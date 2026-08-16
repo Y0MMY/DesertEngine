@@ -18,13 +18,19 @@
 // The header under test is the SAME header the CloudVolumeBaker tool compiles, so a passing test is a
 // statement about the volumes that get shipped rather than about a paraphrase of the maths.
 
+#include "CloudVolumeShaderReference.hpp"
+
 #include <Engine/Graphic/Clouds/CloudVolumeAtlasLayout.hpp>
 #include <Engine/Graphic/Clouds/CloudVolumeBake.hpp>
 #include <Engine/Graphic/Clouds/CloudVolumeFormat.hpp>
+#include <Engine/Graphic/Clouds/CloudVolumeInstance.hpp>
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -42,6 +48,7 @@ using Desert::Graphic::CloudBakeVoxelCenter;
 using Desert::Graphic::CloudVolume;
 using Desert::Graphic::CloudVolumeAtlasBytes;
 using Desert::Graphic::CloudVolumeAtlasDimensions;
+using Desert::Graphic::CloudVolumeAtlasFootprint;
 using Desert::Graphic::CloudVolumeAtlasLayout;
 using Desert::Graphic::CloudVolumeAtlasLocal;
 using Desert::Graphic::CloudVolumeAtlasTileCount;
@@ -53,8 +60,10 @@ using Desert::Graphic::CloudVolumeAtlasWriteTile;
 using Desert::Graphic::CloudVolumeChannelLayout;
 using Desert::Graphic::CloudVolumeFileBytes;
 using Desert::Graphic::CloudVolumeHeader;
+using Desert::Graphic::CloudVolumeInstance;
 using Desert::Graphic::CloudVolumePayloadBytes;
 using Desert::Graphic::CloudVolumeShellMaxProfile;
+using Desert::Graphic::CloudVolumeUpAxisRotation;
 using Desert::Graphic::CloudVolumeVoxelIndex;
 using Desert::Graphic::DecodeSignedDistance;
 using Desert::Graphic::EncodeSignedDistance;
@@ -62,6 +71,8 @@ using Desert::Graphic::kCloudVolumeChannels;
 using Desert::Graphic::kCloudVolumeHeaderBytes;
 using Desert::Graphic::kCloudVolumeMagic;
 using Desert::Graphic::kCloudVolumeVersion;
+using Desert::Graphic::kMaxCloudVolumeInstances;
+using Desert::Graphic::MakeCloudVolumeInstance;
 using Desert::Graphic::ReadCloudVolume;
 using Desert::Graphic::ValidateCloudVolumeHeader;
 using Desert::Graphic::WriteCloudVolume;
@@ -910,6 +921,362 @@ TEST( CloudVolumeBakeDefaults, TheDefaultBakeIsEightMetreVoxelsOnEveryAxis )
     const CloudBakeDescription description;
     EXPECT_TRUE( description.Shape.Primitives.empty() );
     EXPECT_FLOAT_EQ( description.Settings.Extent[0], settings.Extent[0] );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE SHADER'S OWN COPY OF THE TILE ARITHMETIC.
+//
+// Common/CloudVolumeAtlas.glslh is compiled AS C++ here (see CloudVolumeShaderReference.hpp) and checked
+// against CloudVolumeAtlasLayout.hpp. Two independent implementations of one mapping is precisely the
+// shape of every expensive defect this project has had: each side individually correct, a unit test of
+// either passing, and the sky wrong. So the assertion is the AGREEMENT, over a sample dense enough to
+// include every place the two clamps bite.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    namespace ShaderRef = Desert::Tests::CloudVolumeShaderRef;
+
+    glm::vec3 ShaderUvw( const CloudVolumeAtlasLayout& layout, uint32_t tileIndex, const glm::vec3& local )
+    {
+        const glm::vec3 dims( static_cast<float>( layout.TileWidth ), static_cast<float>( layout.TileHeight ),
+                              static_cast<float>( layout.TileDepth ) );
+        const glm::vec3 counts( static_cast<float>( layout.TilesX ), static_cast<float>( layout.TilesY ),
+                                static_cast<float>( layout.TilesZ ) );
+        return ShaderRef::CloudVolumeAtlasUvwOf( dims, counts, static_cast<float>( tileIndex ), local );
+    }
+} // namespace
+
+TEST( CloudVolumeShaderMirror, TheShippedGeometryConstantsAreTheOnesTheLayoutDefaultsTo )
+{
+    const CloudVolumeAtlasLayout layout;
+
+    EXPECT_FLOAT_EQ( ShaderRef::CLOUD_VOLUME_TILE_DIMS.x, static_cast<float>( layout.TileWidth ) );
+    EXPECT_FLOAT_EQ( ShaderRef::CLOUD_VOLUME_TILE_DIMS.y, static_cast<float>( layout.TileHeight ) );
+    EXPECT_FLOAT_EQ( ShaderRef::CLOUD_VOLUME_TILE_DIMS.z, static_cast<float>( layout.TileDepth ) );
+
+    EXPECT_FLOAT_EQ( ShaderRef::CLOUD_VOLUME_TILE_COUNT.x, static_cast<float>( layout.TilesX ) );
+    EXPECT_FLOAT_EQ( ShaderRef::CLOUD_VOLUME_TILE_COUNT.y, static_cast<float>( layout.TilesY ) );
+    EXPECT_FLOAT_EQ( ShaderRef::CLOUD_VOLUME_TILE_COUNT.z, static_cast<float>( layout.TilesZ ) );
+}
+
+TEST( CloudVolumeShaderMirror, TheShaderPlacesEveryTileWhereTheCppSaysItIs )
+{
+    const CloudVolumeAtlasLayout layout;
+
+    for ( uint32_t tile = 0; tile < CloudVolumeAtlasTileCount( layout ); ++tile )
+    {
+        const glm::uvec3 expected = CloudVolumeAtlasTileOrigin( layout, tile );
+        const glm::vec3  actual   = ShaderRef::CloudVolumeAtlasTileOriginOf(
+             glm::vec3( static_cast<float>( layout.TileWidth ), static_cast<float>( layout.TileHeight ),
+                           static_cast<float>( layout.TileDepth ) ),
+             glm::vec3( static_cast<float>( layout.TilesX ), static_cast<float>( layout.TilesY ),
+                           static_cast<float>( layout.TilesZ ) ),
+             static_cast<float>( tile ) );
+
+        EXPECT_FLOAT_EQ( actual.x, static_cast<float>( expected.x ) ) << "tile " << tile;
+        EXPECT_FLOAT_EQ( actual.y, static_cast<float>( expected.y ) ) << "tile " << tile;
+        EXPECT_FLOAT_EQ( actual.z, static_cast<float>( expected.z ) ) << "tile " << tile;
+    }
+}
+
+TEST( CloudVolumeShaderMirror, TheShaderUvwAgreesWithTheCppOneEverywhereIncludingWellOutsideTheBox )
+{
+    const CloudVolumeAtlasLayout layout;
+
+    // Deliberately reaches far outside [0,1] on every axis: a ray steps outside an instance's box on
+    // most of its samples, and the two clamps are what the whole mapping rests on. If the shader had
+    // "simplified away" the second clamp the disagreement would show first at the 0 and 1 rows.
+    const float samples[] = { -12.5f, -1.0f, -0.001f,     0.0f,      1e-5f, 0.00390625f, 0.25f,
+                              0.5f,   0.75f, 0.99609375f, 0.999999f, 1.0f,  1.001f,      9.0f };
+
+    for ( uint32_t tile = 0; tile < CloudVolumeAtlasTileCount( layout ); ++tile )
+    {
+        for ( const float x : samples )
+        {
+            for ( const float y : samples )
+            {
+                for ( const float z : samples )
+                {
+                    const glm::vec3 local( x, y, z );
+                    const glm::vec3 expected = CloudVolumeAtlasUvw( layout, tile, local );
+                    const glm::vec3 actual   = ShaderUvw( layout, tile, local );
+
+                    ASSERT_FLOAT_EQ( actual.x, expected.x )
+                         << "tile " << tile << " local " << x << "," << y << "," << z;
+                    ASSERT_FLOAT_EQ( actual.y, expected.y );
+                    ASSERT_FLOAT_EQ( actual.z, expected.z );
+                }
+            }
+        }
+    }
+}
+
+TEST( CloudVolumeShaderMirror, TheShaderUvwAgreesOnAsymmetricGeometriesToo )
+{
+    // The constants above are the shipped ones; these are not. Driving the layout through the arguments
+    // is what stops the agreement being an accident of 128/128/64 and 4/2/1 — a tile count of one on an
+    // axis, an odd tile size, and a depth of tiles all exercise the divide/mod chain differently.
+    const CloudVolumeAtlasLayout layouts[] = {
+         { .TileWidth = 3, .TileHeight = 5, .TileDepth = 7, .TilesX = 1, .TilesY = 1, .TilesZ = 1 },
+         { .TileWidth = 16, .TileHeight = 8, .TileDepth = 4, .TilesX = 2, .TilesY = 3, .TilesZ = 2 },
+         { .TileWidth = 64, .TileHeight = 64, .TileDepth = 64, .TilesX = 1, .TilesY = 1, .TilesZ = 8 },
+    };
+
+    for ( const auto& layout : layouts )
+    {
+        for ( uint32_t tile = 0; tile < CloudVolumeAtlasTileCount( layout ); ++tile )
+        {
+            for ( float t = -0.5f; t <= 1.5f; t += 0.0625f )
+            {
+                const glm::vec3 local( t, 1.0f - t, 0.5f * t );
+                const glm::vec3 expected = CloudVolumeAtlasUvw( layout, tile, local );
+                const glm::vec3 actual   = ShaderUvw( layout, tile, local );
+
+                ASSERT_FLOAT_EQ( actual.x, expected.x );
+                ASSERT_FLOAT_EQ( actual.y, expected.y );
+                ASSERT_FLOAT_EQ( actual.z, expected.z );
+            }
+        }
+    }
+}
+
+TEST( CloudVolumeShaderMirror, TheBoxTestIsExactlyTheUnitCube )
+{
+    EXPECT_TRUE( ShaderRef::CloudVolumeInsideBox( glm::vec3( 0.0f, 0.0f, 0.0f ) ) );
+    EXPECT_TRUE( ShaderRef::CloudVolumeInsideBox( glm::vec3( 1.0f, 1.0f, 1.0f ) ) );
+    EXPECT_TRUE( ShaderRef::CloudVolumeInsideBox( glm::vec3( 0.5f, 0.25f, 0.75f ) ) );
+
+    // One axis outside is outside, on either side, on each axis.
+    for ( int axis = 0; axis < 3; ++axis )
+    {
+        glm::vec3 below( 0.5f );
+        glm::vec3 above( 0.5f );
+        below[axis] = -1e-4f;
+        above[axis] = 1.0f + 1e-4f;
+
+        EXPECT_FALSE( ShaderRef::CloudVolumeInsideBox( below ) ) << "axis " << axis;
+        EXPECT_FALSE( ShaderRef::CloudVolumeInsideBox( above ) ) << "axis " << axis;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE INSTANCE TRANSFORM — and specifically the thing phase 1a's handover called the single most likely
+// thing to get silently wrong: the volume's LOCAL Z IS UP while the engine is Y-up.
+//
+// A wrong axis here does not crash, does not warn, and does not even look empty: it renders a hero cloud
+// lying on its side, which reads as "the bake is odd" rather than as "the transform is wrong". So it is
+// asserted as a RELATION between world up and the volume's own third axis, in several independent ways.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    CloudVolumeHeader TestVolumeHeader( float ex = 102400.0f, float ey = 102400.0f, float ez = 51200.0f )
+    {
+        CloudVolumeHeader header;
+        header.Width               = 128;
+        header.Height              = 128;
+        header.Depth               = 64;
+        header.ExtentX             = ex;
+        header.ExtentY             = ey;
+        header.ExtentZ             = ez;
+        header.SignedDistanceRange = 25600.0f;
+        return header;
+    }
+
+    glm::vec3 ToLocal( const CloudVolumeInstance& instance, const glm::vec3& world )
+    {
+        return glm::vec3( instance.WorldToLocal * glm::vec4( world, 1.0f ) );
+    }
+} // namespace
+
+TEST( CloudVolumeInstanceTransform, WorldUpBecomesLocalPlusZ )
+{
+    // THE assertion of this file. Half the baked box's Z extent above the centre must land exactly at the
+    // top of the local box, and half below it at the bottom — which is only true if world +Y maps to
+    // local +Z, and is false for every other axis assignment including the ones that "look" fine.
+    const CloudVolumeHeader header = TestVolumeHeader();
+    const glm::vec3         centre( 1000.0f, 250000.0f, -4000.0f );
+
+    glm::mat4 world( 1.0f );
+    world[3] = glm::vec4( centre, 1.0f );
+
+    const CloudVolumeInstance instance = MakeCloudVolumeInstance( world, header, 0, 1.0f, 0.0f );
+
+    const glm::vec3 atCentre = ToLocal( instance, centre );
+    EXPECT_NEAR( atCentre.x, 0.5f, 1e-5f );
+    EXPECT_NEAR( atCentre.y, 0.5f, 1e-5f );
+    EXPECT_NEAR( atCentre.z, 0.5f, 1e-5f );
+
+    const glm::vec3 atTop = ToLocal( instance, centre + glm::vec3( 0.0f, 0.5f * header.ExtentZ, 0.0f ) );
+    EXPECT_NEAR( atTop.x, 0.5f, 1e-5f );
+    EXPECT_NEAR( atTop.y, 0.5f, 1e-5f );
+    EXPECT_NEAR( atTop.z, 1.0f, 1e-5f );
+
+    const glm::vec3 atBottom = ToLocal( instance, centre - glm::vec3( 0.0f, 0.5f * header.ExtentZ, 0.0f ) );
+    EXPECT_NEAR( atBottom.z, 0.0f, 1e-5f );
+
+    // ...and the local height is MONOTONE in world altitude, which is the property that makes
+    // fields.Local.z usable as "where in the cloud am I vertically" the way the procedural path uses its
+    // per-cell height. A spot value could pass with an inverted axis; this cannot.
+    float previous = -1.0f;
+    for ( float up = -0.5f * header.ExtentZ; up <= 0.5f * header.ExtentZ; up += 0.05f * header.ExtentZ )
+    {
+        const float z = ToLocal( instance, centre + glm::vec3( 0.0f, up, 0.0f ) ).z;
+        EXPECT_GT( z, previous );
+        previous = z;
+    }
+}
+
+TEST( CloudVolumeInstanceTransform, TheTurnIsAProperRotationAndNotAMirror )
+{
+    // A mirror would map the axes just as convincingly and hand every authored silhouette back
+    // left-right reversed — invisible on a blob, obvious on a sculpted cloud, and impossible to spot in
+    // a diff. Determinant +1 is the whole statement.
+    const glm::mat4 rotation = CloudVolumeUpAxisRotation();
+
+    EXPECT_NEAR( glm::determinant( glm::mat3( rotation ) ), 1.0f, 1e-6f );
+
+    const glm::vec3 up = glm::vec3( rotation * glm::vec4( 0.0f, 1.0f, 0.0f, 0.0f ) );
+    EXPECT_NEAR( up.x, 0.0f, 1e-6f );
+    EXPECT_NEAR( up.y, 0.0f, 1e-6f );
+    EXPECT_NEAR( up.z, 1.0f, 1e-6f );
+
+    // Orthonormal: it must not scale, or the extent divide that follows would be wrong by that factor.
+    const glm::mat3 linear = glm::mat3( rotation );
+    EXPECT_NEAR( glm::length( linear[0] ), 1.0f, 1e-6f );
+    EXPECT_NEAR( glm::length( linear[1] ), 1.0f, 1e-6f );
+    EXPECT_NEAR( glm::length( linear[2] ), 1.0f, 1e-6f );
+}
+
+TEST( CloudVolumeInstanceTransform, TheHeaderExtentIsWhatSizesTheBoxAndTheTransformScaleMultipliesIt )
+{
+    // The component deliberately has no extent field (teamlead Q2): the `.dvol` says how big it was baked
+    // and the entity's scale says how big it is here. So a scale of 2 must put the box corner twice as
+    // far out, and an anisotropic header must be respected axis by axis.
+    const CloudVolumeHeader header = TestVolumeHeader( 40000.0f, 80000.0f, 20000.0f );
+
+    glm::mat4 world( 1.0f );
+    world[0][0] = 2.0f;
+    world[1][1] = 2.0f;
+    world[2][2] = 2.0f;
+
+    const CloudVolumeInstance instance = MakeCloudVolumeInstance( world, header, 0, 1.0f, 0.0f );
+
+    // Half the SCALED extent on each world axis reaches the box face. World X is local X, world Y is
+    // local Z, world Z is local -Y — so the extent that bounds a world axis is the one on the local axis
+    // it maps to.
+    EXPECT_NEAR( ToLocal( instance, glm::vec3( header.ExtentX, 0.0f, 0.0f ) ).x, 1.0f, 1e-5f );
+    EXPECT_NEAR( ToLocal( instance, glm::vec3( 0.0f, header.ExtentZ, 0.0f ) ).z, 1.0f, 1e-5f );
+    EXPECT_NEAR( ToLocal( instance, glm::vec3( 0.0f, 0.0f, -header.ExtentY ) ).y, 1.0f, 1e-5f );
+
+    // And the box test agrees with the extent: just inside is inside, just outside is outside.
+    EXPECT_TRUE(
+         ShaderRef::CloudVolumeInsideBox( ToLocal( instance, glm::vec3( 0.0f, 0.99f * header.ExtentZ, 0.0f ) ) ) );
+    EXPECT_FALSE(
+         ShaderRef::CloudVolumeInsideBox( ToLocal( instance, glm::vec3( 0.0f, 1.01f * header.ExtentZ, 0.0f ) ) ) );
+}
+
+TEST( CloudVolumeInstanceTransform, ARotatedInstanceTurnsTheVolumeWithIt )
+{
+    // A quarter turn about world Y must move the volume's own X axis onto world -Z (or +Z, depending on
+    // the sense) — the point being that the local coordinate FOLLOWS the entity rather than staying
+    // world-axis-aligned, which is what makes "turn the cloud so its flank faces the sun" work.
+    const CloudVolumeHeader header = TestVolumeHeader();
+
+    const glm::mat4 world = glm::rotate( glm::mat4( 1.0f ), glm::radians( 90.0f ), glm::vec3( 0.0f, 1.0f, 0.0f ) );
+
+    const CloudVolumeInstance instance = MakeCloudVolumeInstance( world, header, 0, 1.0f, 0.0f );
+
+    // A point half an extent along world -Z sits on the volume's own +X face after the turn.
+    const glm::vec3 probe = ToLocal( instance, glm::vec3( 0.0f, 0.0f, -0.5f * header.ExtentX ) );
+    EXPECT_NEAR( probe.x, 1.0f, 1e-5f );
+    EXPECT_NEAR( probe.y, 0.5f, 1e-5f );
+    EXPECT_NEAR( probe.z, 0.5f, 1e-5f );
+
+    // Up is still up, whatever the yaw: the turn about Y cannot touch the volume's vertical axis.
+    EXPECT_NEAR( ToLocal( instance, glm::vec3( 0.0f, 0.5f * header.ExtentZ, 0.0f ) ).z, 1.0f, 1e-5f );
+}
+
+TEST( CloudVolumeInstanceTransform, TheParamsCarryTheTileAndTheTwoPerInstanceDials )
+{
+    const CloudVolumeInstance instance =
+         MakeCloudVolumeInstance( glm::mat4( 1.0f ), TestVolumeHeader(), 6, 1.75f, -0.4f );
+
+    EXPECT_FLOAT_EQ( instance.Params.x, 6.0f );
+    EXPECT_FLOAT_EQ( instance.Params.y, 1.75f );
+    EXPECT_FLOAT_EQ( instance.Params.z, -0.4f );
+
+    // Every tile index the atlas can hand out survives the float round trip exactly — the record is read
+    // as vec4s, so the index travels as a float and an inexact one would sample a neighbouring tile.
+    const CloudVolumeAtlasLayout layout;
+    for ( uint32_t tile = 0; tile < CloudVolumeAtlasTileCount( layout ); ++tile )
+    {
+        const CloudVolumeInstance record =
+             MakeCloudVolumeInstance( glm::mat4( 1.0f ), TestVolumeHeader(), tile, 1.75f, -0.4f );
+        EXPECT_EQ( static_cast<uint32_t>( record.Params.x ), tile );
+    }
+
+    // A negative Density Scale would invert the channel it multiplies; it is repaired at the boundary
+    // rather than left for the shader's clamp to hide.
+    EXPECT_FLOAT_EQ( MakeCloudVolumeInstance( glm::mat4( 1.0f ), TestVolumeHeader(), 0, -2.0f, 0.0f ).Params.y,
+                     0.0f );
+}
+
+TEST( CloudVolumeInstanceTransform, TheGpuRecordIsTheEightyBytesTheShaderIndexesWith )
+{
+    // The GLSL half is `struct CloudVolumeInstanceData` in Common/CloudDensityVoxel.glslh. std430 gives
+    // an array of these an 80-byte stride; a C++ record of any other size would make every element after
+    // the first straddle it, which reads as hero clouds sampling each other's transforms.
+    EXPECT_EQ( sizeof( CloudVolumeInstance ), 80u );
+    EXPECT_EQ( offsetof( CloudVolumeInstance, WorldToLocal ), 0u );
+    EXPECT_EQ( offsetof( CloudVolumeInstance, Params ), 64u );
+
+    // The instance budget IS the atlas tile count — eight distinct shapes resident at once. Two numbers
+    // that must agree, so the agreement is asserted rather than left in two headers.
+    EXPECT_EQ( kMaxCloudVolumeInstances, CloudVolumeAtlasTileCount( CloudVolumeAtlasLayout{} ) );
+}
+
+TEST( CloudVolumeInstanceTransform, EveryTileOfTheShippedAtlasIsReachableThroughTheWholeChain )
+{
+    // End to end: place the same volume in eight different tiles, sample the box centre through the
+    // transform and then through the shader's UVW, and require each answer to land inside its OWN tile.
+    // This is the property the whole hero-cloud path exists to keep — one cloud never reading another —
+    // and it is the only test here that exercises the transform and the atlas mapping together.
+    const CloudVolumeAtlasLayout layout;
+    const CloudVolumeHeader      header = TestVolumeHeader();
+    const glm::uvec3             atlas  = CloudVolumeAtlasDimensions( layout );
+
+    for ( uint32_t tile = 0; tile < CloudVolumeAtlasTileCount( layout ); ++tile )
+    {
+        const CloudVolumeInstance instance =
+             MakeCloudVolumeInstance( glm::mat4( 1.0f ), header, tile, 1.0f, 0.0f );
+
+        const glm::uvec3 origin = CloudVolumeAtlasTileOrigin( layout, tile );
+
+        for ( float x = -0.6f; x <= 0.6f; x += 0.1f )
+        {
+            for ( float y = -0.6f; y <= 0.6f; y += 0.1f )
+            {
+                const glm::vec3 world( x * header.ExtentX, y * header.ExtentZ, 0.0f );
+                const glm::vec3 local = ToLocal( instance, world );
+                const glm::vec3 uvw   = ShaderUvw( layout, tile, local );
+
+                const CloudVolumeAtlasFootprint footprint = CloudVolumeAtlasTrilinearFootprint( layout, uvw );
+
+                EXPECT_GE( footprint.Min.x, static_cast<int32_t>( origin.x ) );
+                EXPECT_GE( footprint.Min.y, static_cast<int32_t>( origin.y ) );
+                EXPECT_GE( footprint.Min.z, static_cast<int32_t>( origin.z ) );
+                EXPECT_LT( footprint.Max.x, static_cast<int32_t>( origin.x + layout.TileWidth ) );
+                EXPECT_LT( footprint.Max.y, static_cast<int32_t>( origin.y + layout.TileHeight ) );
+                EXPECT_LT( footprint.Max.z, static_cast<int32_t>( origin.z + layout.TileDepth ) );
+
+                EXPECT_LT( footprint.Max.x, static_cast<int32_t>( atlas.x ) );
+                EXPECT_LT( footprint.Max.y, static_cast<int32_t>( atlas.y ) );
+                EXPECT_LT( footprint.Max.z, static_cast<int32_t>( atlas.z ) );
+            }
+        }
+    }
 }
 
 int main( int argc, char** argv )

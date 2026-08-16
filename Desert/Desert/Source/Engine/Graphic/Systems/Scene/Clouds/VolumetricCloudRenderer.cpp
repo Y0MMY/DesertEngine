@@ -83,6 +83,18 @@ namespace Desert::Graphic::System
         if ( !m_ParamsBuffer )
             return Common::MakeError( "VolumetricCloudRenderer: could not create the cloud parameter buffer" );
 
+        // The hero-cloud instances. Allocated at its full size here and not lazily: it is 640 bytes, the
+        // descriptor has to be bound on every dispatch whatever the scene holds (an unbound declared
+        // binding is an invalid set), and the count that decides how much of it the shader reads lives in
+        // the parameter block. Non-persistent for the same reason the parameter buffer is — one copy per
+        // (frame x recording renderer slot), or the Details mesh preview would overwrite the viewport's.
+        m_VolumeInstanceBuffer = ShaderResources::StorageBuffer::Create(
+             "CloudVolumeInstances", kMaxCloudVolumeInstances * sizeof( CloudVolumeInstance ),
+             kCloudVolumeInstanceBinding, /*persistent=*/false );
+        if ( !m_VolumeInstanceBuffer )
+            return Common::MakeError( "VolumetricCloudRenderer: could not create the hero-cloud instance "
+                                      "buffer" );
+
         m_CompositeMaterial = std::make_unique<MaterialVolumetricClouds>();
         return BOOLSUCCESS;
     }
@@ -105,6 +117,16 @@ namespace Desert::Graphic::System
         m_HistoryImages[1].reset();
         m_HistoryFilled = false;
         m_ParamsBuffer.reset();
+
+        // Give every atlas tile back before the atlas itself goes. Its own last-lease path is what frees
+        // the 32 MiB image; dropping the leases silently would leave that image alive until the process
+        // exits, which is exactly what closing a scene view is supposed to undo.
+        for ( const uint64_t key : m_VolumeLeases )
+            m_VolumeAtlas.Release( key );
+        m_VolumeLeases.clear();
+        m_VolumePlacements.clear();
+        m_VolumeCounts = CloudVoxelCounts{};
+        m_VolumeInstanceBuffer.reset();
     }
 
     bool VolumetricCloudRenderer::CreatePipelines()
@@ -178,10 +200,89 @@ namespace Desert::Graphic::System
         return m_WeatherPipeline && m_RaymarchPipeline && m_TemporalPipeline && m_CompositePipeline;
     }
 
-    void VolumetricCloudRenderer::SetCloudSettings( bool present, const ECS::VolumetricCloudData& data )
+    void VolumetricCloudRenderer::SetCloudSettings( bool present, const ECS::VolumetricCloudData& data,
+                                                    const CloudVolumePlacements& volumes )
     {
-        m_Present = present;
-        m_Data    = data;
+        m_Present          = present;
+        m_Data             = data;
+        m_VolumePlacements = volumes;
+    }
+
+    void VolumetricCloudRenderer::UpdateVolumeInstances()
+    {
+        DESERT_PROFILE_SCOPE( "Clouds: HeroVolumes" );
+
+        auto* service = Runtime::ResourceRegistry::GetCloudVolumeService();
+
+        std::vector<CloudVolumeInstance> instances;
+        std::vector<uint64_t>            leases;
+        instances.reserve( m_VolumePlacements.size() );
+        leases.reserve( m_VolumePlacements.size() );
+
+        int32_t shadowCount = 0;
+
+        for ( const auto& placement : m_VolumePlacements )
+        {
+            const uint64_t key = static_cast<uint64_t>( placement.Data.Volume );
+
+            // A handle that cannot be resolved or leased is reported ONCE, because the alternative is the
+            // same line at 60 Hz, which is the same as no line at all. Returns true the first time only.
+            const auto firstFailureFor = [this]( uint64_t handle )
+            {
+                if ( std::find( m_VolumeFailures.begin(), m_VolumeFailures.end(), handle ) !=
+                     m_VolumeFailures.end() )
+                    return false;
+                m_VolumeFailures.push_back( handle );
+                return true;
+            };
+
+            const auto asset = service->Get( Assets::AssetHandle( key ) );
+            if ( !asset || !asset->IsReadyForUse() )
+            {
+                if ( firstFailureFor( key ) )
+                    LOG_ERROR( "[CloudVolumes] The .dvol behind asset handle {} is not loaded, so the hero "
+                               "cloud referencing it is not rendered. See the [CloudVolume] load line above "
+                               "for the reason the file was rejected.",
+                               key );
+                continue;
+            }
+
+            // Acquire BEFORE the previous frame's leases are released, so a volume that survives the
+            // frame is never dropped to zero references and re-uploaded. Acquire on an already-resident
+            // key is a refcount bump and no image work at all, which is what makes moving a hero cloud
+            // around free.
+            const auto tile = m_VolumeAtlas.Acquire( key, asset->GetVolume() );
+            if ( !tile.IsSuccess() )
+            {
+                if ( firstFailureFor( key ) )
+                    LOG_ERROR( "[CloudVolumes] {}", tile.GetError() );
+                continue;
+            }
+
+            leases.push_back( key );
+            instances.push_back( MakeCloudVolumeInstance( placement.WorldTransform, asset->GetVolume().Header,
+                                                          tile.GetValue(), placement.Data.DensityScale,
+                                                          placement.Data.DetailTypeBias ) );
+
+            // The placements arrive sorted shadow-casters-first, so the casters are a prefix — counted
+            // here rather than trusted, because a gap would make the shadow pass march a cloud whose
+            // author switched the flag off.
+            if ( placement.Data.CastsCloudShadow && shadowCount == static_cast<int32_t>( instances.size() ) - 1 )
+                ++shadowCount;
+        }
+
+        // Now the previous frame's leases go, one Release per Acquire. Anything still referenced was
+        // acquired again above, so its refcount does not reach zero here.
+        for ( const uint64_t key : m_VolumeLeases )
+            m_VolumeAtlas.Release( key );
+        m_VolumeLeases = std::move( leases );
+
+        m_VolumeCounts =
+             CloudVoxelCounts{ .Total = static_cast<int32_t>( instances.size() ), .Shadow = shadowCount };
+
+        if ( !instances.empty() && m_VolumeInstanceBuffer )
+            m_VolumeInstanceBuffer->SetData(
+                 instances.data(), static_cast<uint32_t>( instances.size() * sizeof( CloudVolumeInstance ) ) );
     }
 
     bool VolumetricCloudRenderer::EnsureResources( uint32_t width, uint32_t height )
@@ -515,6 +616,21 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndWrite( m_WeatherMap.get() );
     }
 
+    void VolumetricCloudRenderer::BindHeroVolumes( ComputePipeline* pipeline )
+    {
+        // BOTH descriptors are bound on every dispatch, whether or not the scene placed a hero cloud: a
+        // declared binding with nothing behind it is an invalid descriptor set, not an unused one — the
+        // same rule the shadow-map and aerial-perspective slots live under. When there is no atlas the
+        // engine's 1x1x1 fallback volume stands in; the shader never reads it, because
+        // u_VoxelInstanceCount is 0 and the union's loop does not run.
+        pipeline->SetStorageBuffer( kCloudVolumeInstanceBinding, m_VolumeInstanceBuffer.get() );
+        pipeline->SetInput(
+             kCloudVolumeAtlasBinding,
+             m_VolumeAtlas.GetImage()
+                  ? m_VolumeAtlas.GetImage().get()
+                  : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
+    }
+
     void VolumetricCloudRenderer::DispatchShadowMap( const CloudNoiseSet& noise )
     {
         DESERT_PROFILE_SCOPE( "Clouds: ShadowMap" );
@@ -538,6 +654,7 @@ namespace Desert::Graphic::System
         m_ShadowPipeline->SetInput( kCloudWeatherMapBinding, m_WeatherMap.get() );
         m_ShadowPipeline->SetInput( kCloudProfileMapBinding, m_ProfileMap.get() );
         m_ShadowPipeline->SetInput( kCloudProfileLutBinding, m_ProfileLut.get() );
+        BindHeroVolumes( m_ShadowPipeline.get() );
         m_ShadowPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         renderer.DispatchComputeInFrame( m_ShadowPipeline.get(), GroupCount( kCloudShadowMapSize ),
@@ -605,6 +722,7 @@ namespace Desert::Graphic::System
              kCloudDistantSkyLightBinding,
              skyLight ? atmosphere.DistantSkyLight
                       : FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA8F ).get() );
+        BindHeroVolumes( m_RaymarchPipeline.get() );
         m_RaymarchPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         renderer.DispatchComputeInFrame( m_RaymarchPipeline.get(), GroupCount( m_ScatterWidth ),
@@ -668,6 +786,16 @@ namespace Desert::Graphic::System
         m_HasFrameResult  = false;
         m_CompositeSource = CloudCompositeSource::Raymarch;
 
+        // THE HERO CLOUDS, before every early-out below and not after them. Two reasons, and both are
+        // about giving memory back: the union happens INSIDE the march, so a layer that is not marching
+        // has no use for atlas tiles at all — clearing the placements here is what turns unticking Enabled
+        // into 32 MiB returned rather than 32 MiB held for a layer that draws nothing. And the atlas image
+        // has to exist before either dispatch binds it, which is a statement about ordering that is easier
+        // to keep true at the top of the function than in the middle of it.
+        if ( !m_Present || !m_Data.Enabled )
+            m_VolumePlacements.clear();
+        UpdateVolumeInstances();
+
         if ( !m_Present || !m_Data.Enabled || !m_WeatherPipeline || !m_RaymarchPipeline || !m_TemporalPipeline ||
              !m_ParamsBuffer )
             return;
@@ -717,8 +845,8 @@ namespace Desert::Graphic::System
         if ( !EnsureResources( target->GetFramebufferWidth(), target->GetFramebufferHeight() ) )
             return;
 
-        const CloudGpuPayload payload =
-             PackCloudParams( m_Data, atmosphere, m_SceneRenderer->GetWind(), m_SceneRenderer->GetWind().Time );
+        const CloudGpuPayload payload = PackCloudParams( m_Data, atmosphere, m_SceneRenderer->GetWind(),
+                                                         m_SceneRenderer->GetWind().Time, m_VolumeCounts );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         // S1. The map is a function of the Weather group alone, so it is rebuilt when those fields

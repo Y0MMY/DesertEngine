@@ -1362,10 +1362,11 @@ namespace Desert::Graphic
             renderer.EndRenderPass();
     }
 
-    void SceneRenderer::SetVolumetricClouds( bool present, const ECS::VolumetricCloudData& data )
+    void SceneRenderer::SetVolumetricClouds( bool present, const ECS::VolumetricCloudData& data,
+                                             const CloudVolumePlacements& volumes )
     {
         UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
-             ->SetCloudSettings( present, data );
+             ->SetCloudSettings( present, data, volumes );
     }
 
     void SceneRenderer::ExecuteVolumetricClouds()

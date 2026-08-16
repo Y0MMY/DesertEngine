@@ -302,19 +302,20 @@ TEST_F( ShaderRootFixture, TheClosureListsEachFileOnce )
 
 // ---- The descriptor count a pipeline layout and a bound set have to agree on ------------------------
 
-TEST_F( ShaderRootFixture, TheRaymarchDeclaresFourteenDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheRaymarchDeclaresSixteenDescriptorsInSetZero )
 {
     // The regression guard for the failure this test file exists for. The raymarch gained a second
     // storage image (the composite's depth guide, binding 8) and went from eight descriptors to nine,
     // then the cloud shadow map (binding 9) took it to ten, the authored Cloud Type axis added the
-    // profile map (10) and the profile table (11) for twelve, and joining the physical atmosphere added
-    // its aerial-perspective volume (12) and its distant sky light (13) for fourteen; a pipeline built
-    // before any of those changes and a set allocated after it could not be bound together. Fourteen is
+    // profile map (10) and the profile table (11) for twelve, joining the physical atmosphere added its
+    // aerial-perspective volume (12) and its distant sky light (13) for fourteen, and the hero clouds of
+    // voxel phase 1b added their instance buffer (14) and their atlas (15) for sixteen; a pipeline built
+    // before any of those changes and a set allocated after it could not be bound together. Sixteen is
     // not a magic number here — it is counted from the shader's own text by the engine's own
     // reflection, so it moves when the shader does.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 14u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 16u );
 
     EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // scatter target
     EXPECT_TRUE( HasBinding( bindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // sky params
@@ -330,22 +331,26 @@ TEST_F( ShaderRootFixture, TheRaymarchDeclaresFourteenDescriptorsInSetZero )
     EXPECT_TRUE( HasBinding( bindings, 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // profile table
     EXPECT_TRUE( HasBinding( bindings, 12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // AP volume
     EXPECT_TRUE( HasBinding( bindings, 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // distant sky light
+    EXPECT_TRUE( HasBinding( bindings, 14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // hero instances
+    EXPECT_TRUE( HasBinding( bindings, 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // hero atlas
 }
 
-TEST_F( ShaderRootFixture, TheShadowMapDeclaresItsOwnEightDescriptors )
+TEST_F( ShaderRootFixture, TheShadowMapDeclaresItsOwnTenDescriptors )
 {
     // It writes one storage image and reads the same density field the raymarch does, at the same
     // binding numbers — one field, one set of bindings, so a mismatch between the two passes would have
     // to be written twice to go unnoticed.
     //
-    // EIGHT, including the curl noise at binding 5 that this pass never samples: the declaration comes
+    // TEN, including the curl noise at binding 5 that this pass never samples: the declaration comes
     // from the density header it includes, and a declared sampler with no image bound is an invalid
     // descriptor set rather than an unused one. That is precisely what this count is here to catch —
-    // and it is why the profile map and the profile table, which arrived with the same header, are
-    // bound by the shadow dispatch as well as by the march.
+    // and it is why the profile map and the profile table, and now the hero-cloud instance buffer (14)
+    // and atlas (15), which all arrived with the same header, are bound by the shadow dispatch as well
+    // as by the march. The shadow pass DOES read the last two: a hero cloud casts a cloud shadow when
+    // its component says so.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudShadowMap.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 8u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 10u );
     EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // the map it fills
     EXPECT_TRUE( HasBinding( bindings, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // cloud params
     EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // shape noise
@@ -354,6 +359,35 @@ TEST_F( ShaderRootFixture, TheShadowMapDeclaresItsOwnEightDescriptors )
     EXPECT_TRUE( HasBinding( bindings, 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // weather map
     EXPECT_TRUE( HasBinding( bindings, 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // profile map
     EXPECT_TRUE( HasBinding( bindings, 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // profile table
+    EXPECT_TRUE( HasBinding( bindings, 14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // hero instances
+    EXPECT_TRUE( HasBinding( bindings, 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // hero atlas
+}
+
+// The seam's own promise, checked on the two passes that go through it: BOTH reach the composer, and
+// through it BOTH implementations. A pass that included only one of them would have a density field the
+// other pass does not share — which is how a hero cloud ends up casting no shadow, or casting one where
+// there is no cloud.
+TEST_F( ShaderRootFixture, BothDensityPassesReachTheUnionAndBothImplementationsBehindIt )
+{
+    for ( const char* shader : { "Clouds/CloudRaymarch.shader", "Clouds/CloudShadowMap.shader" } )
+    {
+        const auto path     = ShaderPath( shader );
+        const auto includes = CollectShaderIncludes( StageSource( path, ShaderStage::Compute ), path );
+
+        const auto contains = [&includes]( const char* name )
+        {
+            for ( const auto& include : includes )
+                if ( include.filename() == name )
+                    return true;
+            return false;
+        };
+
+        EXPECT_TRUE( contains( "CloudDensityCompose.glslh" ) ) << shader;
+        EXPECT_TRUE( contains( "CloudDensityProcedural.glslh" ) ) << shader;
+        EXPECT_TRUE( contains( "CloudDensityVoxel.glslh" ) ) << shader;
+        EXPECT_TRUE( contains( "CloudVolumeAtlas.glslh" ) ) << shader;
+        EXPECT_TRUE( contains( "CloudDensity.glslh" ) ) << shader;
+    }
 }
 
 TEST_F( ShaderRootFixture, TheTemporalResolveDeclaresItsFourDescriptors )

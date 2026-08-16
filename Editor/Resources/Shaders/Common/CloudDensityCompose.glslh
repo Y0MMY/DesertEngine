@@ -1,0 +1,77 @@
+// THE UNION. This file, and only this file, publishes the three names Common/CloudDensity.glslh declares:
+//
+//     float CloudDensityCheap ( vec3 worldPos, float heightFraction );
+//     vec2  CloudDensitySample( vec3 worldPos, float heightFraction, float distance, float stepLength );
+//     float CloudPrecipitationAt( vec3 worldPos );
+//
+// A pass includes THIS, not either implementation. The march, the light march, the shadow pass and the
+// compositor go on calling three functions and never learn which model answered — which was the whole
+// promise of the seam.
+//
+// UNION, NOT REPLACE (teamlead Q1, VOXEL_CLOUD_PATH.md §7). `density = max(procedural, voxel)`: the
+// procedural deck fills the sky and N authored volumes sit inside it as hero clouds, which is what the
+// reference's own production shots show (deck pp. 193/194 — one bespoke cumulus in an otherwise ordinary
+// sky). Replace would mean a scene has no sky at all until somebody authors a whole 4 km cloudscape.
+//
+// WHY THE PAIR IS TAKEN WHOLE AND NOT MAXED COMPONENT-WISE. CloudDensitySample returns (density,
+// profile), and those two are not independent quantities — the profile is the unerroded field the
+// density was carved out of, and every lighting term downstream reads them together (the multi-scatter
+// depth modulation, the in-scatter probability, the ambient occlusion). Taking `max` on each separately
+// could hand the lighting a procedural profile beside a voxel density, i.e. a sample that describes no
+// cloud that exists. The denser branch answers with BOTH of its own numbers.
+//
+// WHAT A SCENE WITH NO HERO CLOUD PAYS. `u_VoxelInstanceCount` is 0, the loops below do not execute, and
+// the result is the procedural value bit for bit — one uniform branch per sample, taken the same way by
+// every invocation in the dispatch. There is deliberately no shader permutation and no `CloudDensityModel`
+// enum: under the union the presence of a Cloud Volume entity IS the switch, and a second copy of that
+// answer on the far side of the bus would be free to disagree with the first.
+//
+// The including pass must define CLOUD_VOXEL_INSTANCE_COUNT to the parameter naming how many instances IT
+// marches — the raymarch sees every one, the shadow pass sees only the prefix that casts cloud shadows.
+
+#ifndef CLOUD_DENSITY_COMPOSE_GLSLH
+#define CLOUD_DENSITY_COMPOSE_GLSLH
+
+#include <Common/CloudDensityProcedural.glslh>
+#include <Common/CloudDensityVoxel.glslh>
+
+#ifndef CLOUD_VOXEL_INSTANCE_COUNT
+#error "Define CLOUD_VOXEL_INSTANCE_COUNT (u_VoxelInstanceCount or u_VoxelShadowCount) before including Common/CloudDensityCompose.glslh"
+#endif
+
+float CloudDensityCheap(vec3 worldPos, float heightFraction)
+{
+    float density = CloudDensityCheapProcedural(worldPos, heightFraction);
+
+    if (CLOUD_VOXEL_INSTANCE_COUNT > 0)
+        density = max(density, CloudDensityCheapVoxel(worldPos, CLOUD_VOXEL_INSTANCE_COUNT));
+
+    return density;
+}
+
+vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromCamera, float stepLength)
+{
+    vec2 sample_ = CloudDensitySampleProcedural(worldPos, heightFraction, distanceFromCamera, stepLength);
+
+    if (CLOUD_VOXEL_INSTANCE_COUNT > 0)
+    {
+        vec2 voxel = CloudDensitySampleVoxel(worldPos, heightFraction, distanceFromCamera, stepLength,
+                                             CLOUD_VOXEL_INSTANCE_COUNT);
+        if (voxel.x > sample_.x)
+            sample_ = voxel;
+    }
+
+    return sample_;
+}
+
+// Precipitation stays the weather map's answer for both branches. It is a 2D field about WHERE IT RAINS,
+// which is orthogonal to any one cloud's shape: a hero cumulus sitting in a rain cell is rained on, and
+// a baked volume carries no channel that could say otherwise (deck pp. 85/158 — profile, type, scale,
+// distance, and nothing about rain). Common/CloudDensity.glslh's contract allows an implementation with
+// no notion of precipitation to return 0; here there is a better answer available for free.
+float CloudPrecipitationAt(vec3 worldPos)
+{
+    return CloudPrecipitationAtProcedural(worldPos);
+}
+
+#endif // CLOUD_DENSITY_COMPOSE_GLSLH

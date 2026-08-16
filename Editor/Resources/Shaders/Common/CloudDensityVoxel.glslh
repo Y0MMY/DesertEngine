@@ -1,0 +1,142 @@
+// The second density source: BAKED HERO CLOUDS — N placed `.dvol` volumes, sampled out of one atlas.
+//
+// It is not a second sampler. The design review's central finding (VOXEL_CLOUD_PATH.md §1.4, verified
+// call site by call site) is that a Nubis3 modelling NVDF substitutes exactly THREE inputs into the
+// existing march — the Dimensional Profile, the Detail Type and the Density Scale — and reuses
+// everything downstream: the curl warp, the detail fetch, the wispy/billowy lerp, the near-field ridged
+// band, the erosion remap, the density-scale sharpen, the distance terms, and every lighting term that
+// reads the profile. So this file fetches those three channels and hands them to CloudDensityErode,
+// which is the SAME function the procedural branch calls. There is one detail composite in this engine.
+//
+// That is also why it includes the procedural header rather than replacing it: the shared composite (and
+// the noise samplers it reads) live there, and the teamlead's Q1 answer is UNION — a hero cloud sits
+// INSIDE the procedural deck, it does not replace it. Common/CloudDensityCompose.glslh is what takes the
+// max of the two and publishes the seam's names.
+//
+// WHY AN ATLAS AND NOT AN ARRAY OF SAMPLERS: `sampler3D[N]` with a dynamic index needs
+// `shaderSampledImageArrayDynamicIndexing`, which on MoltenVK lands on Metal argument buffers —
+// supported, but a portability bet with nothing to win. One image with tiles in a grid needs no feature
+// bit, and the tile index rides in the per-instance record the renderer already builds.
+//
+// THE `.a` CHANNEL IS BAKED AND DELIBERATELY NOT READ HERE. It holds the conservative signed distance,
+// and the design doc's §2.3 use for it is p.163's `step = max(sdf, adaptive)`. That cannot be applied to
+// a UNION: the field the march advances through is `max(procedural, voxel)`, so its conservative
+// distance is `min(d_procedural, d_voxel)`, and the procedural branch has no distance field at all —
+// d_procedural is 0 everywhere, so the min is 0 everywhere. The bound is not merely unmeasurable, it is
+// provably vacuous while a procedural deck is present, which under Q1 it always is. What DOES pay, and
+// is what this file uses, is the instance-box rejection below: a ray nowhere near a hero cloud pays one
+// matrix multiply per instance and never touches the atlas. Phase 2 owns the SDF, and owns it together
+// with whatever gate tells the march that a stretch of sky is voxel-only.
+
+#ifndef CLOUD_DENSITY_VOXEL_GLSLH
+#define CLOUD_DENSITY_VOXEL_GLSLH
+
+#include <Common/CloudDensity.glslh>
+#include <Common/CloudDensityProcedural.glslh>
+#include <Common/CloudVolumeAtlas.glslh>
+
+// Must equal Graphic::kCloudVolumeInstanceBinding / kCloudVolumeAtlasBinding. Compute takes the binding
+// as an explicit argument and never consults the shader's own reflection for it, so a number that
+// disagrees does not fail — it samples somebody else's image.
+#define CLOUD_VOLUME_INSTANCE_BINDING 14
+#define CLOUD_VOLUME_ATLAS_BINDING    15
+
+// The GPU half of Graphic::CloudVolumeInstance, member for member. The C++ side static_asserts every
+// offset against this order; see CloudVolumeInstance.hpp for why each field is what it is.
+struct CloudVolumeInstanceData
+{
+    // World position -> the volume's own [0,1]^3 box coordinate. It carries the entity's inverse
+    // transform, the Y-up -> Z-up turn, the divide by the baked extent and the half-unit recentre, all
+    // multiplied together on the CPU: the shader does one mat4 x vec4 and has the box test in its hands.
+    mat4 WorldToLocal;
+    // x = atlas tile index, y = per-instance Density Scale, z = per-instance Detail Type Bias.
+    // w is the std430 tail — three floats occupy four slots after a mat4 either way.
+    vec4 Params;
+};
+
+layout(std430, binding = CLOUD_VOLUME_INSTANCE_BINDING) readonly buffer CloudVolumeInstanceBuffer
+{
+    CloudVolumeInstanceData u_CloudVolumes[];
+};
+
+layout(binding = CLOUD_VOLUME_ATLAS_BINDING) uniform sampler3D u_CloudVolumeAtlas;
+
+// One instance's four channels at a world position, plus the local coordinate that found them.
+struct CloudVoxelFields
+{
+    // r = Dimensional Profile, g = Detail Type, b = Density Scale, a = the conservative signed distance
+    // (baked, not read — see the header note).
+    vec4 Data;
+    // The volume's own box coordinate. Z is the cloud's OWN height, which is what stands in for the
+    // procedural path's per-cell height: a baked cloud knows where its base and its top are, and does not
+    // have to infer them from a weather map.
+    vec3 Local;
+};
+
+CloudVoxelFields CloudVoxelFetch(int index, vec3 worldPos)
+{
+    CloudVoxelFields fields;
+    fields.Data  = vec4(0.0f, 0.0f, 0.0f, 0.0f);
+    fields.Local = vec3(0.0f, 0.0f, 0.0f);
+
+    vec3 local = (u_CloudVolumes[index].WorldToLocal * vec4(worldPos, 1.0f)).xyz;
+
+    // THE CHEAP REJECTION. Everything past this line costs a 3D texture fetch; this costs a compare.
+    if (!CloudVolumeInsideBox(local))
+        return fields;
+
+    fields.Local = local;
+    fields.Data  = texture(u_CloudVolumeAtlas, CloudVolumeAtlasUvw(u_CloudVolumes[index].Params.x, local));
+    return fields;
+}
+
+// Coarse tier and shadow ray. Deck p.86 is `if (modeling_data.mDimensionalProfile > 0) uprez else 0`, so
+// the profile alone is the occupancy test — and it is the same quantity the procedural cheap tier
+// returns (CloudDensityCheapFrom stops before the density-scale channel), which is what keeps the two
+// tiers of the empty-space state machine measuring comparable things across both branches.
+//
+// @p count is how many instances THIS pass marches. The raymarch passes all of them; the shadow pass
+// passes only the leading run that casts cloud shadows (the renderer sorts them so that run is a prefix).
+float CloudDensityCheapVoxel(vec3 worldPos, int count)
+{
+    float best = 0.0f;
+    for (int i = 0; i < count; ++i)
+        best = max(best, CloudVoxelFetch(i, worldPos).Data.r);
+    return best;
+}
+
+// Fine tier. Returns x = the eroded density, y = the unerroded profile, exactly as the procedural branch
+// does — and the profile here is the AUTHORED interior-depth field rather than a product of a plan-view
+// coverage and a vertical envelope, which is strictly better for every lighting term that reads it
+// (ambient occlusion p.141, multi-scatter depth p.136, in-scatter probability).
+//
+// Overlapping instances take the DENSER of the two rather than summing: two hero clouds sharing a volume
+// of air are one cloud there, and adding their densities would draw a bright seam along the intersection.
+vec2 CloudDensitySampleVoxel(vec3 worldPos, float heightFraction, float distanceFromCamera,
+                             float stepLength, int count)
+{
+    vec2 best = vec2(0.0f, 0.0f);
+
+    for (int i = 0; i < count; ++i)
+    {
+        CloudVoxelFields fields = CloudVoxelFetch(i, worldPos);
+        if (fields.Data.r <= 0.0f)
+            continue;
+
+        // The two per-instance dials, applied to the baked channels rather than replacing them: one
+        // baked shape placed twice at different opacities, or nudged toward wisps or billows, without a
+        // re-bake. The procedural path's own Detail Type Bias is NOT added here — the baked channel is
+        // the authored answer that bias exists to approximate, and applying both would count it twice.
+        float detailType   = clamp(fields.Data.g + u_CloudVolumes[i].Params.z, 0.0f, 1.0f);
+        float densityScale = clamp(fields.Data.b * u_CloudVolumes[i].Params.y, 0.0f, 1.0f);
+
+        float density = CloudDensityErode(worldPos, heightFraction, fields.Local.z, fields.Data.r,
+                                          detailType, densityScale, distanceFromCamera, stepLength);
+        if (density > best.x)
+            best = vec2(density, fields.Data.r);
+    }
+
+    return best;
+}
+
+#endif // CLOUD_DENSITY_VOXEL_GLSLH

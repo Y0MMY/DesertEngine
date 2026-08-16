@@ -13,7 +13,7 @@
     },
     "Shape": {
         "BlendRadius": 2500.0,
-        "ProfileFalloff": 8000.0,
+        "ProfileFalloff": 32000.0,
         "Primitives": [
             {
                 "Kind": "Ellipsoid",

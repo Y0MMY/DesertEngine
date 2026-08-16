@@ -1,6 +1,18 @@
 // The v1 density source: a PROCEDURAL cloudscape — weather map, height envelope, base shape volume,
-// detail erosion. It implements the two functions Common/CloudDensity.glslh declares and nothing else
-// reaches past it.
+// detail erosion. It is one of the two implementations of Common/CloudDensity.glslh's seam; the other is
+// Common/CloudDensityVoxel.glslh, and Common/CloudDensityCompose.glslh is what gives the seam's three
+// names to the UNION of the two (teamlead Q1). Nothing outside those three files reaches past this one.
+//
+// Its functions therefore carry the `Procedural` suffix: GLSL has no overloading on file scope and the
+// seam names belong to the composer.
+//
+// WHAT THE VOXEL BRANCH SHARES WITH THIS FILE, and it is most of it: CloudDensityErode below is the whole
+// detail composite — curl warp, detail fetch, wispy/billowy lerp, the near-field ridged band, the erosion
+// remap, the density-scale sharpen, the distance softening, the near fade and the height bias. The design
+// review's central finding (VOXEL_CLOUD_PATH.md §1.4) is that a baked volume substitutes exactly THREE
+// inputs — profile, detail type, density scale — and reuses every line downstream. So those three are
+// arguments and the rest is one function, called by both branches. Forking it would be how the two
+// slowly stop looking like the same sky.
 //
 // Why procedural at all: the reference's density is a pair of 512x512x64 volumes baked from Guerrilla's
 // internal Houdini tools, which we cannot ship (RESEARCH_REFERENCE J.1 risk 1). What replaces them is
@@ -137,7 +149,7 @@ float CloudAnvilCoverage(float coverage, float heightFraction)
 
 // The rain-laden fraction at this place on the map, for the lighting's precipitation darkening. See the
 // note in Common/CloudDensity.glslh for why this is a function of the seam and not a read in the loop.
-float CloudPrecipitationAt(vec3 worldPos)
+float CloudPrecipitationAtProcedural(vec3 worldPos)
 {
     return CloudSampleWeather(worldPos).b;
 }
@@ -188,7 +200,7 @@ float CloudDensityCheapFrom(vec4 weather, vec2 band, vec3 worldPos, float height
     return clamp(dimensional * mix(1.0f, body, clamp(u_ShapeErosionStrength, 0.0f, 1.0f)), 0.0f, 1.0f);
 }
 
-float CloudDensityCheap(vec3 worldPos, float heightFraction)
+float CloudDensityCheapProcedural(vec3 worldPos, float heightFraction)
 {
     vec4 weather = CloudSampleWeather(worldPos);
 
@@ -203,32 +215,26 @@ float CloudDensityCheap(vec3 worldPos, float heightFraction)
     return CloudDensityCheapFrom(weather, CloudCellBand(worldPos), worldPos, heightFraction);
 }
 
-// Fine tier: everything above, plus the detail erosion, the curl warp, the high-frequency layer and the
-// three distance terms. Returns x = the eroded (full) density, y = the unerroded profile — the march
-// needs BOTH at every shaded sample (the profile drives the in-scatter probability and the ambient
-// occlusion, CLD-106), and computing them in one evaluation is two texture fetches cheaper per sample
-// than the CloudDensityCheap call this replaces.
+// THE DETAIL COMPOSITE — the whole of it, and the ONE copy of it (see the header note).
+//
+// In: the three fields a Nubis3 modelling NVDF carries per voxel, however they were obtained —
+//   @p profile       the Dimensional Profile: interior depth, 1 in the core, 0 at and outside the
+//                    surface. Derived here as `gradient x coverage x baseShape`; fetched from the `.r`
+//                    channel of a baked volume in the voxel branch.
+//   @p detailType    0 = wispy, 1 = billowy (deck p.108). A height ramp here; the `.g` channel there.
+//   @p densityScale  the linear per-voxel density multiplier (deck p.118). The weather map's `.a` here;
+//                    the `.b` channel there.
+//   @p cellHeight    where in the CLOUD (not the layer) this sample sits, in [0,1]. The per-cell band's
+//                    own fraction here; the volume's own local height there.
+// Out: the eroded density in [0,1].
+//
 // @p stepLength is the march's own stride at this sample, in world units. It is not a distance in
 // disguise: the near-field band's amplitude is a statement about the SAMPLING RATE here (CloudBandWeight),
 // and the same distance carries a different rate on every quality tier.
-vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromCamera, float stepLength)
+float CloudDensityErode(vec3 worldPos, float heightFraction, float cellHeight, float profile,
+                        float detailType, float densityScale, float distanceFromCamera, float stepLength)
 {
-    vec4 weather = CloudSampleWeather(worldPos);
-    if (weather.r <= 0.0f)
-        return vec2(0.0f, 0.0f);
-
-    vec2  band    = CloudCellBand(worldPos);
-    float profile = CloudDensityCheapFrom(weather, band, worldPos, heightFraction);
     float density = profile;
-    if (density <= 0.0f)
-        return vec2(0.0f, 0.0f);
-
-    // Everything below that asks "where in the cloud is this sample" asks the CELL, not the layer. A
-    // base, a growing top and a heavy core are properties of a cloud; once cells occupy different slabs
-    // of the layer, a term keyed to layer height gives a cell sitting in the lower third no top at all
-    // and a cell sitting in the upper third no base. At Cloud Height Variance 0 this is the same number
-    // as the layer height, so no sky authored before per-cell bands moves.
-    float cellHeight = clamp(CloudProfileCellHeight(heightFraction, band), 0.0f, 1.0f);
 
     // Curl warps the DETAIL lookup, not the shape: a divergence-free warp swirls small structure around
     // without creating or destroying any of it, which is what gives an edge its turbulent look. The warp
@@ -273,12 +279,6 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
     float billowGradient = pow(clamp(density, 0.0f, 1.0f), u_BillowGradientPower);
     float billowy        = mix(detail.b, detail.a, billowGradient) * u_BillowNoiseScale;
 
-    // The deck authors Detail Type per voxel with a physical rule (p.92): "Increasing Density = Layered
-    // Billows, Decreasing Density = Curly Layered Wisps" — condensation billows on the growing tops,
-    // evaporation shreds the bases and edges into curls. The procedural proxy for "where is density
-    // increasing" is HEIGHT: convection grows upward, entrainment eats the base. A constant bias gave
-    // every altitude the same 50/50 blend, which is why the whole cloud rendered as uniform fibre.
-    float detailType     = clamp(u_DetailTypeBias + (cellHeight - 0.35f) * 0.9f, 0.0f, 1.0f);
     float noiseComposite = mix(wispy, billowy, detailType);
 
     // THE NEAR-FIELD BAND: ridged folds of the same two channels, at their OWN tile and gated by the
@@ -321,7 +321,7 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
     // the weather pass emits the full [0, 1] range again, the channel provides the per-cell density
     // variety the deck's third NVDF channel exists for, and Density Scale Power is once again the
     // exponent it is named after.
-    float scale = clamp(weather.a, 0.0f, 1.0f);
+    float scale = clamp(densityScale, 0.0f, 1.0f);
     density *= scale;
     density = pow(density, mix(u_DensitySharpenLow, u_DensitySharpenHigh,
                                max(pow(scale, u_DensityScalePower), 1e-4f)));
@@ -342,7 +342,44 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
     // scaling the whole cloud, and clamped because the range reaches 2.
     density *= max(1.0f + u_DensityHeightBias * (cellHeight - 0.5f), 0.0f);
 
-    return vec2(clamp(density, 0.0f, 1.0f), profile);
+    return clamp(density, 0.0f, 1.0f);
+}
+
+// Fine tier: the cheap composition above, plus the whole detail composite. Returns x = the eroded (full)
+// density, y = the unerroded profile — the march needs BOTH at every shaded sample (the profile drives
+// the in-scatter probability and the ambient occlusion, CLD-106), and computing them in one evaluation is
+// two texture fetches cheaper per sample than a separate CloudDensityCheap call would be.
+vec2 CloudDensitySampleProcedural(vec3 worldPos, float heightFraction, float distanceFromCamera,
+                                  float stepLength)
+{
+    vec4 weather = CloudSampleWeather(worldPos);
+    if (weather.r <= 0.0f)
+        return vec2(0.0f, 0.0f);
+
+    vec2  band    = CloudCellBand(worldPos);
+    float profile = CloudDensityCheapFrom(weather, band, worldPos, heightFraction);
+    if (profile <= 0.0f)
+        return vec2(0.0f, 0.0f);
+
+    // Everything below that asks "where in the cloud is this sample" asks the CELL, not the layer. A
+    // base, a growing top and a heavy core are properties of a cloud; once cells occupy different slabs
+    // of the layer, a term keyed to layer height gives a cell sitting in the lower third no top at all
+    // and a cell sitting in the upper third no base. At Cloud Height Variance 0 this is the same number
+    // as the layer height, so no sky authored before per-cell bands moves.
+    float cellHeight = clamp(CloudProfileCellHeight(heightFraction, band), 0.0f, 1.0f);
+
+    // The deck authors Detail Type per voxel with a physical rule (p.92): "Increasing Density = Layered
+    // Billows, Decreasing Density = Curly Layered Wisps" — condensation billows on the growing tops,
+    // evaporation shreds the bases and edges into curls. The procedural proxy for "where is density
+    // increasing" is HEIGHT: convection grows upward, entrainment eats the base. A constant bias gave
+    // every altitude the same 50/50 blend, which is why the whole cloud rendered as uniform fibre. A
+    // BAKED volume does not need the proxy — it carries the authored answer per voxel, which is the whole
+    // reason the channel exists.
+    float detailType = clamp(u_DetailTypeBias + (cellHeight - 0.35f) * 0.9f, 0.0f, 1.0f);
+
+    float density = CloudDensityErode(worldPos, heightFraction, cellHeight, profile, detailType, weather.a,
+                                      distanceFromCamera, stepLength);
+    return vec2(density, profile);
 }
 
 #endif // CLOUD_DENSITY_PROCEDURAL_GLSLH

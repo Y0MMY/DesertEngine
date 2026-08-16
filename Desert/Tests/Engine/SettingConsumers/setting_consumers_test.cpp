@@ -297,34 +297,29 @@ namespace
 
     // ------------------------------------------------------------------------------------------------
     // Cloud Volume: a placed hero cloud (Docs/Clouds/VOXEL_CLOUD_PATH.md phase 1). Phase 1a delivered the
-    // .dvol format, the analytic baker, the asset and this component; the seam that reads them - the
-    // voxel density header, the instance buffer and the atlas binding - is phase 1b, which is a separate
-    // task because a different developer owns the cloud shaders. So every field here is PENDING against
-    // that one task, and the count below is what stops "the seam is not wired yet" from quietly growing
-    // to cover a field nobody meant to leave out.
+    // .dvol format, the analytic baker, the asset and this component; phase 1b landed the seam that reads
+    // them - the voxel density header, the instance buffer and the atlas binding - so the component now
+    // owes NOTHING. Three of the five are consumed by the ECS gather (which decides whether an instance
+    // exists at all and in what order), two by the pure packing that turns a placement into the GPU
+    // record the march indexes.
     // ------------------------------------------------------------------------------------------------
 
-    constexpr const char* kVoxel1bGate =
-         "Voxel phase 1b - the density seam: whether this instance is gathered into the buffer at all";
-    constexpr const char* kVoxel1bAtlas =
-         "Voxel phase 1b - the density seam: resolves the .dvol into an atlas tile and puts the tile "
-         "origin and the world-to-local transform in the instance record";
-    constexpr const char* kVoxel1bScale =
-         "Voxel phase 1b - the density seam: a per-instance multiplier the shader applies to the baked "
-         "Density Scale channel";
-    constexpr const char* kVoxel1bType =
-         "Voxel phase 1b - the density seam: a per-instance bias the shader applies to the baked Detail "
-         "Type channel before the erosion reads it";
-    constexpr const char* kVoxel1bShadow =
-         "Voxel phase 1b - the density seam: whether CloudShadowMap.shader marches this instance as well "
-         "as the view";
+    constexpr const char* kVoxelGather = "Desert/Desert/Source/Engine/ECS/System/VolumetricCloudsECSSystem.hpp";
+    constexpr const char* kVoxelInstance =
+         "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.cpp";
 
     constexpr Row kCloudVolumeRows[] = {
-         { "Enabled", nullptr, kVoxel1bGate },
-         { "Volume", nullptr, kVoxel1bAtlas },
-         { "DensityScale", nullptr, kVoxel1bScale },
-         { "DetailTypeBias", nullptr, kVoxel1bType },
-         { "CastsCloudShadow", nullptr, kVoxel1bShadow },
+         // The zero-cost gate: an unticked hero cloud is not gathered, so it takes no atlas tile, no
+         // instance slot and no sample.
+         { "Enabled", kVoxelGather },
+         // The gather refuses a null handle; the renderer resolves it through CloudVolumeService and
+         // leases the atlas tile the instance record points at.
+         { "Volume", kVoxelInstance },
+         { "DensityScale", kVoxelInstance },
+         { "DetailTypeBias", kVoxelInstance },
+         // Sorts the casters to the front of the buffer, which is what makes the shadow pass's prefix
+         // mean "casts a cloud shadow" - see u_VoxelShadowCount.
+         { "CastsCloudShadow", kVoxelGather },
     };
 
     constexpr const char* kFogPayload = "Desert/Desert/Source/Engine/Graphic/Fog/FogPayload.hpp";
@@ -518,15 +513,21 @@ TEST( SettingConsumers, TheCloudComponentOwesExactlyTheFieldsItsPassesHaveNotBee
 }
 
 // The hero-cloud component landed one phase ahead of the seam that reads it, deliberately: the .dvol
-// format, the baker, the asset and this component are one task, and the shader-side seam is another
-// because a different developer owns the cloud shaders. All five fields are therefore owed by phase 1b,
-// and this five is what turns "the seam landed" into a reviewable edit that drives it to zero.
-TEST( SettingConsumers, TheCloudVolumeComponentOwesEveryFieldToTheSeamThatHasNotLandedYet )
+// format, the baker, the asset and the component were one task, and the shader-side seam another. All
+// five fields were owed by phase 1b, and phase 1b landed - the union in
+// Editor/Resources/Shaders/Common/CloudDensityCompose.glslh, the instance buffer and the atlas binding.
+// So the count is 0.
+//
+// It stays a COUNT rather than becoming "no PENDING rows exist" for the same reason the sky's does: the
+// later voxel phases (2: the SDF step bound and the far-LOD atlas; 3: CubeGrid authoring) may well add a
+// field before they add its reader. When that happens the number rises in a reviewable edit instead of a
+// field quietly joining the component with nobody accountable for it.
+TEST( SettingConsumers, TheCloudVolumeComponentOwesNothing )
 {
     const std::ptrdiff_t pending = std::count_if( std::begin( kCloudVolumeRows ), std::end( kCloudVolumeRows ),
                                                   []( const Row& r ) { return r.Task != nullptr; } );
 
-    EXPECT_EQ( pending, 5 );
+    EXPECT_EQ( pending, 0 );
 }
 
 int main( int argc, char** argv )
