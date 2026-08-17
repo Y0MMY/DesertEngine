@@ -109,6 +109,12 @@ Shader "CloudTemporalResolve"
             if (coord.x >= size.x || coord.y >= size.y)
                 return;
 
+            // THE PRIMARY LAYER. This stage reprojects on one shell and there is one history, so it
+            // selects layer 0 - the lowest - and never changes it. Said explicitly rather than left to a
+            // default, because the parameters are a COPY now and an entry point that forgot to select
+            // would read whatever the copy happened to hold.
+            CloudSelectLayer(0);
+
             CloudTemporalFlags flags = CloudTemporalDecodeFlags(u_CameraPosition.w);
 
             // Whether THIS texel was marched this frame. Without the checkerboard every pixel is fresh
@@ -159,6 +165,17 @@ Shader "CloudTemporalResolve"
                                     (1.0f / CLOUD_WORLD_UNITS_PER_KM);
 
             CloudReprojection reprojection =
+                 // THE PRIMARY LAYER's shell, and only it - CloudSelectLayer(0) above, and layer 0 is
+                 // the lowest (Graphic::CloudLayerSet keeps them in altitude order).
+                 //
+                 // A volumetric pixel has no single depth and the mid-surface is already a stand-in; with
+                 // two layers there are two stand-ins and one pixel, and this stage has no per-pixel cloud
+                 // depth to choose between them with. The lowest layer is the right one to pick because it
+                 // is the optically thick one — a deck fills the pixel, a sheet is a wash over it — and
+                 // because the error the choice makes is a PARALLAX error, which is exactly zero while the
+                 // camera only rotates and grows with translation. What survives it is the neighbourhood
+                 // clamp: a high sheet reprojected through the deck's sphere lands within a few pixels for
+                 // any plausible camera speed, and the clamp rejects the rest.
                  CloudReprojectThroughShell(uv, u_InverseViewProjection, cameraPositionKm,
                                             CloudKmFromWorld(u_PlanetRadius),
                                             CloudKmFromWorld(u_LayerBottomAltitude),

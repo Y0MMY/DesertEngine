@@ -33,9 +33,18 @@
 layout(binding = 3) uniform sampler3D u_ShapeNoise;
 layout(binding = 4) uniform sampler3D u_DetailNoise;
 layout(binding = 5) uniform sampler2D u_CurlNoise;
-layout(binding = 6) uniform sampler2D u_WeatherMap;
-layout(binding = 10) uniform sampler2D u_ProfileMap;
-layout(binding = 11) uniform sampler2D u_ProfileLut;
+
+// THE THREE PER-LAYER TABLES ARE VOLUMES, one slice per cloud layer (Graphic::kCloudMaxLayers deep). The
+// noise volumes above are shared by every layer — they are a shape vocabulary, not weather — but the
+// weather map, the per-cell height map and the authored type curves are all functions of a LAYER's own
+// settings, so a deck and a sheet need their own.
+//
+// A volume and not two samplers: the engine refuses arrayed images by design, its own answer to "N of the
+// same thing" is a tiled volume (Common/CloudDensityVoxel.glslh), and one sampler means one fetch instead
+// of a per-pixel branch between two — see CloudLayerSliceW in Common/CloudGeometry.glslh.
+layout(binding = 6) uniform sampler3D u_WeatherMap;
+layout(binding = 10) uniform sampler3D u_ProfileMap;
+layout(binding = 11) uniform sampler3D u_ProfileLut;
 
 // ---- Sampling coordinates --------------------------------------------------------------------------
 
@@ -52,7 +61,8 @@ vec2 CloudWeatherUV(vec3 worldPos)
 
 vec4 CloudSampleWeather(vec3 worldPos)
 {
-    return texture(u_WeatherMap, CloudWeatherUV(worldPos));
+    vec2 uv = CloudWeatherUV(worldPos);
+    return texture(u_WeatherMap, vec3(uv.x, uv.y, CloudActiveLayerSliceW()));
 }
 
 // The lean a sheared wind gives a cloud: a FIXED horizontal displacement proportional to height, in
@@ -123,8 +133,10 @@ float CloudHeightGradient(float heightFraction, float cloudType, vec2 band)
     if (cellHeight < 0.0f || cellHeight > 1.0f)
         return 0.0f;
 
-    vec2 lutSize = vec2(textureSize(u_ProfileLut, 0));
-    vec3 texel   = texture(u_ProfileLut, CloudProfileLutCoord(cellHeight, cloudType, lutSize)).rgb;
+    ivec3 lutExtent = textureSize(u_ProfileLut, 0);
+    vec2  lutSize   = vec2(float(lutExtent.x), float(lutExtent.y));
+    vec2  lutUv     = CloudProfileLutCoord(cellHeight, cloudType, lutSize);
+    vec3  texel     = texture(u_ProfileLut, vec3(lutUv.x, lutUv.y, CloudActiveLayerSliceW())).rgb;
     return CloudProfileCompose(texel, u_BaseGradientPower, u_TopGradientPower);
 }
 
@@ -133,7 +145,8 @@ float CloudHeightGradient(float heightFraction, float cloudType, vec2 band)
 // and whose altitude came from two different places on the ground is two clouds, not one.
 vec2 CloudCellBand(vec3 worldPos)
 {
-    vec2 ndf = texture(u_ProfileMap, CloudWeatherUV(worldPos)).rg;
+    vec2 uv  = CloudWeatherUV(worldPos);
+    vec2 ndf = texture(u_ProfileMap, vec3(uv.x, uv.y, CloudActiveLayerSliceW())).rg;
     return CloudProfileCellBand(ndf.x, ndf.y, u_CloudHeightVariance);
 }
 

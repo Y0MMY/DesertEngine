@@ -39,8 +39,13 @@ Shader "CloudWeather"
 
         // rgba8, matching the VkFormat the engine creates for ImageFormat::RGBA8F. imageStore clamps and
         // quantises the [0,1] values written below.
-        layout(binding = 0, rgba8) restrict writeonly uniform image2D u_WeatherOut;
-        layout(binding = 1, rgba8) restrict writeonly uniform image2D u_ProfileOut;
+        //
+        // VOLUMES, one slice per cloud layer: a deck and a high sheet have different coverage, seed, type
+        // and tile size, so they cannot share a map. One dispatch of depth CLOUD_MAX_LAYERS fills them
+        // all — the warp is per texel and per layer either way, and a second dispatch would only be a
+        // second place for the layer index to come from.
+        layout(binding = 0, rgba8) restrict writeonly uniform image3D u_WeatherOut;
+        layout(binding = 1, rgba8) restrict writeonly uniform image3D u_ProfileOut;
 
         LocalSize(8, 8, 1);
 
@@ -70,15 +75,20 @@ Shader "CloudWeather"
 
         void main()
         {
-            ivec2 size  = imageSize(u_WeatherOut);
-            ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-            if (coord.x >= size.x || coord.y >= size.y)
+            ivec3 size  = imageSize(u_WeatherOut);
+            ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+            if (coord.x >= size.x || coord.y >= size.y || coord.z >= size.z)
                 return;
+
+            // THE SLICE IS THE LAYER. Every u_ name below reads the copy CloudSelectLayer makes, so
+            // this one line is the whole of what makes one dispatch bake two different cloudscapes.
+            CloudSelectLayer(min(coord.z, u_LayerCount - 1));
 
             // Texel CENTRES, so the wrap-around neighbours of texel 0 and texel N-1 sit the same
             // distance apart as any interior pair. Sampling at corners puts a half-texel shift into the
             // seam, and this map is tiled across a hundred kilometres of sky.
-            vec2 uv   = (vec2(coord) + vec2(0.5f, 0.5f)) / vec2(size);
+            vec2 uv   = (vec2(float(coord.x), float(coord.y)) + vec2(0.5f, 0.5f)) /
+                        vec2(float(size.x), float(size.y));
             uint seed = uint(u_WeatherSeed);
 
             // Domain warp. Circular blobs are what an unwarped FBM threshold always produces; pushing

@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 
+#include <Engine/Graphic/Clouds/CloudLayerSet.hpp>
 #include <Engine/Graphic/Clouds/CloudNoiseVolumes.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileCurves.hpp>
@@ -14,6 +15,7 @@
 #include <Engine/ECS/VolumetricCloudsComponent.hpp>
 #include <Engine/ShaderResources/StorageBuffer.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -25,11 +27,13 @@ namespace Desert::Graphic::System
      *
      * All four in-frame stages of the subsystem live here:
      *
-     *   S1  WEATHER MAP  compute, 512x512 RGBA8. Regenerated only when a field of the Weather group
-     *                    changes — nothing in it depends on the camera or on the clock, so a per-frame
-     *                    dispatch would be a per-frame dispatch producing identical bytes.
-     *   S2  RAYMARCH     compute, RGBA16F at ResolutionScale. One ray per pixel through a spherical
-     *                    shell, clamped to the scene depth. Premultiplied radiance + transmittance, plus
+     *   S1  WEATHER MAP  compute, 512x512xN RGBA8 — ONE SLICE PER CLOUD LAYER, filled by one dispatch.
+     *                    Regenerated only when a field of some layer's Weather group changes — nothing in
+     *                    it depends on the camera or on the clock, so a per-frame dispatch would be a
+     *                    per-frame dispatch producing identical bytes.
+     *   S2  RAYMARCH     compute, RGBA16F at ResolutionScale. One ray per pixel through the scene's
+     *                    cloud shells, walked in the order the ray meets them (CloudPlanTwoShells) and
+     *                    clamped to the scene depth. Premultiplied radiance + transmittance, plus
      *                    an RGBA8 guide recording how far each ray was allowed to run. At Full resolution
      *                    with the temporal stage running, the march is CHECKERBOARDED: half the pixels
      *                    each frame, the other half reconstructed by S3 (CloudCheckerboardActive) — a
@@ -49,6 +53,13 @@ namespace Desert::Graphic::System
      * render pass, after the scene depth is finished. SceneRenderer::ExecuteVolumetricClouds() calls
      * ExecuteInFrame() between the deferred block and ExecuteTransparency(), which is the one point in
      * the frame where both hold in Forward and in Deferred.
+     *
+     * TWO LAYERS, ONE MARCH. A scene gets a second cloud layer by putting a second Volumetric Clouds
+     * component on a second entity; the collector hands them over in altitude order and this renderer
+     * marches both in ONE dispatch. Not two: two dispatches would need two scatter targets, two history
+     * pairs and two composites, and no amount of compositing afterwards can resolve a cirrus streak that
+     * crosses in front of one cumulus tower and behind another. The four per-layer tables — weather map,
+     * profile map, profile table, shadow map — are volumes with one slice each.
      *
      * WHAT IT OWNS AND WHAT IT BORROWS. It owns the weather map, the scatter target, the depth guide, the
      * two history images, the parameter buffer and its pipelines. It BORROWS the three noise volumes
@@ -74,21 +85,19 @@ namespace Desert::Graphic::System
         void                  RegisterPasses( RenderGraphBuilder& builder ) override;
 
         /**
-         * @brief This frame's cloud settings, from ECS::VolumetricCloudsECSSystem.
+         * @brief This frame's cloud layers, from ECS::VolumetricCloudsECSSystem.
          *
-         * @param present false when the scene has no volumetric-clouds component at all. Said
-         *                explicitly rather than by omission: the renderer keeps its state across frames,
-         *                so a component deleted mid-session would otherwise leave the last cloudscape it
-         *                saw hanging in the sky.
-         */
-        /**
+         * @param layers  the scene's enabled cloud layers, in ALTITUDE ORDER. Count 0 means the scene has
+         *                no volumetric-clouds component at all, or every one of them is switched off —
+         *                said explicitly rather than by omission, because the renderer keeps its state
+         *                across frames and a component deleted mid-session would otherwise leave the last
+         *                cloudscape it saw hanging in the sky.
          * @param volumes this frame's placed hero clouds, already sorted shadow-casters-first by
          *                ECS::VolumetricCloudsECSSystem — the shadow pass marches a prefix of the buffer
          *                and the ordering is what makes that prefix mean "casts a cloud shadow".
          *                Passed even when empty: an empty list releases every atlas tile.
          */
-        void SetCloudSettings( bool present, const ECS::VolumetricCloudData& data,
-                               const CloudVolumePlacements& volumes );
+        void SetCloudSettings( const CloudLayerSet& layers, const CloudVolumePlacements& volumes );
 
         /** @brief Stages S1 and S2. Must be called outside any render pass. */
         void ExecuteInFrame();
@@ -164,11 +173,15 @@ namespace Desert::Graphic::System
 
         std::unique_ptr<MaterialVolumetricClouds> m_CompositeMaterial;
 
-        std::shared_ptr<Image2D> m_WeatherMap;
-        // The second weather image (per-cell Min/Max Height) and the authored Cloud Type curve table.
-        std::shared_ptr<Image2D> m_ProfileMap;
-        std::shared_ptr<Image2D> m_ProfileLut;
-        std::shared_ptr<Image2D> m_CloudShadowMap;
+        // THE FOUR PER-LAYER TABLES ARE VOLUMES, kCloudMaxLayers slices deep: the weather map, the
+        // second weather image (per-cell Min/Max Height), the authored Cloud Type curve table and the
+        // sun-space shadow map. Each is a function of ONE layer's settings, so a deck and a high sheet
+        // cannot share one; a volume rather than N images because the engine refuses arrayed samplers
+        // and one sampler means one fetch instead of a per-pixel branch (CloudLayerSliceW).
+        std::shared_ptr<Image3D> m_WeatherMap;
+        std::shared_ptr<Image3D> m_ProfileMap;
+        std::shared_ptr<Image3D> m_ProfileLut;
+        std::shared_ptr<Image3D> m_CloudShadowMap;
         std::shared_ptr<Image2D> m_ScatterImage;
         std::shared_ptr<Image2D> m_DepthGuideImage;
 
@@ -214,10 +227,12 @@ namespace Desert::Graphic::System
         // against next frame's placements is what decides which tiles are acquired and released.
         std::vector<uint64_t> m_VolumeLeases;
 
-        ECS::VolumetricCloudData m_Data{};
-        CloudVolumePlacements    m_VolumePlacements;
-        CloudVoxelCounts         m_VolumeCounts{};
-        bool                     m_Present = false;
+        // THIS FRAME'S LAYERS, in altitude order and already filtered to the enabled ones. Count == 0 is
+        // "no cloud layer in this scene", which is why there is no separate `present` flag any more: one
+        // number answers both questions and two could disagree.
+        CloudLayerSet         m_Layers{};
+        CloudVolumePlacements m_VolumePlacements;
+        CloudVoxelCounts      m_VolumeCounts{};
 
         // A handle whose asset could not be resolved or leased is reported ONCE per handle. Without this
         // a missing `.dvol` is a log line at 60 Hz, which is the same as no log line at all.
@@ -228,10 +243,21 @@ namespace Desert::Graphic::System
         uint32_t                  m_ScatterHeight = 0;
         ECS::CloudResolutionScale m_ScatterScale  = ECS::CloudResolutionScale::Half;
 
-        WeatherFingerprint m_WeatherBaked{};
-        bool               m_WeatherValid = false;
+        // ONE FINGERPRINT PER LAYER, plus the count they were baked at. The bake fills every slice in one
+        // dispatch, so any layer's weather changing rebakes them all — the alternative is a per-slice
+        // dispatch for a pass that runs when an artist drags a slider, which is not a rate worth
+        // optimising for.
+        std::array<WeatherFingerprint, kCloudMaxLayers> m_WeatherBaked{};
+        uint32_t                                        m_WeatherBakedCount = 0;
+        bool                                            m_WeatherValid      = false;
 
-        ProfileFingerprint m_ProfileLutBaked{};
+        std::array<ProfileFingerprint, kCloudMaxLayers> m_ProfileLutBaked{};
+        uint32_t                                        m_ProfileLutBakedCount = 0;
+
+        // How many slices of the shadow map this frame's dispatch fills: one past the highest layer
+        // whose own Cloud Shadow Map is on. Decided in ExecuteInFrame and consumed by DispatchShadowMap,
+        // which is the pair the two would otherwise have to agree about through the component twice.
+        uint32_t m_ShadowSlices = 0;
 
         bool m_ResourcesFailed = false;
 

@@ -4,8 +4,12 @@
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/System/VolumetricCloudsECSSystem.hpp>
+#include <Engine/Graphic/Clouds/CloudLayerSet.hpp>
 #include <Engine/Graphic/CloudPresets.hpp>
 #include <Engine/Graphic/CloudQuality.hpp>
+
+#include <ImGui/imgui.h>
 
 namespace Desert::Editor
 {
@@ -76,6 +80,33 @@ namespace Desert::Editor
             if ( !( Graphic::ExtractQualityValues( data ) == qualityBefore ) )
                 data.QualityLevel = Graphic::MatchQuality( data );
         }
+
+        // WHAT AN UPPER LAYER DOES NOT OWN, said where the artist is looking at it.
+        //
+        // A scene gets a second cloud layer by adding a second entity with this component on it, and
+        // seven of the fields below are then read from the LOWEST layer instead of from this one. They
+        // are not dead — they drive the frame when this component IS the lowest layer — but on an upper
+        // layer they describe something the view has only one of, and a slider whose scope is invisible
+        // is the same problem as a slider that does nothing. So the scope is drawn.
+        void DrawUpperLayerScopeNote( ECS::Entity& entity )
+        {
+            entt::registry* registry = entity.GetRegistry();
+            if ( registry == nullptr )
+                return;
+            if ( ECS::VolumetricCloudsECSSystem::IsPrimaryCloudLayer( *registry, entity.GetHandle() ) )
+                return;
+
+            ::ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.90f, 0.74f, 0.32f, 1.0f ) );
+            ::ImGui::TextWrapped(
+                 "Upper cloud layer. Seven settings below come from the LOWEST cloud layer in the scene "
+                 "and not from this one: Resolution Scale, Temporal Mode, Temporal Blend Factor, "
+                 "Temporal Clamp Scale and Jitter Strength (there is one ray and one history per view), "
+                 "and Shape Seed and Detail Seed (there is one noise set per scene). Everything else on "
+                 "this component - including Max Steps, the step schedule, the light march and the cloud "
+                 "shadow map - is this layer's own." );
+            ::ImGui::PopStyleColor();
+            ::ImGui::Spacing();
+        }
     } // namespace
 
     // Every one of the 95 cloud fields is drawn from its REFLECT()/PROPERTY() metadata — there is no
@@ -91,8 +122,9 @@ namespace Desert::Editor
     // selected entity that has the same component (DrawMulti). This one does not, deliberately: a
     // broadcast writes the raw value into the siblings but cannot carry the preset reconcile with it, so
     // every sibling would keep claiming a weather preset its values no longer match — a name that lies,
-    // which is the exact failure this widget exists to prevent. The cost is small because a scene is
-    // meant to have ONE cloud component: the collector already warns when it finds more.
+    // which is the exact failure this widget exists to prevent. The cost is bounded because a scene has
+    // at most Graphic::kCloudMaxLayers cloud components, and a deck and a high sheet are exactly the two
+    // things nobody would want to edit through one broadcast anyway.
     ComponentEditorEntry MakeVolumetricCloudsEntry()
     {
         using C = ::Desert::ECS::VolumetricCloudsComponent;
@@ -108,6 +140,8 @@ namespace Desert::Editor
         {
             auto& clouds = en.GetComponent<C>();
             Data& data   = clouds.Data;
+
+            DrawUpperLayerScopeNote( en );
 
             const Graphic::CloudPresetValues  lookBefore    = Graphic::ExtractPresetValues( data );
             const Graphic::CloudQualityValues qualityBefore = Graphic::ExtractQualityValues( data );
