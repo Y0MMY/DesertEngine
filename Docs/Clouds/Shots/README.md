@@ -165,3 +165,120 @@ contributions can restore contrast the air removed — with the ambient at ZERO 
 |---|---|
 | `ue-showcase-sun.png` | `Clouds_UEShowcase.desce`: sun disc + bloom glow, Ultra (full-res) clouds, deeper zenith. |
 | `ue-showcase-sunset-shafts.png` | The same scene with the sun on the horizon: the new Light Shaft Bloom (DirectionalLight, UE params) — crepuscular rays through the deck, clouds lit from below. |
+
+## v6 — the temporal stage, in motion
+
+Everything above was shot from a FIXED camera, and a fixed camera is the one condition under which
+the cloud temporal resolve's reprojection is exact by construction: every pixel finds its own history
+at its own texel. So a still can never exercise the parts of that stage that exist for a moving one,
+and `CloudTemporalResolve.shader` says so in its own header — it names six artefacts in advance
+precisely because none of them could be looked at. This section is the first time anyone looked.
+
+### Driving it
+
+```
+Editor --project Desert.deproj --scene <s>.desce \
+       --camera 0,200,0 --look 0,0.35,-1 \       # where the path starts (unchanged)
+       --camera-to 200000,200,0 \                # where the eye ends   (optional)
+       --look-to 0.8660,0.35,0.5 \               # where the aim ends   (optional, slerped)
+       --shot-frames 90 \
+       --shot-sequence <dir> --shot-every 1 \    # every Nth frame, not only the last
+       --shot out.png                            # the last frame, as before
+```
+
+`--camera-to` / `--look-to` interpolate from `--camera` / `--look` across exactly the `--shot-frames`
+warm-up frames: position linearly, aim by shortest-arc slerp so equal frames are equal ANGLES (a
+component-wise lerp would put a hump in the middle of every measurement that belonged to the
+interpolator rather than to the renderer). Give one and the other holds still, so a pure translation
+stays a pure translation. `--shot-sequence` writes `frame_00001.png` .. `frame_000NN.png`, frame N
+rendered from path parameter N; with `--shot-every` dividing `--shot-frames`, the last file and the
+`--shot` PNG are the same image.
+
+**A still command renders one more frame than it used to.** The camera is now placed BEFORE the frame
+it affects rather than after, so `--shot-frames N` renders N frames from the requested pose instead of
+N-1 — which on a moving path is not bookkeeping: under the old ordering the last captured frame of a
+120-degree pan sat 1.35 degrees, about 28 pixels, short of the endpoint `--look-to` named, and every
+"same pose, arrived differently" comparison was measuring that shift instead of the renderer. The
+effect on an existing still is exactly that one frame and nothing else, and it was measured rather
+than argued: `after-placement --shot-frames 91` against `before-placement --shot-frames 90` agrees to
+0.040-0.061 mean grey levels, INSIDE the 0.022-0.084 spread of the same binary run twice. So an old
+command at `--shot-frames N` reproduces its old picture at `--shot-frames N+1`; left at N it differs
+by 0.13-0.23 mean, p99 1.1-2.1, max 13 grey levels — inside the +/-14-24 level repeat noise this file
+already records above, but named here rather than left to be discovered.
+
+A shot has never been bit-reproducible in any case: the timestep is `glfwGetTime()`, so the wind has
+advanced by a different amount by frame 90 on every run. That is the noise the tables above are quoted
+against, and it is why every claim here is a spread and not an equality.
+
+Also new, and for the same reason the rest of this exists: in capture mode a `--scene` that does not
+exist is now fatal. The loader logged it and carried on, which is right for an editor and wrong for a
+capture — the run went on to write PNGs named after the scene that was asked for, holding the picture
+of a different one.
+
+### The metric
+
+Frame-to-frame difference of Rec.709 luma, in 8-bit grey levels, over a converged tail (the first 30
+frames of each sequence are dropped — convergence from cold is a different question from behaviour in
+motion). Reported as mean and p99 over the whole frame and over the leading and trailing thirds of the
+direction of travel, because disocclusion is a bright band on the leading edge and ghosting a smear on
+the trailing one, and a mean over the whole frame hides both.
+
+Two controls are what make the numbers mean anything, and both turned out to be necessary:
+
+* **A still of the same scene, measured with the same thirds.** The right third of this sky already
+  differs 3.8x more than the left in a STILL, because that is where the cloud is. Read a motion ratio
+  against 1.0 instead of against that and every pan appears to have a disocclusion band.
+* **`Animation Speed = 0`.** A still sequence measures 0.357 mean; with the wind stopped it measures
+  **0.030**. So 92% of the "floor" is the clouds genuinely moving, and the resolve's own residual on a
+  still is three hundredths of a grey level. (A sequence writes a PNG per frame behind a device-idle
+  wait, so a frame costs ~1 s of wall clock and the wall-clock wind advances far more per frame than
+  it would at 60 fps. Camera steps are unaffected; the wind-driven rows are an upper bound.)
+
+### What the six predicted artefacts actually measure
+
+`Clouds_UEShowcase`, High unless noted, 90 frames, `--camera 0,200,0`.
+
+| the header's prediction | measured |
+|---|---|
+| Disocclusion trails, leading edge | PRESENT under rotation, and only under rotation. Excess over the still baseline: leading/trailing 1.08 (10-degree pan), **1.19** (120-degree pan) at High, 1.09 / **1.33** at Ultra. Under a 2 km translation it is 0.96 — clouds 5-100 km away have no parallax to disocclude at the screen edge, so that case shows up in p99 (14.4 against a 4.3 still) rather than in the thirds. |
+| Inertia on fast rotation | PRESENT and the largest effect found. The frame you land on after a 120-degree pan differs from a still at the same pose by **10.4** mean / 58.9 p99 (High), **10.7** / 59.7 (Ultra). The header says "the inertia is in the pixels that stayed" — measured, the trailing third differs **40%** more than the leading third (11.9 vs 8.5 High; 12.2 vs 8.7 Ultra). Decays as (1 - blend)^n, so ~0.37 s at 60 fps. |
+| Softness in the uncovered band | PRESENT. Laplacian detail in the same frame, moving vs settled: **-14%** at High (1.295 vs 1.502, uniform across the frame) and **-26%** at Ultra (1.480 vs 1.963), where it is edge-weighted — the leading third loses most. Full resolution keeps the interior sharp and pays at the edge; half resolution pays everywhere. |
+| Shell-parallax error (second layer) | NOT VISIBLE above the single-layer case. `Clouds_TwoLayerShowcase` under the same 2 km translation measures 1.214 / 10.556 against the one-layer scene's 1.471 / 14.442 — the two-layer scene is QUIETER, not noisier. Predicted magnitude for the cirrus sheet reprojected through the deck's mid-surface is ~1.7 px/frame, which the neighbourhood clamp absorbs, exactly as the header claims. |
+| Ghosting on wind-driven silhouette change | The clamp has large authority on the scene the header names. `Clouds_Storm` (Animation Speed 2.2), still camera, so the only thing moving is the cloud: Temporal Off **2.287**, clamp 0.75 **1.464**, 1.50 (authored) **1.109**, 4.00 **0.644**. A 5.3x sweep of the knob moves the metric 2.3x — this is not a dead setting. |
+| Sun-glint flicker | PRESENT and monotone in the direction the header predicts. Still, looking along the sun: clamp 0.75 **0.172** / p99 3.088, 1.50 **0.157** / 2.556, 4.00 **0.143** / 2.365. Raising the clamp buys the flicker away, exactly as written. |
+
+### Does the stage earn its place?
+
+| | still | 120-degree whip pan |
+|---|---|---|
+| Temporal Off | 0.819 / 7.34 | 8.644 / 66.75 |
+| Reprojection (High) | **0.357 / 4.32** | **8.403 / 65.00** |
+
+On a still the stage removes 56% of the frame-to-frame change — that is the boiling it exists for.
+Under a fast pan it removes 2.8%, because most reprojected UVs leave the screen and carry no history;
+the header predicted exactly this. It does not make motion WORSE, which was the open question.
+
+### The Ultra checkerboard, and one hypothesis that was wrong
+
+Ultra is the only tier that checkerboards (full resolution + history), and half its pixels each frame
+are pure clamped history at blend weight 0. Its clamp knob behaves differently from every other tier's:
+
+| Temporal Clamp Scale | Ultra still | Ultra whip pan |
+|---|---|---|
+| 0.75 | 0.459 / 5.51 | **7.249 / 53.31** |
+| 1.75 (authored) | 0.367 / 5.63 | 7.711 / 61.75 |
+| 4.00 | **0.287 / 4.94** | 7.795 / 61.52 |
+
+Tightening buys 6.0% mean and 13.7% p99 under motion and costs 25% on a still; loosening does the
+reverse. Ultra is documented as the stills-and-captures tier and 1.75 is authored toward that side, so
+this is a live trade behaving as specified, **not** a defect — but it is a trade nobody could see
+before, and if Ultra is ever used in motion the number to move is this one.
+
+The obvious mechanism-level suspicion was that the 3x3 clamp box is built from all nine taps while the
+fallback mean deliberately counts fresh ones only, so under the checkerboard 4-5 of the 9 taps that
+widen the box were marched from the PREVIOUS camera. Restricting the box to fresh taps was tried and
+**made Ultra strictly worse** — +11% on the whip pan, +25% on a still and on the translation — while
+leaving High identical to 0.02% (the correct control: with no checkerboard every tap is fresh and the
+code reduces to what it was). The reason is that for a stale pixel its own stale texel is not
+pollution: it is the only same-texel evidence in the frame, one frame old, and removing it clamps the
+history away from where it legitimately sits. The shader is right as written; the change was reverted.

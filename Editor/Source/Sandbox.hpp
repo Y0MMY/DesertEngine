@@ -6,6 +6,7 @@
 #include <Editor/Core/ProjectContext.hpp>
 #include <Editor/Core/ShotOptions.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -69,6 +70,22 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
                 shot.HasCamera = readVec3( argv[++i], shot.Position ) || shot.HasCamera;
             else if ( hasNext && std::strcmp( argv[i], "--look" ) == 0 )
                 shot.HasCamera = readVec3( argv[++i], shot.Forward ) || shot.HasCamera;
+            // The far end of a moving shot. Each also implies --camera, because a path that nothing
+            // places is a path the scene's own camera ignores.
+            else if ( hasNext && std::strcmp( argv[i], "--camera-to" ) == 0 )
+            {
+                shot.HasPositionTo = readVec3( argv[++i], shot.PositionTo ) || shot.HasPositionTo;
+                shot.HasCamera     = shot.HasCamera || shot.HasPositionTo;
+            }
+            else if ( hasNext && std::strcmp( argv[i], "--look-to" ) == 0 )
+            {
+                shot.HasForwardTo = readVec3( argv[++i], shot.ForwardTo ) || shot.HasForwardTo;
+                shot.HasCamera    = shot.HasCamera || shot.HasForwardTo;
+            }
+            else if ( hasNext && std::strcmp( argv[i], "--shot-sequence" ) == 0 )
+                shot.Sequence = argv[++i];
+            else if ( hasNext && std::strcmp( argv[i], "--shot-every" ) == 0 )
+                shot.SequenceEvery = std::max( 1, std::atoi( argv[++i] ) );
         }
     }
 
