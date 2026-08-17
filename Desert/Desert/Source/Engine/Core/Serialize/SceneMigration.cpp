@@ -1,6 +1,7 @@
 #include <Engine/Core/Serialize/SceneMigration.hpp>
 
 #include <Common/Core/Logger.hpp>
+#include <Common/Core/Units.hpp>
 
 #include <glm/trigonometric.hpp>
 
@@ -228,6 +229,225 @@ namespace Desert::Core
             report.FieldsRejected += rejected;
             report.FieldsDefaulted += kSkyAtmosphereFieldCount - carried - rejected;
         }
+
+        return report;
+    }
+
+    namespace
+    {
+        // One world unit used to be a metre and is now a centimetre, so every length in an unstamped file
+        // is short by this factor. Named once here so the migration and Units.hpp cannot drift.
+        constexpr double kMetresToUnits = static_cast<double>( Common::Units::UnitsPerMetre );
+
+        enum class Arity
+        {
+            Scalar, // a single number
+            Vec3,   // an array of exactly three numbers
+        };
+
+        // Every LENGTH a component payload can carry, by the key the ComponentRegistry writes it under.
+        // This is the complete list - a field that is not here is not a distance (an angle, a colour, a
+        // count, a frequency), and a field that is here and is NOT a distance would silently inflate a
+        // scene by a hundred. It is stated as data rather than code so the census can be read in one look.
+        struct ScaledField
+        {
+            const char* Component;
+            const char* Field;
+            Arity       Kind;
+        };
+
+        constexpr ScaledField kScaledFields[] = {
+             { "Camera", "Near", Arity::Scalar },
+             { "Camera", "Far", Arity::Scalar },
+             { "PointLight", "Radius", Arity::Scalar },
+             { "PointLight", "MinRadius", Arity::Scalar },
+             { "SpotLight", "Range", Arity::Scalar },
+             { "Collider", "HalfExtents", Arity::Vec3 },
+             { "Collider", "Radius", Arity::Scalar },
+             { "Collider", "HalfHeight", Arity::Scalar },
+             { "CharacterController", "Radius", Arity::Scalar },
+             { "CharacterController", "Height", Arity::Scalar },
+             { "CharacterController", "Gravity", Arity::Scalar },
+             { "Terrain", "Size", Arity::Scalar },
+             { "Terrain", "HeightScale", Arity::Scalar },
+             { "Terrain", "GrassHeight", Arity::Scalar },
+             { "Text", "Size", Arity::Scalar },
+        };
+
+        // Multiplies one value in place. Returns false when the key was there but unusable, which is the
+        // only case worth reporting - an absent key is a scene that predates the field, not a failure.
+        bool ScaleValue( const std::string& where, const char* field, Arity kind, rfl::Generic::Object& obj )
+        {
+            const auto value = obj.get( field );
+            if ( !value.has_value() )
+                return true; // absent: nothing to scale, and nothing went wrong
+
+            if ( kind == Arity::Scalar )
+            {
+                const auto n = AsFiniteNumber( value.value() );
+                if ( !n.has_value() )
+                {
+                    LOG_WARN( "[SceneMigration] {0}.{1} is {2}, expected a finite number - left in metres", where,
+                              field, Describe( value.value() ) );
+                    return false;
+                }
+                obj[field] = n.value() * kMetresToUnits;
+                return true;
+            }
+
+            const auto arr = value.value().to_array();
+            if ( !arr.has_value() || arr.value().size() != 3 )
+            {
+                LOG_WARN( "[SceneMigration] {0}.{1} is {2}, expected an array of 3 numbers - left in metres",
+                          where, field, Describe( value.value() ) );
+                return false;
+            }
+
+            rfl::Generic::Array scaled;
+            for ( const auto& component : arr.value() )
+            {
+                const auto n = AsFiniteNumber( component );
+                if ( !n.has_value() )
+                {
+                    LOG_WARN( "[SceneMigration] {0}.{1} is {2}, expected 3 finite numbers - left in metres", where,
+                              field, Describe( value.value() ) );
+                    return false;
+                }
+                scaled.push_back( rfl::Generic( n.value() * kMetresToUnits ) );
+            }
+            obj[field] = std::move( scaled );
+            return true;
+        }
+
+        // A top-level transform vector (Translation / Scale). Absent means the entity never authored one,
+        // and the component default it will be created with is not a metres-era length - see the header.
+        bool ScaleTransform( const std::string& tag, const char* what, std::optional<glm::vec3>& v )
+        {
+            if ( !v.has_value() )
+                return false;
+
+            const glm::vec3 before = *v;
+            *v *= static_cast<float>( kMetresToUnits );
+            if ( !std::isfinite( v->x ) || !std::isfinite( v->y ) || !std::isfinite( v->z ) )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': {1} is not finite after scaling - restored", tag, what );
+                *v = before;
+                return false;
+            }
+            return true;
+        }
+
+        // A procedural primitive is REGENERATED at its authored size by the factory, so its Scale is a
+        // multiplier on geometry the engine builds, not a length the file owns - scaling it would cube the
+        // object. A file-backed mesh has no such regeneration and its Scale is a real length.
+        bool HasProceduralMesh( const Assets::EntityData& entity )
+        {
+            const auto mesh = entity.Components.get( "StaticMesh" );
+            if ( !mesh.has_value() )
+                return false;
+            const auto fields = mesh.value().to_object();
+            return fields.has_value() && fields.value().get( "Primitive" ).has_value();
+        }
+    } // namespace
+
+    UnitMigrationReport MigrateMetresToUnits( std::vector<Assets::EntityData>& entities,
+                                              std::optional<rfl::Generic>&     settings )
+    {
+        UnitMigrationReport report;
+
+        for ( auto& entity : entities )
+        {
+            const std::string tag     = entity.Tag.value_or( "Entity" );
+            int               values  = 0;
+            int               refused = 0;
+
+            if ( entity.Translation.has_value() )
+            {
+                if ( ScaleTransform( tag, "Translation", entity.Translation ) )
+                    ++values;
+                else
+                    ++refused;
+            }
+
+            if ( entity.Scale.has_value() && !HasProceduralMesh( entity ) )
+            {
+                if ( ScaleTransform( tag, "Scale", entity.Scale ) )
+                    ++values;
+                else
+                    ++refused;
+            }
+
+            for ( const auto& scaled : kScaledFields )
+            {
+                const auto payload = entity.Components.get( scaled.Component );
+                if ( !payload.has_value() )
+                    continue;
+
+                auto fields = payload.value().to_object();
+                if ( !fields.has_value() )
+                {
+                    LOG_WARN( "[SceneMigration] entity '{0}': the {1} payload is {2}, not an object - its "
+                              "lengths stay in metres",
+                              tag, scaled.Component, Describe( payload.value() ) );
+                    ++refused;
+                    continue;
+                }
+                if ( !fields.value().get( scaled.Field ).has_value() )
+                    continue; // the field is absent; the component default applies and is already in units
+
+                const std::string where = "entity '" + tag + "': " + scaled.Component;
+                if ( ScaleValue( where, scaled.Field, scaled.Kind, fields.value() ) )
+                    ++values;
+                else
+                    ++refused;
+
+                entity.Components[scaled.Component] = rfl::Generic( std::move( fields.value() ) );
+            }
+
+            if ( values > 0 )
+                report.Entities += 1;
+            report.Values += values;
+            report.Rejected += refused;
+        }
+
+        // Gravity is the one scene-wide length-per-second-squared. Absent keeps the C++ default, which is
+        // already stated in world units.
+        if ( settings.has_value() )
+        {
+            auto fields = settings->to_object();
+            if ( fields.has_value() && fields.value().get( "Gravity" ).has_value() )
+            {
+                if ( ScaleValue( "Settings", "Gravity", Arity::Scalar, fields.value() ) )
+                    report.Values += 1;
+                else
+                    report.Rejected += 1;
+                settings = rfl::Generic( std::move( fields.value() ) );
+            }
+        }
+
+        return report;
+    }
+
+    SceneMigrationReport MigrateScene( SceneSerialized& scene )
+    {
+        SceneMigrationReport report;
+
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersion )
+        {
+            report.SkyRaised = true;
+            report.Sky       = MigrateSkyV0ToV1( scene.Entities );
+        }
+
+        if ( scene.UnitVersion.value_or( 0 ) < kUnitVersion )
+        {
+            report.UnitsRaised = true;
+            report.Units       = MigrateMetresToUnits( scene.Entities, scene.Settings );
+        }
+
+        // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,
+        // and leaving it unstamped is how every load ends up re-running a migration that already happened.
+        scene.SceneVersion = kSceneVersion;
+        scene.UnitVersion  = kUnitVersion;
 
         return report;
     }
