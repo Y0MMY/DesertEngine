@@ -190,7 +190,10 @@ layout(std430, binding = CLOUD_PARAMS_BINDING) readonly buffer CloudParamsBuffer
     float u_TemporalBlendFactor;
     float u_TemporalClampScale;
 
-    // How many entries of u_CloudLayers are live.
+    // How many entries of u_CloudLayers are live. Read by the WEATHER and SHADOW passes, which are
+    // dispatched one workgroup deep per layer and clamp their z to it. The RAYMARCH does not read it: its
+    // layer count arrives as a specialization constant so the branch on it can be folded away, and both
+    // numbers come from Graphic::VolumetricCloudRenderer::m_Layers.Count.
     int u_LayerCount;
 
     // HERO CLOUDS: how many records of the instance buffer at binding 14 are live, and how many of that
@@ -231,6 +234,13 @@ layout(std430, binding = CLOUD_PARAMS_BINDING) readonly buffer CloudParamsBuffer
 //
 // Programs/Clouds/CloudRaymarch.shader therefore keeps TWO segment loops that differ only in where this
 // call sits, and picks between them on the layer count. See the note there.
+//
+// AND THE LAST 1.2 ms OF IT NEEDED THE LOOP TO STOP EXISTING, not to stop running. Two loops still left a
+// one-layer scene at 9.80 ms because a store to this index in the branch NOT taken is a store the
+// optimiser still has to assume: the parameter loads keep a computed address and stay inside the march.
+// The raymarch's layer count is now a SPECIALIZATION CONSTANT (`layout(constant_id = 0)` there), so the
+// driver folds the test and deletes the branch — and with it the only other writer of this variable —
+// before it compiles the module. One SPIR-V module, one pipeline per layer count, no permutation system.
 //
 // The one thing the index answers that a copy of the parameters could not: which SLICE of the per-layer
 // volumes to sample. See CloudActiveLayerSliceW below.

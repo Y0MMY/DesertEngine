@@ -2450,6 +2450,37 @@ TEST( CloudPayload, TheLayerCountCannotExceedWhatTheArrayHolds )
     EXPECT_GE( p.LayerCount, 0 );
 }
 
+// THE PIPELINE AND THE BUFFER, and the direction their disagreement is allowed to point.
+//
+// The raymarch's layer count is a SPECIALIZATION CONSTANT now, so it reaches the shader through the
+// pipeline the dispatch chose rather than through the parameter block. Two channels for one number is
+// exactly the shape this project has paid for before, and the failure here has no error message at all:
+// a pipeline specialized to ONE layer, dispatched for a scene whose buffer packed TWO, simply never
+// builds the second shell. The sheet is gone, nothing is logged, and every unit test of either side
+// passes because each side is individually right.
+//
+// So assert the RELATION over the whole range, including the counts a hand-edited scene can produce: the
+// pipeline never marches fewer layers than the buffer carries, and never more than the array holds.
+TEST( CloudPayload, ThePipelineNeverMarchesFewerLayersThanTheBufferPacked )
+{
+    Desert::Graphic::AtmosphereEnv atmosphere{};
+    Desert::Graphic::WindEnv       wind{};
+
+    for ( uint32_t count = 0; count <= kCloudMaxLayers + 5u; ++count )
+    {
+        Desert::Graphic::CloudLayerSet layers;
+        layers.Count = count;
+
+        const CloudGpuPayload p       = PackCloudParams( layers, atmosphere, wind, 0.0f, CloudVoxelCounts{} );
+        const uint32_t        marched = Desert::Graphic::CloudRaymarchLayerCount( count );
+
+        EXPECT_GE( static_cast<int32_t>( marched ), p.LayerCount ) << "count " << count;
+        EXPECT_LE( marched, kCloudMaxLayers ) << "count " << count;
+        // And it always names a pipeline that exists: the array is indexed by marched - 1.
+        EXPECT_GE( marched, 1u ) << "count " << count;
+    }
+}
+
 // ---- The march plan ---------------------------------------------------------------------------------
 //
 // A ray crossing two cloud layers has to composite them near over far, and the plan is what makes that
@@ -2733,8 +2764,8 @@ TEST( CloudLayerSlice, ConsecutiveLayersAreOneWholeSliceApart )
 
 TEST( CloudLayerSlice, ADegenerateCountDoesNotDivideByZero )
 {
-    // A count of zero cannot reach the shader — the march builds its plan from u_LayerCount shells and
-    // marches nothing at zero — but a division by it would produce an inf that survives every clamp it
+    // A count of zero cannot reach the shader — a scene with no live layer never dispatches the march at
+    // all — but a division by it would produce an inf that survives every clamp it
     // touches, so the guard is in the function rather than in the caller.
     EXPECT_TRUE( std::isfinite( R::CloudLayerSliceW( 0, 0 ) ) );
     EXPECT_FLOAT_EQ( R::CloudLayerSliceW( 0, 1 ), 0.5f );

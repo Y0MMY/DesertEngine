@@ -46,6 +46,18 @@ project(test_name)
         defines { define }
     end
 
+    -- The platform macro, the same three lines Tests/Engine/CloudMath carries. DESERT_DEBUG_BREAK falls
+    -- back to MSVC's __debugbreak() when none of the three is defined, so ANY engine header that reaches
+    -- DESERT_VERIFY fails to compile here without it — which is what including CloudPayload.hpp (for the
+    -- raymarch's specialization id) found.
+    filter "system:windows"
+        defines { "DESERT_PLATFORM_WINDOWS" }
+    filter "system:macosx"
+        defines { "DESERT_PLATFORM_MACOS" }
+    filter "system:linux"
+        defines { "DESERT_PLATFORM_LINUX" }
+    filter {}
+
     links { "Common", "Optick" } -- Common's JobSystem registers worker threads with Optick
 
     -- Common contains Objective-C (MacOSFileSystem's file dialog) and the include walk goes through

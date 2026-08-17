@@ -15,6 +15,8 @@
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Profiler.hpp>
 
+#include <algorithm>
+
 namespace Desert::Graphic::System
 {
     namespace
@@ -104,7 +106,8 @@ namespace Desert::Graphic::System
     {
         m_WeatherPipeline.reset();
         m_ShadowPipeline.reset();
-        m_RaymarchPipeline.reset();
+        for ( auto& pipeline : m_RaymarchPipelines )
+            pipeline.reset();
         m_TemporalPipeline.reset();
         m_CompositePipeline.reset();
         m_CompositeMaterial.reset();
@@ -136,7 +139,9 @@ namespace Desert::Graphic::System
         if ( !shaderService )
             return false;
 
-        const auto makeCompute = [&shaderService]( const char* name ) -> std::shared_ptr<ComputePipeline>
+        const auto makeCompute =
+             [&shaderService]( const char* name, std::vector<ShaderSpecializationConstant> specialization,
+                               const std::string& debugName ) -> std::shared_ptr<ComputePipeline>
         {
             const auto shader = shaderService->GetByName( name );
             if ( !shader )
@@ -146,7 +151,8 @@ namespace Desert::Graphic::System
                            name, name );
                 return nullptr;
             }
-            auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = name } );
+            auto pipeline = ComputePipeline::Create(
+                 { .Shader = shader, .DebugName = debugName, .Specialization = std::move( specialization ) } );
             if ( !pipeline )
                 return nullptr;
             // Create() allocates the object, Invalidate() builds the Vulkan pipeline. Both are needed;
@@ -155,10 +161,20 @@ namespace Desert::Graphic::System
             return pipeline;
         };
 
-        m_WeatherPipeline  = makeCompute( kWeatherShaderName );
-        m_ShadowPipeline   = makeCompute( kShadowShaderName );
-        m_RaymarchPipeline = makeCompute( kRaymarchShaderName );
-        m_TemporalPipeline = makeCompute( kTemporalShaderName );
+        m_WeatherPipeline  = makeCompute( kWeatherShaderName, {}, kWeatherShaderName );
+        m_ShadowPipeline   = makeCompute( kShadowShaderName, {}, kShadowShaderName );
+        m_TemporalPipeline = makeCompute( kTemporalShaderName, {}, kTemporalShaderName );
+
+        // One raymarch pipeline per layer count. They share the shader, the SPIR-V and the cache entry;
+        // what the specialization constant changes is which of the two segment loops survives compilation.
+        for ( uint32_t layers = 1; layers <= kCloudMaxLayers; ++layers )
+        {
+            m_RaymarchPipelines[CloudRaymarchLayerCount( layers ) - 1] =
+                 makeCompute( kRaymarchShaderName,
+                              { ShaderSpecializationConstant{ .Id    = kCloudLayerCountConstantId,
+                                                              .Value = static_cast<int32_t>( layers ) } },
+                              std::string( kRaymarchShaderName ) + "_" + std::to_string( layers ) + "Layer" );
+        }
 
         const auto target = m_TargetFramebuffer.lock();
         if ( !target )
@@ -198,7 +214,17 @@ namespace Desert::Graphic::System
         if ( m_CompositePipeline )
             m_CompositePipeline->Invalidate();
 
-        return m_WeatherPipeline && m_RaymarchPipeline && m_TemporalPipeline && m_CompositePipeline;
+        return m_WeatherPipeline && RaymarchPipelineFor( 1 ) && RaymarchPipelineFor( kCloudMaxLayers ) &&
+               m_TemporalPipeline && m_CompositePipeline;
+    }
+
+    ComputePipeline* VolumetricCloudRenderer::RaymarchPipelineFor( uint32_t liveLayers ) const
+    {
+        // CloudRaymarchLayerCount, not a clamp written out here: it is the same pure function the
+        // CloudPayload suite asserts can never come back BELOW the count CloudPackPayload wrote into the
+        // buffer, which is the failure mode with no error message — a second layer packed and never
+        // marched.
+        return m_RaymarchPipelines[CloudRaymarchLayerCount( liveLayers ) - 1].get();
     }
 
     void VolumetricCloudRenderer::SetCloudSettings( const CloudLayerSet&         layers,
@@ -667,8 +693,9 @@ namespace Desert::Graphic::System
         m_WeatherPipeline->SetOutput( kCloudProfileOutputBinding, m_ProfileMap.get(), 0 );
         m_WeatherPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
         // ONE dispatch, one workgroup deep per layer: the shader reads its z as the layer index. Only the
-        // live layers are baked — a slice with no layer behind it is never sampled, because the march
-        // builds its plan from u_LayerCount shells.
+        // live layers are baked — a slice with no layer behind it is never sampled, because the march's
+        // own layer count (its specialization constant, RaymarchPipelineFor) comes from the same
+        // m_Layers.Count this dispatch is sized by.
         renderer.DispatchComputeInFrame( m_WeatherPipeline.get(), GroupCount( kWeatherMapSize ),
                                          GroupCount( kWeatherMapSize ), m_Layers.Count );
         renderer.ComputeImageEndWrite( m_ProfileMap.get() );
@@ -738,6 +765,19 @@ namespace Desert::Graphic::System
     {
         DESERT_PROFILE_SCOPE( "Clouds: Raymarch" );
 
+        // The pipeline whose specialization constant says how many layers to march. Selected from the same
+        // m_Layers.Count that CloudPackPayload writes into the buffer as LayerCount — one number, two
+        // consequences. Refusing here rather than dispatching a pipeline that could not be built is the
+        // difference between a frame with no clouds and a frame with someone else's descriptors.
+        ComputePipeline* raymarch = RaymarchPipelineFor( m_Layers.Count );
+        if ( !raymarch )
+        {
+            LOG_ERROR( "[Clouds] No raymarch pipeline for {} live layer(s); the cloud pass is skipped this "
+                       "frame.",
+                       m_Layers.Count );
+            return;
+        }
+
         const auto* camera = m_SceneRenderer->GetMainCamera();
 
         const glm::mat4 viewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
@@ -767,37 +807,37 @@ namespace Desert::Graphic::System
         renderer.ComputeImageBeginWrite( m_ScatterImage.get() );
         renderer.ComputeImageBeginWrite( m_DepthGuideImage.get() );
 
-        m_RaymarchPipeline->SetOutput( kCloudScatterOutputBinding, m_ScatterImage.get(), 0 );
-        m_RaymarchPipeline->SetOutput( kCloudDepthGuideBinding, m_DepthGuideImage.get(), 0 );
-        m_RaymarchPipeline->SetStorageBuffer( kSkyPayloadBinding, m_SceneRenderer->GetAtmosphere().ParamsBuffer );
-        m_RaymarchPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
-        m_RaymarchPipeline->SetInput( kCloudShapeNoiseBinding, noise.ShapeNoise.get() );
-        m_RaymarchPipeline->SetInput( kCloudDetailNoiseBinding, noise.DetailNoise.get() );
-        m_RaymarchPipeline->SetInput( kCloudCurlNoiseBinding, noise.CurlNoise.get() );
-        m_RaymarchPipeline->SetInput( kCloudWeatherMapBinding, m_WeatherMap.get() );
-        m_RaymarchPipeline->SetInput( kCloudProfileMapBinding, m_ProfileMap.get() );
-        m_RaymarchPipeline->SetInput( kCloudProfileLutBinding, m_ProfileLut.get() );
-        m_RaymarchPipeline->SetInput( kCloudSceneDepthBinding, depthImage );
+        raymarch->SetOutput( kCloudScatterOutputBinding, m_ScatterImage.get(), 0 );
+        raymarch->SetOutput( kCloudDepthGuideBinding, m_DepthGuideImage.get(), 0 );
+        raymarch->SetStorageBuffer( kSkyPayloadBinding, m_SceneRenderer->GetAtmosphere().ParamsBuffer );
+        raymarch->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
+        raymarch->SetInput( kCloudShapeNoiseBinding, noise.ShapeNoise.get() );
+        raymarch->SetInput( kCloudDetailNoiseBinding, noise.DetailNoise.get() );
+        raymarch->SetInput( kCloudCurlNoiseBinding, noise.CurlNoise.get() );
+        raymarch->SetInput( kCloudWeatherMapBinding, m_WeatherMap.get() );
+        raymarch->SetInput( kCloudProfileMapBinding, m_ProfileMap.get() );
+        raymarch->SetInput( kCloudProfileLutBinding, m_ProfileLut.get() );
+        raymarch->SetInput( kCloudSceneDepthBinding, depthImage );
         // Always bound, even when the march will not read it: a declared sampler with no image is an
         // invalid descriptor set, not an unused one.
-        m_RaymarchPipeline->SetInput( kCloudShadowMapBinding,
-                                      m_CloudShadowMap ? m_CloudShadowMap.get() : m_WeatherMap.get() );
+        raymarch->SetInput( kCloudShadowMapBinding,
+                            m_CloudShadowMap ? m_CloudShadowMap.get() : m_WeatherMap.get() );
         // The physical atmosphere's two images, bound on exactly the same terms and for exactly the same
         // reason: the engine's 1x1(x1) fallbacks stand in when the sky did not publish them, and
         // push.Atmosphere's gates are what keep the shader from reading either.
-        m_RaymarchPipeline->SetInput(
+        raymarch->SetInput(
              kCloudAerialPerspectiveBinding,
              apActive ? atmosphere.AerialPerspectiveVolume
                       : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
-        m_RaymarchPipeline->SetInput(
+        raymarch->SetInput(
              kCloudDistantSkyLightBinding,
              skyLight ? atmosphere.DistantSkyLight
                       : FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA8F ).get() );
-        BindHeroVolumes( m_RaymarchPipeline.get() );
-        m_RaymarchPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
+        BindHeroVolumes( raymarch );
+        raymarch->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
-        renderer.DispatchComputeInFrame( m_RaymarchPipeline.get(), GroupCount( m_ScatterWidth ),
-                                         GroupCount( m_ScatterHeight ), 1 );
+        renderer.DispatchComputeInFrame( raymarch, GroupCount( m_ScatterWidth ), GroupCount( m_ScatterHeight ),
+                                         1 );
 
         renderer.ComputeImageEndWrite( m_DepthGuideImage.get() );
         renderer.ComputeImageEndWrite( m_ScatterImage.get() );
@@ -867,8 +907,8 @@ namespace Desert::Graphic::System
             m_VolumePlacements.clear();
         UpdateVolumeInstances();
 
-        if ( m_Layers.Empty() || !m_WeatherPipeline || !m_RaymarchPipeline || !m_TemporalPipeline ||
-             !m_ParamsBuffer )
+        if ( m_Layers.Empty() || !m_WeatherPipeline || !RaymarchPipelineFor( m_Layers.Count ) ||
+             !m_TemporalPipeline || !m_ParamsBuffer )
             return;
 
         // Checked here rather than inside the dispatches: without a camera there is no frame, and letting

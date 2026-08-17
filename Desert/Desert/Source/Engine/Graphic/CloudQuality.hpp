@@ -12,6 +12,58 @@ namespace Desert::Graphic
     // can reach a performance one. Look and cost are two separate dials on purpose - the reference
     // implementation put its cloud-type selector and its step-size constants in the same UI block, which
     // is how choosing "Storm" ends up costing frame rate that nobody asked it to spend.
+    //
+    // ---- WHAT PINS THE FIVE MARCH NUMBERS ------------------------------------------------------------
+    //
+    // MaxSteps, MinStepSize, StepGrowthRate, CoarseStepMultiplier and EmptySamplesBeforeCoarse are not
+    // free. Each is bounded by a relation that lives somewhere else, and the bounds now hold against a
+    // DIFFERENT march than the one they were first tuned for: the fine tier used to be entered and
+    // abandoned constantly (it judged occupancy by the ERODED density while the coarse tier judged the
+    // profile), and every ray used to lose a dithered slab off the near face of its layer. Both are
+    // fixed, so the numbers were re-derived rather than inherited. The three relations, and what each
+    // leaves:
+    //
+    //   R1  THE NYQUIST GATE (CloudNyquistWeight, Common/CloudGeometry.glslh). A march samples the medium
+    //       at S, so a feature of size F is fully carried at S <= F/4 and gone at S >= F/2 - and the gate
+    //       reads the step itself, so nothing ever aliases; detail simply STOPS. MinStepSize and
+    //       StepGrowthRate therefore decide HOW FAR the erosion's detail survives, which is a look
+    //       decision wearing a performance knob's name. On the shipped 4 km detail tile the coarse
+    //       channel pair (781 m) is carried in full to 14.4 km on Low, 19.6 on Medium, 24.0 on High and
+    //       30.1 on Ultra. Growing either knob to buy frame time moves that distance in, visibly.
+    //
+    //   R2  THE PROFILE-OCCUPANCY RULE (CloudMarchAdvance's caller). Both tiers judge by the profile, so a
+    //       fine excursion now runs a whole cloud instead of ending on every erosion hole. That is what
+    //       MaxSteps is FOR now: marching, not funding re-entries. It also means the budget is BINDING
+    //       again - crossing the whole deck chord at the shipped horizon view (6.8 degrees) needs 190 fine
+    //       steps against High's 176. Measured: dropping High to 144 costs 5-6 grey levels RMS and 0.43%
+    //       to 0.48% of the frame's mean luminance at all three elevations. The deck gets thinner. Not
+    //       available.
+    //
+    //   R3  THE SEARCH BOUND (CloudMarchScale.hpp, >= 4 samples across the thinnest layer at its worst
+    //       elevation). This is what pins CoarseStepMultiplier, and it pins it HARD: on the Cirrus
+    //       preset's 1.2 km sheet the High row gets 4.06 samples at 20 degrees, and the largest multiplier
+    //       that still clears the bound is 4.05. There is 1.3% of headroom in the number and the CloudMath
+    //       suite fails if it is spent. It would not be worth spending in any case — a wider coarse stride
+    //       skips empty sky faster but pays a one-coarse-stride rewind at every cloud it finds, and the
+    //       rewind wins: 8.0 measured +3.7% at the zenith and +3.0% at the horizon.
+    //
+    // EmptySamplesBeforeCoarse has no closed-form bound, so it was measured against the machine that now
+    // exists. Leaving the fine tier after E empty samples costs E strides of overshoot past every cloud;
+    // re-entering costs the one-coarse-stride rewind, so exiting only pays for a gap longer than about
+    // (E + c) * c / (c - 1) fine strides. Under the OLD rule the gaps were erosion holes - short, dense
+    // and placed by the dither - and under the new one they are real breaks in coverage, so the optimum
+    // had every reason to move. It did not: 8 is a local minimum, with 5 and 12 both measuring +2.7% at
+    // the horizon (and the earlier 8 -> 2 trial, which was worse still, was never a candidate - it puts E
+    // below CoarseStepMultiplier, where an exit costs more ground than it saves).
+    //
+    // MaxStepSize is the one number with room in it — it does not bite until 85.6 km on High, and the
+    // R3 minimum sits at 20 degrees where the clamp never applies, so it can be raised without touching
+    // any bound. It is also not worth raising: 1400 m measured +0.5% at the horizon, because the rays it
+    // reaches are budget-exhausted either way. It is a quality knob for grazing rays, not a saving.
+    //
+    // SO THE SCHEDULE IS PINNED ON EVERY SIDE, and the frame time recovered in this pass came from the
+    // layer-count specialization constant instead (CloudPayload.hpp, Programs/Clouds/CloudRaymarch.shader)
+    // — 11% to 18% of a one-layer frame, for a picture that is identical to the bit.
 
     // The quality-driven field set, written ONCE - the struct, the read and the write below are all
     // generated from it, so the three cannot drift apart.
@@ -51,6 +103,11 @@ namespace Desert::Graphic
     // One row per enumerator of ECS::CloudQuality except Custom, which is the absence of a tier and so
     // has no values. The defaults of VolumetricCloudData are the High row (asserted by test).
     inline constexpr CloudQualityEntry kCloudQualityTiers[] = {
+         // LOW IS A DECK TIER AND NOTHING ELSE. R3 gives it 1.56 search samples across the Cirrus
+         // preset's 1.2 km sheet — it can stride over a thin high layer entirely, and the renderer says
+         // so out loud when a scene asks it to. R1 keeps its detail to 14.4 km. What it is FOR is a low
+         // cumulus deck on a machine that cannot afford the shell, at quarter resolution with no temporal
+         // stage to lean on.
          { ECS::CloudQuality::Low, "Low",
            CloudQualityValues{
                 .ResolutionScale          = ECS::CloudResolutionScale::Quarter,
@@ -67,6 +124,10 @@ namespace Desert::Graphic
                 .TemporalClampScale       = 1.00f,
                 .JitterStrength           = 1.00f,
            } },
+         // MEDIUM IS THE SAME DECK TIER WITH THE TEMPORAL STAGE UNDER IT. Half resolution plus
+         // reprojection is what buys the apparent detail its 30 m step cannot resolve on its own. It is
+         // STILL under R3's bar for a thin sheet (3.53 samples), and deliberately: clearing it would cost
+         // the coarse multiplier, which is most of what makes this tier cheaper than High.
          { ECS::CloudQuality::Medium, "Medium",
            CloudQualityValues{
                 .ResolutionScale          = ECS::CloudResolutionScale::Half,
@@ -83,6 +144,11 @@ namespace Desert::Graphic
                 .TemporalClampScale       = 1.25f,
                 .JitterStrength           = 1.00f,
            } },
+         // HIGH IS THE SHIPPED TIER, AND IT IS THE CHEAPEST ROW THAT CLEARS EVERY RELATION AT ONCE: R3's
+         // four search samples on the thinnest layer any preset authors (4.06, against a ceiling of 4.05
+         // on the coarse multiplier), R1's detail out to 24.0 km, and R2's budget across the deck chord at
+         // an ordinary viewing elevation. Every one of the five numbers below sits against a wall; none of
+         // them has slack to give back. See the derivation at the top of this file.
          { ECS::CloudQuality::High, "High",
            CloudQualityValues{
                 .ResolutionScale = ECS::CloudResolutionScale::Half,
@@ -94,11 +160,26 @@ namespace Desert::Graphic
                 // stride follows the fine one, so the near schedule had tripled the cost of skipping
                 // EMPTY sky; 4 x 30 m at 10 km is still finer than the old 3 x 95 m. Both measured by
                 // frame-count slope against the pre-schedule baseline, inside the 1.5x gate.
-                .MaxSteps                 = 176,
-                .MinStepSize              = Common::Units::Metres( 15.0f ),
-                .MaxStepSize              = Common::Units::Metres( 700.0f ),
-                .StepGrowthRate           = 0.008f,
-                .CoarseStepMultiplier     = 4.0f,
+                //
+                // RE-DERIVED against the profile-occupancy rule (R2) rather than inherited from the march
+                // that thrashed: the fine tier now runs a whole cloud without handing control back, so
+                // this budget buys integration instead of re-entries — and it is still short. Crossing the
+                // deck's own chord at 6.8 degrees needs 190 of these steps; 144 was rendered and measured
+                // at 5.0-6.2 grey levels RMS below 176 with the frame's mean luminance down 0.43-0.48%,
+                // which is the deck getting thinner. It stays at 176.
+                .MaxSteps       = 176,
+                .MinStepSize    = Common::Units::Metres( 15.0f ),
+                .MaxStepSize    = Common::Units::Metres( 700.0f ),
+                .StepGrowthRate = 0.008f,
+                // 4.0, and 4.05 is the ceiling: R3 gives the Cirrus preset's 1.2 km sheet 4.06 search
+                // samples at 20 degrees with this multiplier, and the bound is 4. There is nothing here
+                // to spend, and CloudMath's ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthoredTiers
+                // is what stops the next pass spending it anyway.
+                .CoarseStepMultiplier = 4.0f,
+                // 8 is a MEASURED local minimum on the machine the profile-occupancy rule produced, not a
+                // number carried over from the one before it: 5 and 12 both cost +2.7% at the horizon.
+                // Below CoarseStepMultiplier it is not a candidate at all — an exit that costs a
+                // one-coarse-stride rewind cannot pay for itself in fewer strides than that rewind.
                 .EmptySamplesBeforeCoarse = 8,
                 // 4, not 6. The cone march is 12 of the 18 texture fetches a shaded sample costs — two
                 // per cone sample — so this one number is two thirds of the raymarch. Four keeps the
@@ -112,6 +193,13 @@ namespace Desert::Graphic
                 .TemporalClampScale  = 1.50f,
                 .JitterStrength      = 1.00f,
            } },
+         // ULTRA IS FOR STILLS AND CAPTURES, and what it buys over High is spelled out by the same three
+         // relations: R1 carries the detail to 30.1 km instead of 24.0, R3 gives the thin sheet 7.05
+         // search samples instead of 4.06 (so it has real margin where High has 1.3%), and full
+         // resolution plus a sixth cone sample resolve what the temporal stage reconstructs below it.
+         // What it does NOT buy is budget: R2 leaves it shorter than High relative to its own finer
+         // schedule (235 fine steps needed at 6.8 degrees against 192), which is the honest cost of a
+         // finer stride over the same chord.
          { ECS::CloudQuality::Ultra, "Ultra",
            CloudQualityValues{
                 .ResolutionScale = ECS::CloudResolutionScale::Full,
