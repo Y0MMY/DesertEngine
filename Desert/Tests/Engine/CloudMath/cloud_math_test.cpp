@@ -175,10 +175,16 @@ namespace
 
     std::vector<MarchSample> RunMarch( float tEnter, float tExit, float slabStart, float slabEnd, float minStep,
                                        float maxStep, float growth, float coarseMultiplier, int emptyBeforeCoarse,
-                                       int maxSteps )
+                                       int maxSteps, float jitter = 0.0f )
     {
+        // Wired EXACTLY as Programs/Clouds/CloudRaymarch.shader wires it: the first sample is dithered
+        // forward by up to one coarse stride, the entry is what both the frontier and every rewind are
+        // floored by. Feeding the dithered distance to either of those is the defect this driver exists
+        // to reproduce, so the driver must not quietly do the right thing on its own.
+        const float tStart = tEnter + jitter * R::CloudStepLength( tEnter, minStep, maxStep, growth ) *
+                                           std::max( coarseMultiplier, 1.0f );
         std::vector<MarchSample> samples;
-        R::CloudMarchState       state = R::CloudMarchBegin( tEnter );
+        R::CloudMarchState       state = R::CloudMarchBegin( tEnter, tStart );
 
         for ( int i = 0; i < maxSteps && state.T < tExit; ++i )
         {
@@ -200,7 +206,7 @@ namespace
                                             int maxSteps )
     {
         std::vector<MarchSample> samples;
-        R::CloudMarchState       state = R::CloudMarchBegin( tEnter );
+        R::CloudMarchState       state = R::CloudMarchBegin( tEnter, tEnter );
 
         for ( int i = 0; i < maxSteps && state.T < tExit; ++i )
         {
@@ -834,7 +840,7 @@ TEST( CloudMarch, CrossesAShellTheCoarseTierMisreadsForACostNearTheCoarseTierAlo
 // interval is ever marched twice, so the machine cannot cycle.
 TEST( CloudMarch, NeverRewindsBehindGroundTheFineTierHasAlreadyCovered )
 {
-    R::CloudMarchState state     = R::CloudMarchBegin( 0.0f );
+    R::CloudMarchState state     = R::CloudMarchBegin( 0.0f, 0.0f );
     float              highWater = 0.0f;
 
     for ( int i = 0; i < 20000 && state.T < 850000.0f; ++i )
@@ -849,6 +855,100 @@ TEST( CloudMarch, NeverRewindsBehindGroundTheFineTierHasAlreadyCovered )
         state = R::CloudMarchAdvance( state, occupied, 0.0f, 1500.0f, 70000.0f, 0.008f, 4.0f, 8 );
     }
     EXPECT_GT( highWater, 0.0f );
+}
+
+// THE DITHER MUST MOVE THE LATTICE, NOT DELETE THE MEDIUM — the property the woven cross-hatch on dense
+// cirrus violated, and the one no test above could see because every driver runs at jitter 0.
+//
+// A march samples nothing before its first sample, so a first sample placed a jitter PAST the entry
+// deletes that prefix outright: the coarse tier never tests it, and the rewind reaches back only one
+// stride from the first hit, which is at or after the first sample. The deleted length is
+// `jitter * coarseStride`, and the jitter is interleaved gradient noise, so on a layer whose chord is
+// comparable with a coarse stride it is a fixed screen-space pattern of missing cloud.
+//
+// The assertion is the direct statement of what must hold: over the whole jitter range, the first FINE
+// sample must land at or before the leading face of a slab that begins at the segment's entry. Against a
+// forward dither this fails at every phase but zero.
+TEST( CloudMarch, NoDitherPhaseDeletesTheNearFaceOfTheMedium )
+{
+    // The cirrus sheet's own geometry at the shipped High tier: 1.2 km thick, met at 25 km looking 20
+    // degrees up, where the schedule has grown the fine stride to 216 m and the coarse stride to 865 m.
+    const float kEnter    = 2510000.0f; // 25.1 km
+    const float kExit     = kEnter + 350860.0f;
+    const float kMinStep  = Common::Units::Metres( 15.0f );
+    const float kMaxStep  = Common::Units::Metres( 700.0f );
+    const float kGrowth   = 0.008f;
+    const float kCoarse   = 4.0f;
+    const int   kEmpty    = 8;
+    const int   kMaxSteps = 176;
+
+    // A slab filling the whole segment, so its near face IS the entry and any prefix a phase deletes is
+    // density that no sample ever saw.
+    for ( int phase = 0; phase <= 20; ++phase )
+    {
+        const float                    jitter  = static_cast<float>( phase ) / 20.0f;
+        const std::vector<MarchSample> samples = RunMarch( kEnter, kExit, kEnter, kExit, kMinStep, kMaxStep,
+                                                           kGrowth, kCoarse, kEmpty, kMaxSteps, jitter );
+
+        ASSERT_FALSE( samples.empty() ) << "jitter " << jitter;
+
+        float firstFine = std::numeric_limits<float>::max();
+        for ( const MarchSample& sample : samples )
+        {
+            if ( sample.Fine )
+            {
+                firstFine = sample.Distance;
+                break;
+            }
+        }
+
+        EXPECT_LE( firstFine, kEnter + 1e-3f )
+             << "jitter " << jitter << " deleted " << ( firstFine - kEnter ) << " world units of the near face";
+    }
+}
+
+// The same property stated as ENERGY, which is what the picture actually shows: the density-length a ray
+// accumulates across a uniform slab must not depend on which dither phase it drew. The forward dither made
+// it fall with the phase — at the numbers above, by up to a quarter of the slab.
+TEST( CloudMarch, DensityLengthAcrossAUniformSlabIsIndependentOfTheDitherPhase )
+{
+    const float kEnter    = 2510000.0f;
+    const float kExit     = kEnter + 350860.0f;
+    const float kMinStep  = Common::Units::Metres( 15.0f );
+    const float kMaxStep  = Common::Units::Metres( 700.0f );
+    const float kGrowth   = 0.008f;
+    const float kCoarse   = 4.0f;
+    const int   kEmpty    = 8;
+    const int   kMaxSteps = 176;
+
+    float lowest  = std::numeric_limits<float>::max();
+    float highest = 0.0f;
+    for ( int phase = 0; phase <= 20; ++phase )
+    {
+        const float                    jitter  = static_cast<float>( phase ) / 20.0f;
+        const std::vector<MarchSample> samples = RunMarch( kEnter, kExit, kEnter, kExit, kMinStep, kMaxStep,
+                                                           kGrowth, kCoarse, kEmpty, kMaxSteps, jitter );
+
+        // Unit density over the slab, so the marched density-length is the summed step length of every
+        // fine sample that landed inside it — the quadrature the renderer runs.
+        float marched = 0.0f;
+        for ( const MarchSample& sample : samples )
+        {
+            if ( !sample.Fine || sample.Distance < kEnter || sample.Distance > kExit )
+                continue;
+            marched += R::CloudStepLength( sample.Distance, kMinStep, kMaxStep, kGrowth );
+        }
+
+        lowest  = std::min( lowest, marched );
+        highest = std::max( highest, marched );
+    }
+
+    ASSERT_GT( lowest, 0.0f );
+    // One stride and a half of quadrature spread is the honest allowance; a deleted prefix is worth four
+    // strides and grows with the coarse multiplier.
+    const float stride = R::CloudStepLength( kEnter, kMinStep, kMaxStep, kGrowth );
+    EXPECT_LE( highest - lowest, stride * 1.5f )
+         << "phase spread " << ( highest - lowest ) << " over a slab of " << ( kExit - kEnter );
 }
 
 // ---- Closing out a ray that ran out of budget ------------------------------------------------------
@@ -1067,18 +1167,20 @@ TEST( CloudMarchScale, TheCppStepScheduleIsTheShaderScheduleToTheBit )
     EXPECT_FLOAT_EQ( Desert::Graphic::kCloudStepFarRange, R::CLOUD_STEP_FAR_RANGE );
 }
 
-// THE RELATION A THIN LAYER BREAKS, and the one the first two-layer frame ever rendered broke: the
-// empty-space search strides at CoarseStepMultiplier times the fine stride, and a layer thinner than that
-// stride is stepped over by whichever rays the dither phases unluckily. It renders as a fixed cross-hatch
-// that no temporal average removes, because the average of "half the rays missed the cloud" is "half the
-// cloud".
+// THE RELATION A THIN LAYER BREAKS: the empty-space search strides at CoarseStepMultiplier times the fine
+// stride, and a layer whose chord is comparable with that stride can be stepped over entirely. Nothing
+// averages that away — the mean of "half the rays missed the layer" is "half the layer".
 //
-// Neither side of this is wrong on its own — a 1.2 km sheet is a real cloud and a coarse multiplier of 5
+// Neither side of this is wrong on its own — a 1.2 km sheet is a real cloud and a coarse multiplier of 4
 // is a real optimisation — which is exactly why it needs an assertion about the PAIR.
+//
+// (The cross-hatch that led to this suite was NOT this relation; it was the march's dithered start
+// deleting a per-pixel prefix, and it is pinned by CloudMarch's two dither-phase properties above. See
+// the note at the top of CloudMarchScale.hpp.)
 TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthoredTiers )
 {
     using Desert::Graphic::CloudCoarseStrideIsPlausible;
-    using Desert::Graphic::CloudSearchSamplesAcrossLayer;
+    using Desert::Graphic::CloudWorstSearchAcrossLayer;
 
     // Every shipped quality tier over the layer the component defaults to: the deck is thick enough that
     // no tier can step over it, and that has to stay true when a tier is retuned.
@@ -1091,17 +1193,17 @@ TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthor
              << "tier " << tier.Name;
     }
 
-    // The Cirrus preset's own layer — 1.2 km at 8 km — is the thin case. MEASURED, at the shipped tiers:
-    // Low 2.6 samples, Medium 7.0, High 10.6, Ultra 14.1. So every tier a showcase would use clears the
-    // bar and the LOW tier does not, which is a real limitation of Low over a thin high layer rather than
-    // a defect in either — and it is what the renderer's warning exists to say out loud, with numbers,
-    // instead of leaving an artist to wonder why their cirrus has a cross-hatch on it.
+    // The Cirrus preset's own layer — 1.2 km at 8 km — is the thin case, and it is where the guard's old
+    // zenith-only evaluation was 2.6x optimistic. MEASURED as the minimum over elevation: Low 1.6 samples,
+    // Medium 3.5, High 4.1, Ultra 7.1, against the zenith figures of 2.6 / 6.9 / 10.4 / 13.8 the guard
+    // used to report. So only High and Ultra clear the bar for a thin high sheet, and that is a real
+    // limitation of the cheaper tiers rather than a defect in either — it is what the renderer's warning
+    // exists to say out loud, with numbers and with the elevation they belong to.
     const Desert::Graphic::CloudPresetEntry* cirrus =
          Desert::Graphic::FindCloudPreset( Desert::ECS::CloudPreset::Cirrus );
     ASSERT_NE( cirrus, nullptr );
 
-    for ( const auto id : { Desert::ECS::CloudQuality::Medium, Desert::ECS::CloudQuality::High,
-                            Desert::ECS::CloudQuality::Ultra } )
+    for ( const auto id : { Desert::ECS::CloudQuality::High, Desert::ECS::CloudQuality::Ultra } )
     {
         const Desert::Graphic::CloudQualityEntry* tier = Desert::Graphic::FindCloudQuality( id );
         ASSERT_NE( tier, nullptr );
@@ -1111,31 +1213,65 @@ TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthor
              << "tier " << tier->Name;
     }
 
+    for ( const auto id : { Desert::ECS::CloudQuality::Low, Desert::ECS::CloudQuality::Medium } )
+    {
+        const Desert::Graphic::CloudQualityEntry* tier = Desert::Graphic::FindCloudQuality( id );
+        ASSERT_NE( tier, nullptr );
+        EXPECT_FALSE( CloudCoarseStrideIsPlausible(
+             cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness, tier->Values.MinStepSize,
+             tier->Values.MaxStepSize, tier->Values.StepGrowthRate, tier->Values.CoarseStepMultiplier ) )
+             << "tier " << tier->Name
+             << " now claims to search a thin high sheet finely enough; if that is "
+                "intended, the tier changed and this row should say so";
+    }
+
+    // THE ZENITH IS NOT THE WORST CASE FOR A HIGH LAYER — the assumption the guard used to be built on,
+    // asserted here so it cannot come back. The sheet's worst elevation is in the middle of the sky and
+    // its sample count there is well under the zenith's; the deck's worst is near the horizon and barely
+    // under it, because a low layer never reaches the step schedule's blend band until its chord has
+    // already grown tenfold.
+    const Desert::Graphic::CloudQualityEntry* high =
+         Desert::Graphic::FindCloudQuality( Desert::ECS::CloudQuality::High );
+    ASSERT_NE( high, nullptr );
+
+    const auto sheet = CloudWorstSearchAcrossLayer(
+         cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness, high->Values.MinStepSize,
+         high->Values.MaxStepSize, high->Values.StepGrowthRate, high->Values.CoarseStepMultiplier );
+    EXPECT_GT( sheet.ElevationDegrees, 10.0f );
+    EXPECT_LT( sheet.ElevationDegrees, 40.0f );
+    EXPECT_LT( sheet.Samples,
+               0.5f * CloudWorstSearchAcrossLayer( cirrus->Values.LayerBottomAltitude,
+                                                   cirrus->Values.LayerThickness, high->Values.MinStepSize,
+                                                   high->Values.MaxStepSize, high->Values.StepGrowthRate, 1.0f )
+                           .Samples );
+
+    const auto deck = CloudWorstSearchAcrossLayer(
+         defaults.LayerBottomAltitude, defaults.LayerThickness, high->Values.MinStepSize, high->Values.MaxStepSize,
+         high->Values.StepGrowthRate, high->Values.CoarseStepMultiplier );
+    EXPECT_GT( deck.Samples, 4.0f * sheet.Samples );
+
     // A TIER ORDERING, not a value: a finer tier must never search a layer more coarsely than a cheaper
     // one. Retuning one row in isolation is exactly how that inverts, and the symptom would be Ultra
     // stippling where High did not.
     float previous = -1.0f;
     for ( const auto& tier : Desert::Graphic::kCloudQualityTiers )
     {
-        const float samples = CloudSearchSamplesAcrossLayer(
-             cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness, tier.Values.MinStepSize,
-             tier.Values.MaxStepSize, tier.Values.StepGrowthRate, tier.Values.CoarseStepMultiplier );
+        const float samples =
+             CloudWorstSearchAcrossLayer( cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness,
+                                          tier.Values.MinStepSize, tier.Values.MaxStepSize,
+                                          tier.Values.StepGrowthRate, tier.Values.CoarseStepMultiplier )
+                  .Samples;
         EXPECT_GE( samples, previous ) << "tier " << tier.Name << " searches more coarsely than the one below";
         previous = samples;
     }
 
-    // THE MEASURED CASE, and the reason this file has a CloudMarchScale suite at all. The first schedule
-    // the two-layer showcase authored for its sheet — a 40 m fine step, growth 0.012, coarse multiplier 5
-    // — is individually reasonable for a thin high layer and drew a regular cross-hatch across every wisp.
-    // It comes out at 3.2 samples across the sheet, i.e. under the bar, which is what the renderer now
-    // says out loud with the numbers.
-    EXPECT_LT( CloudSearchSamplesAcrossLayer( cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness,
-                                              Common::Units::Metres( 40.0f ), Common::Units::Metres( 1200.0f ),
-                                              0.012f, 5.0f ),
-               Desert::Graphic::kCloudMinSearchSamplesAcrossLayer );
+    // The two schedules the two-layer showcase tried for its sheet, either side of the bar: a 40 m fine
+    // step with growth 0.012 and coarse multiplier 5 does not clear it, and the coarse multiplier 2,
+    // growth 0.004 schedule the scene ships does.
+    EXPECT_FALSE( CloudCoarseStrideIsPlausible( cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness,
+                                                Common::Units::Metres( 40.0f ), Common::Units::Metres( 1200.0f ),
+                                                0.012f, 5.0f ) );
 
-    // And the schedule that replaced it — coarse multiplier 2, growth 0.004 — clears it, which is the
-    // change that removed the lattice with nothing else touched.
     EXPECT_TRUE( CloudCoarseStrideIsPlausible( cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness,
                                                Common::Units::Metres( 40.0f ), Common::Units::Metres( 400.0f ),
                                                0.004f, 2.0f ) );
