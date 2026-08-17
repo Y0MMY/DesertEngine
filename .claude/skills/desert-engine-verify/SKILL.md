@@ -67,7 +67,7 @@ projects are only generated then:
 ```bash
 CI=true premake5 gmake
 for f in *.make; do t="${f%.make}"
-  case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|PakTool|BuildAllTests|RunAllTests) continue;; esac
+  case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|MeshSimplifier|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|DShaderParser|PakTool|FontBaker|CloudVolumeBaker|BuildAllTests|RunAllTests) continue;; esac
   make -f "$f" config=debug -j8 >/dev/null 2>&1
   [ -x "build/Bin/Tests/Debug/$t" ] && ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"
 done
