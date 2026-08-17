@@ -3077,6 +3077,120 @@ TEST( CloudProfileTable, TheWrittenBandIsOrderedAndNeverZeroWidth )
     EXPECT_GT( inverted.y, inverted.x );
 }
 
+// THE ASYMMETRY. A cloud field condenses at ONE level and climbs to a hundred different ones, so the
+// two ends of a cell's band are not the same kind of quantity: bases scatter by tens of metres and tops
+// by kilometres. The centre/half-width construction this replaced gave them the SAME range, which is
+// what "the clouds look close to the ground, not up in the sky" is — with every cloud's floor at its own
+// altitude there is no plane of flat bases for the eye to read as a ceiling.
+//
+// Four is the factor the constants deliver at 5, asserted with a doubling of margin so a deliberate
+// retune of either range fails only when it has actually destroyed the asymmetry.
+TEST( CloudProfileTable, CloudBasesShareALevelWhileCloudTopsDoNot )
+{
+    float baseLow = 1.0f, baseHigh = 0.0f, topLow = 1.0f, topHigh = 0.0f;
+
+    for ( int b = 0; b <= 20; ++b )
+    {
+        for ( int t = 0; t <= 20; ++t )
+        {
+            const glm::vec2 ndf =
+                 R::CloudProfileHeightNdf( static_cast<float>( b ) / 20.0f, static_cast<float>( t ) / 20.0f );
+            baseLow  = std::min( baseLow, ndf.x );
+            baseHigh = std::max( baseHigh, ndf.x );
+            topLow   = std::min( topLow, ndf.y );
+            topHigh  = std::max( topHigh, ndf.y );
+        }
+    }
+
+    const float baseSpan = baseHigh - baseLow;
+    const float topSpan  = topHigh - topLow;
+
+    EXPECT_GT( baseSpan, 0.0f ) << "a base that cannot move at all is a slab, not a cloud field";
+    EXPECT_LE( baseSpan * 4.0f, topSpan )
+         << "cell bases wander " << baseSpan << " of the layer against tops' " << topSpan
+         << ": the two ends of the band have stopped being different kinds of quantity";
+
+    // And the asymmetry survives Cloud Height Variance, which scales BOTH ends: it is a property of the
+    // construction, not of one authored value. At variance 0 both collapse to the whole layer, which is
+    // the off-end the neighbouring test pins, so the sweep starts above it.
+    for ( int a = 1; a <= 4; ++a )
+    {
+        const float amount = static_cast<float>( a ) / 4.0f;
+        float       bLow = 1.0f, bHigh = 0.0f, tLow = 1.0f, tHigh = 0.0f;
+        for ( int b = 0; b <= 20; ++b )
+        {
+            for ( int t = 0; t <= 20; ++t )
+            {
+                const glm::vec2 ndf =
+                     R::CloudProfileHeightNdf( static_cast<float>( b ) / 20.0f, static_cast<float>( t ) / 20.0f );
+                const glm::vec2 band = R::CloudProfileCellBand( ndf.x, ndf.y, amount );
+                bLow                 = std::min( bLow, band.x );
+                bHigh                = std::max( bHigh, band.x );
+                tLow                 = std::min( tLow, band.y );
+                tHigh                = std::max( tHigh, band.y );
+            }
+        }
+        EXPECT_LE( ( bHigh - bLow ) * 4.0f, tHigh - tLow ) << "at Cloud Height Variance " << amount;
+    }
+}
+
+// THE MECHANISM, asserted rather than described: the base-in ramp is the GAIN that turns horizontal
+// variation into vertical displacement of the cloud bottom.
+//
+// A column becomes cloud at the height where `profile(h) x K` crosses the erosion threshold, where K is
+// everything horizontal — coverage, the base-shape modulation, the density scale. Only `profile` depends
+// on height, so the cloud's base is that equation solved for h, and the SCATTER of that solution across
+// a field of different K is proportional to the width of the base-in ramp. Halve the ramp and the sky's
+// bases halve their scatter; that is why this change is authored per species in the ramps and not in a
+// power or a coverage number.
+//
+// Asserted as a ratio rather than an absolute, so it holds whatever the sampled K range is.
+TEST( CloudProfileTable, BaseAltitudeScatterIsProportionalToTheBaseInRamp )
+{
+    Desert::ECS::VolumetricCloudData data{};
+    const float                      type = TypeOfRow( Desert::Graphic::CloudProfileForm::Cumulus );
+    const glm::vec2                  band( 0.0f, 1.0f );
+
+    // The height at which `profile x K` first crosses `threshold`, swept over a decade of K — the range
+    // the coverage field actually spans between the middle of a cell and its edge.
+    const auto scatter = [&]( float baseIn ) -> float
+    {
+        data.CumulusGradient                  = glm::vec4( 0.0f, baseIn, 0.68f, 0.92f );
+        const std::vector<unsigned char> lut  = Desert::Graphic::BuildCloudProfileLut( data );
+        float                            low  = 1.0f;
+        float                            high = 0.0f;
+        for ( int k = 0; k <= 20; ++k )
+        {
+            const float coverage  = glm::mix( 0.1f, 1.0f, static_cast<float>( k ) / 20.0f );
+            const float threshold = 0.08f; // the detail composite's own mean, times Detail Strength
+            for ( int i = 0; i <= 2000; ++i )
+            {
+                const float h = static_cast<float>( i ) / 2000.0f;
+                if ( ProfileAt( lut, h, type, band, data.BaseGradientPower, data.TopGradientPower ) * coverage >
+                     threshold )
+                {
+                    low  = std::min( low, h );
+                    high = std::max( high, h );
+                    break;
+                }
+            }
+        }
+        return high - low;
+    };
+
+    const float wide   = scatter( 0.22f ); // what the cumulus row carried before this change
+    const float narrow = scatter( 0.05f ); // and what a condensation level justifies
+
+    EXPECT_GT( wide, 0.0f );
+    EXPECT_LT( narrow, wide ) << "a narrower base-in did not tighten the bases at all";
+
+    // Proportional: the ratio of scatters follows the ratio of ramps. The tolerance is generous because
+    // the table is 8-bit and sampled at 128 taps; the RELATION is the assertion, not the third digit.
+    const float expected = 0.05f / 0.22f;
+    EXPECT_NEAR( narrow / wide, expected, 0.25f * expected )
+         << "base scatter " << narrow << " vs " << wide << " for ramps 0.05 vs 0.22";
+}
+
 // The table's dimensions are the shader's only source of truth for the type axis, because the shader
 // reads them with textureSize(). This pins the bytes the CPU actually uploads.
 TEST( CloudProfileTable, TheBakedTableHasTheDimensionsTheShaderWillRead )

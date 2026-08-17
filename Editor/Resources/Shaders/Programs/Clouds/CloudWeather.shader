@@ -147,10 +147,14 @@ Shader "CloudWeather"
             //
             // Period 8, seeded away from every other field here, so a cell's altitude is independent of
             // whether there is a cloud there at all: coverage decides WHERE, this decides HOW HIGH.
-            float centreNoise = CloudPerlin(vec3(p.x, p.y, 0.29f), int(CLOUD_WEATHER_BASE_PERIOD), seed + 4409u) * 1.6f + 0.5f;
-            float widthNoise  = CloudPerlin(vec3(p.x, p.y, 0.67f), int(CLOUD_WEATHER_BASE_PERIOD), seed + 3313u) * 1.6f + 0.5f;
+            //
+            // The two fields are the cell's BASE and its TOP, and they are independent on purpose — a
+            // cumulus field condenses at one level and climbs to a hundred different ones. The ranges the
+            // two are mapped onto carry that asymmetry; see CLOUD_PROFILE_BASE_JITTER.
+            float baseNoise = CloudPerlin(vec3(p.x, p.y, 0.29f), int(CLOUD_WEATHER_BASE_PERIOD), seed + 4409u) * 1.6f + 0.5f;
+            float topNoise  = CloudPerlin(vec3(p.x, p.y, 0.67f), int(CLOUD_WEATHER_BASE_PERIOD), seed + 3313u) * 1.6f + 0.5f;
 
-            vec2 heightNdf = CloudProfileHeightNdf(centreNoise, widthNoise);
+            vec2 heightNdf = CloudProfileHeightNdf(baseNoise, topNoise);
 
             imageStore(u_ProfileOut, coord, vec4(heightNdf.x, heightNdf.y, 0.0f, 0.0f));
         }

@@ -41,11 +41,21 @@ namespace Desert::Graphic
      * `pow(bottom, BaseGradientPower) * pow(top, TopGradientPower) * form` the builder assumes.
      */
 
-    // Height taps per row. Piecewise-linear curves sampled at N points and linearly reconstructed err
-    // by at most (slope x tap spacing) / 4 at a knee; the sharpest knee the component's ranges allow is
-    // the stratus base-in over 0.08 of the layer, which at 128 taps is under 0.03 — inside the
-    // tolerance CloudMath asserts the subset property with, and invisible next to the detail erosion.
-    inline constexpr uint32_t kCloudProfileLutWidth = 128;
+    // Height taps per row. Piecewise-linear curves sampled at N points and linearly reconstructed err by
+    // at most (slope x tap spacing) / 4 at a knee, so the TAP COUNT IS SET BY THE SHARPEST AUTHORED KNEE
+    // and has to move whenever that does.
+    //
+    // It did. The base-in ramps are now authored from the length a condensation level justifies rather
+    // than from a shape (see VolumetricCloudsComponent.hpp): the shelf's is 0.03 of the layer and the
+    // cumulus's 0.05, against the 0.08 that set this constant when it was 128. At 128 taps a 0.05 ramp
+    // reconstructs 0.066 low at its knee — more than twice the 0.03 CloudMath asserts the strict-subset
+    // property with, and the assertion caught it. At 512 the same knee errs 0.010 and the shelf's 0.016,
+    // both inside it.
+    //
+    // The cost is 12 KiB per layer instead of 3, on a table baked once per weather change. A profile
+    // reconstructed a knee's worth low is a cloud base that fades in over the ramp it was authored to
+    // end, which is the whole defect this width exists to avoid.
+    inline constexpr uint32_t kCloudProfileLutWidth = 512;
 
     // Anchor forms along the type axis, in order of convective development. Cloud Type 0..1 maps
     // linearly onto row 0..5 and the sampler interpolates between neighbours, so the axis reads

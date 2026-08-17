@@ -11,7 +11,9 @@
 //
 //   * the profile is sampled between a PER-CELL Min Height and Max Height rather than across the whole
 //     layer, so neighbouring clouds occupy different vertical slabs — the signature of the pp. 126/150
-//     skies that a single global layer cannot produce at any setting;
+//     skies that a single global layer cannot produce at any setting. The two ends of that slab are NOT
+//     symmetric: bases sit within tens of metres of one condensation level while tops differ by
+//     kilometres, which is what makes a deck read as a ceiling at altitude (CLOUD_PROFILE_BASE_JITTER);
 //   * the type axis indexes AUTHORED curves, not a blend of three trapezoids. The table those curves
 //     are baked into is Graphic::BuildCloudProfileLut (Engine/Graphic/Clouds/CloudProfileCurves.hpp).
 //
@@ -30,25 +32,40 @@ float CloudProfileTypeAt( float cloudType, float typeNoise, float variance )
     return clamp( cloudType + ( clamp( typeNoise, 0.0f, 1.0f ) - 0.5f ) * variance, 0.0f, 1.0f );
 }
 
+// How far a cell's BASE may wander off the layer's own floor, as a fraction of the layer, before Cloud
+// Height Variance scales it. The TOP's own range is the rest of the layer above CLOUD_PROFILE_TOP_MIN.
+//
+// THE ASYMMETRY IS THE POINT, and it is the whole of what makes a sky read as a ceiling at altitude.
+// A cumulus field condenses at ONE level — the lifting condensation level, a thermodynamic surface set
+// by the surface temperature and dewpoint that neighbouring thermals share to within a few tens of
+// metres. Its TOPS are set by how far each thermal climbs before it runs out of buoyancy, and those
+// differ by kilometres within a single field. So bases scatter by ~10^2 m and tops by ~10^3 m, a ratio
+// of about five, and it is the plane of flat bases receding toward the horizon that tells a viewer the
+// deck is up there rather than around them.
+//
+// 0.06 x 3500 m is 210 m of full-range base scatter on the Partly Cloudy deck, which the authored Cloud
+// Height Variance of 0.55 brings to 116 m — inside the +/-50-100 m a real cumulus field keeps. The old
+// construction gave base and top the SAME 0.42-of-a-layer range, i.e. 808 m of base scatter on that
+// deck: every cloud's floor at its own altitude, which is a fog bank, not a ceiling.
+const float CLOUD_PROFILE_BASE_JITTER = 0.06f;
+const float CLOUD_PROFILE_TOP_MIN     = 0.70f;
+
 // The cell's raw Min/Max Height pair, as the weather pass writes it into the profile map.
 //
-// Authored as a CENTRE and a HALF-WIDTH rather than as two independent heights: two independent fields
-// would need ordering by hand and would mostly cancel — a base that rises while a ceiling falls only
-// makes every cloud thinner, which is not what the deck's pp. 126/150 skies are. Those are clouds of
-// comparable depth at visibly different altitudes, which is a moving centre.
+// Authored as a BASE JITTER and a FREE TOP rather than as a centre and a half-width. The centre form
+// moved a cell's floor and its ceiling together and by the same amount, which is the one thing a real
+// cloud field does not do (see the two constants above). Two independent fields would need ordering by
+// hand; these two are ordered by construction, because the base's range ends at 0.06 and the top's
+// begins at 0.70.
 //
-// Both inputs are noise in [0, 1]. The returned pair is ordered by construction: the half-width is
-// positive, so the centre minus it can never exceed the centre plus it.
-//
-// The half-width range is deliberately generous — a mean band of ~0.85 of the layer rather than the
-// ~0.72 a narrower one gives. Bands that are too tight thin EVERY cloud, and a showcase sky loses its
-// towers before it gains its variety; the look this exists for is clouds of comparable depth at
-// different altitudes, which is the CENTRE moving, not the thickness shrinking.
-vec2 CloudProfileHeightNdf( float centreNoise, float widthNoise )
+// Both inputs are noise in [0, 1]. The mean band is 0.82 of the layer (top 0.85 less base 0.03) — as
+// generous as the centre/half-width form's, and deliberately so for the same reason: bands that are too
+// tight thin EVERY cloud, and a showcase sky loses its towers before it gains its variety.
+vec2 CloudProfileHeightNdf( float baseNoise, float topNoise )
 {
-    float centre    = mix( 0.28f, 0.72f, clamp( centreNoise, 0.0f, 1.0f ) );
-    float halfWidth = mix( 0.30f, 0.55f, clamp( widthNoise, 0.0f, 1.0f ) );
-    return vec2( clamp( centre - halfWidth, 0.0f, 1.0f ), clamp( centre + halfWidth, 0.0f, 1.0f ) );
+    float base = CLOUD_PROFILE_BASE_JITTER * clamp( baseNoise, 0.0f, 1.0f );
+    float top  = mix( CLOUD_PROFILE_TOP_MIN, 1.0f, clamp( topNoise, 0.0f, 1.0f ) );
+    return vec2( base, top );
 }
 
 // The cell's own vertical band, as fractions of the layer.
