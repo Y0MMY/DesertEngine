@@ -1,5 +1,6 @@
 #include "VolumetricCloudRenderer.hpp"
 
+#include <Engine/Graphic/Clouds/CloudLayerAspect.hpp>
 #include <Engine/Graphic/Clouds/CloudMarchScale.hpp>
 #include <Engine/Graphic/Clouds/CloudNoiseRules.hpp>
 #include <Engine/Graphic/Clouds/CloudNoiseVolumes.hpp>
@@ -716,6 +717,33 @@ namespace Desert::Graphic::System
                       Common::Units::ToMetres( layer.LayerBottomAltitude ) / 1000.0f,
                       Common::Units::ToMetres( layer.LayerBottomAltitude + layer.LayerThickness ) / 1000.0f,
                       kCloudWeatherCellsOverhead * wanted / layer.WeatherTileSize, kCloudWeatherCellsOverhead,
+                      Common::Units::ToMetres( wanted ) / 1000.0f );
+        }
+
+        // The layer's own PROPORTIONS, which the two relations either side of this loop leave open: each
+        // ties the layer to something else, neither says how tall it may be for how wide it is. A layer
+        // taller than its own coverage cell is wide describes a convective tower, and a convective tower is
+        // deep — so one that is not deep is a slab standing on end, and it renders as a ceiling overhead
+        // rather than as clouds at altitude. That was the whole fair-weather family before this warning
+        // existed. See CloudLayerAspect.hpp.
+        for ( uint32_t i = 0; i < m_Layers.Count; ++i )
+        {
+            const ECS::VolumetricCloudData& layer = m_Layers.Layers[i];
+            if ( CloudLayerAspectIsPlausible( layer.WeatherTileSize, layer.LayerThickness ) )
+                continue;
+
+            const float aspect = CloudLayerAspect( layer.WeatherTileSize, layer.LayerThickness );
+            const float wanted =
+                 CloudLayerThicknessForAspect( layer.WeatherTileSize, kCloudMinAspectBelowDeepConvection );
+            LOG_WARN( "[Clouds] Layer {}: {:.2f} km thick under a {:.2f} km coverage cell — the clouds are "
+                      "{:.2f}x as wide as they are tall, i.e. TALLER than wide, which only a cumulonimbus "
+                      "is. This layer is not deep enough to be one ({:.2f} km against the {:.1f} km deep "
+                      "convection needs), so it will read as a ceiling overhead rather than as clouds at "
+                      "altitude. At this Weather Tile Size the layer has to be at most {:.2f} km thick.",
+                      i, Common::Units::ToMetres( layer.LayerThickness ) / 1000.0f,
+                      Common::Units::ToMetres( layer.WeatherTileSize / kCloudWeatherBasePeriod ) / 1000.0f, aspect,
+                      Common::Units::ToMetres( layer.LayerThickness ) / 1000.0f,
+                      Common::Units::ToMetres( kCloudDeepConvectionThickness ) / 1000.0f,
                       Common::Units::ToMetres( wanted ) / 1000.0f );
         }
 

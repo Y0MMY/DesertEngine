@@ -41,6 +41,15 @@ namespace Desert::Graphic
     // of cells the step schedule samples four times each, and at 60 km (2.5x) the zenith is empty. The
     // band below is the part of that range where both ends of the sky hold up, and it is what the preset
     // suite asserts and what the renderer warns outside of.
+    //
+    // THE BAND IS WHERE THE SLACK LIVES, and CloudLayerAspect.hpp is what took it up. A layer whose
+    // thickness is fixed by its species aspect and whose tile is fixed by this relation is
+    // over-determined: solving both exactly leaves one thickness per base altitude, and for the shipped
+    // fair-weather bases that thickness falls under CloudMarchScale.hpp's four-sample search bound at the
+    // Low tier. Of the three constraints this is the only one WITH a measured tolerance — the aspect is a
+    // look measured on frames and the search bound is Nyquist — so it is the one that gives. The shipped
+    // presets now sit at 1.09x to 1.41x the derived tile, well inside the band that was measured to hold
+    // up at both ends of the sky.
     inline constexpr float kCloudWeatherTileToleranceLow  = 0.7f;
     inline constexpr float kCloudWeatherTileToleranceHigh = 1.6f;
 

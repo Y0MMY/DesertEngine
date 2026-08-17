@@ -3,6 +3,7 @@
 #include <Common/Core/Units.hpp>
 
 #include <Engine/ECS/VolumetricCloudsComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudLayerAspect.hpp>
 
 namespace Desert::Graphic
 {
@@ -27,6 +28,14 @@ namespace Desert::Graphic
     // the cloud bottom. Measured at 0.40 x the ramp height. Stratus, stratocumulus, cumulus and congestus
     // all sit on one condensation level and get 0.05-0.07; the anvil gets 0.16 because a storm base really
     // is lowered, ragged and rain-streaked, and that is the species rather than a defect.
+    //
+    // EVERY LayerThickness BELOW IS DERIVED, not chosen. It is the row's own Weather Tile Size divided by
+    // the weather FBM's eight cells and then by the row's species aspect — CloudLayerThicknessForAspect in
+    // Clouds/CloudLayerAspect.hpp — so a cloud in this preset is as many times wider than tall as its
+    // species says it should be. The whole fair-weather family used to be authored the other way round, at
+    // 0.78-1.01, i.e. cumulonimbus proportions, which is what made a deck overhead read as a ceiling.
+    // Weather Tile Size is deliberately unchanged by that pass: the horizontal composition of each sky is
+    // what it was and only the vertical moved.
     //
     // DetailStrength runs at 0.70-0.85 on the convective presets (0.30-0.40 on the blanket ones), not
     // the old 0.30-0.55: Nubis3 erodes the profile with the FULL noise composite (p. 118), and at a
@@ -138,20 +147,33 @@ namespace Desert::Graphic
         bool operator==( const CloudPresetValues& ) const = default;
     };
 
+    // THE SPECIES AND ITS ASPECT SIT OUTSIDE `Values`, and that placement is the point.
+    //
+    // A preset is a species of cloud, and a species has a shape: how many times wider than tall its clouds
+    // are (CloudLayerAspect.hpp). That target is what each row's LayerThickness is DERIVED from, given the
+    // row's own Weather Tile Size — the same arrangement Weather Tile Size itself has with the layer's
+    // altitude, and the CloudPresets suite asserts both.
+    //
+    // It lives here rather than in CloudPresetValues because it is a statement ABOUT the row, not a field of
+    // the component: there is nothing on VolumetricCloudData for it to be written into, and putting it in
+    // the value struct would make it a settable field with no reader — a dead setting by construction.
+    // Keeping it out also preserves the property that CloudPresetValues is exactly the 86 look fields.
     struct CloudPresetEntry
     {
-        ECS::CloudPreset  Id;
-        const char*       Name;
-        CloudPresetValues Values;
+        ECS::CloudPreset   Id;
+        const char*        Name;
+        CloudSpeciesAspect Species;      // the species this row is, in CloudLayerAspect.hpp's vocabulary
+        float              TargetAspect; // its number inside that species' range: cell width / thickness
+        CloudPresetValues  Values;
     };
 
     // One row per enumerator of ECS::CloudPreset except Custom, which is the absence of a preset and so
     // has no values. The defaults of VolumetricCloudData are the Partly Cloudy row (asserted by test).
     inline constexpr CloudPresetEntry kCloudPresets[] = {
-         { ECS::CloudPreset::Clear, "Clear",
+         { ECS::CloudPreset::Clear, "Clear", kCloudSpeciesCumulusHumilis, 1.80f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 2000.0f ),
-                .LayerThickness                = Common::Units::Metres( 2000.0f ),
+                .LayerThickness                = Common::Units::Metres( 1526.4f ),
                 .HorizonFadeStart              = Common::Units::Metres( 60000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 140000.0f ),
                 .Coverage                      = 0.28f,
@@ -236,10 +258,10 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.30f,
                 .WindUpliftSpeed               = Common::Units::Metres( 4.0f ),
            } },
-         { ECS::CloudPreset::FairWeather, "Fair Weather",
+         { ECS::CloudPreset::FairWeather, "Fair Weather", kCloudSpeciesCumulusMediocris, 1.70f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 1500.0f ),
-                .LayerThickness                = Common::Units::Metres( 2500.0f ),
+                .LayerThickness                = Common::Units::Metres( 1481.5f ),
                 .HorizonFadeStart              = Common::Units::Metres( 60000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 140000.0f ),
                 .Coverage                      = 0.62f,
@@ -324,10 +346,11 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.30f,
                 .WindUpliftSpeed               = Common::Units::Metres( 4.0f ),
            } },
-         { ECS::CloudPreset::PartlyCloudy, "Partly Cloudy",
+         { ECS::CloudPreset::PartlyCloudy, "Partly Cloudy", kCloudSpeciesCumulusMediocris,
+           kCloudAspectMeasuredCumulus,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 1500.0f ),
-                .LayerThickness                = Common::Units::Metres( 3500.0f ),
+                .LayerThickness                = Common::Units::Metres( 1608.9f ),
                 .HorizonFadeStart              = Common::Units::Metres( 60000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 140000.0f ),
                 .Coverage                      = 0.80f,
@@ -412,10 +435,10 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.30f,
                 .WindUpliftSpeed               = Common::Units::Metres( 4.0f ),
            } },
-         { ECS::CloudPreset::SummerCumulus, "Summer Cumulus",
+         { ECS::CloudPreset::SummerCumulus, "Summer Cumulus", kCloudSpeciesCumulusCongestus, 1.20f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 900.0f ),
-                .LayerThickness                = Common::Units::Metres( 2600.0f ),
+                .LayerThickness                = Common::Units::Metres( 1679.0f ),
                 .HorizonFadeStart              = Common::Units::Metres( 60000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 140000.0f ),
                 .Coverage                      = 0.86f,
@@ -500,7 +523,9 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.30f,
                 .WindUpliftSpeed               = Common::Units::Metres( 4.0f ),
            } },
-         { ECS::CloudPreset::Stratus, "Stratus",
+         // NOT re-authored by the aspect pass: 6960.3 / 8 over 700 m is 1.243, a low sheet already wider
+         // than it is deep and already inside the stratus range. Its geometry is correct as shipped.
+         { ECS::CloudPreset::Stratus, "Stratus", kCloudSpeciesStratus, 1.243f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 600.0f ),
                 .LayerThickness                = Common::Units::Metres( 700.0f ),
@@ -588,10 +613,10 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.20f,
                 .WindUpliftSpeed               = Common::Units::Metres( 1.0f ),
            } },
-         { ECS::CloudPreset::Overcast, "Overcast",
+         { ECS::CloudPreset::Overcast, "Overcast", kCloudSpeciesStratocumulus, 1.30f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 900.0f ),
-                .LayerThickness                = Common::Units::Metres( 2200.0f ),
+                .LayerThickness                = Common::Units::Metres( 1409.0f ),
                 .HorizonFadeStart              = Common::Units::Metres( 50000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 120000.0f ),
                 .Coverage                      = 0.95f,
@@ -676,7 +701,10 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.25f,
                 .WindUpliftSpeed               = Common::Units::Metres( 2.0f ),
            } },
-         { ECS::CloudPreset::Storm, "Storm",
+         // NOT re-authored by the aspect pass: 38098.4 / 8 over 9000 m is 0.529, and a cumulonimbus is the
+         // one species that IS taller than it is wide. Its 9 km depth is what earns it — deep enough to be
+         // the tower those proportions describe, and past the depth at which CloudLayerAspect stops asking.
+         { ECS::CloudPreset::Storm, "Storm", kCloudSpeciesCumulonimbus, 0.529f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 700.0f ),
                 .LayerThickness                = Common::Units::Metres( 9000.0f ),
@@ -764,7 +792,9 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.50f,
                 .WindUpliftSpeed               = Common::Units::Metres( 18.0f ),
            } },
-         { ECS::CloudPreset::Cirrus, "Cirrus",
+         // NOT re-authored by the aspect pass: 63008.8 / 8 over 1200 m is 6.563, an ice sheet six times
+         // wider than it is deep, which is what a cirrus sheet is. Correct as shipped.
+         { ECS::CloudPreset::Cirrus, "Cirrus", kCloudSpeciesCirrus, 6.563f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 8000.0f ),
                 .LayerThickness                = Common::Units::Metres( 1200.0f ),
