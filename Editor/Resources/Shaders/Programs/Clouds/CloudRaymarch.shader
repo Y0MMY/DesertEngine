@@ -310,7 +310,27 @@ Shader "CloudRaymarch"
                     vec2  densitySample = CloudDensitySample(worldPos, height, state.T, dt);
                     float density       = densitySample.x;
                     float profile       = densitySample.y;
-                    occupied            = density > 0.0f;
+
+                    // THE OCCUPANCY VERDICT IS THE PROFILE, NOT THE ERODED DENSITY — the same field the
+                    // COARSE tier judges by, which is the whole point.
+                    //
+                    // The two tiers used to answer different questions: coarse asked the cheap density
+                    // (weather x envelope x base shape) and fine asked the density AFTER erosion, which is
+                    // zero over most of a cloud's interior because the detail threshold cuts it there. So
+                    // a fine excursion inside a real cloud would count `emptyBeforeCoarse` erosion holes,
+                    // decide the cloud had ended, hand control back to the coarse tier and jump a full
+                    // coarse stride — 2.8 km at the horizon — over cloud the coarse tier itself calls
+                    // occupied. WHERE those holes fall is set by the entry dither, so two neighbouring
+                    // pixels skipped different kilometres of the same deck and integrated visibly
+                    // different amounts of it. That is the ragged fringe: not a fade, not a budget, but a
+                    // state machine whose trajectory is a chaotic function of a per-pixel random number.
+                    //
+                    // Judging both tiers by the profile makes the machine's trajectory a property of the
+                    // FIELD alone: no interval the conservative test calls occupied is ever skipped, and
+                    // the same ray with a different dither phase now differs only by the quadrature error
+                    // it was always allowed. The erosion keeps its whole job — it still decides how much
+                    // light every shaded sample scatters — it just no longer decides where the march goes.
+                    occupied = profile > 0.0f;
 
                     // A fine excursion that has not yet found anything is still SEARCHING, at the
                     // coarse rate (CloudMarchAdvance). Its samples answer "is there cloud here" and
@@ -318,7 +338,10 @@ Shader "CloudRaymarch"
                     // coarse stride, and the fine pass over that interval is what integrates it.
                     // Shading here as well would count this step twice — and would pay for a cone
                     // march at every step of the search, which is the cost the search exists to avoid.
-                    if (occupied && state.Shaded)
+                    // A sample the erosion emptied is INSIDE the cloud and contributes nothing: it is
+                    // marched through, it keeps the excursion alive, and it is not shaded. Shading it
+                    // would pay for a cone march and a shadow fetch to multiply by a density of zero.
+                    if (occupied && state.Shaded && density > 0.0f)
                     {
                         // --- optical depth toward the sun ---
                         float sunDensityLength = 0.0f;

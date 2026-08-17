@@ -57,7 +57,13 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
     {
         vec2 voxel = CloudDensitySampleVoxel(worldPos, heightFraction, distanceFromCamera, stepLength,
                                              CLOUD_VOXEL_INSTANCE_COUNT);
-        if (voxel.x > sample_.x)
+
+        // The denser branch answers with both of its own numbers — and where NEITHER has any density
+        // left, the one with more PROFILE answers instead. CloudDensityCheap unions the two profiles with
+        // max(), and the march's occupancy test reads the profile this function returns; if the two
+        // disagreed, the coarse tier would call a place occupied that the fine tier called empty, which
+        // is the disagreement the horizon fringe was made of.
+        if (voxel.x > sample_.x || (sample_.x <= 0.0f && voxel.y > sample_.y))
             sample_ = voxel;
     }
 

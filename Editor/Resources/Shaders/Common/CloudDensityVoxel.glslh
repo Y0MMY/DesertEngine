@@ -132,7 +132,19 @@ vec2 CloudDensitySampleVoxel(vec3 worldPos, float heightFraction, float distance
 
         float density = CloudDensityErode(worldPos, heightFraction, fields.Local.z, fields.Data.r,
                                           detailType, densityScale, distanceFromCamera, stepLength);
-        if (density > best.x)
+
+        // THE PROFILE IS REPORTED EVEN WHERE NO DENSITY SURVIVED. The march's empty-space state machine
+        // judges occupancy by this second component (Programs/Clouds/CloudRaymarch.shader), and it has to
+        // agree with what CloudDensityCheapVoxel tells the coarse tier — which is the baked profile,
+        // unerroded. Selecting purely on density would report a profile of zero from inside a hero cloud
+        // whose erosion happened to empty this sample, the coarse tier would disagree, and the ray would
+        // jump a coarse stride out of a cloud it is standing in.
+        //
+        // Where any density survives the pair still comes from ONE instance whole, which is what the
+        // lighting terms need (see Common/CloudDensityCompose.glslh). Where none does, the pair is
+        // (0, profile) and nothing downstream reads the profile except the occupancy test: the shading is
+        // skipped on a zero density.
+        if (density > best.x || (best.x <= 0.0f && fields.Data.r > best.y))
             best = vec2(density, fields.Data.r);
     }
 

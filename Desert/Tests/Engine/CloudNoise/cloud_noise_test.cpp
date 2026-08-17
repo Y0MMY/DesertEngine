@@ -440,6 +440,74 @@ TEST( CloudNoiseValues, CurlEncodingRoundTripsThroughTheDeclaredScale )
         }
 }
 
+// The detail volume's MEAN is what a sample past the march's own Nyquist limit is handed instead of an
+// instance it cannot reconstruct (Common/CloudDensityProcedural.glslh's erosion gate). There is no mip
+// chain on these volumes, so the constant IS the filter, and if the noise construction ever drifts away
+// from it the far field would quietly gain or lose mass with no other symptom — a fringe at the horizon
+// is what the last disagreement of this kind looked like.
+//
+// Averaged over a uniform 24^3 grid of texel centres. The mean converges long before the volume's own
+// 128^3 resolution — measured at 16, 24, 32 and 48 the twelve channel means all sit inside 0.1209 to
+// 0.1298 — and a Debug run of the full grid would cost minutes for three more decimal places nobody
+// reads. The tolerance below is that spread with room to spare, and it is deliberately loose enough to
+// pass and tight enough that a construction change (an octave, a weight, a warp) fails it.
+TEST( CloudNoiseValues, TheDetailVolumesMeanAndSpreadAreTheDeclaredConstants )
+{
+    constexpr int           kN       = 24;
+    constexpr std::uint32_t kSeeds[] = { kSeedA, kSeedB, 991u };
+
+    for ( const std::uint32_t seed : kSeeds )
+    {
+        double sum[4]       = { 0.0, 0.0, 0.0, 0.0 };
+        double sumSquare[4] = { 0.0, 0.0, 0.0, 0.0 };
+        for ( int z = 0; z < kN; ++z )
+            for ( int y = 0; y < kN; ++y )
+                for ( int x = 0; x < kN; ++x )
+                {
+                    const glm::vec3 p( TexelCentre( x, kN ), TexelCentre( y, kN ), TexelCentre( z, kN ) );
+                    const glm::vec4 t    = Ref::CloudDetailTexel( p, seed );
+                    const float     c[4] = { t.x, t.y, t.z, t.w };
+                    for ( int i = 0; i < 4; ++i )
+                    {
+                        sum[i] += c[i];
+                        sumSquare[i] += static_cast<double>( c[i] ) * c[i];
+                    }
+                }
+
+        const double n = static_cast<double>( kN ) * kN * kN;
+        for ( int c = 0; c < 4; ++c )
+        {
+            const double mean = sum[c] / n;
+            const double sd   = std::sqrt( std::max( sumSquare[c] / n - mean * mean, 0.0 ) );
+
+            EXPECT_NEAR( static_cast<float>( mean ), Ref::CLOUD_DETAIL_MEAN_LEVEL, 0.01f )
+                 << "channel " << c << " of seed " << seed << " drifted away from CLOUD_DETAIL_MEAN_LEVEL";
+            EXPECT_NEAR( static_cast<float>( sd ), Ref::CLOUD_DETAIL_SD_LEVEL, 0.01f )
+                 << "channel " << c << " of seed " << seed << " drifted away from CLOUD_DETAIL_SD_LEVEL";
+        }
+    }
+}
+
+// The two erosion feature sizes are the amplitude-weighted mean of a three-octave stack at periods p,
+// 2p, 4p with the weights CloudAlligatorFbm applies. Written out here rather than trusted, because the
+// constants are the only place the shader states what frequency its erosion runs at, and an FBM whose
+// weights were retuned without them would gate at the wrong distance and say nothing about it.
+TEST( CloudNoiseValues, TheErosionFeatureSizesFollowTheFbmWeights )
+{
+    const auto perTile = []( float basePeriod )
+    {
+        const float weighted = 0.625f / 1.0f + 0.25f / 2.0f + 0.125f / 4.0f; // = 25/32
+        return basePeriod / weighted;
+    };
+
+    EXPECT_FLOAT_EQ( Ref::CLOUD_DETAIL_EROSION_LOW_PER_TILE, perTile( 4.0f ) );  // CloudDetailTexel R, B
+    EXPECT_FLOAT_EQ( Ref::CLOUD_DETAIL_EROSION_HIGH_PER_TILE, perTile( 8.0f ) ); // CloudDetailTexel G, A
+
+    // The coarse pair must stay resolvable LONGER than the fine pair, or the staged fade the density seam
+    // relies on runs backwards and the far field keeps its finest content while losing its coarsest.
+    EXPECT_LT( Ref::CLOUD_DETAIL_EROSION_LOW_PER_TILE, Ref::CLOUD_DETAIL_EROSION_HIGH_PER_TILE );
+}
+
 // ---------------------------------------------------------------------------------------------------
 // 4. The lifecycle rules
 // ---------------------------------------------------------------------------------------------------

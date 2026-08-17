@@ -507,7 +507,7 @@ TEST( SettingConsumers, TheCloudComponentOwesExactlyTheFieldsItsPassesHaveNotBee
 
     // 86, down from 87: High Frequency Fade Start and High Frequency Fade End became the single High
     // Frequency Feature Size. Two authored distances that could contradict the march's own sampling rate
-    // became one physical size whose fade the march derives (CloudBandWeight), so the component owes one
+    // became one physical size whose fade the march derives (CloudNyquistWeight), so the component owes one
     // reader fewer — not because anything was hidden, but because there is one fewer thing to author.
     EXPECT_EQ( pending, 86 );
 }
