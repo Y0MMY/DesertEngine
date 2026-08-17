@@ -639,22 +639,24 @@ namespace Desert::Graphic::System
         for ( uint32_t i = 0; i < m_Layers.Count; ++i )
         {
             const ECS::VolumetricCloudData& layer = m_Layers.Layers[i];
-            if ( CloudCoarseStrideIsPlausible( layer.LayerBottomAltitude, layer.LayerThickness, layer.MinStepSize,
-                                               layer.MaxStepSize, layer.StepGrowthRate,
-                                               layer.CoarseStepMultiplier ) )
-                continue;
 
-            const float samples = CloudSearchSamplesAcrossLayer(
+            const CloudSearchAcrossLayer worst = CloudWorstSearchAcrossLayer(
                  layer.LayerBottomAltitude, layer.LayerThickness, layer.MinStepSize, layer.MaxStepSize,
                  layer.StepGrowthRate, layer.CoarseStepMultiplier );
+            if ( worst.Samples >= kCloudMinSearchSamplesAcrossLayer )
+                continue;
+
+            // The ELEVATION is in the message because it is the actionable half. A high layer's worst
+            // elevation is in the middle of the sky, not overhead, and an artist told only a sample count
+            // would look up — at the one part of their sky where the number is fine.
             LOG_WARN( "[Clouds] Layer {}: the empty-space search takes {:.1f} samples across a {:.2f} km "
-                      "layer looking straight up, not the {:.1f} it needs. Whether a ray notices this "
-                      "layer at all is then a per-pixel coin toss, which renders as a fixed cross-hatch "
-                      "no temporal average removes. Lower Coarse Step Multiplier ({:.1f}), Step Growth "
-                      "Rate ({:.4f}) or Max Step Size ({:.0f} m).",
-                      i, samples, Common::Units::ToMetres( layer.LayerThickness ) / 1000.0f,
-                      kCloudMinSearchSamplesAcrossLayer, layer.CoarseStepMultiplier, layer.StepGrowthRate,
-                      Common::Units::ToMetres( layer.MaxStepSize ) );
+                      "layer at {:.0f} degrees of elevation, not the {:.1f} it needs. The search can then "
+                      "stride over the layer entirely, and whether a ray notices it becomes a per-pixel "
+                      "coin toss no temporal average removes. Lower Coarse Step Multiplier ({:.1f}), Step "
+                      "Growth Rate ({:.4f}) or Max Step Size ({:.0f} m).",
+                      i, worst.Samples, Common::Units::ToMetres( layer.LayerThickness ) / 1000.0f,
+                      worst.ElevationDegrees, kCloudMinSearchSamplesAcrossLayer, layer.CoarseStepMultiplier,
+                      layer.StepGrowthRate, Common::Units::ToMetres( layer.MaxStepSize ) );
         }
 
         auto& renderer = Renderer::GetInstance();

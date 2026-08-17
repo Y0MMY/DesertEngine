@@ -600,10 +600,40 @@ struct CloudMarchState
     bool  Shaded;   // this fine excursion has found real density at least once
 };
 
-CloudMarchState CloudMarchBegin(float tEnter)
+// THE SEGMENT'S ENTRY AND WHERE SAMPLING STARTS ARE TWO DIFFERENT DISTANCES, and this machine needs
+// both. It used to take one, and the caller handed it the dithered one — which deleted a per-pixel slab
+// off the near face of every cloud layer.
+//
+// The march's first sample is dithered forward by up to one coarse stride, so that the coarse tier's
+// decision boundary is not a fixed shell (the note at the dither site says why the coarse stride and not
+// the fine one). A march samples nothing before its first sample, so that prefix is only ever integrated
+// if a REWIND reaches back into it — and the rewind is floored twice, by this frontier and by
+// CloudMarchAdvance's own `tEnter`. Both were fed the dithered start. The floor was therefore always at
+// or above the first sample, the rewind could never reach behind it, and `[tEnter, tStart]` was not
+// marched coarsely, not marched finely, and not skipped for any reason the field knows about: it was
+// simply absent, by a length drawn from interleaved gradient noise.
+//
+// WHY IT HID FOR SO LONG. The deleted slab is `jitter * coarseStride` against the ray's chord through the
+// layer. On the 3.5 km deck of Clouds_UEShowcase, met at 8 km with a 114 m coarse stride, that is 1.3% of
+// an 8.6 km chord — inside the quadrature noise. On the 1.2 km cirrus sheet of Clouds_Cirrus, met at
+// 25 km where the schedule has grown the stride to 865 m, it is 25% of a 3.5 km chord: a quarter of the
+// cloud, removed per pixel by a fixed screen-space pattern. Measured at the interleaved-gradient-noise
+// fundamental — 1.847 cloud-buffer pixels at 145.2 degrees, which is exactly where the cross-hatch sat —
+// 0.38 grey levels on the cirrus sheet against 0.02 on the deck.
+//
+// Neither side was wrong alone, which is why three passes over this renderer walked past it. The dither
+// is a correct lattice randomiser; the frontier is a correct guard against marching an interval twice.
+// Wiring the guard to the dithered value turned "never march an interval twice" into "never march it
+// once". The tests could not see it either: they drove the machine with tStart == tEnter, the single
+// phase at which the two distances coincide.
+//
+// @param tEnter  the segment's true entry: the first distance at which this layer can carry density.
+//                Nothing before it needs sampling, and nothing after it may go unsampled.
+// @param tStart  where the first SAMPLE falls — tEnter dithered forward by up to one coarse stride.
+CloudMarchState CloudMarchBegin(float tEnter, float tStart)
 {
     CloudMarchState s;
-    s.T        = tEnter;
+    s.T        = tStart;
     s.Frontier = tEnter;
     s.EmptyRun = 0;
     s.Fine     = false;

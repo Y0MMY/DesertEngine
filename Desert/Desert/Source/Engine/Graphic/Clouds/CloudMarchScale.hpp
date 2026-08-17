@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 // The relation between a layer's THICKNESS and the stride the empty-space search takes through it —
 // the second scale relation this renderer needs and the one a THIN layer walks straight into.
@@ -12,10 +13,17 @@
 // phase, i.e. a per-pixel coin toss. The temporal stage cannot rescue it, because the average of "half
 // the rays missed the cloud" is "half the cloud" — it converges to a stipple rather than removing one.
 //
-// It was found on the first two-layer frame ever rendered: a 1.2 km cirrus sheet authored with the same
-// CoarseStepMultiplier of 4-5 the 3.5 km deck uses drew a regular cross-hatch lattice across every wisp.
-// Dropping the sheet's coarse stride below its own thickness removed it completely, with no other change.
-// The deck never showed it because 3.5 km is forty coarse strides, not three.
+// WHAT THIS IS NOT. A cross-hatch on a 1.2 km cirrus sheet is what led to this file, and lowering the
+// sheet's coarse stride did remove it — but that was the stride shrinking a DIFFERENT quantity. The
+// cross-hatch was the march's dithered start deleting a per-pixel prefix of every segment, of length
+// `jitter * coarseStride`; see CloudMarchBegin in Editor/Resources/Shaders/Common/CloudGeometry.glslh for
+// the mechanism, the measurement and the fix, and CloudMath's two dither-phase properties for the
+// assertions. Halving the coarse stride halved the deleted prefix, which is why it looked like this
+// relation and was not.
+//
+// The relation below is real all the same, and it is the one this file is for: a stride comparable with
+// the chord lets the SEARCH miss the layer outright, which no dither fixes because there is nothing to
+// average. It is what the Low tier does to a thin high sheet.
 //
 // The reasoning and the SCHEDULE itself live in Editor/Resources/Shaders/Common/CloudGeometry.glslh
 // (CloudStepLength). This is its C++ mirror, for the one place that has to decide rather than consume:
@@ -43,28 +51,74 @@ namespace Desert::Graphic
         return std::clamp( blended, std::min( minStep, maxStep ), std::max( minStep, maxStep ) );
     }
 
-    // How many SEARCH samples a ray takes across the layer's own thickness, at the nearest distance the
-    // layer can be met from the ground — its base altitude, straight up. That is the WORST case for this
-    // relation and therefore the one to test: looking up, the chord through the layer is exactly its
-    // thickness, and every other direction gives the ray a longer chord and more samples.
-    inline float CloudSearchSamplesAcrossLayer( float layerBottomAltitude, float layerThickness, float minStep,
-                                                float maxStep, float growth, float coarseMultiplier )
+    // THE ZENITH IS NOT THE WORST CASE FOR A HIGH LAYER, and asserting that it was is why this guard
+    // reported 10.4 samples for the shipped Cirrus sheet whose true minimum is 4.1.
+    //
+    // The old argument ran: looking up, the chord through the layer is exactly its thickness, and every
+    // other direction gives a longer chord and therefore more samples. The first clause is true. The
+    // second silently assumes the stride is a constant, and it is not — CloudStepLengthAt grows it with
+    // DISTANCE, and looking down raises the distance faster than it raises the chord as soon as the ray
+    // reaches the schedule's sqrt-to-linear blend band (kCloudStepFineRange 10 km to kCloudStepFarRange
+    // 25 km), where the effective growth is super-linear in t.
+    //
+    // Measured on the two shipped geometries at the High tier. The 1.2 km sheet at 8 km is met at 8.6 km
+    // looking up, still inside the sqrt regime, where the stride is 29 m; at 20 degrees of elevation it is
+    // met at 25 km, deep in the blend, where the stride is 216 m. The stride grew 7.5x while the chord
+    // grew 2.9x, so the samples fell from 10.4 to 4.1. The 3.5 km deck at 1.5 km never reaches the blend
+    // band until 6 degrees, by which point its chord has already grown tenfold, so its minimum is 31.3 and
+    // sits within 16% of its zenith value. A LOW layer really does have its worst case overhead; a high
+    // one has it in the middle of the sky, which is exactly where a ground camera looks.
+    //
+    // So sweep the elevation and take the minimum, and report where it is — an artist cannot act on a
+    // number without knowing which part of their sky it describes.
+    //
+    // FLAT CHORD, and it is sound here. The chord is taken as thickness / sin(elevation) and the distance
+    // as (bottom + half thickness) / sin(elevation), which ignores the planet's curvature. At the 20
+    // degrees where the minimum falls, curvature moves the distance to an 8 km layer by 0.6%; the sweep
+    // therefore stops at 5 degrees, below which the approximation starts to overstate the distance (by 8%
+    // at 5 degrees) and, with it, the stride. Overstating the stride understates the samples, so the
+    // truncation is in the safe direction, and the minimum is interior and nowhere near it.
+    struct CloudSearchAcrossLayer
     {
-        const float stride = CloudStepLengthAt( std::max( layerBottomAltitude, 0.0f ), minStep, maxStep, growth ) *
-                             std::max( coarseMultiplier, 1.0f );
-        return std::max( layerThickness, 0.0f ) / std::max( stride, 1.0f );
+        float Samples;          // the fewest search samples any elevation gets across the layer
+        float ElevationDegrees; // and where
+    };
+
+    inline CloudSearchAcrossLayer CloudWorstSearchAcrossLayer( float layerBottomAltitude, float layerThickness,
+                                                               float minStep, float maxStep, float growth,
+                                                               float coarseMultiplier )
+    {
+        // One degree of granularity over 5..90. This runs once per layer when the weather map is baked,
+        // never per frame, so the sweep is free; one degree is finer than the minimum's own curvature.
+        constexpr int kFirstDegree = 5;
+        constexpr int kLastDegree  = 90;
+
+        const float thickness = std::max( layerThickness, 0.0f );
+        const float midpoint  = std::max( layerBottomAltitude, 0.0f ) + 0.5f * thickness;
+        const float coarse    = std::max( coarseMultiplier, 1.0f );
+
+        CloudSearchAcrossLayer worst{ std::numeric_limits<float>::max(), 90.0f };
+        for ( int degree = kFirstDegree; degree <= kLastDegree; ++degree )
+        {
+            const float sine    = std::sin( static_cast<float>( degree ) * 3.14159265358979323846f / 180.0f );
+            const float stride  = CloudStepLengthAt( midpoint / sine, minStep, maxStep, growth ) * coarse;
+            const float samples = ( thickness / sine ) / std::max( stride, 1.0f );
+            if ( samples < worst.Samples )
+                worst = CloudSearchAcrossLayer{ samples, static_cast<float>( degree ) };
+        }
+        return worst;
     }
 
     // Four, and the number is the Nyquist argument rather than a preference: the search has to be able to
     // land inside the layer whatever its dither phase, and a phase-independent hit needs the stride to be
-    // at most half the chord. Four is that bound with one doubling of margin, which is where the frames
-    // stop showing the lattice — at three it is faint and at two it is the cross-hatch that found this.
+    // at most half the chord. Four is that bound with one doubling of margin.
     inline constexpr float kCloudMinSearchSamplesAcrossLayer = 4.0f;
 
     inline bool CloudCoarseStrideIsPlausible( float layerBottomAltitude, float layerThickness, float minStep,
                                               float maxStep, float growth, float coarseMultiplier )
     {
-        return CloudSearchSamplesAcrossLayer( layerBottomAltitude, layerThickness, minStep, maxStep, growth,
-                                              coarseMultiplier ) >= kCloudMinSearchSamplesAcrossLayer;
+        return CloudWorstSearchAcrossLayer( layerBottomAltitude, layerThickness, minStep, maxStep, growth,
+                                            coarseMultiplier )
+                    .Samples >= kCloudMinSearchSamplesAcrossLayer;
     }
 } // namespace Desert::Graphic
