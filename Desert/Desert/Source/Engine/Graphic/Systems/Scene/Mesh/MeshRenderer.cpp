@@ -1226,6 +1226,10 @@ namespace Desert::Graphic::System
              brdf && brdf->GetImageHandle().IsValid() )
             frame.BrdfLut = static_cast<Image2D*>( imageService->Resolve( brdf->GetImageHandle() ) );
 
+        // The cloud deck's occlusion of the sun, traced before the render graph recorded. Empty unless the
+        // atmosphere sun has Cast Cloud Shadows on, and empty is a transmittance of exactly 1.
+        frame.CloudWorldShadow = m_SceneRenderer->GetCloudWorldShadow();
+
         return frame;
     }
 
@@ -1245,6 +1249,11 @@ namespace Desert::Graphic::System
                                          ShadowDebugMode, ShowNormals, CascadeTexelWorld, LightingDebug );
 
         StaticMaterialPBR::UpdateEnvironment( instance, IrradianceMap, PrefilteredMap, BrdfLut );
+
+        // The forward path's half of "cloud shadows on the world". The deferred path shades the same
+        // meshes through DeferredLighting.shader, which reads the same map through the same header — what
+        // differs is only which shader is doing the shading.
+        CloudWorldShadowBind( *instance->GetParentMaterial(), CloudWorldShadow );
     }
 
     void MeshRenderer::UpdateCascades()

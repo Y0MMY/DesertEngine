@@ -155,6 +155,14 @@ namespace Desert::Graphic
         // change to the palette cannot break it. Mirrors GetWind()/WindEnv.
         const AtmosphereEnv& GetAtmosphere() const;
 
+        // CLOUD SHADOWS ON THE WORLD: this frame's sun-space cloud-shadow map and the frame it was traced
+        // in, for everything that shades an opaque surface with the directional light — the deferred
+        // lighting pass, the three forward PBR shaders, the terrain and the grass. Empty unless the
+        // atmosphere sun has Cast Cloud Shadows on, and empty is a transmittance of exactly 1 in every
+        // consumer's shader. Filled before the render graph records, which is what lets the terrain (which
+        // draws inside it) read this frame's map rather than last frame's.
+        const CloudWorldShadowInput& GetCloudWorldShadow() const;
+
         // How many SceneRenderers are alive right now. Every one of them pays for its own baked sky
         // environment, which is why the bake announces its cost with this number beside it.
         static uint32_t GetLiveRendererCount();

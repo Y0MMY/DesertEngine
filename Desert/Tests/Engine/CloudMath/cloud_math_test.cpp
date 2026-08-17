@@ -2152,6 +2152,182 @@ TEST( CloudShadowReadout, AnEmptyColumnShadowsNothingAtAnyHeight )
         EXPECT_FLOAT_EQ( R::CloudShadowDensityLength( glm::vec4( 0.0f ), h ), 0.0f );
 }
 
+// ---- The WORLD-readable encoding -------------------------------------------------------------------
+//
+// The second cloud-shadow encoding (research doc section 5, Q3): {front depth km, mean extinction per
+// km, max optical depth}, which answers "how much cloud is between THIS point and the sun" for a
+// receiver that is not inside a cloud layer at all — the ground, a mesh, a mountain top above the deck.
+//
+// Every test here is a RELATION between two answers of the same function rather than a spot value,
+// because a spot value of an encoding whose two ends live in different shaders would pass while the two
+// ends disagreed.
+
+TEST( CloudWorldShadow, TheKilometreIsTheSameKilometreTheRestOfTheMarchUses )
+{
+    // Common/CloudWorldShadow.glslh spells the constant out rather than taking it from
+    // Common/CloudGeometry.glslh, so a terrain fragment shader can include the read-out without twelve
+    // hundred lines of march arithmetic. Two spellings of one number is exactly the defect class this
+    // suite exists for, so the two are pinned against each other here.
+    EXPECT_FLOAT_EQ( R::CLOUD_WORLD_SHADOW_UNITS_PER_KM, R::CLOUD_WORLD_UNITS_PER_KM );
+}
+
+TEST( CloudWorldShadow, DepthAlongTheSunGrowsAwayFromIt )
+{
+    const glm::vec3 sun = glm::normalize( glm::vec3( 0.3f, 0.8f, 0.5f ) );
+    const glm::vec3 centre( 1000.0f, 200.0f, -300.0f );
+
+    // A point a kilometre TOWARD the sun is a kilometre LESS deep than the plane, one away from it a
+    // kilometre more. The whole read-out hangs on this sign: get it backwards and the ground is lit
+    // while the air above it is in shadow.
+    const float toward = R::CloudShadowDepthAlongSun( centre + sun * 100000.0f, centre, sun );
+    const float away   = R::CloudShadowDepthAlongSun( centre - sun * 100000.0f, centre, sun );
+
+    EXPECT_NEAR( toward, -100000.0f, 1.0f );
+    EXPECT_NEAR( away, 100000.0f, 1.0f );
+    EXPECT_LT( toward, away );
+
+    // A point displaced ONLY within the map's plane has the same depth: that is what makes one texel
+    // answer for a whole sun ray.
+    const glm::vec3 sideways = centre + R::CloudShadowRight( sun ) * 5000.0f + R::CloudShadowUp( sun ) * -2000.0f;
+    EXPECT_NEAR( R::CloudShadowDepthAlongSun( sideways, centre, sun ), 0.0f, 1e-2f );
+}
+
+TEST( CloudWorldShadow, AReceiverDeeperUnderTheDeckIsNeverLessShadowed )
+{
+    // MONOTONICITY, which catches an inverted subtraction or a sign flip in one assertion where a spot
+    // value would have to be wrong at exactly the depth the test happened to pick.
+    const glm::vec3 encoded( -2.0f, 3.0f, 12.0f ); // front 2 km toward the sun, 3 /km, capped at 12
+
+    float previous = -1.0f;
+    for ( float depthKm = -5.0f; depthKm <= 8.0f; depthKm += 0.25f )
+    {
+        const float opticalDepth = R::CloudWorldShadowOpticalDepth( encoded, depthKm );
+        EXPECT_GE( opticalDepth, previous ) << "depth " << depthKm;
+        previous = opticalDepth;
+    }
+}
+
+TEST( CloudWorldShadow, NothingAboveTheDecksFrontIsShadowedByIt )
+{
+    // A mountain top poking through, or an aircraft over the deck: the cloud is BELOW the receiver, and
+    // `max(0, depth - front)` is the whole of what says so. Without it the linear ramp would run
+    // backwards and shadow everything above the layer.
+    const glm::vec3 encoded( 0.0f, 4.0f, 20.0f );
+    const glm::vec3 sun = glm::vec3( 0.0f, 1.0f, 0.0f );
+    const glm::vec2 uv( 0.5f, 0.5f );
+
+    for ( float depthKm = -10.0f; depthKm <= 0.0f; depthKm += 1.0f )
+    {
+        EXPECT_FLOAT_EQ( R::CloudWorldShadowOpticalDepth( encoded, depthKm ), 0.0f );
+
+        const glm::vec3 position = -sun * R::CloudWorldFromKm( depthKm );
+        EXPECT_FLOAT_EQ( R::CloudWorldShadowTransmittance( encoded, position, glm::vec3( 0.0f ), sun, uv ), 1.0f );
+    }
+}
+
+TEST( CloudWorldShadow, TheColumnsOwnOpticalDepthIsTheCeiling )
+{
+    // A BOUND, and it is what stops a receiver a kilometre under a thin sheet coming out blacker than
+    // one right beneath it: below the medium there is no more cloud to accumulate.
+    const glm::vec3 encoded( -1.0f, 6.0f, 2.5f );
+
+    for ( float depthKm = -1.0f; depthKm <= 50.0f; depthKm += 0.5f )
+        EXPECT_LE( R::CloudWorldShadowOpticalDepth( encoded, depthKm ), encoded.z + 1e-5f );
+
+    // And far below it the answer IS the cap, not an approach to it.
+    EXPECT_FLOAT_EQ( R::CloudWorldShadowOpticalDepth( encoded, 100.0f ), encoded.z );
+}
+
+TEST( CloudWorldShadow, AnEmptyTexelIsFullSunAtEveryDepth )
+{
+    // What makes the feature free where there are no clouds: no flag channel and no branch, just the
+    // arithmetic of a triple of zeroes.
+    const glm::vec3 sun = glm::normalize( glm::vec3( -0.3f, 0.9f, 0.2f ) );
+
+    for ( float depthKm = -20.0f; depthKm <= 20.0f; depthKm += 2.0f )
+    {
+        const glm::vec3 position = -sun * R::CloudWorldFromKm( depthKm );
+        EXPECT_FLOAT_EQ( R::CloudWorldShadowTransmittance( glm::vec3( 0.0f ), position, glm::vec3( 0.0f ), sun,
+                                                           glm::vec2( 0.5f ) ),
+                         1.0f );
+    }
+}
+
+TEST( CloudWorldShadow, TheMapsEdgeJoinsOntoFullSunWithoutAStep )
+{
+    // THE SEAM. The map covers a finite square around the camera and there is no answer beyond it. The
+    // honest answer out there is "no shadow", and a hard switch to it at the border would draw a
+    // straight bright line across the ground along nothing at all — the defect class the audit already
+    // documents for the four-slice map's own extent.
+    //
+    // Two halves of one expression have to meet: inside, the transmittance is faded toward 1 by
+    // CloudShadowEdgeFade; outside, it IS 1. They join continuously exactly because the fade reaches
+    // zero AT the border rather than near it.
+    const glm::vec3 sun = glm::normalize( glm::vec3( 0.2f, 0.85f, 0.45f ) );
+    const glm::vec3 centre( 0.0f );
+    const float     extent = 3000000.0f;           // 30 km, the shipped default
+    const glm::vec3 encoded( -3.0f, 8.0f, 25.0f ); // a thoroughly opaque column
+
+    // In the middle the shadow is at full strength — otherwise this test would pass on a term that is
+    // zero everywhere.
+    const glm::vec2 middleUv( 0.5f, 0.5f );
+    const glm::vec3 middle = R::CloudShadowPlanePoint( middleUv, centre, sun, extent );
+    EXPECT_LT( R::CloudWorldShadowTransmittance( encoded, middle, centre, sun, middleUv ), 0.05f );
+
+    // Walking out to the border the answer rises to 1, and gets there smoothly: no two samples a two
+    // hundredth of the map apart may differ by more than a small fraction.
+    float previous = R::CloudWorldShadowTransmittance( encoded, middle, centre, sun, middleUv );
+    for ( float u = 0.5f; u <= 1.0f; u += 0.005f )
+    {
+        const glm::vec2 uv( u, 0.5f );
+        const glm::vec3 point = R::CloudShadowPlanePoint( uv, centre, sun, extent );
+        const float     here  = R::CloudWorldShadowTransmittance( encoded, point, centre, sun, uv );
+
+        EXPECT_GE( here, previous - 1e-5f ) << "u " << u;
+        EXPECT_LT( here - previous, 0.15f ) << "a step at u " << u;
+        previous = here;
+    }
+
+    // At the border itself the map already says "full sun", which is what the OUTSIDE branch returns —
+    // so crossing it changes nothing.
+    const glm::vec2 border( 1.0f, 0.5f );
+    const glm::vec3 onBorder = R::CloudShadowPlanePoint( border, centre, sun, extent );
+    EXPECT_FLOAT_EQ( R::CloudWorldShadowTransmittance( encoded, onBorder, centre, sun, border ), 1.0f );
+
+    const glm::vec2 outside( 1.0001f, 0.5f );
+    const glm::vec3 beyond = R::CloudShadowPlanePoint( outside, centre, sun, extent );
+    EXPECT_FLOAT_EQ( R::CloudWorldShadowTransmittance( encoded, beyond, centre, sun, outside ), 1.0f );
+}
+
+TEST( CloudWorldShadow, ZeroStrengthIsTheIdentityAndOneIsTheDecksOwnTransmittance )
+{
+    // The OFF state is not "almost no shadow", it is exactly 1.0 — which is what lets the feature ship
+    // default-off with no second code path to keep working.
+    const glm::vec3 sun = glm::normalize( glm::vec3( 0.1f, 0.95f, 0.3f ) );
+    const glm::vec3 centre( 0.0f );
+    const float     extent = 3000000.0f;
+    const glm::vec3 encoded( -1.0f, 5.0f, 9.0f );
+
+    const glm::vec2 uv( 0.5f, 0.5f );
+    const glm::vec3 point = R::CloudShadowPlanePoint( uv, centre, sun, extent ) - sun * 200000.0f;
+
+    EXPECT_FLOAT_EQ( R::CloudWorldShadowFactor( encoded, point, centre, sun, uv, 0.0f ), 1.0f );
+
+    const float full = R::CloudWorldShadowFactor( encoded, point, centre, sun, uv, 1.0f );
+    EXPECT_FLOAT_EQ( full, R::CloudWorldShadowTransmittance( encoded, point, centre, sun, uv ) );
+
+    // A dose in between lands between the two, monotonically — a `lerp(1, T, strength)` and nothing
+    // cleverer, exactly as UE's DeferredLightPixelShaders.usf writes it.
+    float previous = 1.0f;
+    for ( float strength = 0.0f; strength <= 1.0f; strength += 0.1f )
+    {
+        const float dosed = R::CloudWorldShadowFactor( encoded, point, centre, sun, uv, strength );
+        EXPECT_LE( dosed, previous + 1e-6f );
+        EXPECT_GE( dosed, full - 1e-6f );
+        previous = dosed;
+    }
+}
+
 TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 {
     // std430 rounds a block up to its 16-byte alignment; the buffer must cover that, not sizeof. Since

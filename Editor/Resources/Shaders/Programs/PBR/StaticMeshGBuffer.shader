@@ -62,7 +62,7 @@ Shader "StaticMeshGBuffer"
         //   GBufferB (RGBA32F) = world Normal.rgb + Roughness.a
         //
         // CRITICAL: this fragment declares the EXACT SAME descriptor bindings as the forward PBR.glsl.frag, because
-        // it is drawn with the SHARED StaticMaterialPBR descriptor set (17 descriptors). If it declared fewer, the
+        // it is drawn with the SHARED StaticMaterialPBR descriptor set (19 descriptors). If it declared fewer, the
         // pipeline layout wouldn't match the bound set (VUID-vkCmdDrawIndexed-None-02697 -> device lost). SPIR-V
         // reflection drops UNUSED bindings, so every binding is referenced through a ~0 epsilon at the end of main().
 
@@ -121,6 +121,16 @@ Shader "StaticMeshGBuffer"
         Uniform(12) sampler2D  u_NormalTexture;
         Uniform(18) sampler2D  u_OpacityTexture;
 
+        // CLOUD SHADOWS ON THE WORLD — declared here for the SAME reason the four cascade maps above are:
+        // this pass shades nothing and reads neither, but it is drawn with the forward material's descriptor
+        // set and its layout has to match it binding for binding. The deferred sun is shaded by
+        // Programs/Deferred/DeferredLighting.shader, which reads this map for real.
+        Uniform(19) sampler2D u_CloudWorldShadowMap;
+        Uniform(20) CloudWorldShadowUB {
+        	vec4 u_CloudWorldShadowCentre;
+        	vec4 u_CloudWorldShadowSun;
+        };
+
         void main()
         {
         	GpuMaterial mat = materials[pc.MaterialIndex];
@@ -154,6 +164,12 @@ Shader "StaticMeshGBuffer"
         	keep += texture(u_EnvSpecularTex, N).r + texture(u_EnvIrradianceTex, N).r + texture(u_BRDFLUTTexture, uv).r;
         	keep += directionLights.directionLights.ColorIntensity.a + u_ShadowParams.x + u_LightViewProj[0][0][0];
         	keep += float(lightsMetadata.DirectionLightCount);
+        	// textureSize and not texture: a QUERY keeps the binding statically referenced just as a fetch
+        	// does, and this pass runs it on every G-buffer pixel of every frame for a value it throws away.
+        	// The six fetches above predate this file's growth into a full-screen cost; a seventh, measurable
+        	// at 0.3 ms a frame on the shipped showcase, is not one to add for a keep-alive.
+        	keep += float(textureSize(u_CloudWorldShadowMap, 0).x) + u_CloudWorldShadowCentre.w
+        	      + u_CloudWorldShadowSun.w;
         	if (lightsMetadata.PointLightCount > 0u) keep += pointLights[0].intensity; // binding 6
         	if (lightsMetadata.SpotLightCount  > 0u) keep += spotLights[0].intensity;  // binding 16
         	keep *= 1e-20;

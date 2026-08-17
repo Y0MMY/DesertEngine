@@ -39,8 +39,14 @@ namespace Desert::Graphic::System
         // about what the cone march it replaces resolved anyway (its own radius was 400 m).
         constexpr uint32_t kCloudShadowMapSize = 512;
 
-        constexpr const char* kWeatherShaderName   = "CloudWeather";
-        constexpr const char* kShadowShaderName    = "CloudShadowMap";
+        // The WORLD shadow map's resolution. The same 512 as the map above, over the same extent, for the
+        // same reason: at the default 30 km that is ~117 m a texel, and a cloud shadow on the ground has
+        // no detail finer than that to lose — the deck's own features are hundreds of metres across.
+        constexpr uint32_t kCloudWorldShadowMapSize = 512;
+
+        constexpr const char* kWeatherShaderName     = "CloudWeather";
+        constexpr const char* kShadowShaderName      = "CloudShadowMap";
+        constexpr const char* kWorldShadowShaderName = "CloudWorldShadowMap";
         constexpr const char* kRaymarchShaderName  = "CloudRaymarch";
         constexpr const char* kTemporalShaderName  = "CloudTemporalResolve";
         constexpr const char* kCompositeShaderName = "CloudComposite";
@@ -106,6 +112,7 @@ namespace Desert::Graphic::System
     {
         m_WeatherPipeline.reset();
         m_ShadowPipeline.reset();
+        m_WorldShadowPipeline.reset();
         for ( auto& pipeline : m_RaymarchPipelines )
             pipeline.reset();
         m_TemporalPipeline.reset();
@@ -115,6 +122,8 @@ namespace Desert::Graphic::System
         m_ProfileMap.reset();
         m_ProfileLut.reset();
         m_CloudShadowMap.reset();
+        m_WorldShadowMap.reset();
+        m_WorldShadow = CloudWorldShadowInput{};
         m_ScatterImage.reset();
         m_DepthGuideImage.reset();
         m_HistoryImages[0].reset();
@@ -161,9 +170,10 @@ namespace Desert::Graphic::System
             return pipeline;
         };
 
-        m_WeatherPipeline  = makeCompute( kWeatherShaderName, {}, kWeatherShaderName );
-        m_ShadowPipeline   = makeCompute( kShadowShaderName, {}, kShadowShaderName );
-        m_TemporalPipeline = makeCompute( kTemporalShaderName, {}, kTemporalShaderName );
+        m_WeatherPipeline     = makeCompute( kWeatherShaderName, {}, kWeatherShaderName );
+        m_ShadowPipeline      = makeCompute( kShadowShaderName, {}, kShadowShaderName );
+        m_WorldShadowPipeline = makeCompute( kWorldShadowShaderName, {}, kWorldShadowShaderName );
+        m_TemporalPipeline    = makeCompute( kTemporalShaderName, {}, kTemporalShaderName );
 
         // One raymarch pipeline per layer count. They share the shader, the SPIR-V and the cache entry;
         // what the specialization constant changes is which of the two segment loops survives compilation.
@@ -232,6 +242,57 @@ namespace Desert::Graphic::System
     {
         m_Layers           = layers;
         m_VolumePlacements = volumes;
+    }
+
+    void VolumetricCloudRenderer::SetWorldShadowRequest( bool cast, float strength )
+    {
+        // A strength of zero is the same statement as the toggle being off — the shader's own OFF path is
+        // `strength <= 0` and nothing else — so the two are collapsed here, once, rather than left for
+        // five consumers to each decide about.
+        m_WorldShadowStrength  = glm::clamp( strength, 0.0f, 1.0f );
+        m_WorldShadowRequested = cast && m_WorldShadowStrength > 0.0f;
+    }
+
+    bool VolumetricCloudRenderer::EnsureWorldShadowMap()
+    {
+        if ( m_WorldShadowMap )
+            return true;
+        if ( m_WorldShadowFailed || !m_WorldShadowPipeline )
+            return false;
+
+        const Core::Formats::Image2DSpecification spec{
+             .Tag        = "CloudWorldShadowMap",
+             .Width      = kCloudWorldShadowMapSize,
+             .Height     = kCloudWorldShadowMapSize,
+             .Format     = Core::Formats::ImageFormat::RGBA16F,
+             .Mips       = 1u,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
+        };
+
+        m_WorldShadowMap = Image2D::Create( spec, nullptr );
+        if ( !m_WorldShadowMap )
+        {
+            // Not fatal to the frame: every consumer's shader reads a strength of 0 and returns full sun,
+            // which is exactly the picture the scene had before the light asked for cloud shadows. Said
+            // once, with its numbers, rather than leaving an artist to wonder why the toggle does nothing.
+            LOG_ERROR(
+                 "[Clouds] The {}x{} RGBA16F world cloud-shadow map ({:.2f} MiB) could not be "
+                 "created; Cast Cloud Shadows has no effect for this view.",
+                 kCloudWorldShadowMapSize, kCloudWorldShadowMapSize,
+                 BytesToMiB( Core::Formats::CalculateImageSize( kCloudWorldShadowMapSize, kCloudWorldShadowMapSize,
+                                                                Core::Formats::ImageFormat::RGBA16F ) ) );
+            m_WorldShadowFailed = true;
+            return false;
+        }
+
+        LOG_INFO(
+             "[Clouds] World cloud-shadow map {}x{} RGBA16F ({:.2f} MiB) allocated — the deck now "
+             "shadows terrain, meshes and grass.",
+             kCloudWorldShadowMapSize, kCloudWorldShadowMapSize,
+             BytesToMiB( Core::Formats::CalculateImageSize( kCloudWorldShadowMapSize, kCloudWorldShadowMapSize,
+                                                            Core::Formats::ImageFormat::RGBA16F ) ) );
+        return true;
     }
 
     void VolumetricCloudRenderer::UpdateVolumeInstances()
@@ -760,6 +821,50 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndWrite( m_CloudShadowMap.get() );
     }
 
+    void VolumetricCloudRenderer::DispatchWorldShadowMap( const CloudNoiseSet& noise )
+    {
+        DESERT_PROFILE_SCOPE( "Clouds: WorldShadowMap" );
+
+        const auto* camera = m_SceneRenderer->GetMainCamera();
+
+        // ONE map for the whole sky, so it needs ONE extent, and it takes the PRIMARY (lowest) layer's.
+        // The deck nearest the ground is the one whose shadows the ground actually shows; giving the map
+        // the largest extent in the scene instead would let a cirrus sheet with a 200 km reach spend the
+        // deck's texels on air. Layers above it are still marched — they are simply clipped to the same
+        // footprint, which is the footprint anything on the ground can see a shadow inside of anyway.
+        const float extent = CloudShadowExtentOf( m_Layers.Primary() );
+
+        CloudWorldShadowPush push{};
+        push.CentreExtent = glm::vec4( camera->GetPosition(), extent );
+
+        auto& renderer = Renderer::GetInstance();
+
+        renderer.ComputeImageBeginWrite( m_WorldShadowMap.get() );
+        m_WorldShadowPipeline->SetOutput( kCloudWorldShadowOutputBinding, m_WorldShadowMap.get(), 0 );
+        m_WorldShadowPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
+        m_WorldShadowPipeline->SetInput( kCloudShapeNoiseBinding, noise.ShapeNoise.get() );
+        m_WorldShadowPipeline->SetInput( kCloudDetailNoiseBinding, noise.DetailNoise.get() );
+        m_WorldShadowPipeline->SetInput( kCloudCurlNoiseBinding, noise.CurlNoise.get() );
+        m_WorldShadowPipeline->SetInput( kCloudWeatherMapBinding, m_WeatherMap.get() );
+        m_WorldShadowPipeline->SetInput( kCloudProfileMapBinding, m_ProfileMap.get() );
+        m_WorldShadowPipeline->SetInput( kCloudProfileLutBinding, m_ProfileLut.get() );
+        BindHeroVolumes( m_WorldShadowPipeline.get() );
+        m_WorldShadowPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
+
+        renderer.DispatchComputeInFrame( m_WorldShadowPipeline.get(), GroupCount( kCloudWorldShadowMapSize ),
+                                         GroupCount( kCloudWorldShadowMapSize ), 1 );
+        renderer.ComputeImageEndWrite( m_WorldShadowMap.get() );
+
+        // PUBLISHED WITH THE FRAME IT WAS TRACED IN. The centre, the sun and the extent travel with the
+        // image rather than being re-derived by each consumer from the camera and the light — the map is
+        // a projection, and a consumer projecting through a different frame would put every shadow on the
+        // ground somewhere other than under the cloud that cast it.
+        m_WorldShadow.Map          = m_WorldShadowMap.get();
+        m_WorldShadow.CentreExtent = push.CentreExtent;
+        m_WorldShadow.SunStrength =
+             glm::vec4( m_SceneRenderer->GetAtmosphere().SunDirection, m_WorldShadowStrength );
+    }
+
     void VolumetricCloudRenderer::DispatchRaymarch( const CloudNoiseSet& noise, Image2D* depthImage,
                                                     bool checkerboard )
     {
@@ -890,12 +995,37 @@ namespace Desert::Graphic::System
         m_HistoryFilled          = true;
     }
 
-    void VolumetricCloudRenderer::ExecuteInFrame()
+    void VolumetricCloudRenderer::PrepareInFrame()
     {
-        DESERT_PROFILE_SCOPE( "Clouds: ExecuteInFrame" );
+        DESERT_PROFILE_SCOPE( "Clouds: PrepareInFrame" );
 
-        m_HasFrameResult  = false;
-        m_CompositeSource = CloudCompositeSource::Raymarch;
+        // Stated fresh every frame, before anything can fail: a light that stopped asking for world
+        // shadows, a scene whose cloud layer was deleted, or a map that could not be allocated must all
+        // leave the consumers reading strength 0 — and they read THIS.
+        m_WorldShadow = CloudWorldShadowInput{};
+
+        // THE WHOLE COST OF THE FEATURE IS BEHIND THIS LINE. With no light asking for world shadows
+        // nothing is prepared here at all: the frame's hero-cloud diff, parameter upload and weather bake
+        // all still happen exactly once, in ExecuteInFrame, exactly as they did before this pass existed.
+        if ( !m_WorldShadowRequested )
+            return;
+
+        const FramePreparation prep = PrepareFrame();
+        if ( !prep.Ready )
+            return;
+
+        if ( !EnsureWorldShadowMap() )
+            return;
+
+        // S1c. Dispatched HERE, before the render graph records, and not in the cloud stage after it:
+        // the terrain draws inside that graph and the deferred lighting pass runs immediately after it,
+        // so a map traced in the cloud stage would be a map they could only read one frame late.
+        DispatchWorldShadowMap( *prep.Noise );
+    }
+
+    VolumetricCloudRenderer::FramePreparation VolumetricCloudRenderer::PrepareFrame()
+    {
+        FramePreparation prep;
 
         // THE HERO CLOUDS, before every early-out below and not after them. Two reasons, and both are
         // about giving memory back: the union happens INSIDE the march, so a layer that is not marching
@@ -909,14 +1039,14 @@ namespace Desert::Graphic::System
 
         if ( m_Layers.Empty() || !m_WeatherPipeline || !RaymarchPipelineFor( m_Layers.Count ) ||
              !m_TemporalPipeline || !m_ParamsBuffer )
-            return;
+            return prep;
 
         // Checked here rather than inside the dispatches: without a camera there is no frame, and letting
         // each stage discover that separately is how m_HasFrameResult ends up true for a frame in which
         // nothing was dispatched, leaving the composite to magnify whatever was in the target before.
         const auto* camera = m_SceneRenderer->GetMainCamera();
         if ( !camera )
-            return;
+            return prep;
 
         const AtmosphereEnv& atmosphere = m_SceneRenderer->GetAtmosphere();
         if ( !atmosphere.Valid || !atmosphere.ParamsBuffer )
@@ -930,7 +1060,7 @@ namespace Desert::Graphic::System
                           "Atmosphere component to light it; the cloud layer is not drawn." );
                 m_AtmosphereWarned = true;
             }
-            return;
+            return prep;
         }
         m_AtmosphereWarned = false;
 
@@ -953,16 +1083,16 @@ namespace Desert::Graphic::System
                           primary.ShapeSeed, primary.DetailSeed );
                 m_NoiseWarned = true;
             }
-            return;
+            return prep;
         }
         m_NoiseWarned = false;
 
         const auto target = m_TargetFramebuffer.lock();
         if ( !target || target->GetDepthAttachmentCount() == 0 )
-            return;
+            return prep;
 
         if ( !EnsureResources( target->GetFramebufferWidth(), target->GetFramebufferHeight() ) )
-            return;
+            return prep;
 
         const CloudGpuPayload payload = PackCloudParams( m_Layers, atmosphere, m_SceneRenderer->GetWind(),
                                                          m_SceneRenderer->GetWind().Time, m_VolumeCounts );
@@ -984,6 +1114,27 @@ namespace Desert::Graphic::System
             m_WeatherValid      = true;
         }
 
+        prep.Noise = noise;
+        prep.Ready = true;
+        return prep;
+    }
+
+    void VolumetricCloudRenderer::ExecuteInFrame()
+    {
+        DESERT_PROFILE_SCOPE( "Clouds: ExecuteInFrame" );
+
+        m_HasFrameResult  = false;
+        m_CompositeSource = CloudCompositeSource::Raymarch;
+
+        // Idempotent, and already run this frame when a light asked for world shadows — see the note on
+        // FramePreparation. Calling it here unconditionally is what keeps the march's own preconditions in
+        // one place instead of two that could drift apart.
+        const FramePreparation prep = PrepareFrame();
+        if ( !prep.Ready )
+            return;
+
+        const ECS::VolumetricCloudData& primary = m_Layers.Primary();
+
         // S1b. The shadow map follows the weather map and precedes the march that reads it. Rebuilt
         // every frame: it is centred on the camera and parameterised on the sun, and both move.
         // Any layer asking for the map is enough to run the pass: it fills every live slice in one
@@ -997,7 +1148,7 @@ namespace Desert::Graphic::System
         }
 
         if ( m_CloudShadowMap && m_ShadowPipeline && m_ShadowSlices > 0 )
-            DispatchShadowMap( *noise );
+            DispatchShadowMap( *prep.Noise );
 
         // S3's history is decided BEFORE S2 runs: at Full resolution the march visits only half the
         // pixels each frame (the checkerboard), and it may do that only when the resolve that fills in
@@ -1011,8 +1162,14 @@ namespace Desert::Graphic::System
         const bool checkerboard =
              CloudCheckerboardActive( primary.ResolutionScale, primary.TemporalMode, historyReady );
 
-        // S2.
-        DispatchRaymarch( *noise, target->GetDepthAttachmentImage().get(), checkerboard );
+        // S2. The target is re-locked here rather than carried out of PrepareFrame: a weak_ptr's lock is
+        // the statement that the framebuffer is still alive, and a statement made in another function is
+        // a statement about another moment.
+        const auto target = m_TargetFramebuffer.lock();
+        if ( !target || target->GetDepthAttachmentCount() == 0 )
+            return;
+
+        DispatchRaymarch( *prep.Noise, target->GetDepthAttachmentImage().get(), checkerboard );
 
         // S3. Not a branch inside the resolve shader — a stage that either happens or does not. With
         // Temporal Mode = Off nothing is dispatched, no history is held, and the composite is pointed at

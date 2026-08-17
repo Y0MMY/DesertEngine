@@ -293,6 +293,18 @@ Shader "Terrain"
         // unassigned => white fallback (Manual layers show everywhere until painted).
         Uniform(5) sampler2D u_SplatMap;
 
+        // CLOUD SHADOWS ON THE WORLD. Sampled PER PIXEL and not per vertex or per patch: the terrain is a
+        // tessellated grid whose control points sit tens of metres apart at this size, and a cloud shadow
+        // edge interpolated across one of those cells is a straight line with visible corners on it. The
+        // fetch is one bilinear tap on a 512^2 map — the same cost class as the three splat layers above.
+        Uniform(6) sampler2D u_CloudWorldShadowMap;
+        Uniform(7) CloudWorldShadowUB
+        {
+            vec4 u_CloudWorldShadowCentre; // xyz = the world point the map was traced around, w = extent
+            vec4 u_CloudWorldShadowSun;    // xyz = TOWARD the sun (normalized), w = on-surface strength
+        };
+        #include <Common/CloudWorldShadowSample.glslh>
+
         // Triplanar sample: project onto the three world planes and blend by the (squared) normal so steep faces
         // don't stretch. scale = tiles per world unit.
         vec3 Triplanar( sampler2D tex, vec3 wpos, vec3 n, float scale )
@@ -368,6 +380,12 @@ Shader "Terrain"
             vec3 H      = normalize( L + V );
 
             float ndl = max( dot( N, L ), 0.0 );
+
+            // The cloud deck between this patch of ground and the sun (UE's CloudShadowOnSurfaceStrength).
+            // It multiplies the SUN and leaves the hemisphere ambient alone, which is what makes ground
+            // under a cloud read as shaded rather than as black: the sky above it is still lit.
+            float cloudShadow = CloudWorldShadowSunFactor( v_WorldPos );
+            ndl *= cloudShadow;
 
             // Soft sky/ground ambient (hemisphere): brighter from above, cooler/darker from below.
             vec3  skyCol  = vec3( 0.45, 0.52, 0.62 );

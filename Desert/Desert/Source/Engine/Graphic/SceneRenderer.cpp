@@ -491,6 +491,23 @@ namespace Desert::Graphic
             UNIQUE_GET_AS( System::ParticleRenderer, m_RenderSystems["ParticleSystem"] )->SimulateInFrame();
         }
 
+        // CLOUD SHADOWS ON THE WORLD: the sun-space map the terrain, the lit meshes and the deferred
+        // lighting pass read. HERE, and not in the cloud stage far below, because every one of those
+        // consumers draws inside the render graph that records next or in the composite immediately after
+        // it — a map traced after them could only be read a frame late. It needs no scene depth, which is
+        // the only thing that forces the rest of the cloud pipeline to wait.
+        //
+        // It costs nothing at all unless a directional light has Cast Cloud Shadows on: the request is
+        // pushed every frame from the atmosphere sun's own fields, and the pass returns on a false.
+        {
+            DESERT_PROFILE_SCOPE( "Clouds: WorldShadow" );
+            const auto& clouds =
+                 UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] );
+            clouds->SetWorldShadowRequest( m_SunLightFx.CastCloudShadows,
+                                           m_SunLightFx.CloudShadowOnSurfaceStrength );
+            clouds->PrepareInFrame();
+        }
+
         {
             DESERT_PROFILE_SCOPE( "ExecuteRenderGraph" );
             ExecuteRenderGraph();
@@ -591,7 +608,7 @@ namespace Desert::Graphic
             UNIQUE_GET_AS( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
                  ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
                             GetPointLights(), GetSpotLights(), shadow, aoImage, giIntensity, m_EnableSSAO,
-                            static_cast<int>( m_GIMode ), giImage );
+                            static_cast<int>( m_GIMode ), giImage, GetCloudWorldShadow() );
 
             // Custom-shader (generic) meshes have no G-buffer variant — draw them forward OVER
             // the deferred composite (before the glass snapshot so glass refracts them too).
@@ -1111,6 +1128,19 @@ namespace Desert::Graphic
     const AtmosphereEnv& SceneRenderer::GetAtmosphere() const
     {
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems.at( "SkyboxSystem" ) )->GetAtmosphere();
+    }
+
+    const CloudWorldShadowInput& SceneRenderer::GetCloudWorldShadow() const
+    {
+        // Looked up rather than `at`-ed, and the miss answers with an EMPTY input: the cloud system's
+        // registration is non-fatal (see Init), so a view whose cloud renderer failed to come up must
+        // still shade its meshes — and an empty input is a transmittance of exactly 1 in every consumer.
+        // Same shape as GetBackdropBlurImage, for the same reason.
+        static const CloudWorldShadowInput kNone;
+        const auto                         it = m_RenderSystems.find( "VolumetricCloudSystem" );
+        if ( it == m_RenderSystems.end() )
+            return kNone;
+        return UNIQUE_GET_AS( System::VolumetricCloudRenderer, it->second )->GetWorldShadow();
     }
 
     const std::optional<Environment>& SceneRenderer::GetEnvironment()
