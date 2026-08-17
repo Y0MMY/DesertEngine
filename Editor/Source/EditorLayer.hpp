@@ -123,6 +123,12 @@ namespace Desert::Editor
         // Force re-cook of Cooked/ from sources, re-register cooked assets, refresh the asset panel.
         void RebuildCookedAssets();
 
+        // Read the resolved viewport back off the GPU and write it to @p path as a PNG, creating the
+        // parent directory if it is missing. The single implementation behind the `--shot` still, every
+        // frame of a `--shot-sequence`, and the F9 dump. False on any failure, always with the reason
+        // logged and the numbers in it.
+        bool WriteViewportPng( const std::string& path );
+
     private:
         enum class EditorState
         {

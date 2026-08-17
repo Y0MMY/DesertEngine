@@ -293,6 +293,18 @@ namespace Desert::Editor
         // Screenshot mode names its own scene; it is the whole point of the flag.
         if ( const auto& shot = ShotOptions::Get(); !shot.Scene.empty() )
         {
+            // In CAPTURE mode a `--scene` that is not there is fatal, not something to carry on past.
+            // The scene loader already logs and leaves the current scene standing, which is right for an
+            // editor and wrong for a capture: the run would go on to write PNGs named after the scene
+            // that was asked for, holding the picture of a different one. That is worse than no evidence,
+            // because it looks exactly like evidence. Interactive `--scene` keeps the old behaviour.
+            if ( shot.Active() && !std::filesystem::exists( shot.Scene ) )
+            {
+                LOG_ERROR( "[Shot] --scene '{}' does not exist (looked from '{}'); refusing to capture a "
+                           "different scene under that name.",
+                           shot.Scene, std::filesystem::current_path().string() );
+                std::exit( 2 );
+            }
             LoadScene( Common::Filepath( shot.Scene ) );
         }
         else if ( ProjectContext::HasProject() )
@@ -600,6 +612,34 @@ namespace Desert::Editor
         if ( auto* videoService = Runtime::ResourceRegistry::GetVideoService() )
             videoService->UpdateAll();
 
+        // Screenshot mode, FIRST HALF: place the camera for the frame that is about to be rendered.
+        //
+        // Before the render and not after it, because the capture below reads back whatever the render
+        // produced: with the placement after it, the image written as frame N was rendered from the pose
+        // of frame N-2, and on a MOVING path that is not a bookkeeping detail — a 120-degree pan over 90
+        // frames puts the last captured frame 1.35 degrees, about 28 pixels, short of the endpoint the
+        // command line named. Frame N is rendered from pose N, and the final frame lands exactly on
+        // `--camera-to` / `--look-to`.
+        //
+        // With `--camera-to` / `--look-to` the pose is re-placed EVERY frame, walking the path across
+        // exactly the warm-up frames. Without them `HasMotion()` is false, the placement happens once at
+        // parameter 0, and the pose it computes is (Position, Forward) to the bit.
+        if ( auto& shot = ShotOptions::Get(); shot.Active() && shot.HasCamera && !m_SceneLoadRequested &&
+                                              !StartupLoading() && ( !m_ShotCameraPlaced || shot.HasMotion() ) )
+        {
+            if ( auto* cam = dynamic_cast<::Desert::Core::EditorCamera*>( m_MainScene->GetActiveCamera().get() ) )
+            {
+                const ShotCamera view    = shot.CameraAt( shot.Parameter( m_ShotFrame ) );
+                const glm::vec3  forward = glm::normalize( view.Forward );
+                cam->SnapToDirection( forward );
+                // Focus keeps the orientation and re-frames, so aiming at a point one framing distance
+                // ahead lands the camera exactly on the position asked for.
+                cam->Focus( view.Position + forward * 500.0f, 500.0f );
+                cam->SetInputEnabled( false ); // nothing may nudge it between here and the capture
+            }
+            m_ShotCameraPlaced = true;
+        }
+
         // Multi-scene editing: drive EVERY open document each frame so all viewports render live. The active
         // one is m_MainScene (rebound on viewport focus); RigBuilder / F9 below act on it only. The outline
         // aid + Begin/RegistryRender/OnUpdate/End are folded into UpdateSceneFrame (see below), applied per
@@ -615,44 +655,30 @@ namespace Desert::Editor
         if ( m_MainScene && m_AssetManager )
             RigBuilder::ProcessPending( *m_MainScene, *m_AssetManager );
 
-        // Screenshot mode: point the camera once the scene is up, let the temporal stage settle, then write
-        // the viewport out and leave. The frame count is not decoration — the clouds accumulate over about
-        // ten frames, so an early shot is a picture of the dither rather than of the sky.
+        // Screenshot mode, SECOND HALF: the frame just rendered is the frame that gets written. The frame
+        // count is not decoration — the clouds accumulate over about ten frames, so an early shot is a
+        // picture of the dither rather than of the sky.
         if ( auto& shot = ShotOptions::Get(); shot.Active() && !m_SceneLoadRequested && !StartupLoading() )
         {
-            if ( shot.HasCamera && !m_ShotCameraPlaced )
+            ++m_ShotFrame;
+
+            // The sequence counts RENDERED frames, so `frame_00001` is the first frame rendered, from path
+            // parameter 0, and `frame_000NN` at --shot-frames NN is the last, from parameter 1. When
+            // `--shot-every` divides `--shot-frames` the last file of the sequence and the `--shot` PNG are
+            // the same image — a cheap invariant to check a capture against.
+            if ( !shot.Sequence.empty() && ( m_ShotFrame % shot.SequenceEvery ) == 0 )
             {
-                if ( auto* cam =
-                          dynamic_cast<::Desert::Core::EditorCamera*>( m_MainScene->GetActiveCamera().get() ) )
-                {
-                    const glm::vec3 forward = glm::normalize( shot.Forward );
-                    cam->SnapToDirection( forward );
-                    // Focus keeps the orientation and re-frames, so aiming at a point one framing distance
-                    // ahead lands the camera exactly on the position asked for.
-                    cam->Focus( shot.Position + forward * 500.0f, 500.0f );
-                    cam->SetInputEnabled( false ); // nothing may nudge it between here and the capture
-                }
-                m_ShotCameraPlaced = true;
+                char name[64];
+                std::snprintf( name, sizeof( name ), "/frame_%05d.png", m_ShotFrame );
+                const std::string path = shot.Sequence + name;
+                if ( !WriteViewportPng( path ) )
+                    LOG_ERROR( "[Shot] sequence frame {} not written to '{}'", m_ShotFrame, path );
             }
 
-            if ( ++m_ShotFrame >= shot.Frames )
+            if ( m_ShotFrame >= shot.Frames )
             {
-                Graphic::Renderer::GetInstance().WaitDeviceIdle();
-                bool written = false;
-                if ( auto img = m_MainScene->GetFinalImage() )
-                {
-                    const std::vector<uint8_t> px = img->ReadPixelsRGBA8();
-                    const uint32_t             w = img->GetWidth(), h = img->GetHeight();
-                    if ( px.size() == static_cast<size_t>( w ) * h * 4 )
-                    {
-                        stbi_flip_vertically_on_write( 0 );
-                        written = stbi_write_png( shot.Output.c_str(), w, h, 4, px.data(), w * 4 ) != 0;
-                        LOG_INFO( "[Shot] {} -> {} ({}x{})", written ? "wrote" : "FAILED to write", shot.Output, w,
-                                  h );
-                    }
-                }
-                if ( !written )
-                    LOG_ERROR( "[Shot] no final image to capture" );
+                if ( !shot.Output.empty() && !WriteViewportPng( shot.Output ) )
+                    LOG_ERROR( "[Shot] the final frame was not captured to '{}'", shot.Output );
                 const_cast<Engine::Application*>( m_Application )->Close();
             }
         }
@@ -665,23 +691,64 @@ namespace Desert::Editor
             const bool  f9       = Input::Keyboard::IsKeyPressed( Common::KeyCode::F9 );
             if ( f9 && !s_f9Prev )
             {
-                Graphic::Renderer::GetInstance().WaitDeviceIdle();
-                if ( auto img = m_MainScene->GetFinalImage() )
-                {
-                    const std::vector<uint8_t> px = img->ReadPixelsRGBA8();
-                    const uint32_t             w = img->GetWidth(), h = img->GetHeight();
-                    if ( px.size() == static_cast<size_t>( w ) * h * 4 )
-                    {
-                        stbi_flip_vertically_on_write( 0 );
-                        stbi_write_png( "F:/DesertEngine/frame_dump.png", w, h, 4, px.data(), w * 4 );
-                        LOG_INFO( "[Dump] final frame -> frame_dump.png ({}x{})", w, h );
-                    }
-                }
+                if ( !WriteViewportPng( "F:/DesertEngine/frame_dump.png" ) )
+                    LOG_ERROR( "[Dump] final frame could not be written" );
             }
             s_f9Prev = f9;
         }
 
         return BOOLSUCCESS;
+    }
+
+    // Read the resolved viewport back off the GPU and write it as a PNG. The one place that does this: the
+    // still capture, every frame of a `--shot-sequence`, and the F9 dump all go through here, so a capture
+    // cannot quietly differ from a dump in flip, format or the device-idle wait that makes the readback
+    // legal at all.
+    bool EditorLayer::WriteViewportPng( const std::string& path )
+    {
+        if ( !m_MainScene )
+        {
+            LOG_ERROR( "[Shot] no scene to capture ('{}')", path );
+            return false;
+        }
+
+        // The directory of a sequence is named on the command line and usually does not exist yet. Create
+        // it rather than letting stb fail on a path that is only missing a folder.
+        const std::filesystem::path file = std::filesystem::path( path );
+        if ( file.has_parent_path() && !file.parent_path().empty() )
+        {
+            std::error_code ec;
+            std::filesystem::create_directories( file.parent_path(), ec );
+            if ( ec && !std::filesystem::exists( file.parent_path() ) )
+            {
+                LOG_ERROR( "[Shot] could not create '{}': {}", file.parent_path().string(), ec.message() );
+                return false;
+            }
+        }
+
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+
+        auto img = m_MainScene->GetFinalImage();
+        if ( !img )
+        {
+            LOG_ERROR( "[Shot] scene has no final image ('{}')", path );
+            return false;
+        }
+
+        const std::vector<uint8_t> px = img->ReadPixelsRGBA8();
+        const uint32_t             w  = img->GetWidth();
+        const uint32_t             h  = img->GetHeight();
+        if ( px.size() != static_cast<size_t>( w ) * h * 4 )
+        {
+            LOG_ERROR( "[Shot] readback is {} bytes, expected {}x{}x4 = {}", px.size(), w, h,
+                       static_cast<size_t>( w ) * h * 4 );
+            return false;
+        }
+
+        stbi_flip_vertically_on_write( 0 );
+        const bool written = stbi_write_png( path.c_str(), w, h, 4, px.data(), w * 4 ) != 0;
+        LOG_INFO( "[Shot] {} -> {} ({}x{})", written ? "wrote" : "FAILED to write", path, w, h );
+        return written;
     }
 
     void EditorLayer::BuildSceneSystems( Desert::Core::Scene& scene )
