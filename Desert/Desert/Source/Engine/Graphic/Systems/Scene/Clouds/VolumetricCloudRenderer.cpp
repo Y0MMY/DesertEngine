@@ -1,5 +1,6 @@
 #include "VolumetricCloudRenderer.hpp"
 
+#include <Engine/Graphic/Clouds/CloudMarchScale.hpp>
 #include <Engine/Graphic/Clouds/CloudNoiseRules.hpp>
 #include <Engine/Graphic/Clouds/CloudNoiseVolumes.hpp>
 #include <Engine/Graphic/Clouds/CloudWeatherScale.hpp>
@@ -200,11 +201,10 @@ namespace Desert::Graphic::System
         return m_WeatherPipeline && m_RaymarchPipeline && m_TemporalPipeline && m_CompositePipeline;
     }
 
-    void VolumetricCloudRenderer::SetCloudSettings( bool present, const ECS::VolumetricCloudData& data,
+    void VolumetricCloudRenderer::SetCloudSettings( const CloudLayerSet&         layers,
                                                     const CloudVolumePlacements& volumes )
     {
-        m_Present          = present;
-        m_Data             = data;
+        m_Layers           = layers;
         m_VolumePlacements = volumes;
     }
 
@@ -290,24 +290,27 @@ namespace Desert::Graphic::System
         if ( m_ResourcesFailed )
             return false;
 
+        // ONE SLICE PER CLOUD LAYER, always allocated at the full depth whatever the scene holds: adding
+        // a second layer must not reallocate a 2 MiB image mid-session, and a slice nobody marches costs
+        // one megabyte that is never fetched.
         if ( !m_WeatherMap )
         {
-            const Core::Formats::Image2DSpecification spec{
+            const Core::Formats::Image3DSpecification spec{
                  .Tag        = "CloudWeatherMap",
                  .Width      = kWeatherMapSize,
                  .Height     = kWeatherMapSize,
+                 .Depth      = kCloudMaxLayers,
                  .Format     = Core::Formats::ImageFormat::RGBA8F,
-                 .Mips       = 1u,
-                 .Usage      = Core::Formats::Image2DUsage::Image2D,
                  .Properties = Core::Formats::Storage | Core::Formats::Sample,
             };
-            m_WeatherMap = Image2D::Create( spec, nullptr );
+            m_WeatherMap = Image3D::Create( spec );
             if ( !m_WeatherMap )
             {
-                LOG_ERROR( "[Clouds] The {}x{} weather map ({:.2f} MiB) could not be created; the cloud "
+                LOG_ERROR( "[Clouds] The {}x{}x{} weather map ({:.2f} MiB) could not be created; the cloud "
                            "layer will not render for this view.",
-                           kWeatherMapSize, kWeatherMapSize,
+                           kWeatherMapSize, kWeatherMapSize, kCloudMaxLayers,
                            BytesToMiB( Core::Formats::CalculateImageSize( kWeatherMapSize, kWeatherMapSize,
+                                                                          kCloudMaxLayers,
                                                                           Core::Formats::ImageFormat::RGBA8F ) ) );
                 m_ResourcesFailed = true;
                 return false;
@@ -320,22 +323,22 @@ namespace Desert::Graphic::System
         // one pass writes both.
         if ( !m_ProfileMap )
         {
-            const Core::Formats::Image2DSpecification spec{
+            const Core::Formats::Image3DSpecification spec{
                  .Tag        = "CloudProfileMap",
                  .Width      = kWeatherMapSize,
                  .Height     = kWeatherMapSize,
+                 .Depth      = kCloudMaxLayers,
                  .Format     = Core::Formats::ImageFormat::RGBA8F,
-                 .Mips       = 1u,
-                 .Usage      = Core::Formats::Image2DUsage::Image2D,
                  .Properties = Core::Formats::Storage | Core::Formats::Sample,
             };
-            m_ProfileMap = Image2D::Create( spec, nullptr );
+            m_ProfileMap = Image3D::Create( spec );
             if ( !m_ProfileMap )
             {
-                LOG_ERROR( "[Clouds] The {}x{} profile map ({:.2f} MiB) could not be created; the cloud "
+                LOG_ERROR( "[Clouds] The {}x{}x{} profile map ({:.2f} MiB) could not be created; the cloud "
                            "layer will not render for this view.",
-                           kWeatherMapSize, kWeatherMapSize,
+                           kWeatherMapSize, kWeatherMapSize, kCloudMaxLayers,
                            BytesToMiB( Core::Formats::CalculateImageSize( kWeatherMapSize, kWeatherMapSize,
+                                                                          kCloudMaxLayers,
                                                                           Core::Formats::ImageFormat::RGBA8F ) ) );
                 m_ResourcesFailed = true;
                 return false;
@@ -348,31 +351,30 @@ namespace Desert::Graphic::System
 
         if ( !m_CloudShadowMap )
         {
-            const Core::Formats::Image2DSpecification spec{
+            const Core::Formats::Image3DSpecification spec{
                  .Tag        = "CloudShadowMap",
                  .Width      = kCloudShadowMapSize,
                  .Height     = kCloudShadowMapSize,
+                 .Depth      = kCloudMaxLayers,
                  .Format     = Core::Formats::ImageFormat::RGBA16F,
-                 .Mips       = 1u,
-                 .Usage      = Core::Formats::Image2DUsage::Image2D,
                  .Properties = Core::Formats::Storage | Core::Formats::Sample,
             };
-            m_CloudShadowMap = Image2D::Create( spec, nullptr );
+            m_CloudShadowMap = Image3D::Create( spec );
             if ( !m_CloudShadowMap )
             {
                 // Not fatal: the march falls back to the cone for every sample, which is what it did
                 // before this map existed. Say so once rather than rendering slowly and silently.
-                LOG_WARN( "[Clouds] The {}x{} cloud shadow map could not be created; the raymarch will "
+                LOG_WARN( "[Clouds] The {}x{}x{} cloud shadow map could not be created; the raymarch will "
                           "cone-march every shaded sample instead.",
-                          kCloudShadowMapSize, kCloudShadowMapSize );
+                          kCloudShadowMapSize, kCloudShadowMapSize, kCloudMaxLayers );
             }
         }
 
-        const uint32_t scatterW = CloudScaledExtent( width, m_Data.ResolutionScale );
-        const uint32_t scatterH = CloudScaledExtent( height, m_Data.ResolutionScale );
+        const uint32_t scatterW = CloudScaledExtent( width, m_Layers.Primary().ResolutionScale );
+        const uint32_t scatterH = CloudScaledExtent( height, m_Layers.Primary().ResolutionScale );
 
         if ( m_ScatterImage && m_DepthGuideImage && scatterW == m_ScatterWidth && scatterH == m_ScatterHeight &&
-             m_Data.ResolutionScale == m_ScatterScale )
+             m_Layers.Primary().ResolutionScale == m_ScatterScale )
             return true;
 
         // The old image may still be referenced by descriptors of frames in flight. This is the same
@@ -430,27 +432,27 @@ namespace Desert::Graphic::System
 
         m_ScatterWidth   = scatterW;
         m_ScatterHeight  = scatterH;
-        m_ScatterScale   = m_Data.ResolutionScale;
+        m_ScatterScale   = m_Layers.Primary().ResolutionScale;
         m_HasFrameResult = false;
 
         // The cost is announced, not discovered in a memory graph later. One line per allocation, and
         // an allocation only happens on a resolution or tier change. The total is the same arithmetic
         // CloudScaledImageBytes states and the unit test pins, so the log and the test cannot drift.
         LOG_INFO( "[Clouds] Scatter target {}x{} RGBA16F ({:.2f} MiB) + depth guide RGBA8 ({:.2f} MiB) + "
-                  "weather map {}x{} RGBA8 ({:.2f} MiB) for a {}x{} view. Scaled imagery totals "
+                  "weather map {}x{}x{} RGBA8 ({:.2f} MiB) for a {}x{} view. Scaled imagery totals "
                   "{:.2f} MiB with the temporal history and {:.2f} MiB without it.",
                   scatterW, scatterH,
                   BytesToMiB( Core::Formats::CalculateImageSize( scatterW, scatterH,
                                                                  Core::Formats::ImageFormat::RGBA16F ) ),
                   BytesToMiB( Core::Formats::CalculateImageSize( scatterW, scatterH,
                                                                  Core::Formats::ImageFormat::RGBA8F ) ),
-                  kWeatherMapSize, kWeatherMapSize,
-                  BytesToMiB( Core::Formats::CalculateImageSize( kWeatherMapSize, kWeatherMapSize,
+                  kWeatherMapSize, kWeatherMapSize, kCloudMaxLayers,
+                  BytesToMiB( Core::Formats::CalculateImageSize( kWeatherMapSize, kWeatherMapSize, kCloudMaxLayers,
                                                                  Core::Formats::ImageFormat::RGBA8F ) ),
                   width, height,
-                  BytesToMiB( CloudScaledImageBytes( width, height, m_Data.ResolutionScale,
+                  BytesToMiB( CloudScaledImageBytes( width, height, m_Layers.Primary().ResolutionScale,
                                                      ECS::CloudTemporalMode::Reprojection ) ),
-                  BytesToMiB( CloudScaledImageBytes( width, height, m_Data.ResolutionScale,
+                  BytesToMiB( CloudScaledImageBytes( width, height, m_Layers.Primary().ResolutionScale,
                                                      ECS::CloudTemporalMode::Off ) ) );
 
         return true;
@@ -542,8 +544,14 @@ namespace Desert::Graphic::System
 
     bool VolumetricCloudRenderer::EnsureProfileLut()
     {
-        const ProfileFingerprint wanted = ProfileFingerprintOf( m_Data );
-        if ( m_ProfileLut && wanted == m_ProfileLutBaked )
+        // ONE SLICE PER LAYER. The nine curve vectors the table is baked from are per-layer fields, so a
+        // deck's cumulus family and a sheet's flat one are two different tables; concatenating them into
+        // one volume keeps it one sampler and one fetch.
+        std::array<ProfileFingerprint, kCloudMaxLayers> wanted{};
+        for ( uint32_t i = 0; i < m_Layers.Count; ++i )
+            wanted[i] = ProfileFingerprintOf( m_Layers.Layers[i] );
+
+        if ( m_ProfileLut && wanted == m_ProfileLutBaked && m_Layers.Count == m_ProfileLutBakedCount )
             return true;
 
         // The table is a TEXTURE, and the old one may still sit in a descriptor of a frame in flight —
@@ -552,31 +560,46 @@ namespace Desert::Graphic::System
         if ( m_ProfileLut )
             Renderer::GetInstance().WaitDeviceIdle();
 
-        const Core::Formats::Image2DSpecification spec{
+        // Slice-major, which is how a 3D image is uploaded: layer 0's whole 128x6 table, then layer 1's.
+        // A slice with no layer behind it is baked from the default component rather than left at zero —
+        // an all-zero profile is a table that says "no cloud at any height", and if it were ever sampled
+        // the symptom would be an empty sky with nothing to look at.
+        std::vector<unsigned char> texels;
+        texels.reserve( static_cast<std::size_t>( kCloudProfileLutWidth ) * kCloudProfileLutTypes * 4u *
+                        kCloudMaxLayers );
+        for ( uint32_t i = 0; i < kCloudMaxLayers; ++i )
+        {
+            const std::vector<unsigned char> slice =
+                 BuildCloudProfileLut( i < m_Layers.Count ? m_Layers.Layers[i] : ECS::VolumetricCloudData{} );
+            texels.insert( texels.end(), slice.begin(), slice.end() );
+        }
+
+        const Core::Formats::Image3DSpecification spec{
              .Tag        = "CloudProfileLut",
              .Width      = kCloudProfileLutWidth,
              .Height     = kCloudProfileLutTypes,
+             .Depth      = kCloudMaxLayers,
              .Format     = Core::Formats::ImageFormat::RGBA8F,
-             .Mips       = 1u,
-             .Data       = BuildCloudProfileLut( m_Data ),
-             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Data       = std::move( texels ),
              .Properties = Core::Formats::Sample,
         };
 
-        m_ProfileLut = Image2D::Create( spec, nullptr );
+        m_ProfileLut = Image3D::Create( spec );
         if ( !m_ProfileLut )
         {
-            LOG_ERROR( "[Clouds] The {}x{} cloud profile table could not be created; the cloud layer will "
-                       "not render for this view.",
-                       kCloudProfileLutWidth, kCloudProfileLutTypes );
+            LOG_ERROR( "[Clouds] The {}x{}x{} cloud profile table could not be created; the cloud layer "
+                       "will not render for this view.",
+                       kCloudProfileLutWidth, kCloudProfileLutTypes, kCloudMaxLayers );
             m_ResourcesFailed = true;
             return false;
         }
 
-        m_ProfileLutBaked = wanted;
-        LOG_INFO( "[Clouds] Baked the {}x{} cloud profile table: {} authored vertical forms along the "
-                  "Cloud Type axis.",
-                  kCloudProfileLutWidth, kCloudProfileLutTypes, kCloudProfileLutTypes );
+        m_ProfileLutBaked      = wanted;
+        m_ProfileLutBakedCount = m_Layers.Count;
+        LOG_INFO( "[Clouds] Baked the {}x{}x{} cloud profile table: {} authored vertical forms along the "
+                  "Cloud Type axis, for {} cloud layer(s).",
+                  kCloudProfileLutWidth, kCloudProfileLutTypes, kCloudMaxLayers, kCloudProfileLutTypes,
+                  m_Layers.Count );
         return true;
     }
 
@@ -589,18 +612,49 @@ namespace Desert::Graphic::System
         // layer's altitude asks for is not a resource failure and must not be silently corrected — it is
         // a sky that will read as a dense horizon band under empty blue, and the artist gets the numbers
         // and the value that fixes it rather than a mystery. See CloudWeatherScale.hpp.
-        if ( !CloudWeatherTileIsPlausible( m_Data.WeatherTileSize, m_Data.LayerBottomAltitude,
-                                           m_Data.LayerThickness ) )
+        // Checked PER LAYER: the relation is between a tile and the altitude of the layer that tiles the
+        // sky with it, so a deck and a sheet each have their own answer and each can be wrong on its own.
+        for ( uint32_t i = 0; i < m_Layers.Count; ++i )
         {
-            const float wanted = CloudAutoWeatherTileSize( m_Data.LayerBottomAltitude, m_Data.LayerThickness );
-            LOG_WARN( "[Clouds] Weather Tile Size {:.1f} km over a layer at {:.2f}-{:.2f} km: a ground "
-                      "camera sees {:.1f} coverage cells across the sky above 20 degrees, not {:.1f}. "
-                      "The layer's altitude asks for {:.1f} km.",
-                      Common::Units::ToMetres( m_Data.WeatherTileSize ) / 1000.0f,
-                      Common::Units::ToMetres( m_Data.LayerBottomAltitude ) / 1000.0f,
-                      Common::Units::ToMetres( m_Data.LayerBottomAltitude + m_Data.LayerThickness ) / 1000.0f,
-                      kCloudWeatherCellsOverhead * wanted / m_Data.WeatherTileSize, kCloudWeatherCellsOverhead,
+            const ECS::VolumetricCloudData& layer = m_Layers.Layers[i];
+            if ( CloudWeatherTileIsPlausible( layer.WeatherTileSize, layer.LayerBottomAltitude,
+                                              layer.LayerThickness ) )
+                continue;
+
+            const float wanted = CloudAutoWeatherTileSize( layer.LayerBottomAltitude, layer.LayerThickness );
+            LOG_WARN( "[Clouds] Layer {}: Weather Tile Size {:.1f} km over a layer at {:.2f}-{:.2f} km: a "
+                      "ground camera sees {:.1f} coverage cells across the sky above 20 degrees, not "
+                      "{:.1f}. The layer's altitude asks for {:.1f} km.",
+                      i, Common::Units::ToMetres( layer.WeatherTileSize ) / 1000.0f,
+                      Common::Units::ToMetres( layer.LayerBottomAltitude ) / 1000.0f,
+                      Common::Units::ToMetres( layer.LayerBottomAltitude + layer.LayerThickness ) / 1000.0f,
+                      kCloudWeatherCellsOverhead * wanted / layer.WeatherTileSize, kCloudWeatherCellsOverhead,
                       Common::Units::ToMetres( wanted ) / 1000.0f );
+        }
+
+        // And the OTHER scale relation, which a THIN layer walks into: the empty-space search's stride
+        // against the layer's own thickness. Said here, beside the weather tile, because both are
+        // properties of the layer's geometry rather than of the frame, and both are things an artist can
+        // only diagnose from the numbers. See CloudMarchScale.hpp for what it costs to get wrong.
+        for ( uint32_t i = 0; i < m_Layers.Count; ++i )
+        {
+            const ECS::VolumetricCloudData& layer = m_Layers.Layers[i];
+            if ( CloudCoarseStrideIsPlausible( layer.LayerBottomAltitude, layer.LayerThickness, layer.MinStepSize,
+                                               layer.MaxStepSize, layer.StepGrowthRate,
+                                               layer.CoarseStepMultiplier ) )
+                continue;
+
+            const float samples = CloudSearchSamplesAcrossLayer(
+                 layer.LayerBottomAltitude, layer.LayerThickness, layer.MinStepSize, layer.MaxStepSize,
+                 layer.StepGrowthRate, layer.CoarseStepMultiplier );
+            LOG_WARN( "[Clouds] Layer {}: the empty-space search takes {:.1f} samples across a {:.2f} km "
+                      "layer looking straight up, not the {:.1f} it needs. Whether a ray notices this "
+                      "layer at all is then a per-pixel coin toss, which renders as a fixed cross-hatch "
+                      "no temporal average removes. Lower Coarse Step Multiplier ({:.1f}), Step Growth "
+                      "Rate ({:.4f}) or Max Step Size ({:.0f} m).",
+                      i, samples, Common::Units::ToMetres( layer.LayerThickness ) / 1000.0f,
+                      kCloudMinSearchSamplesAcrossLayer, layer.CoarseStepMultiplier, layer.StepGrowthRate,
+                      Common::Units::ToMetres( layer.MaxStepSize ) );
         }
 
         auto& renderer = Renderer::GetInstance();
@@ -610,8 +664,11 @@ namespace Desert::Graphic::System
         m_WeatherPipeline->SetOutput( kCloudWeatherOutputBinding, m_WeatherMap.get(), 0 );
         m_WeatherPipeline->SetOutput( kCloudProfileOutputBinding, m_ProfileMap.get(), 0 );
         m_WeatherPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
+        // ONE dispatch, one workgroup deep per layer: the shader reads its z as the layer index. Only the
+        // live layers are baked — a slice with no layer behind it is never sampled, because the march
+        // builds its plan from u_LayerCount shells.
         renderer.DispatchComputeInFrame( m_WeatherPipeline.get(), GroupCount( kWeatherMapSize ),
-                                         GroupCount( kWeatherMapSize ), 1 );
+                                         GroupCount( kWeatherMapSize ), m_Layers.Count );
         renderer.ComputeImageEndWrite( m_ProfileMap.get() );
         renderer.ComputeImageEndWrite( m_WeatherMap.get() );
     }
@@ -637,11 +694,12 @@ namespace Desert::Graphic::System
 
         const auto* camera = m_SceneRenderer->GetMainCamera();
 
-        // The centre and the extent the march will project with. Pushed from ONE place to both passes in
-        // the same frame: if they ever disagreed, every shadow would land somewhere other than the cloud
-        // that cast it — a coordinate bug wearing a lighting bug's clothes.
+        // The centre the march will project with. The EXTENT is per layer and rides in the parameter
+        // block, which both passes read from the same member — a stronger guarantee than two call sites
+        // agreeing, and if they ever disagreed every shadow would land somewhere other than the cloud
+        // that cast it: a coordinate bug wearing a lighting bug's clothes.
         CloudShadowPush push{};
-        push.Centre = glm::vec4( camera->GetPosition(), CloudShadowExtentOf( m_Data ) );
+        push.Centre = glm::vec4( camera->GetPosition(), 0.0f );
 
         auto& renderer = Renderer::GetInstance();
 
@@ -657,8 +715,19 @@ namespace Desert::Graphic::System
         BindHeroVolumes( m_ShadowPipeline.get() );
         m_ShadowPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
+        // One slice per layer that READS it, and no further. A layer self-shadows with its own mass and
+        // nothing else: the four heights a texel stores are heights inside THAT shell, and a shared map
+        // would have to spend three of them on the empty air between a deck and a sheet. Cross-layer
+        // shadowing — a high sheet dimming the deck under it — is therefore not modelled; for the optical
+        // depths a cirrus sheet actually carries it is a sub-ten-per-cent effect, well inside the ambient
+        // term's own noise.
+        //
+        // The depth stops at the last layer whose own Cloud Shadow Map is on, because this pass is 24
+        // samples of density at every one of 512x512 texels and a slice nobody fetches is that cost for
+        // nothing. The layers below it are still dispatched even if they are off: one dispatch has one
+        // depth, and the alternative is one dispatch per slice.
         renderer.DispatchComputeInFrame( m_ShadowPipeline.get(), GroupCount( kCloudShadowMapSize ),
-                                         GroupCount( kCloudShadowMapSize ), 1 );
+                                         GroupCount( kCloudShadowMapSize ), m_ShadowSlices );
         renderer.ComputeImageEndWrite( m_CloudShadowMap.get() );
     }
 
@@ -792,11 +861,11 @@ namespace Desert::Graphic::System
         // into 32 MiB returned rather than 32 MiB held for a layer that draws nothing. And the atlas image
         // has to exist before either dispatch binds it, which is a statement about ordering that is easier
         // to keep true at the top of the function than in the middle of it.
-        if ( !m_Present || !m_Data.Enabled )
+        if ( m_Layers.Empty() )
             m_VolumePlacements.clear();
         UpdateVolumeInstances();
 
-        if ( !m_Present || !m_Data.Enabled || !m_WeatherPipeline || !m_RaymarchPipeline || !m_TemporalPipeline ||
+        if ( m_Layers.Empty() || !m_WeatherPipeline || !m_RaymarchPipeline || !m_TemporalPipeline ||
              !m_ParamsBuffer )
             return;
 
@@ -823,15 +892,23 @@ namespace Desert::Graphic::System
         }
         m_AtmosphereWarned = false;
 
+        // ONE NOISE SET FOR EVERY LAYER, from the PRIMARY layer's seeds. The three volumes are a shape
+        // VOCABULARY - a Perlin-Worley lattice and a detail field - not weather, and what makes a sheet
+        // look nothing like the deck under it is its own tile sizes, coverage, type curves and erosion,
+        // every one of which is per layer. Leasing a second 20 MiB set per layer to reseed a lattice that
+        // is then sampled at a different scale anyway is a cost with no picture behind it. The upper
+        // layers' Shape Seed and Detail Seed are therefore not read; the Details panel says so.
+        const ECS::VolumetricCloudData& primary = m_Layers.Primary();
+
         const auto* noise =
-             CloudNoiseVolumes::Get().Find( MakeCloudNoiseKey( m_Data.ShapeSeed, m_Data.DetailSeed ) );
+             CloudNoiseVolumes::Get().Find( MakeCloudNoiseKey( primary.ShapeSeed, primary.DetailSeed ) );
         if ( !noise )
         {
             if ( !m_NoiseWarned )
             {
                 LOG_WARN( "[Clouds] The noise volumes for shape seed {} / detail seed {} are not "
                           "available (see the [CloudNoise] log above); the cloud layer is not drawn.",
-                          m_Data.ShapeSeed, m_Data.DetailSeed );
+                          primary.ShapeSeed, primary.DetailSeed );
                 m_NoiseWarned = true;
             }
             return;
@@ -845,36 +922,52 @@ namespace Desert::Graphic::System
         if ( !EnsureResources( target->GetFramebufferWidth(), target->GetFramebufferHeight() ) )
             return;
 
-        const CloudGpuPayload payload = PackCloudParams( m_Data, atmosphere, m_SceneRenderer->GetWind(),
+        const CloudGpuPayload payload = PackCloudParams( m_Layers, atmosphere, m_SceneRenderer->GetWind(),
                                                          m_SceneRenderer->GetWind().Time, m_VolumeCounts );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         // S1. The map is a function of the Weather group alone, so it is rebuilt when those fields
-        // change and at no other time.
-        const WeatherFingerprint wanted = FingerprintOf( m_Data );
-        if ( !m_WeatherValid || !( wanted == m_WeatherBaked ) )
+        // change and at no other time. One fingerprint per layer, and any of them moving rebakes every
+        // slice - one dispatch writes them all, and splitting it per slice would optimise a pass whose
+        // rate is "an artist dragged a slider".
+        std::array<WeatherFingerprint, kCloudMaxLayers> wanted{};
+        for ( uint32_t i = 0; i < m_Layers.Count; ++i )
+            wanted[i] = FingerprintOf( m_Layers.Layers[i] );
+
+        if ( !m_WeatherValid || wanted != m_WeatherBaked || m_Layers.Count != m_WeatherBakedCount )
         {
             DispatchWeather();
-            m_WeatherBaked = wanted;
-            m_WeatherValid = true;
+            m_WeatherBaked      = wanted;
+            m_WeatherBakedCount = m_Layers.Count;
+            m_WeatherValid      = true;
         }
 
         // S1b. The shadow map follows the weather map and precedes the march that reads it. Rebuilt
         // every frame: it is centred on the camera and parameterised on the sun, and both move.
-        if ( m_CloudShadowMap && m_ShadowPipeline && m_Data.CloudShadowMap )
+        // Any layer asking for the map is enough to run the pass: it fills every live slice in one
+        // dispatch, and a layer whose own Cloud Shadow Map is off reads none of it (u_CloudShadowEnabled
+        // gates the read per layer, so it cone-marches instead).
+        m_ShadowSlices = 0;
+        for ( uint32_t i = 0; i < m_Layers.Count; ++i )
+        {
+            if ( m_Layers.Layers[i].CloudShadowMap )
+                m_ShadowSlices = i + 1;
+        }
+
+        if ( m_CloudShadowMap && m_ShadowPipeline && m_ShadowSlices > 0 )
             DispatchShadowMap( *noise );
 
         // S3's history is decided BEFORE S2 runs: at Full resolution the march visits only half the
         // pixels each frame (the checkerboard), and it may do that only when the resolve that fills in
         // the other half is actually going to run — which is known here and nowhere later.
         bool historyReady = false;
-        if ( CloudTemporalUsesHistory( m_Data.TemporalMode ) )
+        if ( CloudTemporalUsesHistory( primary.TemporalMode ) )
             historyReady = EnsureHistory();
         else
             ReleaseHistory();
 
         const bool checkerboard =
-             CloudCheckerboardActive( m_Data.ResolutionScale, m_Data.TemporalMode, historyReady );
+             CloudCheckerboardActive( primary.ResolutionScale, primary.TemporalMode, historyReady );
 
         // S2.
         DispatchRaymarch( *noise, target->GetDepthAttachmentImage().get(), checkerboard );
@@ -885,7 +978,7 @@ namespace Desert::Graphic::System
         if ( historyReady )
             DispatchTemporalResolve( checkerboard );
 
-        m_CompositeSource = CloudSelectCompositeSource( m_Data.TemporalMode, historyReady );
+        m_CompositeSource = CloudSelectCompositeSource( primary.TemporalMode, historyReady );
 
         // Wrapped, not free-running: the index rides in a float push constant, and past 2^24 the
         // increment stops changing it — the jitter pattern would then freeze into a fixed dither. The

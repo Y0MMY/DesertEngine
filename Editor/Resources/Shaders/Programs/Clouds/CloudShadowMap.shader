@@ -39,13 +39,18 @@ Shader "CloudShadowMap"
 
         // rgba16f: density-length is unbounded in principle and a half carries three decimal digits,
         // which is far more than a term that saturates the Beer curve above ~10 will ever need.
-        layout(binding = 0, rgba16f) restrict writeonly uniform image2D u_CloudShadowOut;
+        //
+        // A VOLUME, one slice per cloud layer: each layer self-shadows with its OWN mass, and the four
+        // slices a texel stores are heights inside THAT layer. One dispatch of depth CLOUD_MAX_LAYERS
+        // fills them all.
+        layout(binding = 0, rgba16f) restrict writeonly uniform image3D u_CloudShadowOut;
 
         PushConstant CloudShadowPush
         {
-            // xyz = the world point the map is built around (the camera), w = the map's half-width in
-            // world units. Both must match what the raymarch projects with, so both are pushed to the
-            // two passes from the same place on the CPU in the same frame.
+            // xyz = the world point the map is built around (the camera); w unused. The half-width is
+            // PER LAYER and rides in the parameter block instead — one dispatch cannot push two of them,
+            // and reading it from the same member the raymarch projects with is a stronger guarantee
+            // than two call sites agreeing because they called the same clamp.
             vec4 u_ShadowCentre;
         };
 
@@ -58,20 +63,24 @@ Shader "CloudShadowMap"
 
         void main()
         {
-            ivec2 size  = imageSize(u_CloudShadowOut);
-            ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-            if (coord.x >= size.x || coord.y >= size.y)
+            ivec3 size  = imageSize(u_CloudShadowOut);
+            ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+            if (coord.x >= size.x || coord.y >= size.y || coord.z >= size.z)
                 return;
+
+            // The slice IS the layer, exactly as in the weather pass.
+            CloudSelectLayer(min(coord.z, u_LayerCount - 1));
 
             // Empty is the answer to every early-out below, and it has to be WRITTEN: the image is not
             // cleared between frames, so a texel that returned without storing would shadow this frame's
             // clouds with the sun position of some earlier one.
             vec4 result = vec4(0.0f, 0.0f, 0.0f, 0.0f);
 
-            vec2 uv = (vec2(coord) + vec2(0.5f, 0.5f)) / vec2(size);
+            vec2 uv = (vec2(float(coord.x), float(coord.y)) + vec2(0.5f, 0.5f)) /
+                      vec2(float(size.x), float(size.y));
 
             vec3  centre = vec3(u_ShadowCentre.x, u_ShadowCentre.y, u_ShadowCentre.z);
-            float extent = u_ShadowCentre.w;
+            float extent = u_CloudShadowExtent;
             vec3  sunDir = u_SunDirection.xyz;
 
             // The sun ray for this texel: a point on the plane through the centre, extended along the sun.

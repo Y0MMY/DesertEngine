@@ -17,9 +17,11 @@
 
 #include "CloudGeometryReference.hpp"
 
+#include <Engine/Graphic/Clouds/CloudMarchScale.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileCurves.hpp>
 #include <Engine/Graphic/Clouds/CloudWeatherScale.hpp>
+#include <Engine/Graphic/CloudPresets.hpp>
 #include <Engine/Graphic/CloudQuality.hpp>
 
 #include <gtest/gtest.h>
@@ -36,12 +38,28 @@
 namespace R = Desert::Tests::CloudGeometryRef;
 
 using Desert::Graphic::CloudGpuPayload;
+using Desert::Graphic::CloudLayerPayload;
 using Desert::Graphic::CloudRaymarchPush;
 using Desert::Graphic::CloudResolutionDivisor;
 using Desert::Graphic::CloudScaledExtent;
 using Desert::Graphic::CloudVoxelCounts;
+using Desert::Graphic::kCloudMaxLayers;
 using Desert::Graphic::kCloudPayloadBytes;
 using Desert::Graphic::PackCloudParams;
+
+namespace
+{
+    // The single-layer set every pre-existing packing test speaks in. Count 1 is what every scene
+    // shipped before two layers existed hands the renderer, so these tests go on asserting exactly
+    // what they asserted: that ONE component reaches the GPU intact.
+    Desert::Graphic::CloudLayerSet OneLayer( const Desert::ECS::VolumetricCloudData& data )
+    {
+        Desert::Graphic::CloudLayerSet set;
+        set.Layers[0] = data;
+        set.Count     = 1;
+        return set;
+    }
+} // namespace
 
 namespace
 {
@@ -881,6 +899,100 @@ TEST( CloudWeatherScale, TheComponentDefaultIsTheDerivedTileForItsOwnLayer )
          defaults.WeatherTileSize,
          Desert::Graphic::CloudAutoWeatherTileSize( defaults.LayerBottomAltitude, defaults.LayerThickness ),
          defaults.WeatherTileSize * 0.02f );
+}
+
+// ---- The empty-space search's scale ------------------------------------------------------------------
+
+// The other C++/GLSL mirror of a formula, and the same assertion for the same reason: the renderer warns
+// from the C++ side and the shader marches from the GLSL side, and a divergence would be a warning that
+// fires on the wrong skies while the real one goes unmentioned.
+TEST( CloudMarchScale, TheCppStepScheduleIsTheShaderScheduleToTheBit )
+{
+    for ( float t :
+          { 0.0f, 1000.0f, 100000.0f, 900000.0f, 1000000.0f, 1700000.0f, 2500000.0f, 9000000.0f, 15000000.0f } )
+        for ( float minStep : { 1000.0f, 1500.0f, 4000.0f } )
+            for ( float maxStep : { 40000.0f, 70000.0f, 500000.0f } )
+                for ( float growth : { 0.0f, 0.004f, 0.008f, 0.02f } )
+                    EXPECT_FLOAT_EQ( Desert::Graphic::CloudStepLengthAt( t, minStep, maxStep, growth ),
+                                     R::CloudStepLength( t, minStep, maxStep, growth ) )
+                         << "t " << t << " min " << minStep << " max " << maxStep << " growth " << growth;
+
+    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudStepFineRange, R::CLOUD_STEP_FINE_RANGE );
+    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudStepFarRange, R::CLOUD_STEP_FAR_RANGE );
+}
+
+// THE RELATION A THIN LAYER BREAKS, and the one the first two-layer frame ever rendered broke: the
+// empty-space search strides at CoarseStepMultiplier times the fine stride, and a layer thinner than that
+// stride is stepped over by whichever rays the dither phases unluckily. It renders as a fixed cross-hatch
+// that no temporal average removes, because the average of "half the rays missed the cloud" is "half the
+// cloud".
+//
+// Neither side of this is wrong on its own — a 1.2 km sheet is a real cloud and a coarse multiplier of 5
+// is a real optimisation — which is exactly why it needs an assertion about the PAIR.
+TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthoredTiers )
+{
+    using Desert::Graphic::CloudCoarseStrideIsPlausible;
+    using Desert::Graphic::CloudSearchSamplesAcrossLayer;
+
+    // Every shipped quality tier over the layer the component defaults to: the deck is thick enough that
+    // no tier can step over it, and that has to stay true when a tier is retuned.
+    const Desert::ECS::VolumetricCloudData defaults;
+    for ( const auto& tier : Desert::Graphic::kCloudQualityTiers )
+    {
+        EXPECT_TRUE( CloudCoarseStrideIsPlausible( defaults.LayerBottomAltitude, defaults.LayerThickness,
+                                                   tier.Values.MinStepSize, tier.Values.MaxStepSize,
+                                                   tier.Values.StepGrowthRate, tier.Values.CoarseStepMultiplier ) )
+             << "tier " << tier.Name;
+    }
+
+    // The Cirrus preset's own layer — 1.2 km at 8 km — is the thin case. MEASURED, at the shipped tiers:
+    // Low 2.6 samples, Medium 7.0, High 10.6, Ultra 14.1. So every tier a showcase would use clears the
+    // bar and the LOW tier does not, which is a real limitation of Low over a thin high layer rather than
+    // a defect in either — and it is what the renderer's warning exists to say out loud, with numbers,
+    // instead of leaving an artist to wonder why their cirrus has a cross-hatch on it.
+    const Desert::Graphic::CloudPresetEntry* cirrus =
+         Desert::Graphic::FindCloudPreset( Desert::ECS::CloudPreset::Cirrus );
+    ASSERT_NE( cirrus, nullptr );
+
+    for ( const auto id : { Desert::ECS::CloudQuality::Medium, Desert::ECS::CloudQuality::High,
+                            Desert::ECS::CloudQuality::Ultra } )
+    {
+        const Desert::Graphic::CloudQualityEntry* tier = Desert::Graphic::FindCloudQuality( id );
+        ASSERT_NE( tier, nullptr );
+        EXPECT_TRUE( CloudCoarseStrideIsPlausible(
+             cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness, tier->Values.MinStepSize,
+             tier->Values.MaxStepSize, tier->Values.StepGrowthRate, tier->Values.CoarseStepMultiplier ) )
+             << "tier " << tier->Name;
+    }
+
+    // A TIER ORDERING, not a value: a finer tier must never search a layer more coarsely than a cheaper
+    // one. Retuning one row in isolation is exactly how that inverts, and the symptom would be Ultra
+    // stippling where High did not.
+    float previous = -1.0f;
+    for ( const auto& tier : Desert::Graphic::kCloudQualityTiers )
+    {
+        const float samples = CloudSearchSamplesAcrossLayer(
+             cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness, tier.Values.MinStepSize,
+             tier.Values.MaxStepSize, tier.Values.StepGrowthRate, tier.Values.CoarseStepMultiplier );
+        EXPECT_GE( samples, previous ) << "tier " << tier.Name << " searches more coarsely than the one below";
+        previous = samples;
+    }
+
+    // THE MEASURED CASE, and the reason this file has a CloudMarchScale suite at all. The first schedule
+    // the two-layer showcase authored for its sheet — a 40 m fine step, growth 0.012, coarse multiplier 5
+    // — is individually reasonable for a thin high layer and drew a regular cross-hatch across every wisp.
+    // It comes out at 3.2 samples across the sheet, i.e. under the bar, which is what the renderer now
+    // says out loud with the numbers.
+    EXPECT_LT( CloudSearchSamplesAcrossLayer( cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness,
+                                              Common::Units::Metres( 40.0f ), Common::Units::Metres( 1200.0f ),
+                                              0.012f, 5.0f ),
+               Desert::Graphic::kCloudMinSearchSamplesAcrossLayer );
+
+    // And the schedule that replaced it — coarse multiplier 2, growth 0.004 — clears it, which is the
+    // change that removed the lattice with nothing else touched.
+    EXPECT_TRUE( CloudCoarseStrideIsPlausible( cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness,
+                                               Common::Units::Metres( 40.0f ), Common::Units::Metres( 400.0f ),
+                                               0.004f, 2.0f ) );
 }
 
 // ---- CLD-25: Beer -----------------------------------------------------------------------------------
@@ -1760,12 +1872,17 @@ TEST( CloudShadowReadout, AnEmptyColumnShadowsNothingAtAnyHeight )
 
 TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 {
-    // std430 rounds the block up to its 16-byte alignment; the buffer must cover that, not sizeof.
-    // 516 since voxel phase 1b appended the two hero-cloud counts (how many instance records are live,
-    // and how many of that leading run cast a cloud shadow). The block therefore stops twelve bytes short
-    // of its alignment; the >= and %16 assertions below are what has to hold.
-    EXPECT_EQ( sizeof( CloudGpuPayload ), 516u );
-    EXPECT_EQ( kCloudPayloadBytes, 528u );
+    // std430 rounds a block up to its 16-byte alignment; the buffer must cover that, not sizeof. Since
+    // the block became a head plus an ARRAY of layers, the alignment is not a detail of the end any more:
+    // std430 gives an array of structs a stride of the struct rounded up to 16, glm's vec4 has a 4-byte
+    // alignment in this build so C++ pads nothing, and a four-byte disagreement would read every field of
+    // layer 1 from the wrong offset with no validation error anywhere. The explicit padding is what makes
+    // the three assertions below true rather than lucky.
+    EXPECT_EQ( sizeof( CloudLayerPayload ), 432u );
+    EXPECT_EQ( sizeof( CloudLayerPayload ) % 16u, 0u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, Layers ) % 16u, 0u );
+
+    EXPECT_EQ( sizeof( CloudGpuPayload ), 112u + kCloudMaxLayers * sizeof( CloudLayerPayload ) );
     EXPECT_GE( kCloudPayloadBytes, sizeof( CloudGpuPayload ) );
     EXPECT_EQ( kCloudPayloadBytes % 16u, 0u );
 }
@@ -1781,22 +1898,22 @@ TEST( CloudPayload, TheHeroCloudCountsAreRepairedRatherThanTrusted )
     const Desert::Graphic::WindEnv         wind;
 
     const CloudGpuPayload none =
-         PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = 0, .Shadow = 0 } );
+         PackCloudParams( OneLayer( data ), atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = 0, .Shadow = 0 } );
     EXPECT_EQ( none.VoxelInstanceCount, 0 );
     EXPECT_EQ( none.VoxelShadowCount, 0 );
 
     const CloudGpuPayload some =
-         PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = 5, .Shadow = 3 } );
+         PackCloudParams( OneLayer( data ), atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = 5, .Shadow = 3 } );
     EXPECT_EQ( some.VoxelInstanceCount, 5 );
     EXPECT_EQ( some.VoxelShadowCount, 3 );
 
     const CloudGpuPayload overshoot =
-         PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = 2, .Shadow = 9 } );
+         PackCloudParams( OneLayer( data ), atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = 2, .Shadow = 9 } );
     EXPECT_EQ( overshoot.VoxelInstanceCount, 2 );
     EXPECT_LE( overshoot.VoxelShadowCount, overshoot.VoxelInstanceCount );
 
-    const CloudGpuPayload negative =
-         PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = -4, .Shadow = -1 } );
+    const CloudGpuPayload negative = PackCloudParams( OneLayer( data ), atmosphere, wind, 0.0f,
+                                                      CloudVoxelCounts{ .Total = -4, .Shadow = -1 } );
     EXPECT_EQ( negative.VoxelInstanceCount, 0 );
     EXPECT_EQ( negative.VoxelShadowCount, 0 );
 }
@@ -1838,13 +1955,25 @@ TEST( CloudPayload, EveryFieldReachesADistinctOffset )
     // A spot check of the group boundaries: an insertion anywhere shifts one of these. The full set is
     // asserted at compile time by the static_asserts in CloudPayload.hpp.
     EXPECT_EQ( offsetof( CloudGpuPayload, SunDirection ), 0u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, SceneWind ), 176u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, PlanetRadius ), 192u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, Coverage ), 216u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, LightMarchDistance ), 352u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, MinStepSize ), 436u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, TemporalBlendFactor ), 456u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, MultiScatterOctaves ), 484u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, SceneWind ), 64u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, PlanetRadius ), 80u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, LayerCount ), 96u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, VoxelShadowCount ), 104u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, Layers ), 112u );
+
+    EXPECT_EQ( offsetof( CloudLayerPayload, ScatteringAlbedo ), 0u );
+    EXPECT_EQ( offsetof( CloudLayerPayload, LayerBottomAltitude ), 112u );
+    EXPECT_EQ( offsetof( CloudLayerPayload, Coverage ), 132u );
+    EXPECT_EQ( offsetof( CloudLayerPayload, SunLightIntensityScale ), 268u );
+    EXPECT_EQ( offsetof( CloudLayerPayload, AnimationSpeed ), 332u );
+    EXPECT_EQ( offsetof( CloudLayerPayload, MinStepSize ), 364u );
+    EXPECT_EQ( offsetof( CloudLayerPayload, MultiScatterOctaves ), 400u );
+    EXPECT_EQ( offsetof( CloudLayerPayload, CloudHeightVariance ), 420u );
+
+    // The second layer starts exactly one stride on. This is the assertion the whole layout exists for.
+    EXPECT_EQ( reinterpret_cast<const char*>( &reinterpret_cast<const CloudGpuPayload*>( 0 )->Layers[1] ) -
+                    reinterpret_cast<const char*>( &reinterpret_cast<const CloudGpuPayload*>( 0 )->Layers[0] ),
+               static_cast<std::ptrdiff_t>( sizeof( CloudLayerPayload ) ) );
 }
 
 TEST( CloudPayload, PackingCarriesTheComponentAndTheAtmosphereThrough )
@@ -1863,7 +1992,7 @@ TEST( CloudPayload, PackingCarriesTheComponentAndTheAtmosphereThrough )
     wind.Direction = glm::vec2( 1.0f, 0.0f );
     wind.Strength  = 0.15f;
 
-    const CloudGpuPayload p = PackCloudParams( data, atmosphere, wind, 12.5f, CloudVoxelCounts{} );
+    const CloudGpuPayload p = PackCloudParams( OneLayer( data ), atmosphere, wind, 12.5f, CloudVoxelCounts{} );
 
     // The planet radius comes from the atmosphere and from nowhere else — the cloud subsystem is
     // forbidden a radius of its own.
@@ -1880,11 +2009,11 @@ TEST( CloudPayload, PackingCarriesTheComponentAndTheAtmosphereThrough )
     EXPECT_FLOAT_EQ( p.SceneWind.w, 12.5f );
 
     // Defaults are the Partly Cloudy preset and must survive the trip unchanged.
-    EXPECT_FLOAT_EQ( p.Coverage, data.Coverage );
-    EXPECT_FLOAT_EQ( p.ExtinctionTint.w, data.ExtinctionScale );
-    EXPECT_EQ( p.MaxSteps, data.MaxSteps );
-    EXPECT_EQ( p.LightMarchSamples, data.LightMarchSamples );
-    EXPECT_EQ( p.WeatherOctaves, data.WeatherOctaves );
+    EXPECT_FLOAT_EQ( p.Layers[0].Coverage, data.Coverage );
+    EXPECT_FLOAT_EQ( p.Layers[0].ExtinctionTint.w, data.ExtinctionScale );
+    EXPECT_EQ( p.Layers[0].MaxSteps, data.MaxSteps );
+    EXPECT_EQ( p.Layers[0].LightMarchSamples, data.LightMarchSamples );
+    EXPECT_EQ( p.Layers[0].WeatherOctaves, data.WeatherOctaves );
 }
 
 // CLD-63: the ordering invariants are what produce a division by zero or a negative range in the
@@ -1907,14 +2036,14 @@ TEST( CloudPayload, InvertedRangesAreRepairedAtTheBoundary )
     data.MinStepSize            = 5000.0f;
     data.MaxStepSize            = 100.0f;
 
-    const CloudGpuPayload p = PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{} );
+    const CloudGpuPayload p = PackCloudParams( OneLayer( data ), atmosphere, wind, 0.0f, CloudVoxelCounts{} );
 
-    EXPECT_GE( p.HorizonFadeEnd, p.HorizonFadeStart );
-    EXPECT_GE( p.NearFadeEnd, p.NearFadeStart );
-    EXPECT_GE( p.SofteningEndDistance, p.SofteningStartDistance );
-    EXPECT_GE( p.DistanceFadeEnd, p.DistanceFadeStart );
-    EXPECT_GE( p.HighFreqFeatureSize, 1.0f );
-    EXPECT_GE( p.MaxStepSize, p.MinStepSize );
+    EXPECT_GE( p.Layers[0].HorizonFadeEnd, p.Layers[0].HorizonFadeStart );
+    EXPECT_GE( p.Layers[0].NearFadeEnd, p.Layers[0].NearFadeStart );
+    EXPECT_GE( p.Layers[0].SofteningEndDistance, p.Layers[0].SofteningStartDistance );
+    EXPECT_GE( p.Layers[0].DistanceFadeEnd, p.Layers[0].DistanceFadeStart );
+    EXPECT_GE( p.Layers[0].HighFreqFeatureSize, 1.0f );
+    EXPECT_GE( p.Layers[0].MaxStepSize, p.Layers[0].MinStepSize );
 }
 
 TEST( CloudPayload, EveryPackedValueIsFinite )
@@ -1924,13 +2053,409 @@ TEST( CloudPayload, EveryPackedValueIsFinite )
     Desert::Graphic::WindEnv         wind{};
     atmosphere.PlanetRadius = kPlanetRadiusWorld;
 
-    const CloudGpuPayload p     = PackCloudParams( data, atmosphere, wind, 3.0f, CloudVoxelCounts{} );
+    const CloudGpuPayload p     = PackCloudParams( OneLayer( data ), atmosphere, wind, 3.0f, CloudVoxelCounts{} );
     const float*          words = reinterpret_cast<const float*>( &p );
 
-    // The trailing six members are ints; everything before them is a float and must be finite.
-    const size_t floatCount = offsetof( CloudGpuPayload, WeatherSeed ) / sizeof( float );
-    for ( size_t i = 0; i < floatCount; ++i )
+    // Every word of the block that is a FLOAT. The block is no longer "floats then ints" - it is a head
+    // and an array of layers, each with an int run in its middle - so the int words are named and
+    // skipped rather than assumed to be at the end. A word listed here wrongly would weaken the test;
+    // one missed would fail it loudly, which is the direction that costs nothing.
+    std::set<size_t> intWords;
+    intWords.insert( offsetof( CloudGpuPayload, LayerCount ) / sizeof( float ) );
+    intWords.insert( offsetof( CloudGpuPayload, VoxelInstanceCount ) / sizeof( float ) );
+    intWords.insert( offsetof( CloudGpuPayload, VoxelShadowCount ) / sizeof( float ) );
+    intWords.insert( offsetof( CloudGpuPayload, Pad0 ) / sizeof( float ) );
+
+    for ( size_t layer = 0; layer < kCloudMaxLayers; ++layer )
+    {
+        const size_t base =
+             ( offsetof( CloudGpuPayload, Layers ) + layer * sizeof( CloudLayerPayload ) ) / sizeof( float );
+        for ( size_t at = offsetof( CloudLayerPayload, WeatherSeed );
+              at < offsetof( CloudLayerPayload, AmbientOcclusion ); at += sizeof( int32_t ) )
+            intWords.insert( base + at / sizeof( float ) );
+        intWords.insert( base + offsetof( CloudLayerPayload, AutoDistanceFade ) / sizeof( float ) );
+        intWords.insert( base + offsetof( CloudLayerPayload, CloudShadowEnabled ) / sizeof( float ) );
+    }
+
+    const size_t wordCount = sizeof( CloudGpuPayload ) / sizeof( float );
+    for ( size_t i = 0; i < wordCount; ++i )
+    {
+        if ( intWords.count( i ) != 0 )
+            continue;
         EXPECT_TRUE( std::isfinite( words[i] ) ) << "word " << i;
+    }
+}
+
+TEST( CloudPayload, EachLayerIsPackedFromItsOwnComponentAndNothingLeaksBetweenThem )
+{
+    Desert::ECS::VolumetricCloudData deck{};
+    Desert::ECS::VolumetricCloudData sheet{};
+    Desert::Graphic::AtmosphereEnv   atmosphere{};
+    Desert::Graphic::WindEnv         wind{};
+
+    deck.LayerBottomAltitude = 150000.0f;
+    deck.Coverage            = 0.52f;
+    deck.MaxSteps            = 176;
+    deck.ExtinctionScale     = 1.0f;
+
+    sheet.LayerBottomAltitude = 800000.0f;
+    sheet.Coverage            = 0.66f;
+    sheet.MaxSteps            = 64;
+    sheet.ExtinctionScale     = 0.35f;
+
+    Desert::Graphic::CloudLayerSet layers;
+    layers.Layers[0] = deck;
+    layers.Layers[1] = sheet;
+    layers.Count     = 2;
+
+    const CloudGpuPayload p = PackCloudParams( layers, atmosphere, wind, 0.0f, CloudVoxelCounts{} );
+
+    EXPECT_EQ( p.LayerCount, 2 );
+
+    EXPECT_FLOAT_EQ( p.Layers[0].LayerBottomAltitude, deck.LayerBottomAltitude );
+    EXPECT_FLOAT_EQ( p.Layers[0].Coverage, deck.Coverage );
+    EXPECT_EQ( p.Layers[0].MaxSteps, deck.MaxSteps );
+    EXPECT_FLOAT_EQ( p.Layers[0].ExtinctionTint.w, deck.ExtinctionScale );
+
+    EXPECT_FLOAT_EQ( p.Layers[1].LayerBottomAltitude, sheet.LayerBottomAltitude );
+    EXPECT_FLOAT_EQ( p.Layers[1].Coverage, sheet.Coverage );
+    EXPECT_EQ( p.Layers[1].MaxSteps, sheet.MaxSteps );
+    EXPECT_FLOAT_EQ( p.Layers[1].ExtinctionTint.w, sheet.ExtinctionScale );
+}
+
+TEST( CloudPayload, TheViewWideSettingsComeFromThePrimaryLayerAlone )
+{
+    // There is one ray per pixel and one history pair per view, so there is one answer to each of these.
+    // Taking it from the LOWEST layer rather than from whichever entity was created first is what makes
+    // the frame reproducible; the Details panel says so on every layer that is not the primary.
+    Desert::ECS::VolumetricCloudData deck{};
+    Desert::ECS::VolumetricCloudData sheet{};
+    Desert::Graphic::AtmosphereEnv   atmosphere{};
+    Desert::Graphic::WindEnv         wind{};
+
+    deck.JitterStrength      = 0.25f;
+    deck.TemporalBlendFactor = 0.30f;
+    deck.TemporalClampScale  = 2.00f;
+
+    sheet.JitterStrength      = 1.00f;
+    sheet.TemporalBlendFactor = 0.05f;
+    sheet.TemporalClampScale  = 0.50f;
+
+    Desert::Graphic::CloudLayerSet layers;
+    layers.Layers[0] = deck;
+    layers.Layers[1] = sheet;
+    layers.Count     = 2;
+
+    const CloudGpuPayload p = PackCloudParams( layers, atmosphere, wind, 0.0f, CloudVoxelCounts{} );
+
+    EXPECT_FLOAT_EQ( p.JitterStrength, deck.JitterStrength );
+    EXPECT_FLOAT_EQ( p.TemporalBlendFactor, deck.TemporalBlendFactor );
+    EXPECT_FLOAT_EQ( p.TemporalClampScale, deck.TemporalClampScale );
+}
+
+TEST( CloudPayload, TheLayerCountCannotExceedWhatTheArrayHolds )
+{
+    // The march loops to this number and indexes the array with it. A count above the array's own size
+    // would read a layer nobody packed - which is not a crash, it is a shell at a garbage altitude.
+    Desert::Graphic::AtmosphereEnv atmosphere{};
+    Desert::Graphic::WindEnv       wind{};
+
+    Desert::Graphic::CloudLayerSet layers;
+    layers.Count = kCloudMaxLayers + 5u;
+
+    const CloudGpuPayload p = PackCloudParams( layers, atmosphere, wind, 0.0f, CloudVoxelCounts{} );
+    EXPECT_EQ( p.LayerCount, static_cast<int32_t>( kCloudMaxLayers ) );
+    EXPECT_GE( p.LayerCount, 0 );
+}
+
+// ---- The march plan ---------------------------------------------------------------------------------
+//
+// A ray crossing two cloud layers has to composite them near over far, and the plan is what makes that
+// true BY CONSTRUCTION rather than by a sort: ordered, disjoint intervals, each bound to the layer that
+// owns it. Every test below asserts a RELATION between the two shells rather than a value of one, which
+// is the only kind of assertion that can catch this class of defect — each shell's own intersection is
+// individually correct in every case, including the case where marching them in shell order is wrong.
+
+namespace
+{
+    // The two shells the shipped Clouds_TwoLayerShowcase authors: a cumulus deck at 1.5-5.0 km and a
+    // cirrus sheet at 8.0-9.2 km. Real numbers rather than round ones, because these properties have to
+    // hold for the geometry that actually ships.
+    constexpr float kDeckBottomKm     = 1.5f;
+    constexpr float kDeckThicknessKm  = 3.5f;
+    constexpr float kSheetBottomKm    = 8.0f;
+    constexpr float kSheetThicknessKm = 1.2f;
+
+    R::CloudShellHit ShellMiss()
+    {
+        R::CloudShellHit hit;
+        hit.Hit    = false;
+        hit.TEnter = 0.0f;
+        hit.TExit  = 0.0f;
+        return hit;
+    }
+
+    R::CloudShellHit ShellSpan( float enter, float exit )
+    {
+        R::CloudShellHit hit;
+        hit.Hit    = true;
+        hit.TEnter = enter;
+        hit.TExit  = exit;
+        return hit;
+    }
+
+    std::vector<R::CloudMarchSegment> SegmentsOf( const R::CloudMarchPlan& plan )
+    {
+        std::vector<R::CloudMarchSegment> segments;
+        for ( int i = 0; i < plan.Count; ++i )
+            segments.push_back( R::CloudPlanSegment( plan, i ) );
+        return segments;
+    }
+
+    bool Inside( const R::CloudShellHit& shell, float t )
+    {
+        return shell.Hit && t >= shell.TEnter && t <= shell.TExit;
+    }
+} // namespace
+
+TEST( CloudMarchPlan, TwoMissesProduceNothingToMarch )
+{
+    const R::CloudMarchPlan plan = R::CloudPlanTwoShells( ShellMiss(), 0, ShellMiss(), 1 );
+    EXPECT_EQ( plan.Count, 0 );
+}
+
+TEST( CloudMarchPlan, OneShellIsTheIntervalItAlwaysWas )
+{
+    // The single-layer identity. Every scene shipped before two layers existed takes this path, and the
+    // frame it produces has to be the frame it produced: one segment, the shell's own entry and exit,
+    // and the layer that owns it.
+    const R::CloudMarchPlan first = R::CloudPlanTwoShells( ShellSpan( 12.0f, 34.0f ), 0, ShellMiss(), 1 );
+    ASSERT_EQ( first.Count, 1 );
+    EXPECT_FLOAT_EQ( first.S0.TEnter, 12.0f );
+    EXPECT_FLOAT_EQ( first.S0.TExit, 34.0f );
+    EXPECT_EQ( first.S0.Layer, 0 );
+
+    // And the same when it is the SECOND argument that hit: the plan is about the ray, not about the
+    // order the caller happened to pass the shells in.
+    const R::CloudMarchPlan second = R::CloudPlanTwoShells( ShellMiss(), 0, ShellSpan( 12.0f, 34.0f ), 1 );
+    ASSERT_EQ( second.Count, 1 );
+    EXPECT_FLOAT_EQ( second.S0.TEnter, 12.0f );
+    EXPECT_FLOAT_EQ( second.S0.TExit, 34.0f );
+    EXPECT_EQ( second.S0.Layer, 1 );
+}
+
+TEST( CloudMarchPlan, DisjointShellsAreMarchedNearFirstWhicheverWayTheyArePassed )
+{
+    const R::CloudMarchPlan forward =
+         R::CloudPlanTwoShells( ShellSpan( 10.0f, 20.0f ), 0, ShellSpan( 30.0f, 40.0f ), 1 );
+    ASSERT_EQ( forward.Count, 2 );
+    EXPECT_EQ( forward.S0.Layer, 0 );
+    EXPECT_EQ( forward.S1.Layer, 1 );
+    EXPECT_FLOAT_EQ( forward.S0.TEnter, 10.0f );
+    EXPECT_FLOAT_EQ( forward.S1.TEnter, 30.0f );
+
+    const R::CloudMarchPlan reversed =
+         R::CloudPlanTwoShells( ShellSpan( 30.0f, 40.0f ), 1, ShellSpan( 10.0f, 20.0f ), 0 );
+    ASSERT_EQ( reversed.Count, 2 );
+    EXPECT_EQ( reversed.S0.Layer, 0 );
+    EXPECT_EQ( reversed.S1.Layer, 1 );
+    EXPECT_FLOAT_EQ( reversed.S0.TEnter, 10.0f );
+    EXPECT_FLOAT_EQ( reversed.S1.TEnter, 30.0f );
+}
+
+TEST( CloudMarchPlan, AContainedShellSplitsTheOneAroundIt )
+{
+    // The case a plain sort cannot express, and the reason this function exists. A camera above the
+    // sheet looking down at a shallow angle gets a sheet interval that spans the descent AND the
+    // ascent, with the deck's interval inside it. Marching the sheet whole and then the deck would draw
+    // the deck behind cloud that is in front of it.
+    const R::CloudMarchPlan plan =
+         R::CloudPlanTwoShells( ShellSpan( 10.0f, 100.0f ), 1, ShellSpan( 30.0f, 50.0f ), 0 );
+    ASSERT_EQ( plan.Count, 3 );
+
+    EXPECT_EQ( plan.S0.Layer, 1 );
+    EXPECT_FLOAT_EQ( plan.S0.TEnter, 10.0f );
+    EXPECT_FLOAT_EQ( plan.S0.TExit, 30.0f );
+
+    EXPECT_EQ( plan.S1.Layer, 0 );
+    EXPECT_FLOAT_EQ( plan.S1.TEnter, 30.0f );
+    EXPECT_FLOAT_EQ( plan.S1.TExit, 50.0f );
+
+    EXPECT_EQ( plan.S2.Layer, 1 );
+    EXPECT_FLOAT_EQ( plan.S2.TEnter, 50.0f );
+    EXPECT_FLOAT_EQ( plan.S2.TExit, 100.0f );
+}
+
+TEST( CloudMarchPlan, ASplitThatWouldLeaveAnEmptyPieceDropsIt )
+{
+    // Contained, but sharing the container's start: the leading piece has zero length and is not a
+    // segment. A zero-length segment is not an error, it is a march that begins where it ends — and
+    // reporting one would make "every segment the plan names is marchable" false.
+    const R::CloudMarchPlan leading =
+         R::CloudPlanTwoShells( ShellSpan( 10.0f, 100.0f ), 1, ShellSpan( 10.0f, 50.0f ), 0 );
+    ASSERT_EQ( leading.Count, 2 );
+    EXPECT_EQ( leading.S0.Layer, 0 );
+    EXPECT_EQ( leading.S1.Layer, 1 );
+
+    const R::CloudMarchPlan trailing =
+         R::CloudPlanTwoShells( ShellSpan( 10.0f, 100.0f ), 1, ShellSpan( 40.0f, 100.0f ), 0 );
+    ASSERT_EQ( trailing.Count, 2 );
+    EXPECT_EQ( trailing.S0.Layer, 1 );
+    EXPECT_EQ( trailing.S1.Layer, 0 );
+}
+
+TEST( CloudMarchPlan, SegmentsAreOrderedAndDisjointForEveryCameraAndEveryDirection )
+{
+    // THE PROPERTY, over the geometry that ships. Ordered and disjoint is exactly what "one
+    // transmittance accumulator composites near over far" needs, and it is the pair that a spot check of
+    // any single configuration cannot establish.
+    const std::vector<float> altitudesKm{ 0.002f, 1.0f, 3.0f, 6.0f, 8.5f, 11.0f, 20.0f, 60.0f };
+
+    for ( const float altitude : altitudesKm )
+    {
+        const glm::vec3 camera( 0.0f, altitude, 0.0f );
+        for ( int degrees = -90; degrees <= 90; degrees += 2 )
+        {
+            const float     radians = static_cast<float>( degrees ) * 3.14159265f / 180.0f;
+            const glm::vec3 dir = glm::normalize( glm::vec3( std::cos( radians ), std::sin( radians ), 0.0f ) );
+
+            const R::CloudShellHit deck =
+                 R::CloudShellBounds( camera, dir, kPlanetRadiusKm, kDeckBottomKm, kDeckThicknessKm );
+            const R::CloudShellHit sheet =
+                 R::CloudShellBounds( camera, dir, kPlanetRadiusKm, kSheetBottomKm, kSheetThicknessKm );
+
+            const R::CloudMarchPlan plan     = R::CloudPlanTwoShells( deck, 0, sheet, 1 );
+            const auto              segments = SegmentsOf( plan );
+
+            EXPECT_LE( plan.Count, CLOUD_MAX_MARCH_SEGMENTS )
+                 << "altitude " << altitude << " elevation " << degrees;
+
+            for ( std::size_t i = 0; i < segments.size(); ++i )
+            {
+                EXPECT_LT( segments[i].TEnter, segments[i].TExit )
+                     << "empty segment at altitude " << altitude << " elevation " << degrees;
+
+                // Inside the shell it claims to belong to, with a tolerance of nothing: the split only
+                // ever narrows an interval.
+                const R::CloudShellHit& own = segments[i].Layer == 0 ? deck : sheet;
+                ASSERT_TRUE( own.Hit );
+                EXPECT_GE( segments[i].TEnter, own.TEnter );
+                EXPECT_LE( segments[i].TExit, own.TExit );
+
+                if ( i > 0 )
+                    EXPECT_LE( segments[i - 1].TExit, segments[i].TEnter )
+                         << "segments overlap at altitude " << altitude << " elevation " << degrees;
+            }
+        }
+    }
+}
+
+TEST( CloudMarchPlan, NoStretchOfAShellIsLostExceptWhereTheOtherLayerIs )
+{
+    // The other half of the property. Disjointness alone is satisfied by a plan that drops everything;
+    // this says the plan still COVERS each shell, apart from the stretch it handed to the other layer —
+    // which is the gap between two disjoint altitude bands, where the layer that gave it up has a height
+    // fraction outside [0,1] and no density at all.
+    const std::vector<float> altitudesKm{ 0.002f, 4.0f, 8.5f, 15.0f, 30.0f };
+
+    for ( const float altitude : altitudesKm )
+    {
+        const glm::vec3 camera( 0.0f, altitude, 0.0f );
+        for ( int degrees = -80; degrees <= 80; degrees += 5 )
+        {
+            const float     radians = static_cast<float>( degrees ) * 3.14159265f / 180.0f;
+            const glm::vec3 dir = glm::normalize( glm::vec3( std::cos( radians ), std::sin( radians ), 0.0f ) );
+
+            const R::CloudShellHit deck =
+                 R::CloudShellBounds( camera, dir, kPlanetRadiusKm, kDeckBottomKm, kDeckThicknessKm );
+            const R::CloudShellHit sheet =
+                 R::CloudShellBounds( camera, dir, kPlanetRadiusKm, kSheetBottomKm, kSheetThicknessKm );
+
+            const R::CloudMarchPlan plan     = R::CloudPlanTwoShells( deck, 0, sheet, 1 );
+            const auto              segments = SegmentsOf( plan );
+
+            for ( int layer = 0; layer < 2; ++layer )
+            {
+                const R::CloudShellHit& own   = layer == 0 ? deck : sheet;
+                const R::CloudShellHit& other = layer == 0 ? sheet : deck;
+                if ( !own.Hit )
+                    continue;
+
+                for ( int step = 1; step < 32; ++step )
+                {
+                    const float t =
+                         own.TEnter + ( own.TExit - own.TEnter ) * ( static_cast<float>( step ) / 32.0f );
+                    if ( Inside( other, t ) )
+                        continue;
+
+                    bool covered = false;
+                    for ( const auto& segment : segments )
+                        covered =
+                             covered || ( segment.Layer == layer && t >= segment.TEnter && t <= segment.TExit );
+
+                    EXPECT_TRUE( covered ) << "layer " << layer << " lost t=" << t << " at altitude " << altitude
+                                           << " elevation " << degrees;
+                }
+            }
+        }
+    }
+}
+
+// ---- The per-layer slice coordinate -------------------------------------------------------------------
+
+TEST( CloudLayerSlice, EveryLayerLandsOnATexelCentre )
+{
+    // The weather map, the profile map, the profile table and the shadow map are all volumes with one
+    // slice per layer, and every volume in this engine is sampled LINEAR/REPEAT. A w half a texel off
+    // would blend the deck's coverage into the sheet's — so the property that matters is not "the
+    // coordinates differ" but "the trilinear weight on the neighbouring slice is exactly zero", which is
+    // what landing on an integer texel index means.
+    for ( int count = 1; count <= 4; ++count )
+    {
+        for ( int layer = 0; layer < count; ++layer )
+        {
+            const float w = R::CloudLayerSliceW( layer, count );
+
+            EXPECT_GT( w, 0.0f );
+            EXPECT_LT( w, 1.0f );
+
+            const float unnormalized = w * static_cast<float>( count ) - 0.5f;
+            const float residual     = std::abs( unnormalized - static_cast<float>( layer ) );
+
+            // The residual is the fraction of a texel the neighbouring slice would be weighted by. A
+            // count that is a power of two — which kCloudMaxLayers is, and which is the case that ships —
+            // divides exactly in binary and leaves none of it at all.
+            if ( ( count & ( count - 1 ) ) == 0 )
+                EXPECT_FLOAT_EQ( unnormalized, static_cast<float>( layer ) ) << "count " << count;
+
+            // For the rest, the bound that matters is not "exact" but "below anything a sampler can
+            // resolve": Vulkan guarantees only four bits of sub-texel precision (a sixteenth of a texel)
+            // and real hardware carries eight, so a residual four orders of magnitude under that cannot
+            // move a weight off 1.0.
+            EXPECT_LT( residual, 1.0e-5f ) << "count " << count << " layer " << layer;
+        }
+    }
+}
+
+TEST( CloudLayerSlice, ConsecutiveLayersAreOneWholeSliceApart )
+{
+    for ( int count = 2; count <= 4; ++count )
+    {
+        for ( int layer = 1; layer < count; ++layer )
+        {
+            const float step = R::CloudLayerSliceW( layer, count ) - R::CloudLayerSliceW( layer - 1, count );
+            EXPECT_NEAR( step, 1.0f / static_cast<float>( count ), 1e-6f );
+        }
+    }
+}
+
+TEST( CloudLayerSlice, ADegenerateCountDoesNotDivideByZero )
+{
+    // A count of zero cannot reach the shader — the march builds its plan from u_LayerCount shells and
+    // marches nothing at zero — but a division by it would produce an inf that survives every clamp it
+    // touches, so the guard is in the function rather than in the caller.
+    EXPECT_TRUE( std::isfinite( R::CloudLayerSliceW( 0, 0 ) ) );
+    EXPECT_FLOAT_EQ( R::CloudLayerSliceW( 0, 1 ), 0.5f );
 }
 
 TEST( CloudResolution, EachTierScalesTheTargetAndNeverProducesAZeroExtent )

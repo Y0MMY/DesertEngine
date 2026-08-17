@@ -19,13 +19,19 @@
 namespace Desert::ECS
 {
     /**
-     * @brief Collects the scene's volumetric-cloud settings for the frame.
+     * @brief Collects the scene's volumetric-cloud LAYERS for the frame.
      *
-     * A pure render-data collector — it reads one component and emits one command, exactly as
+     * A pure render-data collector — it reads the cloud components and emits one command, exactly as
      * SkyboxECSSystem does for the sky, and takes no decision the renderer could not have taken. The
      * GPU-owning half is Graphic::System::VolumetricCloudRenderer; the NOISE volumes are a different
      * system's business (ECS::CloudNoiseECSSystem), because they are shared process-wide and this one
      * is per-scene.
+     *
+     * A SECOND CLOUD LAYER IS A SECOND ENTITY. That is the whole authoring model: the component already
+     * carries every parameter a layer needs, the Cirrus preset already authors a thin high sheet, and a
+     * scene adds a deck plus a sheet by adding a second entity with a Volumetric Clouds component on it.
+     * Nothing was added to the component and nothing changed in the file format, which is what makes
+     * every scene written before this load and render exactly as it did.
      *
      * Safe to run in parallel with the other collectors: it only reads cloud component state.
      */
@@ -51,36 +57,109 @@ namespace Desert::ECS
 
             if ( entities.empty() )
             {
-                renderCommandBuffer.Emplace<Graphic::Render::VolumetricCloudsCommand>(
-                     false, ECS::VolumetricCloudData{}, std::move( volumes ) );
+                renderCommandBuffer.Emplace<Graphic::Render::VolumetricCloudsCommand>( Graphic::CloudLayerSet{},
+                                                                                       std::move( volumes ) );
                 return;
             }
 
-            // Lowest UUID drives the frame, exactly as the sky picks its atmosphere and the noise system
-            // picks its seeds. "Whichever entity entt happened to visit first" changes when an unrelated
-            // component is added somewhere else, and a cloudscape that changes for no visible reason is
-            // a hard bug to even describe.
-            size_t chosen = 0;
-            for ( size_t i = 1; i < entities.size(); ++i )
+            // A DETERMINISTIC ORDER FIRST, then altitude. Sorting by (bottom altitude, UUID) rather than
+            // by altitude alone matters because two layers CAN sit at the same height while somebody is
+            // dragging a slider, and "whichever entity entt happened to visit first" changes when an
+            // unrelated component is added somewhere else — a cloudscape that changes for no visible
+            // reason is a hard bug to even describe.
+            std::sort( entities.begin(), entities.end(),
+                       [&registry]( entt::entity a, entt::entity b )
+                       {
+                           return LayerOrderBefore(
+                                registry.get<ECS::VolumetricCloudsComponent>( a ).Data.LayerBottomAltitude,
+                                EntityId( registry, a ),
+                                registry.get<ECS::VolumetricCloudsComponent>( b ).Data.LayerBottomAltitude,
+                                EntityId( registry, b ) );
+                       } );
+
+            // A DISABLED layer is not a layer. Skipping it here rather than passing it through with a
+            // flag is what keeps `Enabled` the zero-cost gate it is on every other component: the shell is
+            // never intersected, its weather slice is never baked and its shadow slice is never marched.
+            Graphic::CloudLayerSet layers;
+            uint32_t               enabled = 0;
+            std::string            marched;
+            for ( const auto entity : entities )
             {
-                if ( EntityId( registry, entities[i] ) < EntityId( registry, entities[chosen] ) )
-                    chosen = i;
+                const auto& clouds = registry.get<ECS::VolumetricCloudsComponent>( entity );
+                if ( !clouds.Data.Enabled )
+                    continue;
+
+                ++enabled;
+                if ( layers.Count < Graphic::kCloudMaxLayers )
+                {
+                    layers.Layers[layers.Count++] = clouds.Data;
+                    if ( !marched.empty() )
+                        marched += "', '";
+                    marched += EntityName( registry, entity );
+                }
             }
 
-            if ( entities.size() > 1 && !m_DuplicateLogged )
+            if ( enabled > Graphic::kCloudMaxLayers && !m_DuplicateLogged )
             {
-                LOG_WARN( "[Clouds] {} Volumetric Clouds components in the scene; the one on entity '{}' "
-                          "drives the frame (lowest id). The others are ignored.",
-                          entities.size(), EntityName( registry, entities[chosen] ) );
+                LOG_WARN( "[Clouds] {} enabled Volumetric Clouds components in the scene; only the lowest "
+                          "{} by altitude are marched — the ray plan is built for that many disjoint "
+                          "shells. In the sky: '{}'.",
+                          enabled, Graphic::kCloudMaxLayers, marched );
                 m_DuplicateLogged = true;
             }
 
-            const auto& clouds = registry.get<ECS::VolumetricCloudsComponent>( entities[chosen] );
-            renderCommandBuffer.Emplace<Graphic::Render::VolumetricCloudsCommand>( true, clouds.Data,
-                                                                                   std::move( volumes ) );
+            // Count 0 with components present means every one of them is switched off. Said the same way
+            // as "no component at all", because it is the same instruction to the renderer: stop marching
+            // and give the images back.
+            renderCommandBuffer.Emplace<Graphic::Render::VolumetricCloudsCommand>( layers, std::move( volumes ) );
+        }
+
+        /**
+         * @brief Whether @p entity is the layer whose VIEW-WIDE settings the renderer obeys.
+         *
+         * Resolution Scale, Temporal Mode, Temporal Blend Factor, Temporal Clamp Scale and Jitter
+         * Strength describe the one ray and the one history this view has, and Shape Seed / Detail Seed
+         * choose the one noise set the scene leases — so all seven come from a single layer whatever else
+         * is in the sky. The Details panel has to name the SAME layer this collector picks, and a second
+         * copy of the rule over there would be free to disagree with this one, so the rule lives here and
+         * both sides call it.
+         *
+         * A disabled layer is never the primary: it is not a layer at all, and the lowest ENABLED one is.
+         */
+        static bool IsPrimaryCloudLayer( entt::registry& registry, entt::entity entity )
+        {
+            const auto* self = registry.try_get<ECS::VolumetricCloudsComponent>( entity );
+            if ( !self || !self->Data.Enabled )
+                return false;
+
+            auto view = registry.view<ECS::VolumetricCloudsComponent>();
+            for ( const auto other : view )
+            {
+                if ( other == entity )
+                    continue;
+
+                const auto& clouds = registry.get<ECS::VolumetricCloudsComponent>( other );
+                if ( !clouds.Data.Enabled )
+                    continue;
+
+                if ( LayerOrderBefore( clouds.Data.LayerBottomAltitude, EntityId( registry, other ),
+                                       self->Data.LayerBottomAltitude, EntityId( registry, entity ) ) )
+                    return false;
+            }
+            return true;
         }
 
     private:
+        // Lowest bottom altitude first; the UUID breaks a tie. The tie-break is not decoration: two
+        // layers CAN sit at the same height while somebody drags a slider, and "whichever entity entt
+        // visited first" changes when an unrelated component is added elsewhere in the scene.
+        static bool LayerOrderBefore( float altitudeA, uint64_t idA, float altitudeB, uint64_t idB )
+        {
+            if ( altitudeA != altitudeB )
+                return altitudeA < altitudeB;
+            return idA < idB;
+        }
+
         /**
          * Every enabled hero cloud in the scene, with the world matrix that places it.
          *

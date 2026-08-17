@@ -1006,6 +1006,21 @@ TEST( CloudTemporalMemory, TurningTheTemporalStageOffSavesExactlyTheHistoryPairA
 
 // ---- The two temporal fields reaching the GPU block --------------------------------------------------
 
+namespace
+{
+    // The temporal knobs describe the ONE history this view has, so the packing takes them from the
+    // primary (lowest) cloud layer and from nowhere else. A one-layer set is what every scene shipped
+    // before two layers existed hands the renderer, and these tests go on asserting exactly what they
+    // asserted about it.
+    Desert::Graphic::CloudLayerSet PrimaryLayer( const Desert::ECS::VolumetricCloudData& data )
+    {
+        Desert::Graphic::CloudLayerSet set;
+        set.Layers[0] = data;
+        set.Count     = 1;
+        return set;
+    }
+} // namespace
+
 TEST( CloudTemporalPayload, TheTwoTemporalFieldsAreCarriedThroughToTheBlock )
 {
     Desert::ECS::VolumetricCloudData data{};
@@ -1013,7 +1028,7 @@ TEST( CloudTemporalPayload, TheTwoTemporalFieldsAreCarriedThroughToTheBlock )
     data.TemporalClampScale  = 2.25f;
 
     const Desert::Graphic::CloudGpuPayload payload =
-         PackCloudParams( data, Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f,
+         PackCloudParams( PrimaryLayer( data ), Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f,
                           Desert::Graphic::CloudVoxelCounts{} );
 
     EXPECT_FLOAT_EQ( payload.TemporalBlendFactor, 0.37f );
@@ -1030,7 +1045,7 @@ TEST( CloudTemporalPayload, UnauthorableTemporalValuesAreRepairedAtTheBoundary )
     data.TemporalClampScale  = -1.0f;
 
     const Desert::Graphic::CloudGpuPayload payload =
-         PackCloudParams( data, Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f,
+         PackCloudParams( PrimaryLayer( data ), Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f,
                           Desert::Graphic::CloudVoxelCounts{} );
 
     EXPECT_FLOAT_EQ( payload.TemporalBlendFactor, 0.02f );
@@ -1038,7 +1053,7 @@ TEST( CloudTemporalPayload, UnauthorableTemporalValuesAreRepairedAtTheBoundary )
 
     data.TemporalBlendFactor = 4.0f;
     const Desert::Graphic::CloudGpuPayload clamped =
-         PackCloudParams( data, Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f,
+         PackCloudParams( PrimaryLayer( data ), Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f,
                           Desert::Graphic::CloudVoxelCounts{} );
     EXPECT_FLOAT_EQ( clamped.TemporalBlendFactor, 1.0f );
 }

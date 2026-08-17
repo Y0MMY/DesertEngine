@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/ECS/VolumetricCloudsComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudLayerSet.hpp>
 #include <Engine/Graphic/Clouds/CloudNoiseRules.hpp>
 #include <Engine/Graphic/AtmosphereEnv.hpp>
 #include <Engine/Graphic/WindEnv.hpp>
@@ -15,25 +16,39 @@ namespace Desert::Graphic
     /**
      * The GPU side of VolumetricCloudData, and the ONLY place the component is turned into bytes.
      *
-     * The GLSL half of this layout is the block in Editor/Resources/Shaders/Common/CloudParams.glslh,
-     * member for member and in this order. The static_asserts at the bottom are what make a divergence a
-     * build error instead of a frame in which every parameter after the inserted one is read from the
-     * wrong offset — a failure with no message, no validation error and no obvious symptom.
+     * The GLSL half of this layout is the pair of blocks in
+     * Editor/Resources/Shaders/Common/CloudParams.glslh, member for member and in this order. The
+     * static_asserts below each are what make a divergence a build error instead of a frame in which
+     * every parameter after the inserted one is read from the wrong offset — a failure with no message,
+     * no validation error and no obvious symptom.
      *
-     * Layout rule (see the glslh): every vec4 first, every 4-byte scalar after. std430 and C++ agree on
-     * both alignments, so the offsets below are the same in both languages and there is no padding
-     * anywhere except at the end of the struct.
+     * Layout rule (see the glslh): in each block, every vec4 first, every 4-byte scalar after. std430 and
+     * C++ agree on both alignments, so the offsets below are the same in both languages. The one place
+     * they DISAGREE is tail padding — glm's vec4 has a 4-byte alignment in this build, so C++ pads
+     * nothing while std430 rounds a struct up to 16 — and that is why both blocks below carry explicit
+     * padding to a multiple of 16 rather than trusting the compiler.
      *
      * Units: WORLD UNITS (centimetres) throughout, exactly as the component authors them. The raymarch
      * converts to kilometres once, inside the shader, where the shell intersection needs it.
      */
-    struct CloudGpuPayload
+
+    /**
+     * ONE CLOUD LAYER, as the GPU reads it. The block the shader indexes by the active layer.
+     *
+     * Everything here describes a SHELL — where it sits, what weather fills it, how it is shaped, lit,
+     * animated and marched. Nothing here describes the frame or the view: the sun, the sky radiances, the
+     * wind and the planet live once in CloudGpuPayload below, because two copies of the sun would be two
+     * answers to what time of day it is.
+     *
+     * The Quality-group members that ARE here — Max Steps, the step schedule, the light march, the
+     * multi-scatter octaves, the ambient occlusion and the shadow map — are properties of marching THIS
+     * shell, not of the frame. A 1.2 km cirrus sheet and a 3.5 km cumulus deck genuinely want different
+     * numbers for each, and each layer's Max Steps is its own budget so a deck the ray meets first cannot
+     * spend the sheet's.
+     */
+    struct CloudLayerPayload
     {
         // ---- vec4s. Colours are LINEAR; each `.w` carries the named companion scalar on its line. ----
-        glm::vec4 SunDirection;     // xyz toward sun (normalized), w = sun angular radius (radians)
-        glm::vec4 SunIrradiance;    // rgb, w = SunLightIntensityScale
-        glm::vec4 ZenithRadiance;   // rgb, w = AmbientSkyContribution
-        glm::vec4 GroundRadiance;   // rgb, w = AmbientGroundContribution
         glm::vec4 ScatteringAlbedo; // rgb, w = AmbientHeightBias
         glm::vec4 ExtinctionTint;   // rgb, w = ExtinctionScale
         glm::vec4 SunTint;          // rgb, w = PrecipitationDarkening
@@ -41,10 +56,8 @@ namespace Desert::Graphic
         glm::vec4 StratusGradient;
         glm::vec4 StratocumulusGradient;
         glm::vec4 CumulusGradient;
-        glm::vec4 SceneWind; // xyz = the scene's wind velocity (world units/s), w = seconds
 
         // ---- Cloud Layer ----
-        float PlanetRadius; // from AtmosphereEnv — the cloud subsystem never owns a radius of its own
         float LayerBottomAltitude;
         float LayerThickness;
         float MaxViewDistance;
@@ -92,6 +105,13 @@ namespace Desert::Graphic
         float NearFadeMinDensity;
 
         // ---- Lighting ----
+        // The three multipliers that used to ride in the `.w` of the sun and sky radiances. Those three
+        // vec4s are SHARED — one sun, one sky — while their multipliers are per layer, so a cirrus sheet
+        // can take more of the sky's ambient than the deck under it without the two disagreeing about
+        // what the sky IS.
+        float SunLightIntensityScale;
+        float AmbientSkyContribution;
+        float AmbientGroundContribution;
         float LightMarchDistance;
         float LightConeSpread;
         float PhaseForwardG;
@@ -117,13 +137,12 @@ namespace Desert::Graphic
         float WindUpliftSpeed;
 
         // ---- Quality ----
+        // The step schedule only. Jitter Strength and the two Temporal knobs are NOT here: they describe
+        // the one ray and the one history this view has, not a shell, and they live in the shared head.
         float MinStepSize;
         float MaxStepSize;
         float StepGrowthRate;
         float CoarseStepMultiplier;
-        float JitterStrength;
-        float TemporalBlendFactor;
-        float TemporalClampScale;
 
         int32_t WeatherSeed;
         int32_t WeatherOctaves;
@@ -152,13 +171,90 @@ namespace Desert::Graphic
         // than sixty floats crossing the bus every frame.
         float CloudHeightVariance;
 
+        // std430 gives an array of structs a stride of the struct's size ROUNDED UP to its own 16-byte
+        // alignment. glm's vec4 has a 4-byte alignment in this build (no SIMD gentypes), so C++ adds no
+        // tail padding of its own and the two strides would differ by these eight bytes — every field of
+        // layer 1 read from the wrong offset, with no validation error and no message. Written out rather
+        // than left to the compiler so the static_assert below is a promise and not a coincidence.
+        float Pad0;
+        float Pad1;
+    };
+
+    static_assert( offsetof( CloudLayerPayload, ScatteringAlbedo ) == 0 );
+    static_assert( offsetof( CloudLayerPayload, ExtinctionTint ) == 16 );
+    static_assert( offsetof( CloudLayerPayload, SunTint ) == 32 );
+    static_assert( offsetof( CloudLayerPayload, ShadowTint ) == 48 );
+    static_assert( offsetof( CloudLayerPayload, StratusGradient ) == 64 );
+    static_assert( offsetof( CloudLayerPayload, StratocumulusGradient ) == 80 );
+    static_assert( offsetof( CloudLayerPayload, CumulusGradient ) == 96 );
+    static_assert( offsetof( CloudLayerPayload, LayerBottomAltitude ) == 112,
+                   "The scalar run must start straight after the seven vec4s — std430 pads neither side." );
+    static_assert( offsetof( CloudLayerPayload, Coverage ) == 132 );
+    static_assert( offsetof( CloudLayerPayload, ShapeTileSize ) == 164 );
+    static_assert( offsetof( CloudLayerPayload, DetailStrength ) == 188 );
+    static_assert( offsetof( CloudLayerPayload, SunLightIntensityScale ) == 268 );
+    static_assert( offsetof( CloudLayerPayload, LightMarchDistance ) == 280 );
+    static_assert( offsetof( CloudLayerPayload, AnimationSpeed ) == 332 );
+    static_assert( offsetof( CloudLayerPayload, MinStepSize ) == 364 );
+    static_assert( offsetof( CloudLayerPayload, WeatherSeed ) == 380 );
+    static_assert( offsetof( CloudLayerPayload, MultiScatterOctaves ) == 400 );
+    static_assert( offsetof( CloudLayerPayload, AmbientOcclusion ) == 404 );
+    static_assert( offsetof( CloudLayerPayload, AutoDistanceFade ) == 408 );
+    static_assert( offsetof( CloudLayerPayload, CloudShadowExtent ) == 412 );
+    static_assert( offsetof( CloudLayerPayload, CloudShadowEnabled ) == 416 );
+    static_assert( offsetof( CloudLayerPayload, CloudHeightVariance ) == 420 );
+    static_assert( sizeof( CloudLayerPayload ) == 432,
+                   "A multiple of 16, which is what makes the C++ array stride equal the std430 one." );
+
+    /**
+     * THE parameter block: the frame's atmosphere and view-wide settings, then the layers.
+     *
+     * The GLSL half of this layout is the block in Editor/Resources/Shaders/Common/CloudParams.glslh,
+     * member for member and in this order.
+     */
+    struct CloudGpuPayload
+    {
+        // ---- SHARED vec4s. One sun, one sky, one wind — a second copy could disagree with the first. --
+        // The `.w` of the three radiances is deliberately unused: their multipliers became per-layer, and
+        // std430 gives a vec3 a 16-byte alignment anyway, so declaring them vec3 would save nothing.
+        glm::vec4 SunDirection;   // xyz toward sun (normalized), w = sun angular radius (radians)
+        glm::vec4 SunIrradiance;  // rgb = sun radiance from the atmosphere
+        glm::vec4 ZenithRadiance; // rgb = sky ambient from above
+        glm::vec4 GroundRadiance; // rgb = ground-bounce ambient from below
+        glm::vec4 SceneWind;      // xyz = the scene's wind velocity (world units/s), w = seconds
+
+        // ---- SHARED scalars ----
+        float PlanetRadius; // from AtmosphereEnv — the cloud subsystem never owns a radius of its own
+
+        // The three that belong to the RAY and to the HISTORY rather than to a shell. There is one ray
+        // per pixel and one history pair per view, so there is one answer to each; the renderer takes it
+        // from the primary (lowest) layer — see Graphic::CloudLayerSet.
+        float JitterStrength;
+        float TemporalBlendFactor;
+        float TemporalClampScale;
+
+        // How many entries of Layers below are live. The march builds its plan from exactly this many
+        // shells, so a stale second layer cannot be marched after the artist deleted its entity.
+        int32_t LayerCount;
+
         // ---- Hero clouds ----
         // How many records of the instance buffer (kCloudVolumeInstanceBinding) are live, and how many of
         // that leading run cast a cloud shadow. The renderer sorts the shadow casters to the front, so
         // the shadow pass marches a prefix rather than testing a per-instance flag on every sample.
-        // Appended, like everything before it.
+        //
+        // They are SHARED and not per layer, and that is the honest answer rather than an economy: a hero
+        // cloud is placed in the WORLD by its own entity's transform, and which shell it falls in is a
+        // question its own bounds already answer. The union in Common/CloudDensityCompose.glslh runs in
+        // whichever layer's segment the ray is currently in, and an instance outside that shell's
+        // altitudes contributes nothing there because the box test rejects it.
         int32_t VoxelInstanceCount;
         int32_t VoxelShadowCount;
+
+        // Brings the head to 112 bytes so the layer array below starts on the 16-byte boundary std430
+        // gives it. Written as zero; see CloudLayerPayload::Pad0 for why the padding is explicit.
+        int32_t Pad0;
+
+        CloudLayerPayload Layers[kCloudMaxLayers];
     };
 
     // Offsets of the vec4 run, and of the first and last scalar. Spot-checking three of them would not
@@ -167,40 +263,23 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudGpuPayload, SunIrradiance ) == 16 );
     static_assert( offsetof( CloudGpuPayload, ZenithRadiance ) == 32 );
     static_assert( offsetof( CloudGpuPayload, GroundRadiance ) == 48 );
-    static_assert( offsetof( CloudGpuPayload, ScatteringAlbedo ) == 64 );
-    static_assert( offsetof( CloudGpuPayload, ExtinctionTint ) == 80 );
-    static_assert( offsetof( CloudGpuPayload, SunTint ) == 96 );
-    static_assert( offsetof( CloudGpuPayload, ShadowTint ) == 112 );
-    static_assert( offsetof( CloudGpuPayload, StratusGradient ) == 128 );
-    static_assert( offsetof( CloudGpuPayload, StratocumulusGradient ) == 144 );
-    static_assert( offsetof( CloudGpuPayload, CumulusGradient ) == 160 );
-    static_assert( offsetof( CloudGpuPayload, SceneWind ) == 176 );
-    static_assert( offsetof( CloudGpuPayload, PlanetRadius ) == 192, "The scalar run must start straight "
-                                                                     "after the twelve vec4s — std430 "
-                                                                     "pads neither side." );
-    static_assert( offsetof( CloudGpuPayload, Coverage ) == 216 );
-    static_assert( offsetof( CloudGpuPayload, ShapeTileSize ) == 248 );
-    static_assert( offsetof( CloudGpuPayload, DetailStrength ) == 272 );
-    static_assert( offsetof( CloudGpuPayload, LightMarchDistance ) == 352 );
-    static_assert( offsetof( CloudGpuPayload, AnimationSpeed ) == 404 );
-    static_assert( offsetof( CloudGpuPayload, MinStepSize ) == 436 );
-    static_assert( offsetof( CloudGpuPayload, TemporalBlendFactor ) == 456 );
-    static_assert( offsetof( CloudGpuPayload, WeatherSeed ) == 464 );
-    static_assert( offsetof( CloudGpuPayload, MultiScatterOctaves ) == 484 );
-    static_assert( offsetof( CloudGpuPayload, AmbientOcclusion ) == 488 );
-    static_assert( offsetof( CloudGpuPayload, AutoDistanceFade ) == 492 );
-    static_assert( offsetof( CloudGpuPayload, CloudShadowExtent ) == 496 );
-    static_assert( offsetof( CloudGpuPayload, CloudShadowEnabled ) == 500 );
-    static_assert( offsetof( CloudGpuPayload, CloudHeightVariance ) == 504 );
-    static_assert( offsetof( CloudGpuPayload, VoxelInstanceCount ) == 508 );
-    static_assert( offsetof( CloudGpuPayload, VoxelShadowCount ) == 512 );
-    static_assert( sizeof( CloudGpuPayload ) == 516,
-                   "The block ends at the last float. glm's vec4 has a 4-byte alignment (no SIMD "
-                   "gentypes in this build), so C++ adds no tail padding — std430 does, which is why "
-                   "the buffer below is created at the rounded-up size and not at sizeof." );
+    static_assert( offsetof( CloudGpuPayload, SceneWind ) == 64 );
+    static_assert( offsetof( CloudGpuPayload, PlanetRadius ) == 80, "The scalar run must start straight "
+                                                                    "after the five vec4s — std430 pads "
+                                                                    "neither side." );
+    static_assert( offsetof( CloudGpuPayload, JitterStrength ) == 84 );
+    static_assert( offsetof( CloudGpuPayload, TemporalBlendFactor ) == 88 );
+    static_assert( offsetof( CloudGpuPayload, TemporalClampScale ) == 92 );
+    static_assert( offsetof( CloudGpuPayload, LayerCount ) == 96 );
+    static_assert( offsetof( CloudGpuPayload, VoxelInstanceCount ) == 100 );
+    static_assert( offsetof( CloudGpuPayload, VoxelShadowCount ) == 104 );
+    static_assert( offsetof( CloudGpuPayload, Layers ) == 112,
+                   "std430 aligns an array of structs to the struct's own 16-byte alignment. The head has "
+                   "to close on that boundary or every layer is read from the wrong offset." );
+    static_assert( sizeof( CloudGpuPayload ) == 112 + kCloudMaxLayers * sizeof( CloudLayerPayload ) );
 
     // std430 rounds a block up to its own 16-byte alignment, so the SSBO must be at least this large
-    // even though the C++ struct stops short of it. Creating it at sizeof() would leave the
+    // even though the C++ struct may stop short of it. Creating it at sizeof() would leave the
     // descriptor range short of the block the shader declares.
     inline constexpr uint32_t kCloudPayloadBytes = ( ( sizeof( CloudGpuPayload ) + 15u ) / 16u ) * 16u;
 
@@ -253,15 +332,17 @@ namespace Desert::Graphic
     inline constexpr uint32_t kCloudHistoryBinding        = 4;
 
     /**
-     * Per-dispatch data for the shadow-map pass: where the map is centred and how far it reaches.
+     * Per-dispatch data for the shadow-map pass: where the map is centred.
      *
-     * Both numbers must be the ones the RAYMARCH projects with. The extent goes through
-     * CloudShadowExtentOf on both sides rather than being clamped twice, and the centre is the same
-     * camera position both passes are handed in the same frame.
+     * The HALF-WIDTH used to ride in `.w` here as well, and it no longer does: it is per layer now, one
+     * dispatch fills every layer's slice, and a single push constant could not carry two of them. Both
+     * passes therefore read it from the same place — CloudLayerPayload::CloudShadowExtent, clamped once
+     * by CloudShadowExtentOf on the way in — which is a stronger guarantee than the two agreeing because
+     * one function was called twice.
      */
     struct CloudShadowPush
     {
-        glm::vec4 Centre; // xyz = world centre (the camera), w = half-width in world units
+        glm::vec4 Centre; // xyz = world centre (the camera), w unused
     };
 
     static_assert( sizeof( CloudShadowPush ) == 16 );
@@ -559,7 +640,132 @@ namespace Desert::Graphic
         int32_t Shadow = 0;
     };
 
-    inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const AtmosphereEnv& atmosphere,
+    /**
+     * Fill ONE layer's block from its component.
+     *
+     * Split out from the frame packing below because it is the half that runs once per layer - and
+     * because every repair it makes is a statement about a SHELL: a fade whose end fell below its start,
+     * a max step below the min, a seed outside the range the shader hashes.
+     */
+    inline CloudLayerPayload PackCloudLayer( const ECS::VolumetricCloudData& data )
+    {
+        CloudLayerPayload l{};
+
+        l.ScatteringAlbedo      = glm::vec4( data.ScatteringAlbedo, data.AmbientHeightBias );
+        l.ExtinctionTint        = glm::vec4( data.ExtinctionTint, data.ExtinctionScale );
+        l.SunTint               = glm::vec4( data.SunTint, data.PrecipitationDarkening );
+        l.ShadowTint            = glm::vec4( data.ShadowTint, data.AtmosphericPerspective );
+        l.StratusGradient       = data.StratusGradient;
+        l.StratocumulusGradient = data.StratocumulusGradient;
+        l.CumulusGradient       = data.CumulusGradient;
+
+        l.LayerBottomAltitude = data.LayerBottomAltitude;
+        l.LayerThickness      = glm::max( data.LayerThickness, 1.0f );
+        l.MaxViewDistance     = data.MaxViewDistance;
+        l.HorizonFadeStart    = data.HorizonFadeStart;
+        l.HorizonFadeEnd      = glm::max( data.HorizonFadeEnd, data.HorizonFadeStart );
+
+        l.Coverage            = data.Coverage;
+        l.CoverageContrast    = glm::max( data.CoverageContrast, 1e-3f );
+        l.WeatherTileSize     = glm::max( data.WeatherTileSize, 1.0f );
+        l.WeatherWarpStrength = data.WeatherWarpStrength;
+        l.CloudType           = data.CloudType;
+        l.CloudTypeVariance   = data.CloudTypeVariance;
+        l.AnvilBias           = data.AnvilBias;
+        l.Wetness             = data.Wetness;
+
+        l.ShapeTileSize        = glm::max( data.ShapeTileSize, 1.0f );
+        l.BaseShapeRemapMin    = data.BaseShapeRemapMin;
+        l.ShapeErosionStrength = data.ShapeErosionStrength;
+        l.BaseGradientPower    = data.BaseGradientPower;
+        l.TopGradientPower     = data.TopGradientPower;
+        l.DensityHeightBias    = data.DensityHeightBias;
+
+        l.DetailStrength          = data.DetailStrength;
+        l.DetailTileSize          = glm::max( data.DetailTileSize, 1.0f );
+        l.DetailTypeBias          = data.DetailTypeBias;
+        l.BillowGradientPower     = data.BillowGradientPower;
+        l.BillowNoiseScale        = data.BillowNoiseScale;
+        l.HighFreqStrength        = data.HighFreqStrength;
+        l.HighFreqWispSharpness   = data.HighFreqWispSharpness;
+        l.HighFreqBillowSharpness = data.HighFreqBillowSharpness;
+        l.HighFreqFeatureSize     = glm::max( data.HighFreqFeatureSize, 1.0f );
+        l.CurlStrength            = data.CurlStrength;
+        l.CurlTileSize            = glm::max( data.CurlTileSize, 1.0f );
+        l.DensitySharpenLow       = data.DensitySharpenLow;
+        l.DensitySharpenHigh      = data.DensitySharpenHigh;
+        l.DensityScalePower       = data.DensityScalePower;
+        l.DistanceSoftening       = data.DistanceSoftening;
+        l.SofteningStartDistance  = data.SofteningStartDistance;
+        l.SofteningEndDistance    = glm::max( data.SofteningEndDistance, data.SofteningStartDistance );
+        l.NearFadeStart           = data.NearFadeStart;
+        l.NearFadeEnd             = glm::max( data.NearFadeEnd, data.NearFadeStart );
+        l.NearFadeMinDensity      = data.NearFadeMinDensity;
+
+        l.SunLightIntensityScale        = data.SunLightIntensityScale;
+        l.AmbientSkyContribution        = data.AmbientSkyContribution;
+        l.AmbientGroundContribution     = data.AmbientGroundContribution;
+        l.LightMarchDistance            = data.LightMarchDistance;
+        l.LightConeSpread               = data.LightConeSpread;
+        l.PhaseForwardG                 = data.PhaseForwardG;
+        l.PhaseBackwardG                = data.PhaseBackwardG;
+        l.PhaseBlend                    = data.PhaseBlend;
+        l.SilverLiningIntensity         = data.SilverLiningIntensity;
+        l.PowderStrength                = data.PowderStrength;
+        l.PowderScale                   = data.PowderScale;
+        l.MultiScatterExtinctionFalloff = data.MultiScatterExtinctionFalloff;
+        l.MultiScatterScatterFalloff    = data.MultiScatterScatterFalloff;
+        l.MultiScatterPhaseFalloff      = data.MultiScatterPhaseFalloff;
+        l.DistanceFadeStart             = data.DistanceFadeStart;
+        l.DistanceFadeEnd               = glm::max( data.DistanceFadeEnd, data.DistanceFadeStart );
+
+        l.AnimationSpeed          = data.AnimationSpeed;
+        l.WindInfluence           = data.WindInfluence;
+        l.WindDirectionOffset     = data.WindDirectionOffset;
+        l.ShapeScrollMultiplier   = data.ShapeScrollMultiplier;
+        l.DetailScrollMultiplier  = data.DetailScrollMultiplier;
+        l.WeatherScrollMultiplier = data.WeatherScrollMultiplier;
+        l.WindHeightShear         = data.WindHeightShear;
+        l.WindUpliftSpeed         = data.WindUpliftSpeed;
+
+        l.MinStepSize          = glm::max( data.MinStepSize, 1.0f );
+        l.MaxStepSize          = glm::max( data.MaxStepSize, l.MinStepSize );
+        l.StepGrowthRate       = glm::max( data.StepGrowthRate, 0.0f );
+        l.CoarseStepMultiplier = glm::max( data.CoarseStepMultiplier, 1.0f );
+
+        // Folded exactly as the noise volumes fold theirs: the component authors an int with a
+        // Range(0, 65535), the shader hashes a uint, and a value outside that range must land on its
+        // representative inside it rather than on a different cloudscape after sign extension.
+        l.WeatherSeed              = static_cast<int32_t>( CloudSeedFromComponent( data.WeatherSeed ) );
+        l.WeatherOctaves           = glm::clamp( data.WeatherOctaves, 1, 8 );
+        l.MaxSteps                 = glm::max( data.MaxSteps, 1 );
+        l.EmptySamplesBeforeCoarse = glm::max( data.EmptySamplesBeforeCoarse, 1 );
+        l.LightMarchSamples        = glm::max( data.LightMarchSamples, 1 );
+        l.MultiScatterOctaves      = glm::clamp( data.MultiScatterOctaves, 1, 8 );
+
+        l.AmbientOcclusion   = glm::clamp( data.AmbientOcclusion, 0.0f, 1.0f );
+        l.AutoDistanceFade   = data.AutoDistanceFade ? 1 : 0;
+        l.CloudShadowExtent  = CloudShadowExtentOf( data );
+        l.CloudShadowEnabled = data.CloudShadowMap ? 1 : 0;
+
+        // Clamped here rather than trusted, like the fade pairs above: the shader lerps the whole layer
+        // toward the cell's own band by this number, and a value outside [0, 1] extrapolates the band
+        // past the layer it is supposed to live inside.
+        l.CloudHeightVariance = glm::clamp( data.CloudHeightVariance, 0.0f, 1.0f );
+
+        return l;
+    }
+
+    /**
+     * Fill the whole block: the frame's atmosphere and wind once, then every live layer.
+     *
+     * Pure: no GPU, no globals, no clock - @p timeSeconds is passed in so the packing can be tested.
+     *
+     * @p layers must already be in ALTITUDE ORDER (ECS::VolumetricCloudsECSSystem puts it there). The
+     * order decides which layer's view-wide settings win, and taking them from the lowest one rather than
+     * from whichever entity was created first is what makes the frame reproducible.
+     */
+    inline CloudGpuPayload PackCloudParams( const CloudLayerSet& layers, const AtmosphereEnv& atmosphere,
                                             const WindEnv& wind, float timeSeconds,
                                             const CloudVoxelCounts& voxels )
     {
@@ -568,118 +774,32 @@ namespace Desert::Graphic
 
         CloudGpuPayload p{};
 
-        p.SunDirection          = glm::vec4( atmosphere.SunDirection, atmosphere.SunAngularRadius );
-        p.SunIrradiance         = glm::vec4( atmosphere.SunIrradiance, data.SunLightIntensityScale );
-        p.ZenithRadiance        = glm::vec4( atmosphere.ZenithRadiance, data.AmbientSkyContribution );
-        p.GroundRadiance        = glm::vec4( atmosphere.GroundRadiance, data.AmbientGroundContribution );
-        p.ScatteringAlbedo      = glm::vec4( data.ScatteringAlbedo, data.AmbientHeightBias );
-        p.ExtinctionTint        = glm::vec4( data.ExtinctionTint, data.ExtinctionScale );
-        p.SunTint               = glm::vec4( data.SunTint, data.PrecipitationDarkening );
-        p.ShadowTint            = glm::vec4( data.ShadowTint, data.AtmosphericPerspective );
-        p.StratusGradient       = data.StratusGradient;
-        p.StratocumulusGradient = data.StratocumulusGradient;
-        p.CumulusGradient       = data.CumulusGradient;
-        p.SceneWind             = glm::vec4( windVelocity, timeSeconds );
+        // The `.w` of the three radiances is unused - their multipliers are per layer now. Written as
+        // zero rather than left uninitialised so a shader that reads one gets a number, not garbage.
+        p.SunDirection   = glm::vec4( atmosphere.SunDirection, atmosphere.SunAngularRadius );
+        p.SunIrradiance  = glm::vec4( atmosphere.SunIrradiance, 0.0f );
+        p.ZenithRadiance = glm::vec4( atmosphere.ZenithRadiance, 0.0f );
+        p.GroundRadiance = glm::vec4( atmosphere.GroundRadiance, 0.0f );
+        p.SceneWind      = glm::vec4( windVelocity, timeSeconds );
 
-        p.PlanetRadius        = atmosphere.PlanetRadius;
-        p.LayerBottomAltitude = data.LayerBottomAltitude;
-        p.LayerThickness      = glm::max( data.LayerThickness, 1.0f );
-        p.MaxViewDistance     = data.MaxViewDistance;
-        p.HorizonFadeStart    = data.HorizonFadeStart;
-        p.HorizonFadeEnd      = glm::max( data.HorizonFadeEnd, data.HorizonFadeStart );
+        p.PlanetRadius = atmosphere.PlanetRadius;
 
-        p.Coverage            = data.Coverage;
-        p.CoverageContrast    = glm::max( data.CoverageContrast, 1e-3f );
-        p.WeatherTileSize     = glm::max( data.WeatherTileSize, 1.0f );
-        p.WeatherWarpStrength = data.WeatherWarpStrength;
-        p.CloudType           = data.CloudType;
-        p.CloudTypeVariance   = data.CloudTypeVariance;
-        p.AnvilBias           = data.AnvilBias;
-        p.Wetness             = data.Wetness;
+        // The three that belong to the ray and to the history, from the PRIMARY layer. Clamped to the
+        // range the Details panel offers for the same reason the fade pairs are repaired per layer: a
+        // blend factor of 0 would freeze the sky on its first frame forever, and a negative clamp scale
+        // would invert the neighbourhood box into an empty one that rejects every history sample. Both
+        // are one keystroke away in a scene file edited by hand.
+        const ECS::VolumetricCloudData& primary = layers.Primary();
 
-        p.ShapeTileSize        = glm::max( data.ShapeTileSize, 1.0f );
-        p.BaseShapeRemapMin    = data.BaseShapeRemapMin;
-        p.ShapeErosionStrength = data.ShapeErosionStrength;
-        p.BaseGradientPower    = data.BaseGradientPower;
-        p.TopGradientPower     = data.TopGradientPower;
-        p.DensityHeightBias    = data.DensityHeightBias;
+        p.JitterStrength      = primary.JitterStrength;
+        p.TemporalBlendFactor = glm::clamp( primary.TemporalBlendFactor, 0.02f, 1.0f );
+        p.TemporalClampScale  = glm::max( primary.TemporalClampScale, 0.0f );
 
-        p.DetailStrength          = data.DetailStrength;
-        p.DetailTileSize          = glm::max( data.DetailTileSize, 1.0f );
-        p.DetailTypeBias          = data.DetailTypeBias;
-        p.BillowGradientPower     = data.BillowGradientPower;
-        p.BillowNoiseScale        = data.BillowNoiseScale;
-        p.HighFreqStrength        = data.HighFreqStrength;
-        p.HighFreqWispSharpness   = data.HighFreqWispSharpness;
-        p.HighFreqBillowSharpness = data.HighFreqBillowSharpness;
-        p.HighFreqFeatureSize     = glm::max( data.HighFreqFeatureSize, 1.0f );
-        p.CurlStrength            = data.CurlStrength;
-        p.CurlTileSize            = glm::max( data.CurlTileSize, 1.0f );
-        p.DensitySharpenLow       = data.DensitySharpenLow;
-        p.DensitySharpenHigh      = data.DensitySharpenHigh;
-        p.DensityScalePower       = data.DensityScalePower;
-        p.DistanceSoftening       = data.DistanceSoftening;
-        p.SofteningStartDistance  = data.SofteningStartDistance;
-        p.SofteningEndDistance    = glm::max( data.SofteningEndDistance, data.SofteningStartDistance );
-        p.NearFadeStart           = data.NearFadeStart;
-        p.NearFadeEnd             = glm::max( data.NearFadeEnd, data.NearFadeStart );
-        p.NearFadeMinDensity      = data.NearFadeMinDensity;
-
-        p.LightMarchDistance            = data.LightMarchDistance;
-        p.LightConeSpread               = data.LightConeSpread;
-        p.PhaseForwardG                 = data.PhaseForwardG;
-        p.PhaseBackwardG                = data.PhaseBackwardG;
-        p.PhaseBlend                    = data.PhaseBlend;
-        p.SilverLiningIntensity         = data.SilverLiningIntensity;
-        p.PowderStrength                = data.PowderStrength;
-        p.PowderScale                   = data.PowderScale;
-        p.MultiScatterExtinctionFalloff = data.MultiScatterExtinctionFalloff;
-        p.MultiScatterScatterFalloff    = data.MultiScatterScatterFalloff;
-        p.MultiScatterPhaseFalloff      = data.MultiScatterPhaseFalloff;
-        p.DistanceFadeStart             = data.DistanceFadeStart;
-        p.DistanceFadeEnd               = glm::max( data.DistanceFadeEnd, data.DistanceFadeStart );
-
-        p.AnimationSpeed          = data.AnimationSpeed;
-        p.WindInfluence           = data.WindInfluence;
-        p.WindDirectionOffset     = data.WindDirectionOffset;
-        p.ShapeScrollMultiplier   = data.ShapeScrollMultiplier;
-        p.DetailScrollMultiplier  = data.DetailScrollMultiplier;
-        p.WeatherScrollMultiplier = data.WeatherScrollMultiplier;
-        p.WindHeightShear         = data.WindHeightShear;
-        p.WindUpliftSpeed         = data.WindUpliftSpeed;
-
-        p.MinStepSize          = glm::max( data.MinStepSize, 1.0f );
-        p.MaxStepSize          = glm::max( data.MaxStepSize, p.MinStepSize );
-        p.StepGrowthRate       = glm::max( data.StepGrowthRate, 0.0f );
-        p.CoarseStepMultiplier = glm::max( data.CoarseStepMultiplier, 1.0f );
-        p.JitterStrength       = data.JitterStrength;
-
-        // Clamped to the range the Details panel offers, for the same reason the fade pairs are repaired
-        // above: a blend factor of 0 would freeze the sky on its first frame forever, and a negative
-        // clamp scale would invert the neighbourhood box into an empty one that rejects every history
-        // sample. Both are one keystroke away in a scene file edited by hand.
-        p.TemporalBlendFactor = glm::clamp( data.TemporalBlendFactor, 0.02f, 1.0f );
-        p.TemporalClampScale  = glm::max( data.TemporalClampScale, 0.0f );
-
-        // Folded exactly as the noise volumes fold theirs: the component authors an int with a
-        // Range(0, 65535), the shader hashes a uint, and a value outside that range must land on its
-        // representative inside it rather than on a different cloudscape after sign extension.
-        p.WeatherSeed              = static_cast<int32_t>( CloudSeedFromComponent( data.WeatherSeed ) );
-        p.WeatherOctaves           = glm::clamp( data.WeatherOctaves, 1, 8 );
-        p.MaxSteps                 = glm::max( data.MaxSteps, 1 );
-        p.EmptySamplesBeforeCoarse = glm::max( data.EmptySamplesBeforeCoarse, 1 );
-        p.LightMarchSamples        = glm::max( data.LightMarchSamples, 1 );
-        p.MultiScatterOctaves      = glm::clamp( data.MultiScatterOctaves, 1, 8 );
-
-        p.AmbientOcclusion   = glm::clamp( data.AmbientOcclusion, 0.0f, 1.0f );
-        p.AutoDistanceFade   = data.AutoDistanceFade ? 1 : 0;
-        p.CloudShadowExtent  = CloudShadowExtentOf( data );
-        p.CloudShadowEnabled = data.CloudShadowMap ? 1 : 0;
-
-        // Clamped here rather than trusted, like the fade pairs above: the shader lerps the whole layer
-        // toward the cell's own band by this number, and a value outside [0, 1] extrapolates the band
-        // past the layer it is supposed to live inside.
-        p.CloudHeightVariance = glm::clamp( data.CloudHeightVariance, 0.0f, 1.0f );
+        // Clamped rather than trusted: the march loops to this count and a value above the array's own
+        // size would index a layer nobody packed.
+        p.LayerCount = static_cast<int32_t>( glm::min( layers.Count, kCloudMaxLayers ) );
+        for ( int32_t i = 0; i < p.LayerCount; ++i )
+            p.Layers[i] = PackCloudLayer( layers.Layers[static_cast<std::size_t>( i )] );
 
         p.VoxelInstanceCount = glm::max( voxels.Total, 0 );
         p.VoxelShadowCount   = glm::clamp( voxels.Shadow, 0, p.VoxelInstanceCount );

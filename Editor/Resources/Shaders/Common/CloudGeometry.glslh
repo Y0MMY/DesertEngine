@@ -247,6 +247,159 @@ float CloudHeightFraction(vec3 positionKm, float planetRadiusKm, float bottomKm,
     return clamp(CloudLayerHeight(positionKm, planetRadiusKm, bottomKm, thicknessKm), 0.0f, 1.0f);
 }
 
+// ---- Layers: which slice, and in what order the ray meets them ---------------------------------------
+
+// The w coordinate of @p layer's slice in a @p layerCount-deep volume.
+//
+// The weather map, the profile map, the profile table and the cloud shadow map are all one image per
+// quantity with one SLICE per cloud layer, rather than one image per layer per quantity. The engine
+// refuses arrayed samplers on purpose (ShaderReflection.RefusesArrayedImagesInsteadOfGuessing) and its own
+// answer to "N of the same thing" is a volume with arithmetic addressing — the hero-cloud atlas is the
+// precedent. One sampler also means one fetch: selecting between two 2D images would be a branch on a
+// value that differs between pixels of the same wave, and this fetch runs up to seven times per shaded
+// sample.
+//
+// TEXEL CENTRES, which is the whole content of this function. Every volume in the engine is sampled
+// LINEAR/REPEAT (VulkanImage's AlwaysLinear policy), so a w half a texel off would blend the deck's
+// coverage into the sheet's. At the centre the trilinear weight on the neighbouring slice is exactly
+// zero, and the fetch returns that layer's texel and nothing else.
+float CloudLayerSliceW(int layer, int layerCount)
+{
+    float count = max(float(layerCount), 1.0f);
+    return (float(layer) + 0.5f) / count;
+}
+
+// ---- The march plan ----------------------------------------------------------------------------------
+
+// One stretch of the view ray, and the cloud layer that owns it.
+struct CloudMarchSegment
+{
+    float TEnter;
+    float TExit;
+    int   Layer;
+};
+
+// The most segments a straight ray through two DISJOINT concentric shells can need.
+//
+// Three, and the third is not padding. CloudShellBounds reports one CONSERVATIVE interval per shell — the
+// first entry to the last exit — because a ray that dips below a layer and climbs back out crosses it
+// twice. A camera above the upper layer looking down at a shallow angle produces exactly that: the upper
+// shell's conservative interval spans the descent AND the ascent, and the lower shell's interval sits
+// inside it. Marching the upper one whole and then the lower one would composite the lower deck BEHIND
+// cloud that is in front of it.
+//
+// Splitting the containing interval at the contained one is EXACT rather than approximate: the pieces the
+// split removes are the gap between the two altitude bands, where the outer layer's own height fraction
+// is outside [0,1] and its density is zero by construction.
+#define CLOUD_MAX_MARCH_SEGMENTS 3
+
+// The ordered, disjoint segments of a ray through up to two shells. Arrays are outside the GLSL/C++
+// intersection this file is written in, so the three are named members and CloudPlanSegment is the
+// subscript.
+struct CloudMarchPlan
+{
+    int               Count;
+    CloudMarchSegment S0;
+    CloudMarchSegment S1;
+    CloudMarchSegment S2;
+};
+
+CloudMarchSegment CloudPlanSegment(CloudMarchPlan plan, int index)
+{
+    CloudMarchSegment segment = plan.S2;
+    if (index == 0)
+        segment = plan.S0;
+    else if (index == 1)
+        segment = plan.S1;
+    return segment;
+}
+
+// Appends a segment to a plan if it has any length at all. A zero-length or inverted interval is not an
+// error — it is what the split produces when the contained shell starts exactly where the containing one
+// does — and dropping it here is what keeps every segment the plan reports genuinely marchable.
+CloudMarchPlan CloudPlanAppend(CloudMarchPlan plan, float tEnter, float tExit, int layer)
+{
+    CloudMarchPlan next = plan;
+    if (tExit <= tEnter)
+        return next;
+
+    CloudMarchSegment segment;
+    segment.TEnter = tEnter;
+    segment.TExit  = tExit;
+    segment.Layer  = layer;
+
+    if (plan.Count == 0)
+        next.S0 = segment;
+    else if (plan.Count == 1)
+        next.S1 = segment;
+    else if (plan.Count == 2)
+        next.S2 = segment;
+    else
+        return next; // full: cannot happen for two disjoint shells, and silently growing would be worse
+
+    next.Count = plan.Count + 1;
+    return next;
+}
+
+// THE ORDER THE RAY MEETS THE LAYERS, as segments that are sorted by distance and do not overlap.
+//
+// Both properties are what makes the march composite correctly BY CONSTRUCTION: one transmittance
+// accumulator walked front to back is "near over far" with nothing to sort afterwards, and no interval
+// marched twice means no cloud counted twice.
+//
+// @p a and @p b are the two shells' conservative intervals; @p layerA and @p layerB name which layer each
+// belongs to. Either may be a miss, in which case it contributes nothing.
+CloudMarchPlan CloudPlanTwoShells(CloudShellHit a, int layerA, CloudShellHit b, int layerB)
+{
+    CloudMarchPlan plan;
+    plan.Count = 0;
+    plan.S0.TEnter = 0.0f;
+    plan.S0.TExit  = 0.0f;
+    plan.S0.Layer  = 0;
+    plan.S1 = plan.S0;
+    plan.S2 = plan.S0;
+
+    if (!a.Hit && !b.Hit)
+        return plan;
+
+    if (!b.Hit)
+        return CloudPlanAppend(plan, a.TEnter, a.TExit, layerA);
+
+    if (!a.Hit)
+        return CloudPlanAppend(plan, b.TEnter, b.TExit, layerB);
+
+    // Order by entry distance. The near one is the one the eye reaches first, whichever altitude it is —
+    // a camera above the deck meets the layers in the opposite order to a camera on the ground.
+    CloudShellHit first     = a;
+    CloudShellHit second    = b;
+    int           firstId   = layerA;
+    int           secondId  = layerB;
+    if (b.TEnter < a.TEnter)
+    {
+        first    = b;
+        second   = a;
+        firstId  = layerB;
+        secondId = layerA;
+    }
+
+    if (second.TExit <= first.TExit)
+    {
+        // CONTAINED: the ray dips through the second layer's band and climbs back out inside the first
+        // layer's conservative span. Split the container around it.
+        plan = CloudPlanAppend(plan, first.TEnter, second.TEnter, firstId);
+        plan = CloudPlanAppend(plan, second.TEnter, second.TExit, secondId);
+        plan = CloudPlanAppend(plan, second.TExit, first.TExit, firstId);
+        return plan;
+    }
+
+    // DISJOINT, or overlapping at the ends. The clip is a no-op in the disjoint case, which is every
+    // ground camera; where the two do overlap, the overlap lies in the gap between the altitude bands
+    // and the first layer has no density there, so the clip loses nothing and keeps the pair disjoint.
+    plan = CloudPlanAppend(plan, first.TEnter, min(first.TExit, second.TEnter), firstId);
+    plan = CloudPlanAppend(plan, second.TEnter, second.TExit, secondId);
+    return plan;
+}
+
 // ---- Step scheduling -------------------------------------------------------------------------------
 
 // The near/far split of the step schedule, in WORLD UNITS (centimetres). Nubis3 grows its step as
