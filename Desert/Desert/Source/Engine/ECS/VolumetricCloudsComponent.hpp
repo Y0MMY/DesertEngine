@@ -153,10 +153,12 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Cloud Height Variance" ), Category( "Weather" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ),
-                  Tooltip( "How much neighbouring clouds differ in BASE and TOP height. 0 makes every "
-                           "cloud fill the whole layer, as the layer's single global slab always did; "
-                           "raising it gives each cell its own vertical slab, so one cloud's base sits "
-                           "above another's top." ) )
+                  Tooltip( "How much neighbouring clouds differ in DEPTH. 0 makes every cloud fill the "
+                           "whole layer, as the layer's single global slab always did; raising it gives "
+                           "each cell its own vertical slab. Tops move about five times as far as bases "
+                           "do - a cloud field condenses at one level and climbs to a hundred different "
+                           "ones, and it is the flat bases all at one altitude that make a deck read as a "
+                           "ceiling instead of as fog." ) )
         float CloudHeightVariance = 0.55f;
 
         PROPERTY( DisplayName( "Anvil Bias" ), Category( "Weather" ), Range( 0.0f, 1.0f ),
@@ -194,19 +196,43 @@ namespace Desert::ECS
                   Tooltip( "Optical density. The most important single number in the system." ) )
         float ExtinctionScale = 1.00f;
 
+        // THE BASE-IN WIDTH IS WHAT A CLOUD BOTTOM IS MADE OF, and every row below is authored from that.
+        //
+        // The profile is thresholded by the detail erosion, so a column becomes cloud at the height where
+        //     gradient(h) x coverage x baseShape > detailThreshold.
+        // Only `gradient` depends on h, so the base altitude is that equation SOLVED for h — and every
+        // horizontally-varying factor on the right is converted into a vertical displacement of the base
+        // by the inverse of the base-in ramp. Measured on the Partly Cloudy deck (CPU probe over one
+        // weather tile, 6400 columns): the base-altitude scatter is 0.40 x the ramp's own height. A ramp
+        // of 0.22 of a 3 km cell is 650 m, giving 260 m of scatter with the per-cell band held fixed;
+        // there is no ceiling in that, and it is the larger half of "the clouds look close to the ground".
+        //
+        // So the ramps are authored as a LENGTH the atmosphere justifies rather than as a shape that
+        // looked right: liquid water content reaches near-adiabatic within roughly 100 m of the lifting
+        // condensation level, so a base-in of 0.05 of a ~3 km cell (150 m, 60 m of scatter) is the
+        // physical figure and 0.22 was four times it.
+
         PROPERTY( DisplayName( "Stratus Gradient" ), Category( "Shape" ), Range( 0.0f, 1.0f ), Advanced,
                   EditCondition( "Enabled" ),
                   Tooltip( "Base-in start/end and top-out start/end of the stratus height profile, in "
-                           "normalized layer height (0 = layer bottom, 1 = layer top)." ) )
-        glm::vec4 StratusGradient = { 0.00f, 0.08f, 0.20f, 0.32f };
+                           "normalized layer height (0 = layer bottom, 1 = layer top). A sheet sits ON "
+                           "its condensation level, so the base-in is a few hundredths wide." ) )
+        glm::vec4 StratusGradient = { 0.00f, 0.05f, 0.20f, 0.32f };
 
         PROPERTY( DisplayName( "Stratocumulus Gradient" ), Category( "Shape" ), Range( 0.0f, 1.0f ), Advanced,
-                  EditCondition( "Enabled" ), Tooltip( "The same four heights for the stratocumulus profile." ) )
-        glm::vec4 StratocumulusGradient = { 0.00f, 0.18f, 0.55f, 0.78f };
+                  EditCondition( "Enabled" ),
+                  Tooltip( "The same four heights for the stratocumulus profile. A cellular deck shares "
+                           "one condensation level across the whole sky, so its base is nearly as flat as "
+                           "a stratus sheet's." ) )
+        glm::vec4 StratocumulusGradient = { 0.00f, 0.06f, 0.55f, 0.78f };
 
         PROPERTY( DisplayName( "Cumulus Gradient" ), Category( "Shape" ), Range( 0.0f, 1.0f ), Advanced,
-                  EditCondition( "Enabled" ), Tooltip( "The same four heights for the cumulus profile." ) )
-        glm::vec4 CumulusGradient = { 0.00f, 0.22f, 0.68f, 0.92f };
+                  EditCondition( "Enabled" ),
+                  Tooltip( "The same four heights for the cumulus profile. Fair-weather cumulus have the "
+                           "SHARPEST bases in the sky - the flat bottoms all at one altitude that say the "
+                           "ceiling is up there - so this is the narrowest base-in of the convective "
+                           "forms." ) )
+        glm::vec4 CumulusGradient = { 0.00f, 0.05f, 0.68f, 0.92f };
 
         // The three forms the Cloud Type axis gained. Each is a trapezoid PLUS a bend: a trapezoid
         // product is a monotone rise times a monotone fall, so it can put a cloud's mass higher or lower
@@ -230,8 +256,10 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Congestus Gradient" ), Category( "Shape" ), Range( 0.0f, 1.0f ), Advanced,
                   EditCondition( "Enabled" ),
                   Tooltip( "The four heights of the cauliflower congestus profile - a tall trapezoid with "
-                           "a short plateau, so the bend below can round it into a bulging mass." ) )
-        glm::vec4 CongestusGradient = { 0.00f, 0.45f, 0.70f, 1.00f };
+                           "a short plateau, so the bend below can round it into a bulging mass. A "
+                           "congestus shares the cumulus condensation level and spends its extra depth "
+                           "UPWARD, so its base-in stays narrow however tall the tower gets." ) )
+        glm::vec4 CongestusGradient = { 0.00f, 0.07f, 0.70f, 1.00f };
 
         PROPERTY( DisplayName( "Congestus Profile Form" ), Category( "Shape" ), Range( -1.0f, 2.0f ), Advanced,
                   EditCondition( "Enabled" ),
@@ -243,8 +271,11 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Anvil Gradient" ), Category( "Shape" ), Range( 0.0f, 1.0f ), Advanced,
                   EditCondition( "Enabled" ),
                   Tooltip( "The four heights of the cumulonimbus anvil profile: a box that fills nearly "
-                           "the whole layer, which the bend below then carves a stalk out of." ) )
-        glm::vec4 AnvilGradient = { 0.00f, 0.06f, 0.92f, 1.00f };
+                           "the whole layer, which the bend below then carves a stalk out of. This is the "
+                           "one form whose base-in is deliberately WIDE - a storm's base is lowered and "
+                           "diffuse, ragged with scud and streaked with rain shafts falling out of it, "
+                           "and that softness is the species rather than a defect." ) )
+        glm::vec4 AnvilGradient = { 0.00f, 0.16f, 0.92f, 1.00f };
 
         PROPERTY( DisplayName( "Anvil Profile Form" ), Category( "Shape" ), Range( -1.0f, 2.0f ), Advanced,
                   EditCondition( "Enabled" ),

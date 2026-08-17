@@ -508,6 +508,47 @@ TEST( CloudPresets, EveryPresetsWeatherTileMatchesItsOwnLayerAltitude )
     }
 }
 
+// EVERY SPECIES KEEPS ITS BASE ON A CONDENSATION LEVEL — except the one whose base is supposed to be a
+// mess, and that exception is asserted too rather than merely allowed.
+//
+// The base-in width of a profile row is the height over which a cloud goes from clear air to full body,
+// and it is the gain that turns horizontal coverage variation into VERTICAL scatter of the cloud bottom
+// (CloudMath asserts that proportionality on the table itself). A cumulus, a stratocumulus, a stratus
+// sheet and a congestus tower all condense at the same kind of thermodynamic surface, so all four get a
+// few hundredths; a cumulonimbus base really is lowered, ragged with scud and streaked with rain, so the
+// anvil row gets the widest ramp in the table and is REQUIRED to.
+//
+// The bounds carry margin over the authored values (0.05-0.07 against 0.06-0.08) so that a deliberate
+// retune passes and a regression to the pre-2026-08 widths — 0.22 for cumulus, 0.45 for congestus —
+// fails. Those widths were 650 m and 1.3 km of ramp on the shipped decks, and they are the larger half of
+// "the clouds look like they are close to the ground, not up in the sky".
+TEST( CloudPresets, EveryPresetKeepsItsCloudBasesOnOneCondensationLevel )
+{
+    const auto check = []( const char* who, const VolumetricCloudData& d )
+    {
+        EXPECT_LE( d.StratusGradient.y, 0.06f ) << who << ": a sheet sits ON its condensation level";
+        EXPECT_LE( d.StratocumulusGradient.y, 0.07f ) << who << ": a cellular deck shares one level";
+        EXPECT_LE( d.ShelfGradient.y - d.ShelfGradient.x, 0.06f ) << who << ": a shelf IS its hard flat base";
+        EXPECT_LE( d.CumulusGradient.y, 0.06f ) << who << ": fair-weather cumulus have the sharpest bases";
+        EXPECT_LE( d.CongestusGradient.y, 0.08f ) << who << ": a tower spends its extra depth upward";
+
+        // The deliberate exception, and the widest ramp in the table by construction.
+        EXPECT_GE( d.AnvilGradient.y, 0.12f ) << who << ": a storm base is lowered and diffuse, not sharp";
+        EXPECT_GT( d.AnvilGradient.y, d.CumulusGradient.y )
+             << who << ": the anvil has stopped being the soft-based form";
+        EXPECT_GT( d.AnvilGradient.y, d.CongestusGradient.y ) << who;
+    };
+
+    check( "component defaults", VolumetricCloudData{} );
+
+    for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
+    {
+        VolumetricCloudData d{};
+        Graphic::ApplyPreset( preset.Id, d );
+        check( preset.Name, d );
+    }
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
