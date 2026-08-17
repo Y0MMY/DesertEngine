@@ -69,7 +69,11 @@ Shader "GrassCull"
             float anchorY = TerrainHeight( vec2( ax, az ) );
 
             // Slope/flatness (same central-diff slope as the vertex shader).
-            float eps  = max( cell, 0.5 );
+            // eps is a LENGTH: one grid cell, floored so a very dense grid can't collapse the central
+            // difference to nothing. The floor was the metre era's 0.5 m; as half a CENTIMETRE it made the
+            // difference vanish against a height field whose features are tens of metres wide, gnrm.y came
+            // back as 1 everywhere, and the flatness cull passed every clump including the cliff faces.
+            float eps  = max( cell, 50.0 );
             float hXp  = TerrainHeight( vec2( ax + eps, az ) );
             float hZp  = TerrainHeight( vec2( ax, az + eps ) );
             vec3  gnrm = normalize( vec3( anchorY - hXp, eps, anchorY - hZp ) );

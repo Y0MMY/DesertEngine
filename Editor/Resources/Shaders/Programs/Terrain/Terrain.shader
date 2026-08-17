@@ -342,7 +342,9 @@ Shader "Terrain"
             // albedo must be darker than the angled, AO'd blades to read at the same brightness.) + world variation.
             // Params2.z carries the grass Brightness (engine-synced) so the lawn ground tracks the blades when
             // you drag the Grass Brightness slider — they always read as one material.
-            float groundVar  = sin( v_WorldPos.x * 3.1 ) * sin( v_WorldPos.z * 2.7 ) * 0.5 + 0.5;
+            // 0.031/0.027 are frequencies per world unit — a ~2 m patch, which is what the metre era's
+            // 3.1/2.7 meant. Left alone they were a 2 cm chequer under the blades: shimmer, not variation.
+            float groundVar  = sin( v_WorldPos.x * 0.031 ) * sin( v_WorldPos.z * 0.027 ) * 0.5 + 0.5;
             float grassBright = max( u.Params2.z, 0.05 );
             vec3  grassCol   = vec3( 0.052, 0.10, 0.034 ) * ( 0.75 + 0.5 * groundVar ) * grassBright;
             vec3  rockCol   = vec3( 0.40, 0.37, 0.33 ); // bare rock (default base)

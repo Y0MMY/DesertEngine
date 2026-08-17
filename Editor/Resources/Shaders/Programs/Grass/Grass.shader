@@ -116,14 +116,20 @@ Shader "Grass"
             vec3  base  = ( u.Model * vec4( bx, baseY, bz, 1.0 ) ).xyz;
 
             float dist = distance( u.CameraPos.xyz, base );
-            float fade = 1.0 - smoothstep( u.Params2.w * 0.25, u.Params2.w * 0.45, dist );
+            // The fade ENDS at maxDist, which is exactly where GrassCull.glsl.comp rejects the clump. The two
+            // used to disagree (fade gone by 0.45*maxDist, cull only at maxDist), so ~80% of every drawn
+            // instance was a zero-height blade nobody could see: the profile below keeps the same shape
+            // relative to the visible radius and stops paying for the invisible five-sixths of the area.
+            float fade = 1.0 - smoothstep( u.Params2.w * 0.55, u.Params2.w, dist );
 
             // Geometry fade = shrink height (a short blade just sinks toward the ground; no horizontal sliver
             // like a collapsed billboard). Hard cap keeps the aliasing-prone far field out entirely.
             float height = u.Params2.z * ( 0.6 + 0.8 * rb3 ) * fade * typeHeight;
             // Width has a CONSTANT floor (not purely height-scaled) so SHORT grass (city/lawn) stays wide enough
             // to close gaps; the height term widens tall grass. * Grass Width * per-type * tip taper.
-            float halfW  = ( 0.009 + height * 0.038 ) * clamp( u.Params.y, 0.1, 3.0 ) * typeWidth * ( 1.0 - 0.85 * t );
+            // 0.9 is a LENGTH — a 9 mm half-width, i.e. the 0.009 m the metre era wrote, in centimetres.
+            // (The 0.038 beside it is a width-to-height RATIO and needs no conversion.)
+            float halfW  = ( 0.9 + height * 0.038 ) * clamp( u.Params.y, 0.1, 3.0 ) * typeWidth * ( 1.0 - 0.85 * t );
             // Screen-space minimum width: far blades widen so they never fall below ~1px and shimmer/blur when
             // the camera zooms out (the geometric equivalent of mip coverage — keeps distant grass sampleable).
             halfW = max( halfW, dist * 0.0007 );
@@ -136,7 +142,10 @@ Shader "Grass"
             // Forward arc (lean) + soft coherent wind, both growing toward the tip.
             float lean    = ( 0.12 + 0.45 * rb2 ) * typeLean;
             vec2  windDir = ( length( u.Wind.xy ) > 0.001 ) ? normalize( u.Wind.xy ) : vec2( 1.0, 0.0 );
-            float gust    = sin( u.Wind.w * 0.7 + dot( vec2( bx, bz ), windDir ) * 0.18 ) * 0.65 +
+            // The 0.0018 is a spatial FREQUENCY (per world unit): a gust wavelength of 2*pi/0.0018 ~ 35 m,
+            // which is what the metre era's 0.18 meant. Left unconverted it was a 35 cm wavelength, so every
+            // blade got its own phase and the "soft coherent wind" was per-blade jitter.
+            float gust    = sin( u.Wind.w * 0.7 + dot( vec2( bx, bz ), windDir ) * 0.0018 ) * 0.65 +
                          sin( u.Wind.w * 0.35 ) * 0.35;
             vec3  forward = bladeDir * lean + vec3( windDir.x, 0.0, windDir.y ) * ( gust * u.Wind.z );
 
@@ -219,8 +228,12 @@ Shader "Grass"
 
             // Tonal sun/shade patches (two octaves) -> the field isn't uniform; sunlit = a touch warmer/lighter,
             // shaded = darker. Kept subtle so it stays natural (not glowing).
-            float sunMask = sin( v_WorldPos.x * 0.06 + 1.7 ) * sin( v_WorldPos.z * 0.05 - 0.6 ) * 0.5 + 0.5;
-            sunMask += 0.35 * ( sin( v_WorldPos.x * 0.17 - 0.9 ) * sin( v_WorldPos.z * 0.13 + 2.1 ) * 0.5 + 0.5 );
+            // Spatial FREQUENCIES per world unit, so they are lengths^-1 and had to be divided by 100 with the
+            // rest of the world: the metre-era 0.06/0.05 and 0.17/0.13 are ~105 m and ~40 m patches, which is
+            // what "tonal sun/shade patches" means. Read as centimetres they were a 1 m and a 37 cm mottle —
+            // noise per blade, not weather over a field.
+            float sunMask = sin( v_WorldPos.x * 0.0006 + 1.7 ) * sin( v_WorldPos.z * 0.0005 - 0.6 ) * 0.5 + 0.5;
+            sunMask += 0.35 * ( sin( v_WorldPos.x * 0.0017 - 0.9 ) * sin( v_WorldPos.z * 0.0013 + 2.1 ) * 0.5 + 0.5 );
             sunMask   = smoothstep( 0.25, 0.95, sunMask / 1.35 );
             base = mix( base * vec3( 0.80, 0.86, 0.78 ), base * vec3( 1.12, 1.08, 0.82 ), sunMask );
 

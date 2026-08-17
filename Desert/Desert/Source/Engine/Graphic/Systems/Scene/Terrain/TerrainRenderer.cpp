@@ -6,6 +6,7 @@
 #include <Engine/Core/Formats/ImageFormat.hpp>
 #include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
 #include <Engine/Graphic/Clouds/CloudWorldShadow.hpp>
+#include <Common/Core/Units.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -62,7 +63,22 @@ namespace Desert::Graphic::System
             uint32_t FirstInstance;
         };
 
-        constexpr float kGrassMaxDist = 45.0f; // grass draw distance (must match the grass-pass Params2.w)
+        // Grass draw distance, in WORLD UNITS (centimetres). It reaches both the cull compute and the grass
+        // vertex shader as Params2.w, and in BOTH it now means the same thing: the distance at which a blade
+        // has shrunk to nothing and the clump is rejected.
+        //
+        // It was a bare 45.0f from the metre era — forty-five CENTIMETRES, and the vertex shader faded blades
+        // out over 0.25..0.45 of it, so grass reached twenty centimetres from the camera and the field was
+        // empty at every real scene scale.
+        //
+        // 120 m is the UE landscape-grass band (End Cull Distance is typically authored at 100-200 m for
+        // ground clutter). What it costs: the grid is GrassDensity^2 clumps spread over the terrain, so the
+        // spacing is Size/GrassDensity and the clumps inside a 16:9 frustum wedge number about
+        // 0.2 * pi * dist^2 / spacing^2. For the 400 m showcase terrain at density 320 (spacing 1.25 m) that
+        // is ~5.9k clumps, i.e. ~0.7 M vertices per frame at 5 blades x 24 verts — one medium mesh. On a
+        // terrain small enough that the whole field is inside 120 m the limit is GrassDensity^2 instead, and
+        // the density slider is what pays for it.
+        constexpr float kGrassMaxDist = Common::Units::Metres( 120.0f );
 
         // Geometric blade: kSegments(4) quads -> kSegments*6 = 24 verts/blade. The indirect draw's
         // per-instance vertex count = bladesPerClump * this (MUST match Grass.glsl.vert's kSegments).
