@@ -148,10 +148,34 @@ namespace Desert::Graphic
 
     // --- Compute Pipeline ---
 
+    // ONE SPECIALIZATION CONSTANT: a value the SPIR-V declares with `layout(constant_id = Id)` and the
+    // DRIVER substitutes when the pipeline is created, before it compiles the shader for the device. It is
+    // the engine's whole answer to shader permutation — one SPIR-V module, one cache entry, N pipelines —
+    // and it costs nothing at the call site because the value was already known on the CPU.
+    //
+    // What it buys that a uniform read cannot: a branch on a specialization constant is FOLDED, and the
+    // branch it deletes takes its stores with it. The cloud raymarch is the case that asked for this — a
+    // one-layer sky was paying for a two-layer loop it never entered, because a store to the layer index in
+    // the branch it did not take is still a store the optimiser has to assume, and it turns ~50 hoistable
+    // parameter loads per density sample into indexed reads inside the march (Common/CloudParams.glslh has
+    // the four measured alternatives).
+    //
+    // INT32 ONLY, deliberately. Vulkan allows any scalar, but every specialization this engine has is a
+    // count or a mode; a variant type here would be machinery in front of one `int`.
+    struct ShaderSpecializationConstant
+    {
+        uint32_t Id    = 0;
+        int32_t  Value = 0;
+    };
+
     struct ComputePipelineSpecification
     {
         std::shared_ptr<Shader> Shader;
         std::string             DebugName;
+
+        // Substituted into the shader at pipeline creation. Empty means the SPIR-V's own defaults, which
+        // is what every pass but the cloud raymarch wants.
+        std::vector<ShaderSpecializationConstant> Specialization;
     };
 
     class ComputePipeline : public IPipeline

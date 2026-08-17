@@ -25,6 +25,7 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
+#include <Engine/Graphic/Clouds/CloudPayload.hpp>
 
 #include <Common/Core/Constants.hpp>
 
@@ -333,6 +334,48 @@ TEST_F( ShaderRootFixture, TheRaymarchDeclaresSixteenDescriptorsInSetZero )
     EXPECT_TRUE( HasBinding( bindings, 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // distant sky light
     EXPECT_TRUE( HasBinding( bindings, 14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // hero instances
     EXPECT_TRUE( HasBinding( bindings, 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // hero atlas
+}
+
+// ---- The specialization id the CPU and the module have to agree on ----------------------------------
+
+// A SPECIALIZATION ID IS A NUMBER TWO SIDES AGREE ON AND NOTHING CHECKS, exactly like a binding — with
+// one difference that makes it worse: getting a binding wrong is a validation error, while Vulkan
+// SILENTLY IGNORES a VkSpecializationMapEntry whose constantID the module does not declare. The pipeline
+// is created, the shader keeps its default, and the frame is correct and slow. A one-layer sky would
+// quietly go back to paying for the two-layer loop (measured: 11-18% of the frame) and the only symptom
+// would be a number in a report nobody is running.
+//
+// So read it out of the COMPILED MODULE, which is what the driver will read. `OpDecorate <target>
+// SpecId <n>` is opcode 71 with decoration 1; walking the instruction stream for it needs no reflection
+// library and cannot be fooled by the source text having the token in a comment.
+TEST_F( ShaderRootFixture, TheRaymarchDeclaresTheLayerCountSpecializationIdTheEngineSupplies )
+{
+    const auto path  = ShaderPath( "Clouds/CloudRaymarch.shader" );
+    const auto spirv = CompileStage( StageSource( path, ShaderStage::Compute ), path, shaderc_compute_shader );
+    ASSERT_FALSE( spirv.empty() );
+    ASSERT_GT( spirv.size(), 5u );
+
+    constexpr uint32_t kOpDecorate       = 71u;
+    constexpr uint32_t kDecorationSpecId = 1u;
+
+    std::vector<uint32_t> declaredIds;
+    for ( std::size_t word = 5; word < spirv.size(); )
+    {
+        const uint32_t count  = spirv[word] >> 16;
+        const uint32_t opcode = spirv[word] & 0xFFFFu;
+        ASSERT_GT( count, 0u ) << "malformed SPIR-V at word " << word;
+
+        if ( opcode == kOpDecorate && count >= 4 && spirv[word + 2] == kDecorationSpecId )
+            declaredIds.push_back( spirv[word + 3] );
+
+        word += count;
+    }
+
+    ASSERT_EQ( declaredIds.size(), 1u )
+         << "the raymarch declares " << declaredIds.size()
+         << " specialization constants; the engine supplies exactly one (the layer count) and a second "
+            "one nobody fills would compile against its default forever";
+    EXPECT_EQ( declaredIds.front(), Desert::Graphic::kCloudLayerCountConstantId );
 }
 
 TEST_F( ShaderRootFixture, TheShadowMapDeclaresItsOwnTenDescriptors )

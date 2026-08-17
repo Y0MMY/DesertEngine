@@ -165,11 +165,26 @@ namespace Desert::Graphic::System
         void DispatchRaymarch( const CloudNoiseSet& noise, Image2D* depthImage, bool checkerboard );
         void DispatchTemporalResolve( bool checkerboard );
 
-        std::shared_ptr<ComputePipeline>  m_WeatherPipeline;
-        std::shared_ptr<ComputePipeline>  m_ShadowPipeline;
-        std::shared_ptr<ComputePipeline>  m_RaymarchPipeline;
+        std::shared_ptr<ComputePipeline> m_WeatherPipeline;
+        std::shared_ptr<ComputePipeline> m_ShadowPipeline;
+
+        // ONE RAYMARCH PIPELINE PER LIVE LAYER COUNT, indexed by count - 1. Same shader, same SPIR-V, same
+        // cache entry: what differs is the specialization constant the driver folds the layer machinery
+        // against (Graphic::kCloudLayerCountConstantId). A one-layer sky then runs a module that does not
+        // contain the two-layer loop at all, which is the only arrangement that gets its frame time back —
+        // see the note on the two loops in Programs/Clouds/CloudRaymarch.shader.
+        //
+        // Built up front, both of them, rather than on demand: creating a pipeline mid-frame stalls on
+        // vkCreateComputePipelines, and there are exactly kCloudMaxLayers of them.
+        std::array<std::shared_ptr<ComputePipeline>, kCloudMaxLayers> m_RaymarchPipelines;
+
         std::shared_ptr<ComputePipeline>  m_TemporalPipeline;
         std::shared_ptr<GraphicsPipeline> m_CompositePipeline;
+
+        // The pipeline that marches @p liveLayers layers, or nullptr if it could not be built. The clamp
+        // is the SAME one CloudPackPayload applies to LayerCount, so the pipeline and the buffer cannot
+        // describe different layer counts.
+        [[nodiscard]] ComputePipeline* RaymarchPipelineFor( uint32_t liveLayers ) const;
 
         std::unique_ptr<MaterialVolumetricClouds> m_CompositeMaterial;
 

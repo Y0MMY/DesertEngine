@@ -288,6 +288,27 @@ namespace Desert::Graphic
     // never consults the shader's own reflection for it.
     inline constexpr uint32_t kCloudParamsBinding = 2;
 
+    // HOW MANY LAYERS THE RAYMARCH PIPELINE FOR A SCENE OF @p liveLayers LAYERS MUST BE SPECIALIZED TO.
+    //
+    // It is a separate function from the `min` CloudPackPayload applies to LayerCount because the two
+    // clamps are not the same clamp and the difference is the whole risk: the buffer may legitimately
+    // carry zero layers (nothing is dispatched), while a PIPELINE must always march at least one, and a
+    // pipeline specialized BELOW the buffer's count would drop a sheet the buffer packed with no error
+    // anywhere — the march would simply never build that shell. So this rounds UP where they differ, and
+    // the CloudPayload suite asserts the ordering over the whole range including the out-of-range values
+    // a hand-edited scene can produce.
+    inline constexpr uint32_t CloudRaymarchLayerCount( uint32_t liveLayers )
+    {
+        return liveLayers < 1u ? 1u : ( liveLayers > kCloudMaxLayers ? kCloudMaxLayers : liveLayers );
+    }
+
+    // The raymarch's ONLY specialization constant: how many layers the pipeline marches. Must equal the
+    // `layout(constant_id = ...)` in Programs/Clouds/CloudRaymarch.shader — a specialization id, like a
+    // binding, is a number the two sides agree on and nothing checks for them. Getting it wrong is not a
+    // failure: the driver ignores an id the module does not declare and the shader keeps its default,
+    // which is the maximum layer count, i.e. a correct but slower frame.
+    inline constexpr uint32_t kCloudLayerCountConstantId = 0;
+
     // The other bindings the cloud passes agree on with their shaders. Same reason, same trap.
     inline constexpr uint32_t kCloudWeatherOutputBinding = 0; // weather pass: the storage image it writes
     inline constexpr uint32_t kCloudScatterOutputBinding = 0; // raymarch: the RGBA16F scatter target

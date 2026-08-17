@@ -121,6 +121,25 @@ Shader "CloudRaymarch"
 
         LocalSize(8, 8, 1);
 
+        // HOW MANY CLOUD LAYERS THIS PIPELINE MARCHES — a Vulkan SPECIALIZATION CONSTANT, substituted by
+        // the driver at pipeline creation, before it compiles this module for the device.
+        //
+        // It is not a permutation system and it needs none: one .shader, one SPIR-V module, one cache
+        // entry, and Graphic::VolumetricCloudRenderer builds one pipeline per layer count out of it
+        // (Graphic::kCloudLayerCountConstantId). What it buys is that the branch below is FOLDED rather
+        // than taken: with the value 1, the two-layer loop is not a branch the ray skips, it is code that
+        // does not exist — and neither does its store to the layer index. That store is the whole cost.
+        // A one-layer sky measured 9.80 ms against the 8.64 it cost before layers existed for no reason
+        // except that the two-layer loop was PRESENT: an index the optimiser cannot prove constant turns
+        // the ~50 parameter loads a density sample makes into indexed reads it may not hoist out of the
+        // march. See the measurements in Common/CloudParams.glslh — four ways of arranging the selection
+        // were tried and every one of them was worse, because none of them removed the code.
+        //
+        // The DEFAULT is the maximum, so a pipeline created without specialization data marches every
+        // layer the buffer can hold. That is the conservative direction: too many is a slower correct
+        // frame, too few would be a missing sheet.
+        layout(constant_id = 0) const int CLOUD_LAYER_COUNT = CLOUD_MAX_LAYERS;
+
         // Interleaved gradient noise (Jimenez 2014), translated per frame. A per-pixel fraction of one
         // step is what turns the march's banding into noise the temporal stage can average away; without
         // it a 128-step march through a soft field draws visible shells.
@@ -601,7 +620,13 @@ Shader "CloudRaymarch"
             float planetRadiusKm = CloudKmFromWorld(u_PlanetRadius);
             vec3  originKm       = cameraPos * (1.0f / CLOUD_WORLD_UNITS_PER_KM);
 
-            int layerCount = clamp(u_LayerCount, 0, CLOUD_MAX_LAYERS);
+            // THE PIPELINE'S layer count, not the buffer's. Both are consequences of the SAME
+            // VolumetricCloudRenderer::m_Layers.Count — the buffer through CloudPackPayload, this one
+            // through the pipeline RaymarchPipelineFor chose — so they cannot drift; that the pipeline
+            // can never march FEWER layers than the buffer packed (which would drop a sheet in silence)
+            // is Graphic::CloudRaymarchLayerCount, and the CloudPayload suite asserts it over the whole
+            // range. Reading the constant here is what lets everything below fold.
+            const int layerCount = clamp(CLOUD_LAYER_COUNT, 0, CLOUD_MAX_LAYERS);
 
             // The GUIDE describes where the GEOMETRY is, so its cap is the FURTHEST any layer would have
             // marched. A nearer layer's own Max View Distance clamps that LAYER's segments below; using
@@ -710,10 +735,11 @@ Shader "CloudRaymarch"
             // worse (13.64 ms against 11.78), because both copies are then live in the same loop and the
             // register allocator has to size for their sum rather than for the larger of them.
             //
-            // What remains is a residue: 9.80 ms against the 8.64 this scene cost before layers existed,
-            // because the shader still CONTAINS the two-layer loop even when it does not run it. Removing
-            // it needs a shader permutation — one program per layer count — which is a bigger change than
-            // this task, and is written up in the report rather than left as a comment.
+            // The residue this used to leave — 9.80 ms against the 8.64 the scene cost before layers
+            // existed, purely because the shader CONTAINED the loop it did not run — is gone: `layerCount`
+            // is the specialization constant above, so on a one-layer pipeline this test is folded and the
+            // second loop is not compiled at all. Both loops stay in the SOURCE because the two-layer
+            // pipeline is a real pipeline that really runs the second one.
             if (layerCount <= 1)
             {
                 CloudSelectLayer(0);
