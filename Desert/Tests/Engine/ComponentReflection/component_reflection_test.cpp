@@ -344,7 +344,7 @@ TEST( VolumetricCloudReflection, ExposesOneHundredAndFiveFieldsInTheSpecifiedGro
     EXPECT_EQ( CountInCategory( clouds, "Shape" ), 17u );
     // 21 since High Frequency Fade Start / End became the single High Frequency Feature Size: the
     // distance the near-field band survives to is derived from that size and the march's own step
-    // (CloudBandWeight), so two authored distances that could contradict each other became one.
+    // (CloudNyquistWeight), so two authored distances that could contradict each other became one.
     EXPECT_EQ( CountInCategory( clouds, "Detail" ), 21u );
     EXPECT_EQ( CountInCategory( clouds, "Lighting" ), 25u );
     EXPECT_EQ( CountInCategory( clouds, "Animation" ), 8u );

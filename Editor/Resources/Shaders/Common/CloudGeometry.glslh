@@ -433,15 +433,24 @@ float CloudStepLength(float t, float minStep, float maxStep, float growth)
     return clamp(mix(fine, linear, w), min(minStep, maxStep), max(minStep, maxStep));
 }
 
-// ---- The near-field detail band ---------------------------------------------------------------------
+// ---- The sampling-rate gate -------------------------------------------------------------------------
 
-// How much of the high-frequency erosion band a sample may carry, from the step the march is taking
-// THERE. This replaces two authored distances (High Freq Fade Start / End) with the relation those
-// distances were an attempt to express, and it is the relation that decides, not the authoring.
+// How much of a field of a given feature size a sample may carry, from the step the march is taking
+// THERE. This replaces authored distances (High Freq Fade Start / End were the first pair) with the
+// relation those distances were an attempt to express, and it is the relation that decides, not the
+// authoring.
+//
+// TWO CONSUMERS, ONE RELATION. The near-field ridged band was the first. The DETAIL EROSION itself is the
+// second (Common/CloudDensityProcedural.glslh), and it is the one that decides what the horizon looks
+// like: at 1-3 degrees of elevation a ray strides 700 m through a field whose amplitude-weighted
+// structure is 390 m across. A field marched three and a half times past its own Nyquist limit is not
+// rendered coarsely — it is a DIFFERENT field in every pixel, because the entry dither moves each ray's
+// sample lattice by up to a coarse stride. That is what the ragged fringe of vertical shreds along the
+// horizon was made of, and no amount of fading hides it, because the shreds ARE the cloud.
 //
 // A march samples the medium at intervals of S. Along the ray that is a sampling rate, and its Nyquist
 // limit is a feature of size 2S: anything finer cannot be reconstructed and arrives as noise for the
-// temporal resolve to average into mush. So a band whose finest content is `featureSize` is
+// temporal resolve to average into mush. So a field whose content is `featureSize` across is
 //
 //     * fully carried where the march is at least twice oversampled for it, S <= featureSize / 4;
 //     * gone at the Nyquist limit itself,                                  S >= featureSize / 2;
@@ -459,10 +468,73 @@ float CloudStepLength(float t, float minStep, float maxStep, float growth)
 // than 30 m is never carried at all. The band therefore ramps from about half strength at the camera to
 // nothing a couple of kilometres out. Making it stronger means a finer near-field step, which is a
 // perf trade rather than a maths one, and is not in this change.
-float CloudBandWeight(float featureSize, float stepLength)
+//
+// WHAT THE EROSION'S CONSUMER COSTS, on Clouds_UEShowcase's High tier and its 4 km detail tile: the
+// coarse channel pair (781 m across) is fully carried to 24.0 km and gone by 47.0 km; the fine pair
+// (391 m) is fully carried to 17.7 km and gone by 24.0 km. Inside 17.7 km BOTH weights are exactly 1,
+// so the detail volume is sampled unmixed and CloudErodeDensity's spread is exactly 0 — the density is
+// then bit for bit what it was before the gate existed, which is what keeps near clouds unchanged.
+float CloudNyquistWeight(float featureSize, float stepLength)
 {
     return CloudRemapRange(stepLength, 0.5f * max(featureSize, 1e-4f), 0.25f * max(featureSize, 1e-4f),
                            0.0f, 1.0f);
+}
+
+// THE EROSION CUT, with the threshold's UNRESOLVED spread folded into it.
+//
+// The cut is a hinge: `max(d - t, 0) / (1 - t)`, where t is the detail composite times Detail Strength.
+// Where the march resolves the noise that sets t, the hinge is exactly right and this function IS it.
+//
+// Where it does not — the far field, past CloudNyquistWeight — the sample carries the noise's MEAN, and
+// the mean of a hinge is not the hinge of a mean. Every sample whose density sits just under the mean
+// threshold clamps to exactly zero and every sample just over it comes through at full strength; with a
+// step's worth of optical depth behind each one (700 m at 0.0005 per centimetre is an opacity of about
+// ten) that is a BINARY field, and which pixel lands on which side of it is decided by the entry dither.
+// The picture is a deck of opaque columns with clear gaps between them: the ragged fringe again, in
+// coarser clothes.
+//
+// So return the MEAN OF THE HINGE instead. Modelling the variation the sample no longer sees as uniform
+// about t with half-width r = sqrt(3) s, so that its standard deviation is the measured s:
+//
+//     E_t[max(d - t, 0)] = 0                        d <= t - r
+//                        = (d - t + r)^2 / (4r)     |d - t| <= r
+//                        = d - t                    d >= t + r
+//
+// Continuous, continuously differentiable, and exactly the conditional mean of the hinge under that
+// model — which is what the test pins, against a numerical average over the same window.
+//
+// R IS CLAMPED TO T, and that is not defensive. The threshold is a noise value in [0,1] times Detail
+// Strength, so it cannot be negative; a symmetric window wider than t would put weight on negative
+// thresholds, and a negative threshold ADDS density. Unclamped, a sample whose unerroded profile is
+// barely above zero came back solid, which paints a faint fog over the whole shell. The widest symmetric
+// window that stays non-negative keeps the mean exactly t and understates the spread where the threshold
+// is small, which is the safe direction: less widening, never invented cloud.
+//
+// The bound the test pins follows from it: the result is never below the hinge and never above
+// `d / (1 - t)`, so no spread can make a sample denser than an unerroded one. At s = 0 it is the hinge
+// bit for bit, which is what leaves every near-field sample untouched.
+float CloudErodeDensity(float density, float threshold, float thresholdSpread)
+{
+    float t = clamp(threshold, 0.0f, 1.0f);
+
+    // A threshold at the top of the range leaves no range to remap onto, and dividing by it is the
+    // inf-then-NaN CloudRemapRange guards against for the same reason. Collapsing to zero here is
+    // exactly what that guard does, which is what keeps this function the hinge it replaced at every
+    // input and not merely at the ones a test happens to sweep.
+    if (1.0f - t < 1e-6f)
+        return 0.0f;
+
+    float r = min(1.7320508f * max(thresholdSpread, 0.0f), t);
+    float d = density - t;
+
+    float cut = max(d, 0.0f);
+    if (r > 1e-6f && d > -r && d < r)
+    {
+        float u = d + r;
+        cut     = u * u * (0.25f / r);
+    }
+
+    return clamp(cut / (1.0f - t), 0.0f, 1.0f);
 }
 
 // The empty-space skip, as a state machine over scalars.
@@ -481,12 +553,16 @@ float CloudBandWeight(float featureSize, float stepLength)
 //
 // This is the Nubis1/2 miss-counting heuristic, and it needs no extra memory at all.
 //
-// THE TWO TIERS DO NOT MEASURE THE SAME FIELD, and that is what the first version of this machine got
-// wrong. The coarse tier's verdict is the CHEAP density — weather x envelope x base shape. The fine
-// tier's is the FULL density, which is the cheap one after the detail erosion has cut it, and the
-// erosion removes everything below `noiseComposite * DetailStrength`. Over most of a procedural
-// cloudscape the cheap density is small but strictly positive while the eroded one is exactly zero, so
-// the coarse tier says "cloud" and the fine tier finds nothing — again and again, at the same place:
+// BOTH TIERS MUST MEASURE THE SAME FIELD, and every defect this machine has produced came from them not
+// doing so. `occupied` is the CHEAP density in both — weather x envelope x base shape — and the caller
+// is what guarantees it: Programs/Clouds/CloudRaymarch.shader judges its fine samples by the profile
+// CloudDensitySample returns beside the eroded density, not by the eroded density itself. See the note
+// at that site for what happened when it did not.
+//
+// The first failure was a STALL. The coarse verdict was the cheap density and the fine verdict was the
+// density AFTER erosion, and over most of a procedural cloudscape the cheap one is small but strictly
+// positive while the eroded one is exactly zero. So the coarse tier said "cloud", the fine tier found
+// nothing, and the two chased each other:
 //
 //     coarse hit at T -> rewind one coarse stride C -> emptyBeforeCoarse empty fine samples of stride F
 //     -> back to coarse at T - C + E*F -> hit again -> rewind C -> fine at T - 2C + E*F
@@ -499,17 +575,22 @@ float CloudBandWeight(float featureSize, float stepLength)
 // elevation: the whole frame budget-exhausted, `finished` false on essentially every pixel, and the
 // exhaustion fade below then erased the cloud that had been integrated.
 //
-// Two things fix it, and both are properties rather than tunings:
+// Two properties cured the stall:
 //
 //   * A FRONTIER. The rewind is clamped to the furthest point the fine tier has already sampled, so no
 //     interval is ever marched twice. This is what makes progress monotone rather than periodic.
 //   * SEARCHING AT THE COARSE RATE. Until a fine excursion has found real density, it is still
-//     SEARCHING, and there is nothing yet to resolve; it advances by the coarse stride while evaluating
-//     the full density — a strictly better occupancy test than the cheap one at the same sample rate.
-//     The first non-empty sample rewinds one coarse stride (once, guarded by `Shaded`) and only then
-//     does the excursion step at the fine stride, which is what resolves the cloud and its interior
-//     holes. A false positive therefore costs `emptyBeforeCoarse` coarse strides of GROUND for
+//     SEARCHING, and there is nothing yet to resolve; it advances by the coarse stride. The first
+//     non-empty sample rewinds one coarse stride (once, guarded by `Shaded`) and only then does the
+//     excursion step at the fine stride, which is what resolves the cloud and its interior holes. A
+//     false positive therefore costs `emptyBeforeCoarse` coarse strides of GROUND for
 //     `emptyBeforeCoarse + 1` samples instead of standing still.
+//
+// The SECOND failure was the horizon fringe, and the disagreement was the same one seen from the far
+// field: the fine tier's erosion holes made it hand control back mid-cloud, so the ray jumped a coarse
+// stride — 2.8 km at 1-3 degrees of elevation — over cloud that the coarse tier itself called occupied,
+// at a place chosen by the entry dither. Unifying the verdict on the cheap density removed it; the
+// erosion still decides how much light a shaded sample scatters and no longer decides where the ray goes.
 struct CloudMarchState
 {
     float T;        // distance along the ray, world units

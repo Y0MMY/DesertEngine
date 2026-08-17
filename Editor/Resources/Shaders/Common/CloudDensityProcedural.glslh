@@ -228,6 +228,49 @@ float CloudDensityCheapProcedural(vec3 worldPos, float heightFraction)
     return CloudDensityCheapFrom(weather, CloudCellBand(worldPos), worldPos, heightFraction);
 }
 
+// Where the detail composite LOOKS: the drifting, leaning sample position, swirled by the curl field.
+//
+// Its own function because it is the one part of the composite that costs a texture fetch without
+// producing any density: past the erosion's sampling limit there is nothing to warp, so the caller skips
+// this entirely rather than paying for a swirl it is about to replace with a mean.
+//
+// Curl warps the DETAIL lookup, not the shape: a divergence-free warp swirls small structure around
+// without creating or destroying any of it, which is what gives an edge its turbulent look. The warp
+// is strongest at the cloud base, where the shear against still air is.
+//
+// TWO THINGS WERE WRONG HERE, and together they were the vertical combing on every cloud edge that
+// three passes over this renderer had described and none had located.
+//
+// THE AXES. CloudCurl builds its field over the map's own two axes, which are world X and world Z,
+// and returns (dPsi/dv, -dPsi/du, vorticity): the first TWO components are the divergence-free
+// in-plane field and the third is the vertical vorticity, which is a rotation RATE and not a
+// displacement at all. This site fed the returned vector straight into a world (x, y, z) offset, so
+// the second in-plane component displaced the lookup VERTICALLY and the vorticity displaced it in Z.
+// A vertical offset that is a function of horizontal position alone shifts the whole detail column
+// up or down together — the pattern stays coherent down a screen column while decorrelating across
+// one, which is precisely a comb of vertical filaments.
+//
+// THE SCALE. The offset was `CurlStrength * DetailTileSize` — measured in DETAIL tiles, a quantity
+// the warp has no relationship to. A displacement field folds the domain it warps once the
+// displacement exceeds the length over which the displacement itself turns, and for this field that
+// length is CurlTileSize / CLOUD_CURL_FINEST_PERIOD (see there). At the showcase's 9 km curl tile
+// that is 280 m, while the old expression displaced by up to 0.35 * 4 km * 2 = 2.8 km: ten times
+// past folding, so the detail was not swirled but scrambled horizontally at the curl map's own
+// frequency while staying coherent vertically — a comb of vertical filaments on every cloud edge.
+//
+// Measured in the curl field's OWN correlation length instead, so CurlStrength = 1 sits exactly at
+// the folding bound and every authored value below it is a genuine swirl. On Clouds_UEShowcase the
+// authored 0.35 now displaces by at most 49 m, which is the amplitude the frames show as turbulent
+// rather than combed.
+vec3 CloudDetailWarpedPos(vec3 worldPos, float heightFraction, float cellHeight)
+{
+    vec3 curl = (texture(u_CurlNoise, vec2(worldPos.x, worldPos.z) / u_CurlTileSize).rgb - 0.5f) *
+                CLOUD_CURL_DECODE_SCALE;
+    float curlUnit = u_CurlTileSize / (CLOUD_CURL_FINEST_PERIOD * CLOUD_CURL_DECODE_MAX);
+    return CloudDetailSamplePos(worldPos, heightFraction) +
+           vec3(curl.x, 0.0f, curl.y) * (u_CurlStrength * curlUnit * (1.0f - cellHeight));
+}
+
 // THE DETAIL COMPOSITE — the whole of it, and the ONE copy of it (see the header note).
 //
 // In: the three fields a Nubis3 modelling NVDF carries per voxel, however they were obtained —
@@ -242,48 +285,64 @@ float CloudDensityCheapProcedural(vec3 worldPos, float heightFraction)
 // Out: the eroded density in [0,1].
 //
 // @p stepLength is the march's own stride at this sample, in world units. It is not a distance in
-// disguise: the near-field band's amplitude is a statement about the SAMPLING RATE here (CloudBandWeight),
-// and the same distance carries a different rate on every quality tier.
+// disguise: both the erosion's own amplitude and the near-field band's are statements about the SAMPLING
+// RATE here (CloudNyquistWeight), and the same distance carries a different rate on every quality tier.
 float CloudDensityErode(vec3 worldPos, float heightFraction, float cellHeight, float profile,
                         float detailType, float densityScale, float distanceFromCamera, float stepLength)
 {
     float density = profile;
 
-    // Curl warps the DETAIL lookup, not the shape: a divergence-free warp swirls small structure around
-    // without creating or destroying any of it, which is what gives an edge its turbulent look. The warp
-    // is strongest at the cloud base, where the shear against still air is.
+    // ---- HOW MUCH OF THE EROSION THIS SAMPLE IS ENTITLED TO ------------------------------------------
     //
-    // TWO THINGS WERE WRONG HERE, and together they were the vertical combing on every cloud edge that
-    // three passes over this renderer had described and none had located.
+    // The erosion is a THRESHOLD — the remap below cuts every density under `noiseComposite *
+    // DetailStrength` to exactly zero — driven by a field the far march cannot resolve. At 1-3 degrees of
+    // elevation on Clouds_UEShowcase the stride is 700 m and the detail volume's amplitude-weighted
+    // structure is 391 m (fine pair) and 781 m (coarse pair): 3.6 and 1.8 times past their own Nyquist
+    // limits. A threshold on an unresolvable field is a coin toss per sample, the entry dither
+    // gives every ray its own lattice phase, and the result was a band of vertical shreds along the
+    // horizon that survived every previous pass because each half of it is individually correct.
     //
-    // THE AXES. CloudCurl builds its field over the map's own two axes, which are world X and world Z,
-    // and returns (dPsi/dv, -dPsi/du, vorticity): the first TWO components are the divergence-free
-    // in-plane field and the third is the vertical vorticity, which is a rotation RATE and not a
-    // displacement at all. This site fed the returned vector straight into a world (x, y, z) offset, so
-    // the second in-plane component displaced the lookup VERTICALLY and the vorticity displaced it in Z.
-    // A vertical offset that is a function of horizontal position alone shifts the whole detail column
-    // up or down together — the pattern stays coherent down a screen column while decorrelating across
-    // one, which is precisely a comb of vertical filaments.
+    // Measured: killing the erosion outright (Detail Strength 0) dropped the pixel-to-pixel horizontal
+    // contrast of that band from 1.29 to 0.59 of a 0-255 level — below the untouched sky above it — while
+    // quadrupling the search rate or the step budget changed it by less than 0.01. The erosion is the
+    // whole of it.
     //
-    // THE SCALE. The offset was `CurlStrength * DetailTileSize` — measured in DETAIL tiles, a quantity
-    // the warp has no relationship to. A displacement field folds the domain it warps once the
-    // displacement exceeds the length over which the displacement itself turns, and for this field that
-    // length is CurlTileSize / CLOUD_CURL_FINEST_PERIOD (see there). At the showcase's 9 km curl tile
-    // that is 280 m, while the old expression displaced by up to 0.35 * 4 km * 2 = 2.8 km: ten times
-    // past folding, so the detail was not swirled but scrambled horizontally at the curl map's own
-    // frequency while staying coherent vertically — a comb of vertical filaments on every cloud edge.
-    //
-    // Measured in the curl field's OWN correlation length instead, so CurlStrength = 1 sits exactly at
-    // the folding bound and every authored value below it is a genuine swirl. On Clouds_UEShowcase the
-    // authored 0.35 now displaces by at most 49 m, which is the amplitude the frames show as turbulent
-    // rather than combed.
-    vec3 curl = (texture(u_CurlNoise, vec2(worldPos.x, worldPos.z) / u_CurlTileSize).rgb - 0.5f) *
-                CLOUD_CURL_DECODE_SCALE;
-    float curlUnit  = u_CurlTileSize / (CLOUD_CURL_FINEST_PERIOD * CLOUD_CURL_DECODE_MAX);
-    vec3  detailPos = CloudDetailSamplePos(worldPos, heightFraction) +
-                      vec3(curl.x, 0.0f, curl.y) * (u_CurlStrength * curlUnit * (1.0f - cellHeight));
+    // So each channel pair carries only what the local stride resolves, and past its limit it carries the
+    // volume's MEAN instead of a sample of it (CLOUD_DETAIL_MEAN_LEVEL). Fading to the mean and not to
+    // zero is what keeps this a filtering step rather than a fade: the expected cut is unchanged, so the
+    // far deck keeps its mass and its silhouette and loses only the instance nobody could reconstruct.
+    // The pairs fade separately because they run at different periods — see the two constants.
+    float erosionCoarse = CloudNyquistWeight(u_DetailTileSize / CLOUD_DETAIL_EROSION_LOW_PER_TILE, stepLength);
+    float erosionFine   = CloudNyquistWeight(u_DetailTileSize / CLOUD_DETAIL_EROSION_HIGH_PER_TILE, stepLength);
 
-    vec4 detail = texture(u_DetailNoise, detailPos / u_DetailTileSize);
+    // The band's own gate, hoisted here because it decides — together with the erosion's — whether the
+    // curl fetch below is paid for at all. Past both limits a fine sample reads nothing beyond the four
+    // fetches the cheap composition already made (weather, the two profile tables and the base shape), so
+    // out there it costs exactly what a coarse sample costs. That is the part of this change that gives
+    // time back rather than spending it.
+    float bandWeight = CloudNyquistWeight(u_HighFreqFeatureSize, stepLength) * u_HighFreqStrength;
+
+    // Fully minified is the DEFAULT, and the fetches below overwrite it where they are resolvable. Written
+    // this way round so that the far-field path — the one a horizon frame is mostly made of — is the one
+    // with no branch to fall out of.
+    vec4 detail = vec4(CLOUD_DETAIL_MEAN_LEVEL, CLOUD_DETAIL_MEAN_LEVEL, CLOUD_DETAIL_MEAN_LEVEL,
+                       CLOUD_DETAIL_MEAN_LEVEL);
+    vec3 detailPos = vec3(0.0f, 0.0f, 0.0f);
+
+    // Both fetches below look at the warped position, and neither should pay for the curl fetch alone.
+    // `erosionCoarse` gates the pair: it is the LOOSER of the two erosion weights (a coarser field stays
+    // resolvable longer), so it can only be zero where `erosionFine` already is.
+    if (erosionCoarse > 0.0f || bandWeight > 0.0f)
+        detailPos = CloudDetailWarpedPos(worldPos, heightFraction, cellHeight);
+
+    if (erosionCoarse > 0.0f)
+    {
+        // The channel pairs mixed toward the mean by THEIR OWN weight: R and B run at the coarse period
+        // and G and A at the fine one (CloudDetailTexel), so the ordering of the two weights is what puts
+        // a band of half-resolved erosion between the near field and the far one instead of a step.
+        vec4 sampled = texture(u_DetailNoise, detailPos / u_DetailTileSize);
+        detail       = mix(detail, sampled, vec4(erosionCoarse, erosionFine, erosionCoarse, erosionFine));
+    }
 
     // Two erosion families: wispy (the low pair of channels) and billowy (the high pair), blended by the
     // authored Detail Type. Billow takes over as the sample gets denser, which is why the blend gradient
@@ -306,9 +365,9 @@ float CloudDensityErode(vec3 worldPos, float heightFraction, float cellHeight, f
     // Its own tile, derived from the feature size the artist asks for: the fold's finest content is
     // CLOUD_DETAIL_RIDGED_FINEST_PER_TILE creases across a tile, so a tile of that many feature-sizes
     // puts the band exactly where it was asked for. The second fetch is the price, and it is paid only
-    // where the band can actually be seen — CloudBandWeight is zero everywhere the march is at or below
-    // its own Nyquist limit for that size, which past a couple of kilometres is everywhere.
-    float bandWeight = CloudBandWeight(u_HighFreqFeatureSize, stepLength) * u_HighFreqStrength;
+    // where the band can actually be seen — CloudNyquistWeight (computed at the top of this function, with
+    // the erosion's own two gates) is zero everywhere the march is at or below its own Nyquist limit for
+    // that size, which past a couple of kilometres is everywhere.
     if (bandWeight > 0.0f)
     {
         float bandTile = u_HighFreqFeatureSize * CLOUD_DETAIL_RIDGED_FINEST_PER_TILE;
@@ -320,7 +379,18 @@ float CloudDensityErode(vec3 worldPos, float heightFraction, float cellHeight, f
         noiseComposite  = mix(noiseComposite, highFreq, clamp(bandWeight, 0.0f, 1.0f));
     }
 
-    density = CloudRemapRange(density, noiseComposite * u_DetailStrength, 1.0f, 0.0f, 1.0f);
+    // THE CUT, widened by the part of the threshold this sample could not see.
+    //
+    // The composite is LINEAR in the four fetched channels for a fixed density and detail type, so
+    // whatever weight it applied to their mean it applies to their spread: one scalar, no second
+    // composite. What is unresolved is the share the gates discarded, and the two pairs discarded
+    // different shares — the mean of the two weights is the composite's own, to the same order as the
+    // rest of this approximation.
+    float compositeScale = mix(1.0f, u_BillowNoiseScale, detailType);
+    float resolved       = 0.5f * (erosionCoarse + erosionFine);
+    float lostSpread     = CLOUD_DETAIL_SD_LEVEL * compositeScale * (1.0f - resolved);
+
+    density = CloudErodeDensity(density, noiseComposite * u_DetailStrength, lostSpread * u_DetailStrength);
 
     // The weather map's density-scale channel. Nubis3 p. 118 applies it LINEARLY and puts the power only
     // inside the sharpening lerp:

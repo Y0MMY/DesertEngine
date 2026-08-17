@@ -442,6 +442,50 @@ const float CLOUD_CURL_FINEST_PERIOD = 32.0f;
 // what makes the band's frequency a stated quantity rather than whatever the detail tile happened to be.
 const float CLOUD_DETAIL_RIDGED_FINEST_PER_TILE = 64.0f;
 
+// ---- What the EROSION's own frequencies are, so the march can say whether it resolves them -----------
+//
+// The two numbers below are what let the density seam gate the detail composite by the sampling rate
+// instead of by an authored distance — the same argument CloudNyquistWeight makes for the ridged band,
+// applied to the erosion itself. They are properties of CloudDetailTexel above and change with it.
+//
+// THE FEATURE SIZE OF AN FBM is not the size of its finest octave: an octave four times finer carries an
+// eighth of the amplitude and is a ripple on the shape, not the shape. The honest single number is the
+// AMPLITUDE-WEIGHTED mean feature size. Every channel here is a three-octave stack at periods p, 2p, 4p
+// with the weights 0.625 / 0.25 / 0.125 that CloudAlligatorFbm applies, so
+//
+//     F = SUM w_i * tile / (p * 2^i) = (tile / p) * (0.625 + 0.25/2 + 0.125/4) = (tile / p) * 25/32
+//
+// and the cells-per-tile that inverts it is 32p/25. The two channel PAIRS run at different p — R and B
+// at 4, G and A at 8 (see CloudDetailTexel) — which is why there are two constants and not one: the
+// coarse pair stays resolvable for twice the distance the fine pair does, and gating them together would
+// throw away structure the march can still carry. Each pair fades on its own.
+const float CLOUD_DETAIL_EROSION_LOW_PER_TILE  = 5.12f;  // R, B: 32 * 4 / 25
+const float CLOUD_DETAIL_EROSION_HIGH_PER_TILE = 10.24f; // G, A: 32 * 8 / 25
+
+// WHAT A SAMPLE PAST THAT LIMIT CARRIES INSTEAD: the volume's own mean.
+//
+// There is no mip chain on these volumes — Core::Formats::Image3DSpecification is single-level by design
+// because the engine has no 3D mip generator — so a sample that cannot resolve the lattice cannot be
+// handed a filtered one either. What it can be handed is the limit of that filtering, which is the mean
+// of the channel over the whole volume; substituting it leaves the erosion's EXPECTED cut unchanged and
+// removes only the instance nobody can reconstruct.
+//
+// One constant for all four channels because they are all the same construction at a different period,
+// and an FBM's mean does not depend on its period: measured over the 128^3 grid the shader bakes, the
+// four channels sit at 0.116 to 0.129 across three seeds, i.e. within +/-0.007 of the value below. The
+// CloudNoise suite recomputes it from CloudDetailTexel and fails if the construction drifts away from it.
+const float CLOUD_DETAIL_MEAN_LEVEL = 0.1225f;
+
+// And its SPREAD, which is the other half of the same substitution.
+//
+// Handing a far sample the mean gets its expected THRESHOLD right and its expected DENSITY wrong, because
+// the erosion cut is a hinge — max(d - t, 0) — and the mean of a hinge is not the hinge of the mean. What
+// closes that gap is the standard deviation of the variation the sample no longer sees; the erosion cut
+// (CloudErodeDensity) widens its knee by exactly this much and recovers the mean it would otherwise lose.
+//
+// Measured the same way and equally stable: 0.0805 to 0.0854 over the four channels and three seeds.
+const float CLOUD_DETAIL_SD_LEVEL = 0.0827f;
+
 // Alpha is 1: the engine has no two- or three-channel image format (Core::Formats::ImageFormat has
 // RGBA8F as its only 8-bit colour format), so the fourth channel is paid for by the format and left at
 // a documented constant rather than filled with a number nobody reads.

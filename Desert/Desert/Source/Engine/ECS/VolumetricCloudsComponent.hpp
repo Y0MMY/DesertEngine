@@ -312,7 +312,7 @@ namespace Desert::ECS
         // relation neither of them could see. The band survives where the march's own step is fine
         // enough to resolve it and nowhere else, and that is a function of the quality tier as much as
         // of distance — the same 2.5-9 km fade was four times oversampled on Ultra and below Nyquist on
-        // Low. The fade is now DERIVED from this size and the local step length (CloudBandWeight in
+        // Low. The fade is now DERIVED from this size and the local step length (CloudNyquistWeight in
         // Common/CloudGeometry.glslh), so there is one number to author and it is a physical one: how
         // big the finest cauliflower creases are.
         PROPERTY( DisplayName( "High Frequency Feature Size" ), Category( "Detail" ), Length,

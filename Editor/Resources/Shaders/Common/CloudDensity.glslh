@@ -23,7 +23,7 @@
 //   stepLength          world units; the stride the march is taking at this sample. NOT a distance in
 //                       disguise: the near-field detail band exists only where the march can resolve it,
 //                       which is a statement about the local SAMPLING RATE, and the same distance
-//                       carries a different rate on every quality tier (CloudBandWeight).
+//                       carries a different rate on every quality tier (CloudNyquistWeight).
 //
 // and one accessor for the weather field the LIGHTING needs:
 //

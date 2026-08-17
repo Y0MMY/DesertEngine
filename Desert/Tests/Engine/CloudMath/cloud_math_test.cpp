@@ -574,6 +574,152 @@ TEST( CloudSteps, MaxStepsBoundsTheLoopForAdversarialSettings )
     EXPECT_EQ( static_cast<int>( steps.size() ), kMaxSteps );
 }
 
+// ---- The sampling-rate gate -----------------------------------------------------------------------
+
+// CloudNyquistWeight is the relation that keeps a field out of the picture wherever the march cannot
+// reconstruct it. It has two consumers — the near-field ridged band and, since the horizon fringe, the
+// DETAIL EROSION itself — and what both rely on is the shape of the ramp, not a distance.
+TEST( CloudNyquist, AFieldIsFullyCarriedWhenOversampledAndGoneAtItsNyquistLimit )
+{
+    for ( float feature = 1000.0f; feature <= 200000.0f; feature *= 2.0f )
+    {
+        // Twice oversampled for the feature: carried whole.
+        EXPECT_FLOAT_EQ( R::CloudNyquistWeight( feature, feature * 0.25f ), 1.0f ) << "feature " << feature;
+        EXPECT_FLOAT_EQ( R::CloudNyquistWeight( feature, feature * 0.1f ), 1.0f ) << "feature " << feature;
+
+        // At and past the Nyquist limit itself — a stride of half the feature — nothing survives. This is
+        // the end that matters: a residue here is a threshold on an unrecoverable field, which renders as
+        // a different cloud in every pixel rather than as a coarse one.
+        EXPECT_FLOAT_EQ( R::CloudNyquistWeight( feature, feature * 0.5f ), 0.0f ) << "feature " << feature;
+        EXPECT_FLOAT_EQ( R::CloudNyquistWeight( feature, feature * 4.0f ), 0.0f ) << "feature " << feature;
+
+        // Monotone in between, so a march that slows down can only ever gain detail. A non-monotone ramp
+        // would draw a ring in the sky at whatever distance it turned round.
+        float previous = 1.0f;
+        for ( int i = 0; i <= 40; ++i )
+        {
+            const float stride = feature * ( 0.2f + 0.4f * static_cast<float>( i ) / 40.0f );
+            const float weight = R::CloudNyquistWeight( feature, stride );
+            EXPECT_LE( weight, previous + 1e-6f ) << "feature " << feature << " stride " << stride;
+            EXPECT_GE( weight, 0.0f );
+            EXPECT_LE( weight, 1.0f );
+            previous = weight;
+        }
+    }
+}
+
+// THE ORDERING THE EROSION GATE DEPENDS ON. Common/CloudDensityProcedural.glslh tests only the COARSE
+// channel pair's weight before skipping the curl and detail fetches, on the grounds that a coarser field
+// stays resolvable at least as far as a finer one does. That is a property of THIS function, and the
+// CloudNoise suite pins the ordering of the two feature sizes it is applied to; together they are what
+// makes the single test safe. If it ever stopped holding, the far field would keep its finest content
+// and lose its coarsest — the exact inverse of the intended degradation, and invisible in one frame.
+TEST( CloudNyquist, ACoarserFieldOutlivesAFinerOneAtEveryStride )
+{
+    for ( float fineFeature = 1000.0f; fineFeature <= 100000.0f; fineFeature *= 2.0f )
+    {
+        const float coarseFeature = fineFeature * 2.0f;
+
+        for ( float stride = 10.0f; stride <= 400000.0f; stride *= 1.1f )
+        {
+            const float coarse = R::CloudNyquistWeight( coarseFeature, stride );
+            const float fine   = R::CloudNyquistWeight( fineFeature, stride );
+
+            EXPECT_GE( coarse, fine ) << "stride " << stride;
+            if ( coarse <= 0.0f )
+                EXPECT_FLOAT_EQ( fine, 0.0f ) << "the fetch would be skipped while the fine pair still wanted it";
+        }
+    }
+}
+
+// ---- The erosion cut ------------------------------------------------------------------------------
+
+// A ZERO SPREAD IS THE HINGE, BIT FOR BIT. This is the property that keeps every near-field sample
+// unchanged: inside the distance where the march resolves the detail volume both gates are 1, the lost
+// spread is exactly 0, and CloudErodeDensity has to reduce to the remap it replaced with no rounding of
+// its own. Asserted with EXPECT_FLOAT_EQ and not a tolerance, because "nearly the same cloud" is not the
+// claim being made.
+TEST( CloudErosion, ZeroSpreadIsExactlyTheHingeItReplaced )
+{
+    for ( int ti = 0; ti <= 20; ++ti )
+    {
+        const float threshold = static_cast<float>( ti ) / 20.0f * 0.9f;
+        for ( int di = 0; di <= 40; ++di )
+        {
+            const float density = static_cast<float>( di ) / 40.0f;
+            EXPECT_FLOAT_EQ( R::CloudErodeDensity( density, threshold, 0.0f ),
+                             R::CloudRemapRange( density, threshold, 1.0f, 0.0f, 1.0f ) )
+                 << "density " << density << " threshold " << threshold;
+        }
+    }
+}
+
+// THE WIDENED CUT IS THE MEAN OF THE HINGE, which is the whole justification for widening rather than
+// fading: the far deck keeps the density the near one would have had on average, so this is a filter and
+// not a fade. Checked against a numerical average of the hinge over the same window, which is the
+// definition the closed form is supposed to be — one implementation of a quantity asserted equal to
+// another rather than trusted.
+TEST( CloudErosion, TheWidenedCutIsTheAveragedHinge )
+{
+    constexpr int kThresholdSamples = 20001;
+
+    for ( const float threshold : { 0.05f, 0.2f, 0.5f, 0.8f } )
+        for ( const float spread : { 0.005f, 0.03f, 0.09f, 0.4f } )
+        {
+            // The half-width the shader will actually use: symmetric about the threshold and never
+            // reaching a negative one, because a noise value times Detail Strength cannot be negative.
+            const float r = std::min( 1.7320508f * spread, threshold );
+
+            for ( int di = 0; di <= 40; ++di )
+            {
+                const float d = static_cast<float>( di ) / 40.0f;
+
+                double mean = 0.0;
+                for ( int i = 0; i < kThresholdSamples; ++i )
+                {
+                    const float sampled =
+                         threshold - r + 2.0f * r * ( static_cast<float>( i ) + 0.5f ) / kThresholdSamples;
+                    mean += std::max( d - sampled, 0.0f );
+                }
+                // Normalised by the MEAN threshold, not by each sampled one: the divisor's variation is
+                // second order beside the numerator's clamp, and the shader spends one divide, not a
+                // distribution's worth.
+                // ...and clamped to the unit range the shader's densities all live in: a high threshold
+                // with a wide window can push the average above 1, and a density above 1 is not a
+                // quantity the march has any use for.
+                mean = std::min( mean / kThresholdSamples / ( 1.0 - threshold ), 1.0 );
+
+                EXPECT_NEAR( R::CloudErodeDensity( d, threshold, spread ), static_cast<float>( mean ), 2e-4f )
+                     << "density " << d << " threshold " << threshold << " spread " << spread;
+            }
+        }
+}
+
+// The bounds and the monotonicity. Between them they say the widening can only ever move density from
+// just above the threshold to just below it: it never invents any, never loses any, and never reverses.
+TEST( CloudErosion, TheSoftCutIsBoundedByTheHingeAndTheUnerrodedDensity )
+{
+    for ( const float threshold : { 0.0f, 0.05f, 0.3f, 0.7f } )
+        for ( const float spread : { 0.0f, 0.02f, 0.08f, 0.3f } )
+        {
+            float previous = -1.0f;
+            for ( int di = 0; di <= 100; ++di )
+            {
+                const float density = static_cast<float>( di ) / 100.0f;
+                const float soft    = R::CloudErodeDensity( density, threshold, spread );
+                const float hinge   = R::CloudErodeDensity( density, threshold, 0.0f );
+
+                EXPECT_GE( soft, hinge - 1e-6f ) << "below the hinge at density " << density;
+                EXPECT_LE( soft, density / ( 1.0f - threshold ) + 1e-6f )
+                     << "denser than the unerroded sample at density " << density;
+                EXPECT_GE( soft, 0.0f );
+                EXPECT_LE( soft, 1.0f );
+                EXPECT_GE( soft, previous - 1e-6f ) << "not monotone at density " << density;
+                previous = soft;
+            }
+        }
+}
+
 // ---- CLD-26: the empty-space skip -----------------------------------------------------------------
 
 TEST( CloudMarch, FineSamplingCoversTheWholeOccupiedIntervalAndCostsFarLessThanAUniformMarch )
