@@ -14,6 +14,7 @@
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Common.hpp>
+#include <Engine/Core/Projection.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
 
@@ -82,11 +83,14 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Near" ), Category( "Camera" ), Range( 1.0f, 1000.0f ), Length,
                   Tooltip( "Near clip plane distance. Anything closer is not drawn." ) )
-        float Near = 10.0f;
+        float Near = Core::kDefaultNearPlane;
 
-        PROPERTY( DisplayName( "Far" ), Category( "Camera" ), Range( 1000.0f, 1000000.0f ), Length,
+        // The range reaches 100 km because reversed-Z made it affordable — see Core/Camera.hpp for why
+        // the default is 50 km and why it used to be 1 km. A slider that stopped at 10 km would have made
+        // the new default unreachable from the editor, which is a dead setting by another name.
+        PROPERTY( DisplayName( "Far" ), Category( "Camera" ), Range( 1000.0f, 10000000.0f ), Length,
                   Tooltip( "Far clip plane distance. Anything beyond is not drawn." ) )
-        float Far = 100000.0f;
+        float Far = Core::kDefaultFarPlane;
     };
 
     struct CameraComponent

@@ -85,7 +85,12 @@ Shader "GrassCull"
             vec3  center  = vec3( ax, anchorY + bladeH * 0.5, az );
             float radius  = bladeH; // generous: height + sway/width margin (avoids edge popping)
 
-            // Gribb-Hartmann planes from the MVP (GL depth convention [-1,1]: near = row3 + row2).
+            // Gribb-Hartmann planes from the MVP. The four SIDE planes are the same in every clip space;
+            // near and far are not. Vulkan keeps 0 <= z <= w, and the engine is REVERSED-Z (z = w at the
+            // near plane, z = 0 at the far one — Core/Projection.hpp), so the two depth half-spaces are
+            // `w - z >= 0` and `z >= 0`, NOT the GL pair `w + z` / `w - z`. With the GL spelling the
+            // "near" plane is the reflection of the far one and rejects the entire visible range: every
+            // blade in the field culls itself, and the terrain comes out bald with no error anywhere.
             vec4 r0 = vec4( u_MVP[0][0], u_MVP[1][0], u_MVP[2][0], u_MVP[3][0] );
             vec4 r1 = vec4( u_MVP[0][1], u_MVP[1][1], u_MVP[2][1], u_MVP[3][1] );
             vec4 r2 = vec4( u_MVP[0][2], u_MVP[1][2], u_MVP[2][2], u_MVP[3][2] );
@@ -96,8 +101,8 @@ Shader "GrassCull"
             planes[1] = r3 - r0; // right
             planes[2] = r3 + r1; // bottom
             planes[3] = r3 - r1; // top
-            planes[4] = r3 + r2; // near
-            planes[5] = r3 - r2; // far
+            planes[4] = r3 - r2; // near  (w - z >= 0)
+            planes[5] = r2;      // far   (z >= 0)
 
             for ( int i = 0; i < 6; ++i )
             {

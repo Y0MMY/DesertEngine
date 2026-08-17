@@ -17,6 +17,7 @@
 
 #include "CloudGeometryReference.hpp"
 
+#include <Engine/Core/Projection.hpp>
 #include <Engine/Graphic/Clouds/CloudMarchScale.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileCurves.hpp>
@@ -1930,9 +1931,11 @@ TEST( CloudShadowEdgeFade, TrustsTheInteriorAndFadesOverTheOuterTenth )
 
 TEST( CloudDepth, ReconstructionIsTheInverseOfTheEnginesOwnProjection )
 {
-    // The engine's camera builds its projection with glm::perspective and its view with glm::lookAt; the
-    // reconstruction has to be the inverse of THAT, whatever depth convention glm was configured with.
-    const glm::mat4 projection = glm::perspective( glm::radians( 60.0f ), 16.0f / 9.0f, 10.0f, 500000.0f );
+    // The engine's camera builds its projection with Core::MakePerspective (reversed-Z, zero-to-one) and
+    // its view with glm::lookAt; the reconstruction has to be the inverse of THAT. Built through the
+    // engine's own factory rather than a hand-rolled glm::perspective, so the test moves if it does.
+    const glm::mat4 projection =
+         Desert::Core::MakePerspective( glm::radians( 60.0f ), 16.0f / 9.0f, 10.0f, 500000.0f );
     const glm::vec3 cameraPos( 120.0f, 300.0f, -45.0f );
     const glm::mat4 view =
          glm::lookAt( cameraPos, cameraPos + glm::vec3( 0.3f, -0.2f, 1.0f ), glm::vec3( 0.0f, 1.0f, 0.0f ) );
@@ -1964,14 +1967,35 @@ TEST( CloudDepth, ReconstructionIsTheInverseOfTheEnginesOwnProjection )
 
 TEST( CloudDepth, ClearedDepthMeansSkyAllTheWayToTheViewDistance )
 {
+    // The cleared value is the ENGINE'S, not a literal: under reversed-Z a depth attachment clears to 0,
+    // the far plane. Spelling it kDepthClear is what makes this fail if the sentinel and the clear ever
+    // disagree, and that is the whole failure mode — a sentinel the wrong way round reads every sky pixel
+    // as geometry at the near plane and the cloud deck stops existing.
     const glm::mat4 identity( 1.0f );
-    EXPECT_FLOAT_EQ( R::CloudGeometryLimit( identity, glm::vec3( 0.0f ), glm::vec2( 0.0f ), 1.0f, 12345.0f ),
+    EXPECT_FLOAT_EQ( R::CloudGeometryLimit( identity, glm::vec3( 0.0f ), glm::vec2( 0.0f ),
+                                            Desert::Core::kDepthClear, 12345.0f ),
                      12345.0f );
+}
+
+// The other side of the same coin, and the reason the test above is not enough on its own: a fragment ON
+// the near plane carries the MAXIMUM stored depth, and it must NOT be read as sky. A sentinel written the
+// wrong way round satisfies one of these two and fails the other, whichever way it is wrong.
+TEST( CloudDepth, NearPlaneDepthIsGeometryAndNotSky )
+{
+    const glm::mat4 projection = Desert::Core::MakePerspective( glm::radians( 60.0f ), 1.0f, 10.0f, 500000.0f );
+    const glm::mat4 view =
+         glm::lookAt( glm::vec3( 0.0f ), glm::vec3( 0.0f, 0.0f, 1.0f ), glm::vec3( 0.0f, 1.0f, 0.0f ) );
+    const glm::mat4 inverse = glm::inverse( projection * view );
+
+    const float limit = R::CloudGeometryLimit( inverse, glm::vec3( 0.0f ), glm::vec2( 0.0f ),
+                                               Desert::Core::kDepthNear, 12345.0f );
+    EXPECT_LT( limit, 12345.0f );
+    EXPECT_NEAR( limit, 10.0f, 1e-2f ); // the near plane itself, in world units
 }
 
 TEST( CloudDepth, GeometryNeverExtendsTheMarchBeyondTheViewDistance )
 {
-    const glm::mat4 projection = glm::perspective( glm::radians( 60.0f ), 1.0f, 10.0f, 500000.0f );
+    const glm::mat4 projection = Desert::Core::MakePerspective( glm::radians( 60.0f ), 1.0f, 10.0f, 500000.0f );
     const glm::mat4 view =
          glm::lookAt( glm::vec3( 0.0f ), glm::vec3( 0.0f, 0.0f, 1.0f ), glm::vec3( 0.0f, 1.0f, 0.0f ) );
     const glm::mat4 inverse = glm::inverse( projection * view );

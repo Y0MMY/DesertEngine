@@ -18,6 +18,7 @@
 #include <limits>
 #include <typeinfo>
 
+#include <Engine/Core/Projection.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
 namespace Desert::Core
@@ -553,8 +554,12 @@ namespace Desert::Core
             if ( cameraComponent.Data.IsMainCamera )
             {
                 // TODO: Get from scene config
-                const glm::mat4 projection =
-                     glm::perspectiveFov( glm::radians( 45.0f ), 1280.0f, 720.0f, 0.1f, 1000.0f );
+                // Through the engine's projection factory so this camera shares the reversed-Z convention
+                // with every other one (Core/Projection.hpp). Near/far are the Camera defaults in world
+                // units — the literal 0.1/1000 that stood here were metres-era leftovers, i.e. a 1 mm near
+                // plane and a 10 m far plane once a unit became a centimetre.
+                const glm::mat4 projection = MakePerspective( glm::radians( 45.0f ), 1280.0f / 720.0f,
+                                                              kDefaultNearPlane, kDefaultFarPlane );
                 cameraComponent.Camera = std::make_shared<EditorCamera>( projection );
                 m_MainCamera           = cameraComponent.Camera;
 

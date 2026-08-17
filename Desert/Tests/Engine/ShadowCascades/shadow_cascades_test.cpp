@@ -6,6 +6,7 @@
 // and nothing beyond it was ever shadowed. Every test below is about a distance in world units; several
 // of them fail outright against the old constant.
 
+#include <Engine/Core/Projection.hpp>
 #include <Engine/Graphic/ShadowCascades.hpp>
 
 #include <Common/Core/Units.hpp>
@@ -24,14 +25,20 @@ namespace Units = Common::Units;
 
 namespace
 {
-    // A camera looking down -Z from the origin with the engine's own defaults (near 10 cm, far 1 km).
+    // A camera looking down -Z from the origin with the engine's own defaults (near 10 cm, far 50 km).
+    //
+    // THE PROJECTION MUST COME FROM THE ENGINE'S OWN FACTORY. ComputeShadowCascades unprojects NDC
+    // corners, so it reads the camera's depth convention; a glm::perspective here would hand it an
+    // OpenGL [-1,1] matrix, the near and far rings would swap, and the test would happily pin cascades
+    // fitted behind the observer.
     CascadeSetup DefaultSetup()
     {
         CascadeSetup s;
-        s.CameraNear = Units::Cm( 10.0f );
-        s.CameraFar  = Units::Metres( 1000.0f );
+        s.CameraNear = Desert::Core::kDefaultNearPlane;
+        s.CameraFar  = Desert::Core::kDefaultFarPlane;
         s.CameraView = glm::lookAt( glm::vec3( 0.0f ), glm::vec3( 0.0f, 0.0f, -1.0f ), glm::vec3( 0, 1, 0 ) );
-        s.CameraProjection = glm::perspective( glm::radians( 45.0f ), 16.0f / 9.0f, s.CameraNear, s.CameraFar );
+        s.CameraProjection =
+             Desert::Core::MakePerspective( glm::radians( 45.0f ), 16.0f / 9.0f, s.CameraNear, s.CameraFar );
         s.LightDirection   = glm::normalize( glm::vec3( -0.4f, -1.0f, -0.3f ) ); // where the light TRAVELS
         return s;
     }
@@ -87,7 +94,7 @@ TEST( ShadowCascades, CoverageIsCappedByTheNearerOfFarPlaneAndMaxDistance )
     CascadeSetup setup = DefaultSetup();
     setup.CameraFar    = Units::Metres( 30.0f );
     setup.CameraProjection =
-         glm::perspective( glm::radians( 45.0f ), 16.0f / 9.0f, setup.CameraNear, setup.CameraFar );
+         Desert::Core::MakePerspective( glm::radians( 45.0f ), 16.0f / 9.0f, setup.CameraNear, setup.CameraFar );
     setup.MaxDistance = Units::Metres( 150.0f );
 
     CascadeFit     fits[kMaxShadowCascades];

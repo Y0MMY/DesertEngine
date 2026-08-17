@@ -1225,13 +1225,19 @@ float CloudDistanceFromDepth(mat4 invViewProj, vec3 cameraPos, vec2 ndc, float d
     return length(vec3(world.x, world.y, world.z) / max(world.w, 1e-9f) - cameraPos);
 }
 
-// Where the march has to stop. Depth clears to 1.0 (RenderPass.hpp), i.e. "nothing was drawn here", and
-// that pixel is sky all the way to MaxViewDistance rather than geometry at the far plane. This is the
-// ONE occlusion path: it works identically in Forward and Deferred because it reads the depth
-// attachment both paths write, not a G-buffer only one of them has.
+// Where the march has to stop. The engine renders REVERSED-Z, so depth clears to 0.0 (RenderPass.hpp /
+// Core/Projection.hpp) and 0 IS THE FAR PLANE — "nothing was drawn here". That pixel is sky all the way
+// to MaxViewDistance rather than geometry at the far plane. This is the ONE occlusion path: it works
+// identically in Forward and Deferred because it reads the depth attachment both paths write, not a
+// G-buffer only one of them has.
+//
+// The reconstruction above needs no such flip because it goes through the inverse view-projection, which
+// carries the convention with it. Only this SENTINEL is convention-bound, and it fails silently in the
+// worst possible way if it is left as `>= 1.0`: no pixel would ever be sky, every ray would be clipped
+// to the near plane, and the entire cloud deck would simply stop existing.
 float CloudGeometryLimit(mat4 invViewProj, vec3 cameraPos, vec2 ndc, float deviceDepth, float maxViewDistance)
 {
-    if (deviceDepth >= 1.0f)
+    if (deviceDepth <= 0.0f)
         return maxViewDistance;
     return min(CloudDistanceFromDepth(invViewProj, cameraPos, ndc, deviceDepth), maxViewDistance);
 }

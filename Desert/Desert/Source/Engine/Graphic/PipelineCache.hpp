@@ -33,17 +33,43 @@ namespace Desert::Graphic
             spec.DepthWriteEnabled = *state.DepthWrite;
         if ( state.DepthCompare )
         {
-            switch ( *state.DepthCompare )
+            // `ZTest Less` IS MIRRORED HERE, and this is the whole reason the mapping is not a
+            // one-to-one table.
+            //
+            // A .shader authors its depth test the way every shading language does — `ZTest Less` means
+            // "the fragment in front wins", `ZTest LEqual` means "in front, or exactly coplanar". That
+            // spelling is what a shader author knows and what every other engine's documentation means
+            // by it. The engine, however, renders REVERSED-Z (Core/Projection.hpp), where in front is
+            // the LARGER stored value, so the arithmetic test that implements "Less" is Greater.
+            //
+            // Doing it here rather than by rewriting the five .shader files that spell a compare is not
+            // tidiness. The next shader will be written by copying a neighbour, and if the neighbours
+            // said `ZTest Greater` the copy would too, and it would be invisible — a whole material
+            // rendered behind the world with nothing to point at. The DSL keeps ONE meaning; the
+            // convention is applied once, at the boundary, in the only place that knows about pipelines.
+            //
+            // STENCIL COMPARES ARE NOT MIRRORED. The stencil buffer has no depth convention; its
+            // StateCompare goes through `toCompare` below, unchanged, deliberately.
+            // clang-format off
+            // Kept one-case-per-line to read as the table it is, and to sit beside the identically
+            // shaped `toCompare` for stencil below — which is the comparison a reader needs to make.
+            const auto mirrored = []( StateCompare c )
             {
-                case StateCompare::Never:          spec.DepthCompareOp = CompareOp::Never; break;
-                case StateCompare::Less:           spec.DepthCompareOp = CompareOp::Less; break;
-                case StateCompare::Equal:          spec.DepthCompareOp = CompareOp::Equal; break;
-                case StateCompare::LessOrEqual:    spec.DepthCompareOp = CompareOp::LessOrEqual; break;
-                case StateCompare::Greater:        spec.DepthCompareOp = CompareOp::Greater; break;
-                case StateCompare::NotEqual:       spec.DepthCompareOp = CompareOp::NotEqual; break;
-                case StateCompare::GreaterOrEqual: spec.DepthCompareOp = CompareOp::GreaterOrEqual; break;
-                case StateCompare::Always:         spec.DepthCompareOp = CompareOp::Always; break;
-            }
+                switch ( c )
+                {
+                    case StateCompare::Never:          return CompareOp::Never;
+                    case StateCompare::Less:           return CompareOp::Greater;
+                    case StateCompare::Equal:          return CompareOp::Equal;
+                    case StateCompare::LessOrEqual:    return CompareOp::GreaterOrEqual;
+                    case StateCompare::Greater:        return CompareOp::Less;
+                    case StateCompare::NotEqual:       return CompareOp::NotEqual;
+                    case StateCompare::GreaterOrEqual: return CompareOp::LessOrEqual;
+                    case StateCompare::Always:         return CompareOp::Always;
+                }
+                return CompareOp::Always;
+            };
+            // clang-format on
+            spec.DepthCompareOp = mirrored( *state.DepthCompare );
         }
         if ( state.Blend )
             spec.BlendEnable = *state.Blend;

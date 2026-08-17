@@ -726,8 +726,13 @@ namespace Desert::Graphic::API::Vulkan
         {
             attachments[i] = {
                  .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = i, .clearValue = clearValues[i] };
-            if ( Graphic::Utils::IsDepthFormat( framebuffer->GetSpecification().Attachments.Attachments[i].Format ) )
-                attachments[i].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            // Asked of the format, not assumed: the scene depth attachment is DEPTH32F (depth-only)
+            // since reversed-Z, and naming a stencil aspect a format does not carry is a validation
+            // error rather than a harmless extra bit. GetImageVulkanAspect is the same answer the image
+            // views themselves are built from, so a clear can never name an aspect the view does not.
+            const auto format = framebuffer->GetSpecification().Attachments.Attachments[i].Format;
+            if ( Graphic::Utils::IsDepthFormat( format ) )
+                attachments[i].aspectMask = GetImageVulkanAspect( format );
             clearRects[i] = {
                  .rect           = { .offset = { 0, 0 },
                                      .extent = { framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() } },

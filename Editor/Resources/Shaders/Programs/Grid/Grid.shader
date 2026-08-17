@@ -53,7 +53,23 @@ Shader "Grid"
         float DepthOf( vec3 worldPos )
         {
             vec4 clip = u.Projection * u.View * vec4( worldPos, 1.0 );
-            return ( clip.z / clip.w ) * 0.5 + 0.5; // GL clip [-1,1] -> Vulkan depth [0,1]
+
+            // NO REMAP. The projection is already zero-to-one (Core/Projection.hpp), so clip.z/clip.w IS
+            // the device depth. The `* 0.5 + 0.5` that used to be here belonged to OpenGL's [-1,1] clip
+            // range, and against a ZO projection it was a systematic push toward the near plane — which
+            // is why the grid used to vanish under any geometry at all, including the ground it is meant
+            // to lie on.
+            //
+            // GRID_DEPTH_BIAS is a deliberate nudge AWAY from the camera (smaller is farther under
+            // reversed-Z), and it is not a fudge for the line above. Most scenes put a ground slab whose
+            // top face sits EXACTLY on y = 0 — the very plane this shader draws — so the two are
+            // coplanar to the last bit, and without a bias they trade pixels on floating-point noise.
+            // The world's own surface must win that argument: an editor overlay is a hint, not geometry.
+            // A RELATIVE bias, because under reversed-Z a fixed one would be enormous up close and
+            // meaningless far away; 1e-4 of the stored depth is a constant ~0.01 % of the distance, i.e.
+            // a centimetre at a hundred metres, and about a thousand times the float noise it hides.
+            const float GRID_DEPTH_BIAS = 1.0 - 1.0e-4;
+            return ( clip.z / clip.w ) * GRID_DEPTH_BIAS;
         }
 
         void main()
@@ -120,9 +136,11 @@ Shader "Grid"
 
             vec2 ndc = verts[gl_VertexIndex];
 
-            // OpenGL-style clip depth ([-1,1]) — matches the engine's perspective convention.
-            v_Near = Unproject( ndc, -1.0 );
-            v_Far  = Unproject( ndc, 1.0 );
+            // Reversed-Z, zero-to-one clip depth: 1 is the near plane, 0 the far one
+            // (Core/Projection.hpp). Read the other way round these two swap, the fragment shader's
+            // near->far ray runs backwards, and the grid disappears behind the camera.
+            v_Near = Unproject( ndc, 1.0 );
+            v_Far  = Unproject( ndc, 0.0 );
 
             gl_Position = vec4( ndc, 0.0, 1.0 );
         }

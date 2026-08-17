@@ -48,17 +48,23 @@ namespace Desert::Core
         m_Planes[PLANE_UP].Normal.z = viewProjection[2][3] - viewProjection[2][1];
         m_Planes[PLANE_UP].Distance = viewProjection[3][3] - viewProjection[3][1];
 
-        // Near plane
-        m_Planes[PLANE_NEAR].Normal.x = viewProjection[0][3] + viewProjection[0][2];
-        m_Planes[PLANE_NEAR].Normal.y = viewProjection[1][3] + viewProjection[1][2];
-        m_Planes[PLANE_NEAR].Normal.z = viewProjection[2][3] + viewProjection[2][2];
-        m_Planes[PLANE_NEAR].Distance = viewProjection[3][3] + viewProjection[3][2];
+        // Near and far come from the DEPTH convention, and are the only two planes that do — the side
+        // planes are the same in every clip space. Vulkan keeps 0 <= z <= w (not OpenGL's -w <= z <= w),
+        // and the engine's projections are REVERSED-Z, so z = w on the near plane and z = 0 on the far
+        // one (Core/Projection.hpp). The half-space tests are therefore `w - z >= 0` for near and
+        // `z >= 0` for far — NOT the `w + z` / `w - z` pair a GL-convention derivation gives.
 
-        // Far plane
-        m_Planes[PLANE_FAR].Normal.x = viewProjection[0][3] - viewProjection[0][2];
-        m_Planes[PLANE_FAR].Normal.y = viewProjection[1][3] - viewProjection[1][2];
-        m_Planes[PLANE_FAR].Normal.z = viewProjection[2][3] - viewProjection[2][2];
-        m_Planes[PLANE_FAR].Distance = viewProjection[3][3] - viewProjection[3][2];
+        // Near plane: row3 - row2
+        m_Planes[PLANE_NEAR].Normal.x = viewProjection[0][3] - viewProjection[0][2];
+        m_Planes[PLANE_NEAR].Normal.y = viewProjection[1][3] - viewProjection[1][2];
+        m_Planes[PLANE_NEAR].Normal.z = viewProjection[2][3] - viewProjection[2][2];
+        m_Planes[PLANE_NEAR].Distance = viewProjection[3][3] - viewProjection[3][2];
+
+        // Far plane: row2 alone
+        m_Planes[PLANE_FAR].Normal.x = viewProjection[0][2];
+        m_Planes[PLANE_FAR].Normal.y = viewProjection[1][2];
+        m_Planes[PLANE_FAR].Normal.z = viewProjection[2][2];
+        m_Planes[PLANE_FAR].Distance = viewProjection[3][2];
 
         // Normalize all planes
         for ( auto& plane : m_Planes )

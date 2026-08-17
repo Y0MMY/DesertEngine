@@ -1,6 +1,7 @@
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Core/Input.hpp>
+#include <Engine/Core/Projection.hpp>
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -20,11 +21,11 @@ namespace Desert::Core
         {
             const float halfH  = m_OrthoSize;
             const float halfW  = m_OrthoSize * aspectRatio;
-            m_ProjectionMatrix = glm::ortho( -halfW, halfW, -halfH, halfH, m_NearPlane, m_FarPlane );
+            m_ProjectionMatrix = MakeOrthographic( -halfW, halfW, -halfH, halfH, m_NearPlane, m_FarPlane );
         }
         else
         {
-            m_ProjectionMatrix = glm::perspective( glm::radians( m_FOV ), aspectRatio, m_NearPlane, m_FarPlane );
+            m_ProjectionMatrix = MakePerspective( glm::radians( m_FOV ), aspectRatio, m_NearPlane, m_FarPlane );
         }
     }
 
@@ -147,12 +148,12 @@ namespace Desert::Core
         {
             const float halfH  = m_OrthoSize * heightScale;
             const float halfW  = halfH * aspect;
-            m_ProjectionMatrix = glm::ortho( -halfW, halfW, -halfH, halfH, m_NearPlane, m_FarPlane );
+            m_ProjectionMatrix = MakeOrthographic( -halfW, halfW, -halfH, halfH, m_NearPlane, m_FarPlane );
         }
         else
         {
             const float fovY = 2.0f * glm::atan( glm::tan( glm::radians( m_FOV ) * 0.5f ) * heightScale );
-            m_ProjectionMatrix = glm::perspective( fovY, aspect, m_NearPlane, m_FarPlane );
+            m_ProjectionMatrix = MakePerspective( fovY, aspect, m_NearPlane, m_FarPlane );
         }
     }
 

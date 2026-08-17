@@ -335,9 +335,11 @@ namespace Desert::Graphic::System
         // Reflective Shadow Map (G-buffer from the sun) — the off-screen bounce source for the RSM GI mode.
         // Its camera UB carries the SUN's matrices, so like glass it needs its OWN material: sharing one with
         // the opaque passes would write the same per-frame UB twice in a frame. m_RSMViewProj/m_RSMEye come
-        // from cascade 1 in UpdateCascades(); the pass reuses m_StaticGBufferPipeline.
+        // from cascade 1 in UpdateCascades(), so the pass draws through a STANDARD-Z matrix and needs its
+        // own pipeline (m_RSMPipeline) rather than the reversed-Z G-buffer one — see SetupDeferredPass.
         std::unique_ptr<StaticMaterialPBR> m_RSMMaterial;
         MaterialInstancePtr                m_RSMInstance;
+        std::shared_ptr<GraphicsPipeline>  m_RSMPipeline;
         glm::mat4                          m_RSMViewProj = glm::mat4( 1.0f );
         glm::vec3                          m_RSMEye      = glm::vec3( 0.0f );
 
