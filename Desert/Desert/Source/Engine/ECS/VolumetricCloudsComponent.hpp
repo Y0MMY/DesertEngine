@@ -78,11 +78,19 @@ namespace Desert::ECS
                   Tooltip( "Cloud base height above the planet surface." ) )
         float LayerBottomAltitude = Common::Units::Metres( 1500.0f );
 
+        // 1608.9 m is not a taste either: it is the thickness at which this layer's 23811.5 m weather tile
+        // — i.e. its 2976 m dominant coverage cell — realises the aspect of a cumulus mediocris, 1.85 times
+        // wider than tall (CloudLayerAspect.hpp). The old 3500 m gave 0.85, a cloud taller than it was
+        // wide: cumulonimbus proportions on a fair-weather sky, and the reason a deck overhead read as a
+        // ceiling rather than as clouds sitting in the atmosphere. Thickness and Weather Tile Size are two
+        // halves of one shape; moving either alone re-opens it. The CloudPresets suite pins the pair.
         PROPERTY( DisplayName( "Layer Thickness" ), Category( "Cloud Layer" ), Length,
                   Range( Common::Units::Metres( 50.0f ), Common::Units::Metres( 15000.0f ) ),
                   EditCondition( "Enabled" ),
-                  Tooltip( "Vertical extent of the shell. Tall layers give towering cumulus." ) )
-        float LayerThickness = Common::Units::Metres( 3500.0f );
+                  Tooltip( "Vertical extent of the shell. A cloud should be WIDER than it is tall: this "
+                           "wants to be about half the weather tile's coverage cell (Weather Tile Size / "
+                           "8) for cumulus, less only for a cumulonimbus deep enough to tower." ) )
+        float LayerThickness = Common::Units::Metres( 1608.9f );
 
         PROPERTY( DisplayName( "Max View Distance" ), Category( "Cloud Layer" ), Length,
                   Range( Common::Units::Metres( 5000.0f ), Common::Units::Metres( 400000.0f ) ),
@@ -111,11 +119,20 @@ namespace Desert::ECS
                   Tooltip( "High values give hard-edged islands, low values a soft blanket." ) )
         float CoverageContrast = 1.20f;
 
-        // 23 811.5 m is not a taste: it is CloudAutoWeatherTileSize (Common/CloudGeometry.glslh) for the
-        // default 1.5-5 km layer above. That function is the relation between this tile and the layer's
-        // altitude — how many coverage cells a ground observer gets to see overhead — and every preset
-        // and every scene in the repository is now authored from it. Moving the layer without moving
-        // this is what emptied Clouds_UEShowcase's zenith; the CloudPresets suite pins the pair.
+        // 23 811.5 m is not a taste: it is what CloudAutoWeatherTileSize (Common/CloudGeometry.glslh) asks
+        // for at this altitude — the relation between this tile and the layer's altitude, i.e. how many
+        // coverage cells a ground observer gets to see overhead. Moving the layer without moving this is
+        // what emptied Clouds_UEShowcase's zenith; the CloudPresets suite pins the pair.
+        //
+        // It is the tile the OLD 1.5-5 km layer derived exactly, and it is kept unchanged now that the
+        // layer is 1.5-3.1 km, which puts it at 1.41x the tile the thinner layer would derive on its own.
+        // That is deliberate and it is inside the measured tolerance band (CloudWeatherScale.hpp): the
+        // layer's thickness is now fixed by its species aspect, the two relations together over-determine
+        // the layer, and the tile is the side with a measured band to give. Deriving the tile instead
+        // would shrink the coverage cell to 1.8 km and the layer to 987 m, which falls under
+        // CloudMarchScale.hpp's four-sample search bound at the Low tier — and that bound has no
+        // tolerance at all. The horizontal composition of the sky is therefore bit for bit what it was;
+        // only the vertical changed.
         PROPERTY( DisplayName( "Weather Tile Size" ), Category( "Weather" ), Length,
                   Range( Common::Units::Metres( 5000.0f ), Common::Units::Metres( 400000.0f ) ),
                   EditCondition( "Enabled" ),

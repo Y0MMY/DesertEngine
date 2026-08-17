@@ -698,7 +698,7 @@ Defaults are the **Partly Cloudy** preset (CLD-51). Group = `Category(...)` stri
 |---|---|---|---|---|---|---|---|
 | `Enabled` | `bool` | — | — | `true` | Master switch; gates every other row via `EditCondition`. | — | — |
 | `LayerBottomAltitude` | `float` | cm `Length` | `0 … M(20000)` | `M(1500)` | Cloud base height above the planet surface. | ✔ | — |
-| `LayerThickness` | `float` | cm `Length` | `M(50) … M(15000)` | `M(3500)` | Vertical extent of the shell; tall = towering cumulus. | ✔ | — |
+| `LayerThickness` | `float` | cm `Length` | `M(50) … M(15000)` | `M(1608.9)` | Vertical extent of the shell. **Derived**, not chosen: `WeatherTileSize / 8 / aspect`, where the aspect is the preset's species (`Engine/Graphic/Clouds/CloudLayerAspect.hpp`). A cloud is wider than it is tall; only a cumulonimbus is not. | ✔ | — |
 | `MaxViewDistance` | `float` | cm `Length` | `M(5000) … M(400000)` | `M(150000)` | How far along the ray clouds are marched at all. | — | — |
 | `HorizonFadeStart` | `float` | cm `Length` | `0 … M(400000)` | `M(60000)` | Distance where clouds start dissolving into the sky. | ✔ | — |
 | `HorizonFadeEnd` | `float` | cm `Length` | `0 … M(400000)` | `M(140000)` | Distance where they are fully gone. | ✔ | — |
@@ -906,10 +906,18 @@ future refactor that flattens the structs.)
 
 All 78 preset-driven fields × 7 presets. `M(x)` = `Common::Units::Metres(x)`.
 
+`LayerThickness` is **derived** from the row's own `WeatherTileSize` and its species aspect:
+`thickness = (WeatherTileSize / 8) / aspect` — see `Engine/Graphic/Clouds/CloudLayerAspect.hpp` for the
+relation, the per-species ranges and what each preset's number is. The whole fair-weather family was
+originally authored at aspects of 0.78–1.01, i.e. clouds taller than they were wide, which is the
+cumulonimbus proportion and is what made a deck overhead read as a ceiling. Stratus, Storm and Cirrus
+were already correct for their species and are unchanged. The `Coverage` row and several others below
+predate the shipped table and are historical.
+
 | Field | Clear | FairWeather | **PartlyCloudy** (default) | Stratus | Overcast | Storm | Cirrus |
 |---|---|---|---|---|---|---|---|
 | `LayerBottomAltitude` | `M(2000)` | `M(1500)` | `M(1500)` | `M(600)` | `M(900)` | `M(700)` | `M(8000)` |
-| `LayerThickness` | `M(2000)` | `M(2500)` | `M(3500)` | `M(700)` | `M(2200)` | `M(9000)` | `M(1200)` |
+| `LayerThickness` (derived — see below) | `M(1526.4)` | `M(1481.5)` | `M(1608.9)` | `M(700)` | `M(1409)` | `M(9000)` | `M(1200)` |
 | `HorizonFadeStart` | `M(60000)` | `M(60000)` | `M(60000)` | `M(45000)` | `M(50000)` | `M(55000)` | `M(90000)` |
 | `HorizonFadeEnd` | `M(140000)` | `M(140000)` | `M(140000)` | `M(110000)` | `M(120000)` | `M(130000)` | `M(200000)` |
 | `Coverage` | `0.06` | `0.28` | `0.50` | `0.78` | `0.90` | `0.96` | `0.35` |

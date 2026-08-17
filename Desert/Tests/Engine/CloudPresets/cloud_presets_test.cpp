@@ -12,6 +12,8 @@
 #include <Common/Core/Units.hpp>
 
 #include <Engine/ECS/VolumetricCloudsComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudLayerAspect.hpp>
+#include <Engine/Graphic/Clouds/CloudMarchScale.hpp>
 #include <Engine/Graphic/Clouds/CloudWeatherScale.hpp>
 #include <Engine/Graphic/CloudPresets.hpp>
 #include <Engine/Graphic/CloudQuality.hpp>
@@ -505,6 +507,126 @@ TEST( CloudPresets, EveryPresetsWeatherTileMatchesItsOwnLayerAltitude )
              << " km over a layer at " << Common::Units::ToMetres( d.LayerBottomAltitude ) / 1000.0f << "-"
              << Common::Units::ToMetres( d.LayerBottomAltitude + d.LayerThickness ) / 1000.0f << " km wants "
              << Common::Units::ToMetres( wanted ) / 1000.0f << " km";
+    }
+}
+
+// THE OTHER PAIR THAT MUST AGREE, and the one that made a deck overhead read as a ceiling: the layer's
+// thickness against the coverage cell it lives under.
+//
+// Both numbers were individually defensible — a 3.5 km deck is a real depth and a 23.8 km weather tile is
+// what that altitude asks for — and their RATIO was 0.85, i.e. a cloud taller than it was wide. Those are
+// cumulonimbus proportions, and the whole fair-weather family carried them: Partly Cloudy 0.85, Summer
+// Cumulus 0.78, Overcast 0.83, Fair Weather 1.01. Nothing in the engine said a cloud should be wider than
+// it is tall, so nothing noticed. See Engine/Graphic/Clouds/CloudLayerAspect.hpp.
+TEST( CloudPresets, EveryPresetsThicknessRealisesItsSpeciesAspect )
+{
+    for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
+    {
+        VolumetricCloudData d{};
+        Graphic::ApplyPreset( preset.Id, d );
+
+        const float realised = Graphic::CloudLayerAspect( d.WeatherTileSize, d.LayerThickness );
+
+        // The row's thickness IS the derived one: the aspect it actually realises is the aspect it claims.
+        EXPECT_NEAR( realised, preset.TargetAspect, 1e-3f )
+             << preset.Name << ": " << Common::Units::ToMetres( d.LayerThickness ) / 1000.0f
+             << " km thick under a " << Common::Units::ToMetres( d.WeatherTileSize ) / 8000.0f << " km cell";
+
+        // And the aspect it claims is one its species can actually have. A species is a range rather than a
+        // number — real cumulus humilis run 1.5 to 3 times wider than deep — so this is the assertion that
+        // the row's single number is a member of it, not that the atmosphere has one answer.
+        EXPECT_TRUE( Graphic::CloudAspectSuitsSpecies( preset.TargetAspect, preset.Species ) )
+             << preset.Name << " claims to be " << preset.Species.Name << " at " << preset.TargetAspect
+             << ", outside [" << preset.Species.Low << ", " << preset.Species.High << "]";
+    }
+}
+
+// A BOUND, not a target, and the difference is the point of having both.
+//
+// The species targets above are intent: a preset that misses its species by a little is a look note. This
+// is the part that is not a matter of taste — a cloud narrower than it is tall is a convective tower, and
+// a tower that is not deep is a slab standing on end. It is the same predicate the renderer warns from,
+// so a preset can never ship a geometry the engine would complain about at runtime.
+TEST( CloudPresets, NoPresetIsTallerThanItIsWideWithoutTheDepthToBeACumulonimbus )
+{
+    for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
+    {
+        VolumetricCloudData d{};
+        Graphic::ApplyPreset( preset.Id, d );
+
+        EXPECT_TRUE( Graphic::CloudLayerAspectIsPlausible( d.WeatherTileSize, d.LayerThickness ) )
+             << preset.Name << ": aspect " << Graphic::CloudLayerAspect( d.WeatherTileSize, d.LayerThickness )
+             << " at " << Common::Units::ToMetres( d.LayerThickness ) / 1000.0f << " km thick";
+    }
+
+    // Storm is the exemption and it is asserted as one: it IS taller than it is wide, and what earns it is
+    // the 9 km depth. Drop that depth and the same proportions stop being a cumulonimbus.
+    VolumetricCloudData storm{};
+    Graphic::ApplyPreset( CloudPreset::Storm, storm );
+    EXPECT_LT( Graphic::CloudLayerAspect( storm.WeatherTileSize, storm.LayerThickness ), 1.0f );
+    EXPECT_GE( storm.LayerThickness, Graphic::kCloudDeepConvectionThickness );
+
+    // Take the depth away and the same weather stops being allowed to be taller than wide. 5 km under
+    // Storm's 4.76 km cell is an aspect of 0.95 — still a tower, no longer a cumulonimbus.
+    const float shallow = Common::Units::Metres( 5000.0f );
+    ASSERT_LT( shallow, Graphic::kCloudDeepConvectionThickness );
+    EXPECT_LT( Graphic::CloudLayerAspect( storm.WeatherTileSize, shallow ), 1.0f );
+    EXPECT_FALSE( Graphic::CloudLayerAspectIsPlausible( storm.WeatherTileSize, shallow ) );
+}
+
+// THE INVERSE IS THE INVERSE, over the whole authored range. CloudLayerThicknessForAspect is what the
+// preset table's thicknesses are derived from and what the renderer quotes in its warning; if it and
+// CloudLayerAspect ever disagree, every derived thickness is wrong by the same silent factor.
+TEST( CloudPresets, ThicknessForAspectInvertsTheAspect )
+{
+    for ( float tile : { 100000.0f, 696000.0f, 1465300.0f, 2381150.0f, 6300880.0f } )
+        for ( float aspect : { 0.4f, 0.529f, 1.0f, 1.3f, 1.85f, 6.563f, 12.0f } )
+        {
+            const float thickness = Graphic::CloudLayerThicknessForAspect( tile, aspect );
+            EXPECT_NEAR( Graphic::CloudLayerAspect( tile, thickness ), aspect, aspect * 1e-4f )
+                 << "tile " << tile << " aspect " << aspect;
+        }
+
+    // MONOTONE, and strictly: a thicker layer under the same weather is a narrower cloud. This is what
+    // makes "raise the aspect" and "thin the layer" the same instruction, which is how the presets were
+    // re-authored and how the warning's advice is phrased.
+    const float tile     = 2381150.0f;
+    float       previous = Graphic::CloudLayerAspect( tile, 50000.0f );
+    for ( float thickness = 60000.0f; thickness <= 1500000.0f; thickness += 10000.0f )
+    {
+        const float aspect = Graphic::CloudLayerAspect( tile, thickness );
+        EXPECT_LT( aspect, previous ) << "thickness " << thickness;
+        previous = aspect;
+    }
+}
+
+// THE THIRD RELATION IS STILL SATISFIED AFTER THE SECOND MOVED, which is the interaction the aspect pass
+// had to be checked against rather than assumed past: thinning a layer to widen its clouds takes it
+// TOWARD CloudMarchScale's search bound, and the Low tier's 60 m minimum step is what caps how far the
+// re-authoring could go. Every preset clears four samples on every shipped tier — that is what decided
+// Fair Weather at 1.70 rather than 2.0 and Overcast at 1.30 rather than the broader sheet.
+TEST( CloudPresets, EveryPresetStillClearsTheSearchBoundOnEveryTierAfterTheAspectPass )
+{
+    for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
+    {
+        VolumetricCloudData d{};
+        Graphic::ApplyPreset( preset.Id, d );
+
+        // Stratus and Cirrus are the shipped thin sheets and were already documented as failing the bound
+        // at the low tiers (CloudMath's ADeckAndAThinSheetBothGetEnoughSearchSamples...). They are not
+        // re-authored here, so they are not this test's business; what matters is that nothing the aspect
+        // pass touched JOINED them.
+        if ( preset.Id == CloudPreset::Stratus || preset.Id == CloudPreset::Cirrus )
+            continue;
+
+        for ( const auto& tier : Graphic::kCloudQualityTiers )
+        {
+            const Graphic::CloudSearchAcrossLayer worst = Graphic::CloudWorstSearchAcrossLayer(
+                 d.LayerBottomAltitude, d.LayerThickness, tier.Values.MinStepSize, tier.Values.MaxStepSize,
+                 tier.Values.StepGrowthRate, tier.Values.CoarseStepMultiplier );
+            EXPECT_GE( worst.Samples, Graphic::kCloudMinSearchSamplesAcrossLayer )
+                 << preset.Name << " on " << tier.Name << " at " << worst.ElevationDegrees << " degrees";
+        }
     }
 }
 

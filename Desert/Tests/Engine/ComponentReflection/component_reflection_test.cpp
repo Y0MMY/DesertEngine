@@ -389,9 +389,12 @@ TEST( VolumetricCloudReflection, LayerGeometryIsInCentimetresWithMetreScaleDefau
     EXPECT_TRUE( Find( clouds, "LayerBottomAltitude" )->Meta.IsLength );
     EXPECT_TRUE( Find( clouds, "LayerThickness" )->Meta.IsLength );
 
-    // 1500 m and 3500 m, in the engine's centimetres.
+    // 1500 m and 1608.9 m, in the engine's centimetres. The thickness is not a round number because it is
+    // not chosen: it is the default weather tile's coverage cell divided by the aspect of a cumulus
+    // mediocris (Engine/Graphic/Clouds/CloudLayerAspect.hpp). It was 3500 m, which made the default cloud
+    // taller than it was wide.
     EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerBottomAltitude" ), 150000.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerThickness" ), 350000.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerThickness" ), 160890.0f );
 }
 
 TEST( VolumetricCloudReflection, TheMasterSwitchGatesEveryOtherRow )

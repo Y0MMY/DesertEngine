@@ -1135,17 +1135,27 @@ TEST( CloudWeatherScale, TheCppMirrorIsTheShaderFormulaToTheBit )
     EXPECT_FLOAT_EQ( Desert::Graphic::kCloudWeatherCellsOverhead, R::CLOUD_WEATHER_CELLS_OVERHEAD );
 }
 
-// The component's own default must BE the derived value for the layer it ships with, or the very first
-// sky an artist sees is the miscalibrated one.
-TEST( CloudWeatherScale, TheComponentDefaultIsTheDerivedTileForItsOwnLayer )
+// The component's own default must sit in the derived value's band for the layer it ships with, or the
+// very first sky an artist sees is the miscalibrated one.
+//
+// IT USED TO BE AN EQUALITY, and the equality is what CloudLayerAspect.hpp spent. The layer's thickness is
+// now derived too — from the species aspect, and 1608.9 m is what makes the default deck 1.85 times wider
+// than it is tall — so tile and thickness are both determined and the pair is over-determined. Solving
+// both exactly would want a 987 m layer, which falls under CloudMarchScale's four-sample search bound at
+// the Low tier, and THAT bound has no tolerance: below it, whether a ray notices the deck is a per-pixel
+// coin toss. This one does have a measured tolerance, so this one gives. The band is still asserted, and
+// the default sits at 1.41x — inside the range both ends of the sky were measured to hold up over.
+TEST( CloudWeatherScale, TheComponentDefaultIsInTheDerivedTilesBandForItsOwnLayer )
 {
     const Desert::ECS::VolumetricCloudData defaults;
     EXPECT_TRUE( Desert::Graphic::CloudWeatherTileIsPlausible(
          defaults.WeatherTileSize, defaults.LayerBottomAltitude, defaults.LayerThickness ) );
-    EXPECT_NEAR(
-         defaults.WeatherTileSize,
-         Desert::Graphic::CloudAutoWeatherTileSize( defaults.LayerBottomAltitude, defaults.LayerThickness ),
-         defaults.WeatherTileSize * 0.02f );
+
+    const float wanted =
+         Desert::Graphic::CloudAutoWeatherTileSize( defaults.LayerBottomAltitude, defaults.LayerThickness );
+    EXPECT_NEAR( defaults.WeatherTileSize / wanted, 1.41f, 0.02f )
+         << "the default deck's tile is the one its OLD 3.5 km layer derived, kept so the sky's horizontal "
+            "composition did not move when the layer thinned";
 }
 
 // ---- The empty-space search's scale ------------------------------------------------------------------
