@@ -16,83 +16,6 @@
 
 namespace Desert::Core
 {
-    // World-unit generation of the scene file. Absent (or 0) means the scene was authored when one world
-    // unit was one METRE; today a unit is a CENTIMETRE (Common/Core/Units.hpp), so such a scene is scaled
-    // ×100 on load — see MigrateMetresToUnits(). Bump this only if the world unit changes again.
-    static constexpr int kUnitVersion = 1;
-
-    struct SceneSerialized
-    {
-        std::string                     SceneName;
-        std::vector<Assets::EntityData> Entities;
-        // Scene-wide settings — reflected, so the whole block round-trips through the generic serializer.
-        std::optional<rfl::Generic>     Settings;
-        std::optional<int>              UnitVersion;
-        // Schema generation, absent => 0. A SECOND version integer on purpose - see kSceneVersion in
-        // SceneMigration.hpp for why it must not be folded into UnitVersion.
-        std::optional<int> SceneVersion;
-    };
-
-    namespace
-    {
-        // One-shot upgrade of a metres-era scene to centimetre world units. Every distance an entity owns
-        // is scaled: positions always, and Scale only for FILE-backed meshes — a procedural primitive's
-        // geometry is regenerated at the new size by the factory, so scaling it too would cube the object.
-        void MigrateMetresToUnits( Core::Scene& scene )
-        {
-            constexpr float S = Common::Units::UnitsPerMetre;
-
-            for ( const auto& e : scene.GetAllEntities() )
-            {
-                ECS::Entity entity = e;
-                if ( entity.HasComponent<ECS::TransformComponent>() )
-                {
-                    auto& tc = entity.GetComponent<ECS::TransformComponent>();
-                    tc.Translation *= S;
-
-                    const bool proceduralMesh =
-                         entity.HasComponent<ECS::StaticMeshComponent>() &&
-                         entity.GetComponent<ECS::StaticMeshComponent>().Primitive.has_value();
-                    if ( !proceduralMesh )
-                        tc.Scale *= S;
-                }
-                if ( entity.HasComponent<ECS::CameraComponent>() )
-                {
-                    auto& d = entity.GetComponent<ECS::CameraComponent>().Data;
-                    d.Near *= S, d.Far *= S;
-                }
-                if ( entity.HasComponent<ECS::PointLightComponent>() )
-                {
-                    auto& d = entity.GetComponent<ECS::PointLightComponent>().Data;
-                    d.Radius *= S, d.MinRadius *= S;
-                }
-                if ( entity.HasComponent<ECS::SpotLightComponent>() )
-                    entity.GetComponent<ECS::SpotLightComponent>().Data.Range *= S;
-                if ( entity.HasComponent<ECS::ColliderComponent>() )
-                {
-                    auto& d = entity.GetComponent<ECS::ColliderComponent>().Data;
-                    d.HalfExtents *= S;
-                    d.Radius *= S, d.HalfHeight *= S;
-                }
-                if ( entity.HasComponent<ECS::CharacterControllerComponent>() )
-                {
-                    auto& d = entity.GetComponent<ECS::CharacterControllerComponent>().Data;
-                    d.Radius *= S, d.Height *= S, d.Gravity *= S;
-                }
-                if ( entity.HasComponent<ECS::TerrainComponent>() )
-                {
-                    auto& d = entity.GetComponent<ECS::TerrainComponent>().Data;
-                    d.Size *= S, d.HeightScale *= S, d.GrassHeight *= S;
-                }
-                if ( entity.HasComponent<ECS::TextComponent>() )
-                    entity.GetComponent<ECS::TextComponent>().Size *= S;
-            }
-
-            scene.GetSettings().Gravity *= S;
-            LOG_INFO( "SceneSerializer: migrated a metres-era scene to centimetre world units (x{0})", S );
-        }
-    } // namespace
-
     SceneSerializer::SceneSerializer( const Scene* scene, const Assets::AssetManager* assetManager )
          : m_Scene( (Scene*)scene ), m_AssetManager( (Assets::AssetManager*)assetManager )
     {
@@ -153,21 +76,28 @@ namespace Desert::Core
 
         LOG_INFO( "Loading scene: {0}", sceneData->SceneName );
 
-        // Sky schema migration - HERE, on the parsed tree, and not after the entities exist. Once the sky
-        // fields left SkyboxComponent there is no component left for them to land in, and the load loop
-        // below iterates the component REGISTRY rather than the file, so an old "Skybox" payload's sky
-        // values would be read by nobody and the scene would open with a default sky.
+        // Both migrations, HERE, on the parsed tree and before a single entity exists. Once the sky fields
+        // left SkyboxComponent there is no component left for them to land in, and the load loop below
+        // iterates the component REGISTRY rather than the file, so an old "Skybox" payload's sky values
+        // would be read by nobody; the unit migration runs here for the plainer reason that a length is
+        // easier to multiply once, in the file's own numbers, than to chase through a live scene graph.
         //
-        // Independent of MigrateMetresToUnits at the bottom of this function, and it has to be: an old
-        // metres-era scene runs BOTH in one load. They cannot interact because no sky field is a length -
-        // colours, multipliers, angles and a radius already authored in kilometres.
-        if ( sceneData->SceneVersion.value_or( 0 ) < kSceneVersion )
+        // DC 4.7: never silently. Say which scene moved, from what, and by how much.
+        const SceneMigrationReport migration = MigrateScene( *sceneData );
+        if ( migration.SkyRaised )
         {
-            const SkyMigrationReport report = MigrateSkyV0ToV1( sceneData->Entities );
-            LOG_INFO( "[SceneMigration] '{0}': sky schema v0 -> v1 - {1} entity(ies), {2} carried, {3} "
-                      "defaulted, {4} rejected",
-                      sceneData->SceneName, report.Entities, report.FieldsCarried, report.FieldsDefaulted,
-                      report.FieldsRejected );
+            LOG_INFO( "[SceneMigration] '{0}': sky schema v0 -> v{1} - {2} entity(ies), {3} carried, {4} "
+                      "defaulted, {5} rejected",
+                      sceneData->SceneName, kSceneVersion, migration.Sky.Entities, migration.Sky.FieldsCarried,
+                      migration.Sky.FieldsDefaulted, migration.Sky.FieldsRejected );
+        }
+        if ( migration.UnitsRaised )
+        {
+            LOG_INFO( "[SceneMigration] '{0}': world units v0 -> v{1} (metres -> centimetres, x{2}) - {3} "
+                      "entity(ies), {4} value(s) scaled, {5} rejected. Re-save (or run SceneMigrator) to "
+                      "stamp the file so this never runs again.",
+                      sceneData->SceneName, kUnitVersion, Common::Units::UnitsPerMetre, migration.Units.Entities,
+                      migration.Units.Values, migration.Units.Rejected );
         }
 
         // Restore the scene name (was only logged before — so a renamed+saved scene reverted on load).
@@ -272,12 +202,6 @@ namespace Desert::Core
                     m_Scene->Attach( parentIt->second, prefabRoot );
             }
         }
-
-        // Scenes written before the world unit became a centimetre carry no UnitVersion — upgrade them
-        // once here, so opening an old level still shows it at the right size (re-saving stamps v1).
-        // Runs on the LIVE scene, unlike the sky migration above, and neither depends on the other.
-        if ( sceneData->UnitVersion.value_or( 0 ) < kUnitVersion )
-            MigrateMetresToUnits( *m_Scene );
     }
 
     void SceneSerializer::SaveToFile() const

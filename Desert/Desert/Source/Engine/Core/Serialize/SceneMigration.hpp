@@ -2,6 +2,8 @@
 
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace Desert::Core
@@ -9,11 +11,30 @@ namespace Desert::Core
     // Schema generation of a .desce file. Absent (or 0) means the file was written while the procedural
     // sky still lived inside SkyboxComponent; 1 means the sky lives in its own "SkyAtmosphere" payload.
     //
-    // This is deliberately a SECOND integer and not UnitVersion. UnitVersion's contract is written next to
-    // it in SceneSerializer.cpp - "bump this only if the world unit changes again" - so reusing it would
-    // couple two migrations that have nothing to do with each other: an old metres-era scene would be
-    // declared sky-migrated the moment someone re-saved it for units, and vice versa.
+    // This is deliberately a SECOND integer and not UnitVersion. UnitVersion's contract is written beside
+    // it below - "bump this only if the world unit changes again" - so reusing it would couple two
+    // migrations that have nothing to do with each other: an old metres-era scene would be declared
+    // sky-migrated the moment someone re-saved it for units, and vice versa.
     inline constexpr int kSceneVersion = 1;
+
+    // World-unit generation of a .desce file. Absent (or 0) means the scene was authored when one world
+    // unit was one METRE; today a unit is a CENTIMETRE (Common/Core/Units.hpp), so such a scene is scaled
+    // x100 once - see MigrateMetresToUnits(). Bump this only if the world unit changes again.
+    inline constexpr int kUnitVersion = 1;
+
+    // The on-disk shape of a .desce file, and the ONLY definition of it: the loader parses into this, the
+    // saver writes it, and the migrations rewrite it in place. It lives here rather than inside
+    // SceneSerializer.cpp because a migration whose input is "the parsed tree" needs the tree's type, and
+    // a second copy of this struct anywhere is a format that can silently fork.
+    struct SceneSerialized
+    {
+        std::string                     SceneName;
+        std::vector<Assets::EntityData> Entities;
+        // Scene-wide settings - reflected, so the whole block round-trips through the generic serializer.
+        std::optional<rfl::Generic> Settings;
+        std::optional<int>          UnitVersion;
+        std::optional<int>          SceneVersion;
+    };
 
     // Number of reflected fields on ECS::SkyAtmosphereData. The migration needs it to say how many NEW
     // fields were left at their C++ default, and it must not reach for the reflection registry to find out
@@ -45,8 +66,8 @@ namespace Desert::Core
     //
     // It runs on the PARSED TREE, before a single entity exists, and that is the whole point: once
     // SkyboxComponent lost its sky fields, the load loop - which iterates the component REGISTRY, not the
-    // file - has nowhere to put the old values, so a migration over the live ECS scene (the shape
-    // MigrateMetresToUnits uses) would find them already gone.
+    // file - has nowhere to put the old values, so a migration over the live ECS scene would find them
+    // already gone.
     //
     // Idempotent: an entity that already has a "SkyAtmosphere" payload is skipped untouched, so a second
     // run reports all zeros and leaves the tree byte-identical.
@@ -54,5 +75,65 @@ namespace Desert::Core
     // SHELF LIFE: this function upgrades v0 to v1 and nothing else. It is not "support for the old format";
     // when v2 arrives it gets its own v1 -> v2 function, and this one is deleted once no v0 file remains.
     SkyMigrationReport MigrateSkyV0ToV1( std::vector<Assets::EntityData>& entities );
+
+    // What MigrateMetresToUnits touched, returned rather than logged, for the same reason as above: the
+    // function is pure and the caller is the one who knows which file this was.
+    struct UnitMigrationReport
+    {
+        int Entities = 0; // entities that had at least one number rescaled
+        int Values   = 0; // individual numbers multiplied by 100 (a vec3 counts as one)
+        int Rejected = 0; // fields present but unusable (not a finite number / wrong arity) - left alone
+    };
+
+    // Raises a metres-era scene to centimetre world units: every LENGTH the scene file owns is multiplied
+    // by 100. PURE - no GPU, no filesystem, no global state; a LOG_WARN per rejected value is the only
+    // side effect beyond the arguments.
+    //
+    // It runs on the PARSED TREE, like the sky migration and unlike the version that used to live in
+    // SceneSerializer.cpp and walked the live ECS scene AFTER the load. Three things follow from that, and
+    // all three are deliberate:
+    //
+    //  1. Only keys that are PRESENT are scaled. The live version scaled the TransformComponent every
+    //     entity is created with, so an entity whose file entry carries no "Scale" - every UI entity in
+    //     MainMenu.desce, for one - had its default (1,1,1) turned into (100,100,100). A default is not a
+    //     length somebody authored in metres.
+    //  2. Prefab CONTENTS are not touched. The scene file owns where a prefab was placed; the prefab file
+    //     owns what is inside it. The live version scaled the instantiated children too, so the same
+    //     prefab came out a hundred times bigger in an old scene than in a new one.
+    //  3. The values are already in centimetres before a single component is deserialized, so nothing
+    //     downstream can observe the metres-era numbers.
+    //
+    // Idempotent by construction: it does not decide anything from the values themselves, so running it on
+    // a scene that has already been raised is a second x100 - which is exactly why the caller must gate it
+    // on UnitVersion, and why MigrateScene() below is the only supported way to call it.
+    //
+    // SHELF LIFE: this raises UnitVersion 0 to 1 and nothing else. When the world unit changes again it
+    // gets a 1 -> 2 successor; this function is deleted once no unstamped file remains.
+    UnitMigrationReport MigrateMetresToUnits( std::vector<Assets::EntityData>& entities,
+                                              std::optional<rfl::Generic>&     settings );
+
+    // Everything that ran, so the caller can say which scene moved and how far.
+    struct SceneMigrationReport
+    {
+        bool                SkyRaised = false; // the sky schema was below kSceneVersion
+        SkyMigrationReport  Sky;
+        bool                UnitsRaised = false; // the world unit was below kUnitVersion
+        UnitMigrationReport Units;
+
+        bool Changed() const
+        {
+            return SkyRaised || UnitsRaised;
+        }
+    };
+
+    // Raises a parsed scene file to the current generation of BOTH version integers and stamps them, so a
+    // tree that has been through this function is one nothing will migrate again. This is the single entry
+    // point: the loader calls it on the tree it just parsed, and SceneMigrator calls it on every .desce in
+    // the repository and writes the result back - the contract's "data migrates once, and is written back
+    // in the new form" is only true if something actually writes it back.
+    //
+    // The two migrations are independent (no sky field is a length; no length lives under "SkyAtmosphere"),
+    // so the order below is the order they were written and nothing depends on it.
+    SceneMigrationReport MigrateScene( SceneSerialized& scene );
 
 } // namespace Desert::Core
