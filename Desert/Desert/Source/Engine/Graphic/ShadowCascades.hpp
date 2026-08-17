@@ -74,10 +74,16 @@ namespace Desert::Graphic
             splitFar[i]     = glm::mix( uni, log, setup.SplitLambda );
         }
 
-        // Frustum corners (GL NDC z in [-1,1]) give the eye + view axis; the slice bounding spheres are then
-        // computed analytically from scalars, which is what keeps the radius bit-stable as the camera turns
+        // Frustum corners give the eye + view axis; the slice bounding spheres are then computed
+        // analytically from scalars, which is what keeps the radius bit-stable as the camera turns
         // (a centroid + max-corner-distance is analytically rotation-invariant but accumulates FP noise, and
         // the quantized radius then flip-flops and the texel snap stops hiding the crawl).
+        //
+        // THE NDC z VALUES BELONG TO THE CAMERA'S CONVENTION, NOT TO THIS FUNCTION'S. The camera is
+        // REVERSED-Z (Core/Projection.hpp): 1 on the near plane, 0 on the far one. Reading them the GL way
+        // (-1 near, +1 far) does not merely misplace the rings — it SWAPS them, `viewFwd` comes out
+        // pointing behind the camera, and every cascade is fitted to the space at the observer's back.
+        // The cascades' own projection is a separate decision, made where it is built below.
         const glm::mat4 invVP = glm::inverse( setup.CameraProjection * setup.CameraView );
         glm::vec3       nearCorners[4];
         glm::vec3       farCorners[4];
@@ -86,8 +92,8 @@ namespace Desert::Graphic
         {
             for ( int y = 0; y < 2; ++y )
             {
-                const glm::vec4 nc = invVP * glm::vec4( 2.0f * x - 1.0f, 2.0f * y - 1.0f, -1.0f, 1.0f );
-                const glm::vec4 fc = invVP * glm::vec4( 2.0f * x - 1.0f, 2.0f * y - 1.0f, 1.0f, 1.0f );
+                const glm::vec4 nc = invVP * glm::vec4( 2.0f * x - 1.0f, 2.0f * y - 1.0f, 1.0f, 1.0f );
+                const glm::vec4 fc = invVP * glm::vec4( 2.0f * x - 1.0f, 2.0f * y - 1.0f, 0.0f, 1.0f );
                 nearCorners[ci]    = glm::vec3( nc ) / nc.w;
                 farCorners[ci]     = glm::vec3( fc ) / fc.w;
                 ++ci;
@@ -143,6 +149,12 @@ namespace Desert::Graphic
 
             // The light eye is pushed back by 2*radius so casters between it and the slice still cast.
             const glm::mat4 view = glm::lookAt( snapped - lightDir * ( radius * 2.0f ), snapped, up );
+            // DELIBERATELY STANDARD-Z (0 at the near plane, 1 at the far one) while the camera is
+            // reversed-Z. An orthographic projection's depth is LINEAR in light-space distance, so the
+            // float exponent is already spread evenly across the slice and reversing it would gain
+            // precisely nothing — while costing an inverted compare in the seven shaders that sample
+            // these maps and a re-tuned shadow bias. The pass that consumes this matrix says so too
+            // (MeshRenderer::SetupShadowPass) and clears its depth to 1 rather than the engine's 0.
             const glm::mat4 proj =
                  glm::orthoRH_ZO( -radius, radius, -radius, radius, Common::Units::Cm( 10.0f ), radius * 4.0f );
 

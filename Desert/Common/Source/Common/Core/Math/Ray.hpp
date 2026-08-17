@@ -134,7 +134,11 @@ namespace Common::Math
             const float x = ( 2.0f * mousePosition.x ) / viewportWidth - 1.0f;
             const float y = 1.0f - ( 2.0f * mousePosition.y ) / viewportHeight;
 
-            // Create point in clip space (z=-1 for near plane)
+            // A clip-space point on the ray. THE z HERE IS ARBITRARY under a perspective projection and
+            // is not a depth-convention assumption, which matters now that the engine renders reversed-Z:
+            // the inverse of a perspective matrix has (0, 0, 0, -1) as its third row, so the x, y and z of
+            // the result below depend only on the pixel — the clip z leaks into w alone, and w is unused
+            // because a direction needs no perspective divide.
             const glm::vec4 clipCoords = { x, y, -1.0f, 1.0f };
 
             // Transform back to world space

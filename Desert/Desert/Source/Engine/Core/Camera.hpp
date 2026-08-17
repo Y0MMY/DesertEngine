@@ -4,6 +4,7 @@
 #include <Common/Core/Events/KeyEvents.hpp>
 #include <Common/Core/Events/MouseEvents.hpp>
 #include <Engine/Core/Application.hpp>
+#include <Engine/Core/Projection.hpp>
 
 #include "Frustum.hpp"
 
@@ -68,8 +69,8 @@ namespace Desert::Core
         glm::vec3 m_Position         = glm::vec3( 0.0f );
 
         float          m_FOV            = 45.0f;
-        float          m_NearPlane      = 10.0f;     // 10 cm (1 world unit = 1 cm)
-        float          m_FarPlane       = 100000.0f; // 1 km
+        float          m_NearPlane      = kDefaultNearPlane;
+        float          m_FarPlane       = kDefaultFarPlane;
         ProjectionType m_ProjectionType = ProjectionType::Perspective;
         float          m_OrthoSize      = 1000.0f; // world half-height for the orthographic projection
 

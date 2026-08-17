@@ -513,9 +513,10 @@ namespace Desert::Graphic::System
 
     void MeshRenderer::RenderRSMManual()
     {
-        // Reuses the G-buffer PIPELINE: the RSM framebuffer is created with the same attachment layout, so
-        // the two are render-pass compatible and the shader's four outputs line up. Only the camera differs.
-        if ( !m_StaticGBufferPipeline || !m_RSMMaterial || !m_RSMInstance || m_StaticQueue.empty() )
+        // Reuses the G-buffer SHADER and attachment layout — the RSM framebuffer is created to match, so
+        // the two are render-pass compatible and the shader's four outputs line up. The pipeline is its
+        // own (standard-Z, see SetupDeferredPass) and so is the camera.
+        if ( !m_RSMPipeline || !m_RSMMaterial || !m_RSMInstance || m_StaticQueue.empty() )
             return;
         const auto& rsm = m_SceneRenderer ? m_SceneRenderer->GetRSMBuffer() : nullptr;
         if ( !rsm )
@@ -559,7 +560,10 @@ namespace Desert::Graphic::System
         rpSpec.TargetFramebuffer = rsm;
         rpSpec.DebugName         = "RSMPass";
         rpSpec.ClearColor.Color  = glm::vec4( 0.0f ); // zero normal = "no caster here" for the VPL gather
-        auto rp                  = RenderPass::Create( rpSpec );
+        // Standard-Z pass (it is drawn through a cascade matrix), so its depth clears to 1 = far, not to
+        // the engine's reversed-Z 0. With 0 the LessOrEqual test rejects everything and the RSM is empty.
+        rpSpec.ClearColor.DepthStencil.x = 1.0f;
+        auto rp                          = RenderPass::Create( rpSpec );
 
         renderer.BeginRenderPass( rp.get() );
         for ( uint32_t i = 0; i < static_cast<uint32_t>( objs.size() ); ++i )
@@ -568,7 +572,7 @@ namespace Desert::Graphic::System
             StaticMaterialPBR::UpdateTransform( ri, obj->Transform );
             m_RSMMaterial->SetMaterialIndex( i );
             m_RSMMaterial->Bind( ri );
-            renderer.RenderMesh( m_StaticGBufferPipeline.get(), obj->Mesh, obj->Transform,
+            renderer.RenderMesh( m_RSMPipeline.get(), obj->Mesh, obj->Transform,
                                  m_RSMMaterial->GetMaterialExecutor(), 1, 0, obj->HiddenSubmeshes );
         }
         renderer.EndRenderPass();
@@ -915,7 +919,7 @@ namespace Desert::Graphic::System
                         { Graphic::ShaderDataType::Float3, "a_Bitangent" },
                         { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
 
-        spec.DepthCompareOp = CompareOp::LessOrEqual;
+        spec.DepthCompareOp = DepthCompare::CloserOrEqual;
         spec.CullMode       = CullMode::Back;
         spec.Shader         = m_GeometryShader;
         spec.Framebuffer    = targetFb;
@@ -944,7 +948,7 @@ namespace Desert::Graphic::System
                                      { Graphic::ShaderDataType::Float3, "a_Tangent" },
                                      { Graphic::ShaderDataType::Float3, "a_Bitangent" },
                                      { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
-            ispec.DepthCompareOp = CompareOp::LessOrEqual;
+            ispec.DepthCompareOp      = DepthCompare::CloserOrEqual;
             ispec.CullMode       = CullMode::Back;
             ispec.Shader         = m_InstancedGeometryShader;
             ispec.Framebuffer    = targetFb;
@@ -973,7 +977,7 @@ namespace Desert::Graphic::System
                                 { Graphic::ShaderDataType::Float3, "a_Tangent" },
                                 { Graphic::ShaderDataType::Float3, "a_Bitangent" },
                                 { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
-        spec.DepthCompareOp = CompareOp::LessOrEqual;
+        spec.DepthCompareOp = DepthCompare::CloserOrEqual;
         spec.CullMode       = CullMode::Back;
         spec.Shader         = m_StaticGBufferShader;
         spec.Framebuffer    = gbuffer; // 2 color attachments -> the shader's 2 MRT outputs
@@ -982,8 +986,20 @@ namespace Desert::Graphic::System
         if ( !m_StaticGBufferPipeline )
             return false;
 
-        // The RSM render reuses this very pipeline (its framebuffer has the identical attachment layout, so
-        // the two are render-pass compatible) with a DEDICATED material rendered from the sun's POV.
+        // The RSM renders the same shader, layout and attachment set from the sun's POV, with a DEDICATED
+        // material — but NOT the same pipeline, because it is drawn through a CASCADE matrix, and the
+        // cascades are standard-Z (SetupShadowPass says why). Sharing the G-buffer pipeline would test
+        // reversed-Z depth against standard-Z fragments, which is not "slightly wrong": it keeps the
+        // FARTHEST surface per texel, so every VPL would be a back face and the bounce light would come
+        // out of the wrong geometry. One extra pipeline is the price of the two conventions coexisting,
+        // and the cache hands back a shared object anyway if some other pass ever asks for the same state.
+        GraphicsPipelineSpecification rsmSpec = spec;
+        rsmSpec.DebugName                     = "StaticMeshRSM";
+        rsmSpec.DepthCompareOp                = CompareOp::LessOrEqual;
+        m_RSMPipeline                         = m_SceneRenderer->GetPipelineCache().GetOrCreate( rsmSpec );
+        if ( !m_RSMPipeline )
+            return false;
+
         m_RSMMaterial = std::make_unique<MaterialRSM>();
         m_RSMInstance = m_RSMMaterial->CreateInstance();
         return true;
@@ -1010,7 +1026,7 @@ namespace Desert::Graphic::System
                                    { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
         spec.Shader            = m_StaticGlassShader;
         spec.Framebuffer       = target;
-        spec.DepthCompareOp    = CompareOp::LessOrEqual;
+        spec.DepthCompareOp    = DepthCompare::CloserOrEqual;
         spec.DepthWriteEnabled = false;      // transparent: don't occlude later fragments / itself
         spec.CullMode          = CullMode::Back;
         spec.BlendEnable       = true;       // src-alpha over the composited scene
@@ -1051,7 +1067,7 @@ namespace Desert::Graphic::System
                         { Graphic::ShaderDataType::Int4, "a_BoneIndices" },
                         { Graphic::ShaderDataType::Float4, "a_BoneWeights" } };
 
-        spec.DepthCompareOp = CompareOp::LessOrEqual;
+        spec.DepthCompareOp = DepthCompare::CloserOrEqual;
         spec.CullMode       = CullMode::Back;
         spec.Shader         = m_SkinnedShader;
         spec.Framebuffer    = targetFb;
@@ -1160,6 +1176,13 @@ namespace Desert::Graphic::System
                            { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
         spec.DepthTestEnabled  = true;
         spec.DepthWriteEnabled = true;
+        // STANDARD-Z, AND THE ONLY PASS IN THE ENGINE THAT IS. Everything else renders reversed-Z
+        // (Core/Projection.hpp), but a cascade's projection is ORTHOGRAPHIC — its depth is linear in
+        // light-space distance, so there is no 1/z curve for a float exponent to cancel and reversing it
+        // would buy exactly zero precision while inverting the compare in seven sampling shaders and the
+        // sign of the shadow bias. It is spelled with a raw CompareOp, not DepthCompare::, precisely so
+        // that it does not silently follow the engine convention if that is ever revisited. Its render
+        // pass clears depth to 1 via PassConfig::ClearDepth in RegisterShadowPass.
         spec.DepthCompareOp    = CompareOp::LessOrEqual;
         // No culling in the shadow pass: store ALL faces so the map can never come out empty (front-face
         // culling under the engine's negative-height viewport could cull the wrong set and black out the
@@ -1410,7 +1433,11 @@ namespace Desert::Graphic::System
                  m_ShadowPipeline->GetSpecification(), m_CascadeFB[c], {},
                  // Clear the R32F depth target to 1.0 (far): background texels must read as "no occluder",
                  // else the default 0.1 grey clear falsely shadows receivers whose light-space depth > 0.1.
-                 glm::vec4( 1.0f ) );
+                 glm::vec4( 1.0f ), RenderPassOrder::Default,
+                 // And the DEPTH ATTACHMENT to 1.0 as well, overriding the engine's reversed-Z clear of
+                 // 0. This pass is standard-Z (SetupShadowPass says why); a 0 clear under its LessOrEqual
+                 // test would reject every caster and hand back an empty shadow map, silently.
+                 1.0f );
         }
     }
 
@@ -1435,7 +1462,7 @@ namespace Desert::Graphic::System
         spec.LineWidth         = 1.0f; // dynamic line width is set to 1.0 in SubmitLines (no wideLines feature)
         spec.DepthTestEnabled  = true;
         spec.DepthWriteEnabled = false;
-        spec.DepthCompareOp    = CompareOp::LessOrEqual;
+        spec.DepthCompareOp    = DepthCompare::CloserOrEqual;
         spec.CullMode          = CullMode::None;
         // No vertex Layout: the DebugLine shader pulls endpoints from the Lines storage buffer by index.
 

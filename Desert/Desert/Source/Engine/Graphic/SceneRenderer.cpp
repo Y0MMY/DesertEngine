@@ -59,7 +59,12 @@ namespace Desert::Graphic
         }
         RenderConfig::MSAASamplesActive = static_cast<int>( fbSpec.Samples );
         fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
-        fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
+        // DEPTH32F, AND THE FLOAT IS THE POINT. Reversed-Z (Core/Projection.hpp) works by lining the
+        // 1/z curve up against the float exponent so the two cancel; on a UNORM24 attachment, which
+        // quantizes uniformly in NDC, reversing the range just relabels the same 2^24 levels and buys
+        // literally nothing. This was DEPTH24STENCIL8, and no pass in the engine enables a stencil test,
+        // so the packed stencil byte was paying for nothing either.
+        fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH32F );
 
         m_TargetFramebuffer = Graphic::Framebuffer::Create( fbSpec );
         m_TargetFramebuffer->Resize( width, height );
@@ -79,7 +84,10 @@ namespace Desert::Graphic
              Core::Formats::ImageFormat::RGBA32F ); // GBufferC WorldPosition.xyz
         gbufferSpec.Attachments.Attachments.push_back(
              Core::Formats::ImageFormat::RGBA32F ); // GBufferEmissive (HDR self-illum)
-        gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
+        // DEPTH32F for the same reason as the forward target above — and it is this attachment the
+        // clouds and the height fog read back as a texture, so its precision is the precision of every
+        // distance they reconstruct.
+        gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH32F );
         m_GBuffer = Graphic::Framebuffer::Create( gbufferSpec );
         m_GBuffer->Resize( width, height );
 
@@ -886,7 +894,10 @@ namespace Desert::Graphic
         rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // Normal
         rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // WorldPos
         rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // Emissive (unused)
-        rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
+        // Matches the G-buffer's depth format because "mirror m_GBuffer" includes the depth attachment:
+        // the RSM pipeline is created from the G-buffer's spec, and a differing depth format makes the
+        // two render passes incompatible.
+        rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH32F );
         m_RSMBuffer = Graphic::Framebuffer::Create( rsmSpec );
         m_RSMBuffer->Resize( kRSMResolution, kRSMResolution );
 

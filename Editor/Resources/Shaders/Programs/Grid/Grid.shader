@@ -53,7 +53,11 @@ Shader "Grid"
         float DepthOf( vec3 worldPos )
         {
             vec4 clip = u.Projection * u.View * vec4( worldPos, 1.0 );
-            return ( clip.z / clip.w ) * 0.5 + 0.5; // GL clip [-1,1] -> Vulkan depth [0,1]
+            // NO REMAP. The projection is already zero-to-one (Core/Projection.hpp), so clip.z/clip.w IS
+            // the device depth. The `* 0.5 + 0.5` that used to be here belonged to OpenGL's [-1,1] clip
+            // range; applied to a ZO projection it compresses the grid's depth into the near half of the
+            // buffer, which under a Greater test floats it in front of geometry it should be hidden by.
+            return clip.z / clip.w;
         }
 
         void main()
@@ -120,9 +124,11 @@ Shader "Grid"
 
             vec2 ndc = verts[gl_VertexIndex];
 
-            // OpenGL-style clip depth ([-1,1]) — matches the engine's perspective convention.
-            v_Near = Unproject( ndc, -1.0 );
-            v_Far  = Unproject( ndc, 1.0 );
+            // Reversed-Z, zero-to-one clip depth: 1 is the near plane, 0 the far one
+            // (Core/Projection.hpp). Read the other way round these two swap, the fragment shader's
+            // near->far ray runs backwards, and the grid disappears behind the camera.
+            v_Near = Unproject( ndc, 1.0 );
+            v_Far  = Unproject( ndc, 0.0 );
 
             gl_Position = vec4( ndc, 0.0, 1.0 );
         }

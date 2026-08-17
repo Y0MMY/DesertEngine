@@ -40,6 +40,13 @@ namespace Desert::Graphic
             // background would falsely occlude any receiver whose depth exceeds it.
             std::optional<glm::vec4>          ClearColor;
 
+            // Optional per-pass DEPTH clear override. When unset the pass clears to the engine's
+            // reversed-Z far value, 0 (RenderPassSpecification). The shadow cascades are the reason this
+            // exists: they are deliberately standard-Z (MeshRenderer::SetupShadowPass), so their depth
+            // attachment must clear to 1, and a 0 clear under a LessOrEqual test rejects every caster
+            // and empties the shadow map without a single error anywhere.
+            std::optional<float> ClearDepth;
+
             // Where this pass sits INSIDE its phase; lower draws first. Leave it at Default unless the
             // pass has a real reason to overrule registration order — see the AddPass comment below and
             // RenderPassOrder in RenderGraphSort.hpp.
@@ -76,7 +83,8 @@ namespace Desert::Graphic
                       std::shared_ptr<Framebuffer>             targetFramebuffer = nullptr,
                       const std::vector<RenderPassDependency>& dependencies      = {},
                       const std::optional<glm::vec4>&          clearColor        = std::nullopt,
-                      int32_t                                  orderInPhase      = RenderPassOrder::Default );
+                      int32_t                                  orderInPhase      = RenderPassOrder::Default,
+                      const std::optional<float>&              clearDepth        = std::nullopt );
 
         void AddPhaseDependency( RenderPhaseID requiredPhase, RenderPhaseID dependentPhase );
         void AddTextureDependency( const std::string& textureName,

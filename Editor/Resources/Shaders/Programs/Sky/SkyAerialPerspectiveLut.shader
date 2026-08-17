@@ -103,7 +103,8 @@ Shader "SkyAerialPerspectiveLut"
             // froxel's ray and the pixel's ray have to be one direction, or the haze is sampled from the
             // neighbouring column at the frame's edges.
             vec2 ndc     = vec2(unitX * 2.0f - 1.0f, 1.0f - unitY * 2.0f);
-            vec4 farH    = u_InverseViewProjection * vec4(ndc.x, ndc.y, 1.0f, 1.0f);
+            // Device depth 0 IS the far plane — the engine renders reversed-Z (Core/Projection.hpp).
+            vec4 farH    = u_InverseViewProjection * vec4(ndc.x, ndc.y, 0.0f, 1.0f);
             vec3 farPos  = farH.xyz / max(farH.w, 1e-9f);
             vec3 rayDir  = normalize(farPos - u_CameraPosWorld.xyz);
 

@@ -29,7 +29,8 @@ namespace Desert::Graphic
                                       const GraphicsPipelineSpecification&     pipelineSpec,
                                       std::shared_ptr<Framebuffer>             targetFramebuffer,
                                       const std::vector<RenderPassDependency>& dependencies,
-                                      const std::optional<glm::vec4>& clearColor, int32_t orderInPhase )
+                                      const std::optional<glm::vec4>& clearColor, int32_t orderInPhase,
+                                      const std::optional<float>& clearDepth )
     {
         PassConfig config;
         config.Name              = name;
@@ -40,6 +41,7 @@ namespace Desert::Graphic
         config.Dependencies      = dependencies;
         config.ClearColor        = clearColor;
         config.OrderInPhase      = orderInPhase;
+        config.ClearDepth        = clearDepth;
 
         AddPass( config );
     }
@@ -138,6 +140,8 @@ namespace Desert::Graphic
                 rpSpec.DebugName         = pass.Name;
                 if ( pass.ClearColor )
                     rpSpec.ClearColor.Color = *pass.ClearColor;
+                if ( pass.ClearDepth )
+                    rpSpec.ClearColor.DepthStencil.x = *pass.ClearDepth;
                 pass.CachedRenderPass = RenderPass::Create( rpSpec );
             }
             m_SortedPasses.push_back( pass );

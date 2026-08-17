@@ -36,8 +36,9 @@ Shader "HeightFog"
         // write this depth attachment, only Deferred has a G-buffer (teamlead decision Q5,
         // Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 5).
         //
-        // SKY PIXELS ARE FOGGED. Depth clears to 1.0 where nothing was drawn, and the reconstruction
-        // below turns that into the far-plane point — a kilometre of fog toward the horizon, thinning
+        // SKY PIXELS ARE FOGGED. Depth clears to 0.0 where nothing was drawn (the engine is REVERSED-Z:
+        // 0 is the far plane, see Core/Projection.hpp), and the reconstruction
+        // below turns that into the far-plane point — fifty kilometres of fog toward the horizon, thinning
         // toward the zenith as the closed form's height term says, attenuated by StartDistance and
         // MaxOpacity. That is UE's behaviour (fog applies to skybox pixels through their far-plane
         // depth), and it is what produces the horizon veil. AERIAL PERSPECTIVE IS NOT applied to them —
@@ -106,7 +107,8 @@ Shader "HeightFog"
 
             // The world position from the camera's own inverse view-projection at the stored depth —
             // it inherits whatever projection and depth convention the frame was drawn with, and a sky
-            // pixel (depth 1.0) lands on the far plane, which is exactly the distance UE fogs it at.
+            // pixel (depth 0.0 under reversed-Z) lands on the far plane, which is exactly the distance
+            // UE fogs it at. Only the sentinel below has to know which end of the range is far.
             vec4 worldH   = u_InverseViewProjection * vec4(ndc.x, ndc.y, deviceDepth, 1.0f);
             vec3 worldPos = worldH.xyz / max(worldH.w, 1e-9f);
 
@@ -140,7 +142,10 @@ Shader "HeightFog"
             // integrates the same medium out to the shell — so adding the volume's 96 km on top would be
             // the atmosphere counted twice, as a bright band exactly where the sky is thickest.
             vec4 ap = vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            if (u_ApParams.z > 0.5f && deviceDepth < 1.0f)
+            // `> 0` IS THE SKY TEST under reversed-Z — a sky pixel stores 0, the far plane. Left as
+            // `< 1.0` it would be true for every pixel including the sky, and the atmosphere would be
+            // integrated twice across the whole upper half of the frame.
+            if (u_ApParams.z > 0.5f && deviceDepth > 0.0f)
             {
                 // Distance ALONG THE RAY, which is what the volume's slices measure — not the linear
                 // view-space z, which would put a pixel at the corner of the frame in the wrong slice.

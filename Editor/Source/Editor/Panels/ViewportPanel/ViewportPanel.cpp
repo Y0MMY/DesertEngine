@@ -719,7 +719,9 @@ namespace Desert::Editor
 
                     float farP = editorCam->GetFar();
                     ImGui::SetNextItemWidth( kW );
-                    if ( ImGui::SliderFloat( "Far", &farP, 10000.0f, 500000.0f, "%.0f cm" ) )
+                    // Up to 100 km: reversed-Z made the far plane cheap, and a slider that stopped at
+                    // 5 km could not even reach the engine's own 50 km default (Core/Projection.hpp).
+                    if ( ImGui::SliderFloat( "Far", &farP, 10000.0f, 10000000.0f, "%.0f cm" ) )
                         editorCam->SetFar( farP );
 
                     float spd = editorCam->GetMovementSpeed();

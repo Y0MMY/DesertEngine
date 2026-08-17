@@ -48,6 +48,20 @@ namespace Desert::Graphic
         Never = 0, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always
     };
 
+    // Depth tests named by what they MEAN, not by the arithmetic they perform. The engine renders
+    // REVERSED-Z (Core/Projection.hpp): the near plane stores 1 and the far plane 0, so "the nearer
+    // fragment wins" is CompareOp::Greater, and a pass that writes `DepthCompareOp = CompareOp::Less`
+    // renders behind everything and looks like it was never submitted.
+    //
+    // These are the only two depth compares any pass in the engine has ever wanted, and a pass that
+    // spells its intent with one of them stays correct if the convention is ever revisited. Raw
+    // CompareOp values remain right for STENCIL, which reversed-Z does not touch.
+    namespace DepthCompare
+    {
+        inline constexpr CompareOp Closer        = CompareOp::Greater;
+        inline constexpr CompareOp CloserOrEqual = CompareOp::GreaterOrEqual;
+    } // namespace DepthCompare
+
     enum class CullMode
     {
         None = 0, Front, Back, FrontAndBack
@@ -109,7 +123,7 @@ namespace Desert::Graphic
         std::optional<VertexPullingConfig> PullingConfig;
 
         bool           DepthTestEnabled   = true;
-        CompareOp      DepthCompareOp     = CompareOp::Less;
+        CompareOp      DepthCompareOp     = DepthCompare::Closer;
         bool           StencilTestEnabled = false;
         StencilOpState StencilFront;
         StencilOpState StencilBack;

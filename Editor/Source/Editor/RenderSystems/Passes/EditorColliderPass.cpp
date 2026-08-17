@@ -74,7 +74,7 @@ namespace Desert::Editor::Render
         spec.LineWidth         = 1.0f; // no wideLines feature — width stays 1.0 in SubmitLines
         spec.DepthTestEnabled  = true; // colliders occlude behind geometry (the old ImGui gizmo didn't)
         spec.DepthWriteEnabled = false;
-        spec.DepthCompareOp    = Graphic::CompareOp::LessOrEqual;
+        spec.DepthCompareOp    = Graphic::DepthCompare::CloserOrEqual;
         spec.CullMode          = Graphic::CullMode::None;
         // No vertex layout: the DebugLine shader pulls endpoints from the Lines storage buffer by index.
 

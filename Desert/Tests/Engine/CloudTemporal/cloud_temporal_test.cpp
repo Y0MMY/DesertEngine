@@ -19,6 +19,7 @@
 
 #include "CloudTemporalReference.hpp"
 
+#include <Engine/Core/Projection.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 
 #include <gtest/gtest.h>
@@ -79,7 +80,8 @@ namespace
         return std::memcmp( &a, &b, sizeof( glm::vec4 ) ) == 0;
     }
 
-    // A camera the way the engine builds one: glm::perspective for the projection, glm::lookAt for the
+    // A camera the way the engine builds one: Core::MakePerspective (reversed-Z) for the projection,
+    // glm::lookAt for the
     // view, and the world origin on the planet surface with +Y up. Kept in pieces rather than as a single
     // product because that is what the push builder needs — the eye translation has to come out of the
     // view before the matrix is inverted.
@@ -98,7 +100,8 @@ namespace
     TestCamera MakeCamera( const glm::vec3& position, const glm::vec3& forward )
     {
         TestCamera camera;
-        camera.Projection = glm::perspective( glm::radians( 60.0f ), 16.0f / 9.0f, 10.0f, 20000000.0f );
+        camera.Projection =
+             Desert::Core::MakePerspective( glm::radians( 60.0f ), 16.0f / 9.0f, 10.0f, 20000000.0f );
         camera.View       = glm::lookAt( position, position + forward, glm::vec3( 0.0f, 1.0f, 0.0f ) );
         camera.Position   = position;
         return camera;
@@ -130,8 +133,11 @@ namespace
     {
         const glm::dvec2 ndc( double( uv.x ) * 2.0 - 1.0, 1.0 - double( uv.y ) * 2.0 );
 
-        const glm::vec4  nearH = inverseViewProjection * glm::vec4( float( ndc.x ), float( ndc.y ), 0.0f, 1.0f );
-        const glm::vec4  farH  = inverseViewProjection * glm::vec4( float( ndc.x ), float( ndc.y ), 1.0f, 1.0f );
+        // Device depth 1 is the NEAR plane and 0 the far one — the engine is reversed-Z
+        // (Core/Projection.hpp), and this reference has to build the ray the same way the shader does or
+        // `dir` comes out negated and every ray misses the shell.
+        const glm::vec4  nearH = inverseViewProjection * glm::vec4( float( ndc.x ), float( ndc.y ), 1.0f, 1.0f );
+        const glm::vec4  farH  = inverseViewProjection * glm::vec4( float( ndc.x ), float( ndc.y ), 0.0f, 1.0f );
         const glm::dvec3 nearP( nearH.x / nearH.w, nearH.y / nearH.w, nearH.z / nearH.w );
         const glm::dvec3 farP( farH.x / farH.w, farH.y / farH.w, farH.z / farH.w );
         const glm::dvec3 dir = glm::normalize( farP - nearP );
@@ -353,13 +359,10 @@ TEST( CloudReprojection, AnIdenticalCameraReprojectsEveryPixelOntoItself )
 
 TEST( CloudReprojection, ACameraFarFromTheWorldOriginStillReprojectsOntoItself )
 {
-    // The case that decided how the push constant is built. Inverting the ABSOLUTE view-projection in
-    // single precision tilts every reconstructed ray, by an angle that grows with the camera's distance
-    // from the world origin, because the reconstruction has to resolve a near-plane offset of tens of
-    // units out of coordinates of millions. Removing the eye translation before the inversion removes the
-    // magnitude that causes it. Both halves are asserted, so this test documents WHY the builder takes
-    // the projection and the view separately instead of their product — the same shape as CloudMath's
-    // TheExpandedFormBeatsKilometreSpaceWhichBeatsWorldUnits.
+    // The case that decided how the push constant is built: the reconstruction has to resolve a
+    // near-plane offset of tens of units out of camera coordinates of millions, and in single precision
+    // that used to tilt every ray by an angle that grew with distance from the world origin. The builder
+    // removes the eye translation before inverting, so the magnitude that causes it never enters.
     const glm::vec3  position( 3000000.0f, 200000.0f, -2000000.0f ); // 30 km east, 20 km south, 2 km up
     const TestCamera camera = MakeCamera( position, glm::vec3( 0.0f, 0.05f, 1.0f ) );
 
@@ -371,13 +374,27 @@ TEST( CloudReprojection, ACameraFarFromTheWorldOriginStillReprojectsOntoItself )
     EXPECT_NEAR( resolved.Uv.x, 0.5f, 1e-4f );
     EXPECT_NEAR( resolved.Uv.y, 0.05f, 1e-4f );
 
-    // What the naive form would have produced. Everything else is identical, so the difference is the
-    // inversion and nothing but the inversion.
-    CloudTemporalPush naive        = push;
-    naive.InverseViewProjection    = glm::inverse( camera.ViewProjection() );
-    const R::CloudReprojection bad = Reproject( glm::vec2( 0.5f, 0.05f ), naive );
-    ASSERT_TRUE( bad.Valid );
-    EXPECT_GT( std::abs( bad.Uv.y - 0.05f ), 5e-3f ); // ten pixels of a 1080-line screen
+    // AND THE NAIVE FORM NOW AGREES WITH IT, which it did NOT before the engine went reversed-Z. This
+    // assertion used to be its opposite — that inverting the absolute view-projection moved the pixel by
+    // ten lines of a 1080-line screen — and reversed-Z deleted the error rather than the test.
+    //
+    // WHY, because it is not luck. The projection's z row is scaled by P[2][2], which is -far/(far-near)
+    // under standard-Z (essentially -1) and near/(far-near) under reversed-Z (here 5e-7). Under
+    // standard-Z that row therefore carried the view's translation at full size, so rows 2 and 3 of the
+    // view-projection both ended with about -3e6 in their fourth column; a cofactor inverse then
+    // subtracts two ~9e12 products that nearly cancel, and the surviving digits are noise. Reversed-Z
+    // leaves that entry at about 11 instead, the two rows stop being nearly parallel, and the inverse is
+    // well conditioned. Same camera, same distance, same single precision.
+    //
+    // The builder still removes the eye translation, and should: that is unconditional, whereas the
+    // conditioning above is a consequence of one particular near/far ratio. This asserts the two forms
+    // now agree — if they ever diverge again, the eye-relative construction is what is holding the frame
+    // together and this test says so.
+    CloudTemporalPush naive         = push;
+    naive.InverseViewProjection     = glm::inverse( camera.ViewProjection() );
+    const R::CloudReprojection also = Reproject( glm::vec2( 0.5f, 0.05f ), naive );
+    ASSERT_TRUE( also.Valid );
+    EXPECT_NEAR( also.Uv.y, 0.05f, 1e-4f );
 }
 
 TEST( CloudReprojection, APureTranslationMatchesADoublePrecisionReference )

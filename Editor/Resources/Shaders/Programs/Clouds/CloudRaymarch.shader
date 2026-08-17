@@ -160,10 +160,14 @@ Shader "CloudRaymarch"
             return fract(52.9829189f * fract(0.06711056f * p.x + 0.00583715f * p.y));
         }
 
-        // Depth of the nearest geometry covering this (possibly larger) cloud pixel. The MINIMUM over the
+        // Depth of the nearest geometry covering this (possibly larger) cloud pixel. The NEAREST over the
         // covered block, not one corner: erring toward the nearer surface makes clouds stop slightly
         // early at a silhouette, which reads as a clean edge, while erring the other way lets them bleed
         // over the object in front of them.
+        //
+        // Nearest is the MAXIMUM stored value, because the engine is REVERSED-Z (Core/Projection.hpp): 1
+        // is the near plane and 0 the far one. A `min` here would pick the FARTHEST of the four, and at
+        // every silhouette the cloud would be allowed to march past the object in front of it.
         float NearestSceneDepth(ivec2 coord, ivec2 targetSize)
         {
             ivec2 depthSize = textureSize(u_SceneDepth, 0);
@@ -176,7 +180,7 @@ Shader "CloudRaymarch"
             float b = texelFetch(u_SceneDepth, ivec2(hi.x, lo.y), 0).r;
             float c = texelFetch(u_SceneDepth, ivec2(lo.x, hi.y), 0).r;
             float d = texelFetch(u_SceneDepth, ivec2(hi.x, hi.y), 0).r;
-            return min(min(a, b), min(c, d));
+            return max(max(a, b), max(c, d));
         }
 
         // ---- One segment of the plan ----------------------------------------------------------------
@@ -609,8 +613,13 @@ Shader "CloudRaymarch"
             // The ray from the inverse view-projection at two depths rather than from a hand-built
             // camera basis: it inherits whatever projection the camera has (perspective or orthographic,
             // any near/far) and cannot disagree with the matrix the rest of the frame was drawn with.
-            vec4 nearH = u_InverseViewProjection * vec4(ndc.x, ndc.y, 0.0f, 1.0f);
-            vec4 farH  = u_InverseViewProjection * vec4(ndc.x, ndc.y, 1.0f, 1.0f);
+            //
+            // WHICH two depths is NOT arbitrary, and it is the one thing here the convention reaches.
+            // Reversed-Z puts the near plane at 1 and the far plane at 0 (Core/Projection.hpp); read the
+            // GL way round, `farP - nearP` comes out negated and every ray marches backwards out of the
+            // frame — the sky would go empty with nothing to point at.
+            vec4 nearH = u_InverseViewProjection * vec4(ndc.x, ndc.y, 1.0f, 1.0f);
+            vec4 farH  = u_InverseViewProjection * vec4(ndc.x, ndc.y, 0.0f, 1.0f);
             vec3 nearP = nearH.xyz / nearH.w;
             vec3 farP  = farH.xyz / farH.w;
             vec3 dir   = normalize(farP - nearP);

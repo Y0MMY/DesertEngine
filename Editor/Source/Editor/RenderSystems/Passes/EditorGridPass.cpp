@@ -25,7 +25,7 @@ namespace Desert::Editor::Render
         spec.Framebuffer       = scene->GetTargetFramebuffer();
         spec.DepthTestEnabled  = true;  // occluded by opaque geometry
         spec.DepthWriteEnabled = false; // overlay; don't write depth
-        spec.DepthCompareOp    = Graphic::CompareOp::Less;
+        spec.DepthCompareOp    = Graphic::DepthCompare::Closer;
         spec.CullMode          = Graphic::CullMode::None;
         spec.BlendEnable       = true; // alpha-composite the lines over the scene
 

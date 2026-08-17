@@ -2,6 +2,8 @@
 
 #include <glm/glm.hpp>
 
+#include <array> // m_Planes — reached transitively inside the engine, but not by a test that includes this alone
+
 namespace Desert::Core
 {
     class Camera;

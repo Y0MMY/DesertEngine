@@ -74,14 +74,20 @@ namespace Desert::Graphic::API::Vulkan
         VkPipelineStageFlags sourceStage      = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
         VkPipelineStageFlags destinationStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
-        if ( NewLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL || 
-             ( Format == VK_FORMAT_D32_SFLOAT_S8_UINT ) || ( Format == VK_FORMAT_D24_UNORM_S8_UINT ) || ( Format == VK_FORMAT_D16_UNORM_S8_UINT ) )
-        {
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-        }
-        else if ( ( Format == VK_FORMAT_D32_SFLOAT ) || ( Format == VK_FORMAT_D16_UNORM ) )
+        // THE ASPECT IS A PROPERTY OF THE FORMAT AND OF NOTHING ELSE. The depth-only formats are tested
+        // FIRST and the layout is not consulted at all: this used to read
+        // `NewLayout == DEPTH_STENCIL_ATTACHMENT_OPTIMAL || <a packed format>`, which is fine while every
+        // depth attachment is packed and becomes a validation error the moment one is not — a D32_SFLOAT
+        // image barriered with DEPTH|STENCIL, because the layout enum happens to carry the word stencil.
+        if ( ( Format == VK_FORMAT_D32_SFLOAT ) || ( Format == VK_FORMAT_D16_UNORM ) )
         {
             barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        }
+        else if ( ( Format == VK_FORMAT_D32_SFLOAT_S8_UINT ) || ( Format == VK_FORMAT_D24_UNORM_S8_UINT ) ||
+                  ( Format == VK_FORMAT_D16_UNORM_S8_UINT ) ||
+                  NewLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL )
+        {
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
         }
         else
         {

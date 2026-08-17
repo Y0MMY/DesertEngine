@@ -5,6 +5,7 @@
 #include <Editor/Core/CommandHistory.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
 
+#include <Engine/Core/Projection.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Animation/Animator.hpp>
@@ -416,7 +417,7 @@ namespace Desert::Editor
                 }
             }
 
-            // View frustum wireframe. The real Far can be huge (1000) -> draw only a SHORT, compact frustum
+            // View frustum wireframe. The real Far is 50 km -> draw only a SHORT, compact frustum
             // (a couple units deep) so the FOV/aspect shape reads clearly near the icon instead of a few
             // diverging lines streaking off-screen.
             const glm::mat4 world    = worldXf;
@@ -426,14 +427,19 @@ namespace Desert::Editor
             const float     aspect   = height > 0.0f ? width / height : 1.7778f;
             const float     gizmoFar = glm::min( cam.Far, cam.Near + 2.5f );
             const glm::mat4 camView  = glm::lookAt( pos, pos + forward, up );
-            const glm::mat4 camProj  = glm::perspective( glm::radians( cam.FOV ), aspect, cam.Near, gizmoFar );
-            const glm::mat4 invVP    = glm::inverse( camProj * camView );
+            const glm::mat4 camProj =
+                 ::Desert::Core::MakePerspective( glm::radians( cam.FOV ), aspect, cam.Near, gizmoFar );
+            const glm::mat4 invVP = glm::inverse( camProj * camView );
 
-            // GL-convention NDC cube corners (z in [-1,1]): 0-3 near, 4-7 far. Keep them in WORLD space so we
-            // can clip each edge to the editor camera's near plane before projecting (a wide FOV puts corners
-            // near/behind the editor camera; an unclipped perspective divide then streaks lines off-screen).
-            static const glm::vec3 ndc[8] = { { -1, -1, -1 }, { 1, -1, -1 }, { 1, 1, -1 }, { -1, 1, -1 },
-                                              { -1, -1, 1 },  { 1, -1, 1 },  { 1, 1, 1 },  { -1, 1, 1 } };
+            // NDC cube corners: 0-3 near, 4-7 far. z = 1 is the NEAR plane and z = 0 the far one, because
+            // the matrix above is built by the engine's own reversed-Z factory (Core/Projection.hpp) —
+            // the previous GL-convention -1/+1 pair would place four corners outside the clip volume
+            // entirely and draw a frustum with its narrow end at the wrong side. Keep them in WORLD space
+            // so we can clip each edge to the editor camera's near plane before projecting (a wide FOV
+            // puts corners near/behind the editor camera; an unclipped perspective divide then streaks
+            // lines off-screen).
+            static const glm::vec3 ndc[8] = { { -1, -1, 1 }, { 1, -1, 1 }, { 1, 1, 1 }, { -1, 1, 1 },
+                                              { -1, -1, 0 }, { 1, -1, 0 }, { 1, 1, 0 }, { -1, 1, 0 } };
             glm::vec3              corners[8];
             for ( int i = 0; i < 8; ++i )
             {

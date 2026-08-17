@@ -238,9 +238,10 @@ CloudReprojection CloudReprojectThroughShell(vec2 uv, mat4 invViewProjection, ve
     vec2 ndc = vec2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
 
     // The ray comes from the inverse view-projection at two depths, exactly as the raymarch builds it, so
-    // the two stages cannot disagree about which direction a pixel points in.
-    vec4 nearH = invViewProjection * vec4(ndc.x, ndc.y, 0.0f, 1.0f);
-    vec4 farH  = invViewProjection * vec4(ndc.x, ndc.y, 1.0f, 1.0f);
+    // the two stages cannot disagree about which direction a pixel points in — including which of the
+    // two device depths is the NEAR one. Reversed-Z: near is 1, far is 0 (Core/Projection.hpp).
+    vec4 nearH = invViewProjection * vec4(ndc.x, ndc.y, 1.0f, 1.0f);
+    vec4 farH  = invViewProjection * vec4(ndc.x, ndc.y, 0.0f, 1.0f);
     vec3 nearP = vec3(nearH.x, nearH.y, nearH.z) / nearH.w;
     vec3 farP  = vec3(farH.x, farH.y, farH.z) / farH.w;
     vec3 dir   = normalize(farP - nearP);

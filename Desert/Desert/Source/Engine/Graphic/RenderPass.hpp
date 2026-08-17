@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Engine/Core/Projection.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
 
 #include <glm/glm.hpp>
@@ -10,8 +11,12 @@ namespace Desert::Graphic
     {
         struct
         {
-            glm::vec4 Color        = { 0.1000000015, 0.1000000015, 0.1000000015, 1.00 };
-            glm::vec2 DepthStencil = { 1.0f, 0 }; // X = Depth, Y = Stencil
+            glm::vec4 Color = { 0.1000000015, 0.1000000015, 0.1000000015, 1.00 };
+            // X = Depth, Y = Stencil. Depth clears to 0 because the engine renders REVERSED-Z and 0 IS
+            // THE FAR PLANE (Core/Projection.hpp) — an empty pixel must read as "infinitely far", and
+            // under this convention that is 0, not 1. The one pass that still wants 1 is the shadow
+            // cascade, which is deliberately standard-Z and overrides this via PassConfig::ClearDepth.
+            glm::vec2 DepthStencil = { Core::kDepthClear, 0.0f };
         } ClearColor;
 
         std::shared_ptr<Framebuffer> TargetFramebuffer;
