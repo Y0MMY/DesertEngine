@@ -205,6 +205,8 @@ namespace Desert::ECS
             m_SunFx.BloomMaxBrightness = light.Data.BloomMaxBrightness;
             m_SunFx.BloomTint          = light.Data.BloomTint;
             m_SunFx.CloudScatteredLuminanceScale = light.Data.CloudScatteredLuminanceScale;
+            m_SunFx.CastCloudShadows                  = light.Data.CastCloudShadows;
+            m_SunFx.CloudShadowOnSurfaceStrength      = light.Data.CloudShadowOnSurfaceStrength;
             m_SunFx.AffectedByAtmosphereTransmittance = light.Data.AffectedByAtmosphereTransmittance;
             m_SunFx.OuterSpaceIlluminance             = light.Data.Color * light.Data.Intensity;
 

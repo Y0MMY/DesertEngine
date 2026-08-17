@@ -5,6 +5,7 @@
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Core/Formats/ImageFormat.hpp>
 #include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
+#include <Engine/Graphic/Clouds/CloudWorldShadow.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -344,6 +345,10 @@ namespace Desert::Graphic::System
                      if ( t.SplatMap )
                          m_Material->SetTexture( "u_SplatMap", t.SplatMap );
 
+                     // The cloud deck's shadow on the ground. After ApplyDefaults, which resets the
+                     // material's own params and would otherwise be free to clear this block later.
+                     CloudWorldShadowBind( *m_Material, m_SceneRenderer->GetCloudWorldShadow() );
+
                      const uint32_t vertexCount = gridDim * gridDim * 4u; // patches * control points
                      Renderer::GetInstance().SubmitVertices( m_Pipeline.get(), vertexCount,
                                                              m_Material->GetMaterialExecutor() );
@@ -410,6 +415,9 @@ namespace Desert::Graphic::System
                      m_GrassMaterial->SetTexture( "u_SplatMap", gt->SplatMap );
                  if ( m_GrassClumpTex )
                      m_GrassMaterial->SetTexture( "u_GrassClump", m_GrassClumpTex.get() );
+
+                 // The same deck, the same map, the same frame as the ground the blades stand on.
+                 CloudWorldShadowBind( *m_GrassMaterial, m_SceneRenderer->GetCloudWorldShadow() );
 
                  Renderer::GetInstance().SubmitVerticesIndirect( m_GrassPipeline.get(), m_GrassIndirectBuf.get(),
                                                                  m_GrassMaterial->GetMaterialExecutor() );

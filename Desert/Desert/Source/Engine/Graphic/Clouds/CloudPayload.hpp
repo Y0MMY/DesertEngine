@@ -346,6 +346,11 @@ namespace Desert::Graphic
     // raymarch binds, at the same numbers — one density field, one set of bindings.
     inline constexpr uint32_t kCloudShadowOutputBinding = 0;
 
+    // The WORLD shadow pass's own output binding — the 2D map the terrain, the lit meshes and the
+    // deferred lighting pass read. Its inputs are, again, the same weather map and noise volumes at the
+    // same numbers: one density field, one set of bindings, three passes marching it.
+    inline constexpr uint32_t kCloudWorldShadowOutputBinding = 0;
+
     // The temporal resolve's own bindings. Its output is the history image it fills; its two inputs are
     // the frame the raymarch just produced and the frame this stage produced last time.
     inline constexpr uint32_t kCloudResolvedOutputBinding = 0;
@@ -367,6 +372,23 @@ namespace Desert::Graphic
     };
 
     static_assert( sizeof( CloudShadowPush ) == 16 );
+
+    /**
+     * Per-dispatch data for the WORLD shadow pass: where the map is centred and how wide it is.
+     *
+     * The half-width rides HERE, unlike the four-slice pass's, and the difference is who reads the map.
+     * That one is read by the raymarch, which already has CloudLayerPayload in front of it and takes the
+     * extent from the same member the pass projected with. This one is read by the terrain and the lit
+     * meshes, which never see a cloud parameter block at all — so the extent has to reach them through
+     * their own uniform block, and Graphic::CloudWorldShadowInput is the single struct that fills BOTH
+     * that block and this push constant. One number, one origin, two destinations.
+     */
+    struct CloudWorldShadowPush
+    {
+        glm::vec4 CentreExtent; // xyz = world centre (the camera), w = half-width in world units
+    };
+
+    static_assert( sizeof( CloudWorldShadowPush ) == 16 );
 
     /**
      * Per-dispatch data for the raymarch: everything that changes with the CAMERA rather than with the

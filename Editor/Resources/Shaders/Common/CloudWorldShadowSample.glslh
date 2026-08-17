@@ -1,0 +1,47 @@
+// The one-call read of the world cloud-shadow map, for a shader that shades an opaque surface.
+//
+// GLSL ONLY — it is the only piece of the world-shadow arithmetic that is NOT compiled as C++ by the
+// CloudMath tests, because it does the two things the shared GLSL/C++ dialect forbids: a texture fetch
+// and a swizzle. Everything with maths in it lives in Common/CloudWorldShadow.glslh, which IS tested.
+//
+// The including shader must declare these three THREE NAMES BEFORE the include, at whatever bindings are
+// free in it — the DSL takes a literal binding number, so this header cannot declare them itself without
+// forcing one number on five different shaders:
+//
+//     Uniform(a) sampler2D u_CloudWorldShadowMap;
+//     Uniform(b) CloudWorldShadowUB
+//     {
+//         vec4 u_CloudWorldShadowCentre; // xyz = the world point the map was traced around, w = extent
+//         vec4 u_CloudWorldShadowSun;    // xyz = TOWARD the sun (normalized), w = on-surface strength
+//     };
+//
+// The C++ that fills them is Graphic::CloudWorldShadowInput / CloudWorldShadowUpload
+// (Engine/Graphic/Clouds/CloudWorldShadow.hpp), which every consumer calls — so the three names, the two
+// vec4s and their meaning are written down exactly once on each side of the bus.
+//
+// The sampler is ALWAYS bound, feature on or off: a declared descriptor with nothing behind it is an
+// invalid set, not an unused one — the same rule the cloud march's own shadow-map slot lives under. What
+// switches the feature off is the strength in `.w`, which is 0 unless a directional light asked for it,
+// and at 0 this returns exactly 1.0 with no fetch.
+
+#ifndef CLOUD_WORLD_SHADOW_SAMPLE_GLSLH
+#define CLOUD_WORLD_SHADOW_SAMPLE_GLSLH
+
+#include <Common/CloudWorldShadow.glslh>
+
+// The multiplier on the DIRECTIONAL light's contribution at @p worldPos. 1 = full sun.
+float CloudWorldShadowSunFactor(vec3 worldPos)
+{
+    float strength = u_CloudWorldShadowSun.w;
+    if (strength <= 0.0)
+        return 1.0;
+
+    vec3 centre = u_CloudWorldShadowCentre.xyz;
+    vec3 sunDir = u_CloudWorldShadowSun.xyz;
+    vec2 uv     = CloudShadowUv(worldPos, centre, sunDir, u_CloudWorldShadowCentre.w);
+
+    return CloudWorldShadowFactor(texture(u_CloudWorldShadowMap, uv).rgb, worldPos, centre, sunDir, uv,
+                                  strength);
+}
+
+#endif // CLOUD_WORLD_SHADOW_SAMPLE_GLSLH

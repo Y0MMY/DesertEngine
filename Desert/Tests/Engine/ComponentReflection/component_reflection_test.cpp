@@ -621,7 +621,8 @@ TEST( DirectionalLightReflection, GainsTheAtmosphereSunFields )
     const TypeInfo& light = Type( "DirectionalLightData" );
     EXPECT_EQ( FieldNames( light ),
                ( std::vector<std::string>{ "Color", "Intensity", "AtmosphereSunLight", "AtmosphereSunLightIndex",
-                                           "CloudScatteredLuminanceScale", "AffectedByAtmosphereTransmittance",
+                                           "CloudScatteredLuminanceScale", "CastCloudShadows",
+                                           "CloudShadowOnSurfaceStrength", "AffectedByAtmosphereTransmittance",
                                            "LightShaftBloom", "BloomScale", "BloomThreshold", "BloomMaxBrightness",
                                            "BloomTint" } ) );
 
@@ -634,6 +635,24 @@ TEST( DirectionalLightReflection, GainsTheAtmosphereSunFields )
     // is correct for the physical model (there is no such thing as an atmosphere that does not absorb)
     // and invisible on the artistic gradient, where the coupling does not exist at all.
     EXPECT_TRUE( DefaultOf<bool>( light, "AffectedByAtmosphereTransmittance" ) );
+
+    // CLOUD SHADOWS ON THE WORLD, UE's pair and UE's defaults: bCastCloudShadows = 0 and
+    // CloudShadowOnSurfaceStrength = 1. Off is what makes every scene authored before this field existed
+    // render exactly as it did — the shader's whole OFF path is `strength <= 0` and nothing else.
+    // Consumers: SceneRenderer -> VolumetricCloudRenderer (whether the map is traced at all) and, through
+    // Graphic::CloudWorldShadowInput, DeferredLighting.shader, the three forward PBR shaders, Terrain and
+    // Grass.
+    EXPECT_FALSE( DefaultOf<bool>( light, "CastCloudShadows" ) );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( light, "CloudShadowOnSurfaceStrength" ), 1.0f );
+
+    const FieldInfo* dose = Find( light, "CloudShadowOnSurfaceStrength" );
+    ASSERT_NE( dose, nullptr );
+    // Gated on the toggle above, so a strength slider never sits live over a feature that is off — and
+    // ranged 0..1 because it is a lerp weight toward the deck's real transmittance, not a multiplier.
+    EXPECT_EQ( dose->Meta.EditCondition, "CastCloudShadows" );
+    EXPECT_TRUE( dose->Meta.HasRange );
+    EXPECT_FLOAT_EQ( dose->Meta.RangeMin, 0.0f );
+    EXPECT_FLOAT_EQ( dose->Meta.RangeMax, 1.0f );
 
     // The Light Shafts group ships with UE's own defaults: OFF, and harmless when switched on.
     EXPECT_FALSE( DefaultOf<bool>( light, "LightShaftBloom" ) );

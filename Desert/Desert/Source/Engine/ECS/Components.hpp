@@ -431,6 +431,36 @@ namespace Desert::ECS
                            "multiple scattering, per-channel." ) )
         glm::vec3 CloudScatteredLuminanceScale = glm::vec3( 1.0f );
 
+        // UE's `bCastCloudShadows` (DirectionalLightComponent.h:184), same name, same default — OFF.
+        //
+        // ON THE LIGHT AND NOT ON THE CLOUD COMPONENT, deliberately. What the cloud layer owns is the MAP:
+        // where it is centred and how far it reaches (Cloud Shadow Extent). What this switch decides is
+        // whether THIS light's contribution to the world is occluded by it — the same kind of question as
+        // "does this light cast shadows at all", asked of the same object, and answered next to Cloud
+        // Scattered Luminance Scale, which is already a cloud-facing property of the sun. A scene with two
+        // decks has one answer here, not two; a scene with two suns would have two, which is what UE means
+        // by per-light.
+        //
+        // Off by default because turning it on redistributes light across every lit surface in a scene,
+        // and every scene authored before this field existed was balanced without it. Presets and the
+        // showcase scenes turn it on.
+        PROPERTY( DisplayName( "Cast Cloud Shadows" ), Category( "Atmosphere" ),
+                  EditCondition( "AtmosphereSunLight" ),
+                  Tooltip( "Let the volumetric cloud deck shadow the world this light lights — terrain, "
+                           "meshes and grass fall into shade under a passing cloud. Needs a Volumetric "
+                           "Clouds component in the scene; costs one 512x512 sun-space trace a frame." ) )
+        bool CastCloudShadows = false;
+
+        // UE's `CloudShadowOnSurfaceStrength` (h:199-213), same name, same default. The receiver-side dose:
+        // the shader computes lerp(1, T, strength), so 1 is the deck's honest transmittance and lower
+        // values are the artist admitting that a physically correct cloud shadow can be darker than the
+        // shot wants.
+        PROPERTY( DisplayName( "Cloud Shadow Strength" ), Category( "Atmosphere" ), Range( 0.0f, 1.0f ),
+                  EditCondition( "CastCloudShadows" ),
+                  Tooltip( "How much of the cloud deck's real transmittance reaches surfaces. 1 = the "
+                           "deck's own opacity; 0 = no cloud shadow at all." ) )
+        float CloudShadowOnSurfaceStrength = 1.0f;
+
         // UE's "Affected By Atmosphere Transmittance", same name, same default (ON): in
         // SkyModel::PhysicalAtmosphere the colour above is multiplied by the atmosphere's transmittance
         // toward the sun at ground level, so a sunset reddens and dims the light on geometry by the same

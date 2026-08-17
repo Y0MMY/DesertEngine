@@ -9,6 +9,7 @@
 #include <Engine/Graphic/Clouds/CloudVolumeAtlas.hpp>
 #include <Engine/Graphic/Clouds/CloudVolumeInstance.hpp>
 #include <Engine/Graphic/Clouds/CloudVolumePlacement.hpp>
+#include <Engine/Graphic/Clouds/CloudWorldShadow.hpp>
 #include <Engine/Graphic/Materials/Clouds/MaterialVolumetricClouds.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/Renderer.hpp>
@@ -99,10 +100,65 @@ namespace Desert::Graphic::System
          */
         void SetCloudSettings( const CloudLayerSet& layers, const CloudVolumePlacements& volumes );
 
-        /** @brief Stages S1 and S2. Must be called outside any render pass. */
+        /**
+         * @brief Whether this frame's atmosphere sun wants the deck to shadow the WORLD, and how strongly.
+         *
+         * From ECS::DirectionalLightData::CastCloudShadows / CloudShadowOnSurfaceStrength, through
+         * Graphic::SunLightFx and SceneRenderer. Said every frame rather than latched: a light switched
+         * off mid-session must stop paying for the trace on the very next frame, and the renderer keeps
+         * its state across frames.
+         */
+        void SetWorldShadowRequest( bool cast, float strength );
+
+        /**
+         * @brief Stage S1c, and the frame's shared preparation. Must be called outside any render pass,
+         *        and BEFORE the render graph records — the terrain, the lit meshes and the deferred
+         *        lighting pass all read the map it fills, and all three run inside or right after that
+         *        graph.
+         *
+         * Costs exactly nothing when no light asked for world shadows: it returns before it prepares
+         * anything.
+         */
+        void PrepareInFrame();
+
+        /**
+         * @brief What the world's lit surfaces need to read the map S1c filled. Empty (`Map == nullptr`,
+         *        strength 0) whenever no map was traced this frame, which every consumer's shader turns
+         *        into a transmittance of exactly 1.
+         */
+        [[nodiscard]] const CloudWorldShadowInput& GetWorldShadow() const
+        {
+            return m_WorldShadow;
+        }
+
+        /** @brief Stages S1, S1b, S2 and S3. Must be called outside any render pass. */
         void ExecuteInFrame();
 
     private:
+        // What PrepareFrame established, or why it could not.
+        struct FramePreparation
+        {
+            // The three shared noise volumes this frame's layers are marched through. Non-null exactly
+            // when Ready.
+            const CloudNoiseSet* Noise = nullptr;
+            bool                 Ready = false;
+        };
+
+        /**
+         * The half of a cloud frame that does not depend on the scene depth: the hero-cloud leases, the
+         * images, the parameter buffer and the weather map. Split out of ExecuteInFrame because the world
+         * shadow map is dispatched BEFORE the render graph and the raymarch after it, and both need all
+         * of it.
+         *
+         * IT IS IDEMPOTENT, which is what lets both callers run it in the same frame without a flag
+         * between them saying who went first. Every step is already a no-op the second time: the atlas
+         * diff finds the same leases, EnsureResources returns on the first compare, the weather
+         * fingerprint matches so no dispatch is issued, and the parameter buffer is handed the same bytes
+         * — bytes the GPU has not read yet either way, because both dispatches are recorded into one
+         * command buffer and execute after the submit that follows them.
+         */
+        FramePreparation PrepareFrame();
+
         // The Weather-group fields the map is baked from. Compared field by field to decide whether S1
         // has to run again; a hash would be shorter and would tell us nothing when it collided.
         struct WeatherFingerprint
@@ -147,6 +203,10 @@ namespace Desert::Graphic::System
         bool EnsureProfileLut();
 
         bool CreatePipelines();
+        // Allocates the 512x512 world shadow map on the first frame a light asks for one. Returns false
+        // having logged the reason once and latched it — a view that could not allocate 2 MiB will not
+        // manage it next frame either, and a per-frame log line is the same as no log line.
+        bool EnsureWorldShadowMap();
         // Allocates (or reallocates) the weather map, the scatter target and the depth guide for
         // @p width x @p height at the current resolution tier. Returns false having logged the reason and
         // latched the failure.
@@ -160,6 +220,11 @@ namespace Desert::Graphic::System
         // Fills the sun-space shadow map from the weather map and the shape noise. Runs before the
         // raymarch, which reads it in one fetch where it used to march a cone.
         void DispatchShadowMap( const CloudNoiseSet& noise );
+        // Fills the WORLD-readable map — {front depth, mean extinction, max optical depth} for the whole
+        // sky's column, one texel per sun ray — and publishes the frame it was traced in on m_WorldShadow.
+        // A second pass and not three more channels on the one above: see the note in
+        // Programs/Clouds/CloudWorldShadowMap.shader.
+        void DispatchWorldShadowMap( const CloudNoiseSet& noise );
         // @p checkerboard: both stages are handed the SAME answer from CloudCheckerboardActive — the
         // march skips the stale half only when the resolve that reconstructs it is going to run.
         void DispatchRaymarch( const CloudNoiseSet& noise, Image2D* depthImage, bool checkerboard );
@@ -167,6 +232,7 @@ namespace Desert::Graphic::System
 
         std::shared_ptr<ComputePipeline> m_WeatherPipeline;
         std::shared_ptr<ComputePipeline> m_ShadowPipeline;
+        std::shared_ptr<ComputePipeline> m_WorldShadowPipeline;
 
         // ONE RAYMARCH PIPELINE PER LIVE LAYER COUNT, indexed by count - 1. Same shader, same SPIR-V, same
         // cache entry: what differs is the specialization constant the driver folds the layer machinery
@@ -197,6 +263,22 @@ namespace Desert::Graphic::System
         std::shared_ptr<Image3D> m_ProfileMap;
         std::shared_ptr<Image3D> m_ProfileLut;
         std::shared_ptr<Image3D> m_CloudShadowMap;
+
+        // THE WORLD'S map, and a 2D image rather than a volume: it is the whole sky's column aggregated
+        // into one answer, so there is no per-layer slice to fill. Allocated on the first frame a light
+        // asks for it and kept afterwards — 2 MiB, and a view whose sun has the toggle on has it on for
+        // the session.
+        std::shared_ptr<Image2D> m_WorldShadowMap;
+        bool                     m_WorldShadowFailed = false;
+
+        // This frame's answer for the world's lit surfaces, and the request that produced it. The request
+        // is the light's; the answer carries the centre, sun and extent the map was actually traced with,
+        // because a consumer that re-derived them from the current camera would project through a frame
+        // the map was not traced in.
+        CloudWorldShadowInput m_WorldShadow;
+        bool                  m_WorldShadowRequested = false;
+        float                 m_WorldShadowStrength  = 0.0f;
+
         std::shared_ptr<Image2D> m_ScatterImage;
         std::shared_ptr<Image2D> m_DepthGuideImage;
 

@@ -282,3 +282,19 @@ leaving High identical to 0.02% (the correct control: with no checkerboard every
 code reduces to what it was). The reason is that for a stale pixel its own stale texel is not
 pollution: it is the only same-texel evidence in the frame, one frame old, and removing it clamps the
 history away from where it legitimately sits. The shader is right as written; the change was reverted.
+
+## Cloud shadows on the WORLD (UE research doc §1.7, roadmap item 3a)
+
+The second, world-readable shadow encoding — UE's analytic {front depth, mean extinction, max optical
+depth} triple — and its consumers: the deferred lighting pass, the three forward PBR shaders, the
+terrain and the grass. `Clouds_ShadowsOnWorld.desce` is its scene; it deliberately compresses the sky's
+vertical scale (a 300 m deck with 1 km weather cells) because the editor camera's far plane is 1 km and
+the shipped 1.5 km deck with 24 km cells casts one shadow far larger than anything the camera can see.
+
+| file | what it shows |
+|---|---|
+| `cloud_world_shadow_off.png` | Cast Cloud Shadows OFF, cloud animation frozen. Uniformly sunlit terrain, uniformly lit block. |
+| `cloud_world_shadow_on.png` | The SAME frozen deck with the toggle on. Soft shadow swathes rake the terrain and cross the block's front face — one map, two consumers (the terrain's own forward shader and the deferred lighting pass) agreeing on where the shadow is. |
+| `cloud_world_shadow_edge.png` | Cloud Shadow Extent cut to 300 m against a 1 km far plane, so the map's boundary lies in the middle of the view. The shadow fades out with distance and the ground beyond is fully lit; there is no line. Measured on the difference against the OFF frame, the largest row-to-row change in the shadow term is 0.6/255 — under one quantisation step. |
+| `cloud_world_shadow_deck.png` | Looking up at the deck that casts them. |
+| `CloudWorldShadow/frame_*.png` | The moving demonstration: the wind carries the deck across the map while the camera drifts, and the shadows travel over the terrain and onto the block. |

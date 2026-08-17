@@ -11,6 +11,11 @@
 // Requires, from the including shader:
 //   #include <Common/CloudGeometry.glslh>   (CloudRemapRange)
 //
+// The PROJECTION itself — the sun-space basis, the UV, the edge fade and the plane point — moved to
+// Common/CloudShadowProjection.glslh, which this file includes. It moved because the world-readable
+// encoding (Common/CloudWorldShadow.glslh) and its consumers out in the terrain and mesh shaders need
+// exactly those functions and nothing else: a lit surface must not have to include the whole march.
+//
 // ---- WHAT THIS REPLACES ----------------------------------------------------------------------------
 //
 // The optical depth from a shaded sample toward the sun. The march computes it by walking a CONE of
@@ -45,6 +50,8 @@
 #ifndef CLOUD_SHADOW_GLSLH
 #define CLOUD_SHADOW_GLSLH
 
+#include <Common/CloudShadowProjection.glslh>
+
 // The height fractions, from the layer BASE upward, at which the column's accumulated density-length is
 // recorded. Slice i holds "how much cloud lies between height CLOUD_SHADOW_SLICE_HEIGHT(i) and the top".
 // The topmost slice is deliberately not 1.0: a sample exactly at the layer top has nothing above it by
@@ -53,68 +60,6 @@ float CloudShadowSliceHeight(int slice)
 {
     // 0.0, 0.25, 0.5, 0.75 — evenly spaced from the base up, leaving the always-zero top implicit.
     return float(slice) * 0.25f;
-}
-
-// An orthonormal basis for the plane orthogonal to the sun. Deterministic and shared: the pass that
-// WRITES the map and the march that READS it must agree on it exactly, or every shadow lands somewhere
-// other than the cloud that cast it.
-//
-// The reference axis is swapped near the poles for the same reason CloudConeSampleOffset swaps it —
-// cross() with a nearly parallel vector loses all its precision, and a zero-length tangent is a NaN.
-vec3 CloudShadowRight(vec3 sunDir)
-{
-    vec3 reference = abs(sunDir.y) < 0.99f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
-    return normalize(cross(reference, sunDir));
-}
-
-vec3 CloudShadowUp(vec3 sunDir)
-{
-    return cross(sunDir, CloudShadowRight(sunDir));
-}
-
-// Where @p worldPos lands on the map. @p centre is the world point the map is built around (the camera,
-// so the covered area follows the viewer) and @p extent is the map's HALF-WIDTH in world units.
-//
-// Returns UV in [0,1] at the covered area and outside it beyond — the caller decides what to do with a
-// sample that has left the map, and CloudShadowInside is how it asks.
-vec2 CloudShadowUv(vec3 worldPos, vec3 centre, vec3 sunDir, float extent)
-{
-    vec3  offset = worldPos - centre;
-    float scale  = 0.5f / max(extent, 1.0f);
-
-    float u = dot(offset, CloudShadowRight(sunDir)) * scale + 0.5f;
-    float v = dot(offset, CloudShadowUp(sunDir)) * scale + 0.5f;
-    return vec2(u, v);
-}
-
-// Whether a UV is on the map at all. Sampling outside it would clamp to the border and shadow a cloud
-// with whatever happened to be at the edge, which reads as a hard line across the sky.
-bool CloudShadowInside(vec2 uv)
-{
-    return uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f;
-}
-
-// How much of the map's answer to TRUST at this UV (CLD-103): 1 over the interior, falling linearly to 0
-// across the outer tenth. A term that exists inside the map and vanishes outside it draws its own
-// boundary in the sky — one cloud straddling the edge got a column-occluded base on the near side and an
-// unoccluded one on the far side, a step in brightness along a line no cloud defined. Fading the trust
-// out before the edge turns the step into a gradient the eye does not find.
-float CloudShadowEdgeFade(vec2 uv)
-{
-    float dx = min(uv.x, 1.0f - uv.x);
-    float dy = min(uv.y, 1.0f - uv.y);
-    return clamp(min(dx, dy) * 10.0f, 0.0f, 1.0f);
-}
-
-// The inverse of CloudShadowUv, for the pass that fills the map: the point on the plane through @p centre
-// that this texel's sun ray passes through. The ray itself is then that point plus any multiple of the
-// sun direction, which is what the shell intersection turns into an entry and an exit.
-vec3 CloudShadowPlanePoint(vec2 uv, vec3 centre, vec3 sunDir, float extent)
-{
-    float span = 2.0f * max(extent, 1.0f);
-    float x    = (uv.x - 0.5f) * span;
-    float y    = (uv.y - 0.5f) * span;
-    return centre + CloudShadowRight(sunDir) * x + CloudShadowUp(sunDir) * y;
 }
 
 // The stretch of this texel's sun ray that lies inside the layer, as SIGNED distances along +sunDir from

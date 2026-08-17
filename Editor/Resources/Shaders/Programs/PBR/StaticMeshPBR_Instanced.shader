@@ -235,6 +235,16 @@ Shader "StaticMeshPBR_Instanced"
         Uniform(12) sampler2D u_NormalTexture;
         Uniform(18) sampler2D u_OpacityTexture; // alpha-cutout mask (foliage); unused when cutoff == 0 (16/17 = light SSBOs)
 
+        // CLOUD SHADOWS ON THE WORLD. The sun-space map System::VolumetricCloudRenderer traced before the
+        // render graph, plus the frame it was traced in — see Common/CloudWorldShadowSample.glslh for why
+        // the centre and the sun travel with the image instead of being re-derived here.
+        Uniform(19) sampler2D u_CloudWorldShadowMap;
+        Uniform(20) CloudWorldShadowUB {
+        	vec4 u_CloudWorldShadowCentre; // xyz = the world point the map was traced around, w = extent
+        	vec4 u_CloudWorldShadowSun;    // xyz = TOWARD the sun (normalized), w = on-surface strength
+        };
+        #include <Common/CloudWorldShadowSample.glslh>
+
         struct Params
         {
         	vec3 AlbedoColor;
@@ -384,6 +394,10 @@ Shader "StaticMeshPBR_Instanced"
             vec3  sunDir = normalize(-directionLights.directionLights.Direction.xyz); // toward the sun
             int   cascade;
             float shadow = ShadowFactor(inVertex.WorldPosition, m_Params.Normal, sunDir, cascade);
+            // ...and by the cloud deck standing between this surface and the sun (UE's
+            // CloudShadowOnSurfaceStrength). Folded into the SAME factor the cascades produce, so the two
+            // occluders compose and the per-mesh Receive Shadows toggle below governs both.
+            shadow *= CloudWorldShadowSunFactor(inVertex.WorldPosition);
 
             // Lighting debug (Scene Settings -> Debug -> Light Debug): each source gets a distinct color, the
             // surface is tinted by the sources reaching it (weighted by attenuation * NdotL), brightness = light

@@ -55,6 +55,15 @@ namespace Desert::Tests::CloudGeometryRef
 // project through it, and a disagreement puts every shadow somewhere other than the cloud that cast it.
 #include <Common/CloudShadow.glslh>
 
+// The WORLD-readable encoding's read-out — the analytic {front depth, mean extinction, max optical depth}
+// triple a terrain or a lit mesh inverts to get its own transmittance. Compiled here for the same reason
+// the map above is: the pass that WRITES it and the five shaders that READ it must agree about what the
+// three numbers mean, and a disagreement is a ground that is dark under nothing.
+//
+// It pulls in Common/CloudShadowProjection.glslh, which CloudShadow.glslh has already included — the
+// include guard is what makes that harmless in both languages.
+#include <Common/CloudWorldShadow.glslh>
+
 // The vertical profile's own arithmetic: the per-cell band, the lookup coordinate, the composition of
 // the profile table's three channels, and the two fields the weather pass writes. The same text the
 // weather pass and the raymarch compile — which is the whole point, because the two ENDS of this
