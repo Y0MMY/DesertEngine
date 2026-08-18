@@ -388,41 +388,15 @@ TEST( SkyPayloadLayout, EveryAuthoredValueLandsWhereTheShaderReadsIt )
 }
 
 // ---------------------------------------------------------------------------------------------------
-// The evaluated state the cloud pass consumes
+// The evaluated state the other renderers consume
 // ---------------------------------------------------------------------------------------------------
-
-TEST( AtmosphereEnvRule, NightFactorMatchesTheShadersDayBlend )
-{
-    SkySettings sky;
-
-    // Atmosphere.glslh: day = smoothstep(-0.10, 0.20, sunDir.y); night = 1 - day. Hand-computed here so a
-    // change to either side has to be a deliberate change to both.
-    struct Case
-    {
-        float SunY;
-        float ExpectedNight;
-    };
-    const Case cases[] = { { -0.20f, 1.0f }, // below the smoothstep's low edge -> full night
-                           { -0.10f, 1.0f }, // exactly the low edge
-                           { 0.05f, 0.5f },  // the midpoint: smoothstep(t=0.5) = 0.5
-                           { 0.20f, 0.0f },  // the high edge -> full day
-                           { 0.90f, 0.0f } };
-
-    for ( const auto& c : cases )
-    {
-        const float     horizontal = std::sqrt( std::max( 0.0f, 1.0f - c.SunY * c.SunY ) );
-        const glm::vec3 toward( horizontal, c.SunY, 0.0f );
-        const auto      env = EvaluateAtmosphere( sky, toward, nullptr );
-        EXPECT_NEAR( env.NightFactor, c.ExpectedNight, 1e-5f ) << "sun y = " << c.SunY;
-    }
-}
 
 TEST( AtmosphereEnvRule, AmbientIsTheDomeNotTheZenithTexel )
 {
-    // CLD-100/101. The sky ambient a cloud receives is the hemisphere it hangs against, blended toward
-    // the horizon colour by solid angle — the zenith texel alone is the dome's darkest, bluest corner
-    // and feeding it to the clouds painted every shadowed face navy. The ground term is what the ground
-    // REFLECTS (sun + dome, times albedo over pi), not the tone the ground is painted with.
+    // The sky ambient is the hemisphere a surface sits under, blended toward the horizon colour by solid
+    // angle — the zenith texel alone is the dome's darkest, bluest corner, and feeding it alone painted
+    // every shadowed face navy. The ground term is what the ground REFLECTS (sun + dome, times albedo
+    // over pi), not the tone the ground is painted with.
     SkySettings sky;
     sky.ZenithColor   = { 0.08f, 0.26f, 0.70f };
     sky.HorizonColor  = { 0.50f, 0.66f, 0.92f };
@@ -430,7 +404,7 @@ TEST( AtmosphereEnvRule, AmbientIsTheDomeNotTheZenithTexel )
     sky.GroundColor   = { 0.16f, 0.19f, 0.24f };
     sky.SkyBrightness = 2.0f;
 
-    const auto day = EvaluateAtmosphere( sky, glm::vec3( 0.0f, 1.0f, 0.0f ), nullptr );
+    const auto day = EvaluateAtmosphere( sky, glm::vec3( 0.0f, 1.0f, 0.0f ) );
 
     const glm::vec3 dome = glm::mix( sky.ZenithColor, sky.HorizonColor, 0.65f ) * sky.SkyBrightness;
     EXPECT_NEAR( day.ZenithRadiance.r, dome.r, 1e-5f ) << "dome blend, scaled by Sky Brightness";
@@ -444,7 +418,7 @@ TEST( AtmosphereEnvRule, AmbientIsTheDomeNotTheZenithTexel )
          << "ground bounce reflects sun + dome, Lambertian";
     EXPECT_NEAR( day.GroundRadiance.b, expectedGround.b, 1e-4f );
 
-    const auto night = EvaluateAtmosphere( sky, glm::vec3( 0.0f, -1.0f, 0.0f ), nullptr );
+    const auto night = EvaluateAtmosphere( sky, glm::vec3( 0.0f, -1.0f, 0.0f ) );
     EXPECT_NEAR( night.ZenithRadiance.b, 0.05f * 2.0f, 1e-5f ) << "night: the dome resolves to the night colour";
 
     const glm::vec3 expectedNightGround = 0.30f * sky.GroundColor * night.ZenithRadiance * 0.3183099f;
@@ -454,11 +428,11 @@ TEST( AtmosphereEnvRule, AmbientIsTheDomeNotTheZenithTexel )
 
 TEST( AtmosphereEnvRule, TheSunTakesTheSunsetColourAsItGoesDown )
 {
-    // SunIrradiance is what the cloud march is lit by, and it is the ONLY route by which the colour of
-    // the light reaches a cloud. It used to be SunColor * SunIntensity with no dependence on elevation,
-    // so the sky reddened at dusk and every cloud in it stayed noon-white. The tint now mirrors
-    // Atmosphere.glslh's own — mix(sunsetColor, sunColor, smoothstep(0, 0.25, sunUp)) — which is what
-    // makes "the sky and the clouds see one sun" a fact rather than a comment.
+    // SunIrradiance is the SKY's own sun, and the only route by which the colour of the light reaches the
+    // consumers that read it. It used to be SunColor * SunIntensity with no dependence on elevation, so
+    // the sky reddened at dusk and everything lit by this irradiance stayed noon-white. The tint now
+    // mirrors Atmosphere.glslh's own — mix(sunsetColor, sunColor, smoothstep(0, 0.25, sunUp)) — which is
+    // what makes "every consumer sees one sun" a fact rather than a comment.
     SkyAtmosphereData data;
     data.SunColor     = { 1.0f, 1.0f, 1.0f }; // deliberately neutral: any warmth must come from the ramp
     data.SunsetColor  = { 1.0f, 0.4f, 0.2f };
@@ -467,52 +441,52 @@ TEST( AtmosphereEnvRule, TheSunTakesTheSunsetColourAsItGoesDown )
     const SkySettings sky = MakeSkySettings( data );
 
     // High: the sun's own colour, untouched.
-    const auto high = EvaluateAtmosphere( sky, glm::vec3( 0.0f, 1.0f, 0.0f ), nullptr );
+    const auto high = EvaluateAtmosphere( sky, glm::vec3( 0.0f, 1.0f, 0.0f ) );
     EXPECT_NEAR( high.SunIrradiance.r / high.SunIrradiance.b, 1.0f, 1e-5f );
 
     // On the horizon: the sunset colour, and therefore red-dominant.
-    const auto low = EvaluateAtmosphere( sky, glm::vec3( 1.0f, 0.0f, 0.0f ), nullptr );
+    const auto low = EvaluateAtmosphere( sky, glm::vec3( 1.0f, 0.0f, 0.0f ) );
     EXPECT_GT( low.SunIrradiance.r / low.SunIrradiance.b, 4.0f );
 
     // And it reddens MONOTONICALLY on the way down — no band that jumps.
     float previousRatio = 0.0f;
     for ( float y = 0.30f; y >= 0.0f; y -= 0.02f )
     {
-        const auto  env   = EvaluateAtmosphere( sky, glm::vec3( 1.0f, y, 0.0f ), nullptr );
+        const auto  env   = EvaluateAtmosphere( sky, glm::vec3( 1.0f, y, 0.0f ) );
         const float ratio = env.SunIrradiance.r / std::max( env.SunIrradiance.b, 1e-6f );
         EXPECT_GE( ratio, previousRatio - 1e-5f ) << "sun y = " << y;
         previousRatio = ratio;
     }
 }
 
-TEST( AtmosphereEnvRule, TheSunStopsLightingCloudsOnceItIsDown )
+TEST( AtmosphereEnvRule, TheSunStopsLightingThingsOnceItIsDown )
 {
-    // NightFactor was computed here and consumed by nothing, so a cloud at midnight went on receiving the
-    // full noon irradiance while the sky behind it had gone dark. What lights a cloud after sunset is the
-    // night sky, and that arrives through ZenithRadiance instead.
+    // The irradiance follows the DISC: once the sun is genuinely below the horizon it contributes nothing,
+    // and what lights the world after sunset is the night sky, which arrives through ZenithRadiance
+    // instead. Before this ramp existed a scene at midnight went on receiving the full noon irradiance
+    // while the sky behind it had gone dark.
     SkyAtmosphereData data;
     data.SunColor     = { 1.0f, 1.0f, 1.0f };
     data.SunIntensity = 10.0f;
 
     const SkySettings sky   = MakeSkySettings( data );
-    const auto        night = EvaluateAtmosphere( sky, glm::vec3( 0.0f, -1.0f, 0.0f ), nullptr );
+    const auto        night = EvaluateAtmosphere( sky, glm::vec3( 0.0f, -1.0f, 0.0f ) );
 
-    EXPECT_FLOAT_EQ( night.NightFactor, 1.0f );
     EXPECT_NEAR( night.SunIrradiance.r, 0.0f, 1e-6f );
     EXPECT_NEAR( night.SunIrradiance.g, 0.0f, 1e-6f );
     EXPECT_NEAR( night.SunIrradiance.b, 0.0f, 1e-6f );
 
     // Never negative on the way there, and never brighter than the daylight value.
-    const auto noon = EvaluateAtmosphere( sky, glm::vec3( 0.0f, 1.0f, 0.0f ), nullptr );
+    const auto noon = EvaluateAtmosphere( sky, glm::vec3( 0.0f, 1.0f, 0.0f ) );
     for ( float y = 1.0f; y >= -1.0f; y -= 0.05f )
     {
-        const auto env = EvaluateAtmosphere( sky, glm::vec3( 0.3f, y, 0.0f ), nullptr );
+        const auto env = EvaluateAtmosphere( sky, glm::vec3( 0.3f, y, 0.0f ) );
         EXPECT_GE( env.SunIrradiance.r, 0.0f ) << "sun y = " << y;
         EXPECT_LE( env.SunIrradiance.r, noon.SunIrradiance.r + 1e-5f ) << "sun y = " << y;
     }
 }
 
-TEST( AtmosphereEnvRule, CarriesTheSunAndThePlanetAndNormalizes )
+TEST( AtmosphereEnvRule, CarriesTheSunAndNormalizes )
 {
     SkyAtmosphereData data;
     data.SunColor           = { 1.0f, 0.5f, 0.25f };
@@ -521,24 +495,20 @@ TEST( AtmosphereEnvRule, CarriesTheSunAndThePlanetAndNormalizes )
     data.PlanetRadius       = 6360.0f;
 
     const auto env = EvaluateAtmosphere( MakeSkySettings( data ),
-                                         glm::vec3( 0.0f, 5.0f, 0.0f ) /*deliberately un-normalized*/, nullptr );
+                                         glm::vec3( 0.0f, 5.0f, 0.0f ) /*deliberately un-normalized*/ );
 
     EXPECT_NEAR( glm::length( env.SunDirection ), 1.0f, 1e-6f );
     EXPECT_FLOAT_EQ( env.SunIrradiance.r, 4.0f );
     EXPECT_FLOAT_EQ( env.SunIrradiance.g, 2.0f );
-    EXPECT_NEAR( env.SunAngularRadius, glm::radians( 2.2918f ) * 0.5f, 1e-7f );
-    EXPECT_FLOAT_EQ( env.PlanetRadius, 636000000.0f );
     EXPECT_TRUE( env.Valid );
-    EXPECT_EQ( env.ParamsBuffer, nullptr );
 }
 
-TEST( AtmosphereEnvRule, DefaultConstructedStateIsInvalidAndCarriesNoBuffer )
+TEST( AtmosphereEnvRule, DefaultConstructedStateIsInvalid )
 {
     // What the renderer publishes when no enabled sky drives the frame. A consumer that drew anyway would
-    // be drawing against the previous frame's sun, so both facts have to hold together.
+    // be drawing against the previous frame's sun.
     const Desert::Graphic::AtmosphereEnv env;
     EXPECT_FALSE( env.Valid );
-    EXPECT_EQ( env.ParamsBuffer, nullptr );
 }
 
 TEST( ColorTemperature, MatchesUnrealsConversionAndBehavesPhysically )

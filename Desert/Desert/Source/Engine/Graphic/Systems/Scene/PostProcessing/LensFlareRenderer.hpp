@@ -19,7 +19,7 @@ namespace Desert::Graphic::System
     //
     // Every feature is an IMAGE of the source, never a drawn sprite: a ghost is the source rescaled about
     // its own centre, the halo reads the source at the pixel's bearing from the sun, the streak is a
-    // 16-tap gather along the authored axis. So a sun behind a cloud dims and shortens its own flare with
+    // 16-tap gather along the authored axis. So an occluded sun dims and shortens its own flare with
     // no occlusion code, and the flare deforms with the scene instead of sitting on top of it.
     //
     // The parameters are a POST-PROCESS setting, not the sun light's: this is a property of the lens the

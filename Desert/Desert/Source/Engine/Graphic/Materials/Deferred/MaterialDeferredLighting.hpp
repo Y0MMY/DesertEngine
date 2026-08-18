@@ -4,7 +4,6 @@
 #include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
 
-#include <Engine/Graphic/Clouds/CloudWorldShadow.hpp>
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/Metadata.hpp>
@@ -52,7 +51,7 @@ namespace Desert::Graphic
                    int debugMode, const ShaderProtocols::PointLight& pointLights,
                    const ShaderProtocols::SpotLight& spotLights, const DeferredShadowInput& shadow,
                    const std::shared_ptr<Image2D>& aoImage, float giIntensity, bool ssaoEnabled, int giMode,
-                   const std::shared_ptr<Image2D>& giImage, const CloudWorldShadowInput& cloudShadow )
+                   const std::shared_ptr<Image2D>& giImage )
         {
             if ( m_GBufferA && gA )
                 m_GBufferA->SetImage( gA.get() );
@@ -79,10 +78,6 @@ namespace Desert::Graphic
                                   static_cast<float>( giMode ) ) );
 
             UploadShadow( shadow );
-
-            // The cloud deck's own occlusion of the sun. Always uploaded, feature on or off: the sampler is
-            // a declared descriptor and the block's strength is what switches the shader's read off.
-            CloudWorldShadowBind( *this, cloudShadow );
 
             // Upload the dynamic lights into the same SSBO/UB layout the mesh PBR shader uses (bindings 6/16/4).
             // Empty is fine — the shader loops 0..count, so an untouched buffer is simply never read; but the

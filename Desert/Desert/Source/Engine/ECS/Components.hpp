@@ -28,10 +28,8 @@
 
 // Components big enough to own a file. They live in Desert::ECS like everything below, and are included
 // here so that "the components" remains one include for every consumer.
-#include <Engine/ECS/CloudVolumeComponent.hpp>
 #include <Engine/ECS/ExponentialHeightFogComponent.hpp>
 #include <Engine/ECS/SkyAtmosphereComponent.hpp>
-#include <Engine/ECS/VolumetricCloudsComponent.hpp>
 
 namespace Desert
 {
@@ -415,7 +413,7 @@ namespace Desert::ECS
         // missing from the file keeps its C++ default, so the one directional light such a scene has
         // becomes its atmosphere sun with no migration.
         PROPERTY( DisplayName( "Atmosphere Sun Light" ), Category( "Atmosphere" ),
-                  Tooltip( "This light drives the sky, the sky's IBL bake and the cloud lighting." ) )
+                  Tooltip( "This light drives the sky and the sky's IBL bake." ) )
         bool AtmosphereSunLight = true;
 
         PROPERTY( DisplayName( "Atmosphere Sun Light Index" ), Category( "Atmosphere" ), Range( 0, 0 ),
@@ -423,47 +421,6 @@ namespace Desert::ECS
                   Tooltip( "The engine renders exactly one directional light; index 1 is reserved for a "
                            "future second sun." ) )
         int AtmosphereSunLightIndex = 0;
-
-        // UE's Cloud Scattered Luminance Scale, same name, same meaning (UE reserves Volumetric
-        // Scattering Intensity for volumetric FOG, which we do not have — the CLOUD multiplier is this
-        // one). Scales this light's contribution scattered in the cloud medium: it multiplies the sun
-        // irradiance the cloud march receives (AtmosphereEnv::SunIrradiance) and touches nothing else.
-        PROPERTY( DisplayName( "Cloud Scattered Luminance Scale" ), Category( "Atmosphere" ), Color,
-                  EditCondition( "AtmosphereSunLight" ),
-                  Tooltip( "Scales this light's contribution to the volumetric clouds. White = exactly "
-                           "the sun the sky model computes; useful to counterbalance the approximate "
-                           "multiple scattering, per-channel." ) )
-        glm::vec3 CloudScatteredLuminanceScale = glm::vec3( 1.0f );
-
-        // UE's `bCastCloudShadows` (DirectionalLightComponent.h:184), same name, same default — OFF.
-        //
-        // ON THE LIGHT AND NOT ON THE CLOUD COMPONENT, deliberately. What the cloud layer owns is the MAP:
-        // where it is centred and how far it reaches (Cloud Shadow Extent). What this switch decides is
-        // whether THIS light's contribution to the world is occluded by it — the same kind of question as
-        // "does this light cast shadows at all", asked of the same object, and answered next to Cloud
-        // Scattered Luminance Scale, which is already a cloud-facing property of the sun. A scene with two
-        // decks has one answer here, not two; a scene with two suns would have two, which is what UE means
-        // by per-light.
-        //
-        // Off by default because turning it on redistributes light across every lit surface in a scene,
-        // and every scene authored before this field existed was balanced without it. Presets and the
-        // showcase scenes turn it on.
-        PROPERTY( DisplayName( "Cast Cloud Shadows" ), Category( "Atmosphere" ),
-                  EditCondition( "AtmosphereSunLight" ),
-                  Tooltip( "Let the volumetric cloud deck shadow the world this light lights — terrain, "
-                           "meshes and grass fall into shade under a passing cloud. Needs a Volumetric "
-                           "Clouds component in the scene; costs one 512x512 sun-space trace a frame." ) )
-        bool CastCloudShadows = false;
-
-        // UE's `CloudShadowOnSurfaceStrength` (h:199-213), same name, same default. The receiver-side dose:
-        // the shader computes lerp(1, T, strength), so 1 is the deck's honest transmittance and lower
-        // values are the artist admitting that a physically correct cloud shadow can be darker than the
-        // shot wants.
-        PROPERTY( DisplayName( "Cloud Shadow Strength" ), Category( "Atmosphere" ), Range( 0.0f, 1.0f ),
-                  EditCondition( "CastCloudShadows" ),
-                  Tooltip( "How much of the cloud deck's real transmittance reaches surfaces. 1 = the "
-                           "deck's own opacity; 0 = no cloud shadow at all." ) )
-        float CloudShadowOnSurfaceStrength = 1.0f;
 
         // UE's "Affected By Atmosphere Transmittance", same name, same default (ON): in
         // SkyModel::PhysicalAtmosphere the colour above is multiplied by the atmosphere's transmittance
@@ -486,12 +443,13 @@ namespace Desert::ECS
         // ---- Light Shafts (UE's category, UE's names, UE's defaults) ----------------------------------
         // The screen-space sun streaks: a bright-pass of the HDR scene around the sun's position on
         // screen, radially blurred toward it and added back before tonemapping. Occlusion is inherited
-        // from the scene colour itself — clouds composite with their real transmittance, so the shafts
-        // exist exactly where the sun breaks through. Consumed by System::LightShaftRenderer via the
-        // SunLightFx slice of the ProceduralSkyCommand; only the atmosphere sun's values are read.
+        // from the scene colour itself — whatever stands in front of the sun composites with its real
+        // transmittance, so the shafts exist exactly where the sun breaks through. Consumed by
+        // System::LightShaftRenderer via the SunLightFx slice of the ProceduralSkyCommand; only the
+        // atmosphere sun's values are read.
         PROPERTY( DisplayName( "Light Shaft Bloom" ), Category( "Light Shafts" ),
-                  Tooltip( "Radial streaks of the sun's light through gaps in the clouds, added to the "
-                           "scene before tonemapping." ) )
+                  Tooltip( "Radial streaks of the sun's light through gaps in whatever occludes it, "
+                           "added to the scene before tonemapping." ) )
         bool LightShaftBloom = false;
 
         PROPERTY( DisplayName( "Bloom Scale" ), Category( "Light Shafts" ), Range( 0.0f, 10.0f ),
@@ -1562,9 +1520,8 @@ namespace Desert::ECS
     };
 
     // The HDR-cubemap background, and nothing else. The procedural atmosphere (palette, sun, stars, the
-    // IBL bake request) moved to SkyAtmosphereComponent and the flat cloud layer to
-    // VolumetricCloudsComponent; the old fields are gone rather than deprecated, so there is exactly one
-    // place each value can live.
+    // IBL bake request) moved to SkyAtmosphereComponent; the old fields are gone rather than deprecated,
+    // so there is exactly one place each value can live.
     //
     // Reflected (REFLECT/PROPERTY) so it (de)serializes generically — the SkyboxHandle round-trips as an
     // asset PATH via the serializer's AssetResolver. Fields kept flat (no Data sub-struct) so existing

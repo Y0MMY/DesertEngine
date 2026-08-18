@@ -7,7 +7,7 @@
 //   * as C++, by Desert/Tests/Engine/HeightFog/HeightFogReference.hpp, which the HeightFog tests drive
 //     against a brute-force numeric integration of the same medium.
 // Sharing the text means a passing test is a statement about the code the GPU runs — the arrangement
-// Common/CloudGeometry.glslh established, and its restricted dialect applies verbatim:
+// Common/SkyMedium.glslh established, and its restricted dialect applies verbatim:
 //   * no swizzles (glm's are proxies), no `out` parameters, no arrays, no `inline`, no namespaces;
 //   * float literals carry the `f` suffix so C++ does not silently widen;
 //   * a struct is returned by value through a NAMED LOCAL whose fields are assigned one at a time;
@@ -29,7 +29,7 @@
 // SCALE. All fog maths runs in KILOMETRES (heights, distances, per-km coefficients): the closed form
 // subtracts heights and multiplies by distances, and at world-unit (centimetre) magnitudes those
 // products leave float precision long before the horizon. The conversion happens exactly once, in
-// Graphic::PackFogParams and in the pass's own position reconstruction — the CloudPayload.hpp rule.
+// Graphic::PackFogParams and in the pass's own position reconstruction — the FogPayload.hpp rule.
 
 #ifndef HEIGHT_FOG_GLSLH
 #define HEIGHT_FOG_GLSLH

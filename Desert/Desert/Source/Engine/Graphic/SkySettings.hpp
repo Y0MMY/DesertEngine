@@ -38,8 +38,8 @@ namespace Desert::Graphic
         // Angular RADIUS in RADIANS (the component authors a DIAMETER in degrees).
         float SunAngularRadius = 0.02f;
 
-        // WORLD UNITS (centimetres). The single planet radius in the engine: the volumetric cloud shell
-        // reads it from AtmosphereEnv so the sky's horizon and the cloud layer's horizon cannot disagree.
+        // WORLD UNITS (centimetres). The single planet radius in the engine, so nothing can disagree with
+        // the sky about where the horizon is.
         float PlanetRadius = 636000000.0f;
 
         // Which model the sky pass evaluates; gates the physical-atmosphere LUT dispatches, so a scene

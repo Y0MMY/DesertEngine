@@ -553,7 +553,7 @@ TEST( DShaderParser, AutoBindingsSkipExplicit )
     EXPECT_NE( c.find( "layout(std430, binding = 2) buffer Counter" ), std::string::npos );   // auto next free
 }
 
-// CLD-15. Volumetric clouds sample 3D noise volumes, so `sampler3D` and `image3D` have to survive the
+// A pass that samples a 3D noise volume needs `sampler3D` and `image3D` to survive the
 // DSL untouched. They were EXPECTED to: the sugar rewrites `Uniform(n) T name;` without looking at T,
 // and storage-image format qualifiers are deliberately left as raw `layout(...)`. Expected, but never
 // asserted — and "probably passes through" is not something to find out from a garbage render.

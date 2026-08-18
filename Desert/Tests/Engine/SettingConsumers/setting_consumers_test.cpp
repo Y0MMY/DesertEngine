@@ -2,17 +2,17 @@
 //
 // A slider that moves nothing is the failure mode this programme was written to avoid, and it is not
 // caught by any build: an unread field compiles, serializes, appears in Details and does nothing at all.
-// So the reflected field list of both sky and cloud components is enumerated here and matched against an
+// So the reflected field list of the sky and fog components is enumerated here and matched against an
 // explicit table that says, for every single field, WHO consumes it.
 //
 // The table has two kinds of row:
 //
 //   * WIRED   - names a source file that must exist and must mention the field. If someone deletes the
 //               read while leaving the field, that file stops mentioning it and this test goes red.
-//   * PENDING - names the TASK that owes the field a consumer. The cloud component is fully authored but
-//               its render passes are still being written, so most of its 95 fields legitimately have no
-//               reader yet. Writing that down per field is the difference between "not built yet" and
-//               "forgotten": a field nobody ever claims is visible here as a field with no owner.
+//   * PENDING - names the TASK that owes the field a consumer. Nothing is pending today, and the two
+//               counts at the bottom of this file pin that. The kind exists so that a component whose
+//               passes are still being written can say so PER FIELD, which is the difference between
+//               "not built yet" and "forgotten": a field nobody ever claims is a field with no owner.
 //
 // Every reflected field must appear in exactly one row, so a field added tomorrow fails this test until
 // somebody decides which of the two it is. That decision is the point.
@@ -93,7 +93,7 @@ namespace
          // Display-only state, and the widget is what maintains it.
          { "ActivePreset", kSkyWidget },
 
-         // Shared by the sky and the cloud shell; converted to world units on the C++ side.
+         // Converted to world units on the C++ side.
          { "PlanetRadius", kSkySettings },
 
          // ---- The physical atmosphere (Phase 0/1 of the Sky Atmosphere programme) ------------------
@@ -137,196 +137,10 @@ namespace
     };
 
     // ------------------------------------------------------------------------------------------------
-    // Clouds: the component is authored, the passes that read it are not written yet.
-    // ------------------------------------------------------------------------------------------------
-
-    constexpr const char* kCloudWidget =
-         "Editor/Source/Editor/Panels/SceneProperties/ComponentWidgets/VolumetricCloudsComponent.cpp";
-
-    // The four tasks that owe the cloud component its readers. Naming the task per field is what keeps a
-    // forgotten field from disappearing into "the clouds are not done yet".
-    // T7 has LANDED and consumes ShapeSeed, DetailSeed, Enabled and the regenerate request. It does not
-    // consume the erosion-shaping fields below: those shape how the volumes are SAMPLED, which is the
-    // raymarch's job. A debt booked against a finished task reads as paid, so they are owed by T8.
-    // Both cloud-shadow fields are read on the CPU where the payload is packed: the extent through
-    // CloudShadowExtentOf, which the shadow pass and the march both project with, and the toggle straight
-    // into the block the march branches on.
-    constexpr const char* kCloudPayload = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp";
-
-    // The Cloud Type axis is baked into a texture on the CPU, so the six profile gradients and the three
-    // form bends have a named C++ reader rather than a shader that samples them: this file turns them
-    // into the table the march looks the profile up in.
-    constexpr const char* kCloudCurves = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudProfileCurves.hpp";
-
-    constexpr const char* kT8 = "T8 - weather map and raymarch: samples the density field and lights it";
-    constexpr const char* kT8Steps =
-         "T8 - weather map and raymarch: the step schedule and the sampling budget of the march";
-    constexpr const char* kT9 =
-         "T9 - temporal resolve: how much of the previous frame survives, and how far it may drift";
-    constexpr const char* kT8T10 =
-         "T8/T10 - sizes the raymarch target that T8 writes and T10 upsamples into the frame";
-
-    constexpr Row kCloudRows[] = {
-         // Cloud Layer - the shell the ray is marched through.
-         { "Enabled", nullptr, kT8 },
-         { "LayerBottomAltitude", nullptr, kT8 },
-         { "LayerThickness", nullptr, kT8 },
-         { "MaxViewDistance", nullptr, kT8 },
-         { "HorizonFadeStart", nullptr, kT8 },
-         { "HorizonFadeEnd", nullptr, kT8 },
-
-         // Weather - the coverage field.
-         { "Coverage", nullptr, kT8 },
-         { "CoverageContrast", nullptr, kT8 },
-         { "WeatherTileSize", nullptr, kT8 },
-         { "WeatherSeed", kCloudWidget }, // a seed change raises RequestRegenerateNoise; T7 rebuilds
-         { "WeatherOctaves", nullptr, kT8 },
-         { "WeatherWarpStrength", nullptr, kT8 },
-         { "CloudType", nullptr, kT8 },
-         { "CloudTypeVariance", nullptr, kT8 },
-         { "CloudHeightVariance", kCloudPayload },
-         { "AnvilBias", nullptr, kT8 },
-         { "Wetness", nullptr, kT8 },
-
-         // Shape - the base density field.
-         { "ShapeTileSize", nullptr, kT8 },
-         { "ShapeSeed", kCloudWidget },
-         { "BaseShapeRemapMin", nullptr, kT8 },
-         { "ShapeErosionStrength", nullptr, kT8 },
-         { "ExtinctionScale", nullptr, kT8 },
-         { "StratusGradient", kCloudCurves },
-         { "StratocumulusGradient", kCloudCurves },
-         { "CumulusGradient", kCloudCurves },
-         { "ShelfGradient", kCloudCurves },
-         { "ShelfProfileForm", kCloudCurves },
-         { "CongestusGradient", kCloudCurves },
-         { "CongestusProfileForm", kCloudCurves },
-         { "AnvilGradient", kCloudCurves },
-         { "AnvilProfileForm", kCloudCurves },
-         { "BaseGradientPower", nullptr, kT8 },
-         { "TopGradientPower", nullptr, kT8 },
-         { "DensityHeightBias", nullptr, kT8 },
-
-         // Detail - the erosion of that field.
-         { "DetailStrength", nullptr, kT8 },
-         { "DetailTileSize", nullptr, kT8 },
-         { "DetailSeed", kCloudWidget },
-         { "DetailTypeBias", nullptr, kT8 },
-         { "BillowGradientPower", nullptr, kT8 },
-         { "BillowNoiseScale", nullptr, kT8 },
-         { "HighFreqStrength", nullptr, kT8 },
-         { "HighFreqWispSharpness", nullptr, kT8 },
-         { "HighFreqBillowSharpness", nullptr, kT8 },
-         { "HighFreqFeatureSize", nullptr, kT8 },
-         { "CurlStrength", nullptr, kT8 },
-         { "CurlTileSize", nullptr, kT8 },
-         { "DensitySharpenLow", nullptr, kT8 },
-         { "DensitySharpenHigh", nullptr, kT8 },
-         { "DensityScalePower", nullptr, kT8 },
-         { "DistanceSoftening", nullptr, kT8 },
-         { "SofteningStartDistance", nullptr, kT8 },
-         { "SofteningEndDistance", nullptr, kT8 },
-         { "NearFadeStart", nullptr, kT8 },
-         { "NearFadeEnd", nullptr, kT8 },
-         { "NearFadeMinDensity", nullptr, kT8 },
-
-         // Lighting - in-scatter, phase, ambient.
-         { "ScatteringAlbedo", nullptr, kT8 },
-         { "ExtinctionTint", nullptr, kT8 },
-         { "LightMarchDistance", nullptr, kT8 },
-         { "LightConeSpread", nullptr, kT8 },
-         { "PhaseForwardG", nullptr, kT8 },
-         { "PhaseBackwardG", nullptr, kT8 },
-         { "PhaseBlend", nullptr, kT8 },
-         { "SilverLiningIntensity", nullptr, kT8 },
-         { "PowderStrength", nullptr, kT8 },
-         { "PowderScale", nullptr, kT8 },
-         { "MultiScatterExtinctionFalloff", nullptr, kT8 },
-         { "MultiScatterScatterFalloff", nullptr, kT8 },
-         { "MultiScatterPhaseFalloff", nullptr, kT8 },
-         { "AmbientSkyContribution", nullptr, kT8 },
-         { "AmbientGroundContribution", nullptr, kT8 },
-         { "AmbientHeightBias", nullptr, kT8 },
-         { "SunLightIntensityScale", nullptr, kT8 },
-         { "SunTint", nullptr, kT8 },
-         { "ShadowTint", nullptr, kT8 },
-         { "PrecipitationDarkening", nullptr, kT8 },
-         { "AtmosphericPerspective", nullptr, kT8 },
-         { "DistanceFadeStart", nullptr, kT8 },
-         { "DistanceFadeEnd", nullptr, kT8 },
-
-         // Animation - the scroll offsets the march applies to its lookups.
-         { "AnimationSpeed", nullptr, kT8 },
-         { "WindInfluence", nullptr, kT8 },
-         { "WindDirectionOffset", nullptr, kT8 },
-         { "ShapeScrollMultiplier", nullptr, kT8 },
-         { "DetailScrollMultiplier", nullptr, kT8 },
-         { "WeatherScrollMultiplier", nullptr, kT8 },
-         { "WindHeightShear", nullptr, kT8 },
-         { "WindUpliftSpeed", nullptr, kT8 },
-
-         // Quality - the cost dial.
-         { "QualityLevel", kCloudWidget },
-         { "ResolutionScale", nullptr, kT8T10 },
-         { "MaxSteps", nullptr, kT8Steps },
-         { "MinStepSize", nullptr, kT8Steps },
-         { "MaxStepSize", nullptr, kT8Steps },
-         { "StepGrowthRate", nullptr, kT8Steps },
-         { "CoarseStepMultiplier", nullptr, kT8Steps },
-         { "EmptySamplesBeforeCoarse", nullptr, kT8Steps },
-         { "LightMarchSamples", nullptr, kT8Steps },
-         { "MultiScatterOctaves", nullptr, kT8Steps },
-         { "AmbientOcclusion", kCloudPayload },
-         { "AutoDistanceFade", kCloudPayload },
-         { "CloudShadowMap", kCloudPayload },
-         { "CloudShadowExtent", kCloudPayload },
-         { "TemporalMode", nullptr, kT9 },
-         { "TemporalBlendFactor", nullptr, kT9 },
-         { "TemporalClampScale", nullptr, kT9 },
-         { "JitterStrength", nullptr, kT8Steps },
-
-         // Preset - the selector the widget turns into the 78 fields above.
-         { "Preset", kCloudWidget },
-    };
-
-    // ------------------------------------------------------------------------------------------------
     // Height fog: the component and its pass shipped together (Sky plan Phase 5), so every field is
     // WIRED - nothing pending. One funnel consumes them: PackFogParams in FogPayload.hpp turns each
     // field into the GPU block the fog pass evaluates; Enabled is the renderer's own dispatch gate.
     // ------------------------------------------------------------------------------------------------
-
-    // ------------------------------------------------------------------------------------------------
-    // Cloud Volume: a placed hero cloud (Docs/Clouds/VOXEL_CLOUD_PATH.md phase 1). Phase 1a delivered the
-    // .dvol format, the analytic baker, the asset and this component; phase 1b landed the seam that reads
-    // them - the voxel density header, the instance buffer and the atlas binding; phase 2 added the
-    // distance fade. The component owes NOTHING. Two of the seven are consumed by the ECS gather (which
-    // decides whether an instance exists at all and in what order), five by the renderer's per-frame
-    // packing that turns a placement into the GPU record the march indexes.
-    // ------------------------------------------------------------------------------------------------
-
-    constexpr const char* kVoxelGather = "Desert/Desert/Source/Engine/ECS/System/VolumetricCloudsECSSystem.hpp";
-    constexpr const char* kVoxelInstance =
-         "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.cpp";
-
-    constexpr Row kCloudVolumeRows[] = {
-         // The zero-cost gate: an unticked hero cloud is not gathered, so it takes no atlas tile, no
-         // instance slot and no sample.
-         { "Enabled", kVoxelGather },
-         // The gather refuses a null handle; the renderer resolves it through CloudVolumeService and
-         // leases the atlas tile the instance record points at.
-         { "Volume", kVoxelInstance },
-         { "DensityScale", kVoxelInstance },
-         { "DetailTypeBias", kVoxelInstance },
-         // Sorts the casters to the front of the buffer, which is what makes the shadow pass's prefix
-         // mean "casts a cloud shadow" - see u_VoxelShadowCount.
-         { "CastsCloudShadow", kVoxelGather },
-         // Phase 2's distance LOD. Read on the CPU, once per cloud per frame, and folded into the
-         // instance record's density scale - the shader learns nothing about it, which is deliberate:
-         // the seam's cheap tier takes no distance argument, so a per-sample fade would live in the fine
-         // tier alone and the two tiers would disagree about where a cloud is.
-         { "FadeStartDistance", kVoxelInstance },
-         { "FadeEndDistance", kVoxelInstance },
-    };
 
     constexpr const char* kFogPayload = "Desert/Desert/Source/Engine/Graphic/Fog/FogPayload.hpp";
     constexpr const char* kFogRenderer =
@@ -379,7 +193,7 @@ namespace
         return ss.str();
     }
 
-    // Whole-word search, so "Preset" does not match inside "CloudPresetValues" and report a consumer that
+    // Whole-word search, so "Preset" does not match inside "SkyPresetValues" and report a consumer that
     // merely names the type.
     bool MentionsWord( const std::string& haystack, const std::string& word )
     {
@@ -450,16 +264,6 @@ TEST( SettingConsumers, EverySkyFieldNamesItsConsumer )
     CheckTableCoversTypeExactly( Type( "SkyAtmosphereData" ), kSkyRows, std::size( kSkyRows ) );
 }
 
-TEST( SettingConsumers, EveryCloudFieldNamesItsConsumerOrTheTaskThatOwesOne )
-{
-    CheckTableCoversTypeExactly( Type( "VolumetricCloudData" ), kCloudRows, std::size( kCloudRows ) );
-}
-
-TEST( SettingConsumers, EveryCloudVolumeFieldNamesItsConsumerOrTheTaskThatOwesOne )
-{
-    CheckTableCoversTypeExactly( Type( "CloudVolumeData" ), kCloudVolumeRows, std::size( kCloudVolumeRows ) );
-}
-
 TEST( SettingConsumers, EveryFogFieldNamesItsConsumer )
 {
     CheckTableCoversTypeExactly( Type( "ExponentialHeightFogData" ), kFogRows, std::size( kFogRows ) );
@@ -471,8 +275,6 @@ TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
     ASSERT_FALSE( root.empty() ) << "repository root not found - run from the workspace root or build/Bin";
 
     CheckWiredRowsReadTheirField( root, kSkyRows, std::size( kSkyRows ) );
-    CheckWiredRowsReadTheirField( root, kCloudRows, std::size( kCloudRows ) );
-    CheckWiredRowsReadTheirField( root, kCloudVolumeRows, std::size( kCloudVolumeRows ) );
     CheckWiredRowsReadTheirField( root, kFogRows, std::size( kFogRows ) );
 }
 
@@ -492,47 +294,12 @@ TEST( SettingConsumers, TheFogComponentOwesNothing )
 // camera aerial-perspective volume and its apply on opaque — consumed the last two fields that were
 // carried without a reader, plus the Aerial Perspective Distance it added.
 //
-// The count stays as a count rather than becoming "no PENDING rows exist", because the remaining
-// phases (4: the distant sky-light value; the cloud march sampling this volume) may well add a field
-// before they add its reader. When that happens the number rises in a reviewable edit instead of a
-// field quietly joining the component with nobody accountable for it.
+// The count stays as a count rather than becoming "no PENDING rows exist", because a later phase may
+// well add a field before it adds its reader. When that happens the number rises in a reviewable edit
+// instead of a field quietly joining the component with nobody accountable for it.
 TEST( SettingConsumers, TheSkyComponentOwesNothing )
 {
     const std::ptrdiff_t pending = std::count_if( std::begin( kSkyRows ), std::end( kSkyRows ),
-                                                  []( const Row& r ) { return r.Task != nullptr; } );
-
-    EXPECT_EQ( pending, 0 );
-}
-
-// A count, so that "the clouds are not wired yet" cannot quietly grow to cover a field nobody meant to
-// leave out. When a cloud pass lands, this number drops and the drop is a reviewable edit.
-TEST( SettingConsumers, TheCloudComponentOwesExactlyTheFieldsItsPassesHaveNotBeenWrittenFor )
-{
-    const std::ptrdiff_t pending = std::count_if( std::begin( kCloudRows ), std::end( kCloudRows ),
-                                                  []( const Row& r ) { return r.Task != nullptr; } );
-
-    // 86, down from 87: High Frequency Fade Start and High Frequency Fade End became the single High
-    // Frequency Feature Size. Two authored distances that could contradict the march's own sampling rate
-    // became one physical size whose fade the march derives (CloudNyquistWeight), so the component owes one
-    // reader fewer — not because anything was hidden, but because there is one fewer thing to author.
-    EXPECT_EQ( pending, 86 );
-}
-
-// The hero-cloud component landed one phase ahead of the seam that reads it, deliberately: the .dvol
-// format, the baker, the asset and the component were one task, and the shader-side seam another. All
-// five fields were owed by phase 1b, and phase 1b landed - the union in
-// Editor/Resources/Shaders/Common/CloudDensityCompose.glslh, the instance buffer and the atlas binding.
-// Phase 2 added the two fade distances WITH their reader in the same change. So the count is 0.
-//
-// It stays a COUNT rather than becoming "no PENDING rows exist" for the same reason the sky's does: a
-// later voxel phase (3: CubeGrid authoring) may well add a field before it adds its reader. When that
-// happens the number rises in a reviewable edit instead of a field quietly joining the component with
-// nobody accountable for it. Phase 2's own two candidates for a field-without-a-reader - the SDF step
-// bound and the far-LOD atlas - were measured and refused rather than half-added; see
-// Docs/Clouds/VOXEL_CLOUD_PATH.md and the phase-2 commit message for the numbers.
-TEST( SettingConsumers, TheCloudVolumeComponentOwesNothing )
-{
-    const std::ptrdiff_t pending = std::count_if( std::begin( kCloudVolumeRows ), std::end( kCloudVolumeRows ),
                                                   []( const Row& r ) { return r.Task != nullptr; } );
 
     EXPECT_EQ( pending, 0 );

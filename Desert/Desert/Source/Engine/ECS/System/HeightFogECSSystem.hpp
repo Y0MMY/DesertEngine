@@ -16,7 +16,7 @@ namespace Desert::ECS
     /**
      * @brief Collects the scene's exponential height fog for the frame.
      *
-     * A pure render-data collector, the VolumetricCloudsECSSystem shape exactly: it reads one component
+     * A pure render-data collector: it reads one component
      * (plus the owning entity's transform, because the fog floor IS that transform's Y) and emits one
      * command. The GPU-owning half is Graphic::System::HeightFogRenderer.
      *
@@ -47,7 +47,7 @@ namespace Desert::ECS
                 return;
             }
 
-            // Lowest UUID drives the frame, exactly as the clouds and the sky pick theirs: "whichever
+            // Lowest UUID drives the frame, exactly as the sky picks its own: "whichever
             // entity entt happened to visit first" changes when an unrelated component is added
             // somewhere else, and fog that thickens for no visible reason is a hard bug to describe.
             size_t chosen = 0;

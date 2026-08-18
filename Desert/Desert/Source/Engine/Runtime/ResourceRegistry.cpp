@@ -62,10 +62,4 @@ namespace Desert::Runtime
         return &videoService;
     }
 
-    CloudVolumeService* ResourceRegistry::GetCloudVolumeService()
-    {
-        static CloudVolumeService cloudVolumeService;
-        return &cloudVolumeService;
-    }
-
 } // namespace Desert::Runtime

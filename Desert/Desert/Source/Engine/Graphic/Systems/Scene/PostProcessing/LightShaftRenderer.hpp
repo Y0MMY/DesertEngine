@@ -14,7 +14,7 @@ namespace Desert::Graphic::System
 {
     // Light shafts from the atmosphere sun — UE's "Light Shaft Bloom": a bright-pass mask of the HDR
     // scene colour around the sun's screen position, radially blurred toward it (Mitchell, GPU Gems 3
-    // ch.13), added back in by the tonemap exactly the way bloom is. Occlusion comes for free: clouds
+    // ch.13), added back in by the tonemap exactly the way bloom is. Occlusion comes for free: whatever
     // are composited into the scene colour with their real transmittance before this runs, so the
     // streaks exist only where the sun actually breaks through.
     //

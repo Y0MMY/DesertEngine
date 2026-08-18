@@ -137,7 +137,7 @@ namespace Desert::Graphic::System
             return true;
 
         // The old image may still be referenced by descriptors of frames in flight — the same rule the
-        // cloud scatter target follows on resize.
+        // scatter target follows on resize.
         if ( m_FogImage )
             Renderer::GetInstance().WaitDeviceIdle();
 
@@ -210,7 +210,7 @@ namespace Desert::Graphic::System
 
         // The atmosphere is a coupling, not a dependency: without one the fog keeps its authored colour
         // and drops the sun lobe and the sky ambient (PackFogParams says so per term). Fog on a
-        // sky-less scene is legitimate; a cloud without a sun is not — hence no cloud-style bail-out.
+        // sky-less scene is legitimate, so there is no bail-out here.
         const FogGpuPayload payload = PackFogParams( m_Data, atmosphere, m_FogHeightY );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
@@ -227,7 +227,7 @@ namespace Desert::Graphic::System
 
         // Present the DEPTH attachment to a compute sampler and hand it back afterwards — its tracked
         // layout is not legal for a combined image sampler, and SetInput binds the tracked layout
-        // verbatim. Same round-trip as the cloud raymarch.
+        // verbatim.
         renderer.ComputeImageBeginRead( depthImage );
         renderer.ComputeImageBeginWrite( m_FogImage.get() );
 
@@ -285,7 +285,7 @@ namespace Desert::Graphic::System
         config.Dependencies      = { RenderPassDependency( RenderPhase::Geometry ) };
 
         // The fog is the FLOOR of the Transparency phase: it must land on the opaque scene before the
-        // cloud composite (FarField) and every particle draw over it, so all of them are composited
+        // every particle draw over it, so all of them are composited
         // OVER the fogged world. Stated here, on the pass itself, not implied by registration order.
         config.OrderInPhase = RenderPassOrder::AtmosphericFog;
 

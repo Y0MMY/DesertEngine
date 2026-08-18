@@ -6,14 +6,9 @@ Shader "SkyDistantLight"
         // radiance of the sky seen from near the ground, refilled every frame because it depends on
         // the sun.
         //
-        // TWO TEXELS, ONE MARCH. Texel (0,0) is the FULL-SPHERE mean — UE's own quantity, and what the
+        // ONE TEXEL, ONE MARCH. Texel (0,0) is the FULL-SPHERE mean — UE's own quantity, and what the
         // height fog reads: a fog pixel is lit from every direction at once and has no ground term of
-        // its own. Texel (1,0) is the SKY HALF, the mean over the 32 cells that look up, and it is what
-        // the volumetric clouds' ambient reads: CloudAmbient already blends a sky radiance against a
-        // separate ground-bounce radiance, so feeding it the sphere mean would count the lit ground
-        // twice and give every shadowed cloud face the colour of dirt. Both come out of the SAME 64
-        // marched radiances in the same workgroup, so they cannot disagree; the split is
-        // Common/SkyScattering.glslh's SkyDistantLight / SkyDistantSkyLight, which the tests drive.
+        // its own. The mean is Common/SkyScattering.glslh's SkyDistantLight, which the tests drive.
         //
         // ONE WORKGROUP, 64 THREADS, ONE DIRECTION EACH. The direction set and the per-direction
         // radiance are Common/SkyScattering.glslh's SkyDistantLightDirection / SkyDistantLightRadiance —
@@ -28,14 +23,13 @@ Shader "SkyDistantLight"
         //
         // WHY A MEAN AND NOT A CUBEMAP: this value's consumers want the MEAN sky, not its directional
         // variation — the height fog's ambient in-scattering is isotropic by construction (the
-        // closed-form line integral has no direction in it), the cloud ambient's is too (sky light
-        // arrives from the whole sky, which is why CloudAmbientOcclusion has no angle term), and
-        // directional ambient is what the IBL bake's irradiance cube already is.
+        // closed-form line integral has no direction in it), and directional ambient is what the IBL
+        // bake's irradiance cube already is.
 
         #include <Common/Atmosphere.glslh>
         #include <Common/SkyMedium.glslh>
 
-        // rgba32f for ONE texel: the cost of the exact format is a rounding error here, and the value is
+        // rgba32f for one texel: the cost of the exact format is a rounding error here, and the value is
         // read by a pass that adds it to a fog colour, where a half's three decimal digits at very low
         // night radiances would quantise visibly.
         layout(binding = 0, rgba32f) restrict writeonly uniform image2D u_DistantSkyLight;
@@ -75,7 +69,6 @@ Shader "SkyDistantLight"
         #include <Common/SkyScattering.glslh>
 
         shared vec3 s_Radiance[64];
-        shared vec3 s_SkyRadiance[64];
 
         LocalSize(64, 1, 1);
         void main()
@@ -113,10 +106,6 @@ Shader "SkyDistantLight"
 
             s_Radiance[index] = tinted;
 
-            // The sky half of the same 64: a downward cell contributes zero to this sum, so the two
-            // reductions share every march and differ only in what they admit.
-            s_SkyRadiance[index] = direction.y > 0.0f ? tinted : vec3(0.0f, 0.0f, 0.0f);
-
             barrier();
 
             // Tree reduction, uniform control flow at every barrier (the loop bound is a constant and
@@ -124,20 +113,15 @@ Shader "SkyDistantLight"
             for (uint stride = 32u; stride > 0u; stride = stride >> 1u)
             {
                 if (index < stride)
-                {
-                    s_Radiance[index]    = s_Radiance[index] + s_Radiance[index + stride];
-                    s_SkyRadiance[index] = s_SkyRadiance[index] + s_SkyRadiance[index + stride];
-                }
+                    s_Radiance[index] = s_Radiance[index] + s_Radiance[index + stride];
                 barrier();
             }
 
             if (index == 0u)
             {
-                vec3 mean    = s_Radiance[0] / float(SKY_DISTANT_LIGHT_DIRECTIONS);
-                vec3 skyMean = s_SkyRadiance[0] / float(SKY_DISTANT_LIGHT_SKY_DIRECTIONS);
+                vec3 mean = s_Radiance[0] / float(SKY_DISTANT_LIGHT_DIRECTIONS);
 
                 imageStore(u_DistantSkyLight, ivec2(SKY_DISTANT_LIGHT_SPHERE_TEXEL, 0), vec4(mean, 1.0f));
-                imageStore(u_DistantSkyLight, ivec2(SKY_DISTANT_LIGHT_SKY_TEXEL, 0), vec4(skyMean, 1.0f));
             }
         }
     }

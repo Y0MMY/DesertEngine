@@ -35,14 +35,13 @@ namespace Desert::Graphic
     {
         // The atmospheric-fog apply in Transparency: it modifies the OPAQUE scene itself (every pixel's
         // geometry gains the fog between it and the camera), so it must land before everything the
-        // phase composites over that scene — the cloud far field and every particle included. It sits
-        // below FarField for exactly that reason: clouds draw over the fogged world, never under it.
+        // phase composites over that scene — every particle included. It sits below FarField for
+        // exactly that reason: what the phase composites draws over the fogged world, never under it.
         constexpr int32_t AtmosphericFog = -200;
 
-        // Content at sky distance that is composited inside an otherwise camera-local phase — the
-        // volumetric cloud composite in Transparency. Everything else in that phase is nearer to the
-        // camera and must paint OVER it: sparks and smoke from an emitter in front of the camera belong
-        // on top of the cloudscape, never erased by it.
+        // Content at sky distance that is composited inside an otherwise camera-local phase. Everything
+        // else in that phase is nearer to the camera and must paint OVER it: sparks and smoke from an
+        // emitter in front of the camera belong on top of a distant backdrop, never erased by it.
         constexpr int32_t FarField = -100;
 
         // No opinion; registration order decides. This is what every existing engine pass uses.

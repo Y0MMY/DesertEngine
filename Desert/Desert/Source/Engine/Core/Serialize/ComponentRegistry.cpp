@@ -13,7 +13,6 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
-#include <Engine/Assets/Clouds/CloudVolumeAsset.hpp>
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -61,12 +60,12 @@ namespace Desert::Core::Serialize
             s.Key = std::move( key );
             s.Has = []( ECS::Entity e ) { return e.HasComponent<TComponent>(); };
 
-            // The AssetResolver is passed on BOTH directions, exactly as MakeReflectedSelf passes it. It is
-            // a no-op for a component with no PROPERTY(Asset<...>) field — which every component this
-            // helper served was, until CloudVolumeData arrived with one. Without it an AssetHandle field
-            // is written as a raw 64-bit id and read back as one: the id is minted at load time from the
-            // file path, so it does not survive a restart, and the component comes back pointing at
-            // nothing with no error anywhere. That is what a placed hero cloud did before this line.
+            // The AssetResolver is passed on BOTH directions, exactly as MakeReflectedSelf passes it. It
+            // is a no-op for a component with no PROPERTY(Asset<...>) field, and load-bearing for the ones
+            // that have one (UIImage's Sprite, UIText's Font, UIPanel's Video). Without it an AssetHandle
+            // field is written as a raw 64-bit id and read back as one: the id is minted at load time from
+            // the file path, so it does not survive a restart, and the component comes back pointing at
+            // nothing with no error anywhere.
             s.Serialize = [member, typeName]( ECS::Entity e, const Assets::AssetManager& mgr ) -> rfl::Generic
             {
                 const auto* type = Reflection::ReflectionRegistry::Get().Find( typeName );
@@ -224,11 +223,6 @@ namespace Desert::Core::Serialize
                     auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) );
                     return a ? a->GetMetadata().Filepath.string() : "";
                 }
-                if ( type == "CloudVolumeAsset" )
-                {
-                    auto a = mgr.FindByHandle<Assets::CloudVolumeAsset>( Common::UUID( handle ) );
-                    return a ? a->GetMetadata().Filepath.string() : "";
-                }
                 if ( type == "FontAsset" )
                 {
                     // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
@@ -297,32 +291,6 @@ namespace Desert::Core::Serialize
                     // Textures are registered from cooked paths by the preloader; just look up by path.
                     auto a = mgr.FindByPath<Assets::TextureAsset>( path );
                     return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
-                }
-                if ( type == "CloudVolumeAsset" )
-                {
-                    // Hero-cloud volumes are not swept by the preloader (a .dvol is 4 MiB and only a
-                    // placed Cloud Volume wants one), so a scene reference creates and loads it here. The
-                    // load decodes the file and reports the reason if it cannot; it does not touch the
-                    // GPU, so a failure costs a log line rather than a frame.
-                    auto a = mgr.FindByPath<Assets::CloudVolumeAsset>( path );
-                    if ( !a )
-                    {
-                        a = m.CreateAsset<Assets::CloudVolumeAsset>( Assets::AssetPriority::Medium, path );
-                        if ( a )
-                            a->Load();
-                    }
-                    if ( !a )
-                        return 0;
-
-                    // The renderer cannot reach the AssetManager (it is a layer object), so the handle the
-                    // component carries has to resolve through a service — the same crossing the skybox
-                    // makes above. Registered here, at the one place a scene reference turns into an
-                    // asset, so a hero cloud placed in a saved scene is marchable the frame it loads.
-                    if ( const auto registered = Runtime::ResourceRegistry::GetCloudVolumeService()->Register( a );
-                         !registered.IsSuccess() )
-                        LOG_ERROR( "[CloudVolume] {}", registered.GetError() );
-
-                    return static_cast<uint64_t>( a->GetMetadata().Handle );
                 }
                 if ( type == "FontAsset" )
                 {
@@ -1056,21 +1024,15 @@ namespace Desert::Core::Serialize
         // ---- Skybox (now FULLY REFLECTED via RA3) ----
         // No more hand-written SkyboxComponentSer / field mapping: the whole component reflects, and its
         // SkyboxHandle round-trips as a path through the AssetResolver. It now carries the HDR path ONLY —
-        // the procedural sky lives under "SkyAtmosphere" and the clouds under "VolumetricClouds".
+        // the procedural sky lives under "SkyAtmosphere".
         Register( MakeReflectedSelf<ECS::SkyboxComponent>( "Skybox", "SkyboxComponent" ) );
 
-        // ---- Sky / clouds ----
+        // ---- Sky / fog ----
         // Data-block components, so one line each is the whole of save/load, duplicate and undo.
         Register( MakeReflected<ECS::SkyAtmosphereComponent, ECS::SkyAtmosphereData>(
              "SkyAtmosphere", "SkyAtmosphereData", &ECS::SkyAtmosphereComponent::Data ) );
-        Register( MakeReflected<ECS::VolumetricCloudsComponent, ECS::VolumetricCloudData>(
-             "VolumetricClouds", "VolumetricCloudData", &ECS::VolumetricCloudsComponent::Data ) );
         Register( MakeReflected<ECS::ExponentialHeightFogComponent, ECS::ExponentialHeightFogData>(
              "ExponentialHeightFog", "ExponentialHeightFogData", &ECS::ExponentialHeightFogComponent::Data ) );
-        // A placed hero cloud. One per entity, unlike the layer components above — a scene holds as many
-        // as the atlas has tiles, and its .dvol handle round-trips as a path through the AssetResolver.
-        Register( MakeReflected<ECS::CloudVolumeComponent, ECS::CloudVolumeData>(
-             "CloudVolume", "CloudVolumeData", &ECS::CloudVolumeComponent::Data ) );
 
         // ---- Script (manual: .lua path + exposed-property values) ----
         Register( MakeScript() );

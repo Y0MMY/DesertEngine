@@ -63,7 +63,7 @@ namespace Desert::Core
     //   * it stays well clear of the point where even reversed-Z thins out. The relative depth error is
     //     about (far/near) * 2^-23 of a distance; at 50 km over a 10 cm near plane that is sub-millimetre
     //     everywhere, and the near plane — not the far one — is what would have to move to spend it.
-    // Anything beyond — the planet shell, a cloud deck, the sky — is drawn by passes that never consult
+    // Anything beyond — the planet shell, the sky — is drawn by passes that never consult
     // this plane at all.
     inline constexpr float kDefaultNearPlane = 10.0f;      // 10 cm
     inline constexpr float kDefaultFarPlane  = 5000000.0f; // 50 km

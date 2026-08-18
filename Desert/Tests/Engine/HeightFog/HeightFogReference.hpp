@@ -9,7 +9,7 @@
 // separate them silently. Sharing the text means a passing test is a statement about the code the GPU
 // runs.
 //
-// The arrangement mirrors Tests/Engine/CloudTemporal/CloudTemporalReference.hpp exactly:
+// The arrangement is the house one for a shader-maths reference:
 //   * glm supplies vec3/vec4 and the maths built-ins with GLSL semantics;
 //   * the include sits inside an ANONYMOUS namespace so each translation unit gets its own copy — GLSL
 //     has no `inline`, so the shared text cannot carry one.

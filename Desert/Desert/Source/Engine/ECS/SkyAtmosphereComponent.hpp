@@ -159,9 +159,8 @@ namespace Desert::ECS
         // origin along +Y. A second authorable value that must agree with this one is exactly the
         // duplicated state that produces a horizon disagreeing with itself.
         PROPERTY( DisplayName( "Planet Radius" ), Category( "Atmosphere" ), Range( 1.0f, 20000.0f ), Units( "km" ),
-                  Tooltip( "Radius of the planet the sky and the volumetric cloud shell both sit on. This "
-                           "is the only planet radius in the engine: the clouds read it from here, so the "
-                           "horizon of the sky and the horizon of the cloud layer cannot disagree." ) )
+                  Tooltip( "Radius of the planet the sky sits on. This is the only planet radius in the "
+                           "engine, so nothing can disagree with the sky about where the horizon is." ) )
         float PlanetRadius = 6360.0f;
 
         // ---- The physical atmosphere (SkyModel::PhysicalAtmosphere) ---------------------------------

@@ -3,7 +3,7 @@
 // A layout declared twice diverges the first time somebody inserts a field in the middle of one of them,
 // and the failure is a corrupted frame with no error message — the asserts turn it into a build error.
 //
-// Raw `layout(std430, ...)` rather than the ReadBuffer(n) sugar, for the same reason CloudParams.glslh
+// Raw `layout(std430, ...)` rather than the ReadBuffer(n) sugar, for the same reason SkyScattering.glslh
 // gives: this header must also compile under plain glslc, and raw layout is the sanctioned escape for
 // structural GLSL.
 //

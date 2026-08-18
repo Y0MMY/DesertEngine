@@ -31,7 +31,7 @@ Shader "SceneComposite"
             // and at W = 1 that expression reduces ALGEBRAICALLY to L' = L. The operator was hard-coded to
             // W = 1, so this pass tonemapped nothing — every luminance above 1 walked through untouched and
             // was clipped by the 8-bit store. That is what flattened bright content into paper silhouettes:
-            // a cloud lit to 2.0 and one lit to 6.0 both wrote 255 and lost every gradient between them.
+            // a highlight lit to 2.0 and one lit to 6.0 both wrote 255 and lost every gradient between them.
             // W is the value that now maps to 1.0, so everything below it keeps its shading.
             float pureWhite = max(u_WhitePoint, 1.0);
 

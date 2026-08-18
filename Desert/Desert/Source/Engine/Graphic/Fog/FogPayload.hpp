@@ -15,12 +15,11 @@ namespace Desert::Graphic
      *
      * The GLSL half of this layout is the block in Editor/Resources/Shaders/Common/FogParams.glslh,
      * member for member and in this order. The static_asserts below make a divergence a build error
-     * instead of a frame in which every parameter after the inserted one is read from the wrong offset —
-     * the CloudPayload.hpp arrangement, verbatim.
+     * instead of a frame in which every parameter after the inserted one is read from the wrong offset.
      *
      * Units: KILOMETRES and per-kilometre coefficients throughout — this packer is where the component's
-     * world-unit distances and UE-unit densities are converted, exactly once ("kilometres once, inside",
-     * the cloud payload's rule; the closed form's precision argument is in HeightFog.glslh).
+     * world-unit distances and UE-unit densities are converted, exactly once ("kilometres once, inside
+     * the shader"; the closed form's precision argument is in HeightFog.glslh).
      */
     struct FogGpuPayload
     {
@@ -61,7 +60,7 @@ namespace Desert::Graphic
     inline constexpr uint32_t kFogSceneDepthBinding = 2;
     // The sky's camera aerial-perspective volume, which this pass composes ITSELF OVER. ALWAYS bound,
     // even in a scene with no atmosphere at all: a declared sampler with no image is an invalid
-    // descriptor set, not an unused one (the cloud raymarch's shadow-map slot, same rule). What varies
+    // descriptor set, not an unused one. What varies
     // is FogPush::AerialPerspective.z, which is 0 when there is no volume — and then the shader never
     // reads the binding and composes the exact identity instead.
     inline constexpr uint32_t kFogAerialPerspectiveBinding = 3;
@@ -72,8 +71,8 @@ namespace Desert::Graphic
 
     /**
      * Per-dispatch data: everything that changes with the CAMERA rather than with the fog settings.
-     * Rides in the push constant for the same reason CloudRaymarchPush does — ComputePipeline has no
-     * SetUniformBuffer, and a second storage buffer for one matrix would be a second per-frame upload.
+     * Rides in the push constant because ComputePipeline has no SetUniformBuffer, and a second storage
+     * buffer for one matrix would be a second per-frame upload.
      */
     struct FogPush
     {
@@ -132,8 +131,7 @@ namespace Desert::Graphic
      *         here: it lives on the GPU, so what this packer carries is the artist's scale and a gate,
      *         and the shader does the multiply.
      *       - SkyModel::ArtisticGradient — the mean of the dome and ground-bounce radiance, the
-     *         gradient's own ambient and the same pair the clouds read, so a gradient scene's fog is
-     *         bit for bit what it was.
+     *         gradient's own ambient, so a gradient scene's fog is bit for bit what it was.
      */
     inline FogGpuPayload PackFogParams( const ECS::ExponentialHeightFogData& data, const AtmosphereEnv& atmosphere,
                                         float fogHeightWorldY )

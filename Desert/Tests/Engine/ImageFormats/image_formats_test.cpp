@@ -65,8 +65,6 @@ TEST( ImageFormatSize, TwoDimensionalSizesAreExact )
     EXPECT_EQ( CalculateImageSize( 128u, 128u, ImageFormat::RGBA16F ), 131072ull );
     EXPECT_EQ( CalculateImageSize( 128u, 128u, ImageFormat::RGBA8F ), 65536ull );
     EXPECT_EQ( CalculateImageSize( 128u, 128u, ImageFormat::RGBA32F ), 262144ull );
-    // The curl-noise and weather-map resources of the cloud programme.
-    EXPECT_EQ( CalculateImageSize( 128u, 128u, ImageFormat::RGBA8F ), 65536ull );
     EXPECT_EQ( CalculateImageSize( 512u, 512u, ImageFormat::RGBA8F ), 1048576ull );
 }
 
@@ -77,13 +75,13 @@ TEST( ImageFormatSize, AnEmptyExtentCostsNothing )
     EXPECT_EQ( CalculateImageSize( 128u, 128u, 0u, ImageFormat::RGBA8F ), 0ull );
 }
 
-// ── 3D size arithmetic (CLD-95) ───────────────────────────────────────────────────────────────────
+// ── 3D size arithmetic ────────────────────────────────────────────────────────────────────────────
 
 TEST( ImageFormatSize, VolumeSizesAreExact )
 {
-    // Shape noise: 128^3 RGBA8F = 8 MiB.
+    // A 128^3 RGBA8F volume is 8 MiB.
     EXPECT_EQ( CalculateImageSize( 128u, 128u, 128u, ImageFormat::RGBA8F ), 8388608ull );
-    // Detail noise: 32^3 RGBA8F = 128 KiB.
+    // A 32^3 RGBA8F volume is 128 KiB.
     EXPECT_EQ( CalculateImageSize( 32u, 32u, 32u, ImageFormat::RGBA8F ), 131072ull );
     // The same volume at 32-bit float is what we are NOT paying: 4x.
     EXPECT_EQ( CalculateImageSize( 128u, 128u, 128u, ImageFormat::RGBA32F ), 33554432ull );
@@ -103,32 +101,6 @@ TEST( ImageFormatSize, LargeVolumesDoNotWrap )
 {
     EXPECT_EQ( CalculateImageSize( 2048u, 2048u, 2048u, ImageFormat::RGBA8F ), 34359738368ull );
     EXPECT_EQ( CalculateImageSize( 65536u, 65536u, ImageFormat::RGBA8F ), 17179869184ull );
-}
-
-// ── The per-SceneRenderer cost the format change buys (CLD-34) ────────────────────────────────────
-//
-// Three full-resolution targets (scatter + two history) at 1920x1080, and the same at half resolution.
-// These are the figures quoted in the requirements; they are asserted here so a format or resolution
-// change moves a number in a test instead of a memory graph.
-
-TEST( ImageFormatSize, CloudTargetBudgetAtFullResolution )
-{
-    const uint64_t oneTarget = CalculateImageSize( 1920u, 1080u, ImageFormat::RGBA16F );
-    EXPECT_EQ( oneTarget, 16588800ull );
-    EXPECT_EQ( 3ull * oneTarget, 49766400ull ); // 47.46 MiB
-
-    // What RGBA32F would have cost for the same three targets: 94.92 MiB.
-    EXPECT_EQ( 3ull * CalculateImageSize( 1920u, 1080u, ImageFormat::RGBA32F ), 99532800ull );
-}
-
-TEST( ImageFormatSize, CloudTargetBudgetAtHalfResolution )
-{
-    const uint64_t oneTarget = CalculateImageSize( 960u, 540u, ImageFormat::RGBA16F );
-    EXPECT_EQ( oneTarget, 4147200ull );
-    EXPECT_EQ( 3ull * oneTarget, 12441600ull ); // 11.86 MiB
-
-    // Half resolution is a quarter of the pixels, so a quarter of the bytes.
-    EXPECT_EQ( 4ull * oneTarget, CalculateImageSize( 1920u, 1080u, ImageFormat::RGBA16F ) );
 }
 
 // ── Aspect selection (CLD-96c) ────────────────────────────────────────────────────────────────────

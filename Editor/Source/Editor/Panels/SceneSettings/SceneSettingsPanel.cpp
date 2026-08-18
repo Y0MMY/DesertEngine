@@ -118,7 +118,7 @@ namespace Desert::Editor
             Utils::ImGuiUtilities::Tooltip(
                  "Luminance that maps to pure white. At 1.0 the tonemapper is the identity and every "
                  "highlight above 1.0 clips to flat white; raise it to keep shading inside bright "
-                 "content (clouds, the sun's surroundings, emissive surfaces)." );
+                 "content (the sun's surroundings, emissive surfaces)." );
 
             ImGui::Spacing();
             ImGui::Checkbox( "Bloom", &s.EnableBloom );
@@ -134,14 +134,14 @@ namespace Desert::Editor
             ImGui::Checkbox( "Lens Flare", &s.EnableLensFlare );
             Utils::ImGuiUtilities::Tooltip(
                  "Ghosts, halo and anamorphic streak from the sun disc. Every feature is an image of "
-                 "what is actually bright on screen, so a sun behind cloud dims its own flare." );
+                 "what is actually bright on screen, so an occluded sun dims its own flare." );
 
             ImGui::BeginDisabled( !s.EnableLensFlare );
             ImGui::SliderFloat( "Flare Intensity", &s.LensFlareIntensity, 0.0f, 5.0f );
             ImGui::ColorEdit3( "Flare Tint", &s.LensFlareTint.x );
             ImGui::SliderFloat( "Flare Threshold", &s.LensFlareThreshold, 0.0f, 50.0f );
             Utils::ImGuiUtilities::Tooltip(
-                 "HDR luminance a pixel must exceed to flare. Keep it above the brightest cloud so only "
+                 "HDR luminance a pixel must exceed to flare. Keep it above the brightest sky so only "
                  "the sun qualifies." );
 
             ImGui::Spacing();
@@ -275,14 +275,14 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Deferred: static meshes only, directional light (WIP)." );
         }
 
-        // Shared wind — a scene-global environment force (not owned by the Skybox). Drives grass + cloud
+        // Shared wind — a scene-global environment force (not owned by the Skybox). Drives grass
         // drift now; hair/cloth later. Consumed via SceneRenderer::GetWind().
         if ( Utils::ImGuiUtilities::SectionHeader( "Wind" ) )
         {
             ImGui::SliderFloat( "Direction (deg)", &s.WindDirection, 0.0f, 360.0f );
             ImGui::SliderFloat( "Strength", &s.WindStrength, 0.0f, 1.0f );
             ImGui::SliderFloat( "Turbulence", &s.WindTurbulence, 0.0f, 3.0f );
-            ImGui::TextDisabled( "Shared: one direction moves grass AND clouds." );
+            ImGui::TextDisabled( "Shared: one direction moves every wind-driven renderer." );
         }
 
         // NOTE: the Time of Day section was removed on purpose — the sun's state is the directional

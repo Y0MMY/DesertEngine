@@ -5,8 +5,8 @@
 namespace Desert::Graphic
 {
     // Per-frame, evaluated state of the scene's SHARED wind (authored in SceneSettings::Wind*). This is the
-    // runtime form the renderers consume via SceneRenderer::GetWind(): grass/foliage today, clouds + hair +
-    // cloth next. Keeping it here (not on the Skybox) is the whole point — one wind moves the world.
+    // runtime form the renderers consume via SceneRenderer::GetWind(): grass/foliage today, hair + cloth
+    // next. Keeping it here (not on the Skybox) is the whole point — one wind moves the world.
     struct WindEnv
     {
         glm::vec2 Direction{ 1.0f, 0.0f }; // normalized heading on the ground (XZ) plane

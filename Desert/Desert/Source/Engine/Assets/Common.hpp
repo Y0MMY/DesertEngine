@@ -29,7 +29,5 @@ namespace Desert::Assets
         Skeleton,
         Animation,
         Prefab,
-        // A baked hero-cloud volume (.dvol) — Assets::CloudVolumeAsset.
-        CloudVolume,
     };
 } // namespace Desert::Assets

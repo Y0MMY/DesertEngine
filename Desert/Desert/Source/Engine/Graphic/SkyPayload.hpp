@@ -10,7 +10,7 @@
 namespace Desert::Graphic
 {
     // THE sky parameter block, byte for byte. One layout serves three consumers: the sky graphics pass, the
-    // IBL bake compute dispatch, and (through the same buffer) the volumetric cloud compute pass.
+    // IBL bake compute dispatch.
     //
     // The GLSL side of this layout is `SkyPacked` in Editor/Resources/Shaders/Common/Atmosphere.glslh, and
     // no shader reads a field of it directly — they call the unpack helpers there. That is the point: the
@@ -41,7 +41,7 @@ namespace Desert::Graphic
         // ---- Physical atmosphere medium (SkyModel::PhysicalAtmosphere). Coefficients are PER
         // KILOMETRE (the authored unit), altitudes and scale heights in kilometres; the one world-unit
         // quantity (the planet radius) is converted to km once, inside the shader — the same rule the
-        // cloud payload states at CloudPayload.hpp. ----
+        // ----
         glm::vec4 MediumRayleigh;      // 112  rgb = Rayleigh scattering /km, w = Rayleigh scale height (km)
         glm::vec4 MediumMie;           // 128  rgb = Mie scattering /km,      w = Mie scale height (km)
         glm::vec4 MediumMieAbsorption; // 144  rgb = Mie absorption /km,      w = Mie anisotropy g
@@ -95,7 +95,7 @@ namespace Desert::Graphic
     inline constexpr uint32_t kSkyMultiScatterLutOutputBinding  = 0; // SkyMultiScatterLut: the image it fills
     inline constexpr uint32_t kSkyViewLutOutputBinding          = 0; // SkyViewLut: the image it fills
     inline constexpr uint32_t kSkyAerialPerspectiveOutputBinding = 0; // SkyAerialPerspectiveLut: the volume
-    inline constexpr uint32_t kSkyDistantLightOutputBinding      = 0; // SkyDistantLight: the two texels
+    inline constexpr uint32_t kSkyDistantLightOutputBinding      = 0; // SkyDistantLight: the texel it fills
     // LUT INPUT bindings, shared by every compute consumer (SkyMultiScatterLut reads the transmittance
     // at 2; SkyViewLut and BakeProceduralSky read the transmittance at 2 and the multi-scatter at 3).
     inline constexpr uint32_t kSkyTransmittanceLutBinding = 2;
@@ -124,17 +124,13 @@ namespace Desert::Graphic
     inline constexpr uint32_t kAerialPerspectiveHeight = 32;
     inline constexpr uint32_t kAerialPerspectiveDepth  = 16;
 
-    // The distant sky light's extent, and the two texels it holds. ONE march of 64 directions, TWO
-    // reductions (Programs/Sky/SkyDistantLight.shader):
+    // The distant sky light's extent, and the texel it holds. ONE march of 64 directions reduced once
+    // (Programs/Sky/SkyDistantLight.shader):
     //   x = 0  the FULL-SPHERE mean — UE's Distant Sky Light, read by the height fog, which is lit from
-    //          every direction at once and has no ground term of its own;
-    //   x = 1  the SKY HALF, the mean over the 32 cells that look up — read by the volumetric clouds,
-    //          whose ambient already blends a sky radiance against a separate ground bounce and would
-    //          otherwise count the lit ground twice.
-    // The shaders index these by number, so the numbers live here and not in two shader comments.
-    inline constexpr uint32_t kDistantLightWidth       = 2;
+    //          every direction at once and has no ground term of its own.
+    // The shader indexes this by number, so the number lives here and not in a shader comment.
+    inline constexpr uint32_t kDistantLightWidth       = 1;
     inline constexpr int32_t  kDistantLightSphereTexel = 0;
-    inline constexpr int32_t  kDistantLightSkyTexel    = 1;
 
     // Push block of the SkyAerialPerspectiveLut pass — mirrored by `PushConstant SkyApPush` in
     // SkyAerialPerspectiveLut.shader. Everything here is per-VIEW and per-frame: the froxel grid is the

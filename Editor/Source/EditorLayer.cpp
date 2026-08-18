@@ -78,8 +78,6 @@
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/TextECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
-#include <Engine/ECS/System/CloudNoiseECSSystem.hpp>
-#include <Engine/ECS/System/VolumetricCloudsECSSystem.hpp>
 #include <Engine/ECS/System/HeightFogECSSystem.hpp>
 #include <Engine/ECS/System/TimeOfDayECSSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
@@ -656,8 +654,8 @@ namespace Desert::Editor
             RigBuilder::ProcessPending( *m_MainScene, *m_AssetManager );
 
         // Screenshot mode, SECOND HALF: the frame just rendered is the frame that gets written. The frame
-        // count is not decoration — the clouds accumulate over about ten frames, so an early shot is a
-        // picture of the dither rather than of the sky.
+        // count is not decoration — a temporally accumulating pass needs several frames to converge, so an
+        // early shot is a picture of the dither rather than of the scene.
         if ( auto& shot = ShotOptions::Get(); shot.Active() && !m_SceneLoadRequested && !StartupLoading() )
         {
             ++m_ShotFrame;
@@ -758,16 +756,9 @@ namespace Desert::Editor
         // BEFORE the collectors: it writes the atmosphere sun's transform, which the sky collector, the
         // light collector and the shadow path all read this same frame.
         scene.AddSystem<ECS::TimeOfDayECSSystem>();
-        // Owns the shared cloud noise volumes. Placed next to the other sequential system rather than
-        // inside the collector group below: it creates and destroys GPU images, so it must not run on a
-        // job thread, and putting it here keeps the collectors one uninterrupted parallel run.
-        scene.AddSystem<ECS::CloudNoiseECSSystem>();
         scene.AddSystem<ECS::SkyboxECSSystem>();
-        // Collects the cloud settings for the frame; it only reads the component, so it belongs with the
-        // other parallel-capable collectors rather than beside the noise system above.
-        scene.AddSystem<ECS::VolumetricCloudsECSSystem>();
-        // Same shape as the cloud collector: reads the fog component (and its entity's transform Y, the
-        // fog floor) and emits one command.
+        // A pure render-data collector: reads the fog component (and its entity's transform Y, the fog
+        // floor) and emits one command.
         scene.AddSystem<ECS::HeightFogECSSystem>();
         scene.AddSystem<ECS::TerrainECSSystem>();
         scene.AddSystem<ECS::PointLightECSSystem>();

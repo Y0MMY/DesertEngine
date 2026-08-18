@@ -135,7 +135,7 @@ namespace Desert::Core
         PROPERTY( DisplayName( "Gamma" ), Category( "Post Processing" ), Range( 1.0f, 3.0f ) )
         float Gamma          = 2.2f;
         // The luminance that tonemaps to pure white. 1.0 makes extended Reinhard the IDENTITY — which is
-        // what this pass used to hard-code, and why every HDR highlight (a lit cloud above all) clipped to
+        // what this pass used to hard-code, and why every HDR highlight clipped to
         // a flat white silhouette instead of keeping its shading.
         PROPERTY( DisplayName( "White Point" ), Category( "Post Processing" ), Range( 1.0f, 20.0f ) )
         float WhitePoint = 8.0f;
@@ -265,7 +265,7 @@ namespace Desert::Core
 
         // Wind — a SHARED environment force, deliberately scene-global (like Gravity), NOT owned by the
         // Skybox. It is the single source of truth for the wind that drives grass/foliage sway today and
-        // cloud drift, hair and cloth next. Consumers read it via SceneRenderer::GetWind() (renderers) so
+        // hair and cloth next. Consumers read it via SceneRenderer::GetWind() (renderers) so
         // one direction/strength moves everything coherently.
         PROPERTY( DisplayName( "Wind Direction" ), Category( "Wind" ), Range( 0.0f, 360.0f ) )
         float WindDirection  = 20.0f; // compass heading on the ground (XZ) plane, degrees

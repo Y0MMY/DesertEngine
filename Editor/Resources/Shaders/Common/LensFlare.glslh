@@ -118,7 +118,7 @@ float LensFlareHaloWeight( vec2 uv, vec2 sunUv, float radius, float aspect )
 //
 // A cylindrical element smears a point source along one axis. This is a GATHER along that axis, not a
 // drawn bar: tap k reads the source displaced along the axis, so the streak's brightness profile is the
-// source's own profile convolved with the axis — a bright sun gives a long streak, a sun behind cloud
+// source's own profile convolved with the axis — a bright sun gives a long streak, an occluded sun
 // gives a short weak one, for free.
 
 // Tap @p k of @p tapCount, in [-1,1] along the axis. Symmetric about the pixel, so the streak is centred.

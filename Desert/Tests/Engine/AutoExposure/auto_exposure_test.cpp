@@ -37,7 +37,7 @@ namespace
 TEST( AutoExposureWindowRule, ReachesTheBrightestLuminanceTheSkyCanWrite )
 {
     // THE assertion. The sky pass clamps its output at kSkyLuminanceClamp; a meter that cannot represent
-    // that value cannot tell the sun disc from a bright cloud, because both land in the top bin. If
+    // that value cannot tell the sun disc from a merely bright sky, because both land in the top bin. If
     // either number moves alone, this fails.
     EXPECT_TRUE( kWindow.Covers( kSkyLuminanceClamp ) )
          << "the meter's ceiling (2^" << kWindow.MaxLogLum << ") is below the sky's own luminance clamp ("
@@ -47,7 +47,7 @@ TEST( AutoExposureWindowRule, ReachesTheBrightestLuminanceTheSkyCanWrite )
 TEST( AutoExposureWindowRule, TheLegacyWindowCouldNotSeeTheSunDisc )
 {
     // The bug, stated as a fact rather than a memory: the old ceiling of 2 (luminance 4) was eight stops
-    // below what the sky writes, so a cloud at 4 and the sun at 1000 metered identically.
+    // below what the sky writes, so a highlight at 4 and the sun at 1000 metered identically.
     EXPECT_FALSE( kLegacyWindow.Covers( kSkyLuminanceClamp ) );
     EXPECT_EQ( AutoExposureBin( kLegacyWindow, 4.0f, kBins ),
                AutoExposureBin( kLegacyWindow, kSkyLuminanceClamp, kBins ) );

@@ -57,7 +57,7 @@ namespace
     }
 
     // A compute shader declaring one binding of every image kind the engine can reflect. This is the
-    // shape of the cloud noise-generation pass: a volume written as `image3D`, a volume sampled as
+    // shape of a noise-generation pass: a volume written as `image3D`, a volume sampled as
     // `sampler3D`, alongside the 2D and cube resources that already worked.
     const char* kEveryImageKind = R"(#version 450
 layout(binding = 0) uniform sampler2D   u_Weather;

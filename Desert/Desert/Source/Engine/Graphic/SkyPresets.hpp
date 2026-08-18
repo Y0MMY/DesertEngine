@@ -4,8 +4,8 @@
 
 namespace Desert::Graphic
 {
-    // Sky palettes: one constexpr table of VALUES, in this one file, in the same shape the cloud presets
-    // use (CloudPresets.hpp). Adding a preset is one enumerator on ECS::SkyPreset plus one row here.
+    // Sky palettes: one constexpr table of VALUES, in this one file. Adding a preset is one enumerator on
+    // ECS::SkyPreset plus one row here.
     //
     // SkyPresetValues carries EXACTLY the thirteen palette fields. Everything else on the component -
     // the time-of-day block, the environment-bake knobs, the planet radius and ActivePreset itself - is
@@ -91,7 +91,7 @@ namespace Desert::Graphic
                 .StarIntensity      = 0.0f,
            } },
          // A flat grey dome: the sun is a diffuse smear rather than a disk, so its angular size is widened
-         // and its glow nearly removed instead of pretending a cloud deck exists in the sky shader.
+         // and its glow nearly removed instead of pretending an overcast deck exists in the sky shader.
          { ECS::SkyPreset::OvercastGrey, "Overcast Grey",
            SkyPresetValues{
                 .SkyBrightness      = 0.75f,

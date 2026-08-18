@@ -218,16 +218,6 @@ Shader "DeferredLighting"
         	return shadow;
         }
 
-        // CLOUD SHADOWS ON THE WORLD. The sun-space map System::VolumetricCloudRenderer traced before the
-        // render graph, plus the frame it was traced in — see Common/CloudWorldShadowSample.glslh for why
-        // the centre and the sun travel with the image instead of being re-derived here.
-        Uniform(11) sampler2D u_CloudWorldShadowMap;
-        Uniform(12) CloudWorldShadowUB {
-        	vec4 u_CloudWorldShadowCentre; // xyz = the world point the map was traced around, w = extent
-        	vec4 u_CloudWorldShadowSun;    // xyz = TOWARD the sun (normalized), w = on-surface strength
-        };
-        #include <Common/CloudWorldShadowSample.glslh>
-
         // Heat ramp for the Light-Complexity debug view: 0 -> dark blue, up through cyan/green/yellow -> red.
         // Standard "jet"-style piecewise map so overlapping light volumes read as hotter pixels.
         vec3 HeatColor(float t)
@@ -300,11 +290,6 @@ Shader "DeferredLighting"
         	// Directional sun (energy-normalized PBR), occluded by the cascaded shadow map.
         	vec3  L        = normalize(-u_LightDir.xyz);
         	float shadow   = ShadowFactor(worldPos, N, L);
-        	// ...and by the cloud deck standing between this pixel and the sun (UE's
-        	// DeferredLightPixelShaders.usf:198-204, `Out *= lerp(1, T, CloudShadowOnSurfaceStrength)`).
-        	// Multiplied into the SAME factor the cascades produce, so the two occluders compose the way
-        	// two occluders should and the Shadow-Factor debug view shows both.
-        	shadow *= CloudWorldShadowSunFactor(worldPos);
         	vec3  radiance = u_LightColor.rgb * u_LightColor.a;
         	vec3  result   = CalculateDirectional(u_LightDir.xyz, radiance, view, N, F0, metallic, roughness, albedo)
         	               * shadow;

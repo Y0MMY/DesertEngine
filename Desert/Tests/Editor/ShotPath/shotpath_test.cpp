@@ -19,7 +19,7 @@ namespace
 
 // ── The relation the static-shot evidence rests on ───────────────────────────────────────────────
 //
-// Every PNG under Docs/Clouds/Shots was taken with --camera/--look and no path. A shot is not
+// Every shot in the repository so far was taken with --camera/--look and no path. A shot is not
 // bit-reproducible even from the same binary — the timestep is wall-clock, so the wind has advanced
 // by a different amount by frame 90 on every run, and that README measures the resulting noise — so
 // the POSE is the one thing that can be pinned, and it is the only thing standing between the old

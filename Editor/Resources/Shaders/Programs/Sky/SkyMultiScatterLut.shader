@@ -113,8 +113,8 @@ Shader "SkyMultiScatterLut"
                     vec3 extinction        = max(medium.Extinction, vec3(kExtinctionFloor));
 
                     float sunZenithHere = dot(zenith, sunDirection);
-                    // The planet blocks the sun analytically — the LUT knows nothing of clouds or
-                    // geometry, only of the sphere it sits on.
+                    // The planet blocks the sun analytically — the LUT knows nothing of geometry, only
+                    // of the sphere it sits on.
                     float planetShadow =
                          SkyIntersectsGround(radius, sunZenithHere, atm.BottomRadiusKm) ? 0.0f : 1.0f;
 

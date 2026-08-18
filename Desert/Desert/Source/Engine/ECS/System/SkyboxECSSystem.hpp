@@ -195,18 +195,15 @@ namespace Desert::ECS
             if ( !selection.Chosen )
                 return Rules::FallbackAtmosphereSunDirection();
 
-            // The chosen light's render effects travel WITH its direction: shafts and the cloud
-            // luminance scale are properties of the sun, and reading them from any other light would
-            // let an unmarked light in the corner of the scene tint the sky's own sun.
+            // The chosen light's render effects travel WITH its direction: the shafts are properties of
+            // the sun, and reading them from any other light would let an unmarked light in the corner
+            // of the scene tint the sky's own sun.
             const auto& light          = registry.get<ECS::DirectionLightComponent>( entities[*selection.Chosen] );
             m_SunFx.LightShaftBloom    = light.Data.LightShaftBloom;
             m_SunFx.BloomScale         = light.Data.BloomScale;
             m_SunFx.BloomThreshold     = light.Data.BloomThreshold;
             m_SunFx.BloomMaxBrightness = light.Data.BloomMaxBrightness;
             m_SunFx.BloomTint          = light.Data.BloomTint;
-            m_SunFx.CloudScatteredLuminanceScale = light.Data.CloudScatteredLuminanceScale;
-            m_SunFx.CastCloudShadows                  = light.Data.CastCloudShadows;
-            m_SunFx.CloudShadowOnSurfaceStrength      = light.Data.CloudShadowOnSurfaceStrength;
             m_SunFx.AffectedByAtmosphereTransmittance = light.Data.AffectedByAtmosphereTransmittance;
             m_SunFx.OuterSpaceIlluminance             = light.Data.Color * light.Data.Intensity;
 

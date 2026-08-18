@@ -8,8 +8,6 @@
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/AtmosphereEnv.hpp>
-#include <Engine/Graphic/Clouds/CloudLayerSet.hpp>
-#include <Engine/Graphic/Clouds/CloudVolumePlacement.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
 #include <Engine/Graphic/SunLightFx.hpp>
 #include <Engine/Graphic/WindEnv.hpp>
@@ -40,7 +38,6 @@
 #include "Systems/Scene/Deferred/SSRRenderer.hpp"
 #include "Systems/Scene/Deferred/GIResolveRenderer.hpp"
 #include "Systems/Scene/Particles/ParticleRenderer.hpp"
-#include "Systems/Scene/Clouds/VolumetricCloudRenderer.hpp"
 #include "Systems/Scene/Fog/HeightFogRenderer.hpp"
 
 #include <Engine/Core/SceneSettings.hpp>
@@ -135,33 +132,18 @@ namespace Desert::Graphic
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky,
                                const SunLightFx& fx );
 
-        // This frame's volumetric-cloud LAYERS (from the scene's VolumetricCloudsComponents, via the
-        // ECS, in altitude order), and the hero clouds the scene placed (from CloudVolumeComponent).
-        // A set with Count = 0 means the scene has no enabled cloud layer at all — said explicitly,
-        // because the renderer keeps its settings across frames and would otherwise keep marching a
-        // deleted one. The placements are passed every frame for the same reason: an empty list is the
-        // instruction to give the atlas tiles back, and a scene that lost its last hero cloud has to be
-        // able to say so.
-        void SetVolumetricClouds( const CloudLayerSet& layers, const CloudVolumePlacements& volumes );
-
         // This frame's exponential height fog (from ExponentialHeightFogComponent, via the ECS).
-        // `present` follows the cloud rule above; `fogHeightY` is the fog entity's transform Y — the fog
-        // floor, owned by the transform and never authored twice.
+        // `present` = false means the scene has no enabled fog component at all — said explicitly, because
+        // the renderer keeps its settings across frames and would otherwise keep evaluating a deleted one.
+        // `fogHeightY` is the fog entity's transform Y — the fog floor, owned by the transform and never
+        // authored twice.
         void SetHeightFog( bool present, const ECS::ExponentialHeightFogData& data, float fogHeightY );
 
         // The evaluated per-frame sky: sun direction and radiance, ambient above/below, night factor, the
-        // planet radius, and an OPAQUE handle to the packed sky-parameter buffer. This is the whole surface
-        // the volumetric cloud pass consumes — it never sees the sky's authoring representation, so a
-        // change to the palette cannot break it. Mirrors GetWind()/WindEnv.
+        // planet radius, and an OPAQUE handle to the packed sky-parameter buffer. Consumers never see the
+        // sky's authoring representation, so a change to the palette cannot break them. Mirrors
+        // GetWind()/WindEnv.
         const AtmosphereEnv& GetAtmosphere() const;
-
-        // CLOUD SHADOWS ON THE WORLD: this frame's sun-space cloud-shadow map and the frame it was traced
-        // in, for everything that shades an opaque surface with the directional light — the deferred
-        // lighting pass, the three forward PBR shaders, the terrain and the grass. Empty unless the
-        // atmosphere sun has Cast Cloud Shadows on, and empty is a transmittance of exactly 1 in every
-        // consumer's shader. Filled before the render graph records, which is what lets the terrain (which
-        // draws inside it) read this frame's map rather than last frame's.
-        const CloudWorldShadowInput& GetCloudWorldShadow() const;
 
         // How many SceneRenderers are alive right now. Every one of them pays for its own baked sky
         // environment, which is why the bake announces its cost with this number beside it.
@@ -178,7 +160,7 @@ namespace Desert::Graphic
         }
 
         // Scene-global SHARED wind (authored in SceneSettings, refreshed each BeginScene). Renderers that
-        // respond to wind (grass/foliage now; clouds/hair/cloth next) read it from here so one direction +
+        // respond to wind (grass/foliage now; hair/cloth next) read it from here so one direction +
         // strength animate the whole world coherently.
         const WindEnv& GetWind() const
         {
@@ -283,17 +265,12 @@ namespace Desert::Graphic
         // graph they land on the target BEFORE the composite and get painted over wherever geometry
         // exists (visible against sky, gone against the ground — the particle "top-down" bug).
         void ExecuteTransparency();
-        // Volumetric clouds: the weather-map and raymarch COMPUTE dispatches. Called between the
-        // deferred block and ExecuteTransparency() — the one point in the frame where the scene depth is
-        // finished in BOTH paths and no render pass is open (an in-frame dispatch inside one is
-        // illegal). The composite itself is a graph pass in Transparency and is replayed by
-        // ExecuteTransparency, ordered ahead of the particles by RenderPassOrder::FarField.
-        void ExecuteVolumetricClouds();
-        // Exponential height fog: the closed-form COMPUTE evaluation, called in the same slot as the
-        // clouds above (scene depth finished in both paths, no render pass open) and for the same
-        // reasons. Its apply is a graph pass in Transparency at RenderPassOrder::AtmosphericFog —
-        // BEFORE the clouds' FarField, so clouds and particles composite over the fogged scene. When
-        // Sky Phase 3 lands, this pass composes fog OVER the aerial perspective (UE's order).
+        // Exponential height fog: the closed-form COMPUTE evaluation. Called between the deferred block
+        // and ExecuteTransparency() — the one point in the frame where the scene depth is finished in
+        // BOTH paths and no render pass is open (an in-frame dispatch inside one is illegal). Its apply
+        // is a graph pass in Transparency at RenderPassOrder::AtmosphericFog, BELOW the particles, so
+        // they composite over the fogged scene. When Sky Phase 3 lands, this pass composes fog OVER the
+        // aerial perspective (UE's order).
         void ExecuteAtmosphericFog();
         // UI-phase passes (the Render2D canvas) drawn as a LOAD overlay AFTER the deferred lighting
         // composite — same reason as ExecuteTransparency/ExecuteDebugOverlay: recorded inside the graph

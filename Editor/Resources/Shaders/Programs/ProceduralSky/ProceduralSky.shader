@@ -27,9 +27,9 @@ Shader "ProceduralSky"
         Out(0) vec4 oColor;
 
         // The sky parameter block. A std430 STORAGE buffer rather than a uniform block, because the
-        // volumetric cloud pass evaluates the same sky from a compute shader and ComputePipeline has no
+        // atmosphere LUT passes evaluate the same sky from a compute shader and ComputePipeline has no
         // SetUniformBuffer — its binding surface is inputs, outputs, storage buffers and push constants.
-        // One buffer, one layout, three consumers.
+        // One buffer, one layout, every consumer.
         //
         // The binding is written explicitly as (1) and must stay equal to Graphic::kSkyPayloadBinding: the
         // graphics descriptor write uses the buffer's OWN binding number while a compute dispatch passes

@@ -85,8 +85,8 @@ namespace Desert::Graphic
         gbufferSpec.Attachments.Attachments.push_back(
              Core::Formats::ImageFormat::RGBA32F ); // GBufferEmissive (HDR self-illum)
         // DEPTH32F for the same reason as the forward target above — and it is this attachment the
-        // clouds and the height fog read back as a texture, so its precision is the precision of every
-        // distance they reconstruct.
+        // height fog reads back as a texture, so its precision is the precision of every distance it
+        // reconstructs.
         gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH32F );
         m_GBuffer = Graphic::Framebuffer::Create( gbufferSpec );
         m_GBuffer->Resize( width, height );
@@ -191,21 +191,9 @@ namespace Desert::Graphic
         if ( !SP_CAST( System::CopyRenderer, m_RenderSystems["SceneColorCopySystem"] )->Initialize() )
             LOG_WARN( "[SceneRenderer] Scene-color copy system unavailable (glass refraction off)." );
 
-        // Volumetric clouds: two compute stages issued outside the graph (ExecuteVolumetricClouds) and
-        // one composite pass in the Transparency phase. Registered ahead of the particles for reading
-        // order only — the composite states its own place in the phase with RenderPassOrder::FarField,
-        // so it does not depend on this line. Non-fatal: clouds must never take a scene down.
-        RegisterSystem<System::VolumetricCloudRenderer>( "VolumetricCloudSystem", this, m_TargetFramebuffer,
-                                                         m_RenderGraphBuilder );
-        if ( const auto cloudInit =
-                  SP_CAST( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
-                       ->Initialize();
-             !cloudInit )
-            LOG_WARN( "[SceneRenderer] Volumetric cloud system unavailable: {}", cloudInit.GetError() );
-
         // Atmosphere and fog: aerial perspective on opaque with exponential height fog over it — one
         // compute evaluation issued outside the graph (ExecuteAtmosphericFog) and one apply pass in the
-        // Transparency phase, self-ordered below the clouds' FarField by RenderPassOrder::AtmosphericFog.
+        // Transparency phase, self-ordered below the particles by RenderPassOrder::AtmosphericFog.
         // Non-fatal: neither must ever take a scene down.
         RegisterSystem<System::HeightFogRenderer>( "HeightFogSystem", this, m_TargetFramebuffer,
                                                    m_RenderGraphBuilder );
@@ -341,7 +329,7 @@ namespace Desert::Graphic
         m_SSRMaxDistance = sceneSettings.SSRMaxDistance;
 
         // Evaluate the scene-global SHARED wind once per frame so every wind-driven renderer (grass now;
-        // clouds/hair/cloth next) reads one coherent direction + strength via GetWind(). Direction is a
+        // hair/cloth next) reads one coherent direction + strength via GetWind(). Direction is a
         // compass heading (degrees) on the XZ plane; Time is monotonic seconds so the sway keeps animating.
         {
             const float       rad       = glm::radians( sceneSettings.WindDirection );
@@ -499,23 +487,6 @@ namespace Desert::Graphic
             UNIQUE_GET_AS( System::ParticleRenderer, m_RenderSystems["ParticleSystem"] )->SimulateInFrame();
         }
 
-        // CLOUD SHADOWS ON THE WORLD: the sun-space map the terrain, the lit meshes and the deferred
-        // lighting pass read. HERE, and not in the cloud stage far below, because every one of those
-        // consumers draws inside the render graph that records next or in the composite immediately after
-        // it — a map traced after them could only be read a frame late. It needs no scene depth, which is
-        // the only thing that forces the rest of the cloud pipeline to wait.
-        //
-        // It costs nothing at all unless a directional light has Cast Cloud Shadows on: the request is
-        // pushed every frame from the atmosphere sun's own fields, and the pass returns on a false.
-        {
-            DESERT_PROFILE_SCOPE( "Clouds: WorldShadow" );
-            const auto& clouds =
-                 UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] );
-            clouds->SetWorldShadowRequest( m_SunLightFx.CastCloudShadows,
-                                           m_SunLightFx.CloudShadowOnSurfaceStrength );
-            clouds->PrepareInFrame();
-        }
-
         {
             DESERT_PROFILE_SCOPE( "ExecuteRenderGraph" );
             ExecuteRenderGraph();
@@ -616,7 +587,7 @@ namespace Desert::Graphic
             UNIQUE_GET_AS( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
                  ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
                             GetPointLights(), GetSpotLights(), shadow, aoImage, giIntensity, m_EnableSSAO,
-                            static_cast<int>( m_GIMode ), giImage, GetCloudWorldShadow() );
+                            static_cast<int>( m_GIMode ), giImage );
 
             // Custom-shader (generic) meshes have no G-buffer variant — draw them forward OVER
             // the deferred composite (before the glass snapshot so glass refracts them too).
@@ -651,35 +622,25 @@ namespace Desert::Graphic
         }
 
         // The physical atmosphere's LUTs: the cached pair (transmittance + multi-scattering), the
-        // per-view Sky-View LUT and the per-view aerial-perspective volume. Same in-frame compute slot as
-        // the clouds below — outside any open render pass — and BEFORE both the atmospheric-fog pass,
-        // which samples the AP volume this very frame, and the cloud march, a future consumer of the
-        // multi-scattering LUT. The cached pair is almost always a fingerprint compare and an immediate
-        // return; nothing here runs at all for SkyModel::ArtisticGradient.
+        // per-view Sky-View LUT and the per-view aerial-perspective volume. In-frame compute, outside any
+        // open render pass, and BEFORE the atmospheric-fog pass, which samples the AP volume this very
+        // frame. The cached pair is almost always a fingerprint compare and an immediate return; nothing
+        // here runs at all for SkyModel::ArtisticGradient.
         {
             DESERT_PROFILE_SCOPE( "SkyAtmosphereLuts" );
             UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->ExecuteAtmosphereLuts();
         }
 
         // Atmosphere and fog: aerial perspective on opaque, with the closed-form height fog over it.
-        // HERE for the same reason as the clouds below — it reads the finished scene depth and must be
-        // dispatched outside an open render pass — and immediately after the LUT slot above, which just
-        // filled the AP volume it samples. Its apply is replayed by ExecuteTransparency at
-        // RenderPassOrder::AtmosphericFog, under the cloud composite, so the clouds are drawn OVER the
-        // fogged scene.
+        // HERE and not earlier — it reads the finished scene depth, which only exists after the graph in
+        // Forward and after the G-buffer depth copy in Deferred, and an in-frame compute dispatch has to
+        // be issued outside an open render pass. Both hold at exactly this point, and it follows the LUT
+        // slot above, which just filled the AP volume it samples. Its apply is replayed by
+        // ExecuteTransparency at RenderPassOrder::AtmosphericFog, under the particles, so they are drawn
+        // OVER the fogged scene.
         {
             DESERT_PROFILE_SCOPE( "AtmosphericFog" );
             ExecuteAtmosphericFog();
-        }
-
-        // Volumetric clouds: the weather-map and raymarch dispatches. HERE and not earlier — the march
-        // reads the scene depth, which only exists after the graph in Forward and after the G-buffer
-        // depth copy in Deferred, and an in-frame compute dispatch has to be issued outside an open
-        // render pass. Both hold at exactly this point. The composite draw follows in the Transparency
-        // phase below.
-        {
-            DESERT_PROFILE_SCOPE( "VolumetricClouds" );
-            ExecuteVolumetricClouds();
         }
 
         // Transparent billboards (GPU particles) over the finished opaque scene. Runs in BOTH paths here,
@@ -1141,19 +1102,6 @@ namespace Desert::Graphic
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems.at( "SkyboxSystem" ) )->GetAtmosphere();
     }
 
-    const CloudWorldShadowInput& SceneRenderer::GetCloudWorldShadow() const
-    {
-        // Looked up rather than `at`-ed, and the miss answers with an EMPTY input: the cloud system's
-        // registration is non-fatal (see Init), so a view whose cloud renderer failed to come up must
-        // still shade its meshes — and an empty input is a transmittance of exactly 1 in every consumer.
-        // Same shape as GetBackdropBlurImage, for the same reason.
-        static const CloudWorldShadowInput kNone;
-        const auto                         it = m_RenderSystems.find( "VolumetricCloudSystem" );
-        if ( it == m_RenderSystems.end() )
-            return kNone;
-        return UNIQUE_GET_AS( System::VolumetricCloudRenderer, it->second )->GetWorldShadow();
-    }
-
     const std::optional<Environment>& SceneRenderer::GetEnvironment()
     {
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->GetEnvironment();
@@ -1401,18 +1349,6 @@ namespace Desert::Graphic
 
         if ( currentFb )
             renderer.EndRenderPass();
-    }
-
-    void SceneRenderer::SetVolumetricClouds( const CloudLayerSet& layers, const CloudVolumePlacements& volumes )
-    {
-        UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
-             ->SetCloudSettings( layers, volumes );
-    }
-
-    void SceneRenderer::ExecuteVolumetricClouds()
-    {
-        UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
-             ->ExecuteInFrame();
     }
 
     void SceneRenderer::SetHeightFog( bool present, const ECS::ExponentialHeightFogData& data, float fogHeightY )

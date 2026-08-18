@@ -22,7 +22,6 @@ include "Tools/FbxMeshSplitter/"
 include "Tools/ProjectHub/"
 include "Tools/DShaderTool/"
 include "Tools/PakTool/"
-include "Tools/CloudVolumeBaker/"
 include "Tools/SceneMigrator/"
 group ""
 

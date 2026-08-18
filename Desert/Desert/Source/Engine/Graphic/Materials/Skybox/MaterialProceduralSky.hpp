@@ -19,7 +19,7 @@ namespace Desert::Graphic
     // view-ray reconstruction) and rebinds the sky parameter SSBO.
     //
     // The buffer is EXTERNALLY owned — SkyboxRenderer creates and fills it, because the same buffer also
-    // feeds the IBL bake's compute dispatch and, later, the volumetric cloud pass. The material only points
+    // feeds the IBL bake's compute dispatch. The material only points
     // the descriptor at it, the way MaterialParticleBillboard does with the particle buffer.
     class MaterialProceduralSky final : public Material
     {

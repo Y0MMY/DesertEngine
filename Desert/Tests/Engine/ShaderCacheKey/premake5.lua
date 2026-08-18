@@ -46,10 +46,9 @@ project(test_name)
         defines { define }
     end
 
-    -- The platform macro, the same three lines Tests/Engine/CloudMath carries. DESERT_DEBUG_BREAK falls
-    -- back to MSVC's __debugbreak() when none of the three is defined, so ANY engine header that reaches
-    -- DESERT_VERIFY fails to compile here without it — which is what including CloudPayload.hpp (for the
-    -- raymarch's specialization id) found.
+    -- The platform macro, the same three lines every other engine-linking test carries. DESERT_DEBUG_BREAK
+    -- falls back to MSVC's __debugbreak() when none of the three is defined, so ANY engine header that
+    -- reaches DESERT_VERIFY fails to compile here without it.
     filter "system:windows"
         defines { "DESERT_PLATFORM_WINDOWS" }
     filter "system:macosx"

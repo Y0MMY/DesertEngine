@@ -89,7 +89,7 @@ namespace Desert::Graphic
      *
      * The backend gives every volume a LINEAR / REPEAT sampler that does NOT follow the global Scene
      * Settings texture filter. Interpolating a noise volume is part of the algorithm, not a quality
-     * preference: with "Nearest" selected for textures, a trilinearly-sampled cloud volume would turn
+     * preference: with "Nearest" selected for textures, a trilinearly-sampled noise volume would turn
      * into visible voxels.
      */
     class Image3D : public Image, public DynamicResources

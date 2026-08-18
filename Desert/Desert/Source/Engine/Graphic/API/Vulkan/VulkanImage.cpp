@@ -29,7 +29,7 @@ namespace Desert::Graphic::API::Vulkan
             Global,
             // Always LINEAR with REPEAT addressing, whatever the user picked. For volumes whose
             // interpolation is part of the algorithm: with "Nearest" selected for texture quality, a
-            // trilinearly-sampled noise volume would render as visible voxels instead of clouds.
+            // trilinearly-sampled noise volume would render as visible voxels instead of a smooth field.
             AlwaysLinear
         };
 
@@ -707,7 +707,7 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError<bool>( allocResult.GetError() );
         m_Resource.Allocation = allocResult.GetValue();
 
-        // Name the VkImage as well as the VMA allocation, so a capture lists "CloudShapeNoise" rather
+        // Name the VkImage as well as the VMA allocation, so a capture lists "SkyTransmittanceLut" rather
         // than a nameless 128x128x128 volume.
         if ( !m_Specification.Tag.empty() )
             VKUtils::SetDebugUtilsObjectName( vkDevice, VK_OBJECT_TYPE_IMAGE, m_Specification.Tag,

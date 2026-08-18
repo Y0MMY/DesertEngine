@@ -2,7 +2,8 @@
 //
 // Until now the order of two passes inside one phase was whatever the containers handed back, and the
 // only way to find out was to look at the frame: that is why MeshRenderer::UpdateCascades() had to be
-// hoisted out of the graph entirely, and why "clouds under particles" could not be promised. The rules
+// hoisted out of the graph entirely, and why "the far field under the particles" could not be promised.
+// The rules
 // are pure functions of integers now (Engine/Graphic/RenderGraphSort.hpp) and everything below asserts
 // them directly.
 //
@@ -207,10 +208,10 @@ TEST( PassOrder, ExplicitPlacementOverrulesRegistrationOrder )
     // when its position is a visual requirement rather than an accident of the Init call order.
     const std::vector<Pass> passes = {
          { "Particles", RenderPhase::Transparency, RenderPassOrder::Default },
-         { "Clouds", RenderPhase::Transparency, RenderPassOrder::FarField },
+         { "Backdrop", RenderPhase::Transparency, RenderPassOrder::FarField },
     };
 
-    const std::vector<std::string> expected = { "Clouds", "Particles" };
+    const std::vector<std::string> expected = { "Backdrop", "Particles" };
     EXPECT_EQ( SortNames( passes, phaseOrder ), expected );
 }
 
@@ -228,38 +229,37 @@ TEST( PassOrder, NearFieldSortsAfterDefaultAndFarField )
     EXPECT_EQ( SortNames( passes, phaseOrder ), expected );
 }
 
-// CLD-21a, the case this task exists to make possible: the volumetric cloud composite and the particle
-// billboards share RenderPhase::Transparency, and the clouds are the far field. Sparks and smoke from an
-// emitter in front of the camera must sit OVER the cloudscape — the other way round is the same class of
-// mistake as the particle "top-down" bug.
-TEST( PassOrder, CloudsCompositeBeforeParticlesInTransparency )
+// The case this task exists to make possible: a far-field composite and the particle billboards share
+// RenderPhase::Transparency. Sparks and smoke from an emitter in front of the camera must sit OVER the
+// distant backdrop — the other way round is the same class of mistake as the particle "top-down" bug.
+TEST( PassOrder, FarFieldCompositesBeforeParticlesInTransparency )
 {
     const std::vector<RenderPhaseID> phaseOrder = OrderRenderPhases(
          { RenderPhase::Geometry, RenderPhase::Transparency }, EnginePhaseEdges(), BuiltinDeclarationOrder() );
 
-    // Registration order agrees with the intent (clouds first) ...
-    const std::vector<Pass> registeredCloudsFirst = {
-         { "CloudCompositePass", RenderPhase::Transparency, RenderPassOrder::FarField },
+    // Registration order agrees with the intent (the backdrop first) ...
+    const std::vector<Pass> registeredBackdropFirst = {
+         { "BackdropCompositePass", RenderPhase::Transparency, RenderPassOrder::FarField },
          { "ParticlePass", RenderPhase::Transparency, RenderPassOrder::Default },
     };
 
-    // ... and here it contradicts it. The clouds must still come first: the requirement is a property
+    // ... and here it contradicts it. The backdrop must still come first: the requirement is a property
     // of the passes, not of the order SceneRenderer::Init happens to register their systems in.
     const std::vector<Pass> registeredParticlesFirst = {
          { "ParticlePass", RenderPhase::Transparency, RenderPassOrder::Default },
-         { "CloudCompositePass", RenderPhase::Transparency, RenderPassOrder::FarField },
+         { "BackdropCompositePass", RenderPhase::Transparency, RenderPassOrder::FarField },
     };
 
-    const std::vector<std::string> expected = { "CloudCompositePass", "ParticlePass" };
-    EXPECT_EQ( SortNames( registeredCloudsFirst, phaseOrder ), expected );
+    const std::vector<std::string> expected = { "BackdropCompositePass", "ParticlePass" };
+    EXPECT_EQ( SortNames( registeredBackdropFirst, phaseOrder ), expected );
     EXPECT_EQ( SortNames( registeredParticlesFirst, phaseOrder ), expected );
 }
 
 // The height-fog apply is the FLOOR of the Transparency phase: it modifies the opaque scene itself, so
-// everything the phase composites over that scene — the cloud far field and every particle — must land
-// on top of it. Two constants that must agree (AtmosphericFog below FarField below Default); each is
+// everything the phase composites over that scene — the far field and every particle — must land on top
+// of it. Two constants that must agree (AtmosphericFog below FarField below Default); each is
 // individually plausible, which is exactly why the agreement is asserted rather than assumed.
-TEST( PassOrder, HeightFogAppliesUnderTheCloudsAndTheParticles )
+TEST( PassOrder, HeightFogAppliesUnderTheFarFieldAndTheParticles )
 {
     const std::vector<RenderPhaseID> phaseOrder = OrderRenderPhases(
          { RenderPhase::Geometry, RenderPhase::Transparency }, EnginePhaseEdges(), BuiltinDeclarationOrder() );
@@ -267,11 +267,11 @@ TEST( PassOrder, HeightFogAppliesUnderTheCloudsAndTheParticles )
     // Registered in the worst possible order — the fog last, after everything that must draw over it.
     const std::vector<Pass> passes = {
          { "ParticlePass", RenderPhase::Transparency, RenderPassOrder::Default },
-         { "CloudCompositePass", RenderPhase::Transparency, RenderPassOrder::FarField },
+         { "BackdropCompositePass", RenderPhase::Transparency, RenderPassOrder::FarField },
          { "HeightFogApply", RenderPhase::Transparency, RenderPassOrder::AtmosphericFog },
     };
 
-    const std::vector<std::string> expected = { "HeightFogApply", "CloudCompositePass", "ParticlePass" };
+    const std::vector<std::string> expected = { "HeightFogApply", "BackdropCompositePass", "ParticlePass" };
     EXPECT_EQ( SortNames( passes, phaseOrder ), expected );
 
     // Said as the relation itself, so a future pass inserted between them cannot quietly reorder these.
@@ -309,7 +309,7 @@ TEST( PassOrder, IsIdenticalWhenTheSameGraphIsBuiltTwice )
 
     const std::vector<Pass> passes = {
          { "Canvas", RenderPhase::UI, RenderPassOrder::Default },
-         { "Clouds", RenderPhase::Transparency, RenderPassOrder::FarField },
+         { "Backdrop", RenderPhase::Transparency, RenderPassOrder::FarField },
          { "Mesh", RenderPhase::Geometry, RenderPassOrder::Default },
          { "Particles", RenderPhase::Transparency, RenderPassOrder::Default },
          { "Terrain", RenderPhase::Geometry, RenderPassOrder::Default },

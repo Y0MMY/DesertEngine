@@ -35,7 +35,7 @@ namespace Desert::Core
         // function writes reads like the one a save would produce.
         //
         // What is deliberately NOT here: SkyboxHandle and Intensity stay under "Skybox" (they are the HDR
-        // path, which did not move), and the six Cloud* fields belong to VolumetricCloudsComponent - this
+        // path, which did not move) - this
         // function neither reads nor removes them.
         constexpr SkyFieldMapping kSkyFieldMappings[] = {
              { "Procedural", "Enabled", MappedKind::Bool },

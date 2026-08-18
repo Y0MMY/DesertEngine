@@ -91,7 +91,7 @@ namespace Desert::ECS::Rules
     }
 
     // THE ENGINE'S ONE NEGATION. TransformComponent::Translation on a directional light is the direction
-    // the light TRAVELS (sun -> scene); the atmosphere, the IBL bake and the cloud pass all want the
+    // the light TRAVELS (sun -> scene); the atmosphere and the IBL bake both want the
     // direction TOWARD the sun. Every one of them goes through here. Two negations is how a sky ends up
     // lit from below — which is precisely the bug the viewport's light gizmo shipped with.
     inline glm::vec3 AtmosphereSunDirection( const glm::vec3& lightTranslation )

@@ -1,6 +1,6 @@
 // The two things that decided whether a shader edit reaches the GPU — tested without one.
 //
-// Both are here because a real failure needed both to be understood. A cloud shader gained a binding
+// Both are here because a real failure needed both to be understood. A compute shader gained a binding
 // while the editor was running; the validation layer then reported, every frame:
 //
 //     VkDescriptorSetLayout from VkPipelineLayout has 8 total descriptors,
@@ -25,7 +25,6 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
-#include <Engine/Graphic/Clouds/CloudPayload.hpp>
 
 #include <Common/Core/Constants.hpp>
 
@@ -205,7 +204,7 @@ namespace
 TEST_F( ShaderRootFixture, TheKeyIsStableForUnchangedInput )
 {
     const std::string source = "#version 450\nvoid main() {}\n";
-    const auto        path   = ShaderPath( "Clouds/CloudRaymarch.shader" );
+    const auto        path   = ShaderPath( "Fog/HeightFog.shader" );
 
     EXPECT_EQ( ComputeShaderCacheKey( ShaderStage::Compute, source, path ),
                ComputeShaderCacheKey( ShaderStage::Compute, source, path ) );
@@ -213,7 +212,7 @@ TEST_F( ShaderRootFixture, TheKeyIsStableForUnchangedInput )
 
 TEST_F( ShaderRootFixture, EditingTheStageSourceMovesTheKey )
 {
-    const auto path = ShaderPath( "Clouds/CloudRaymarch.shader" );
+    const auto path = ShaderPath( "Fog/HeightFog.shader" );
 
     EXPECT_NE( ComputeShaderCacheKey( ShaderStage::Compute, "#version 450\nvoid main() {}\n", path ),
                ComputeShaderCacheKey( ShaderStage::Compute, "#version 450\nvoid main() { }\n", path ) );
@@ -222,7 +221,7 @@ TEST_F( ShaderRootFixture, EditingTheStageSourceMovesTheKey )
 TEST_F( ShaderRootFixture, TheStageIsPartOfTheKey )
 {
     const std::string source = "#version 450\nvoid main() {}\n";
-    const auto        path   = ShaderPath( "Clouds/CloudRaymarch.shader" );
+    const auto        path   = ShaderPath( "Fog/HeightFog.shader" );
 
     // Vertex and fragment SPIR-V from identical text are different binaries, and a key that ignored the
     // stage would serve one for the other.
@@ -237,7 +236,7 @@ TEST_F( ShaderRootFixture, EditingAnIncludedHeaderMovesTheKey )
     ScopedHeader header( "// v1\nconst float kScratch = 1.0f;\n" );
 
     const std::string source = "#version 450\n#include <Common/CacheKeyTestScratch.glslh>\nvoid main() {}\n";
-    const auto        path   = ShaderPath( "Clouds/CloudRaymarch.shader" );
+    const auto        path   = ShaderPath( "Fog/HeightFog.shader" );
 
     const uint64_t before = ComputeShaderCacheKey( ShaderStage::Compute, source, path );
 
@@ -254,7 +253,7 @@ TEST_F( ShaderRootFixture, EditingAnIncludedHeaderMovesTheKey )
 TEST_F( ShaderRootFixture, AnIncludeThatDoesNotResolveIsNotFatal )
 {
     const std::string source = "#version 450\n#include <Common/NoSuchHeaderAnywhere.glslh>\nvoid main() {}\n";
-    const auto        path   = ShaderPath( "Clouds/CloudRaymarch.shader" );
+    const auto        path   = ShaderPath( "Fog/HeightFog.shader" );
 
     EXPECT_TRUE( CollectShaderIncludes( source, path ).empty() );
     EXPECT_NO_THROW( (void)ComputeShaderCacheKey( ShaderStage::Compute, source, path ) );
@@ -262,9 +261,9 @@ TEST_F( ShaderRootFixture, AnIncludeThatDoesNotResolveIsNotFatal )
 
 // ---- The include closure ----------------------------------------------------------------------------
 
-TEST_F( ShaderRootFixture, TheClosureOfTheRaymarchReachesItsTransitiveHeaders )
+TEST_F( ShaderRootFixture, TheClosureOfTheFogPassListsEveryHeaderItNames )
 {
-    const auto path     = ShaderPath( "Clouds/CloudRaymarch.shader" );
+    const auto path     = ShaderPath( "Fog/HeightFog.shader" );
     const auto source   = StageSource( path, ShaderStage::Compute );
     const auto includes = CollectShaderIncludes( source, path );
 
@@ -276,19 +275,36 @@ TEST_F( ShaderRootFixture, TheClosureOfTheRaymarchReachesItsTransitiveHeaders )
         return false;
     };
 
-    // Named directly by the shader...
-    EXPECT_TRUE( contains( "CloudGeometry.glslh" ) );
-    EXPECT_TRUE( contains( "CloudParams.glslh" ) );
-    EXPECT_TRUE( contains( "CloudTemporal.glslh" ) );
-    EXPECT_TRUE( contains( "CloudDensityProcedural.glslh" ) );
-    // ...and this one only through CloudDensityProcedural.glslh, which is the transitive step that makes
-    // the walk worth having.
-    EXPECT_TRUE( contains( "CloudDensity.glslh" ) );
+    EXPECT_TRUE( contains( "HeightFog.glslh" ) );
+    EXPECT_TRUE( contains( "FogParams.glslh" ) );
+    EXPECT_TRUE( contains( "SkyMedium.glslh" ) );
+    EXPECT_TRUE( contains( "SkyScattering.glslh" ) );
+}
+
+TEST_F( ShaderRootFixture, TheClosureFollowsAHeaderThatIncludesAnother )
+{
+    // The TRANSITIVE step, which is what makes the walk worth having over a single grep of the stage
+    // source: NewShaderGraph names Common/GraphVertex.glslh, and only GraphVertex names
+    // Common/CameraUB.glslh. A key that stopped at depth one would not move when CameraUB was edited,
+    // and the machine holding the stale SPIR-V would render differently from the one that had none.
+    const auto path     = ShaderPath( "Graph/NewShaderGraph.shader" );
+    const auto includes = CollectShaderIncludes( StageSource( path, ShaderStage::Vertex ), path );
+
+    const auto contains = [&includes]( const char* name )
+    {
+        for ( const auto& include : includes )
+            if ( include.filename() == name )
+                return true;
+        return false;
+    };
+
+    EXPECT_TRUE( contains( "GraphVertex.glslh" ) );
+    EXPECT_TRUE( contains( "CameraUB.glslh" ) );
 }
 
 TEST_F( ShaderRootFixture, TheClosureListsEachFileOnce )
 {
-    const auto path     = ShaderPath( "Clouds/CloudRaymarch.shader" );
+    const auto path     = ShaderPath( "Fog/HeightFog.shader" );
     const auto includes = CollectShaderIncludes( StageSource( path, ShaderStage::Compute ), path );
 
     std::vector<std::string> seen;
@@ -303,145 +319,36 @@ TEST_F( ShaderRootFixture, TheClosureListsEachFileOnce )
 
 // ---- The descriptor count a pipeline layout and a bound set have to agree on ------------------------
 
-TEST_F( ShaderRootFixture, TheRaymarchDeclaresSixteenDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheFogEvaluationDeclaresFiveDescriptorsInSetZero )
 {
-    // The regression guard for the failure this test file exists for. The raymarch gained a second
-    // storage image (the composite's depth guide, binding 8) and went from eight descriptors to nine,
-    // then the cloud shadow map (binding 9) took it to ten, the authored Cloud Type axis added the
-    // profile map (10) and the profile table (11) for twelve, joining the physical atmosphere added its
-    // aerial-perspective volume (12) and its distant sky light (13) for fourteen, and the hero clouds of
-    // voxel phase 1b added their instance buffer (14) and their atlas (15) for sixteen; a pipeline built
-    // before any of those changes and a set allocated after it could not be bound together. Sixteen is
-    // not a magic number here — it is counted from the shader's own text by the engine's own
-    // reflection, so it moves when the shader does.
-    const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
+    // The regression guard for the failure this test file exists for: a pipeline built before a shader
+    // gained a binding and a set allocated after it cannot be bound together. Five is not a magic number
+    // — it is counted from the shader's own text by the engine's own reflection, so it moves when the
+    // shader does.
+    const auto bindings = ComputeSetZero( ShaderPath( "Fog/HeightFog.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 16u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 5u );
 
-    EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // scatter target
-    EXPECT_TRUE( HasBinding( bindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // sky params
-    EXPECT_TRUE( HasBinding( bindings, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // cloud params
-    EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // shape noise
-    EXPECT_TRUE( HasBinding( bindings, 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // detail noise
-    EXPECT_TRUE( HasBinding( bindings, 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // curl noise
-    EXPECT_TRUE( HasBinding( bindings, 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // weather map
-    EXPECT_TRUE( HasBinding( bindings, 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // scene depth
-    EXPECT_TRUE( HasBinding( bindings, 8, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // depth guide
-    EXPECT_TRUE( HasBinding( bindings, 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // cloud shadow map
-    EXPECT_TRUE( HasBinding( bindings, 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // profile map
-    EXPECT_TRUE( HasBinding( bindings, 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // profile table
-    EXPECT_TRUE( HasBinding( bindings, 12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // AP volume
-    EXPECT_TRUE( HasBinding( bindings, 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // distant sky light
-    EXPECT_TRUE( HasBinding( bindings, 14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // hero instances
-    EXPECT_TRUE( HasBinding( bindings, 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // hero atlas
+    EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // the fog it writes
+    EXPECT_TRUE( HasBinding( bindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // fog params
+    EXPECT_TRUE( HasBinding( bindings, 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // scene depth
+    EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // AP volume
+    EXPECT_TRUE( HasBinding( bindings, 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // distant sky light
 }
 
-// ---- The specialization id the CPU and the module have to agree on ----------------------------------
-
-// A SPECIALIZATION ID IS A NUMBER TWO SIDES AGREE ON AND NOTHING CHECKS, exactly like a binding — with
-// one difference that makes it worse: getting a binding wrong is a validation error, while Vulkan
-// SILENTLY IGNORES a VkSpecializationMapEntry whose constantID the module does not declare. The pipeline
-// is created, the shader keeps its default, and the frame is correct and slow. A one-layer sky would
-// quietly go back to paying for the two-layer loop (measured: 11-18% of the frame) and the only symptom
-// would be a number in a report nobody is running.
-//
-// So read it out of the COMPILED MODULE, which is what the driver will read. `OpDecorate <target>
-// SpecId <n>` is opcode 71 with decoration 1; walking the instruction stream for it needs no reflection
-// library and cannot be fooled by the source text having the token in a comment.
-TEST_F( ShaderRootFixture, TheRaymarchDeclaresTheLayerCountSpecializationIdTheEngineSupplies )
+TEST_F( ShaderRootFixture, TheDistantSkyLightDeclaresFourDescriptorsInSetZero )
 {
-    const auto path  = ShaderPath( "Clouds/CloudRaymarch.shader" );
-    const auto spirv = CompileStage( StageSource( path, ShaderStage::Compute ), path, shaderc_compute_shader );
-    ASSERT_FALSE( spirv.empty() );
-    ASSERT_GT( spirv.size(), 5u );
-
-    constexpr uint32_t kOpDecorate       = 71u;
-    constexpr uint32_t kDecorationSpecId = 1u;
-
-    std::vector<uint32_t> declaredIds;
-    for ( std::size_t word = 5; word < spirv.size(); )
-    {
-        const uint32_t count  = spirv[word] >> 16;
-        const uint32_t opcode = spirv[word] & 0xFFFFu;
-        ASSERT_GT( count, 0u ) << "malformed SPIR-V at word " << word;
-
-        if ( opcode == kOpDecorate && count >= 4 && spirv[word + 2] == kDecorationSpecId )
-            declaredIds.push_back( spirv[word + 3] );
-
-        word += count;
-    }
-
-    ASSERT_EQ( declaredIds.size(), 1u )
-         << "the raymarch declares " << declaredIds.size()
-         << " specialization constants; the engine supplies exactly one (the layer count) and a second "
-            "one nobody fills would compile against its default forever";
-    EXPECT_EQ( declaredIds.front(), Desert::Graphic::kCloudLayerCountConstantId );
-}
-
-TEST_F( ShaderRootFixture, TheShadowMapDeclaresItsOwnTenDescriptors )
-{
-    // It writes one storage image and reads the same density field the raymarch does, at the same
-    // binding numbers — one field, one set of bindings, so a mismatch between the two passes would have
-    // to be written twice to go unnoticed.
-    //
-    // TEN, including the curl noise at binding 5 that this pass never samples: the declaration comes
-    // from the density header it includes, and a declared sampler with no image bound is an invalid
-    // descriptor set rather than an unused one. That is precisely what this count is here to catch —
-    // and it is why the profile map and the profile table, and now the hero-cloud instance buffer (14)
-    // and atlas (15), which all arrived with the same header, are bound by the shadow dispatch as well
-    // as by the march. The shadow pass DOES read the last two: a hero cloud casts a cloud shadow when
-    // its component says so.
-    const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudShadowMap.shader" ) );
-
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 10u );
-    EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // the map it fills
-    EXPECT_TRUE( HasBinding( bindings, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // cloud params
-    EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // shape noise
-    EXPECT_TRUE( HasBinding( bindings, 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // detail noise
-    EXPECT_TRUE( HasBinding( bindings, 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // curl noise
-    EXPECT_TRUE( HasBinding( bindings, 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // weather map
-    EXPECT_TRUE( HasBinding( bindings, 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // profile map
-    EXPECT_TRUE( HasBinding( bindings, 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // profile table
-    EXPECT_TRUE( HasBinding( bindings, 14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // hero instances
-    EXPECT_TRUE( HasBinding( bindings, 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // hero atlas
-}
-
-// The seam's own promise, checked on the two passes that go through it: BOTH reach the composer, and
-// through it BOTH implementations. A pass that included only one of them would have a density field the
-// other pass does not share — which is how a hero cloud ends up casting no shadow, or casting one where
-// there is no cloud.
-TEST_F( ShaderRootFixture, BothDensityPassesReachTheUnionAndBothImplementationsBehindIt )
-{
-    for ( const char* shader : { "Clouds/CloudRaymarch.shader", "Clouds/CloudShadowMap.shader" } )
-    {
-        const auto path     = ShaderPath( shader );
-        const auto includes = CollectShaderIncludes( StageSource( path, ShaderStage::Compute ), path );
-
-        const auto contains = [&includes]( const char* name )
-        {
-            for ( const auto& include : includes )
-                if ( include.filename() == name )
-                    return true;
-            return false;
-        };
-
-        EXPECT_TRUE( contains( "CloudDensityCompose.glslh" ) ) << shader;
-        EXPECT_TRUE( contains( "CloudDensityProcedural.glslh" ) ) << shader;
-        EXPECT_TRUE( contains( "CloudDensityVoxel.glslh" ) ) << shader;
-        EXPECT_TRUE( contains( "CloudVolumeAtlas.glslh" ) ) << shader;
-        EXPECT_TRUE( contains( "CloudDensity.glslh" ) ) << shader;
-    }
-}
-
-TEST_F( ShaderRootFixture, TheTemporalResolveDeclaresItsFourDescriptors )
-{
-    const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudTemporalResolve.shader" ) );
+    // A second pass through the same reflection, and the one that would notice the sky's LUT chain
+    // gaining or losing an input: the fill reads the cached transmittance and multi-scatter pair and
+    // writes exactly one image.
+    const auto bindings = ComputeSetZero( ShaderPath( "Sky/SkyDistantLight.shader" ) );
 
     EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 4u );
-    EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // resolved output
-    EXPECT_TRUE( HasBinding( bindings, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // cloud params
-    EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // current frame
-    EXPECT_TRUE( HasBinding( bindings, 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // history
+
+    EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // the texel it fills
+    EXPECT_TRUE( HasBinding( bindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // sky params
+    EXPECT_TRUE( HasBinding( bindings, 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // transmittance LUT
+    EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // multi-scatter LUT
 }
 
 TEST_F( ShaderRootFixture, TheBindingsComeOutSortedAndCountedTheWayTheLayerCounts )
@@ -449,7 +356,7 @@ TEST_F( ShaderRootFixture, TheBindingsComeOutSortedAndCountedTheWayTheLayerCount
     // The layer reports "N total descriptors", which is the SUM of descriptorCount, not the number of
     // bindings. They agree here only because every binding this engine builds has a count of one — the
     // day that stops being true, this is where it is noticed.
-    const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
+    const auto bindings = ComputeSetZero( ShaderPath( "Fog/HeightFog.shader" ) );
 
     ASSERT_FALSE( bindings.empty() );
     for ( size_t i = 1; i < bindings.size(); ++i )

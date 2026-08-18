@@ -358,14 +358,25 @@ TEST( SceneSkyMigration, NonFiniteSunDiskRadiusIsRejected )
 }
 
 // ---------------------------------------------------------------------------------------------------
-// T8 - the cloud fields belong to another component. This function must not touch them either way.
+// WHAT A FILE FROM THE PAST MAY CARRY THAT THE ENGINE NO LONGER KNOWS.
+//
+// A .desce written by an older build holds keys for fields and components that have since been removed,
+// and a scene in the wild must still load. Both halves of the loader are index-driven rather than
+// file-driven — DeserializeReflected walks the TYPE's fields and looks each up in the file, and
+// EntitySerializer walks the component REGISTRY and looks each key up in the entity — so a key nobody
+// claims is simply never visited. It is not an error, it is not a warning, and it disappears the next
+// time the scene is saved, because a save writes only what the registry knows.
+//
+// The two tests below pin that at both levels, using the keys a real pre-split Sandbox file carries.
 // ---------------------------------------------------------------------------------------------------
-TEST( SceneSkyMigration, CloudFieldsAreNeitherReadNorRemoved )
+TEST( SceneSkyMigration, UnknownFieldsOfAKnownPayloadAreNeitherReadNorRemoved )
 {
     std::vector<EntityData> entities{ WithSkybox( "Sky", RealSandboxSkybox() ) };
 
     MigrateSkyV0ToV1( entities );
 
+    // Six keys of a feature the engine no longer has. The migration maps what it maps and leaves the
+    // rest of the payload byte for byte as it found it.
     const rfl::Generic::Object skybox = PayloadOf( entities[0], "Skybox" );
     EXPECT_TRUE( skybox.get( "EnableClouds" ).has_value() );
     EXPECT_TRUE( skybox.get( "CloudCoverage" ).has_value() );
@@ -374,7 +385,7 @@ TEST( SceneSkyMigration, CloudFieldsAreNeitherReadNorRemoved )
     EXPECT_TRUE( skybox.get( "CloudBrightness" ).has_value() );
     EXPECT_TRUE( skybox.get( "CloudWindSpeed" ).has_value() );
 
-    // ...and nothing cloud-shaped leaked into the sky payload.
+    // ...and none of them leaked into the payload the migration wrote.
     const rfl::Generic::Object sky = PayloadOf( entities[0], "SkyAtmosphere" );
     EXPECT_FALSE( sky.get( "EnableClouds" ).has_value() );
     EXPECT_FALSE( sky.get( "CloudCoverage" ).has_value() );
@@ -382,6 +393,28 @@ TEST( SceneSkyMigration, CloudFieldsAreNeitherReadNorRemoved )
     // The HDR path stays where it is, too.
     EXPECT_TRUE( skybox.get( "SkyboxHandle" ).has_value() );
     EXPECT_TRUE( skybox.get( "Intensity" ).has_value() );
+}
+
+TEST( SceneSkyMigration, AComponentBlockNoRegistryClaimsIsSkippedRatherThanRejected )
+{
+    // The COMPONENT level of the same rule, and the one that decides whether removing a component
+    // breaks every saved scene: a payload keyed by a component that no longer exists must survive the
+    // migration untouched and be deserialized by nobody.
+    std::vector<EntityData> entities{ WithSkybox( "Sky", RealSandboxSkybox() ) };
+    rfl::Generic::Object    orphan;
+    orphan["Enabled"]                                     = true;
+    orphan["Coverage"]                                    = 0.5;
+    entities[0].Components["ComponentThatNoLongerExists"] = rfl::Generic( orphan );
+
+    MigrateSkyV0ToV1( entities );
+
+    // Still there and still ignored: the migration iterates the keys it knows, so it neither reads nor
+    // removes this one, and no registered component will ever look it up.
+    ASSERT_TRUE( HasPayload( entities[0], "ComponentThatNoLongerExists" ) );
+    EXPECT_TRUE( PayloadOf( entities[0], "ComponentThatNoLongerExists" ).get( "Enabled" ).has_value() );
+
+    // And the entity it sits on migrates exactly as it would have without it.
+    EXPECT_TRUE( HasPayload( entities[0], "SkyAtmosphere" ) );
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -423,7 +456,8 @@ TEST( SceneSkyMigration, RoundTripThroughTheReflectedSerializers )
     EXPECT_EQ( reloaded.Enabled, skyComponent.Data.Enabled );
 
     // What a save writes for the Skybox component now: two fields, and none of the sky ones. The stale
-    // keys still sitting in the file are read by nobody and disappear on the next save.
+    // keys still sitting in the file are read by nobody and disappear on the next save — which is the
+    // whole disposal route for a removed field, and why no migration is owed for one.
     EXPECT_EQ( savedSkybox.size(), 2u );
     EXPECT_TRUE( savedSkybox.get( "SkyboxHandle" ).has_value() );
     EXPECT_TRUE( savedSkybox.get( "Intensity" ).has_value() );

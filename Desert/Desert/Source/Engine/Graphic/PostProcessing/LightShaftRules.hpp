@@ -37,7 +37,7 @@ namespace Desert::Graphic
 
         const glm::vec2 ndc( clip.x / clip.w, clip.y / clip.w );
 
-        // The inverse of the raymarch's own uv->ndc mapping (CloudRaymarch: ndc = (2u-1, 1-2v)), so the
+        // The inverse of the compute passes' own uv->ndc mapping (ndc = (2u-1, 1-2v)), so the
         // sun the shafts stream from is the sun the sky pass drew.
         const glm::vec2 uv( ndc.x * 0.5f + 0.5f, ( 1.0f - ndc.y ) * 0.5f );
 

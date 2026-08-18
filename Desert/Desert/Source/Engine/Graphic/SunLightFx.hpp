@@ -7,8 +7,7 @@ namespace Desert::Graphic
     // The atmosphere sun light's RENDER EFFECTS, in transport form — the evaluated slice of
     // ECS::DirectionalLightData that the renderer consumes beyond plain surface illumination. Travels
     // on the ProceduralSkyCommand next to the sun direction, because every field here is a property OF
-    // that sun: shafts without the sun that casts them are not a thing, and neither is a volumetric
-    // scattering scale with no volumetrics to scale.
+    // that sun: shafts without the sun that casts them are not a thing.
     //
     // Same closed-struct rule as AtmosphereEnv: values, never the authoring component.
     struct SunLightFx
@@ -20,22 +19,6 @@ namespace Desert::Graphic
         float     BloomThreshold     = 0.0f;
         float     BloomMaxBrightness = 100.0f;
         glm::vec3 BloomTint          = glm::vec3( 1.0f );
-
-        // UE's Cloud Scattered Luminance Scale: scales this light's contribution scattered in the cloud
-        // medium. Multiplies AtmosphereEnv::SunIrradiance, which the clouds alone consume.
-        glm::vec3 CloudScatteredLuminanceScale = glm::vec3( 1.0f );
-
-        // UE's "Cast Cloud Shadows" and "CloudShadowOnSurfaceStrength": whether the volumetric deck
-        // shadows the WORLD this sun lights, and how strongly. They travel here for the same reason the
-        // shaft fields do — both are properties OF the chosen atmosphere sun, and a cloud shadow cast by
-        // a light the sky is not driving would be a shadow with no sun behind it.
-        //
-        // FALSE HERE, and false on the component too: this struct is reset to its defaults whenever no
-        // directional light was chosen as the atmosphere sun, and the feature's default is off in both
-        // places for the same reason — UE ships bCastCloudShadows = 0, and a scene that never asked for
-        // cloud shadows must render exactly as it did before this field existed.
-        bool  CastCloudShadows             = false;
-        float CloudShadowOnSurfaceStrength = 1.0f;
 
         // The sun light's OWN illuminance before the atmosphere touches it — the authored Color times
         // Intensity of the directional light that was chosen as the atmosphere sun. UE calls this the

@@ -175,7 +175,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             // The binding list comes from the device-free reflection unit, so the shape a pipeline
             // layout and a descriptor set have to agree on is computed by code a test can run without
-            // Vulkan (Tests/Engine/ShaderCacheKey drives it over the real cloud shaders).
+            // Vulkan (Tests/Engine/ShaderCacheKey drives it over the real engine shaders).
             const auto bindings = ShaderReflection::BuildLayoutBindings( descriptorSet );
 
             if ( setIndex >= m_DescriptorSetLayouts.size() )

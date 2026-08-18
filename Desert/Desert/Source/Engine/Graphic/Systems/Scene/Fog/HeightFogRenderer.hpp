@@ -25,7 +25,7 @@ namespace Desert::Graphic::System
      * opaque (research doc section 1.6) — and it is why the two are one pass and not two: they share a
      * depth read, a full-screen dispatch and a composite, and only their order matters.
      *
-     * Two stages, both the volumetric-cloud subsystem's idioms one size smaller:
+     * Two stages:
      *
      *   S1  EVALUATE  compute, RGBA16F at the target's own size. Reconstructs each pixel's world
      *                 position from the scene depth (presented by ComputeImageBeginRead — the ONE path
@@ -34,12 +34,12 @@ namespace Desert::Graphic::System
      *                 volume at that pixel's distance, and composes `Fog over AP`. Premultiplied
      *                 inscattering in .rgb, transmittance in .a.
      *   S2  APPLY     a fullscreen quad registered in RenderPhase::Transparency at
-     *                 RenderPassOrder::AtmosphericFog — BEFORE the cloud composite's FarField, so the
-     *                 clouds and every particle land OVER the fogged scene rather than under it.
+     *                 RenderPassOrder::AtmosphericFog — below everything else the phase composites, so
+     *                 every particle lands OVER the fogged scene rather than under it.
      *
      * WHERE IT RUNS. S1 is an in-frame compute dispatch and must be issued OUTSIDE an open render pass,
      * after the scene depth is finished. SceneRenderer::ExecuteAtmosphericFog() calls ExecuteInFrame()
-     * between the deferred block and ExecuteTransparency() — the same point the clouds hold, and
+     * between the deferred block and ExecuteTransparency() —
      * immediately AFTER SkyboxRenderer::ExecuteAtmosphereLuts filled this frame's AP volume, so the
      * froxels a pixel reads were marched for the camera that pixel was drawn with.
      *
@@ -48,7 +48,7 @@ namespace Desert::Graphic::System
      * target, and the apply pass draws nothing: the frame is what it was before this system existed.
      * Either half alone is enough to run the pass, and the absent half composes as the exact arithmetic
      * identity, so a gradient scene's pixels are unchanged bit for bit. What Initialize does build
-     * regardless is the two pipelines and the 80-byte parameter buffer, the cloud renderer's arrangement
+     * regardless is the two pipelines and the 80-byte parameter buffer
      * exactly; the per-view RGBA16F target is the only real memory, and it is allocated lazily on the
      * first fogged frame with the failure latched.
      */

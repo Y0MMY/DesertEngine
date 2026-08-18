@@ -89,7 +89,7 @@ namespace Desert::Graphic::System
                                                                   kSkyPayloadBinding, /*persistent=*/false );
 
             // The physical atmosphere's LUT pipelines. Built up front (they are two small compute
-            // pipelines, the same price the clouds pay for five); the IMAGES stay lazy, so a scene on
+            // pipelines); the IMAGES stay lazy, so a scene on
             // the artistic gradient allocates nothing.
             const auto makeCompute = [shaderService = Runtime::ResourceRegistry::GetShaderService()](
                                           const char* name ) -> std::shared_ptr<ComputePipeline>
@@ -218,8 +218,7 @@ namespace Desert::Graphic::System
 
         m_MultiScatterLutPipeline->SetOutput( kSkyMultiScatterLutOutputBinding, m_MultiScatterLut.get(), 0 );
         m_MultiScatterLutPipeline->SetStorageBuffer( kSkyPayloadBinding, m_SkyParams.get() );
-        // Written a moment ago; both paths leave it sampleable, exactly as the cloud weather map is
-        // sampleable by the raymarch that follows it.
+        // Written a moment ago; both paths leave it sampleable by the dispatch that follows.
         m_MultiScatterLutPipeline->SetInput( kSkyTransmittanceLutBinding, m_TransmittanceLut.get() );
         if ( inFrame )
         {
@@ -357,11 +356,11 @@ namespace Desert::Graphic::System
         if ( m_DistantLight )
             return true;
 
-        // TWO TEXELS: (0,0) the full-sphere mean the height fog reads, (1,0) the sky half the cloud
-        // ambient reads — one march, two reductions, see Programs/Sky/SkyDistantLight.shader. RGBA32F
-        // rather than the RGBA16F every other LUT uses: at 32 bytes total the exact format is free, and
-        // these values are added to a fog colour at night radiances where a half's three decimal digits
-        // would quantise into visible steps as the sun sets.
+        // ONE TEXEL: (0,0) the full-sphere mean the height fog reads — one march, one reduction, see
+        // Programs/Sky/SkyDistantLight.shader. RGBA32F rather than the RGBA16F every other LUT uses: at
+        // 16 bytes total the exact format is free, and this value is added to a fog colour at night
+        // radiances where a half's three decimal digits would quantise into visible steps as the sun
+        // sets.
         const Core::Formats::Image2DSpecification distantSpec{
              .Tag        = "SkyDistantLight",
              .Width      = kDistantLightWidth,
@@ -377,15 +376,14 @@ namespace Desert::Graphic::System
         {
             LOG_ERROR( "[SkyAtmosphere] The distant sky light ({}x1 RGBA32F) could not be created; the "
                        "atmospheric fog in this view will fall back to its authored colour with no sky "
-                       "ambient, and the clouds to the artistic dome.",
+                       "ambient.",
                        kDistantLightWidth );
             m_DistantLightResourcesFailed = true;
             return false;
         }
 
         LOG_INFO( "[SkyAtmosphere] Distant sky light {}x1 RGBA32F allocated — {} directions marched at "
-                  "{} km every frame, reduced to the full-sphere mean (the fog's) and the sky half "
-                  "(the clouds').",
+                  "{} km every frame, reduced to the full-sphere mean the fog reads.",
                   kDistantLightWidth, 64, 6 );
         return true;
     }
@@ -527,19 +525,12 @@ namespace Desert::Graphic::System
         // The evaluated sky other renderers consume. It is rebuilt from this frame's numbers rather than
         // accumulated, so a frame in which the sky is switched off publishes Valid == false immediately.
         //
-        // The parameter buffer is part of the condition, not an afterthought: the published contract is
-        // "ParamsBuffer is null exactly when Valid is false", and a missing ProceduralSky shader leaves the
-        // buffer uncreated. Publishing Valid == true with no buffer would hand a consumer a null it was
-        // told could not happen.
+        // The parameter buffer is part of the condition, not an afterthought: a missing ProceduralSky
+        // shader leaves the buffer uncreated, and with no buffer the sky is not being evaluated on the GPU
+        // at all. Publishing Valid == true then would hand a consumer a sun no pass agrees with.
         if ( enabled && m_SkyParams )
         {
-            m_Atmosphere = EvaluateAtmosphere( m_Sky, m_SunDir, m_SkyParams.get() );
-
-            // The sun light's Cloud Scattered Luminance Scale (UE semantics): scales what the CLOUDS
-            // receive from this sun, and nothing else — SunIrradiance's only consumer is the cloud
-            // march (see AtmosphereEnv), which is what makes this a per-light volumetrics control
-            // rather than a second sun intensity.
-            m_Atmosphere.SunIrradiance *= fx.CloudScatteredLuminanceScale;
+            m_Atmosphere = EvaluateAtmosphere( m_Sky, m_SunDir );
 
             // UE's PrepareSunLightProxy, scoped to the model by the teamlead's decision (research doc
             // section 5, Q3): in PhysicalAtmosphere the sun light's colour is multiplied by the

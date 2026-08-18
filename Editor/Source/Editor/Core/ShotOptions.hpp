@@ -10,20 +10,19 @@ namespace Desert::Editor
     // Command-line SCREENSHOT MODE: load a scene, point the camera, render a fixed number of frames, write
     // the viewport to a PNG and exit.
     //
-    // It exists because the alternative is worse. Every cloud defect this engine has shipped — a
-    // tonemapper that was the identity, a radiance five thousand times too large, a shadow map marching
-    // the far side of the planet — is one that a person looking at the screen catches in a minute, and the
-    // people looking at this screen are outnumbered by the parameters. This turns "does it look right" from
-    // a question someone has to be present to answer into one command.
+    // It exists because the alternative is worse. The most expensive rendering defects this engine has
+    // shipped — a tonemapper that was the identity, a radiance five thousand times too large, a shadow map
+    // marching the far side of the planet — are ones that a person looking at the screen catches in a
+    // minute, and the people looking at this screen are outnumbered by the parameters. This turns "does it
+    // look right" from a question someone has to be present to answer into one command.
     //
-    // The frame count matters and is not decoration: the volumetric clouds accumulate over roughly ten
-    // frames (Temporal Blend Factor 0.10), so a shot taken on frame one is a picture of the dither.
+    // The frame count matters and is not decoration: a temporally accumulating pass needs several frames to
+    // converge, so a shot taken on frame one is a picture of the dither.
     //
-    // MOTION, and why a still is not enough. Under a FIXED camera the cloud temporal resolve's
-    // reprojection is exact by construction — every pixel finds its own history at its own texel — so a
-    // still can never exercise the parts of that stage that exist for a moving one: the disocclusion
-    // fallback, the neighbourhood clamp, the Ultra tier's checkerboard, the second layer's shell-parallax
-    // error. `--camera-to` / `--look-to` interpolate the camera across the warm-up frames and
+    // MOTION, and why a still is not enough. Under a FIXED camera a temporal resolve's reprojection is
+    // exact by construction — every pixel finds its own history at its own texel — so a still can never
+    // exercise the parts of that stage that exist for a moving one: the disocclusion fallback, the
+    // neighbourhood clamp. `--camera-to` / `--look-to` interpolate the camera across the warm-up frames and
     // `--shot-sequence` writes the frames out instead of only the last, which is what turns those into
     // things that can be measured rather than predicted.
 
@@ -52,8 +51,8 @@ namespace Desert::Editor
         // in the last bit. This is not tidiness: a still shot places its camera at t = 0, and `--look`
         // must reach `SnapToDirection` bit for bit as it did before this path existed. A shot is not
         // bit-reproducible for other reasons — the timestep is wall-clock, so the wind has advanced by a
-        // different amount by frame 90 on every run (Docs/Clouds/Shots/README.md measures that noise) —
-        // and the pose is the one part of it that CAN be held exact, so it is.
+        // different amount by frame 90 on every run — and the pose is the one part of it that CAN be held
+        // exact, so it is.
         if ( t <= 0.0f )
             return from;
         if ( t >= 1.0f )

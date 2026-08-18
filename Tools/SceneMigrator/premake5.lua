@@ -1,6 +1,6 @@
 -- SceneMigrator — standalone CLI over the ENGINE's own scene migrations (Engine/Core/Serialize/
 -- SceneMigration.cpp). It compiles that one translation unit directly instead of linking the engine,
--- the same recipe CloudVolumeBaker and DShaderTool use: the migrations are pure functions over the
+-- the same recipe DShaderTool uses: the migrations are pure functions over the
 -- parsed tree, so they need no GPU, no asset manager and no scene graph — and the files this tool
 -- writes can never be produced by different code from the one the loader runs.
 -- dofile, not include: the dependency list was already include()'d by the engine projects.

@@ -12,7 +12,7 @@ namespace Desert::Graphic
     // THE RELATION. A histogram meter is only honest over the range it can represent. The procedural sky
     // writes the sun disc at up to kSkyLuminanceClamp (ProceduralSky.shader) and the meter's top bin has
     // to reach that, or every luminance above the ceiling collapses into one bin and the meter cannot
-    // tell the sun from a bright cloud. Before the physical sun existed nothing in a frame exceeded 4 and
+    // tell the sun from a merely bright sky. Before the physical sun existed nothing in a frame exceeded 4 and
     // a ceiling of 4 was fine; the sky pass then started writing 1000 and the two quietly disagreed by
     // eight stops. Neither side is wrong on its own, which is exactly why it needs an assertion rather
     // than a comment — the defect class this project has paid for most.

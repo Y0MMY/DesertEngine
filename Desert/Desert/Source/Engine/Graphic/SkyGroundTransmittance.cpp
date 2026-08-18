@@ -8,7 +8,7 @@ namespace Desert::Graphic
     {
         // Editor/Resources/Shaders/Common/SkyMedium.glslh, COMPILED AS C++ — the same text, the same
         // file, that SkyTransmittanceLut.shader compiles as GLSL. This is the arrangement the
-        // SkyMedium/CloudTemporal test references established, used here in the engine for the first
+        // SkyMedium test reference established, used here in the engine for the first
         // time and for the same reason: the sun light's colour and the transmittance LUT's texels are
         // one quantity, and a hand-written CPU copy of the march would agree with the GPU exactly until
         // the first tuning pass on either side.
@@ -47,7 +47,7 @@ namespace Desert::Graphic
              SkyMakeAtmParams( payload.MediumRayleigh, payload.MediumMie, payload.MediumMieAbsorption,
                                payload.MediumOzone, payload.MediumGround, payload.MediumTentPlanet );
 
-        // The world origin lies ON the planet surface with +Y up (CloudGeometry.glslh's convention), so
+        // The world origin lies ON the planet surface with +Y up (SkyScattering.glslh's convention), so
         // the ground's zenith is +Y and the sun's zenith cosine is the direction's y component.
         const float sunZenithCos = glm::clamp( towardSun.y, -1.0f, 1.0f );
 

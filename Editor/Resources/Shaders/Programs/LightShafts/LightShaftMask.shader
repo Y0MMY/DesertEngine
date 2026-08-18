@@ -5,10 +5,9 @@ Shader "LightShaftMask"
         // Light-shaft SOURCE MASK (UE's "Light Shaft Bloom", first half). Extracts the energy that is
         // allowed to streak: the HDR scene colour above a threshold, windowed by distance to the sun's
         // position on screen. Occlusion needs no separate depth pass here — the scene colour ALREADY
-        // encodes it: geometry in front of the sky is lit surface radiance (below the threshold), and
-        // clouds were composited with their real transmittance, so a thick cloud in front of the sun
-        // leaves nothing above the threshold to streak. That is exactly the "sun breaking through the
-        // gaps" look the reference shots are made of.
+        // encodes it: geometry in front of the sky is lit surface radiance (below the threshold), so an
+        // occluder in front of the sun leaves nothing above the threshold to streak. That is exactly the
+        // "sun breaking through the gaps" look the reference shots are made of.
         //
         // Runs at half resolution: shafts are a low-frequency effect and the radial blur that follows
         // reads this image dozens of times per pixel.
@@ -45,7 +44,7 @@ Shader "LightShaftMask"
             vec3  masked       = min(colour * contribution, vec3(u_MaxBrightness));
 
             // Radial window about the sun: energy far from the sun has no business in a sun streak —
-            // without this, every bright cloud rim on screen would smear toward the sun.
+            // without this, every bright rim on screen would smear toward the sun.
             float d      = distance(uv, u_SunUV);
             float window = 1.0f - smoothstep(u_WindowRadius * 0.5f, u_WindowRadius, d);
 

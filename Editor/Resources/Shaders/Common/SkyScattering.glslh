@@ -38,7 +38,7 @@ const float SKY_VIEW_LUT_WIDTH  = 192.0f;
 const float SKY_VIEW_LUT_HEIGHT = 104.0f;
 
 // ---- The camera in the planet's frame --------------------------------------------------------------
-// World convention (CloudGeometry.glslh): the world origin lies ON the planet surface with +Y up, so
+// World convention: the world origin lies ON the planet surface with +Y up, so
 // the planet centre is (0, -bottomRadius, 0). Both helpers below avoid ever FORMING a planet-scale
 // coordinate: r is recovered from r^2 - Rb^2 = |c|^2 + 2*Rb*c.y, which is small near the surface.
 
@@ -279,14 +279,12 @@ int SkyApSegmentSampleCount(float segmentLengthKm)
     return steps < SKY_AP_MAX_SEGMENT_SAMPLES ? steps : SKY_AP_MAX_SEGMENT_SAMPLES;
 }
 
-// ---- The distant sky light's two texels -------------------------------------------------------------
-// Which column of the 2x1 image holds which mean. Stated OUTSIDE the integrator block below, because
-// the passes that only READ the image (the height fog, the cloud raymarch) deliberately do not define
-// the LUT callback macros the integrator is guarded on — and they still have to address it.
-// Graphic::kDistantLightSphereTexel / kDistantLightSkyTexel state the same pair on the C++ side; the
-// value each one holds is defined by SkyDistantLight / SkyDistantSkyLight below.
+// ---- The distant sky light's texel -------------------------------------------------------------------
+// Which column of the 1x1 image holds the mean. Stated OUTSIDE the integrator block below, because the
+// pass that only READS the image (the height fog) deliberately does not define the LUT callback macros
+// the integrator is guarded on — and it still has to address it. Graphic::kDistantLightSphereTexel
+// states the same number on the C++ side; the value it holds is defined by SkyDistantLight below.
 const int SKY_DISTANT_LIGHT_SPHERE_TEXEL = 0; // the full sphere — the height fog's ambient
-const int SKY_DISTANT_LIGHT_SKY_TEXEL    = 1; // the upward half — the cloud ambient's sky term
 
 // ---- The single-scattering integrator (Hillaire section 4, with the multi-scattering LUT) ----------
 
@@ -357,8 +355,8 @@ SkyScatterResult SkyIntegrateStep(SkyAtmParams p, vec3 position, vec3 sunDir, ve
 // Per step, Frostbite's analytic form integrates source x transmittance exactly over the segment
 // (the arrangement the multi-scattering LUT already uses), with:
 //   * sun transmittance from the transmittance LUT via SKY_SCATTERING_SUN_TRANSMITTANCE;
-//   * the analytic planet shadow above, faded across the terminator (no geometry shadow map and no
-//     cloud shadow map enter the sky's own march, in this phase or the last);
+//   * the analytic planet shadow above, faded across the terminator (no geometry shadow map enters
+//     the sky's own march, in this phase or the last);
 //   * the multi-scattering LUT's Psi_ms via SKY_SCATTERING_MULTI_SCATTER, deliberately NOT attenuated
 //     by the planet shadow or the sun transmittance — Psi already represents light diffused through
 //     the whole sky, which is exactly why twilight is not pitch black.
@@ -478,12 +476,6 @@ const float SKY_DISTANT_LIGHT_ALTITUDE_KM = 6.0f;
 const int   SKY_DISTANT_LIGHT_DIRECTIONS  = 64; // the 8x8 area-uniform grid
 const int   SKY_DISTANT_LIGHT_SAMPLES     = 32; // per-direction march budget, the bake's
 
-// How many of those 64 cells look UP. The grid's zenith coordinate is (col + 0.5) / 8 and the mapping
-// is cos(zenith) = 1 - 2v, so columns 0..3 sit above the horizon and 4..7 below it — exactly half,
-// exactly, for any azimuth. The number is stated once here and pinned by a test rather than written as
-// "/ 2" at each site, because it is a property of the direction set and not an arithmetic convenience.
-const int SKY_DISTANT_LIGHT_SKY_DIRECTIONS = 32;
-
 // Direction @p index of the fixed set, 0 .. SKY_DISTANT_LIGHT_DIRECTIONS-1, in the frame whose +Y is
 // the zenith. Integer division and modulo agree between GLSL and C++ for non-negative operands, which
 // is what lets one workgroup thread take index gl_LocalInvocationIndex and the C++ reference take the
@@ -534,36 +526,6 @@ vec3 SkyDistantLight(SkyAtmParams p, vec3 sunDir, vec3 sunIlluminance)
                                             SKY_DISTANT_LIGHT_ALTITUDE_KM, SKY_DISTANT_LIGHT_SAMPLES);
     }
     return sum / float(SKY_DISTANT_LIGHT_DIRECTIONS);
-}
-
-// The SKY HALF of the same march: the mean radiance of the 32 cells that look UP.
-//
-// WHY A SECOND VALUE AND NOT THE ONE ABOVE. The full-sphere mean is a sphere mean — half of what it
-// averages is the lit GROUND, and at noon over a 0.3-albedo surface that half is eight times brighter
-// than the sky half and nearly achromatic. It is the right quantity for the height fog, which is lit
-// from every direction at once and has no separate ground term. It is the WRONG quantity for anything
-// that already accounts for the ground separately: the volumetric clouds' ambient blends a SKY radiance
-// against a GROUND-BOUNCE radiance by the sample's height in the layer (CloudAmbient), and handing it
-// the sphere mean as its sky would count the ground twice AND paint a shadowed cloud face the colour of
-// dirt instead of the colour of the sky it hangs against — measured here as an R/B of 0.98 against the
-// sky half's 0.27.
-//
-// One march, one direction set, one per-direction function, two reductions. The GPU pass runs both in
-// the same workgroup over the same 64 marched radiances, so the two values cannot be inconsistent with
-// each other; this sequential form is what the tests drive.
-vec3 SkyDistantSkyLight(SkyAtmParams p, vec3 sunDir, vec3 sunIlluminance)
-{
-    vec3 sum = vec3(0.0f, 0.0f, 0.0f);
-    for (int i = 0; i < SKY_DISTANT_LIGHT_DIRECTIONS; ++i)
-    {
-        vec3 dir = SkyDistantLightDirection(i);
-        if (dir.y > 0.0f)
-        {
-            sum = sum + SkyDistantLightRadiance(p, dir, sunDir, sunIlluminance,
-                                                SKY_DISTANT_LIGHT_ALTITUDE_KM, SKY_DISTANT_LIGHT_SAMPLES);
-        }
-    }
-    return sum / float(SKY_DISTANT_LIGHT_SKY_DIRECTIONS);
 }
 
 #endif // SKY_SCATTERING_SUN_TRANSMITTANCE

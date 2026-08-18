@@ -1,4 +1,4 @@
-// What the sky and cloud components actually EXPOSE, checked against the specification field by field.
+// What the sky, fog and light components actually EXPOSE, checked against the specification field by field.
 //
 // The Details panel, scene serialization, undo, duplicate, prefabs and the Lua bindings are all driven by
 // one table: the reflection metadata DesertHeaderTool generates from REFLECT()/PROPERTY(). A field that is
@@ -251,7 +251,7 @@ TEST( SkyAtmosphereReflection, SunAngularDiameterIsDegreesAndMatchesTheRadiusItR
 // The one planet radius in the engine. It is authored in KILOMETRES — 6360 is a number a reviewer can
 // check, 636000000 is not — so it must not carry Length, which means centimetres everywhere else in this
 // codebase. If it ever silently becomes a world-unit field, the default changes by a factor of 100000 and
-// the cloud shell ends up inside the ground.
+// the planet shell ends up inside the ground.
 TEST( SkyAtmosphereReflection, PlanetRadiusIsKilometresAndConvertsToWorldUnits )
 {
     const TypeInfo&  sky    = Type( "SkyAtmosphereData" );
@@ -326,201 +326,6 @@ TEST( SkyAtmosphereReflection, BothSunPairsExplainTheSplit )
         const std::string tip = Find( light, name )->Meta.Tooltip;
         EXPECT_NE( tip.find( "Sky Atmosphere" ), std::string::npos ) << name << ": " << tip;
     }
-}
-
-// ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 105 fields in eight groups
-// ---------------------------------------------------------------------------------------------------
-
-TEST( VolumetricCloudReflection, ExposesOneHundredAndFiveFieldsInTheSpecifiedGroups )
-{
-    const TypeInfo& clouds = Type( "VolumetricCloudData" );
-    EXPECT_EQ( clouds.Fields.size(), 105u );
-
-    EXPECT_EQ( CountInCategory( clouds, "Cloud Layer" ), 6u );
-    EXPECT_EQ( CountInCategory( clouds, "Weather" ), 11u ); // + Cloud Height Variance
-    // 17 since the Cloud Type axis became authored curves: three new profile gradients and the
-    // three form bends that make them shapes a trapezoid pair cannot reach.
-    EXPECT_EQ( CountInCategory( clouds, "Shape" ), 17u );
-    // 21 since High Frequency Fade Start / End became the single High Frequency Feature Size: the
-    // distance the near-field band survives to is derived from that size and the march's own step
-    // (CloudNyquistWeight), so two authored distances that could contradict each other became one.
-    EXPECT_EQ( CountInCategory( clouds, "Detail" ), 21u );
-    EXPECT_EQ( CountInCategory( clouds, "Lighting" ), 25u );
-    EXPECT_EQ( CountInCategory( clouds, "Animation" ), 8u );
-    // 16 since the shadow map landed: Cloud Shadow Map and Cloud Shadow Extent.
-    EXPECT_EQ( CountInCategory( clouds, "Quality" ), 16u );
-    EXPECT_EQ( CountInCategory( clouds, "Preset" ), 1u );
-}
-
-// A field with no Tooltip is a number nobody outside this repository can interpret; a Float/Int with no
-// Range silently becomes an unbounded DragFloat instead of a slider.
-TEST( VolumetricCloudReflection, EveryFieldIsAnnotatedWellEnoughToAuthor )
-{
-    const TypeInfo& clouds = Type( "VolumetricCloudData" );
-    for ( const auto& f : clouds.Fields )
-    {
-        EXPECT_FALSE( f.Meta.Tooltip.empty() ) << f.Name << " has no tooltip";
-        EXPECT_FALSE( f.Meta.DisplayName.empty() ) << f.Name << " has no display name";
-        if ( f.Type == FieldType::Float || f.Type == FieldType::Int )
-            EXPECT_TRUE( f.Meta.HasRange ) << f.Name << " has no Range, so it draws as a bare drag field";
-    }
-}
-
-// One world unit is one centimetre everywhere. A distance that forgets to say so drags in the wrong
-// magnitude and reads without a unit.
-TEST( VolumetricCloudReflection, EveryQuantityWithAUnitDeclaresIt )
-{
-    const TypeInfo& clouds = Type( "VolumetricCloudData" );
-    for ( const auto& f : clouds.Fields )
-    {
-        const bool quantity = EndsWith( f.Name, "Altitude" ) || EndsWith( f.Name, "Thickness" ) ||
-                              EndsWith( f.Name, "Distance" ) || EndsWith( f.Name, "Size" ) ||
-                              EndsWith( f.Name, "Speed" );
-        if ( quantity )
-            EXPECT_TRUE( f.Meta.IsLength || !f.Meta.Units.empty() ) << f.Name << " states no unit";
-    }
-}
-
-TEST( VolumetricCloudReflection, LayerGeometryIsInCentimetresWithMetreScaleDefaults )
-{
-    const TypeInfo& clouds = Type( "VolumetricCloudData" );
-
-    EXPECT_TRUE( Find( clouds, "LayerBottomAltitude" )->Meta.IsLength );
-    EXPECT_TRUE( Find( clouds, "LayerThickness" )->Meta.IsLength );
-
-    // 8000 m and 3647.3 m, in the engine's centimetres, and neither is a round number because neither is
-    // chosen. The thickness is the default weather tile's coverage cell divided by the aspect of a cumulus
-    // mediocris (Engine/Graphic/Clouds/CloudLayerAspect.hpp) and the tile is what the layer's mid altitude
-    // asks for (Clouds/CloudWeatherScale.hpp), so the two together admit one pair per base altitude.
-    // Solving that pair down at the 1500 m this component used to default to gives a 683.9 m layer, and
-    // 683.9 m is 1.99 search samples at the Low tier against CloudMarchScale's four. The thickness was
-    // 3500 m before any of it, which made the default cloud taller than it was wide.
-    //
-    // THE BASE WENT 1500 -> 5000 -> 8000 m, and the second move is the one this comment has to be honest
-    // about: it does NOT change the angular size of a cloud. The cell is tile / 8, the tile is derived from
-    // the mid altitude, so cell / altitude is scale-free and a cloud overhead subtends 37.9 degrees at both
-    // 5 km and 8 km. What the 8 km base buys is altitude, aerial perspective and less parallax under a
-    // moving camera. Docs/Clouds/DECK_SCALE_DECISION.md D7.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerBottomAltitude" ), 800000.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerThickness" ), 364730.0f );
-}
-
-TEST( VolumetricCloudReflection, TheMasterSwitchGatesEveryOtherRow )
-{
-    const TypeInfo& clouds = Type( "VolumetricCloudData" );
-    for ( const auto& f : clouds.Fields )
-    {
-        if ( f.Name == "Enabled" )
-        {
-            EXPECT_TRUE( f.Meta.EditCondition.empty() ) << "the master switch cannot gate itself";
-            continue;
-        }
-        // The Quality group is a performance tier: it stays editable while the layer is off, so a project
-        // can dial cost down without switching the clouds on first.
-        if ( f.Meta.Category == "Quality" || f.Meta.Category == "Preset" )
-            continue;
-        EXPECT_EQ( f.Meta.EditCondition, "Enabled" ) << f.Name << " is not gated by the master switch";
-    }
-}
-
-TEST( VolumetricCloudReflection, QualityAndPresetSelectorsAreEnums )
-{
-    const TypeInfo& clouds = Type( "VolumetricCloudData" );
-
-    const struct
-    {
-        const char* Field;
-        std::size_t Enumerators;
-    } cases[] = {
-         { "QualityLevel", 5u },
-         { "ResolutionScale", 3u },
-         { "TemporalMode", 2u },
-         { "Preset", 9u }, // Custom + eight presets, Summer Cumulus included
-    };
-
-    for ( const auto& c : cases )
-    {
-        const FieldInfo* f = Find( clouds, c.Field );
-        ASSERT_NE( f, nullptr ) << c.Field;
-        EXPECT_EQ( f->Type, FieldType::Enum ) << c.Field;
-        EXPECT_EQ( f->EnumValues.size(), c.Enumerators ) << c.Field;
-    }
-}
-
-// ---------------------------------------------------------------------------------------------------
-// CloudVolumeData — a placed hero cloud (Docs/Clouds/VOXEL_CLOUD_PATH.md phases 1 and 2). Seven fields
-// in one group, and the SIZE AND POSITION are deliberately absent: they are the entity's TransformComponent,
-// exactly as the fog height is, because the teamlead's Q2 answer makes the world extent a tile covers a
-// per-instance transform rather than a global constant. A field added here for extent or altitude would
-// be a second source of truth for a value the transform already owns.
-// ---------------------------------------------------------------------------------------------------
-
-TEST( CloudVolumeReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
-{
-    const std::vector<std::string> expected = {
-         "Enabled",           "Volume",          "DensityScale", "DetailTypeBias", "CastsCloudShadow",
-         "FadeStartDistance", "FadeEndDistance",
-    };
-
-    const TypeInfo& volume = Type( "CloudVolumeData" );
-    EXPECT_EQ( FieldNames( volume ), expected );
-    EXPECT_EQ( volume.Fields.size(), 7u );
-    EXPECT_EQ( CountInCategory( volume, "Cloud Volume" ), 7u );
-}
-
-TEST( CloudVolumeReflection, TheVolumeSlotNamesTheAssetTypeThatCanBeDroppedOnIt )
-{
-    // The AssetType string is what the Details panel's asset slot and the scene serializer's resolver
-    // both dispatch on. A wrong or missing one does not fail to compile: the slot silently falls through
-    // to the TEXTURE branch, which resolves the handle as a texture, reports "(missing)" for a perfectly
-    // good .dvol, and accepts a PNG.
-    const FieldInfo* slot = Find( Type( "CloudVolumeData" ), "Volume" );
-    ASSERT_NE( slot, nullptr );
-
-    EXPECT_EQ( slot->Type, FieldType::AssetHandle );
-    EXPECT_TRUE( slot->Meta.IsAsset );
-    EXPECT_EQ( slot->Meta.AssetType, "CloudVolumeAsset" );
-}
-
-TEST( CloudVolumeReflection, EveryFieldIsAnnotatedWellEnoughToAuthorAndGatedByTheMasterSwitch )
-{
-    const TypeInfo& volume = Type( "CloudVolumeData" );
-    for ( const auto& f : volume.Fields )
-    {
-        EXPECT_FALSE( f.Meta.Tooltip.empty() ) << f.Name << " has no tooltip";
-        EXPECT_FALSE( f.Meta.DisplayName.empty() ) << f.Name << " has no display name";
-        if ( f.Type == FieldType::Float || f.Type == FieldType::Int )
-            EXPECT_TRUE( f.Meta.HasRange ) << f.Name << " has no Range, so it draws as a bare drag field";
-
-        if ( f.Name == "Enabled" )
-            EXPECT_TRUE( f.Meta.EditCondition.empty() ) << "the master switch cannot gate itself";
-        else
-            EXPECT_EQ( f.Meta.EditCondition, "Enabled" ) << f.Name << " is not gated by the master switch";
-    }
-}
-
-TEST( CloudVolumeReflection, DefaultsPlaceANeutralInstanceThatChangesNothingUntilAVolumeIsBound )
-{
-    const TypeInfo& volume = Type( "CloudVolumeData" );
-
-    EXPECT_TRUE( DefaultOf<bool>( volume, "Enabled" ) );
-    // 1.0 and 0.0: the baked channels are used exactly as authored until somebody moves a slider, so
-    // placing the same .dvol twice gives two identical clouds rather than two different ones.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( volume, "DensityScale" ), 1.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( volume, "DetailTypeBias" ), 0.0f );
-    EXPECT_TRUE( DefaultOf<bool>( volume, "CastsCloudShadow" ) );
-
-    // 12 km -> 18 km, in centimetres: the measured crossover, where a kilometre-class baked cloud stops
-    // holding up against the deck beside it (the frames are in the phase-2 commit; the reasoning is on
-    // the fields). Pinned because it is a MEASUREMENT, so moving it should be somebody's decision and
-    // not a drive-by — and because the pair must stay ORDERED: an inverted pair is a hard cut, which is
-    // legal but is not what a default should silently be.
-    const float start = DefaultOf<float>( volume, "FadeStartDistance" );
-    const float end   = DefaultOf<float>( volume, "FadeEndDistance" );
-    EXPECT_FLOAT_EQ( start, 1200000.0f );
-    EXPECT_FLOAT_EQ( end, 1800000.0f );
-    EXPECT_LT( start, end );
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -628,27 +433,22 @@ TEST( SkyboxReflection, KeepsOnlyTheHdrCubemapPath )
 
     // The old path is deleted, not deprecated: a field left behind here is a second place a value can
     // live, and one of the two would never be tested again.
-    for ( const char* gone :
-          { "Procedural",    "SunIntensity", "SunDiskRadius",   "ZenithColor",     "HorizonColor",
-            "GroundColor",   "NightColor",   "SkyBrightness",   "HorizonFalloff",  "SunColor",
-            "SunGlow",       "SunsetColor",  "SunsetIntensity", "StarIntensity",   "EnableClouds",
-            "CloudCoverage", "CloudDensity", "CloudTiling",     "CloudBrightness", "CloudWindSpeed" } )
+    for ( const char* gone : { "Procedural", "SunIntensity", "SunDiskRadius", "ZenithColor", "HorizonColor",
+                               "GroundColor", "NightColor", "SkyBrightness", "HorizonFalloff", "SunColor",
+                               "SunGlow", "SunsetColor", "SunsetIntensity", "StarIntensity" } )
         EXPECT_EQ( Find( skybox, gone ), nullptr ) << gone << " still lives on SkyboxComponent";
 }
 
 TEST( DirectionalLightReflection, GainsTheAtmosphereSunFields )
 {
-    // The UE-parity slice added 2026-08-14: Cloud Scattered Luminance Scale (the clouds' per-light sun
-    // multiplier — UE reserves Volumetric Scattering Intensity for fog) and the Light Shafts category,
-    // UE's names and defaults verbatim. Consumers: SkyboxRenderer (cloud scale) and LightShaftRenderer
-    // via the SunLightFx slice of the ProceduralSkyCommand.
+    // The UE-parity slice: the atmosphere-sun marker, the transmittance coupling and the Light Shafts
+    // category, UE's names and defaults verbatim. Consumers: SkyboxECSSystem picks the sun, and
+    // LightShaftRenderer reads the shafts via the SunLightFx slice of the ProceduralSkyCommand.
     const TypeInfo& light = Type( "DirectionalLightData" );
     EXPECT_EQ( FieldNames( light ),
                ( std::vector<std::string>{ "Color", "Intensity", "AtmosphereSunLight", "AtmosphereSunLightIndex",
-                                           "CloudScatteredLuminanceScale", "CastCloudShadows",
-                                           "CloudShadowOnSurfaceStrength", "AffectedByAtmosphereTransmittance",
-                                           "LightShaftBloom", "BloomScale", "BloomThreshold", "BloomMaxBrightness",
-                                           "BloomTint" } ) );
+                                           "AffectedByAtmosphereTransmittance", "LightShaftBloom", "BloomScale",
+                                           "BloomThreshold", "BloomMaxBrightness", "BloomTint" } ) );
 
     // Sky Phase 4's coupling, UE's name and UE's default: ON. The light's colour is multiplied by the
     // atmosphere's transmittance toward the sun at ground level in SkyModel::PhysicalAtmosphere, so
@@ -659,24 +459,6 @@ TEST( DirectionalLightReflection, GainsTheAtmosphereSunFields )
     // is correct for the physical model (there is no such thing as an atmosphere that does not absorb)
     // and invisible on the artistic gradient, where the coupling does not exist at all.
     EXPECT_TRUE( DefaultOf<bool>( light, "AffectedByAtmosphereTransmittance" ) );
-
-    // CLOUD SHADOWS ON THE WORLD, UE's pair and UE's defaults: bCastCloudShadows = 0 and
-    // CloudShadowOnSurfaceStrength = 1. Off is what makes every scene authored before this field existed
-    // render exactly as it did — the shader's whole OFF path is `strength <= 0` and nothing else.
-    // Consumers: SceneRenderer -> VolumetricCloudRenderer (whether the map is traced at all) and, through
-    // Graphic::CloudWorldShadowInput, DeferredLighting.shader, the three forward PBR shaders, Terrain and
-    // Grass.
-    EXPECT_FALSE( DefaultOf<bool>( light, "CastCloudShadows" ) );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( light, "CloudShadowOnSurfaceStrength" ), 1.0f );
-
-    const FieldInfo* dose = Find( light, "CloudShadowOnSurfaceStrength" );
-    ASSERT_NE( dose, nullptr );
-    // Gated on the toggle above, so a strength slider never sits live over a feature that is off — and
-    // ranged 0..1 because it is a lerp weight toward the deck's real transmittance, not a multiplier.
-    EXPECT_EQ( dose->Meta.EditCondition, "CastCloudShadows" );
-    EXPECT_TRUE( dose->Meta.HasRange );
-    EXPECT_FLOAT_EQ( dose->Meta.RangeMin, 0.0f );
-    EXPECT_FLOAT_EQ( dose->Meta.RangeMax, 1.0f );
 
     // The Light Shafts group ships with UE's own defaults: OFF, and harmless when switched on.
     EXPECT_FALSE( DefaultOf<bool>( light, "LightShaftBloom" ) );

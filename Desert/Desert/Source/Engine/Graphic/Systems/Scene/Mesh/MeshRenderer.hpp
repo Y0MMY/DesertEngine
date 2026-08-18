@@ -5,7 +5,6 @@
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Materials/MaterialOverrides.hpp>
-#include <Engine/Graphic/Clouds/CloudWorldShadow.hpp>
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialSilhouette.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialShadow.hpp>
@@ -138,11 +137,6 @@ namespace Desert::Graphic::System
             ImageCube* IrradianceMap  = nullptr;
             ImageCube* PrefilteredMap = nullptr;
             Image2D*   BrdfLut        = nullptr;
-
-            // CLOUD SHADOWS ON THE WORLD: the sun-space map this frame traced, and the centre/sun/extent it
-            // was traced with. Copied by value because that is what it is — four floats, four floats and a
-            // borrowed image pointer the cloud renderer owns for the life of the view.
-            CloudWorldShadowInput CloudWorldShadow;
 
             // Writes the whole snapshot onto @p instance's material. One call, so a new piece of frame
             // state can never be applied at two of the three sites and forgotten at the third.

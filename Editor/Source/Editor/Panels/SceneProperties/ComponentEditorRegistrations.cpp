@@ -92,16 +92,9 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIDropdownComponent, Data, "
 // scene, and the fog height deliberately is not a field (it is the entity's transform Y).
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::ExponentialHeightFogComponent, Data,
                                      "ExponentialHeightFogData", "Exponential Height Fog" )
-// Cloud Volume is the plain reflected one-liner as well: a .dvol slot and three per-instance numbers.
-// Its size and position deliberately are not fields — they are the entity's transform, exactly as the
-// fog height is (teamlead Q2), so there is nothing here for a custom widget to draw.
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CloudVolumeComponent, Data, "CloudVolumeData", "Cloud Volume" )
 // Sky Atmosphere is a CUSTOM entry: the reflected fields PLUS the sky-colour ramp (which needs the scene's
 // sun elevation, and that is not a field) and the IBL bake button. See
 // ComponentWidgets/SkyAtmosphereComponent.cpp.
-// Volumetric Clouds is a CUSTOM entry too: the reflected fields PLUS the preset/quality selectors, which
-// have to write the fields around them, and the noise-seed change that has to reach the generation pass.
-// See ComponentWidgets/VolumetricCloudsComponent.cpp.
 
 namespace Desert::Editor
 {

@@ -23,7 +23,7 @@ namespace Desert::ECS
     // UNITS. Distances are world units (centimetres, Length). FogDensity and the height falloffs keep
     // UE's authored semantics — "per 1000 cm", so 0.02 and 0.2 mean in this engine exactly what they mean
     // in UE — and are converted to per-kilometre coefficients once, in Graphic::PackFogParams
-    // (Graphic/Fog/FogPayload.hpp), following the cloud payload's "kilometres once, inside" rule.
+    // (Graphic/Fog/FogPayload.hpp), following the "kilometres once, inside the shader" rule.
     //
     // DELIBERATELY NOT PORTED from UExponentialHeightFogComponent (research doc section 4, non-goals):
     // the Inscattering Texture cubemap group, FSSS, EndDistance, and the VOLUMETRIC FOG group — whose

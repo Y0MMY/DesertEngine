@@ -140,7 +140,7 @@ Shader "LensFlareFeatures"
 
             // --- Anamorphic streak -------------------------------------------------------------------
             // A gather along the authored axis: the streak's profile is the source's profile smeared,
-            // so the sun behind a cloud shortens and dims its own streak with no extra code.
+            // so an occluded sun shortens and dims its own streak with no extra code.
             if (u_Streak.x > 0.0f && u_Streak.y > 0.0f)
             {
                 vec2  axis     = vec2(u_Streak.z, u_Streak.w);

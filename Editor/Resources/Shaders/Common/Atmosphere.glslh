@@ -2,13 +2,13 @@
 // (day / sunrise-sunset / night) is a function of the SUN ELEVATION (sunDir.y). Output is LINEAR HDR
 // (post-process tonemap applies exposure/gamma).
 //
-// THIS IS THE ENGINE'S ONLY SKY EVALUATION. The screen sky pass, the IBL bake and the volumetric cloud
-// pass all include this file and call EvaluateSky; there is no second copy of the maths in GLSL or in C++,
-// so the sky you SEE and the light it CASTS cannot drift apart.
+// THIS IS THE ENGINE'S ONLY SKY EVALUATION. The screen sky pass and the IBL bake both include this file
+// and call EvaluateSky; there is no second copy of the maths in GLSL or in C++, so the sky you SEE and the
+// light it CASTS cannot drift apart.
 //
 // A pass gets its parameters through the SkyPacked loaders below: the LAYOUT lives here, in one place,
 // while the BINDING stays each pass's own business — which is what lets the graphics sky pass and a
-// compute cloud pass read the same buffer from different descriptor sets. Nothing in this file declares a
+// compute pass read the same buffer from different descriptor sets. Nothing in this file declares a
 // sampler, a derivative or any other fragment-only construct, so it compiles in a compute stage; the IBL
 // bake has been proving that on every platform CI builds for some time now.
 

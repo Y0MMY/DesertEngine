@@ -3,8 +3,8 @@ Shader "HeightFogApply"
     Fragment
     {
         // The height fog's APPLY: a fullscreen quad in RenderPhase::Transparency, drawn with a LOAD
-        // begin over the finished scene colour, at RenderPassOrder::AtmosphericFog — BEFORE the cloud
-        // composite's FarField, so clouds and particles land OVER the fogged scene rather than under it.
+        // begin over the finished scene colour, at RenderPassOrder::AtmosphericFog — below everything
+        // else the phase composites, so particles land OVER the fogged scene rather than under it.
         //
         // The pipeline supplies the blend: source factor One, destination factor SrcAlpha, i.e.
         //

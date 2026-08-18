@@ -335,41 +335,10 @@ namespace Desert::Graphic::API::Vulkan
         const VkPipelineCache pipelineCache =
              SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetPipelineCache();
 
-        // SPECIALIZATION: the values the driver substitutes for this shader's `layout(constant_id = n)`
-        // constants before it compiles the module for the device, so a branch on one is folded and the
-        // side it deletes stops existing. See ShaderSpecializationConstant for what that is worth.
-        //
-        // These three must outlive the vkCreateComputePipelines below — the whole chain
-        // (pSpecializationInfo -> pMapEntries / pData) is read DURING the call. They are locals of this
-        // scope and the call is in it, which is the arrangement the dangling-VkPushConstantRange bug above
-        // exists to warn about; nothing here escapes.
-        std::vector<VkSpecializationMapEntry> specEntries;
-        std::vector<int32_t>                  specData;
-        VkSpecializationInfo                  specInfo{};
-
-        specEntries.reserve( m_Specification.Specialization.size() );
-        specData.reserve( m_Specification.Specialization.size() );
-        for ( const ShaderSpecializationConstant& constant : m_Specification.Specialization )
-        {
-            specEntries.push_back( { .constantID = constant.Id,
-                                     .offset     = static_cast<uint32_t>( specData.size() * sizeof( int32_t ) ),
-                                     .size       = sizeof( int32_t ) } );
-            specData.push_back( constant.Value );
-        }
-
-        VkComputePipelineCreateInfo pipelineInfo{ .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-                                                  .stage  = vulkanShader->GetPipelineShaderStageCreateInfos()[0],
-                                                  .layout = m_ComputePipelineLayout };
-
-        if ( !specEntries.empty() )
-        {
-            specInfo = { .mapEntryCount = static_cast<uint32_t>( specEntries.size() ),
-                         .pMapEntries   = specEntries.data(),
-                         .dataSize      = specData.size() * sizeof( int32_t ),
-                         .pData         = specData.data() };
-
-            pipelineInfo.stage.pSpecializationInfo = &specInfo;
-        }
+        const VkComputePipelineCreateInfo pipelineInfo{ .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                                                        .stage =
+                                                             vulkanShader->GetPipelineShaderStageCreateInfos()[0],
+                                                        .layout = m_ComputePipelineLayout };
 
         VK_CHECK_RESULT(
              vkCreateComputePipelines( device, pipelineCache, 1, &pipelineInfo, nullptr, &m_ComputePipeline ) );

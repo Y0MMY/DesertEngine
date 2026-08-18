@@ -6,7 +6,7 @@ namespace Desert::Graphic
 {
     // Binds the one image the height-fog apply pass composites: the RGBA16F fog image the compute pass
     // wrote (premultiplied inscattering + transmittance). No parameters — the closed form already ran,
-    // and the blend state does the rest. The MaterialVolumetricClouds arrangement, one sampler smaller.
+    // and the blend state does the rest.
     class MaterialHeightFog final : public Material
     {
     public:

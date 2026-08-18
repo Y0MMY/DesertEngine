@@ -48,7 +48,7 @@ TEST( LightShaftRules, TheSunBehindTheCameraContributesNothing )
 TEST( LightShaftRules, ScreenUvIsYDown )
 {
     // A sun ABOVE the view axis must land in the UPPER half of the image, which in the engine's
-    // y-down screen UV is uv.y < 0.5 — the exact inverse of CloudRaymarch's uv->ndc mapping.
+    // y-down screen UV is uv.y < 0.5 — the exact inverse of the compute passes' uv->ndc mapping.
     const glm::mat4 vp  = MakeViewProjection( glm::vec3( 0.0f ), glm::vec3( 0.0f, 0.0f, -1.0f ) );
     const SunScreen sun = ComputeSunScreen( vp, glm::normalize( glm::vec3( 0.0f, 0.4f, -1.0f ) ) );
 

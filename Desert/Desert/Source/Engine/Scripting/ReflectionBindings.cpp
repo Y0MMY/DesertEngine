@@ -62,8 +62,6 @@ namespace Desert::Scripting
              MakeEntry<ECS::RigidBodyComponent>( "RigidBody", "RigidBodyData" ),
              MakeEntry<ECS::CharacterControllerComponent>( "CharacterController", "CharacterControllerData" ),
              MakeEntry<ECS::SkyAtmosphereComponent>( "SkyAtmosphere", "SkyAtmosphereData" ),
-             MakeEntry<ECS::VolumetricCloudsComponent>( "VolumetricClouds", "VolumetricCloudData" ),
-             MakeEntry<ECS::CloudVolumeComponent>( "CloudVolume", "CloudVolumeData" ),
              MakeEntry<ECS::ExponentialHeightFogComponent>( "ExponentialHeightFog", "ExponentialHeightFogData" ),
         };
 

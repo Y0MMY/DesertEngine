@@ -220,14 +220,14 @@ namespace Desert::Runtime
             }
 
             // Renderer-owned pipelines (the batched PBR/shadow set, every compute pipeline, the
-            // cloud composite) are built once at init and keep the code they were built with until
+            // fog apply) are built once at init and keep the code they were built with until
             // a restart. That is now merely STALE and no longer unsafe: the pipeline holds strong
             // references to the descriptor set layouts it was built from, so recompiling under it
             // cannot leave it bound to a layout that has been destroyed (see
             // VulkanDescriptorSetLayout.hpp). Said on every recompile, because "the shader did not
             // change anything" is otherwise indistinguishable from "the shader did not compile".
             LOG_INFO( "[HotReload] Shader '{}' recompiled. Graph pipelines pick it up next frame; "
-                      "renderer-owned pipelines (compute, batched PBR/shadow, cloud composite) keep "
+                      "renderer-owned pipelines (compute, batched PBR/shadow, fog apply) keep "
                       "the previous code until the editor is restarted.",
                       shader->GetName() );
 

@@ -13,7 +13,6 @@
 #include "Services/Icon/IconService.hpp"
 #include "Services/AnimatedImage/AnimatedImageService.hpp"
 #include "Services/Video/VideoService.hpp"
-#include "Services/Clouds/CloudVolumeService.hpp"
 
 namespace Desert::Runtime
 {
@@ -36,6 +35,5 @@ namespace Desert::Runtime
 
         static AnimatedImageService* GetAnimatedImageService();
         static VideoService*         GetVideoService();
-        static CloudVolumeService*   GetCloudVolumeService();
     };
 } // namespace Desert::Runtime

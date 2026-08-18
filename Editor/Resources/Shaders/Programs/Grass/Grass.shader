@@ -207,17 +207,6 @@ Shader "Grass"
         }
         u;
 
-        // CLOUD SHADOWS ON THE WORLD. The grass stands ON the terrain and is lit by the same sun, so it
-        // has to fall into the same shade: a field of fully lit blades over ground the deck has darkened
-        // reads as the grass glowing, which is worse than no cloud shadow at all.
-        Uniform(2) sampler2D u_CloudWorldShadowMap;
-        Uniform(4) CloudWorldShadowUB
-        {
-            vec4 u_CloudWorldShadowCentre; // xyz = the world point the map was traced around, w = extent
-            vec4 u_CloudWorldShadowSun;    // xyz = TOWARD the sun (normalized), w = on-surface strength
-        };
-        #include <Common/CloudWorldShadowSample.glslh>
-
         void main()
         {
             float t = v_UV.y; // height fraction along the blade
@@ -253,19 +242,16 @@ Shader "Grass"
             vec3  L   = normalize( -u.SunDir.xyz );
             vec3  sun = u.SunColor.rgb * max( u.SunColor.a, 0.0001 );
 
-            float cloudShadow = CloudWorldShadowSunFactor( v_WorldPos );
-
             float ndl  = max( dot( N, L ), 0.0 ) + 0.30 * max( dot( -N, L ), 0.0 );
             // The wrap term's 0.2 floor is the blade's own translucent bounce, not sunlight arriving
-            // straight from the sky, so the deck's occlusion multiplies the WHOLE wrapped term — the same
-            // place the terrain applies it, so the lawn and the blades darken together.
-            float wrap = ( ndl * 0.8 + 0.2 ) * cloudShadow;
+            // straight from the sky.
+            float wrap = ndl * 0.8 + 0.2;
 
             vec3 ambient = vec3( 0.17, 0.24, 0.15 );
             vec3 lit     = base * ( ambient + sun * wrap ) * ao;
 
             // SSS: sun behind the thin blade glows through toward the viewer (stronger at the tip).
-            float trans = pow( max( dot( V, -L ), 0.0 ), 3.0 ) * ( 0.3 + 0.7 * t ) * cloudShadow;
+            float trans = pow( max( dot( V, -L ), 0.0 ), 3.0 ) * ( 0.3 + 0.7 * t );
             lit += sun * trans * vec3( 0.22, 0.36, 0.10 ) * u.GrassTint.rgb;
 
             o_Color = vec4( lit, 1.0 );

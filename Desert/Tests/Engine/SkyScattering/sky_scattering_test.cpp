@@ -925,60 +925,18 @@ TEST( SkyDistantLight, IsPositiveAndBoundedByTheBrightestDirectionItSampled )
     EXPECT_GT( average.z, average.x );
 }
 
-TEST( SkyDistantLight, TheSkyHalfIsExactlyHalfTheGridAndAllOfItLooksUp )
+TEST( SkyDistantLight, TheTexelTheFillWritesIsTheOneTheEngineNames )
 {
-    // The split the cloud ambient depends on: the 8x8 grid's zenith coordinate is (col + 0.5) / 8 and
-    // cos(zenith) = 1 - 2v, so columns 0..3 are above the horizon and 4..7 below — 32 and 32, for every
-    // azimuth. If this ever stops holding, SkyDistantSkyLight's divisor is silently wrong and the cloud
-    // ambient is off by whatever the imbalance is.
-    int up = 0;
-    for ( int i = 0; i < Ref::SKY_DISTANT_LIGHT_DIRECTIONS; ++i )
-    {
-        if ( Ref::SkyDistantLightDirection( i ).y > 0.0f )
-            ++up;
-        // Nothing sits exactly on the horizon, so no cell is ambiguous about which half it belongs to.
-        EXPECT_GT( glm::abs( Ref::SkyDistantLightDirection( i ).y ), 1e-3f ) << "direction " << i;
-    }
-    EXPECT_EQ( up, Ref::SKY_DISTANT_LIGHT_SKY_DIRECTIONS );
-    EXPECT_EQ( up * 2, Ref::SKY_DISTANT_LIGHT_DIRECTIONS );
-
-    // The two texels the fill writes are distinct columns of the same image.
-    EXPECT_NE( Ref::SKY_DISTANT_LIGHT_SPHERE_TEXEL, Ref::SKY_DISTANT_LIGHT_SKY_TEXEL );
+    // The direction set is a full sphere and the reduction is a single mean, so the fill writes exactly
+    // one texel — and the column it writes has to be the column the height fog reads. Two constants,
+    // one in GLSL and one in C++, and this is the assertion that stops them drifting.
     EXPECT_EQ( Ref::SKY_DISTANT_LIGHT_SPHERE_TEXEL, Desert::Graphic::kDistantLightSphereTexel );
-    EXPECT_EQ( Ref::SKY_DISTANT_LIGHT_SKY_TEXEL, Desert::Graphic::kDistantLightSkyTexel );
-    EXPECT_LT( static_cast<uint32_t>( Ref::SKY_DISTANT_LIGHT_SKY_TEXEL ), Desert::Graphic::kDistantLightWidth );
-}
+    EXPECT_LT( static_cast<uint32_t>( Ref::SKY_DISTANT_LIGHT_SPHERE_TEXEL ), Desert::Graphic::kDistantLightWidth );
 
-TEST( SkyDistantLight, TheSkyHalfIsTheSkyAndTheSphereMeanIsNot )
-{
-    ResetLutCallbacks();
-
-    const Ref::SkyAtmParams p = EarthParams();
-
-    // A high sun over the shipped 0.3-albedo ground: the case the volumetric clouds are lit in, and the
-    // one where the two means are most obviously different quantities.
-    const glm::vec3 sunDir         = glm::normalize( glm::vec3( 0.307f, 0.767f, 0.563f ) );
-    const glm::vec3 sunIlluminance = glm::vec3( 22.0f, 21.12f, 19.36f );
-
-    const glm::vec3 sphere = Ref::SkyDistantLight( p, sunDir, sunIlluminance );
-    const glm::vec3 sky    = Ref::SkyDistantSkyLight( p, sunDir, sunIlluminance );
-
-    // Both are means of the same 64 marched radiances, so the sky half is bounded by what it averaged
-    // and the sphere mean lies between the two halves. Recovering the ground half from the identity
-    // sphere = (sky + ground) / 2 is what pins that the two reductions share one march.
-    const glm::vec3 ground = sphere * 2.0f - sky;
-    for ( int c = 0; c < 3; ++c )
-    {
-        EXPECT_GT( sky[c], 0.0f ) << "channel " << c;
-        EXPECT_GT( ground[c], sky[c] ) << "a lit ground is brighter than the sky over it, channel " << c;
-        EXPECT_LT( sky[c], sphere[c] ) << "channel " << c;
-    }
-
-    // THE PROPERTY THE CLOUDS NEED: the sky half is BLUE and the sphere mean is not. A shadowed cloud
-    // face lit by the sphere mean renders grey — the exact failure CLD-100 named when the ambient was
-    // taken from the wrong place the first time.
-    EXPECT_LT( sky.x / sky.z, 0.5f ) << "the sky half must stay strongly blue";
-    EXPECT_GT( sphere.x / sphere.z, 0.8f ) << "the sphere mean is washed toward neutral by the ground";
+    // Nothing sits exactly on the horizon, so no cell of the grid is ambiguous about which half of the
+    // sphere it belongs to — the property the area-uniform mapping is supposed to have.
+    for ( int i = 0; i < Ref::SKY_DISTANT_LIGHT_DIRECTIONS; ++i )
+        EXPECT_GT( glm::abs( Ref::SkyDistantLightDirection( i ).y ), 1e-3f ) << "direction " << i;
 }
 
 TEST( SkyDistantLight, FallsAsTheSunSets )

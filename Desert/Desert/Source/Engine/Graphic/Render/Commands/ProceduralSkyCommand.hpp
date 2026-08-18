@@ -11,7 +11,7 @@ namespace Desert::Graphic::Render
     // Carries the procedural-sky configuration from the ECS (SkyAtmosphereComponent + the atmosphere sun)
     // to the SkyboxRenderer. SunDir is the direction TOWARD the sun, already normalized — the engine's one
     // negation happened in ECS::Rules::AtmosphereSunDirection and must not happen again downstream.
-    // Fx is the chosen sun light's render-effect slice (light shafts, cloud luminance scale): it rides the
+    // Fx is the chosen sun light's render-effect slice (light shafts): it rides the
     // same command because those effects have no meaning apart from the sun that casts them.
     struct ProceduralSkyCommand : RenderCommand
     {

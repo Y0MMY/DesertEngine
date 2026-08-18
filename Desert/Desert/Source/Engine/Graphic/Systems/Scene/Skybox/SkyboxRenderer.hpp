@@ -34,8 +34,7 @@ namespace Desert::Graphic::System
         // @p sunDir is the direction TOWARD the sun, normalized. @p bakeNow is the editor's one-shot
         // request. Everything else the sky needs — palette, sun radiance, planet radius, bake knobs — is
         // in @p sky, which MakeSkySettings produced from the component.
-        // @p fx is the chosen sun light's evaluated slice: its Cloud Scattered Luminance Scale lands on
-        // the SunIrradiance the clouds consume, and its "Affected By Atmosphere Transmittance" decides
+        // @p fx is the chosen sun light's evaluated slice: its "Affected By Atmosphere Transmittance" decides
         // whether this frame's AtmosphereEnv publishes a ground transmittance or the identity — both
         // inside the same evaluation everything else reads.
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky,
@@ -53,7 +52,7 @@ namespace Desert::Graphic::System
         // aerial-perspective volume, 32x32x16, all RGBA16F, and the one-texel distant sky light. Call
         // once per
         // frame from the in-frame compute point (outside any open render pass — the slot
-        // ExecuteVolumetricClouds dispatches from). Does NOTHING unless SkyModel::PhysicalAtmosphere
+        // ExecuteAtmosphericFog dispatches from). Does NOTHING unless SkyModel::PhysicalAtmosphere
         // is active: gradient scenes never allocate the images and never dispatch, so the old sky pays
         // zero. When active, the cached pair re-runs only when the atmosphere parameter fingerprint
         // moves (a texel depends on the medium alone), while the Sky-View LUT is refilled EVERY frame —
@@ -82,7 +81,7 @@ namespace Desert::Graphic::System
             return std::nullopt;
         }
 
-        // The evaluated per-frame sky, for renderers that must agree with it (the volumetric clouds).
+        // The evaluated per-frame sky, for renderers that must agree with it (the atmospheric fog).
         // Valid == false when no enabled atmosphere is driving this frame.
         const AtmosphereEnv& GetAtmosphere() const
         {
@@ -99,7 +98,7 @@ namespace Desert::Graphic::System
         void UploadSkyParams();
 
         // Everything the two LUT passes read. When any of it moves, both LUTs are re-dispatched; while
-        // it holds still they are not touched at all — the WeatherFingerprint arrangement the cloud
+        // it holds still they are not touched at all — the fingerprint arrangement the sky
         // weather map uses, for the same reason. Deliberately NOT the whole SkySettings: the palette,
         // the sun and the bake knobs change constantly and none of them is a LUT input. MieAnisotropy
         // is also absent — it rides in the payload for the Phase 2 integrator, but no LUT texel depends

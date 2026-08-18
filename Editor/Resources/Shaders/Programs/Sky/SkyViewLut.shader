@@ -68,7 +68,7 @@ Shader "SkyViewLut"
         // far segments are then tens of kilometres long and the twilight terminator is still visibly
         // under-resolved even with the shadow faded (measured against 128- and 256-sample fills, 32
         // overshoots the sky either side of the sun by ~10%, 64 lands within a display level).
-        // 192x104x64 marches per frame is a fraction of one cloud raymarch.
+        // 192x104x64 marches per frame is a fraction of one full-screen post pass.
         const int kSkyViewSampleCount = 64;
 
         LocalSize(8, 8, 1);

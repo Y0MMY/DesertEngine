@@ -15,8 +15,6 @@
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/TextECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
-#include <Engine/ECS/System/CloudNoiseECSSystem.hpp>
-#include <Engine/ECS/System/VolumetricCloudsECSSystem.hpp>
 #include <Engine/ECS/System/HeightFogECSSystem.hpp>
 #include <Engine/ECS/System/TimeOfDayECSSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
@@ -87,16 +85,9 @@ namespace Desert::Player
         // BEFORE the collectors: it writes the atmosphere sun's transform, which the sky collector, the
         // light collector and the shadow path all read this same frame.
         m_Scene->AddSystem<ECS::TimeOfDayECSSystem>();
-        // Owns the shared cloud noise volumes. Placed next to the other sequential system rather than
-        // inside the collector group below: it creates and destroys GPU images, so it must not run on a
-        // job thread, and putting it here keeps the collectors one uninterrupted parallel run.
-        m_Scene->AddSystem<ECS::CloudNoiseECSSystem>();
         m_Scene->AddSystem<ECS::SkyboxECSSystem>();
-        // Collects the cloud settings for the frame; it only reads the component, so it belongs with the
-        // other parallel-capable collectors rather than beside the noise system above.
-        m_Scene->AddSystem<ECS::VolumetricCloudsECSSystem>();
-        // Same shape as the cloud collector: reads the fog component (and its entity's transform Y, the
-        // fog floor) and emits one command.
+        // A pure render-data collector: reads the fog component (and its entity's transform Y, the fog
+        // floor) and emits one command.
         m_Scene->AddSystem<ECS::HeightFogECSSystem>();
         m_Scene->AddSystem<ECS::TerrainECSSystem>();
         m_Scene->AddSystem<ECS::PointLightECSSystem>();

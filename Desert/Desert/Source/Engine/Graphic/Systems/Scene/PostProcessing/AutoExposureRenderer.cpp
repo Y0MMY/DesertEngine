@@ -14,7 +14,7 @@ namespace Desert::Graphic::System
 
         // What the meter can SEE, in log2 luminance. The ceiling is not a taste value: the procedural
         // sky writes the sun disc at up to its own kSkyLuminanceClamp of 1000 (ProceduralSky.shader), and
-        // a meter whose top bin means 4 cannot tell that disc from a merely bright cloud — it was eight
+        // a meter whose top bin means 4 cannot tell that disc from a merely bright sky — it was eight
         // stops blind at the top, and every pixel above 4 metered as though it were 4. AutoExposureRules
         // asserts this covers the sky's clamp, so the two cannot drift apart again.
         //
