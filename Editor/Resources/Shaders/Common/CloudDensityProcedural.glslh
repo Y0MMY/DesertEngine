@@ -316,39 +316,52 @@ float CloudDensityErode(vec3 worldPos, float heightFraction, float cellHeight, f
     // So each channel pair carries only what the local stride resolves, and past its limit it carries the
     // volume's MEAN instead of a sample of it (CLOUD_DETAIL_MEAN_LEVEL). Fading to the mean and not to
     // zero is what keeps this a filtering step rather than a fade: the expected cut is unchanged, so the
-    // far deck keeps its mass and its silhouette and loses only the instance nobody could reconstruct.
+    // far deck keeps its mass and loses only the instance nobody could reconstruct.
     // The pairs fade separately because they run at different periods — see the two constants.
-    float erosionCoarse = CloudNyquistWeight(u_DetailTileSize / CLOUD_DETAIL_EROSION_LOW_PER_TILE, stepLength);
-    float erosionFine   = CloudNyquistWeight(u_DetailTileSize / CLOUD_DETAIL_EROSION_HIGH_PER_TILE, stepLength);
+    //
+    // AND THE COARSE PAIR NO LONGER FADES AT ALL — IT CHANGES SCALE. Fading to the mean keeps the deck's
+    // MASS and throws away its SILHOUETTE, and a coverage island with no erosion on it is a 2-D field
+    // extruded between a flat base and a flat top: a box. That, and not the march, is what made the far
+    // sky a wall of cubes (CloudGeometry.glslh's CLOUD_WEATHER_CELLS_OVERHEAD note carries the
+    // ground-truth probe and the knock-out table). CloudErosionLodTile picks a COARSER tile for the same
+    // one fetch — the coarsest structure the local stride still resolves in full — so the erosion follows
+    // the stride out instead of switching off, and the silhouette survives to where the deck now ends
+    // (CloudAutoFadeEnd). The fine pair still fades to the mean, at its own period, exactly as before.
+    //
+    // BIT-IDENTICAL WHERE THE AUTHORED TILE IS ALREADY RESOLVABLE, which is every near sample and the
+    // whole of any scene whose deck ends before its detail does: there the max() inside
+    // CloudErosionLodTile returns u_DetailTileSize itself, so all three expressions below and the fetch
+    // coordinate further down are the text they were. The CloudMath suite asserts it rather than
+    // asserting that it "should" hold.
+    float lodTile       = CloudErosionLodTile(u_DetailTileSize, CLOUD_DETAIL_EROSION_LOW_PER_TILE, stepLength);
+    float erosionCoarse = CloudNyquistWeight(lodTile / CLOUD_DETAIL_EROSION_LOW_PER_TILE, stepLength);
+    float erosionFine   = CloudNyquistWeight(lodTile / CLOUD_DETAIL_EROSION_HIGH_PER_TILE, stepLength);
 
-    // The band's own gate, hoisted here because it decides — together with the erosion's — whether the
-    // curl fetch below is paid for at all. Past both limits a fine sample reads nothing beyond the four
-    // fetches the cheap composition already made (weather, the two profile tables and the base shape), so
-    // out there it costs exactly what a coarse sample costs. That is the part of this change that gives
-    // time back rather than spending it.
+    // The band's own gate, hoisted here because it decides whether the SECOND fetch below is paid for.
+    // Past its limit a fine sample makes one detail fetch and one curl fetch and nothing else beyond the
+    // four the cheap composition already made (weather, the two profile tables and the base shape).
     float bandWeight = CloudNyquistWeight(u_HighFreqFeatureSize, stepLength) * u_HighFreqStrength;
 
-    // Fully minified is the DEFAULT, and the fetches below overwrite it where they are resolvable. Written
-    // this way round so that the far-field path — the one a horizon frame is mostly made of — is the one
-    // with no branch to fall out of.
-    vec4 detail = vec4(CLOUD_DETAIL_MEAN_LEVEL, CLOUD_DETAIL_MEAN_LEVEL, CLOUD_DETAIL_MEAN_LEVEL,
-                       CLOUD_DETAIL_MEAN_LEVEL);
-    vec3 detailPos = vec3(0.0f, 0.0f, 0.0f);
+    // THE DETAIL FETCH IS UNCONDITIONAL, and it did not use to be: the far field skipped both it and the
+    // curl fetch once `erosionCoarse` reached zero, which is the two fetches per far sample that the LOD
+    // tile above now spends. It bought a deck with no silhouette, and the deck it bought them back for is
+    // a much shorter one — the layer now ends where its erosion does rather than at the planet's
+    // geometric horizon (CloudAutoFadeEnd), so there is far less far field left to pay for.
+    // Docs/Clouds/DECK_SCALE_DECISION.md D5 measured the two changes together and put the cost inside the
+    // baseline's own run-to-run spread; the fetch count is what to look at first if that is ever revisited.
+    //
+    // `erosionCoarse` is 1 by construction now (CloudErosionLodTile chooses the tile that makes it so)
+    // and is still READ rather than assumed, so that retuning the LOD rule cannot silently leave a mix
+    // weight behind. `erosionFine` is the one that still moves.
+    vec3 detailPos = CloudDetailWarpedPos(worldPos, heightFraction, cellHeight);
 
-    // Both fetches below look at the warped position, and neither should pay for the curl fetch alone.
-    // `erosionCoarse` gates the pair: it is the LOOSER of the two erosion weights (a coarser field stays
-    // resolvable longer), so it can only be zero where `erosionFine` already is.
-    if (erosionCoarse > 0.0f || bandWeight > 0.0f)
-        detailPos = CloudDetailWarpedPos(worldPos, heightFraction, cellHeight);
-
-    if (erosionCoarse > 0.0f)
-    {
-        // The channel pairs mixed toward the mean by THEIR OWN weight: R and B run at the coarse period
-        // and G and A at the fine one (CloudDetailTexel), so the ordering of the two weights is what puts
-        // a band of half-resolved erosion between the near field and the far one instead of a step.
-        vec4 sampled = textureLod(u_DetailNoise, detailPos / u_DetailTileSize, 0.0f);
-        detail       = mix(detail, sampled, vec4(erosionCoarse, erosionFine, erosionCoarse, erosionFine));
-    }
+    // The channel pairs mixed toward the volume's MEAN by THEIR OWN weight: R and B run at the coarse
+    // period and G and A at the fine one (CloudDetailTexel), so the ordering of the two weights is what
+    // puts a band of half-resolved erosion between the near field and the far one instead of a step.
+    vec4 sampled = textureLod(u_DetailNoise, detailPos / lodTile, 0.0f);
+    vec4 detail  = mix(vec4(CLOUD_DETAIL_MEAN_LEVEL, CLOUD_DETAIL_MEAN_LEVEL, CLOUD_DETAIL_MEAN_LEVEL,
+                            CLOUD_DETAIL_MEAN_LEVEL),
+                       sampled, vec4(erosionCoarse, erosionFine, erosionCoarse, erosionFine));
 
     // Two erosion families: wispy (the low pair of channels) and billowy (the high pair), blended by the
     // authored Detail Type. Billow takes over as the sample gets denser, which is why the blend gradient

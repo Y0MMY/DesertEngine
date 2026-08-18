@@ -389,12 +389,16 @@ TEST( VolumetricCloudReflection, LayerGeometryIsInCentimetresWithMetreScaleDefau
     EXPECT_TRUE( Find( clouds, "LayerBottomAltitude" )->Meta.IsLength );
     EXPECT_TRUE( Find( clouds, "LayerThickness" )->Meta.IsLength );
 
-    // 1500 m and 1608.9 m, in the engine's centimetres. The thickness is not a round number because it is
-    // not chosen: it is the default weather tile's coverage cell divided by the aspect of a cumulus
-    // mediocris (Engine/Graphic/Clouds/CloudLayerAspect.hpp). It was 3500 m, which made the default cloud
-    // taller than it was wide.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerBottomAltitude" ), 150000.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerThickness" ), 160890.0f );
+    // 5000 m and 2279.6 m, in the engine's centimetres, and neither is a round number because neither is
+    // chosen. The thickness is the default weather tile's coverage cell divided by the aspect of a cumulus
+    // mediocris (Engine/Graphic/Clouds/CloudLayerAspect.hpp) and the tile is what the layer's mid altitude
+    // asks for (Clouds/CloudWeatherScale.hpp), so the two together admit one pair per base altitude. The
+    // base altitude is 5000 m — UE's own default — because solving that pair down at the 1500 m this
+    // component used to default to gives a 683.9 m layer, and 683.9 m is 1.99 search samples at the Low
+    // tier against CloudMarchScale's four. The thickness was 3500 m before any of it, which made the
+    // default cloud taller than it was wide.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerBottomAltitude" ), 500000.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerThickness" ), 227960.0f );
 }
 
 TEST( VolumetricCloudReflection, TheMasterSwitchGatesEveryOtherRow )

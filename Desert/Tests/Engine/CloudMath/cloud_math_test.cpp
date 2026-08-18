@@ -18,6 +18,8 @@
 #include "CloudGeometryReference.hpp"
 
 #include <Engine/Core/Projection.hpp>
+#include <Engine/Graphic/Clouds/CloudIslandScale.hpp>
+#include <Engine/Graphic/Clouds/CloudLayerAspect.hpp>
 #include <Engine/Graphic/Clouds/CloudMarchScale.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileCurves.hpp>
@@ -1138,24 +1140,69 @@ TEST( CloudWeatherScale, TheCppMirrorIsTheShaderFormulaToTheBit )
 // The component's own default must sit in the derived value's band for the layer it ships with, or the
 // very first sky an artist sees is the miscalibrated one.
 //
-// IT USED TO BE AN EQUALITY, and the equality is what CloudLayerAspect.hpp spent. The layer's thickness is
-// now derived too — from the species aspect, and 1608.9 m is what makes the default deck 1.85 times wider
-// than it is tall — so tile and thickness are both determined and the pair is over-determined. Solving
-// both exactly would want a 987 m layer, which falls under CloudMarchScale's four-sample search bound at
-// the Low tier, and THAT bound has no tolerance: below it, whether a ray notices the deck is a per-pixel
-// coin toss. This one does have a measured tolerance, so this one gives. The band is still asserted, and
-// the default sits at 1.41x — inside the range both ends of the sky were measured to hold up over.
+// THE EQUALITY IS BACK, and the ALTITUDE is what bought it. It was spent once: with the layer's thickness
+// also derived (from the species aspect, CloudLayerAspect.hpp) tile and thickness are over-determined, and
+// solving both exactly at a 1.5 km base wanted a 987 m layer — under CloudMarchScale's four-sample search
+// bound at the Low tier, which has no tolerance at all. Moving the deck to UE's altitude band removes the
+// conflict rather than trading it: at 5 km the simultaneous solution clears the search bound on EVERY
+// tier including Low, so the default now sits AT the derived tile instead of 1.41x it.
+//
+// ASSERTED AGAINST THE DEFAULTS THEMSELVES, not against a copied literal. The three numbers this reads are
+// the component's own; a preset pass that moves the layer moves all three together and this test follows
+// it, which is the whole point of a relation test. The band is still asserted too, because the band is
+// what the renderer warns outside of.
 TEST( CloudWeatherScale, TheComponentDefaultIsInTheDerivedTilesBandForItsOwnLayer )
 {
     const Desert::ECS::VolumetricCloudData defaults;
+    ASSERT_FALSE( Desert::Graphic::CloudCoverageFieldIsConnected( defaults.Coverage ) )
+         << "the default sky is a BROKEN one, which is the only kind this relation describes";
     EXPECT_TRUE( Desert::Graphic::CloudWeatherTileIsPlausible(
-         defaults.WeatherTileSize, defaults.LayerBottomAltitude, defaults.LayerThickness ) );
+         defaults.Coverage, defaults.WeatherTileSize, defaults.LayerBottomAltitude, defaults.LayerThickness ) );
 
     const float wanted =
          Desert::Graphic::CloudAutoWeatherTileSize( defaults.LayerBottomAltitude, defaults.LayerThickness );
-    EXPECT_NEAR( defaults.WeatherTileSize / wanted, 1.41f, 0.02f )
-         << "the default deck's tile is the one its OLD 3.5 km layer derived, kept so the sky's horizontal "
-            "composition did not move when the layer thinned";
+    EXPECT_NEAR( defaults.WeatherTileSize / wanted, 1.0f, 0.001f )
+         << "the default deck's tile is the simultaneous solution of CloudWeatherScale and CloudLayerAspect "
+            "at its own altitude; if a preset pass moved the layer, move the tile with it";
+}
+
+// THE CELLS-OVERHEAD QUESTION IS NOT AN OBSERVABLE ON A SHEET, and the predicate has to know that in code.
+//
+// Both ends of the measured tolerance band are failures of a BROKEN sky: at 2.5x the derived tile the
+// zenith empties, because the one cell overhead is as likely to be a hole as a cloud — and a connected
+// field has no holes; at 0.63x the horizon walls, because the islands out there fall under the erosion the
+// march can carry (CloudIslandScale.hpp) — and a connected field has no islands. Neither failure mode
+// exists on a blanket, so above kCloudConnectedCoverage the relation says nothing.
+//
+// This is what replaced a by-name exemption for the Overcast row, whose authored tile lands at 1.662x the
+// tile four-cells-overhead derives. Exempting a preset BY NAME is content baked into a mechanism; exempting
+// it by the physics that makes the question meaningless is the relation doing its job. ONE threshold serves
+// both relations — the constant is CloudWeatherScale.hpp's and CloudIslandScale.hpp reads it from there.
+TEST( CloudWeatherScale, TheTileRelationIsVacuousOnASheetAndBindingOnABrokenSky )
+{
+    using Desert::Graphic::CloudCoverageFieldIsConnected;
+    using Desert::Graphic::CloudWeatherTileIsPlausible;
+    using Desert::Graphic::kCloudConnectedCoverage;
+
+    // The two ends of the band, on a layer that is nowhere near either of them by construction.
+    const float bottom    = Common::Units::Metres( 900.0f );
+    const float thickness = Common::Units::Metres( 1409.0f );
+    const float derived   = Desert::Graphic::CloudAutoWeatherTileSize( bottom, thickness );
+
+    for ( float ratio : { 0.4f, 0.63f, 1.662f, 2.5f } )
+    {
+        EXPECT_FALSE( CloudWeatherTileIsPlausible( 0.42f, derived * ratio, bottom, thickness ) )
+             << "a broken sky at " << ratio << "x the derived tile must still be warned about";
+
+        for ( float coverage : { kCloudConnectedCoverage, 0.95f, 0.98f, 1.0f } )
+            EXPECT_TRUE( CloudWeatherTileIsPlausible( coverage, derived * ratio, bottom, thickness ) )
+                 << "coverage " << coverage << " is a blanket: it has no discrete cells overhead to count";
+    }
+
+    // And the threshold is the same one the island relation uses, read from the same place. Two spellings
+    // of one number is the drift these headers exist to prevent.
+    EXPECT_TRUE( CloudCoverageFieldIsConnected( kCloudConnectedCoverage ) );
+    EXPECT_FALSE( CloudCoverageFieldIsConnected( std::nextafter( kCloudConnectedCoverage, 0.0f ) ) );
 }
 
 // ---- The empty-space search's scale ------------------------------------------------------------------
@@ -1237,10 +1284,23 @@ TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthor
     }
 
     // THE ZENITH IS NOT THE WORST CASE FOR A HIGH LAYER — the assumption the guard used to be built on,
-    // asserted here so it cannot come back. The sheet's worst elevation is in the middle of the sky and
-    // its sample count there is well under the zenith's; the deck's worst is near the horizon and barely
-    // under it, because a low layer never reaches the step schedule's blend band until its chord has
-    // already grown tenfold.
+    // asserted here so it cannot come back. Both shipped geometries now have their minimum in the MIDDLE
+    // of the sky, which is exactly where a ground camera looks.
+    //
+    // THE DECK'S USED TO BE OVERHEAD, and raising it to 5 km (Docs/Clouds/DECK_SCALE_DECISION.md D2) is
+    // what moved it — into the step schedule's sqrt-to-linear blend band, by the same mechanism
+    // CloudMarchScale.hpp:54-70 already documents for high layers. A LOW layer never reaches that band
+    // until its chord has grown tenfold, so its worst case really is the zenith; at 5 km the deck reaches
+    // it while its chord has barely doubled, and it joins the sheet's regime. Measured at High:
+    //
+    //     deck   18.1177 samples at 90 degrees  ->  10.8044 at 14 degrees   (the layer moved)
+    //     sheet   4.0579 samples at 20 degrees  ->   4.0579 at 20 degrees   (unchanged)
+    //
+    // WHAT DIED WITH IT was an incidental "the deck gets more than four times the sheet's samples", which
+    // was never the property under test — it was an artefact of comparing a low layer's regime with a high
+    // one's. THE BOUND IS UNCHANGED AND STILL CLEARED: both layers are above
+    // kCloudMinSearchSamplesAcrossLayer, and the deck is strictly above the sheet. Read the removal as the
+    // 4x margin being incidental, not as a bound being relaxed — the bound is asserted right here.
     const Desert::Graphic::CloudQualityEntry* high =
          Desert::Graphic::FindCloudQuality( Desert::ECS::CloudQuality::High );
     ASSERT_NE( high, nullptr );
@@ -1259,7 +1319,12 @@ TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthor
     const auto deck = CloudWorstSearchAcrossLayer(
          defaults.LayerBottomAltitude, defaults.LayerThickness, high->Values.MinStepSize, high->Values.MaxStepSize,
          high->Values.StepGrowthRate, high->Values.CoarseStepMultiplier );
-    EXPECT_GT( deck.Samples, 4.0f * sheet.Samples );
+    EXPECT_GT( deck.ElevationDegrees, 5.0f );
+    EXPECT_LT( deck.ElevationDegrees, 40.0f );
+
+    EXPECT_GE( deck.Samples, Desert::Graphic::kCloudMinSearchSamplesAcrossLayer );
+    EXPECT_GE( sheet.Samples, Desert::Graphic::kCloudMinSearchSamplesAcrossLayer );
+    EXPECT_GT( deck.Samples, sheet.Samples );
 
     // A TIER ORDERING, not a value: a finer tier must never search a layer more coarsely than a cheaper
     // one. Retuning one row in isolation is exactly how that inverts, and the symptom would be Ultra
@@ -1286,6 +1351,373 @@ TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthor
     EXPECT_TRUE( CloudCoarseStrideIsPlausible( cirrus->Values.LayerBottomAltitude, cirrus->Values.LayerThickness,
                                                Common::Units::Metres( 40.0f ), Common::Units::Metres( 400.0f ),
                                                0.004f, 2.0f ) );
+}
+
+// ---- The island's scale: the fourth relation ---------------------------------------------------------
+//
+// A coverage island against the finest erosion the march can still carry where the deck is drawn. See
+// Engine/Graphic/Clouds/CloudIslandScale.hpp for the mechanism and the ground-truth probe behind it; what
+// is asserted here is the relation, not either side of it.
+
+namespace
+{
+    // Every shipped tier, spelled as the five numbers these functions take. Written once because six of
+    // the tests below sweep it and a hand-copied row is exactly the drift these suites exist to catch.
+    struct IslandTierRow
+    {
+        const char* Name;
+        float       MinStep;
+        float       MaxStep;
+        float       Growth;
+    };
+
+    std::vector<IslandTierRow> ShippedTierRows()
+    {
+        std::vector<IslandTierRow> rows;
+        for ( const auto& tier : Desert::Graphic::kCloudQualityTiers )
+            rows.push_back( IslandTierRow{ tier.Name, tier.Values.MinStepSize, tier.Values.MaxStepSize,
+                                           tier.Values.StepGrowthRate } );
+        return rows;
+    }
+
+    constexpr float kIslandMaxView = Common::Units::Metres( 150000.0f );
+} // namespace
+
+// The same assertion the other two relations carry, for the same reason: the renderer WARNS from the C++
+// side and the raymarch ENDS THE DECK from the GLSL side, so a divergence is a warning that fires on the
+// wrong skies while the deck stops somewhere else entirely.
+TEST( CloudIslandScale, TheCppMirrorsAreTheShaderFormulaeToTheBit )
+{
+    using namespace Desert::Graphic;
+
+    EXPECT_FLOAT_EQ( kCloudErosionCoarseCellsPerTile, R::CLOUD_DETAIL_EROSION_LOW_PER_TILE );
+    EXPECT_EQ( kCloudScheduleInverseIterations, R::CLOUD_SCHEDULE_INVERSE_ITERATIONS );
+
+    for ( const auto& tier : ShippedTierRows() )
+    {
+        for ( float tile : { Common::Units::Metres( 1250.0f ), Common::Units::Metres( 2000.0f ),
+                             Common::Units::Metres( 4000.0f ), Common::Units::Metres( 12000.0f ) } )
+        {
+            EXPECT_FLOAT_EQ(
+                 CloudErosionCarryDistance( tile, tier.MinStep, tier.MaxStep, tier.Growth, kIslandMaxView ),
+                 R::CloudErosionCarriedAtAll( tile, kCloudErosionCoarseCellsPerTile, tier.MinStep, tier.MaxStep,
+                                              tier.Growth, kIslandMaxView ) )
+                 << tier.Name << " tile " << tile;
+
+            EXPECT_FLOAT_EQ(
+                 CloudErosionCarryDistance( tile, tier.MinStep, tier.MaxStep, tier.Growth, kIslandMaxView ),
+                 R::CloudAutoFadeEnd( tile, kCloudErosionCoarseCellsPerTile, tier.MinStep, tier.MaxStep,
+                                      tier.Growth, kIslandMaxView ) )
+                 << tier.Name << " tile " << tile;
+        }
+
+        for ( float stride : { Common::Units::Metres( 20.0f ), Common::Units::Metres( 195.0f ),
+                               Common::Units::Metres( 400.0f ), Common::Units::Metres( 2000.0f ) } )
+        {
+            EXPECT_FLOAT_EQ( CloudScheduleDistanceForStrideAt( stride, tier.MinStep, tier.MaxStep, tier.Growth,
+                                                               kIslandMaxView ),
+                             R::CloudScheduleDistanceForStride( stride, tier.MinStep, tier.MaxStep, tier.Growth,
+                                                                kIslandMaxView ) )
+                 << tier.Name << " stride " << stride;
+        }
+
+        for ( float t : { 0.0f, 100000.0f, 1000000.0f, 4000000.0f, 15000000.0f } )
+            EXPECT_FLOAT_EQ( CloudCarriedErosionFeature( t, tier.MinStep, tier.MaxStep, tier.Growth ),
+                             4.0f * R::CloudStepLength( t, tier.MinStep, tier.MaxStep, tier.Growth ) )
+                 << tier.Name << " t " << t;
+    }
+}
+
+// THE SCHEDULE'S INVERSE IS AN INVERSE, which a bisection is only as long as the schedule stays monotone.
+// Asserted as a round trip rather than as values: the stride AT the distance the search returns is the
+// stride that was asked for, to the bisection's own resolution.
+TEST( CloudIslandScale, TheScheduleInverseRoundTripsAgainstTheScheduleItself )
+{
+    using namespace Desert::Graphic;
+
+    for ( const auto& tier : ShippedTierRows() )
+    {
+        for ( float t : { 500000.0f, 1000000.0f, 2000000.0f, 5000000.0f, 12000000.0f } )
+        {
+            const float stride = CloudStepLengthAt( t, tier.MinStep, tier.MaxStep, tier.Growth );
+            if ( stride >= tier.MaxStep || stride <= tier.MinStep )
+                continue; // clamped: the schedule is flat there and the inverse is not unique
+
+            const float back = CloudScheduleDistanceForStrideAt( stride, tier.MinStep, tier.MaxStep, tier.Growth,
+                                                                 kIslandMaxView );
+            EXPECT_NEAR( CloudStepLengthAt( back, tier.MinStep, tier.MaxStep, tier.Growth ), stride,
+                         0.005f * stride )
+                 << tier.Name << " t " << t;
+        }
+    }
+}
+
+// A MONOTONICITY, and it catches a class rather than an instance: a coarser schedule can only bring the
+// deck's end IN, never push it out. An inversion here would mean a cheaper tier drawing MORE deck than an
+// expensive one, which is the shape of every off-by-one in a schedule table.
+TEST( CloudIslandScale, ACoarserTierNeverDrawsTheDeckFurtherThanAFinerOne )
+{
+    using namespace Desert::Graphic;
+
+    const float tile = Common::Units::Metres( 4000.0f );
+
+    float previous = -1.0f;
+    for ( const auto& tier : ShippedTierRows() ) // kCloudQualityTiers is ordered Low -> Ultra
+    {
+        const float drawTo =
+             CloudDeckDrawDistance( tile, tier.MinStep, tier.MaxStep, tier.Growth, kIslandMaxView );
+        EXPECT_GE( drawTo, previous ) << tier.Name << " ends the deck nearer than the tier below it";
+        previous = drawTo;
+    }
+}
+
+// A BOUND, and it is the strongest single statement CloudIslandScale.hpp makes. Where MaxViewDistance does
+// not clip the deck, the stride at the draw distance is exactly `feature / 2` BY CONSTRUCTION, so the
+// finest erosion carried out there is exactly twice the coarse feature — independent of the tier. A
+// cheaper tier ends the deck sooner in exactly the proportion its stride is coarser, and the two cancel.
+// If the schedule and the Nyquist gate are ever retuned independently of each other, this is what fails.
+TEST( CloudIslandScale, TheCarriedFeatureAtTheDeckSEndIsTwiceTheCoarseFeatureOnEveryTier )
+{
+    using namespace Desert::Graphic;
+
+    for ( const auto& tier : ShippedTierRows() )
+    {
+        for ( float tile : { Common::Units::Metres( 1250.0f ), Common::Units::Metres( 2000.0f ),
+                             Common::Units::Metres( 3000.0f ), Common::Units::Metres( 4000.0f ) } )
+        {
+            const float drawTo =
+                 CloudDeckDrawDistance( tile, tier.MinStep, tier.MaxStep, tier.Growth, kIslandMaxView );
+            const float carried = CloudCarriedErosionFeature( drawTo, tier.MinStep, tier.MaxStep, tier.Growth );
+            const float feature = tile / kCloudErosionCoarseCellsPerTile;
+
+            EXPECT_LE( carried, 2.0f * feature * 1.001f ) << tier.Name << " tile " << tile;
+            EXPECT_NEAR( carried, 2.0f * feature, 0.005f * feature ) << tier.Name << " tile " << tile;
+        }
+    }
+}
+
+// THE APPLICABILITY CLAUSE, in the only form that counts: a sheet must not trip the relation whatever its
+// tile. Stratus at 0.90, Overcast at 0.95 and Storm at 0.98 have connected coverage fields — there is no
+// isolated blob to read as a box — and a warning that fires on them is a warning that stops being read.
+TEST( CloudIslandScale, ASheetIsExemptAndABrokenSkyAtTheSameTileIsNot )
+{
+    using namespace Desert::Graphic;
+
+    const float minStep  = Common::Units::Metres( 15.0f );
+    const float maxStep  = Common::Units::Metres( 700.0f );
+    const float growth   = 0.008f;
+    const float detail   = Common::Units::Metres( 4000.0f );
+    const float tinyTile = Common::Units::Metres( 2000.0f ); // an island of 125 m: hopeless if it applied
+
+    EXPECT_FALSE( CloudDeckIsResolvable( 0.899f, tinyTile, detail, minStep, maxStep, growth, kIslandMaxView ) );
+
+    for ( float coverage : { kCloudConnectedCoverage, 0.95f, 0.98f, 1.0f } )
+        EXPECT_TRUE(
+             CloudDeckIsResolvable( coverage, tinyTile, detail, minStep, maxStep, growth, kIslandMaxView ) )
+             << "coverage " << coverage << " is a sheet and has no islands to be unresolvable";
+
+    // And the clause is a property of the COVERAGE alone: no tile, however small, can make a sheet fire,
+    // and no tile, however large, changes that answer.
+    for ( float tile : { Common::Units::Metres( 500.0f ), Common::Units::Metres( 60000.0f ) } )
+        EXPECT_TRUE( CloudDeckIsResolvable( 0.96f, tile, detail, minStep, maxStep, growth, kIslandMaxView ) );
+}
+
+// A MONOTONICITY IN THE TILE, plus the exact threshold. The predicate can only go from false to true as
+// the tile grows, and the number the renderer prints as "the tile you should have had" is precisely where
+// it turns over — a warning that names a value which does not actually fix it is worse than no warning.
+TEST( CloudIslandScale, TheRelationIsMonotoneInTheTileAndTurnsOverAtTheTileTheWarningNames )
+{
+    using namespace Desert::Graphic;
+
+    const float coverage = 0.42f; // broken sky: the clause above does not apply
+    const float minStep  = Common::Units::Metres( 15.0f );
+    const float maxStep  = Common::Units::Metres( 700.0f );
+    const float growth   = 0.008f;
+
+    for ( float detail : { Common::Units::Metres( 1250.0f ), Common::Units::Metres( 2000.0f ),
+                           Common::Units::Metres( 4000.0f ) } )
+    {
+        const float wanted = CloudDeckMinWeatherTileSize( detail, minStep, maxStep, growth, kIslandMaxView );
+
+        EXPECT_TRUE(
+             CloudDeckIsResolvable( coverage, wanted * 1.001f, detail, minStep, maxStep, growth, kIslandMaxView ) )
+             << "detail " << detail;
+        EXPECT_FALSE(
+             CloudDeckIsResolvable( coverage, wanted * 0.999f, detail, minStep, maxStep, growth, kIslandMaxView ) )
+             << "detail " << detail;
+
+        bool seenTrue = false;
+        for ( float tile = wanted * 0.25f; tile <= wanted * 4.0f; tile += wanted * 0.05f )
+        {
+            const bool ok =
+                 CloudDeckIsResolvable( coverage, tile, detail, minStep, maxStep, growth, kIslandMaxView );
+            EXPECT_FALSE( seenTrue && !ok ) << "the relation went true and back to false at tile " << tile;
+            seenTrue = seenTrue || ok;
+        }
+        EXPECT_TRUE( seenTrue );
+    }
+}
+
+// THE ALTITUDE FLOOR, which is the consequence this relation exists for. Island size is proportional to
+// the weather tile and the tile is proportional to the layer's mid altitude, so a broken sky has a MINIMUM
+// altitude — and it is monotone, so the floor is a single crossing rather than a band of luck. Measured on
+// a layer that solves CloudWeatherScale and the cumulus aspect exactly, at High with a 4 km detail tile,
+// that floor is about 3.7 km of base altitude: which is where UE's 5 km default lives.
+TEST( CloudIslandScale, ABrokenSkyHasAnAltitudeFloorAndItIsASingleCrossing )
+{
+    using namespace Desert::Graphic;
+
+    const float coverage = 0.42f;
+    const float minStep  = Common::Units::Metres( 15.0f );
+    const float maxStep  = Common::Units::Metres( 700.0f );
+    const float growth   = 0.008f;
+    const float detail   = Common::Units::Metres( 4000.0f );
+
+    // The layer this sweep walks is the one the presets are derived as: thickness from the measured
+    // cumulus aspect, tile from CloudWeatherScale. Both follow the altitude, which is the only free
+    // variable left.
+    const auto layerAt = [&]( float bottom, float& tile )
+    {
+        float thickness = Common::Units::Metres( 1000.0f );
+        for ( int i = 0; i < 32; ++i ) // tile and thickness are mutually defined; iterate to the fixed point
+        {
+            tile      = CloudAutoWeatherTileSize( bottom, thickness );
+            thickness = CloudLayerThicknessForAspect( tile, kCloudAspectMeasuredCumulus );
+        }
+        return thickness;
+    };
+
+    bool  seenTrue = false;
+    float floorAt  = -1.0f;
+    for ( float bottom = Common::Units::Metres( 500.0f ); bottom <= Common::Units::Metres( 9000.0f );
+          bottom += Common::Units::Metres( 50.0f ) )
+    {
+        float       tile            = 0.0f;
+        const float unusedThickness = layerAt( bottom, tile );
+        (void)unusedThickness;
+
+        const bool ok = CloudDeckIsResolvable( coverage, tile, detail, minStep, maxStep, growth, kIslandMaxView );
+        EXPECT_FALSE( seenTrue && !ok ) << "the floor is not a single crossing: failed again at " << bottom;
+        if ( ok && !seenTrue )
+            floorAt = bottom;
+        seenTrue = seenTrue || ok;
+    }
+
+    ASSERT_TRUE( seenTrue );
+    EXPECT_NEAR( Common::Units::ToMetres( floorAt ), 3700.0f, 200.0f )
+         << "the floor a 4 km detail tile puts under a cumulus sky at High — see the decision doc section 3";
+}
+
+// ---- Where the deck ends -----------------------------------------------------------------------------
+
+// A RANGE INSIDE ANOTHER RANGE, which is the assertion the old fade never made: it returned the layer's
+// GEOMETRIC horizon, sqrt(2*R*top) = 304 km on the fixed geometry, while the march is clipped at
+// MaxViewDistance = 150 km. The dissolve weight at that clip measured 0.597 — sixty per cent of a deck of
+// boxes drawn straight up to a hard edge. One assertion catches that whole class.
+TEST( CloudAutoFade, TheDeckEndsInsideTheMarchAndTheFadesAreOrdered )
+{
+    using namespace Desert::Graphic;
+
+    for ( const auto& tier : ShippedTierRows() )
+    {
+        for ( float tile : { Common::Units::Metres( 1250.0f ), Common::Units::Metres( 2000.0f ),
+                             Common::Units::Metres( 4000.0f ), Common::Units::Metres( 20000.0f ) } )
+        {
+            for ( float maxView :
+                  { Common::Units::Metres( 8000.0f ), Common::Units::Metres( 40000.0f ), kIslandMaxView } )
+            {
+                for ( float bottom : { Common::Units::Metres( 600.0f ), Common::Units::Metres( 5000.0f ),
+                                       Common::Units::Metres( 8000.0f ) } )
+                {
+                    const float end   = R::CloudAutoFadeEnd( tile, kCloudErosionCoarseCellsPerTile, tier.MinStep,
+                                                             tier.MaxStep, tier.Growth, maxView );
+                    const float start = R::CloudAutoFadeStart( bottom, end );
+                    const float horizonStart = R::CloudAutoHorizonStart(
+                         tile, kCloudErosionCoarseCellsPerTile, tier.MinStep, tier.MaxStep, tier.Growth, end );
+
+                    EXPECT_LE( end, maxView ) << tier.Name << " tile " << tile << " view " << maxView;
+                    EXPECT_GT( end, 0.0f );
+
+                    // Both starts strictly inside their own end. A start PAST its end does not soften a
+                    // hard edge — CloudRemapRange inverts and the layer disappears altogether — so this is
+                    // the assertion that stands between a clipped deck and an empty sky.
+                    EXPECT_LT( start, end ) << tier.Name << " bottom " << bottom << " view " << maxView;
+                    EXPECT_LT( horizonStart, end ) << tier.Name << " tile " << tile << " view " << maxView;
+                    EXPECT_GT( start, 0.0f );
+                    EXPECT_GT( horizonStart, 0.0f );
+                }
+            }
+        }
+    }
+}
+
+// And the number the decision was taken on: on the fixed geometry at High with a 4 km detail tile the deck
+// ends where its coarse erosion does, and the dissolve opens where that erosion stops being carried in
+// full. Recorded as values because the decision doc quotes them and the next reader will want to check.
+TEST( CloudAutoFade, TheShippedHighTierEndsTheDeckAtItsOwnErosion )
+{
+    using namespace Desert::Graphic;
+
+    const CloudQualityEntry* high = FindCloudQuality( Desert::ECS::CloudQuality::High );
+    ASSERT_NE( high, nullptr );
+
+    const float tile = Common::Units::Metres( 4000.0f );
+    const float end  = R::CloudAutoFadeEnd( tile, kCloudErosionCoarseCellsPerTile, high->Values.MinStepSize,
+                                            high->Values.MaxStepSize, high->Values.StepGrowthRate, kIslandMaxView );
+    const float horizonStart =
+         R::CloudAutoHorizonStart( tile, kCloudErosionCoarseCellsPerTile, high->Values.MinStepSize,
+                                   high->Values.MaxStepSize, high->Values.StepGrowthRate, end );
+
+    EXPECT_NEAR( Common::Units::ToMetres( end ) / 1000.0f, 47.0f, 0.5f );
+    EXPECT_NEAR( Common::Units::ToMetres( horizonStart ) / 1000.0f, 23.5f, 0.6f );
+
+    // What it replaced, so the size of the defect stays on the record: the layer's geometric horizon over
+    // the same deck is more than six times the distance the march is even allowed to run to.
+    const float top       = Common::Units::Metres( 5000.0f ) + Common::Units::Metres( 2279.6f );
+    const float geometric = std::sqrt( 2.0f * Common::Units::Metres( 6360000.0f ) * top );
+    EXPECT_GT( geometric, 2.0f * kIslandMaxView );
+}
+
+// ---- The erosion's LOD tile ---------------------------------------------------------------------------
+
+// BIT-IDENTICAL WHEREVER THE AUTHORED TILE IS RESOLVABLE. That is what the max() is for and it is the only
+// thing that makes this change safe to land without a frame: every near sample, and every sample of any
+// scene whose deck ends before its detail does, has to come out of the composite as the exact float it
+// came out of before. Not "close" — the same bits, because the fetch coordinate and both Nyquist weights
+// are the same expressions on the same inputs.
+TEST( CloudErosionLod, TheAuthoredTileAndEveryWeightAreUntouchedWhereverItIsResolvable )
+{
+    using namespace Desert::Graphic;
+
+    const float per = kCloudErosionCoarseCellsPerTile;
+
+    for ( float tile : { Common::Units::Metres( 1250.0f ), Common::Units::Metres( 2000.0f ),
+                         Common::Units::Metres( 4000.0f ) } )
+    {
+        const float resolvableTo = tile / ( 4.0f * per ); // the largest stride the authored tile carries
+        for ( float stride : { 0.0f, 0.05f * resolvableTo, 0.5f * resolvableTo, resolvableTo } )
+        {
+            EXPECT_FLOAT_EQ( R::CloudErosionLodTile( tile, per, stride ), tile ) << "stride " << stride;
+            EXPECT_FLOAT_EQ( R::CloudNyquistWeight( R::CloudErosionLodTile( tile, per, stride ) / per, stride ),
+                             R::CloudNyquistWeight( tile / per, stride ) )
+                 << "stride " << stride;
+            EXPECT_FLOAT_EQ( R::CloudNyquistWeight( R::CloudErosionLodTile( tile, per, stride ) /
+                                                         R::CLOUD_DETAIL_EROSION_HIGH_PER_TILE,
+                                                    stride ),
+                             R::CloudNyquistWeight( tile / R::CLOUD_DETAIL_EROSION_HIGH_PER_TILE, stride ) )
+                 << "stride " << stride;
+        }
+
+        // And past it the tile tracks the stride instead of the erosion switching off: the coarse pair is
+        // carried in full at EVERY stride, which is the whole point — the far deck keeps a silhouette
+        // instead of carrying the noise's mean and arriving as a box.
+        for ( float stride : { 1.5f * resolvableTo, 4.0f * resolvableTo, 40.0f * resolvableTo } )
+        {
+            const float lod = R::CloudErosionLodTile( tile, per, stride );
+            EXPECT_GT( lod, tile ) << "stride " << stride;
+            EXPECT_FLOAT_EQ( R::CloudNyquistWeight( lod / per, stride ), 1.0f ) << "stride " << stride;
+        }
+    }
 }
 
 // ---- CLD-25: Beer -----------------------------------------------------------------------------------
