@@ -76,29 +76,35 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Layer Bottom Altitude" ), Category( "Cloud Layer" ), Length,
                   Range( 0.0f, Common::Units::Metres( 20000.0f ) ), EditCondition( "Enabled" ),
                   Tooltip( "Cloud base height above the planet surface." ) )
-        float LayerBottomAltitude = Common::Units::Metres( 5000.0f );
+        float LayerBottomAltitude = Common::Units::Metres( 8000.0f );
 
-        // 2279.6 m is not a taste either: it is the thickness at which this layer's 33737.9 m weather tile
-        // — i.e. its 4217 m dominant coverage cell — realises the aspect of a cumulus mediocris, 1.85 times
-        // wider than tall (CloudLayerAspect.hpp). The old 3500 m gave 0.85, a cloud taller than it was
+        // 3647.3 m is not a taste either: it is the thickness at which this layer's 53980.6 m weather tile
+        // — i.e. its 6747.6 m dominant coverage cell — realises the aspect of a cumulus mediocris, 1.85
+        // times wider than tall (CloudLayerAspect.hpp). The old 3500 m gave 0.85, a cloud taller than it was
         // wide: cumulonimbus proportions on a fair-weather sky, and the reason a deck overhead read as a
         // ceiling rather than as clouds sitting in the atmosphere. Thickness and Weather Tile Size are two
         // halves of one shape; moving either alone re-opens it. The CloudPresets suite pins the pair.
         //
-        // The pair is also joined to the BASE ALTITUDE above, which is why that is 5000 m and not the 1500 m
-        // this default shipped at. The tile is fixed by the mid altitude and the thickness by the tile, so a
-        // base admits exactly one pair; solved at 1500 m the same aspect gives a 683.9 m layer, and 683.9 m
-        // is 1.99 search samples across the layer at the Low tier against CloudMarchScale's four — a march
-        // that steps over its own cloud depending on the ray's dither phase. At 5000 m the same solution is
-        // 2279.6 m and 4.15 samples. Angular size bought by raising the layer is free; bought by thinning
-        // it, it comes out of the march.
+        // The pair is also joined to the BASE ALTITUDE above, which is why that is 8000 m and not the 1500 m
+        // this default shipped at or the 5000 m it passed through. The tile is fixed by the mid altitude and
+        // the thickness by the tile, so a base admits exactly one pair; solved at 1500 m the same aspect
+        // gives a 683.9 m layer, and 683.9 m is 1.99 search samples across the layer at the Low tier against
+        // CloudMarchScale's four — a march that steps over its own cloud depending on the ray's dither
+        // phase. At 8000 m the same solution is 3647.3 m and 4.15 samples. Angular size bought by raising
+        // the layer is free; bought by thinning it, it comes out of the march.
+        //
+        // AND RAISING IT AGAIN DOES NOT SHRINK THE CLOUD. The angular size of a coverage cell overhead is
+        // cell / mid altitude, the cell is tile / 8 and the tile is derived FROM the mid altitude, so the
+        // ratio is scale-free: 37.9 degrees at the 5 km base and 37.9 degrees here. The lift from 5 km to
+        // 8 km buys altitude, aerial perspective and less parallax under a moving camera — not a smaller
+        // cloud. Docs/Clouds/DECK_SCALE_DECISION.md D7.
         PROPERTY( DisplayName( "Layer Thickness" ), Category( "Cloud Layer" ), Length,
                   Range( Common::Units::Metres( 50.0f ), Common::Units::Metres( 15000.0f ) ),
                   EditCondition( "Enabled" ),
                   Tooltip( "Vertical extent of the shell. A cloud should be WIDER than it is tall: this "
                            "wants to be about half the weather tile's coverage cell (Weather Tile Size / "
                            "8) for cumulus, less only for a cumulonimbus deep enough to tower." ) )
-        float LayerThickness = Common::Units::Metres( 2279.6f );
+        float LayerThickness = Common::Units::Metres( 3647.3f );
 
         PROPERTY( DisplayName( "Max View Distance" ), Category( "Cloud Layer" ), Length,
                   Range( Common::Units::Metres( 5000.0f ), Common::Units::Metres( 400000.0f ) ),
@@ -127,19 +133,19 @@ namespace Desert::ECS
                   Tooltip( "High values give hard-edged islands, low values a soft blanket." ) )
         float CoverageContrast = 1.20f;
 
-        // 33 737.9 m is not a taste: it is exactly what CloudAutoWeatherTileSize (Common/CloudGeometry.glslh)
+        // 53 980.6 m is not a taste: it is exactly what CloudAutoWeatherTileSize (Common/CloudGeometry.glslh)
         // asks for at this layer's mid altitude — the relation between this tile and the layer's altitude,
         // i.e. how many coverage cells a ground observer gets to see overhead. Moving the layer without
         // moving this is what emptied Clouds_UEShowcase's zenith; the CloudPresets suite pins the pair.
         //
         // THE CELL IT MAKES IS WHAT WAS WRONG WITH THE SKY, and the measurement is angular. The dominant
-        // coverage cell is this tile over the weather FBM's eight cells, 4217 m here, and what a ground
+        // coverage cell is this tile over the weather FBM's eight cells, 6747.6 m here, and what a ground
         // observer sees is that cell against the altitude it hangs at. The default shipped as a 23811.5 m
         // tile over a 1.5 km base: a 2976 m cell at 2304 m of mid altitude, so one cloud directly overhead
         // subtended 65.7 degrees and four of them covered the sky above twenty degrees. That is a ceiling,
         // and it was not an accident — the auto tile targeted three cells overhead, which is the SMALLEST
-        // count that can show cloud, gap and cloud, adopted as if it were the target. At four cells and a
-        // 5 km base the same cloud subtends 37.9 degrees.
+        // count that can show cloud, gap and cloud, adopted as if it were the target. At four cells the same
+        // cloud subtends 37.9 degrees — at ANY base altitude, because this tile is derived from that base.
         //
         // This default now sits at 1.000x its own derived tile rather than the 1.41x it carried before, and
         // it can, because the base altitude moved with it: the tile relation and the aspect relation
@@ -150,7 +156,7 @@ namespace Desert::ECS
                   EditCondition( "Enabled" ),
                   Tooltip( "World size of one weather-map tile, i.e. the size of a cloud SYSTEM. Roughly "
                            "5.5x the layer's mid-altitude gives a ground observer a filled sky." ) )
-        float WeatherTileSize = Common::Units::Metres( 33737.9f );
+        float WeatherTileSize = Common::Units::Metres( 53980.6f );
 
         PROPERTY( DisplayName( "Weather Seed" ), Category( "Weather" ), Range( 0, 65535 ),
                   EditCondition( "Enabled" ), Tooltip( "Reshuffles the whole cloudscape layout." ) )

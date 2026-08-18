@@ -151,6 +151,13 @@ gives 1.99 samples at Low). The altitude is what pays for the smaller angular cl
 **D3. The four sheet/deep rows are NOT re-derived.** Stratus, Overcast, Storm and Cirrus keep their
 authored geometry. Changing the constant moves the *derived* tile they are compared against by 0.75x.
 
+> **SUPERSEDED IN PART BY D7 (2026-08-18), and the part that fell is worth naming.** Three of the four
+> refusals below — Stratus, Overcast, Storm — were failures of the **base altitude** rather than of the
+> derivation, and D3 did not say so. Lifted to 3000 / 3500 / 3000 m all three solve cleanly and are now
+> derived at 1.000x. Only **Cirrus** survives as a refusal, and it survives because its cost (High 4.06 ->
+> 3.05) is scale-free in the altitude. Everything below is still the correct record of what was true at
+> the 600-900 m bases; read it as history, and D7 as the current table.
+
 > **Corrected twice. The second correction is the one that is true.**
 >
 > This clause originally claimed all four land at exactly 1.333x the new derived tile, inside the shipped
@@ -229,6 +236,85 @@ max stride 200 m, 512 steps costs **13.70-14.80 ms** — the only variant whose 
 other's range, 1.6x the baseline's slowest run and 3.5x its fastest — and it buys a better-marched cube,
 because the silhouette is a property of the density field and not of the sampling. Do not build it.
 
+**D7. Every layer lifted, 2026-08-18.** The owner reported that the clouds still felt *adjacent* rather
+than up in the atmosphere, and measurement agreed: D2 had moved only the four cumulus rows, so half the
+shipped table was still at the altitudes §1 measured — Stratus 600 m, Storm 700 m, Overcast 900 m,
+`Clouds_ShadowsOnWorld` 500 m. **Seven of the eight rows are now the simultaneous solution of
+`CloudWeatherScale` and `CloudLayerAspect` at a raised base**, each at its own UNCHANGED `TargetAspect`, so
+every species keeps its exact proportions and only the altitude moves:
+
+| preset | bottom | thickness | weather tile | aspect (target) | tile ratio | search samples Low/Med/High/Ultra |
+|---|---|---|---|---|---|---|
+| Clear | 8000 | 3772.5 | 54324.6 | 1.80002 (1.80) | 1.0000 | 4.26 / 9.65 / 11.10 / 19.29 |
+| Fair Weather | 8000 | 4050.6 | 55088.7 | 1.70002 (1.70) | 1.0000 | 4.52 / 10.23 / 11.77 / 20.45 |
+| Partly Cloudy | 8000 | 3647.3 | 53980.6 | 1.85002 (1.85) | 1.0000 | 4.15 / 9.38 / 10.80 / 18.76 |
+| Summer Cumulus | 7000 | 5613.2 | 53886.9 | 1.20000 (1.20) | 1.0000 | 6.39 / 14.46 / 16.64 / 28.92 |
+| Stratus | 3000 | 2290.7 | 22778.4 | 1.24298 (1.243) | 1.0000 | 5.81 / 14.03 / 16.13 / 28.05 |
+| Overcast | 3500 | 2513.2 | 26137.3 | 1.30000 (1.30) | 1.0000 | 5.92 / 13.39 / 15.42 / 26.78 |
+| Storm | 3000 | 11104.5 | 46994.2 | 0.52900 (0.529) | 1.0000 | 14.49 / 32.79 / 37.75 / 65.58 |
+| **Cirrus** | **8000** | **1200** | **63008.8** | 6.56342 (6.563) | 1.3333 | 1.56 / 3.53 / 4.06 / 7.05 |
+
+All seven lifted rows clear `CloudMarchScale`'s four-sample search bound on **every** tier including Low,
+every realised aspect matches its target to better than 2e-5, every tile sits at exactly its own derived
+value, and every value is inside its declared reflection `Range` (thickness max 15 km — Storm's 11104.5 m
+is the closest approach at 74% of it; base max 20 km; tile min 5 km). Storm stays above
+`kCloudDeepConvectionThickness`'s 6 km with 1.85x margin, so it is still allowed to be taller than it is
+wide.
+
+**THE THING THE NEXT READER MUST NOT LOSE: lifting a layer does NOT make the cloud smaller.** A cloud
+overhead subtends `cell / midAltitude`, the cell is `WeatherTileSize / 8`, and the tile is DERIVED from the
+mid altitude — so the ratio is **scale-free**. It was 37.9 degrees at the 5 km base and it is 37.9 degrees
+at 8 km. D1 is what bought the angular size, once, and no further lift can buy any more of it. What the
+lift buys instead is exactly three things: **altitude** (the layer is where an artist and a physical
+atmosphere both expect it), **aerial perspective** (three times the path length between eye and cloud, so
+`AtmosphericPerspective` and the shell's own extinction have something to work with), and **less parallax**
+under a moving camera (a deck at 8 km slides far less against the terrain than one at 900 m, which is what
+"adjacent" was describing). Read any future report of "the clouds are too big" as a request to change
+`kCloudWeatherCellsOverhead`, never as a request to raise the layer again.
+
+**Cirrus is the one row NOT lifted, and the refusal does not expire with altitude.** Two reasons, in order:
+it is already the highest row, so a lift buys it the least of the eight; and solving the pair at its 6.563
+aspect thins the sheet to 883.5 m and takes `CloudWorstSearchAcrossLayer` at the **High** tier — the
+shipped tier — from **4.06 to 3.05**, through a bound of four that `CloudQuality.hpp` documents as having
+1.3% of headroom. That 3.05 is scale-free for the same reason the angular size is: at fixed aspect the
+solved thickness is proportional to the base, so it measures 3.05 at 8 km, 3.05 at 10 km and 3.05 at 11 km.
+No altitude rescues it. Cirrus therefore stays at 1.333x its own derived tile — the only row in the table
+that is not at 1.000 — and the `CloudPresets` suite pins that as a decision rather than an oversight
+(`OnlyCirrusIsDeliberatelyNotDerived`).
+
+**The three refusals D3 recorded have EXPIRED, and it is worth being explicit about why.** D3 refused to
+derive Stratus, Overcast and Storm with numbers: 458.1 m under a 4555.7 m tile (below the field's own
+5000 m minimum) and 1.50 samples at Low; 646.3 m and 2.00 samples; 2591.0 m of depth against the 6 km
+deep-convection threshold. Every one of those was a failure of the **base altitude**, not of the
+derivation — solved at 600 m, 900 m and 700 m respectively. Lifted to 3000 / 3500 / 3000 m the same
+solutions are affordable on every count. A refusal grounded in one input is only as durable as that input,
+and D3 did not say which of its numbers was load-bearing; this one does.
+
+**The two-layer scenes broke and needed a decision.** `Clouds_TwoLayerShowcase` and
+`Clouds_TwoLayerSunset` stack the cumulus deck under a separately-authored "Cirrus Sheet" entity that sat
+at 8000-9200 m. The lifted deck spans **8000-11647.3 m** and completely swallows it. The sheet was raised
+to a **13000 m** base, which leaves 1352.7 m of clear air above the deck's top, and its tile is the derived
+**76929.4 m**. Its thickness had to move too, and that is the part that was NOT free: **at 1200 m there is
+no base above the deck that clears the High bound at all** — measured 3.64 at 9 km, 3.29 at 10 km, 3.01 at
+11 km, 2.57 at 13 km, and the highest base that still clears four is ~8.1 km, i.e. inside the deck. So the
+sheet is **2000 m** thick, which is the roundest number above the 1917.4 m minimum the bound asks for at
+13 km. It measures **1.59 / 3.61 / 4.15 / 7.22** on Low/Medium/High/Ultra and **11.16** on the schedule
+those two scenes actually author for it (40 m fine step, coarse multiplier 2), so it is strictly better on
+every tier than the Cirrus preset it was copied from. Its realised aspect is **4.808**, inside
+`kCloudSpeciesCirrus`'s [4, 12]. It is a slightly deeper ice sheet than before and it is still a cirrus
+sheet; a 1.2 km sheet 1.4 km above a 3.6 km deck was not an option the march would carry.
+
+**`Clouds_ShadowsOnWorld` was NOT lifted, and the number is a hard range rather than a judgement.** The
+scene deliberately compresses its deck to 500 m base / 300 m thick / 1000 m tile because it is a *cloud
+shadows on the ground* demo: its terrain is 400 m across and its `CloudShadowExtent` is 1 km. Solving the
+pair at a 2000 m base **at its own aspect of 0.4167** gives a **18758.7 m** layer — **25% above
+`LayerThickness`'s declared `Range` maximum of 15000 m**, so the row is not authorable at that altitude at
+all. The highest base that fits inside the range at that aspect is **1599 m**, and even there the derived
+tile is 50.0 km, i.e. a **6.25 km coverage cell** over a 400 m terrain inside a 1 km shadow map: the ground
+would sit entirely within one cell and the scene's whole subject — a shadow edge travelling across the
+world — would become a uniform dimming. It stays at 500 / 300 / 1000 and keeps warning about its 0.280 tile
+ratio, exactly as §5 already records.
+
 ## 5. Known, recorded, not fixed here
 
 Everything in this list is a defect somebody will otherwise find again from scratch. None of it is fixed
@@ -259,10 +345,53 @@ by this change and none of it should be absorbed into the next one silently.
 - **The presets and the scenes disagree about `DetailTileSize`**: the preset table ships 1250-3000 m
   (the cumulus rows 2000 m) and the cloud scenes ship 4000 m. Nothing relates the two, so a scene built
   from a preset silently doubles it. This divergence is what made §3's floor wrong by a factor of two.
-- **The cumulus rows now sit at 4000-5000 m with no absolute-altitude assertion anywhere.** Every
-  altitude constraint in the engine is a *relation* — tile vs altitude, thickness vs tile, stride vs
-  thickness — and all three are satisfied at any altitude if the others move with it. Meanwhile
-  `CloudLayerAspect.hpp` names species: a cumulus mediocris base is meteorologically **800-2000 m**, so
-  the table now ships **altostratus altitudes under cumulus names**, and nothing catches it. The move is
-  defensible against the march (§3) and indefensible against the species names, and only one of those two
-  is written down in code.
+- **The rows now sit at 3000-8000 m with no absolute-altitude assertion anywhere, and D7 made this worse
+  rather than better.** Every altitude constraint in the engine is a *relation* — tile vs altitude,
+  thickness vs tile, stride vs thickness — and all three are satisfied at any altitude if the others move
+  with it, which is exactly what let D7 raise everything without a single test going red. Meanwhile
+  `CloudLayerAspect.hpp` names species, and the meteorological bases are: cumulus humilis/mediocris
+  **800-2000 m**, congestus **600-2000 m**, stratus **0-600 m**, stratocumulus **600-2000 m**,
+  cumulonimbus **500-1500 m**. The table now ships **Stratus at 3 km, Storm's cumulonimbus base at 3 km
+  and the cumulus family at 7-8 km** — cirrostratus altitudes under cumulus names, and nothing catches it.
+  The move is defensible against the march (§3) and against the owner's report (D7); it is indefensible
+  against the species names, and only the first of those is written down in code. **If a future pass wants
+  one number to argue about, it is `kCloudWeatherCellsOverhead`, not the base altitudes** — see D7 on why
+  raising the layer cannot change the angular size of a cloud.
+
+---
+
+## D8. The clouds were never in the atmosphere, and the fix was to stop switching it off
+
+The owner's complaint survived the lift, and instrumenting the march found why. Measured against our
+OWN sky LUTs, a cloud gets a fraction of the air it should:
+
+| cloud distance | our physics wants | renderer applied | deficit |
+|---|---|---|---|
+| 10.6 km | 17.0 % | **0.19 %** | **89x** |
+| 13.6 km | 20.7 % | 0.97 % | 21x |
+| 24.2 km | 33.0 % | 3.8 % | 8.7x |
+| 48.4 km | 53.4 % | 10.5 % | 5.1x |
+
+**Nothing was broken.** `SkyAtmosphereComponent`'s `Model` defaults to `ArtisticGradient`, and every cloud
+scene except `Clouds_PhysicalShowcase` simply omitted the field. Under that model `SkyboxRenderer` never
+allocates the aerial-perspective volume, so `AtmosphereEnv::AerialPerspectiveVolume` is null,
+`VolumetricCloudRenderer` packs `Atmosphere.z = 0`, and `CloudRaymarch.shader` takes the artistic branch —
+the whole UE `SAMPLE_ATMOSPHERE_ON_CLOUDS` path (froxel volume, transmittance LUT,
+`CloudApplyAerialPerspective`) is **dead code in those scenes**. The artistic fallback's auto range runs
+from 10 km to `sqrt(2*R*h_top)` = 304 km, the layer's GEOMETRIC horizon, which has nothing to do with the
+optical scale of air. Hence the deficit.
+
+The physical path was already written, already correct — its froxel readback agrees with an independent
+integration of `SkyMedium.glslh` to ~1 % — and already the arrangement UE ships. So the fix is one field
+on fourteen scenes: `"Model": 1`. **No new code, no new relation, no new constant.**
+
+What it buys, on frames: the deck dissolves into the horizon haze instead of ending in a straight line
+across the sky at 72 % opacity, the far-field block silhouettes wash into the air instead of reading as a
+skyline, and cloud and ground finally resolve into one integral, which is exactly what the raymarch's own
+comment says the physical branch is for.
+
+TWO THINGS TO KNOW. The component **default is still `ArtisticGradient`**, so a scene authored tomorrow
+falls into the same hole; whether that default should move is an owner decision and is not taken here.
+And the artistic branch remains as it was — if it is to stay a supported model, its fade wants
+calibrating against the medium rather than against the layer's geometric horizon, which is a separate
+piece of work and is NOT this one.

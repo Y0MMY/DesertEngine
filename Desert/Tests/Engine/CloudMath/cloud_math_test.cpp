@@ -1141,9 +1141,9 @@ TEST( CloudWeatherScale, TheCppMirrorIsTheShaderFormulaToTheBit )
 // THE EQUALITY IS BACK, and the ALTITUDE is what bought it. It was spent once: with the layer's thickness
 // also derived (from the species aspect, CloudLayerAspect.hpp) tile and thickness are over-determined, and
 // solving both exactly at a 1.5 km base wanted a 987 m layer — under CloudMarchScale's four-sample search
-// bound at the Low tier, which has no tolerance at all. Moving the deck to UE's altitude band removes the
-// conflict rather than trading it: at 5 km the simultaneous solution clears the search bound on EVERY
-// tier including Low, so the default now sits AT the derived tile instead of 1.41x it.
+// bound at the Low tier, which has no tolerance at all. Moving the deck up removes the conflict rather than
+// trading it: at the 8 km base it now defaults to, the simultaneous solution clears the search bound on
+// EVERY tier including Low, so the default sits AT the derived tile instead of 1.41x it.
 //
 // ASSERTED AGAINST THE DEFAULTS THEMSELVES, not against a copied literal. The three numbers this reads are
 // the component's own; a preset pass that moves the layer moves all three together and this test follows
@@ -1306,14 +1306,18 @@ TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthor
     // asserted here so it cannot come back. Both shipped geometries now have their minimum in the MIDDLE
     // of the sky, which is exactly where a ground camera looks.
     //
-    // THE DECK'S USED TO BE OVERHEAD, and raising it to 5 km (Docs/Clouds/DECK_SCALE_DECISION.md D2) is
+    // THE DECK'S USED TO BE OVERHEAD, and raising it (Docs/Clouds/DECK_SCALE_DECISION.md D2, then D7) is
     // what moved it — into the step schedule's sqrt-to-linear blend band, by the same mechanism
     // CloudMarchScale.hpp:54-70 already documents for high layers. A LOW layer never reaches that band
-    // until its chord has grown tenfold, so its worst case really is the zenith; at 5 km the deck reaches
-    // it while its chord has barely doubled, and it joins the sheet's regime. Measured at High:
+    // until its chord has grown tenfold, so its worst case really is the zenith; at altitude the deck
+    // reaches it while its chord has barely doubled, and it joins the sheet's regime. Measured at High:
     //
-    //     deck   18.1177 samples at 90 degrees  ->  10.8044 at 14 degrees   (the layer moved)
+    //     deck   18.1177 samples at 90 degrees  ->  10.7972 at 23 degrees   (the layer moved, twice)
     //     sheet   4.0579 samples at 20 degrees  ->   4.0579 at 20 degrees   (unchanged)
+    //
+    // The deck's count is essentially FLAT under the lift — 10.8044 at the 5 km base, 10.7972 at 8 km —
+    // and that is the derivation working rather than a coincidence: raising the base scales the thickness
+    // and the distance to the layer together, and the search count is the ratio of the two.
     //
     // WHAT REPLACED THE OLD ASSERTION, AND WHY IT IS NOT `deck > sheet` ALONE. The old relation was
     // `deck > 4 * sheet`, and calling the 4x incidental was wrong in a way worth spelling out: with the
@@ -1323,8 +1327,8 @@ TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthor
     // headroom (18.12 against 16.23), so it was TIGHT rather than loose, and dropping it cost real
     // detection.
     //
-    // THE NEW DETECTOR, in the new regime and against the same three measured numbers: deck 10.8044 at
-    // 14 degrees, sheet 4.0579 at 20 degrees, bound 4.0. Twice the bound is 8.0 — cleared by 35% by the
+    // THE NEW DETECTOR, in the new regime and against the same three measured numbers: deck 10.7972 at
+    // 23 degrees, sheet 4.0579 at 20 degrees, bound 4.0. Twice the bound is 8.0 — cleared by 35% by the
     // measured deck, and failed by a halving to 5.0. It is a bound and not a ratio, so it does not go
     // stale when one of the two layers changes regime, which is what happened to the 4x.
     //
@@ -1353,7 +1357,7 @@ TEST( CloudMarchScale, ADeckAndAThinSheetBothGetEnoughSearchSamplesAtTheirAuthor
     EXPECT_LT( deck.ElevationDegrees, 40.0f );
 
     EXPECT_GE( deck.Samples, 2.0f * Desert::Graphic::kCloudMinSearchSamplesAcrossLayer )
-         << "the default deck is what every new scene marches; measured 10.8044 against this 8.0, and a "
+         << "the default deck is what every new scene marches; measured 10.7972 against this 8.0, and a "
             "halving to 5.0 is the regression this catches";
 
     // A RAIL, NOT A TARGET, and the margin is 1.5%. The sheet's 4.0579 sits at 1.0145x the bound, so a

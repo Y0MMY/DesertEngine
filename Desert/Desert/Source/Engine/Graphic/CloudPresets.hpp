@@ -29,34 +29,38 @@ namespace Desert::Graphic
     // all sit on one condensation level and get 0.05-0.07; the anvil gets 0.16 because a storm base really
     // is lowered, ragged and rain-streaked, and that is the species rather than a defect.
     //
-    // THE FOUR CUMULUS ROWS ARE ONE SIMULTANEOUS SOLUTION, not two numbers each. Weather Tile Size is what
+    // SEVEN OF THE EIGHT ROWS ARE ONE SIMULTANEOUS SOLUTION, not two numbers each. Weather Tile Size is what
     // CloudAutoWeatherTileSize asks of the layer's mid altitude (Clouds/CloudWeatherScale.hpp) and
     // LayerThickness is what CloudLayerThicknessForAspect asks of that tile at the row's own species aspect
     // (Clouds/CloudLayerAspect.hpp). Each is defined through the other, so a base altitude admits exactly
     // one pair that satisfies both — solve
     //     thickness = bottom * K / ( 1 - K/2 ),   K = cot(20 deg) / kCloudWeatherCellsOverhead / aspect
-    // and the four rows below fall out: Clear 2357.8 m under a 33952.9 m tile, Fair Weather 2531.6 /
-    // 34430.4, Partly Cloudy 2279.6 / 33737.9, Summer Cumulus 3207.6 / 30792.5. Each realises its species
-    // aspect to better than 4e-5 and each sits at 1.000x its own derived tile.
+    // and the rows below fall out: Clear 3772.5 m under a 54324.6 m tile, Fair Weather 4050.6 / 55088.7,
+    // Partly Cloudy 3647.3 / 53980.6, Summer Cumulus 5613.2 / 53886.9, Stratus 2290.7 / 22778.4, Overcast
+    // 2513.2 / 26137.3, Storm 11104.5 / 46994.2. Each realises its species aspect to better than 2e-5 and
+    // each sits at 1.000x its own derived tile. Cirrus is the one row left alone, and the reason is at it.
     //
-    // THE BASE ALTITUDE IS WHAT PAYS FOR THAT, and it is why Clear, Fair Weather and Partly Cloudy sit at
-    // 5000 m and Summer Cumulus at 4000 m rather than the 0.9-2.0 km the family used to live at (UE ships a
-    // 5 km LayerBottomAltitude and a 10 km LayerHeight).
-    // Measured before the move: the dominant coverage cell — WeatherTileSize / 8 — sat at 0.92 to 1.29
-    // times the layer's mid altitude on all eight rows, so one cloud directly overhead subtended 49 to 66
-    // degrees and two clouds covered the sky horizon to horizon. Partly Cloudy was the worst at 65.7
-    // degrees. At the altitudes below the same cloud subtends 37.9 degrees, and the zenith reads as a
-    // cumulus field with depth instead of a ceiling.
+    // THE BASE ALTITUDE IS WHAT PAYS FOR THAT, and it is why the four cumulus rows sit at 7-8 km and the
+    // three sheet/deep rows at 3-3.5 km rather than the 0.6-0.9 km they used to live at (UE ships a 5 km
+    // LayerBottomAltitude and a 10 km LayerHeight).
+    // Measured before the first move: the dominant coverage cell — WeatherTileSize / 8 — sat at 0.92 to
+    // 1.29 times the layer's mid altitude on all eight rows, so one cloud directly overhead subtended 49 to
+    // 66 degrees and two clouds covered the sky horizon to horizon. Partly Cloudy was the worst at 65.7
+    // degrees. At every altitude below the same cloud subtends 37.9 degrees — that number is SCALE-FREE,
+    // because the tile is derived from the altitude, so it does not move again when the layer is raised
+    // further. WHAT THE SECOND LIFT (5 km -> 8 km, and 0.6-0.9 km -> 3-3.5 km) BUYS IS NOT A SMALLER
+    // CLOUD: it is altitude, the aerial perspective that comes with the extra path length, and less
+    // parallax against a moving camera. See Docs/Clouds/DECK_SCALE_DECISION.md D7.
     //
     // MOVING THE LAYER RATHER THAN SHRINKING THE CLOUD is the whole point, and the number that forces it is
     // CloudMarchScale's four-sample search bound. Buying the same angular size at 1500 m means solving the
     // pair there instead, which gives Partly Cloudy a 683.9 m layer and 1.99 search samples at the Low tier
     // — under half the bound, i.e. a per-pixel coin toss on whether a ray notices the deck at all. The rows
-    // below clear it on every shipped tier, 4.15 to 6.41 at Low. Altitude buys angular size for free; a
+    // below clear it on every shipped tier, 4.15 to 14.49 at Low. Altitude buys angular size for free; a
     // thinner layer buys it out of the march.
     //
-    // The four sheet/deep rows are NOT part of this and are deliberately left as authored — the reason is
-    // beside each of them, and it is measured rather than asserted.
+    // Cirrus is NOT part of this and is deliberately left as authored — the reason is beside it, and it is
+    // measured rather than asserted.
     //
     // DetailStrength runs at 0.70-0.85 on the convective presets (0.30-0.40 on the blanket ones), not
     // the old 0.30-0.55: Nubis3 erodes the profile with the FULL noise composite (p. 118), and at a
@@ -193,13 +197,13 @@ namespace Desert::Graphic
     inline constexpr CloudPresetEntry kCloudPresets[] = {
          { ECS::CloudPreset::Clear, "Clear", kCloudSpeciesCumulusHumilis, 1.80f,
            CloudPresetValues{
-                .LayerBottomAltitude           = Common::Units::Metres( 5000.0f ),
-                .LayerThickness                = Common::Units::Metres( 2357.8f ),
+                .LayerBottomAltitude           = Common::Units::Metres( 8000.0f ),
+                .LayerThickness                = Common::Units::Metres( 3772.5f ),
                 .HorizonFadeStart              = Common::Units::Metres( 60000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 140000.0f ),
                 .Coverage                      = 0.28f,
                 .CoverageContrast              = 2.20f,
-                .WeatherTileSize               = Common::Units::Metres( 33952.9f ),
+                .WeatherTileSize               = Common::Units::Metres( 54324.6f ),
                 .WeatherSeed                   = 1337,
                 .WeatherOctaves                = 6,
                 .WeatherWarpStrength           = 0.35f,
@@ -281,13 +285,13 @@ namespace Desert::Graphic
            } },
          { ECS::CloudPreset::FairWeather, "Fair Weather", kCloudSpeciesCumulusMediocris, 1.70f,
            CloudPresetValues{
-                .LayerBottomAltitude           = Common::Units::Metres( 5000.0f ),
-                .LayerThickness                = Common::Units::Metres( 2531.6f ),
+                .LayerBottomAltitude           = Common::Units::Metres( 8000.0f ),
+                .LayerThickness                = Common::Units::Metres( 4050.6f ),
                 .HorizonFadeStart              = Common::Units::Metres( 60000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 140000.0f ),
                 .Coverage                      = 0.62f,
                 .CoverageContrast              = 1.60f,
-                .WeatherTileSize               = Common::Units::Metres( 34430.4f ),
+                .WeatherTileSize               = Common::Units::Metres( 55088.7f ),
                 .WeatherSeed                   = 1337,
                 .WeatherOctaves                = 6,
                 .WeatherWarpStrength           = 0.40f,
@@ -370,13 +374,13 @@ namespace Desert::Graphic
          { ECS::CloudPreset::PartlyCloudy, "Partly Cloudy", kCloudSpeciesCumulusMediocris,
            kCloudAspectMeasuredCumulus,
            CloudPresetValues{
-                .LayerBottomAltitude           = Common::Units::Metres( 5000.0f ),
-                .LayerThickness                = Common::Units::Metres( 2279.6f ),
+                .LayerBottomAltitude           = Common::Units::Metres( 8000.0f ),
+                .LayerThickness                = Common::Units::Metres( 3647.3f ),
                 .HorizonFadeStart              = Common::Units::Metres( 60000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 140000.0f ),
                 .Coverage                      = 0.80f,
                 .CoverageContrast              = 1.20f,
-                .WeatherTileSize               = Common::Units::Metres( 33737.9f ),
+                .WeatherTileSize               = Common::Units::Metres( 53980.6f ),
                 .WeatherSeed                   = 1337,
                 .WeatherOctaves                = 6,
                 .WeatherWarpStrength           = 0.45f,
@@ -458,13 +462,13 @@ namespace Desert::Graphic
            } },
          { ECS::CloudPreset::SummerCumulus, "Summer Cumulus", kCloudSpeciesCumulusCongestus, 1.20f,
            CloudPresetValues{
-                .LayerBottomAltitude           = Common::Units::Metres( 4000.0f ),
-                .LayerThickness                = Common::Units::Metres( 3207.6f ),
+                .LayerBottomAltitude           = Common::Units::Metres( 7000.0f ),
+                .LayerThickness                = Common::Units::Metres( 5613.2f ),
                 .HorizonFadeStart              = Common::Units::Metres( 60000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 140000.0f ),
                 .Coverage                      = 0.86f,
                 .CoverageContrast              = 1.05f,
-                .WeatherTileSize               = Common::Units::Metres( 30792.5f ),
+                .WeatherTileSize               = Common::Units::Metres( 53886.9f ),
                 .WeatherSeed                   = 1337,
                 .WeatherOctaves                = 6,
                 .WeatherWarpStrength           = 0.45f,
@@ -544,22 +548,23 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.30f,
                 .WindUpliftSpeed               = Common::Units::Metres( 4.0f ),
            } },
-         // NOT re-authored, twice over. By the aspect pass: 6960.3 / 8 over 700 m is 1.243, a low sheet
-         // already wider than it is deep and already inside the stratus range. And not re-derived when the
-         // cumulus rows moved either — a blanket at Coverage 0.90 has little discrete cloud overhead to make
-         // angularly smaller, so the move buys it least. Re-deriving it anyway was computed and refused:
-         // 458.1 m thick under a 4555.7 m tile, which is below Weather Tile Size's own 5000 m field minimum,
-         // and 1.50 search samples at the Low tier against CloudMarchScale's four. It sits at 1.333x the
-         // derived tile, inside the band.
+         // LIFTED AND DERIVED. It kept its authored geometry through two earlier passes — the aspect pass
+         // (6960.3 / 8 over 700 m is already 1.243, inside the stratus range) and the 5 km cumulus move,
+         // where re-deriving it AT ITS OWN 600 m BASE gave 458.1 m under a 4555.7 m tile: below Weather Tile
+         // Size's own 5000 m field minimum, and 1.50 search samples at Low against CloudMarchScale's four.
+         // Both of those failures were failures of the ALTITUDE, not of the derivation. At a 3000 m base the
+         // same simultaneous solution is 2290.7 m under a 22778.4 m tile — 4.6x the tile minimum and 5.81
+         // search samples at Low — so the row is now derived like the rest, at exactly 1.000x its own tile,
+         // and its aspect is unchanged at 1.243.
          { ECS::CloudPreset::Stratus, "Stratus", kCloudSpeciesStratus, 1.243f,
            CloudPresetValues{
-                .LayerBottomAltitude           = Common::Units::Metres( 600.0f ),
-                .LayerThickness                = Common::Units::Metres( 700.0f ),
+                .LayerBottomAltitude           = Common::Units::Metres( 3000.0f ),
+                .LayerThickness                = Common::Units::Metres( 2290.7f ),
                 .HorizonFadeStart              = Common::Units::Metres( 45000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 110000.0f ),
                 .Coverage                      = 0.90f,
                 .CoverageContrast              = 0.70f,
-                .WeatherTileSize               = Common::Units::Metres( 6960.3f ),
+                .WeatherTileSize               = Common::Units::Metres( 22778.4f ),
                 .WeatherSeed                   = 1337,
                 .WeatherOctaves                = 4,
                 .WeatherWarpStrength           = 0.20f,
@@ -639,23 +644,23 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.20f,
                 .WindUpliftSpeed               = Common::Units::Metres( 1.0f ),
            } },
-         // NOT re-derived when the cumulus rows moved, and the one row where that costs something: its tile
-         // was authored rather than derived, at 1.2465x what its own altitude asks for at three cells
-         // overhead. Raising CellsOverhead to four shrinks the derived tile by 0.75x and carries this row to
-         // 1.6620x, the highest ratio of the eight — inside the band, but only once the band was rescaled by
-         // the same constant it was measured under (CloudWeatherScale.hpp). Re-deriving it instead was
-         // computed and refused: 646.3 m thick under a 6721.0 m tile gives 2.00 search samples at the Low
-         // tier, half of CloudMarchScale's four, and that bound has no tolerance at all where the tile band
-         // has a measured one. See DECK_SCALE_DECISION.md D3, which records the other three at 1.333x.
+         // LIFTED AND DERIVED, and this is the row where that fixes the most. Its tile used to be AUTHORED
+         // rather than derived, at 1.2465x what its own 900 m altitude asked for, which after CellsOverhead
+         // 3 -> 4 carried it to 1.6620x — the highest ratio of the eight and the one that made the tolerance
+         // band's own rescaling load-bearing (CloudWeatherScale.hpp). Re-deriving it at 900 m was refused
+         // with numbers: 646.3 m thick under a 6721.0 m tile gives 2.00 search samples at Low, half of
+         // CloudMarchScale's four. At a 3500 m base the same solution is 2513.2 m under a 26137.3 m tile and
+         // 5.92 samples at Low, so the refusal expires and the row is derived: 1.000x its own tile, aspect
+         // unchanged at 1.30, and no row left in the table needing the band's slack to be admissible.
          { ECS::CloudPreset::Overcast, "Overcast", kCloudSpeciesStratocumulus, 1.30f,
            CloudPresetValues{
-                .LayerBottomAltitude           = Common::Units::Metres( 900.0f ),
-                .LayerThickness                = Common::Units::Metres( 1409.0f ),
+                .LayerBottomAltitude           = Common::Units::Metres( 3500.0f ),
+                .LayerThickness                = Common::Units::Metres( 2513.2f ),
                 .HorizonFadeStart              = Common::Units::Metres( 50000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 120000.0f ),
                 .Coverage                      = 0.95f,
                 .CoverageContrast              = 0.60f,
-                .WeatherTileSize               = Common::Units::Metres( 14653.2f ),
+                .WeatherTileSize               = Common::Units::Metres( 26137.3f ),
                 .WeatherSeed                   = 1337,
                 .WeatherOctaves                = 4,
                 .WeatherWarpStrength           = 0.25f,
@@ -735,21 +740,24 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.25f,
                 .WindUpliftSpeed               = Common::Units::Metres( 2.0f ),
            } },
-         // NOT re-authored by the aspect pass: 38098.4 / 8 over 9000 m is 0.529, and a cumulonimbus is the
-         // one species that IS taller than it is wide. Its 9 km depth is what earns it — deep enough to be
-         // the tower those proportions describe, and past the depth at which CloudLayerAspect stops asking.
-         // Not re-derived when the cumulus rows moved either, and that one is arithmetic rather than taste:
-         // the pair solved at this base gives 2591.0 m of depth, well under kCloudDeepConvectionThickness's
-         // 6 km, so the row would stop being allowed to have the proportions that make it a storm at all.
+         // LIFTED AND DERIVED, and the aspect is untouched at 0.529 — a cumulonimbus is the one species that
+         // IS taller than it is wide, and what earns it is depth: past kCloudDeepConvectionThickness's 6 km
+         // the proportions describe a tower rather than a slab standing on end, and CloudLayerAspect stops
+         // asking. Deriving the pair was refused at the old 700 m base for exactly that reason — the
+         // solution there is 2591.0 m of depth, well under the 6 km, so the row would have stopped being
+         // allowed to be a storm. At a 3000 m base the same solution is 11104.5 m under a 46994.2 m tile:
+         // 1.85x the deep-convection threshold, still inside LayerThickness's own 15 km field maximum, and
+         // 14.49 search samples at Low — the largest margin in the table. The refusal was about the
+         // altitude and it expires with it.
          { ECS::CloudPreset::Storm, "Storm", kCloudSpeciesCumulonimbus, 0.529f,
            CloudPresetValues{
-                .LayerBottomAltitude           = Common::Units::Metres( 700.0f ),
-                .LayerThickness                = Common::Units::Metres( 9000.0f ),
+                .LayerBottomAltitude           = Common::Units::Metres( 3000.0f ),
+                .LayerThickness                = Common::Units::Metres( 11104.5f ),
                 .HorizonFadeStart              = Common::Units::Metres( 55000.0f ),
                 .HorizonFadeEnd                = Common::Units::Metres( 130000.0f ),
                 .Coverage                      = 0.98f,
                 .CoverageContrast              = 0.80f,
-                .WeatherTileSize               = Common::Units::Metres( 38098.4f ),
+                .WeatherTileSize               = Common::Units::Metres( 46994.2f ),
                 .WeatherSeed                   = 1337,
                 .WeatherOctaves                = 6,
                 .WeatherWarpStrength           = 0.60f,
@@ -829,10 +837,23 @@ namespace Desert::Graphic
                 .WindHeightShear               = 0.50f,
                 .WindUpliftSpeed               = Common::Units::Metres( 18.0f ),
            } },
-         // NOT re-authored by the aspect pass: 63008.8 / 8 over 1200 m is 6.563, an ice sheet six times
-         // wider than it is deep, which is what a cirrus sheet is. Correct as shipped. Not re-derived when
-         // the cumulus rows moved either: the pair solved at this base thins it to 883.5 m and takes it
-         // from 1.56 search samples at Low to 1.17, i.e. further under the bound it already sits beneath.
+         // THE ONE ROW NOT LIFTED, and the only one left that is authored rather than derived. Two reasons,
+         // in this order:
+         //
+         // IT IS ALREADY THE HIGHEST ROW. At 8000 m it sits at the top of the table's new band, so a lift
+         // buys it the least of the eight — there is no altitude left to gain.
+         //
+         // AND IT IS THE ONE ROW THAT CANNOT AFFORD THE DERIVATION AT ANY ALTITUDE. The pair solved at this
+         // aspect thins the sheet to 883.5 m and takes CloudMarchScale's worst search across the layer at
+         // the High tier from 4.06 to 3.05 — through a bound of four that has no tolerance in it at all,
+         // and High is the SHIPPED tier. That number is not a property of 8000 m: at aspect 6.563 the
+         // solved thickness is proportional to the base, so the search count is scale-free and the solution
+         // measures 3.05 at 10 km, 3.04 at 10.75 km and 3.05 at 11 km. Raising the row does not rescue it;
+         // only thickening it would, and thickening it is what stops it being a cirrus sheet.
+         //
+         // 63008.8 / 8 over 1200 m is 6.563, an ice sheet six times wider than it is deep, which is what a
+         // cirrus sheet is. It stays as authored, at 1.333x its own derived tile — inside the band, and now
+         // the only row that is not at 1.000.
          { ECS::CloudPreset::Cirrus, "Cirrus", kCloudSpeciesCirrus, 6.563f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 8000.0f ),

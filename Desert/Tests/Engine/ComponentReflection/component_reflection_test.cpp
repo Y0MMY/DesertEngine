@@ -389,16 +389,21 @@ TEST( VolumetricCloudReflection, LayerGeometryIsInCentimetresWithMetreScaleDefau
     EXPECT_TRUE( Find( clouds, "LayerBottomAltitude" )->Meta.IsLength );
     EXPECT_TRUE( Find( clouds, "LayerThickness" )->Meta.IsLength );
 
-    // 5000 m and 2279.6 m, in the engine's centimetres, and neither is a round number because neither is
+    // 8000 m and 3647.3 m, in the engine's centimetres, and neither is a round number because neither is
     // chosen. The thickness is the default weather tile's coverage cell divided by the aspect of a cumulus
     // mediocris (Engine/Graphic/Clouds/CloudLayerAspect.hpp) and the tile is what the layer's mid altitude
-    // asks for (Clouds/CloudWeatherScale.hpp), so the two together admit one pair per base altitude. The
-    // base altitude is 5000 m — UE's own default — because solving that pair down at the 1500 m this
-    // component used to default to gives a 683.9 m layer, and 683.9 m is 1.99 search samples at the Low
-    // tier against CloudMarchScale's four. The thickness was 3500 m before any of it, which made the
-    // default cloud taller than it was wide.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerBottomAltitude" ), 500000.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerThickness" ), 227960.0f );
+    // asks for (Clouds/CloudWeatherScale.hpp), so the two together admit one pair per base altitude.
+    // Solving that pair down at the 1500 m this component used to default to gives a 683.9 m layer, and
+    // 683.9 m is 1.99 search samples at the Low tier against CloudMarchScale's four. The thickness was
+    // 3500 m before any of it, which made the default cloud taller than it was wide.
+    //
+    // THE BASE WENT 1500 -> 5000 -> 8000 m, and the second move is the one this comment has to be honest
+    // about: it does NOT change the angular size of a cloud. The cell is tile / 8, the tile is derived from
+    // the mid altitude, so cell / altitude is scale-free and a cloud overhead subtends 37.9 degrees at both
+    // 5 km and 8 km. What the 8 km base buys is altitude, aerial perspective and less parallax under a
+    // moving camera. Docs/Clouds/DECK_SCALE_DECISION.md D7.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerBottomAltitude" ), 800000.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( clouds, "LayerThickness" ), 364730.0f );
 }
 
 TEST( VolumetricCloudReflection, TheMasterSwitchGatesEveryOtherRow )

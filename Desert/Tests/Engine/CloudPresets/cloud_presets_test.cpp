@@ -497,12 +497,12 @@ TEST( CloudPresets, EveryPresetsWeatherTileMatchesItsOwnLayerAltitude )
 {
     for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
     {
-        // NO ROW IS EXEMPTED, BY NAME OR BY CLAUSE. All eight sit inside the band: the four cumulus rows
-        // at 1.000 because they are solved to the derivation, Stratus, Storm and Cirrus at 1.333 because
-        // their tiles were the derived tile at the three cells overhead the constant used to carry, and
-        // Overcast at 1.662 because its tile was authored at 1.2465x its own derived one. The band is
-        // [0.9333, 2.1333] and it is derived from kCloudWeatherCellsOverhead rather than written down,
-        // so a future change to the count moves every one of these ratios and the band together.
+        // NO ROW IS EXEMPTED, BY NAME OR BY CLAUSE. All eight sit inside the band, and after the lift
+        // SEVEN of them sit at exactly 1.000 because they are solved to the derivation. Only Cirrus is
+        // still authored, at 1.333 — its tile was the derived tile at the three cells overhead the
+        // constant used to carry. The band is [0.9333, 2.1333] and it is derived from
+        // kCloudWeatherCellsOverhead rather than written down, so a future change to the count moves
+        // every one of these ratios and the band together.
         VolumetricCloudData d{};
         Graphic::ApplyPreset( preset.Id, d );
 
@@ -572,10 +572,20 @@ TEST( CloudPresets, NoPresetIsTallerThanItIsWideWithoutTheDepthToBeACumulonimbus
     EXPECT_LT( Graphic::CloudLayerAspect( storm.WeatherTileSize, storm.LayerThickness ), 1.0f );
     EXPECT_GE( storm.LayerThickness, Graphic::kCloudDeepConvectionThickness );
 
-    // Take the depth away and the same weather stops being allowed to be taller than wide. 5 km under
-    // Storm's 4.76 km cell is an aspect of 0.95 — still a tower, no longer a cumulonimbus.
-    const float shallow = Common::Units::Metres( 5000.0f );
+    // Take the depth away and the same weather stops being allowed to be taller than wide.
+    //
+    // THE WINDOW NARROWED WHEN STORM WAS LIFTED, and the shallow thickness is written against the
+    // threshold rather than as a literal because of it. The probe has to be taller than Storm's coverage
+    // cell (or the aspect is not below one and there is nothing to disallow) and shorter than
+    // kCloudDeepConvectionThickness (or the depth excuses it). Storm's cell went 4762 m -> 5874.3 m with
+    // the lift, so the window went [4762, 6000) to [5874.3, 6000): one metre under the threshold is the
+    // only expression of "shallow" that stays inside it without being re-tuned every time the row moves.
+    // At 5999 m under a 5874.3 m cell the aspect is 0.979.
+    const float shallow = Graphic::kCloudDeepConvectionThickness - Common::Units::Metres( 1.0f );
     ASSERT_LT( shallow, Graphic::kCloudDeepConvectionThickness );
+    ASSERT_GT( shallow, storm.WeatherTileSize / Graphic::kCloudWeatherBasePeriod )
+         << "the probe is shorter than Storm's own coverage cell, so its aspect is not below one and this "
+            "row is asserting nothing";
     EXPECT_LT( Graphic::CloudLayerAspect( storm.WeatherTileSize, shallow ), 1.0f );
     EXPECT_FALSE( Graphic::CloudLayerAspectIsPlausible( storm.WeatherTileSize, shallow ) );
 }
@@ -586,9 +596,9 @@ TEST( CloudPresets, NoPresetIsTallerThanItIsWideWithoutTheDepthToBeACumulonimbus
 TEST( CloudPresets, ThicknessForAspectInvertsTheAspect )
 {
     // The shipped tiles, smallest to largest, plus a 1 km one below anything authored. Partly Cloudy's
-    // is 3373790 since the cumulus rows moved to the 5 km band; this list is here to exercise the inverse
-    // over the range the table actually occupies, so it has to follow the table.
-    for ( float tile : { 100000.0f, 696030.0f, 1465320.0f, 3373790.0f, 6300880.0f } )
+    // is 5398060 since the lift took the cumulus rows to the 8 km band; this list is here to exercise the
+    // inverse over the range the table actually occupies, so it has to follow the table.
+    for ( float tile : { 100000.0f, 2277840.0f, 2613730.0f, 5398060.0f, 6300880.0f } )
         for ( float aspect : { 0.4f, 0.529f, 1.0f, 1.3f, 1.85f, 6.563f, 12.0f } )
         {
             const float thickness = Graphic::CloudLayerThicknessForAspect( tile, aspect );
@@ -599,7 +609,7 @@ TEST( CloudPresets, ThicknessForAspectInvertsTheAspect )
     // MONOTONE, and strictly: a thicker layer under the same weather is a narrower cloud. This is what
     // makes "raise the aspect" and "thin the layer" the same instruction, which is how the presets were
     // re-authored and how the warning's advice is phrased.
-    const float tile     = 3373790.0f;
+    const float tile     = 5398060.0f;
     float       previous = Graphic::CloudLayerAspect( tile, 50000.0f );
     for ( float thickness = 60000.0f; thickness <= 1500000.0f; thickness += 10000.0f )
     {
@@ -615,12 +625,17 @@ TEST( CloudPresets, ThicknessForAspectInvertsTheAspect )
 // re-authoring could go. Every preset clears four samples on every shipped tier — that is what decided
 // Fair Weather at 1.70 rather than 2.0 and Overcast at 1.30 rather than the broader sheet.
 //
-// AND IT IS THE TEST THAT SAYS THE ALTITUDE MOVE WAS HONEST. Taking the four cumulus rows to the 5 km band
-// buys angular size by moving the layer instead of by shrinking the cloud, and the way to tell the two
-// apart is right here: solved at the OLD 1.5 km base, the same aspect gives Partly Cloudy a 683.9 m layer
-// and 1.99 samples at Low — under half the bound, a march that steps over its own deck depending on the
-// ray's dither phase. Solved at 5 km it is 2279.6 m and 4.15. Measured on the shipped rows at Low: Clear
-// 4.27, Fair Weather 4.53, Partly Cloudy 4.15, Summer Cumulus 6.41, all at 13-14 degrees of elevation.
+// AND IT IS THE TEST THAT SAYS THE ALTITUDE MOVES WERE HONEST. Buying angular size by moving the layer
+// instead of by shrinking the cloud is the whole claim, and the way to tell the two apart is right here:
+// solved at the OLD 1.5 km base, the same aspect gives Partly Cloudy a 683.9 m layer and 1.99 samples at
+// Low — under half the bound, a march that steps over its own deck depending on the ray's dither phase.
+// Solved at 8 km it is 3647.3 m and 4.15. Measured on the shipped rows at Low, after the lift: Clear 4.26,
+// Fair Weather 4.52, Partly Cloudy 4.15, Summer Cumulus 6.39, Stratus 5.81, Overcast 5.92, Storm 14.49.
+//
+// STRATUS IS NO LONGER SKIPPED. It used to be, because at a 600 m base it was a 700 m sheet that failed at
+// Low and Medium and nobody had lifted it. The lift derived it at 3000 m, where it clears every tier with
+// margin, so the exemption is gone rather than carried — and if a future pass puts it back under the bound
+// this row goes red instead of quietly skipping it.
 TEST( CloudPresets, EveryPresetStillClearsTheSearchBoundOnEveryTierAfterTheAspectPass )
 {
     for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
@@ -628,11 +643,12 @@ TEST( CloudPresets, EveryPresetStillClearsTheSearchBoundOnEveryTierAfterTheAspec
         VolumetricCloudData d{};
         Graphic::ApplyPreset( preset.Id, d );
 
-        // Stratus and Cirrus are the shipped thin sheets and were already documented as failing the bound
-        // at the low tiers (CloudMath's ADeckAndAThinSheetBothGetEnoughSearchSamples...). They are not
-        // re-authored here, so they are not this test's business; what matters is that nothing the aspect
-        // pass touched JOINED them.
-        if ( preset.Id == CloudPreset::Stratus || preset.Id == CloudPreset::Cirrus )
+        // Cirrus is the one shipped thin sheet left, and it is documented as failing the bound at the two
+        // cheap tiers (CloudMath's ADeckAndAThinSheetBothGetEnoughSearchSamples..., and the note at the
+        // Cirrus row itself: deriving it costs High 4.06 -> 3.05 at ANY altitude). It is deliberately not
+        // lifted, so it is not this test's business; what matters is that nothing the lift touched JOINED
+        // it.
+        if ( preset.Id == CloudPreset::Cirrus )
             continue;
 
         for ( const auto& tier : Graphic::kCloudQualityTiers )
@@ -646,26 +662,29 @@ TEST( CloudPresets, EveryPresetStillClearsTheSearchBoundOnEveryTierAfterTheAspec
     }
 }
 
-// D3 OF THE DECK-SCALE DECISION, ASSERTED RATHER THAN LEFT AS AN ABSENCE. Four rows — Stratus, Overcast,
-// Storm and Cirrus — are deliberately NOT part of the simultaneous solution the four cumulus rows are, and
-// the next person to read this table has to be able to tell "decided against" from "nobody got round to".
+// D7 OF THE DECK-SCALE DECISION, ASSERTED RATHER THAN LEFT AS AN ABSENCE. SEVEN of the eight rows are now
+// the simultaneous solution of CloudWeatherScale and CloudLayerAspect at their own base altitude; CIRRUS is
+// the one that is deliberately NOT, and the next person to read this table has to be able to tell "decided
+// against" from "nobody got round to".
 //
-// WHY THEY ARE NOT DERIVED is measured, not aesthetic: re-deriving each of them breaks a bound that has no
-// tolerance, while the thing the derivation buys — a smaller cloud overhead — is worth least on exactly
-// these species. Stratus at Coverage 0.90, Overcast at 0.95 and Storm at 0.98 are blankets; there is
-// little in the way of discrete cloud overhead to make angularly smaller. Cirrus is a 1.2 km ice layer
-// whose binding constraint is already CloudMarchScale's, not this one.
+// WHAT CHANGED, AND WHY THE OLD VERSION OF THIS TEST NAMED FOUR ROWS. Stratus, Overcast and Storm used to
+// be exempt too, and every one of those exemptions was a failure of the ALTITUDE rather than of the
+// derivation. At their old bases — 600 m, 900 m, 700 m — solving the pair gave Stratus 458.1 m under a
+// 4555.7 m tile (below Weather Tile Size's own 5000 m field minimum) and 1.50 search samples at Low,
+// Overcast 646.3 m and 2.00 samples, and Storm 2591.0 m of depth against kCloudDeepConvectionThickness's
+// 6 km, i.e. a cumulonimbus no longer deep enough to be one. Lifting them to 3000 / 3500 / 3000 m makes all
+// three solutions affordable — 22778.4 / 26137.3 / 46994.2 m of tile and 5.81 / 5.92 / 14.49 samples at Low
+// — so the refusals expire with the altitude that caused them and the rows are derived like the rest.
 //
-// WHAT RE-DERIVING THEM WAS MEASURED TO COST, at four cells overhead: Stratus 458.1 m under a 4555.7 m
-// tile — below Weather Tile Size's own 5000 m field minimum — and 1.50 search samples at Low; Overcast
-// 646.3 m under 6721.0 m and 2.00 samples at Low; Storm 2591.0 m of depth against
-// kCloudDeepConvectionThickness's 6 km, i.e. a cumulonimbus no longer deep enough to be one; Cirrus 883.5 m
-// and 1.17 samples at Low against the 1.56 it already has. Three hard bounds broken and one made worse, in
-// exchange for an angular improvement on species with no discrete clouds to make angularly smaller.
+// WHY CIRRUS IS NOT, and it is the one refusal that does NOT expire with altitude: solving the pair at its
+// 6.563 aspect thins the sheet to 883.5 m and takes CloudMarchScale's worst search at the High tier from
+// 4.06 to 3.05, through a bound of four with no tolerance in it. The solved thickness is proportional to
+// the base at fixed aspect, so that 3.05 is scale-free — 3.05 at 8 km, 3.05 at 10 km, 3.05 at 11 km.
+// There is no altitude that buys it, and Cirrus is already the highest row in the table anyway.
 //
 // The assertions below are written against the ratio a DERIVED row realises rather than against the raw
 // ratio, because the raw one is a function of kCloudWeatherCellsOverhead and this statement is not.
-TEST( CloudPresets, TheSheetAndDeepRowsAreDeliberatelyNotDerived )
+TEST( CloudPresets, OnlyCirrusIsDeliberatelyNotDerived )
 {
     // The yardstick. A row the derivation produced sits at exactly its own derived tile — 1.000x at four
     // cells overhead, 0.75x at three — because its tile and its thickness were solved together against
@@ -677,52 +696,45 @@ TEST( CloudPresets, TheSheetAndDeepRowsAreDeliberatelyNotDerived )
         return d.WeatherTileSize / Graphic::CloudAutoWeatherTileSize( d.LayerBottomAltitude, d.LayerThickness );
     };
     const float derivedRow = tileRatio( CloudPreset::PartlyCloudy );
-    ASSERT_GT( derivedRow, 0.0f );
+    ASSERT_NEAR( derivedRow, 1.0f, 1e-3f );
 
-    // Their authored geometry, pinned. "Not re-derived" is a claim about these twelve numbers, so a future
-    // pass that quietly solves one of them fails here rather than passing as a rounding change.
-    struct AuthoredRow
+    // EVERY ROW EXCEPT CIRRUS IS AT THE DERIVATION. This is the part that used to be an absence: "the four
+    // cumulus rows are solved" was asserted only of those four, so a sheet row drifting off its own
+    // derivation had nothing to fail against. Now the statement is about the whole table minus one.
+    for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
     {
-        CloudPreset Id;
-        const char* Name;
-        float       BottomMetres;
-        float       ThicknessMetres;
-        float       TileMetres;
-    };
-    constexpr AuthoredRow kAuthored[] = {
-         { CloudPreset::Stratus, "Stratus", 600.0f, 700.0f, 6960.3f },
-         { CloudPreset::Overcast, "Overcast", 900.0f, 1409.0f, 14653.2f },
-         { CloudPreset::Storm, "Storm", 700.0f, 9000.0f, 38098.4f },
-         { CloudPreset::Cirrus, "Cirrus", 8000.0f, 1200.0f, 63008.8f },
-    };
+        if ( preset.Id == CloudPreset::Cirrus )
+            continue;
 
-    for ( const AuthoredRow& row : kAuthored )
-    {
-        VolumetricCloudData d{};
-        Graphic::ApplyPreset( row.Id, d );
-
-        EXPECT_FLOAT_EQ( d.LayerBottomAltitude, Common::Units::Metres( row.BottomMetres ) ) << row.Name;
-        EXPECT_FLOAT_EQ( d.LayerThickness, Common::Units::Metres( row.ThicknessMetres ) ) << row.Name;
-        EXPECT_FLOAT_EQ( d.WeatherTileSize, Common::Units::Metres( row.TileMetres ) ) << row.Name;
+        EXPECT_NEAR( tileRatio( preset.Id ), 1.0f, 1e-3f )
+             << preset.Name << " is no longer at its own derived tile";
     }
 
-    // AND ALL FOUR ARE ADMISSIBLE AS AUTHORED, with no clause and no by-name exemption anywhere.
-    //
-    // DECK_SCALE_DECISION.md D3 predicted all four would land at 1.333x the derived tile. Three do;
-    // Overcast lands at 1.662x, because its tile was AUTHORED rather than derived, at 1.2465x what its own
-    // altitude asks for. That was briefly taken as an argument for a coverage-based exemption. It was not
-    // one: the band's own endpoints are absolute tiles measured at three cells overhead, so raising the
-    // count to four had to rescale them by 4/3 and nobody had. With the band derived from the constant
-    // (CloudWeatherScale.hpp) Overcast is simply inside it, and no row needs admitting by anything except
-    // the relation.
-    for ( const AuthoredRow& row : kAuthored )
+    // Cirrus's authored geometry, pinned. "Not derived" is a claim about these three numbers, so a future
+    // pass that quietly solves it fails here rather than passing as a rounding change.
+    VolumetricCloudData cirrus{};
+    Graphic::ApplyPreset( CloudPreset::Cirrus, cirrus );
+
+    EXPECT_FLOAT_EQ( cirrus.LayerBottomAltitude, Common::Units::Metres( 8000.0f ) );
+    EXPECT_FLOAT_EQ( cirrus.LayerThickness, Common::Units::Metres( 1200.0f ) );
+    EXPECT_FLOAT_EQ( cirrus.WeatherTileSize, Common::Units::Metres( 63008.8f ) );
+
+    // AND IT IS ADMISSIBLE AS AUTHORED, with no clause and no by-name exemption anywhere: its tile was the
+    // derived tile at the three cells overhead the constant used to carry, so it sits at 1.333x today, and
+    // the band is [0.9333, 2.1333] derived from that same constant (CloudWeatherScale.hpp).
+    EXPECT_TRUE( Graphic::CloudWeatherTileIsPlausible( cirrus.WeatherTileSize, cirrus.LayerBottomAltitude,
+                                                       cirrus.LayerThickness ) )
+         << "Cirrus is no longer admissible as authored";
+    EXPECT_NEAR( tileRatio( CloudPreset::Cirrus ), 4.0f / 3.0f, 1e-3f );
+
+    // AND CIRRUS IS THE HIGHEST ROW, which is the first half of why it is not lifted. Asserted so that a
+    // pass which raises another row above it has to come back and re-read the refusal at the Cirrus row.
+    for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
     {
         VolumetricCloudData d{};
-        Graphic::ApplyPreset( row.Id, d );
-
-        EXPECT_TRUE(
-             Graphic::CloudWeatherTileIsPlausible( d.WeatherTileSize, d.LayerBottomAltitude, d.LayerThickness ) )
-             << row.Name << " is no longer admissible as authored";
+        Graphic::ApplyPreset( preset.Id, d );
+        EXPECT_LE( d.LayerBottomAltitude, cirrus.LayerBottomAltitude )
+             << preset.Name << " now sits above Cirrus; the refusal to lift Cirrus assumed it was the top row";
     }
 }
 
