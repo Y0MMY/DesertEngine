@@ -497,20 +497,18 @@ TEST( CloudPresets, EveryPresetsWeatherTileMatchesItsOwnLayerAltitude )
 {
     for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
     {
-        // NO ROW IS EXEMPTED BY NAME. Overcast is the only row whose tile was authored rather than
-        // derived, so raising the cells-overhead count took it to 1.6620x a derived row — outside the
-        // band, while re-deriving it was measured at 2.00 search samples at the Low tier against
-        // CloudMarchScale's four. Neither is what the band is FOR: it was measured on a broken sky,
-        // where 2.5x empties the zenith and 0.63x walls the horizon, and Overcast at Coverage 0.95 is a
-        // blanket with no discrete cells to count. The predicate carries that clause itself now
-        // (CloudWeatherScale.hpp), so every present and future sheet is vacuous here for the same
-        // reason rather than this one being special.
+        // NO ROW IS EXEMPTED, BY NAME OR BY CLAUSE. All eight sit inside the band: the four cumulus rows
+        // at 1.000 because they are solved to the derivation, Stratus, Storm and Cirrus at 1.333 because
+        // their tiles were the derived tile at the three cells overhead the constant used to carry, and
+        // Overcast at 1.662 because its tile was authored at 1.2465x its own derived one. The band is
+        // [0.9333, 2.1333] and it is derived from kCloudWeatherCellsOverhead rather than written down,
+        // so a future change to the count moves every one of these ratios and the band together.
         VolumetricCloudData d{};
         Graphic::ApplyPreset( preset.Id, d );
 
         const float wanted = Graphic::CloudAutoWeatherTileSize( d.LayerBottomAltitude, d.LayerThickness );
-        EXPECT_TRUE( Graphic::CloudWeatherTileIsPlausible( d.Coverage, d.WeatherTileSize,
-                                                           d.LayerBottomAltitude, d.LayerThickness ) )
+        EXPECT_TRUE(
+             Graphic::CloudWeatherTileIsPlausible( d.WeatherTileSize, d.LayerBottomAltitude, d.LayerThickness ) )
              << preset.Name << ": tile " << Common::Units::ToMetres( d.WeatherTileSize ) / 1000.0f
              << " km over a layer at " << Common::Units::ToMetres( d.LayerBottomAltitude ) / 1000.0f << "-"
              << Common::Units::ToMetres( d.LayerBottomAltitude + d.LayerThickness ) / 1000.0f << " km wants "
@@ -652,12 +650,11 @@ TEST( CloudPresets, EveryPresetStillClearsTheSearchBoundOnEveryTierAfterTheAspec
 // Storm and Cirrus — are deliberately NOT part of the simultaneous solution the four cumulus rows are, and
 // the next person to read this table has to be able to tell "decided against" from "nobody got round to".
 //
-// WHY THEY ARE EXEMPT is a property of the sky rather than of the table. The relation that moved the
-// cumulus rows is about a coverage ISLAND staying larger than the finest erosion the march can still carry
-// at the distance the deck is drawn to; above roughly Coverage 0.90 the coverage field is CONNECTED, there
-// is no isolated blob left to read as a box, and the relation is vacuous. Stratus is 0.90, Overcast 0.95
-// and Storm 0.98. Cirrus is not a sheet by coverage but is a 1.2 km ice layer whose binding constraint is
-// already CloudMarchScale's, not this one.
+// WHY THEY ARE NOT DERIVED is measured, not aesthetic: re-deriving each of them breaks a bound that has no
+// tolerance, while the thing the derivation buys — a smaller cloud overhead — is worth least on exactly
+// these species. Stratus at Coverage 0.90, Overcast at 0.95 and Storm at 0.98 are blankets; there is
+// little in the way of discrete cloud overhead to make angularly smaller. Cirrus is a 1.2 km ice layer
+// whose binding constraint is already CloudMarchScale's, not this one.
 //
 // WHAT RE-DERIVING THEM WAS MEASURED TO COST, at four cells overhead: Stratus 458.1 m under a 4555.7 m
 // tile — below Weather Tile Size's own 5000 m field minimum — and 1.50 search samples at Low; Overcast
@@ -709,47 +706,24 @@ TEST( CloudPresets, TheSheetAndDeepRowsAreDeliberatelyNotDerived )
         EXPECT_FLOAT_EQ( d.WeatherTileSize, Common::Units::Metres( row.TileMetres ) ) << row.Name;
     }
 
-    // WHY THEY ARE EXEMPT, asserted as the mechanism rather than as an arithmetic coincidence.
+    // AND ALL FOUR ARE ADMISSIBLE AS AUTHORED, with no clause and no by-name exemption anywhere.
     //
-    // DECK_SCALE_DECISION.md D3 predicted all four would land at 1.333x the derived tile and stay inside
-    // CloudWeatherScale's [0.7, 1.6] band. Three did. Overcast did not — its tile was AUTHORED rather than
-    // derived, at 1.2465x what its own altitude asks for at three cells overhead, so raising the constant
-    // to four carried it to 1.6620x, out of the band's high end and the only preset to leave it.
-    //
-    // Pinning that ratio would have made the band's arithmetic the load-bearing fact, and it is not.
-    // THESE FOUR ROWS ARE ADMISSIBLE FOR TWO DIFFERENT REASONS and the difference is worth asserting,
-    // because a later pass that collapses them into one will look like a simplification:
-    //
-    //   * Stratus, Overcast and Storm are CONNECTED FIELDS at Coverage 0.90 to 0.98. The band was measured
-    //     on a broken sky — 2.5x empties the zenith, 0.63x walls the horizon — and neither failure can
-    //     happen to a blanket, so "how many cells overhead" is not an observable and the relation is
-    //     vacuous. That is a statement about the species and holds at any cells-overhead count.
-    //   * Cirrus is NOT a sheet (Coverage 0.66). It needs no exemption at all: it was the derived tile at
-    //     three cells, so raising the constant carried it to 1.333x and it passes the band on its own.
-    //
-    // Overcast is the only row for which the clause is doing the work. Assert exactly that.
+    // DECK_SCALE_DECISION.md D3 predicted all four would land at 1.333x the derived tile. Three do;
+    // Overcast lands at 1.662x, because its tile was AUTHORED rather than derived, at 1.2465x what its own
+    // altitude asks for. That was briefly taken as an argument for a coverage-based exemption. It was not
+    // one: the band's own endpoints are absolute tiles measured at three cells overhead, so raising the
+    // count to four had to rescale them by 4/3 and nobody had. With the band derived from the constant
+    // (CloudWeatherScale.hpp) Overcast is simply inside it, and no row needs admitting by anything except
+    // the relation.
     for ( const AuthoredRow& row : kAuthored )
     {
         VolumetricCloudData d{};
         Graphic::ApplyPreset( row.Id, d );
 
-        EXPECT_TRUE( Graphic::CloudWeatherTileIsPlausible( d.Coverage, d.WeatherTileSize, d.LayerBottomAltitude,
-                                                           d.LayerThickness ) )
+        EXPECT_TRUE(
+             Graphic::CloudWeatherTileIsPlausible( d.WeatherTileSize, d.LayerBottomAltitude, d.LayerThickness ) )
              << row.Name << " is no longer admissible as authored";
     }
-
-    VolumetricCloudData overcast{};
-    Graphic::ApplyPreset( CloudPreset::Overcast, overcast );
-    EXPECT_TRUE( Graphic::CloudCoverageFieldIsConnected( overcast.Coverage ) )
-         << "Overcast is carried by the sheet clause alone - its coverage " << overcast.Coverage
-         << " has fallen below kCloudConnectedCoverage and nothing else admits its 1.662x tile";
-
-    // And the clause is a clause, not a blanket: the derived rows are NOT sheets, so the band still has
-    // something to say about them. Without this, a threshold that swallowed every row would pass.
-    VolumetricCloudData derived{};
-    Graphic::ApplyPreset( CloudPreset::PartlyCloudy, derived );
-    EXPECT_FALSE( Graphic::CloudCoverageFieldIsConnected( derived.Coverage ) )
-         << "the cumulus rows have become sheets, which would make the tile relation vacuous everywhere";
 }
 
 // EVERY SPECIES KEEPS ITS BASE ON A CONDENSATION LEVEL — except the one whose base is supposed to be a

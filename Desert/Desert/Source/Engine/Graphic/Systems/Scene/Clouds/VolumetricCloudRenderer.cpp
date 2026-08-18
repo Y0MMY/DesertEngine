@@ -1,6 +1,5 @@
 #include "VolumetricCloudRenderer.hpp"
 
-#include <Engine/Graphic/Clouds/CloudIslandScale.hpp>
 #include <Engine/Graphic/Clouds/CloudLayerAspect.hpp>
 #include <Engine/Graphic/Clouds/CloudMarchScale.hpp>
 #include <Engine/Graphic/Clouds/CloudNoiseRules.hpp>
@@ -724,12 +723,10 @@ namespace Desert::Graphic::System
         // and the value that fixes it rather than a mystery. See CloudWeatherScale.hpp.
         // Checked PER LAYER: the relation is between a tile and the altitude of the layer that tiles the
         // sky with it, so a deck and a sheet each have their own answer and each can be wrong on its own.
-        // A BLANKET IS EXEMPT and the predicate knows it — above Coverage 0.90 there are no discrete cells
-        // to count overhead, so the quantity this warns about is not an observable on that sky at all.
         for ( uint32_t i = 0; i < m_Layers.Count; ++i )
         {
             const ECS::VolumetricCloudData& layer = m_Layers.Layers[i];
-            if ( CloudWeatherTileIsPlausible( layer.Coverage, layer.WeatherTileSize, layer.LayerBottomAltitude,
+            if ( CloudWeatherTileIsPlausible( layer.WeatherTileSize, layer.LayerBottomAltitude,
                                               layer.LayerThickness ) )
                 continue;
 
@@ -797,43 +794,6 @@ namespace Desert::Graphic::System
                       i, worst.Samples, Common::Units::ToMetres( layer.LayerThickness ) / 1000.0f,
                       worst.ElevationDegrees, kCloudMinSearchSamplesAcrossLayer, layer.CoarseStepMultiplier,
                       layer.StepGrowthRate, Common::Units::ToMetres( layer.MaxStepSize ) );
-        }
-
-        // And the FOURTH: a coverage island against the finest erosion the march can still carry out
-        // where the deck is drawn to. This is the one that decides whether a distant cloud is a cloud at
-        // all — an island the erosion cannot sculpt arrives as its own raw silhouette, which is a 2-D
-        // coverage field extruded between a flat base and a flat top, i.e. a box. It is the relation that
-        // was missing while the whole repository rendered a ceiling, and the one the other three are each
-        // satisfied by a sky of boxes. See CloudIslandScale.hpp.
-        //
-        // A SHEET IS EXEMPT AND THE PREDICATE KNOWS IT: above Coverage 0.90 the field is connected and
-        // there is no isolated blob to read as a box, so Stratus, Overcast and Storm never reach this
-        // message. A warning that fires on skies it does not describe is how warnings stop being read.
-        for ( uint32_t i = 0; i < m_Layers.Count; ++i )
-        {
-            const ECS::VolumetricCloudData& layer = m_Layers.Layers[i];
-            if ( CloudDeckIsResolvable( layer.Coverage, layer.WeatherTileSize, layer.DetailTileSize,
-                                        layer.MinStepSize, layer.MaxStepSize, layer.StepGrowthRate,
-                                        layer.MaxViewDistance ) )
-                continue;
-
-            const float drawTo = CloudDeckDrawDistance( layer.DetailTileSize, layer.MinStepSize, layer.MaxStepSize,
-                                                        layer.StepGrowthRate, layer.MaxViewDistance );
-            const float carried =
-                 CloudCarriedErosionFeature( drawTo, layer.MinStepSize, layer.MaxStepSize, layer.StepGrowthRate );
-            const float wanted =
-                 CloudDeckMinWeatherTileSize( layer.DetailTileSize, layer.MinStepSize, layer.MaxStepSize,
-                                              layer.StepGrowthRate, layer.MaxViewDistance );
-            LOG_WARN( "[Clouds] Layer {}: a coverage island is {:.2f} km across, but at the {:.1f} km this "
-                      "deck is drawn to the march can only carry erosion down to {:.2f} km. Nothing sculpts "
-                      "the island out there, so it arrives as its own raw silhouette — a flat-based, "
-                      "flat-topped extrusion of the coverage field, which reads as a box rather than as a "
-                      "cloud. At this Detail Tile Size ({:.2f} km) and step schedule the Weather Tile Size "
-                      "has to be at least {:.1f} km, or the layer has to move up so its own tile is.",
-                      i, Common::Units::ToMetres( CloudDeckIslandSize( layer.WeatherTileSize ) ) / 1000.0f,
-                      Common::Units::ToMetres( drawTo ) / 1000.0f, Common::Units::ToMetres( carried ) / 1000.0f,
-                      Common::Units::ToMetres( layer.DetailTileSize ) / 1000.0f,
-                      Common::Units::ToMetres( wanted ) / 1000.0f );
         }
 
         auto& renderer = Renderer::GetInstance();

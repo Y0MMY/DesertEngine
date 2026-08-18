@@ -28,13 +28,10 @@ namespace Desert::Tests::CloudGeometryRef
     // globally, so nothing else in a test binary sees a bare `vec3`.
     namespace
     {
-        using vec2  = glm::vec2;
-        using vec3  = glm::vec3;
-        using vec4  = glm::vec4;
-        using mat4  = glm::mat4;
-        using ivec3 = glm::ivec3;
-        using uvec3 = glm::uvec3;
-        using uint  = std::uint32_t;
+        using vec2 = glm::vec2;
+        using vec3 = glm::vec3;
+        using vec4 = glm::vec4;
+        using mat4 = glm::mat4;
 
         using glm::abs;
         using glm::clamp;
@@ -42,7 +39,6 @@ namespace Desert::Tests::CloudGeometryRef
         using glm::cross;
         using glm::dot;
         using glm::exp;
-        using glm::floor;
         using glm::length;
         using glm::max;
         using glm::min;
@@ -51,13 +47,6 @@ namespace Desert::Tests::CloudGeometryRef
         using glm::pow;
         using glm::sin;
         using glm::sqrt;
-
-// The NOISE header too, in the order the raymarch includes them. Not for the noise itself — the
-// CloudNoise suite owns that — but for the two constants that describe the erosion's own frequencies.
-// CloudGeometry.glslh deliberately does NOT include this file (it takes the cells-per-tile figure as a
-// parameter so it stays free of the noise volume's layout), which leaves exactly one place where the
-// engine's C++ copy of that figure can be checked against the shader's: here.
-#include <Common/CloudNoise.glslh>
 
 #include <Common/CloudGeometry.glslh>
 

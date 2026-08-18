@@ -565,24 +565,15 @@ Shader "CloudRaymarch"
             // the segment's entry for a ray that met nothing (there is no cloud whose distance to use).
             float segCloudDistance = segWeight > 1e-6f ? segDistance / segWeight : tEnter;
 
-            // Auto ranges are derived from THIS layer's own geometry AND from the step schedule this
-            // tier marches it with — the deck ends where its own erosion stops being carried, not at the
-            // planet's geometric horizon. See CloudAutoFadeStart / CloudAutoFadeEnd /
-            // CloudAutoHorizonStart, where the measurement and the reasoning live.
-            float fadeEnd = u_AutoDistanceFade != 0
-                                 ? CloudAutoFadeEnd(u_DetailTileSize, CLOUD_DETAIL_EROSION_LOW_PER_TILE,
-                                                    u_MinStepSize, u_MaxStepSize, u_StepGrowthRate,
-                                                    u_MaxViewDistance)
-                                 : u_DistanceFadeEnd;
-            float fadeStart = u_AutoDistanceFade != 0
-                                   ? CloudAutoFadeStart(u_LayerBottomAltitude, fadeEnd)
-                                   : u_DistanceFadeStart;
-            float horizonStart =
-                 u_AutoDistanceFade != 0
-                      ? CloudAutoHorizonStart(u_DetailTileSize, CLOUD_DETAIL_EROSION_LOW_PER_TILE,
-                                              u_MinStepSize, u_MaxStepSize, u_StepGrowthRate, fadeEnd)
-                      : u_HorizonFadeStart;
-            float horizonEnd = u_AutoDistanceFade != 0 ? fadeEnd : u_HorizonFadeEnd;
+            // Auto ranges are derived from THIS layer's own geometry; see CloudAutoFadeStart/End.
+            float fadeStart = u_AutoDistanceFade != 0 ? CloudAutoFadeStart(u_LayerBottomAltitude)
+                                                      : u_DistanceFadeStart;
+            float fadeEnd   = u_AutoDistanceFade != 0
+                                   ? CloudAutoFadeEnd(u_PlanetRadius, u_LayerBottomAltitude,
+                                                      u_LayerThickness)
+                                   : u_DistanceFadeEnd;
+            float horizonStart = u_AutoDistanceFade != 0 ? fadeStart * 4.0f : u_HorizonFadeStart;
+            float horizonEnd   = u_AutoDistanceFade != 0 ? fadeEnd : u_HorizonFadeEnd;
 
             // Horizon dissolve: the far edge of the layer fades into the sky instead of ending on the
             // hard circle where the shell meets the horizon.
@@ -856,14 +847,12 @@ Shader "CloudRaymarch"
                 vec3 skyColour = EvaluateSky(dir, UnpackSunDirection(sky), 0.0f,
                                              UnpackSunAngularRadius(sky), UnpackSkyConfig(sky));
 
-                float fadeEnd = u_AutoDistanceFade != 0
-                                     ? CloudAutoFadeEnd(u_DetailTileSize, CLOUD_DETAIL_EROSION_LOW_PER_TILE,
-                                                        u_MinStepSize, u_MaxStepSize, u_StepGrowthRate,
-                                                        u_MaxViewDistance)
-                                     : u_DistanceFadeEnd;
-                float fadeStart = u_AutoDistanceFade != 0
-                                       ? CloudAutoFadeStart(u_LayerBottomAltitude, fadeEnd)
-                                       : u_DistanceFadeStart;
+                float fadeStart = u_AutoDistanceFade != 0 ? CloudAutoFadeStart(u_LayerBottomAltitude)
+                                                          : u_DistanceFadeStart;
+                float fadeEnd   = u_AutoDistanceFade != 0
+                                       ? CloudAutoFadeEnd(u_PlanetRadius, u_LayerBottomAltitude,
+                                                          u_LayerThickness)
+                                       : u_DistanceFadeEnd;
 
                 float aerial = CloudRemapRange(cloudDistance, fadeStart, fadeEnd, 0.0f, 1.0f) * strength;
                 g_Scattered    = mix(g_Scattered, skyColour * (1.0f - g_Transmittance), aerial);

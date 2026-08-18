@@ -111,8 +111,9 @@ const float CLOUD_WEATHER_BASE_PERIOD = 8.0f;
 // coverage cell sat at 0.92 to 1.29 times the layer's own mid altitude, so a cloud directly overhead
 // subtended 49 to 66 degrees and a ground observer saw four to six clouds across the whole sky above 20
 // degrees — two clouds covering it from horizon to horizon. At four, the worst row (Partly Cloudy) goes
-// from 65.7 to 37.9 degrees overhead, and the zenith and mid-sky read as a cumulus field with depth
-// rather than as a lid. The per-preset table is in Docs/Clouds/DECK_SCALE_DECISION.md section 1.
+// from 65.7 to 37.9 degrees overhead. The per-preset table is in Docs/Clouds/DECK_SCALE_DECISION.md
+// section 1. Those figures are the subtense of the coverage CELL; the visible island inside it was
+// measured from a straight-up frame at 13.5 to 22 degrees, i.e. 0.35 to 0.6 of the cell.
 //
 // WHY IT WAS NOT RAISED SOONER, AND WHY THE REASON RECORDED HERE WAS WRONG. This comment used to blame
 // the 30-degree trial on the march — "the horizon becomes a wall of cells small enough that the step
@@ -135,15 +136,17 @@ const float CLOUD_WEATHER_BASE_PERIOD = 8.0f;
 // of the layer — flat base, flat top. Measured on a 5 km / 2.28 km layer that is a box 2.0 km wide by
 // 2.3 km tall. A cube. The only thing that has ever made a coverage island read as a cloud is the detail
 // erosion, and CloudNyquistWeight switches that off by design wherever the march cannot resolve it.
-// Shrinking the cell without moving the layer therefore cannot fix the sky: it drives the island BELOW
-// the finest erosion the march can still carry out there. That is the fourth scale relation, and it is
-// stated in Engine/Graphic/Clouds/CloudIslandScale.hpp with the renderer warning that goes with it.
+// WHAT IS NOT ESTABLISHED, and must not be written here until it is: how a cell's size relates to the
+// erosion it needs. A relation was tried and withdrawn — its central constant was a guess and its
+// verdicts were an artifact of it (DECK_SCALE_DECISION.md section 4, D4 withdrawn). So this note ends
+// where the measurements end.
 //
 // BOTH DIRECTIONS STILL FAIL, and the measured tolerance band is unchanged — it is the diagnosis above
 // it that moved, not the frames. Solving for 30 degrees gives Clouds_UEShowcase a 15 km tile (0.63x the
-// derived one) and the horizon degenerates; 60 km (2.5x) empties the zenith. 20 degrees with four cells
-// is where both ends of the sky hold up, which is why this is derived from the layer rather than
-// authored per scene.
+// tile derived at THREE cells) and the horizon degenerates; 60 km (2.5x) empties the zenith. 20 degrees
+// with four cells is where both ends of the sky hold up, which is why this is derived from the layer
+// rather than authored per scene. The C++ side keeps the band those two failures bound, and rescales it
+// with this constant rather than hardcoding it — Engine/Graphic/Clouds/CloudWeatherScale.hpp.
 const float CLOUD_WEATHER_OVERHEAD_COT = 2.7474774f; // 1 / tan(20 degrees)
 const float CLOUD_WEATHER_CELLS_OVERHEAD = 4.0f;
 
@@ -510,99 +513,6 @@ float CloudNyquistWeight(float featureSize, float stepLength)
 {
     return CloudRemapRange(stepLength, 0.5f * max(featureSize, 1e-4f), 0.25f * max(featureSize, 1e-4f),
                            0.0f, 1.0f);
-}
-
-// ---- The same gate, read backwards: DISTANCES instead of weights --------------------------------------
-
-// CloudNyquistWeight answers "how much of this field may a sample here carry". Two consumers need the
-// INVERSE — "how far out does this field survive" — and both of them are about where the DECK ends
-// rather than about one sample:
-//
-//   * the erosion's own LOD (CloudErosionLodTile below, used by Common/CloudDensityProcedural.glslh),
-//     which picks a tile the local stride can resolve instead of letting the erosion switch off;
-//   * the auto fade range (CloudAutoFadeStart / CloudAutoFadeEnd at the bottom of this file), because a
-//     deck that has lost its erosion is a deck of extruded coverage cells — boxes — and must be gone by
-//     then rather than drawn to the planet's geometric horizon.
-//
-// The schedule (CloudStepLength) has no closed-form inverse: it is a sqrt law blended into a linear one
-// over CLOUD_STEP_FINE_RANGE..CLOUD_STEP_FAR_RANGE, and inverting the blend analytically means solving a
-// cubic in sqrt(t). It IS monotone nondecreasing in t for any growth >= 0 — that is stated and relied on
-// where the blend is defined — so a bisection is exact to its own resolution and needs no case analysis.
-//
-// SIXTEEN ITERATIONS, and the number is a resolution rather than a preference: the search runs over
-// [0, maxDistance], so it halves a 150 km bracket down to 2.3 m. The fades it feeds are measured in
-// kilometres. This runs at most twice per ray, outside the march loop, against a budget of 176 steps
-// each of which costs up to eighteen texture fetches.
-const int CLOUD_SCHEDULE_INVERSE_ITERATIONS = 16;
-
-// The distance at which the march's stride first reaches `stride`, bounded by `maxDistance` and returned
-// as exactly that where the schedule never gets there (a clamped MaxStepSize below the target, or a
-// layer clipped short by MaxViewDistance).
-float CloudScheduleDistanceForStride(float stride, float minStep, float maxStep, float growth,
-                                     float maxDistance)
-{
-    float hi = max(maxDistance, 0.0f);
-    if (CloudStepLength(hi, minStep, maxStep, growth) <= stride)
-        return hi;
-    if (CloudStepLength(0.0f, minStep, maxStep, growth) >= stride)
-        return 0.0f;
-
-    float lo = 0.0f;
-    for (int i = 0; i < CLOUD_SCHEDULE_INVERSE_ITERATIONS; ++i)
-    {
-        float mid = 0.5f * (lo + hi);
-        if (CloudStepLength(mid, minStep, maxStep, growth) >= stride)
-            hi = mid;
-        else
-            lo = mid;
-    }
-    return hi;
-}
-
-// The erosion's COARSE channel pair is what these two are about. `erosionCellsPerTile` is how many of
-// its cells fit across one detail tile — CLOUD_DETAIL_EROSION_LOW_PER_TILE in Common/CloudNoise.glslh,
-// passed in rather than included so this file stays free of the noise volume's layout. (Every shader
-// that includes CloudNoise.glslh also includes this one; the reverse is not true.)
-//
-// The COARSE pair and not the fine one because it is the one that outlives the other: it stays
-// resolvable for twice the distance, so it is the last erosion the deck has, and where it goes the
-// silhouette goes with it.
-float CloudErosionCarriedInFull(float detailTileSize, float erosionCellsPerTile, float minStep,
-                                float maxStep, float growth, float maxDistance)
-{
-    float feature = max(detailTileSize, 1.0f) / max(erosionCellsPerTile, 1e-3f);
-    return CloudScheduleDistanceForStride(0.25f * feature, minStep, maxStep, growth, maxDistance);
-}
-
-float CloudErosionCarriedAtAll(float detailTileSize, float erosionCellsPerTile, float minStep,
-                               float maxStep, float growth, float maxDistance)
-{
-    float feature = max(detailTileSize, 1.0f) / max(erosionCellsPerTile, 1e-3f);
-    return CloudScheduleDistanceForStride(0.5f * feature, minStep, maxStep, growth, maxDistance);
-}
-
-// THE EROSION'S OWN LOD: the tile to sample the detail volume at, so the coarse pair is resolvable
-// wherever the march is.
-//
-// The gate above says what a sample may carry; on its own it says nothing about what to do with the
-// rest, and what the composite did was fade to the volume's mean. That is correct filtering and it
-// leaves the far deck with NO erosion at all — which is a box, for the reason spelled out at the top of
-// this file. The alternative costs one max(): sample the same volume, the same channels, the same one
-// fetch, at a COARSER tile chosen so that the coarse pair is exactly resolvable at this stride. The
-// erosion then tracks the stride instead of switching off, and the band between where the fine detail
-// dies and where the deck ends keeps a silhouette.
-//
-// `4 * stepLength` is CloudNyquistWeight's own "fully carried where S <= featureSize / 4", solved for
-// the feature; multiplying by the cells the coarse pair puts across a tile turns a feature size back
-// into a tile size.
-//
-// THE max() IS THE CONTRACT, not defensive coding: wherever the AUTHORED tile is already resolvable it
-// is the larger of the two, so the expression returns it unchanged and every consumer downstream —
-// the two Nyquist weights and the fetch coordinate — is bit for bit what it was. Near clouds cannot
-// move. The CloudMath suite asserts exactly that.
-float CloudErosionLodTile(float detailTileSize, float erosionCellsPerTile, float stepLength)
-{
-    return max(detailTileSize, 4.0f * max(stepLength, 0.0f) * erosionCellsPerTile);
 }
 
 // THE EROSION CUT, with the threshold's UNRESOLVED spread folded into it.
@@ -1290,69 +1200,20 @@ float CloudAmbientColumnVertical(float sunColumnLength, float sunDirY)
 // horizon. Every cloud higher than two degrees got no aerial perspective at all, which is why a cloud
 // forty kilometres away was as white and as crisp as one four kilometres away.
 //
-// Tied to the layer instead: the aerial fade begins a couple of layer-heights out, where a ray has
-// travelled enough air for it to matter.
-//
-// THE END IS NOT THE GEOMETRIC HORIZON, and it used to be. `sqrt(2*R*top)` is where the layer meets the
-// ground plane — 304 km on a 5 km deck — while the march is CLIPPED at MaxViewDistance, 150 km. The
-// dissolve weight at that clip was measured at 0.597: sixty per cent of the deck was still being drawn
-// when the ray simply stopped, so the layer ended on a hard edge, and the fade whose whole job was to
-// remove that edge never reached it. Half the screen area of a horizon view.
-//
-// It is worse than a clipping bug, because of what is being clipped. Past the distance where the march
-// can no longer carry the erosion (CloudNyquistWeight, and the inverse pair above), the density is
-// `coverage(x,z) x verticalProfile x baseShape` with nothing sculpting it — a 2-D field extruded between
-// a flat base and a flat top. Boxes. Drawing them further does not make them clouds; it makes them a
-// wall of cubes. So the deck ends where its own detail ends, and the fade is the nearest of:
-//
-//   * the distance at which the coarse erosion pair stops being carried at all, and
-//   * MaxViewDistance, where the march stops regardless.
-//
-// Measured on the fixed geometry at High with a 4 km detail tile that pair is 24.0 km and 47.0 km. It is
-// TIER-DEPENDENT — the carry distance is a function of the step schedule — and that is the same argument
-// CloudNyquistWeight already makes for reading the step rather than authoring a distance: Low carries the
-// erosion to 21.0 km and its horizon really is nearer, because on Low there is less of a cloud out there
-// to draw. Recorded rather than floored: a floor would be a number that hides the tier's cost.
-//
-// BOTH STARTS ARE CAPPED AT HALF THE END, and that is not a taste bound either. A fade needs a band to
-// run over; where MaxViewDistance clips the deck before its erosion dies, an uncapped start can land
-// beyond the end, and a start beyond its end does not soften a hard edge — CloudRemapRange inverts and
-// erases the layer outright. Half is one doubling of margin, the same idiom the search bound uses.
-const float CLOUD_FADE_MAX_START_FRACTION = 0.5f;
-
-// @p fadeEnd is CloudAutoFadeEnd's answer for this layer, passed in rather than recomputed: it is a
-// bisection, and the caller needs the number anyway.
-float CloudAutoFadeStart(float layerBottomAltitude, float fadeEnd)
+// Tied to the layer instead: the fade begins a couple of layer-heights out, where a ray has travelled
+// enough air for it to matter, and ends at the layer's own geometric horizon, sqrt(2*R*h) — the distance
+// at which the layer meets the ground plane and there is nothing further to fade. For a 1.5 km base that
+// is 3 km to 138 km, which spreads the effect from about thirty degrees down to the horizon instead of
+// compressing it into the last degree.
+float CloudAutoFadeStart(float layerBottomAltitude)
 {
-    return min(max(2.0f * layerBottomAltitude, 1.0f), CLOUD_FADE_MAX_START_FRACTION * fadeEnd);
+    return max(2.0f * layerBottomAltitude, 1.0f);
 }
 
-float CloudAutoFadeEnd(float detailTileSize, float erosionCellsPerTile, float minStep, float maxStep,
-                       float growth, float maxViewDistance)
+float CloudAutoFadeEnd(float planetRadius, float layerBottomAltitude, float layerThickness)
 {
-    return CloudErosionCarriedAtAll(detailTileSize, erosionCellsPerTile, minStep, maxStep, growth,
-                                    maxViewDistance);
-}
-
-// Where the HORIZON DISSOLVE opens, which is a different question from where the aerial fade does.
-//
-// It used to be `CloudAutoFadeStart * 4` at the call site — an unnamed multiplier that existed only
-// because the aerial start (a couple of layer-heights, 3 km on the old geometry) was far too near to
-// open a dissolve at. Now that the END is the erosion's own death, the START of the dissolve has an
-// answer of its own and does not have to be scaled out of another number: the deck begins to lose its
-// erosion where the coarse pair stops being carried IN FULL, and it has lost all of it at the end. The
-// dissolve therefore spans exactly the band over which the deck stops being a cloud. On the fixed
-// geometry at High with a 4 km detail tile that is 24.0 km to 47.0 km.
-//
-// The old multiplier could not have survived this change in any case: four times a 5 km deck's aerial
-// start is 40 km against an end of 47 km, and on any tier or tile where the end comes in nearer than
-// that it would have crossed it and erased the layer.
-float CloudAutoHorizonStart(float detailTileSize, float erosionCellsPerTile, float minStep, float maxStep,
-                            float growth, float fadeEnd)
-{
-    return min(CloudErosionCarriedInFull(detailTileSize, erosionCellsPerTile, minStep, maxStep, growth,
-                                         fadeEnd),
-               CLOUD_FADE_MAX_START_FRACTION * fadeEnd);
+    float top = max(layerBottomAltitude + layerThickness, 1.0f);
+    return sqrt(2.0f * max(planetRadius, 1.0f) * top);
 }
 
 // ---- Aerial perspective ----------------------------------------------------------------------------

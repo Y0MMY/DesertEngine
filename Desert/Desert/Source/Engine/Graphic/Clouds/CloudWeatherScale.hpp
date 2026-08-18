@@ -39,8 +39,9 @@ namespace Desert::Graphic
     // 30-degree trial's wall at the horizon was blamed on the step schedule, and a converged ground-truth
     // probe with no state machine, no dither and cheap density only renders the same boxes. The boxes are
     // a property of the DENSITY FIELD — a 2-D coverage field extruded vertically between a flat base and
-    // a flat top — and the only thing that has ever made one read as a cloud is the detail erosion. That
-    // is why raising this constant alone is not the fix, and why CloudIslandScale.hpp exists.
+    // a flat top — and the only thing that has ever made one read as a cloud is the detail erosion. So
+    // raising this constant is not on its own a complete answer to the boxes; what it fixes is the
+    // angular size of a cloud overhead, which is what the owner reported.
     inline constexpr float kCloudWeatherCellsOverhead = 4.0f;
 
     // The tile that gives a ground observer a believable sky over a layer of this geometry, in world
@@ -58,65 +59,73 @@ namespace Desert::Graphic
     //
     // THE MEASUREMENT SURVIVED A RE-DIAGNOSIS; THE EXPLANATION THAT USED TO SIT HERE DID NOT. The wall at
     // 0.63x was recorded as "cells the step schedule samples four times each". It is not: a converged
-    // ground-truth probe renders the same wall, and the mechanism is that a cell that small carries a
-    // coverage island smaller than the erosion the march can still carry at that distance, so the island
-    // arrives unsculpted — a box. See CloudIslandScale.hpp, which is the relation that says so, and
-    // CloudGeometry.glslh's CLOUD_WEATHER_CELLS_OVERHEAD note for the knock-out table behind it.
+    // ground-truth probe with 768 uniform samples, no state machine and no dither renders the same wall.
+    // What the mechanism actually is has not been established with numbers, so this header does not claim
+    // one. See CloudGeometry.glslh's CLOUD_WEATHER_CELLS_OVERHEAD note for the knock-out table.
     //
     // THE BAND IS WHERE THE SLACK LIVES, and CloudLayerAspect.hpp is what took it up. A layer whose
     // thickness is fixed by its species aspect and whose tile is fixed by this relation is
     // over-determined: solving both exactly leaves one thickness per base altitude, and for the shipped
     // fair-weather bases that thickness falls under CloudMarchScale.hpp's four-sample search bound at the
     // Low tier. Of the three constraints this is the only one WITH a measured tolerance — the aspect is a
-    // look measured on frames and the search bound is Nyquist — so it is the one that gives. WHERE THE
-    // SHIPPED PRESETS SIT against the derived tile, since the deck-scale decision: the four cumulus rows
-    // (Clear, Fair Weather, Partly Cloudy, Summer Cumulus) are re-derived and sit at 1.000; Stratus, Storm
-    // and Cirrus keep authored geometry that was exactly the derived tile at three cells overhead, so
-    // raising the constant to four puts all three at 1.333; Overcast keeps an authored tile that was
-    // 1.2465x its own derived one and therefore lands at 1.662 — outside the band, and exempt for the
-    // reason the clause below states rather than by name.
-    inline constexpr float kCloudWeatherTileToleranceLow  = 0.7f;
-    inline constexpr float kCloudWeatherTileToleranceHigh = 1.6f;
-
-    // ---- The applicability clause, shared with CloudIslandScale.hpp -------------------------------------
+    // look measured on frames and the search bound is Nyquist — so it is the one that gives.
     //
-    // The coverage at and above which the weather field is CONNECTED: one blanket rather than a field of
-    // discrete cells with gaps between them. 0.90 is where the shipped Stratus row sits and the comparison
-    // is inclusive, so that row is exempt by its physics and not by a rounding accident.
+    // ---- WHY THE BAND IS DERIVED AND NOT WRITTEN DOWN --------------------------------------------------
     //
-    // ONE THRESHOLD, TWO RELATIONS, STATED ONCE. It lives here, in the header that owns the weather field,
-    // and CloudIslandScale.hpp reads it from here. A second literal 0.90 in the other file would be two
-    // spellings of one number, which is the drift this project keeps paying for.
-    inline constexpr float kCloudConnectedCoverage = 0.90f;
+    // THE BAND IS A RATIO TO THE DERIVED TILE, AND THE DERIVED TILE MOVES WITH kCloudWeatherCellsOverhead.
+    // Its two endpoints, however, were measured as ABSOLUTE tiles on ONE layer — Clouds_UEShowcase, whose
+    // derived tile was 23.8 km at the three cells overhead the constant carried then. So raising the count
+    // to four rescaled the derived tile by 0.75x while two hardcoded ratios stayed put, and the band
+    // silently moved by 4/3 relative to the frames that define it. That is not a tuning question: it made
+    // an authored row leave a band it had not moved relative to.
+    //
+    // So the ratios are DERIVED from the count, and the two literals below are historical facts that never
+    // move again: the band as measured, and the count it was measured under. Change
+    // kCloudWeatherCellsOverhead and the band follows it exactly, which is the only way it stays the same
+    // band. The absolute failures behind the measurement, for the record: on that layer 15 km walled the
+    // horizon (0.63x its 23.8 km) and 60 km emptied the zenith (2.5x); the shipped band sits inside both
+    // with margin, and it is the band and not the failures that is the shipped guarantee.
+    inline constexpr float kCloudWeatherTileToleranceLowAsMeasured  = 0.7f;
+    inline constexpr float kCloudWeatherTileToleranceHighAsMeasured = 1.6f;
+    inline constexpr float kCloudWeatherCellsOverheadAtMeasurement  = 3.0f;
 
-    inline constexpr bool CloudCoverageFieldIsConnected( float coverage )
+    inline constexpr float kCloudWeatherTileBandRescale =
+         kCloudWeatherCellsOverhead / kCloudWeatherCellsOverheadAtMeasurement;
+
+    inline constexpr float kCloudWeatherTileToleranceLow =
+         kCloudWeatherTileToleranceLowAsMeasured * kCloudWeatherTileBandRescale;
+    inline constexpr float kCloudWeatherTileToleranceHigh =
+         kCloudWeatherTileToleranceHighAsMeasured * kCloudWeatherTileBandRescale;
+
+    // ---- A KNOWN, QUANTIFIED DEFECT: THE DERIVED ROWS SIT 7% ABOVE THE MEASURED WALL -------------------
+    //
+    // This is the most important thing to know about this relation and it is not a passing remark.
+    //
+    // Under the corrected band a row solved EXACTLY to CloudAutoWeatherTileSize sits at 1.000, and the
+    // band's low end is 0.9333. So the four cumulus presets — Clear, Fair Weather, Partly Cloudy, Summer
+    // Cumulus, every one of them derived rather than authored — sit **7.1% above the tile at which the
+    // horizon was measured to wall**. The derivation does not aim at the middle of the measured range; it
+    // lands just inside its bad end.
+    //
+    // THAT IS VISIBLE TODAY. It is the band of hard-edged boxes above the horizon on the cumulus scenes:
+    // the same failure the 0.9333 endpoint records, one twelfth of the way back from it. A relation whose
+    // solution sits 7% from a measured failure is not a passing guard, it is a guard the shipped content
+    // is standing on the edge of, and the next change to either side of it — the count, the aspect, the
+    // schedule — can push it over with no test going red, because 1.000 is inside 0.9333 and always will
+    // be. Where the other rows sit: Stratus, Storm and Cirrus at 1.333 (they were the derived tile at
+    // three cells), Overcast at 1.662 (an authored tile at 1.2465x its own derived one).
+    //
+    // WHAT WOULD ANSWER IT, so this is a finding and not a shrug: the mechanism behind the wall at 0.63x
+    // is not established — the step-schedule explanation was disproved by a converged ground-truth probe
+    // and nothing replaced it. Until it is, "move the derivation up inside the band" is a number chosen to
+    // look better rather than a fix, and this header will not do that.
+
+    // The quantity this predicate bounds is "how many discrete coverage cells does a ground observer see
+    // across the sky above 20 degrees". It takes the geometry and nothing else: the tile and the altitude
+    // are the two sides of the relation, and a third input would be a third opinion about them.
+    inline constexpr bool CloudWeatherTileIsPlausible( float weatherTileSize, float layerBottomAltitude,
+                                                       float layerThickness )
     {
-        return coverage >= kCloudConnectedCoverage;
-    }
-
-    // WHY THIS PREDICATE TAKES THE COVERAGE. The quantity it bounds is "how many discrete coverage cells
-    // does a ground observer see across the sky above 20 degrees", and on a SHEET that is not an
-    // observable: above kCloudConnectedCoverage there are no discrete cells to count. Both ends of the
-    // measured band are failures of a BROKEN sky and neither exists on a blanket — 2.5x empties the zenith
-    // because the one cell overhead is as likely to be a hole as a cloud, and a connected field has no
-    // holes; 0.63x walls the horizon because the islands out there fall below the erosion the march can
-    // carry (CloudIslandScale.hpp), and a connected field has no islands. So the relation is vacuous on a
-    // sheet, and it says so in code rather than in a note beside itself — or in a by-name exemption in a
-    // test, which is content baked into a mechanism.
-    //
-    // WHAT THIS DOES NOT CLAIM, and the next reader needs it in the same breath: a sheet's Weather Tile
-    // Size is NOT a free parameter. It still sets the horizontal scale of the blanket's own undulations —
-    // the thickening and thinning that makes an overcast sky read as weather rather than as fog — and a
-    // tile of 500 m or of 500 km is as wrong there as anywhere. What is vacuous is the CELLS-OVERHEAD
-    // question specifically, because it counts something a connected field does not have. Nothing in this
-    // engine currently bounds a blanket's undulation scale; that is an absence, recorded here, not a
-    // licence.
-    inline constexpr bool CloudWeatherTileIsPlausible( float coverage, float weatherTileSize,
-                                                       float layerBottomAltitude, float layerThickness )
-    {
-        if ( CloudCoverageFieldIsConnected( coverage ) )
-            return true;
-
         const float wanted = CloudAutoWeatherTileSize( layerBottomAltitude, layerThickness );
         return weatherTileSize >= wanted * kCloudWeatherTileToleranceLow &&
                weatherTileSize <= wanted * kCloudWeatherTileToleranceHigh;

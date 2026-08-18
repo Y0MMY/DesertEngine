@@ -546,10 +546,11 @@ namespace Desert::Graphic
            } },
          // NOT re-authored, twice over. By the aspect pass: 6960.3 / 8 over 700 m is 1.243, a low sheet
          // already wider than it is deep and already inside the stratus range. And not re-derived when the
-         // cumulus rows moved either — a sheet at Coverage 0.90 has no isolated coverage island to read as
-         // a box, so the relation that moved them does not govern it. Re-deriving it anyway was computed
-         // and refused: 458.1 m thick under a 4555.7 m tile, which is below Weather Tile Size's own 5000 m
-         // field minimum, and 1.50 search samples at the Low tier against CloudMarchScale's four.
+         // cumulus rows moved either — a blanket at Coverage 0.90 has little discrete cloud overhead to make
+         // angularly smaller, so the move buys it least. Re-deriving it anyway was computed and refused:
+         // 458.1 m thick under a 4555.7 m tile, which is below Weather Tile Size's own 5000 m field minimum,
+         // and 1.50 search samples at the Low tier against CloudMarchScale's four. It sits at 1.333x the
+         // derived tile, inside the band.
          { ECS::CloudPreset::Stratus, "Stratus", kCloudSpeciesStratus, 1.243f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 600.0f ),
@@ -640,14 +641,12 @@ namespace Desert::Graphic
            } },
          // NOT re-derived when the cumulus rows moved, and the one row where that costs something: its tile
          // was authored rather than derived, at 1.2465x what its own altitude asks for at three cells
-         // overhead. Raising CellsOverhead to four shrinks the derived tile by 0.75x and carries this row
-         // to 1.6620x, which is outside CloudWeatherScale's measured [0.7, 1.6] band — the only preset that
-         // leaves it. Re-deriving it instead was computed and refused: 646.3 m thick under a 6721.0 m tile
-         // gives 2.00 search samples at the Low tier, half of CloudMarchScale's four, and that bound has no
-         // tolerance at all where the tile band has a measured one. A blanket at Coverage 0.95 has no
-         // coverage island to lose, which is why the band's own failure mode — an empty zenith between
-         // cells — is not a thing this sky can do. See DECK_SCALE_DECISION.md D3, which records the other
-         // three at 1.333x and does not record this one.
+         // overhead. Raising CellsOverhead to four shrinks the derived tile by 0.75x and carries this row to
+         // 1.6620x, the highest ratio of the eight — inside the band, but only once the band was rescaled by
+         // the same constant it was measured under (CloudWeatherScale.hpp). Re-deriving it instead was
+         // computed and refused: 646.3 m thick under a 6721.0 m tile gives 2.00 search samples at the Low
+         // tier, half of CloudMarchScale's four, and that bound has no tolerance at all where the tile band
+         // has a measured one. See DECK_SCALE_DECISION.md D3, which records the other three at 1.333x.
          { ECS::CloudPreset::Overcast, "Overcast", kCloudSpeciesStratocumulus, 1.30f,
            CloudPresetValues{
                 .LayerBottomAltitude           = Common::Units::Metres( 900.0f ),
