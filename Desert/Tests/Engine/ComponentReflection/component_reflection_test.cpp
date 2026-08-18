@@ -440,8 +440,8 @@ TEST( VolumetricCloudReflection, QualityAndPresetSelectorsAreEnums )
 }
 
 // ---------------------------------------------------------------------------------------------------
-// CloudVolumeData — a placed hero cloud (Docs/Clouds/VOXEL_CLOUD_PATH.md phase 1). Five fields in one
-// group, and the SIZE AND POSITION are deliberately absent: they are the entity's TransformComponent,
+// CloudVolumeData — a placed hero cloud (Docs/Clouds/VOXEL_CLOUD_PATH.md phases 1 and 2). Seven fields
+// in one group, and the SIZE AND POSITION are deliberately absent: they are the entity's TransformComponent,
 // exactly as the fog height is, because the teamlead's Q2 answer makes the world extent a tile covers a
 // per-instance transform rather than a global constant. A field added here for extent or altitude would
 // be a second source of truth for a value the transform already owns.
@@ -450,13 +450,14 @@ TEST( VolumetricCloudReflection, QualityAndPresetSelectorsAreEnums )
 TEST( CloudVolumeReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
 {
     const std::vector<std::string> expected = {
-         "Enabled", "Volume", "DensityScale", "DetailTypeBias", "CastsCloudShadow",
+         "Enabled",           "Volume",          "DensityScale", "DetailTypeBias", "CastsCloudShadow",
+         "FadeStartDistance", "FadeEndDistance",
     };
 
     const TypeInfo& volume = Type( "CloudVolumeData" );
     EXPECT_EQ( FieldNames( volume ), expected );
-    EXPECT_EQ( volume.Fields.size(), 5u );
-    EXPECT_EQ( CountInCategory( volume, "Cloud Volume" ), 5u );
+    EXPECT_EQ( volume.Fields.size(), 7u );
+    EXPECT_EQ( CountInCategory( volume, "Cloud Volume" ), 7u );
 }
 
 TEST( CloudVolumeReflection, TheVolumeSlotNamesTheAssetTypeThatCanBeDroppedOnIt )
@@ -500,6 +501,17 @@ TEST( CloudVolumeReflection, DefaultsPlaceANeutralInstanceThatChangesNothingUnti
     EXPECT_FLOAT_EQ( DefaultOf<float>( volume, "DensityScale" ), 1.0f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( volume, "DetailTypeBias" ), 0.0f );
     EXPECT_TRUE( DefaultOf<bool>( volume, "CastsCloudShadow" ) );
+
+    // 12 km -> 18 km, in centimetres: the measured crossover, where a kilometre-class baked cloud stops
+    // holding up against the deck beside it (the frames are in the phase-2 commit; the reasoning is on
+    // the fields). Pinned because it is a MEASUREMENT, so moving it should be somebody's decision and
+    // not a drive-by — and because the pair must stay ORDERED: an inverted pair is a hard cut, which is
+    // legal but is not what a default should silently be.
+    const float start = DefaultOf<float>( volume, "FadeStartDistance" );
+    const float end   = DefaultOf<float>( volume, "FadeEndDistance" );
+    EXPECT_FLOAT_EQ( start, 1200000.0f );
+    EXPECT_FLOAT_EQ( end, 1800000.0f );
+    EXPECT_LT( start, end );
 }
 
 // ---------------------------------------------------------------------------------------------------

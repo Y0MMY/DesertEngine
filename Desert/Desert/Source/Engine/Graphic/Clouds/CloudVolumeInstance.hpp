@@ -60,6 +60,40 @@ namespace Desert::Graphic
     inline constexpr uint32_t kMaxCloudVolumeInstances = 8;
 
     /**
+     * @brief How much of a hero cloud is left at @p distance from the camera.
+     *
+     * 1 inside @p start, 0 at and beyond @p end, linear between. The renderer multiplies it into the
+     * instance's density scale and stops emitting the record entirely at 0.
+     *
+     * WHY THE DISTANCE IS THE CLOUD'S AND NOT THE SAMPLE'S, which is the one decision in this function.
+     * A per-sample fade — which is what the design doc's crossfade sketch and every distance term in
+     * Common/CloudDensityProcedural.glslh are — would fade the near face of a 2 km tower less than its
+     * far face, tilting the cloud's density toward the camera as it goes. Worse, the seam's cheap tier
+     * takes no distance argument (`CloudDensityCheap( worldPos, heightFraction )`), so a per-sample fade
+     * would live in the FINE tier alone: the coarse tier would keep calling a faded-out cloud occupied
+     * and the fine tier would find nothing there, which is the two-tier disagreement the horizon fringe
+     * was made of. One weight per cloud per frame has neither problem and costs one distance per
+     * instance on the CPU.
+     *
+     * @param start  where the fade begins. Beyond @p end this is ignored; see below.
+     * @param end    where the cloud is gone. If it is not strictly beyond @p start the fade degenerates
+     *               to a hard cut AT @p end — an authored `start == end` is a legitimate "pop off here",
+     *               and an inverted pair must not silently invert the ramp and make a distant cloud the
+     *               only one drawn.
+     *
+     * Pure: no camera object, no component, no clock, so the property that matters (monotone, bounded,
+     * exactly 1 near and exactly 0 far) is a test rather than a comment.
+     */
+    inline float CloudVolumeFadeWeight( float distance, float start, float end )
+    {
+        if ( !( end > start ) )
+            return distance >= end ? 0.0f : 1.0f;
+
+        const float t = ( distance - start ) / ( end - start );
+        return 1.0f - glm::clamp( t, 0.0f, 1.0f );
+    }
+
+    /**
      * The turn from the engine's frame to the volume's own.
      *
      * LOCAL Z IS UP. The `.dvol` is a 3D texture whose third dimension is the SMALL one (128 x 128 x 64),
