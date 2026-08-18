@@ -301,8 +301,17 @@ namespace Desert::Graphic::System
          * a placement whose `.dvol` is already resident costs nothing, a new one takes a lease, and a
          * handle nobody references any more gives its tile back. The atlas rebuilds its image only when
          * the resident SET changes, so moving a hero cloud around is free.
+         *
+         * @param cameraPosition where the distance fade is measured from, or nullptr for a frame with no
+         *                       camera — which draws nothing anyway, so every cloud keeps full weight
+         *                       rather than the whole scene fading out on a frame nobody sees.
+         *
+         * A cloud past its Fade End Distance emits NO instance record and therefore costs no samples —
+         * but it KEEPS ITS ATLAS LEASE. Dropping the lease would give the tile back, and the next 32 MiB
+         * upload would then land on the frame the camera crossed the line, twice per oscillation. The
+         * tile is what the scene placed; the record is what this frame marches.
          */
-        void UpdateVolumeInstances();
+        void UpdateVolumeInstances( const glm::vec3* cameraPosition );
 
         // Binds the hero-cloud atlas and instance buffer on @p pipeline. Called by BOTH the march and the
         // shadow pass, from one place, because the two declare the same two bindings through the same

@@ -58,6 +58,7 @@ using Desert::Graphic::CloudVolumeAtlasTrilinearFootprint;
 using Desert::Graphic::CloudVolumeAtlasUvw;
 using Desert::Graphic::CloudVolumeAtlasWriteTile;
 using Desert::Graphic::CloudVolumeChannelLayout;
+using Desert::Graphic::CloudVolumeFadeWeight;
 using Desert::Graphic::CloudVolumeFileBytes;
 using Desert::Graphic::CloudVolumeHeader;
 using Desert::Graphic::CloudVolumeInstance;
@@ -1277,6 +1278,80 @@ TEST( CloudVolumeInstanceTransform, EveryTileOfTheShippedAtlasIsReachableThrough
             }
         }
     }
+}
+
+// ---- The distance fade (phase 2) ------------------------------------------------------------------
+//
+// The hand-back to the procedural deck. Phase 1b measured the limit it exists for: at distance a hero
+// reads SMOOTHER than the deck around it, because a hero is one analytic body the erosion nibbles while
+// a deck cloud is many weather cells intrinsically shredded. The fix is not a finer or coarser volume —
+// it is to stop drawing the hero and let the deck, which is already behind it under the union, carry
+// the frame.
+
+TEST( CloudVolumeFade, FullInsideTheStartGoneAtTheEndAndMonotoneBetween )
+{
+    constexpr float kStart = 2000000.0f; // 20 km
+    constexpr float kEnd   = 3000000.0f; // 30 km
+
+    // Exactly 1 and exactly 0, not "about": a near hero must be bit for bit the cloud it was before this
+    // parameter existed, and a faded one must contribute NOTHING rather than a residue that keeps its
+    // instance record alive and its box test on every sample.
+    EXPECT_FLOAT_EQ( CloudVolumeFadeWeight( 0.0f, kStart, kEnd ), 1.0f );
+    EXPECT_FLOAT_EQ( CloudVolumeFadeWeight( kStart, kStart, kEnd ), 1.0f );
+    EXPECT_FLOAT_EQ( CloudVolumeFadeWeight( kEnd, kStart, kEnd ), 0.0f );
+    EXPECT_FLOAT_EQ( CloudVolumeFadeWeight( kEnd * 10.0f, kStart, kEnd ), 0.0f );
+    EXPECT_FLOAT_EQ( CloudVolumeFadeWeight( 0.5f * ( kStart + kEnd ), kStart, kEnd ), 0.5f );
+
+    float previous = 1.0f;
+    for ( int i = 0; i <= 200; ++i )
+    {
+        const float distance = kEnd * 1.5f * static_cast<float>( i ) / 200.0f;
+        const float weight   = CloudVolumeFadeWeight( distance, kStart, kEnd );
+
+        EXPECT_GE( weight, 0.0f ) << "distance " << distance;
+        EXPECT_LE( weight, 1.0f ) << "distance " << distance;
+        // Monotone, so a camera flying toward a hero cloud can only ever gain it. A ramp that turned
+        // round would draw a ring of denser cloud at whatever distance it turned.
+        EXPECT_LE( weight, previous + 1e-6f ) << "distance " << distance;
+        previous = weight;
+    }
+}
+
+TEST( CloudVolumeFade, AnInvertedOrDegenerateRangeIsAHardCutAndNeverAnInvertedRamp )
+{
+    // start == end is a legitimate authored "pop off exactly here".
+    EXPECT_FLOAT_EQ( CloudVolumeFadeWeight( 999999.0f, 1000000.0f, 1000000.0f ), 1.0f );
+    EXPECT_FLOAT_EQ( CloudVolumeFadeWeight( 1000000.0f, 1000000.0f, 1000000.0f ), 0.0f );
+
+    // start > end must NOT invert the ramp. Unguarded, `1 - (d - start)/(end - start)` with a negative
+    // denominator makes a hero VISIBLE only beyond `start` and invisible near the camera — the exact
+    // opposite of what the two fields say, from a pair an artist can produce with one drag.
+    for ( float d = 0.0f; d <= 4000000.0f; d += 100000.0f )
+    {
+        const float weight = CloudVolumeFadeWeight( d, 3000000.0f, 2000000.0f );
+        EXPECT_FLOAT_EQ( weight, d >= 2000000.0f ? 0.0f : 1.0f ) << "distance " << d;
+    }
+}
+
+TEST( CloudVolumeFade, TheWeightReachesTheShaderThroughTheDensityScaleAndNowhereElse )
+{
+    // The fade is folded into the instance record's density multiplier by the renderer, so the shader
+    // learns nothing about it and Common/CloudDensityVoxel.glslh needed no change at all. Pinned here
+    // because the alternative — a distance term in the fine tier — is the two-tier disagreement the
+    // horizon fringe was made of (the seam's cheap tier takes no distance argument).
+    const CloudVolumeHeader header = TestVolumeHeader();
+
+    const CloudVolumeInstance full = MakeCloudVolumeInstance( glm::mat4( 1.0f ), header, 0, 1.6f * 1.0f, 0.25f );
+    const CloudVolumeInstance half = MakeCloudVolumeInstance( glm::mat4( 1.0f ), header, 0, 1.6f * 0.5f, 0.25f );
+
+    EXPECT_FLOAT_EQ( full.Params.y, 1.6f );
+    EXPECT_FLOAT_EQ( half.Params.y, 0.8f );
+
+    // Everything else about the record is untouched by the fade: same tile, same detail bias, same
+    // transform. A fade that moved the cloud would be a very strange bug to chase.
+    EXPECT_FLOAT_EQ( full.Params.x, half.Params.x );
+    EXPECT_FLOAT_EQ( full.Params.z, half.Params.z );
+    EXPECT_EQ( full.WorldToLocal, half.WorldToLocal );
 }
 
 int main( int argc, char** argv )

@@ -208,7 +208,13 @@ float CloudDensityCheapFrom(vec4 weather, vec2 band, vec3 worldPos, float height
     // that keeps two clouds at the same map coordinate from being the same cloud, exactly the role the
     // deck's per-voxel Density Scale channel plays for its baked NVDFs. Base Shape Remap Min sets where
     // the volume reads as empty; Shape Erosion Strength is how much of the modulation is let through.
-    vec4  shape = texture(u_ShapeNoise, CloudShapeSamplePos(worldPos, heightFraction) / u_ShapeTileSize);
+    //
+    // textureLod with an explicit 0 and not texture(): the march is a COMPUTE shader, where an implicit
+    // level of detail is UNDEFINED — the same reason Programs/Clouds/CloudTemporalResolve.shader spells
+    // its history fetch out. Every volume here has one level, so 0 is the only answer there has ever
+    // been; this site was relying on the driver reaching it.
+    vec4  shape = textureLod(u_ShapeNoise, CloudShapeSamplePos(worldPos, heightFraction) / u_ShapeTileSize,
+                             0.0f);
     float body  = CloudRemapRange(shape.r, u_BaseShapeRemapMin, 1.0f, 0.0f, 1.0f);
     return clamp(dimensional * mix(1.0f, body, clamp(u_ShapeErosionStrength, 0.0f, 1.0f)), 0.0f, 1.0f);
 }
@@ -340,7 +346,7 @@ float CloudDensityErode(vec3 worldPos, float heightFraction, float cellHeight, f
         // The channel pairs mixed toward the mean by THEIR OWN weight: R and B run at the coarse period
         // and G and A at the fine one (CloudDetailTexel), so the ordering of the two weights is what puts
         // a band of half-resolved erosion between the near field and the far one instead of a step.
-        vec4 sampled = texture(u_DetailNoise, detailPos / u_DetailTileSize);
+        vec4 sampled = textureLod(u_DetailNoise, detailPos / u_DetailTileSize, 0.0f);
         detail       = mix(detail, sampled, vec4(erosionCoarse, erosionFine, erosionCoarse, erosionFine));
     }
 
@@ -371,7 +377,7 @@ float CloudDensityErode(vec3 worldPos, float heightFraction, float cellHeight, f
     if (bandWeight > 0.0f)
     {
         float bandTile = u_HighFreqFeatureSize * CLOUD_DETAIL_RIDGED_FINEST_PER_TILE;
-        vec4  band     = texture(u_DetailNoise, detailPos / bandTile);
+        vec4  band     = textureLod(u_DetailNoise, detailPos / bandTile, 0.0f);
 
         float hfWisps   = 1.0f - pow(abs(abs(band.g * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqWispSharpness);
         float hfBillows = pow(abs(abs(band.a * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqBillowSharpness);
@@ -409,11 +415,25 @@ float CloudDensityErode(vec3 worldPos, float heightFraction, float cellHeight, f
     density = pow(density, mix(u_DensitySharpenLow, u_DensitySharpenHigh,
                                max(pow(scale, u_DensityScalePower), 1e-4f)));
 
-    // Distance softening: the explicit answer to distance aliasing. There is no mip chain on the noise
-    // volumes in v1 and no runtime LOD selection — the reference computed a mip level and then sampled
-    // without it, with maxLod = 0 on every sampler, which is a dead knob wearing the costume of a
-    // feature (RESEARCH_REFERENCE J.3 #11). This term is what actually attenuates far detail, and it is
-    // a slider an artist can see.
+    // Distance softening: an ARTISTIC far-field density curve — `d^0.5 * 0.666` at full strength — and
+    // NOT this file's answer to distance aliasing, whatever this comment used to claim. Two things have
+    // replaced that claim and one has been measured out of it:
+    //
+    //   * CloudNyquistWeight above is what attenuates far detail now, by the march's own sampling rate
+    //     rather than by an authored distance.
+    //   * the argument that a real mip chain would do it better was TESTED IN PHASE 2 and refused. A 3D
+    //     mip generator was written and the detail volume given eight levels; selecting the sample's
+    //     level from the stride cost Clouds_TwoLayerShowcase's cirrus sheet 20.2 RMS levels of 255 (the
+    //     erosion is a THRESHOLD applied after the fetch, so filtering the fetch removes mass in patches
+    //     rather than noise, and the temporal stage is the real reconstruction), while any bias gentle
+    //     enough to spare the sheet left the far deck within 1.4 RMS of unfiltered. The chain was
+    //     removed. Docs/Clouds/VOXEL_CLOUD_PATH.md §4.4 carries the numbers so nobody rebuilds it.
+    //   * this curve itself is weak: on the Clouds_UEShowcase horizon — 8 km to 45 km, the frame it
+    //     should be doing the most work in — turning it off entirely moves the whole frame by 0.86 RMS
+    //     levels with a 12-level peak, and the far band's horizontal contrast by 0.801 -> 0.785.
+    //
+    // Kept, because 12 levels in a third of the pixels is a grade an artist can reach for. Described
+    // honestly, because it is not the thing standing between this sky and aliasing.
     float soften = CloudRemapRange(distanceFromCamera, u_SofteningStartDistance, u_SofteningEndDistance,
                                    0.0f, 1.0f) * u_DistanceSoftening;
     density = pow(density, mix(1.0f, 0.5f, soften)) * mix(1.0f, 0.666f, soften);

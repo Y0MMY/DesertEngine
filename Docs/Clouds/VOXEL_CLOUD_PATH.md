@@ -552,6 +552,59 @@ at allocation in the `CloudNoiseVolumes.cpp:257` idiom:
 
 ### 4.4 The LOD / distance story — what a voxel cloud does at 30 km
 
+> **SUPERSEDED IN PART (phase 2, measured).** Of the three answers below, ONE shipped and TWO were
+> built or costed and then refused with numbers. Read this box before acting on the section.
+>
+> **The per-instance fade SHIPPED**, as `CloudVolumeData::FadeStartDistance` / `FadeEndDistance`,
+> defaulting to **12 km → 18 km**: the measured crossover. Clouds_HeroVolumes' congestus tower (2.2 km
+> across, the largest thing the shipped content places) rendered side-on at 3/6/9/13/20/30 km holds its
+> cauliflower rim to 6 km, is noticeably smoother at 9, is a smooth lozenge at 13 and is a featureless
+> wall at 20 — while the weather-driven deck either side of it is still shredded. The fade is applied
+> per CLOUD on the CPU, from the instance centre's distance to the camera, and folded into the instance
+> record's density scale, so the shader learns nothing about it, a hero past its end emits no record at
+> all (no instance slot, no box test, no shadow column) and the two march tiers cannot disagree about
+> where it is.
+>
+> **The quarter-resolution far ATLAS was refused, for two reasons.** (a) It is not free: box-filtering
+> the three shipped `.dvol`s to 1/4 and sampling back costs 9.9 %, 19.6 % and **34.7 %** of the profile
+> channel's own RMS (1.7, 1.8 and 6.7 grey levels of 255) — the anvil's thin edges are exactly what a
+> quarter-resolution tile loses, so this trades silhouette for bandwidth nobody has shown we need.
+> (b) It cannot be built behind the seam as sketched: the crossfade weight is a function of
+> `distanceFromCamera`, and `CloudDensityCheap( worldPos, heightFraction )` — which the COARSE tier and
+> the light march reach — has no distance in its signature. A distance-blended atlas would live in the
+> fine tier alone, and the two tiers would then disagree about where a hero cloud is. That is the
+> disagreement the horizon fringe was made of, twice.
+>
+> **The 3D MIP GENERATOR was built, measured, and REMOVED.** `MipMap3DGenerator` (a `vkCmdBlitImage`
+> chain over `VK_IMAGE_TYPE_3D`, matching `MipMap2DGenerator`) plus `Image3DSpecification::Mips`, eight
+> levels on the detail noise volume (8.00 → 9.14 MiB) and a stride-derived level selection. It works;
+> it does not pay, and the reason is structural enough to be worth writing down so nobody rebuilds it:
+>
+> * the erosion is a **threshold applied after the fetch** (`CloudErodeDensity`). Filtering the fetch
+>   does not smooth a cloud — it stops values crossing the cut, so it removes MASS, in patches.
+> * the per-frame stride is **not the reconstruction**. The lattice is dithered per frame and the
+>   temporal stage averages several phases; `CloudQuality.hpp`'s Medium row says outright that
+>   "reprojection is what buys the apparent detail its 30 m step cannot resolve on its own".
+>
+> Measured against the same frames with no chain, on Clouds_TwoLayerShowcase's cirrus sheet at the
+> zenith (a 2.5 km detail tile, 19.5 m texels, 40 m stride — the finest content any shipped scene has)
+> and on the Clouds_UEShowcase horizon, level chosen from `stride / N`:
+>
+> | N | cirrus zenith | UE horizon far band |
+> |---|---|---|
+> | 1 | destroyed — sparse blotches, **20.2 RMS** | contrast 0.801 → 0.764 |
+> | 2 | still broken, 15.6 RMS, contrast 1.956 → 1.522 | 0.801 → 0.788 |
+> | 4 | intact, 3.7 RMS | 0.801 → **0.810**, i.e. the wrong way |
+>
+> A safer form was then tried — leave the SAMPLE at level 0 and use the chain only for the far end of
+> the existing fade, replacing `CLOUD_DETAIL_MEAN_LEVEL`'s global constant with the local mean. It
+> cannot regress by construction (where the march resolves the field the weight is 1 and the level-0
+> fetch answers alone) and it measures 0.31 RMS on the cirrus and 0.64 RMS on the horizon: inert. Three
+> hundred lines of Vulkan backend and 1.14 MiB per noise set for six tenths of a grey level is not a
+> trade worth shipping, so the whole of it was removed. What survived is one-line: the two detail
+> fetches and the shape fetch now say `textureLod(..., 0.0f)` instead of `texture(...)`, because an
+> implicit level of detail is undefined in a compute shader and those sites were relying on it.
+
 Work the numbers. A hero cloud 1024 m across, seen at 30 km, subtends
 `1024 / 30000 ≈ 0.034 rad ≈ 1.96°`. At a 60° horizontal FOV rendered into a 960 px half-res scatter
 target, that is `960 × 1.96 / 60 ≈ 31 px`. A 128-texel-wide volume sampled across 31 px is a **4:1

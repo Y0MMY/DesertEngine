@@ -295,7 +295,7 @@ namespace Desert::Graphic::System
         return true;
     }
 
-    void VolumetricCloudRenderer::UpdateVolumeInstances()
+    void VolumetricCloudRenderer::UpdateVolumeInstances( const glm::vec3* cameraPosition )
     {
         DESERT_PROFILE_SCOPE( "Clouds: HeroVolumes" );
 
@@ -346,9 +346,30 @@ namespace Desert::Graphic::System
                 continue;
             }
 
+            // The lease is taken BEFORE the fade is consulted, and kept whatever the fade says: a tile is
+            // what the SCENE placed, a record is what THIS FRAME marches. Releasing the tile when a cloud
+            // fades out would put a 32 MiB atlas rebuild on the frame the camera crosses the line, and
+            // another on the frame it crosses back.
             leases.push_back( key );
+
+            // The fade is measured to the cloud's CENTRE — the transform's translation — once per frame,
+            // not per sample. See Graphic::CloudVolumeFadeWeight for why that is the only version of this
+            // that is safe behind the density seam.
+            float fade = 1.0f;
+            if ( cameraPosition != nullptr )
+            {
+                const glm::vec3 centre( placement.WorldTransform[3] );
+                fade = CloudVolumeFadeWeight( glm::length( centre - *cameraPosition ),
+                                              placement.Data.FadeStartDistance, placement.Data.FadeEndDistance );
+            }
+
+            // Gone: no record, so no instance slot, no box test on any sample, and no shadow column. The
+            // procedural deck behind it is what the frame shows there, which is the whole point.
+            if ( fade <= 0.0f )
+                continue;
+
             instances.push_back( MakeCloudVolumeInstance( placement.WorldTransform, asset->GetVolume().Header,
-                                                          tile.GetValue(), placement.Data.DensityScale,
+                                                          tile.GetValue(), placement.Data.DensityScale * fade,
                                                           placement.Data.DetailTypeBias ) );
 
             // The placements arrive sorted shadow-casters-first, so the casters are a prefix — counted
@@ -1035,7 +1056,14 @@ namespace Desert::Graphic::System
         // to keep true at the top of the function than in the middle of it.
         if ( m_Layers.Empty() )
             m_VolumePlacements.clear();
-        UpdateVolumeInstances();
+
+        // The camera is fetched HERE rather than after the early-outs below, because the hero clouds'
+        // distance fade needs it and they are gathered before those early-outs — see the note above. A
+        // frame without a camera draws nothing, so a null one simply means no fade rather than a special
+        // case anywhere downstream.
+        const auto*     frameCamera    = m_SceneRenderer->GetMainCamera();
+        const glm::vec3 cameraPosition = frameCamera ? frameCamera->GetPosition() : glm::vec3( 0.0f );
+        UpdateVolumeInstances( frameCamera ? &cameraPosition : nullptr );
 
         if ( m_Layers.Empty() || !m_WeatherPipeline || !RaymarchPipelineFor( m_Layers.Count ) ||
              !m_TemporalPipeline || !m_ParamsBuffer )
@@ -1044,7 +1072,7 @@ namespace Desert::Graphic::System
         // Checked here rather than inside the dispatches: without a camera there is no frame, and letting
         // each stage discover that separately is how m_HasFrameResult ends up true for a frame in which
         // nothing was dispatched, leaving the composite to magnify whatever was in the target before.
-        const auto* camera = m_SceneRenderer->GetMainCamera();
+        const auto* camera = frameCamera;
         if ( !camera )
             return prep;
 

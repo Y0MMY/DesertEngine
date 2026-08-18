@@ -298,10 +298,10 @@ namespace
     // ------------------------------------------------------------------------------------------------
     // Cloud Volume: a placed hero cloud (Docs/Clouds/VOXEL_CLOUD_PATH.md phase 1). Phase 1a delivered the
     // .dvol format, the analytic baker, the asset and this component; phase 1b landed the seam that reads
-    // them - the voxel density header, the instance buffer and the atlas binding - so the component now
-    // owes NOTHING. Three of the five are consumed by the ECS gather (which decides whether an instance
-    // exists at all and in what order), two by the pure packing that turns a placement into the GPU
-    // record the march indexes.
+    // them - the voxel density header, the instance buffer and the atlas binding; phase 2 added the
+    // distance fade. The component owes NOTHING. Two of the seven are consumed by the ECS gather (which
+    // decides whether an instance exists at all and in what order), five by the renderer's per-frame
+    // packing that turns a placement into the GPU record the march indexes.
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kVoxelGather = "Desert/Desert/Source/Engine/ECS/System/VolumetricCloudsECSSystem.hpp";
@@ -320,6 +320,12 @@ namespace
          // Sorts the casters to the front of the buffer, which is what makes the shadow pass's prefix
          // mean "casts a cloud shadow" - see u_VoxelShadowCount.
          { "CastsCloudShadow", kVoxelGather },
+         // Phase 2's distance LOD. Read on the CPU, once per cloud per frame, and folded into the
+         // instance record's density scale - the shader learns nothing about it, which is deliberate:
+         // the seam's cheap tier takes no distance argument, so a per-sample fade would live in the fine
+         // tier alone and the two tiers would disagree about where a cloud is.
+         { "FadeStartDistance", kVoxelInstance },
+         { "FadeEndDistance", kVoxelInstance },
     };
 
     constexpr const char* kFogPayload = "Desert/Desert/Source/Engine/Graphic/Fog/FogPayload.hpp";
@@ -516,12 +522,14 @@ TEST( SettingConsumers, TheCloudComponentOwesExactlyTheFieldsItsPassesHaveNotBee
 // format, the baker, the asset and the component were one task, and the shader-side seam another. All
 // five fields were owed by phase 1b, and phase 1b landed - the union in
 // Editor/Resources/Shaders/Common/CloudDensityCompose.glslh, the instance buffer and the atlas binding.
-// So the count is 0.
+// Phase 2 added the two fade distances WITH their reader in the same change. So the count is 0.
 //
-// It stays a COUNT rather than becoming "no PENDING rows exist" for the same reason the sky's does: the
-// later voxel phases (2: the SDF step bound and the far-LOD atlas; 3: CubeGrid authoring) may well add a
-// field before they add its reader. When that happens the number rises in a reviewable edit instead of a
-// field quietly joining the component with nobody accountable for it.
+// It stays a COUNT rather than becoming "no PENDING rows exist" for the same reason the sky's does: a
+// later voxel phase (3: CubeGrid authoring) may well add a field before it adds its reader. When that
+// happens the number rises in a reviewable edit instead of a field quietly joining the component with
+// nobody accountable for it. Phase 2's own two candidates for a field-without-a-reader - the SDF step
+// bound and the far-LOD atlas - were measured and refused rather than half-added; see
+// Docs/Clouds/VOXEL_CLOUD_PATH.md and the phase-2 commit message for the numbers.
 TEST( SettingConsumers, TheCloudVolumeComponentOwesNothing )
 {
     const std::ptrdiff_t pending = std::count_if( std::begin( kCloudVolumeRows ), std::end( kCloudVolumeRows ),
