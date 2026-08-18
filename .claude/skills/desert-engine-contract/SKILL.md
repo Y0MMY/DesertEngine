@@ -113,6 +113,29 @@ most expensive defects in this project all shipped built, tested and unseen.
    for what reason**; what was left out of scope deliberately. A divergence you name is a
    discussion. A divergence found on review is a return.
 
+### A measured refusal counts as done
+
+If the work turns out not to earn its cost, **the deliverable is the measurement and the refusal**,
+not a feature nobody should have shipped. That is a completed task, and this project has accepted
+several: an SDF step bound that could only ever fire in a sky with no clouds in it; a
+quarter-resolution atlas that cost a third of the channel it was meant to preserve; a 3D mip
+generator that was **built, measured at six tenths of a grey level, and removed again**; a weighted
+metering mask whose own control series moved the frame by one 8-bit level.
+
+The rules that make it a refusal rather than a shrug:
+
+- **Numbers, not impressions.** Say what you measured, on what, and what the noise floor was.
+- **Say what would change the answer.** ("This only pays once a stretch of sky can be declared
+  voxel-only.") The next person needs to know when to revisit.
+- **Record it where it will be found** — the commit message, the requirement entry, or a comment at
+  the site. A refusal nobody can find gets re-derived.
+- A hypothesis you **disproved** is worth the same treatment. Knowing that the height bands were not
+  the horizon fringe, or that shrinking the weather cell makes "clouds look too low" worse, saved
+  the next agent hours.
+
+What is still forbidden: shipping something that never fires, a knob that hides a defect instead of
+fixing it, or raising a budget constant until one camera angle looks acceptable.
+
 ---
 
 ## 4. No legacy — migrate immediately, and in the files
@@ -148,6 +171,14 @@ is deleted, not kept "in case we roll back". Rolling back is called `git revert`
   registration. Nobody else starts until it exists, or three people edit one header at once.
 - **After the backbone, work on non-overlapping files.** Shaders, the render pass, the editor UI.
 - **Own your files, ask for anyone else's.**
+- **Say which files you are fencing off**, and expect the same. When several people work at once the
+  scope fence is what makes a merge mechanical instead of archaeological — and the one conflict this
+  project actually hit was a scene file two people edited for unrelated reasons.
+- **`git stash` is shared across worktrees on this machine.** One `stash pop` pulled another
+  engineer's untracked files into an unrelated tree. Prefer explicit commits; if you must stash,
+  apply by name.
+- **The machine is shared too.** Rendering and timing while someone else renders produces numbers
+  that measure them, not you — see `desert-engine-verify` §5a before quoting a slope.
 
 ---
 

@@ -45,9 +45,48 @@ does *not* work (`osascript`/System Events has no assistive access), so the GUI 
 drive the render through the flags above.
 
 **Take at least two frames: what the change fixed, and what it could have broken.** These fail in
-opposite directions and one alone is not evidence. For sky/clouds the pair is the zenith
-(`--look 0,0.9,-1`) and the horizon (`--look 0,0.12,-1`) — shrinking a noise tile fixes the first
-and destroys the second.
+opposite directions and one alone is not evidence.
+
+### For anything in the sky: THREE elevations, never one
+
+```
+zenith   --look 0,0.9,-1      mid   --look 0,0.45,-1      horizon   --look 0,0.12,-1
+```
+
+A ten-merge cloud and sky programme was verified almost entirely from the horizon, and the owner
+found two defects by simply looking up: a zenith that was empty above ~20 degrees, and vertical
+streaking that cut every cloud at mid elevation. **The horizon is the most forgiving angle in the
+sky** — a grazing ray crosses dozens of weather cells and hundreds of samples, so it hides both
+sparsity and per-ray failures. The mid angle is where a player actually looks and where these
+defects live.
+
+### The camera can move, and static frames prove nothing about the temporal stage
+
+```
+--camera-to x,y,z   --look-to x,y,z   --shot-sequence <dir>   --shot-every N
+```
+
+Position lerps, aim slerps, and giving one endpoint holds the other still. Under a **fixed** camera
+the temporal resolve's reprojection is exact by construction, so a static shot says nothing about
+disocclusion, the neighbourhood clamp under translation, or the Ultra tier's checkerboard. If your
+change touches anything temporal, move the camera. A translation under a cloud deck is also the
+strongest test of whether a layer reads as sitting at altitude.
+
+### Before you compare two frames, measure the noise floor
+
+Cloud and sky scenes are **not byte-reproducible run to run** — the timestep is wall-clock, so the
+same binary twice already differs (measured: mean 0.02-0.08 grey levels, max 14-24). Two rules
+follow, and agents have been caught by both:
+
+- **Freeze animation for any pixel comparison**: copy the scene with `AnimationSpeed: 0` and the
+  wind strength at 0. Without that, frame 90 of two runs lands at different elapsed times and the
+  diff is meaningless.
+- **Shoot the same build against itself first** and quote that number beside your before/after. "Max
+  delta 11" means nothing until you know the repeat is 21.
+
+Byte-identity IS achievable and IS the right bar for a feature that is switched off, a scene the
+change should not touch, or a specialization constant that alters which code the driver compiles
+rather than what it computes. Claim it only where it is real.
 
 ## 2. What is NOT verification
 
@@ -99,6 +138,15 @@ The defect taxonomy of this project, from three audits and a render session:
 | white blown-out sky | tonemapper white point vs the operator it feeds |
 | grey clouds | a C++ mirror of a gradient vs the shader's own formula |
 | authored tints never loading | preset table vs the saved scenes |
+| the march made ZERO net progress | the skip's coarse tier judged by cheap density, its fine tier by density AFTER erosion |
+| horizon shredded into torn paper | the same two tiers, again — a fine excursion inside real cloud counted erosion holes and jumped 2.8 km |
+| a woven cross-hatch on cirrus | the rewind floor got the DITHERED start instead of the shell entry, deleting a slab off every near face |
+| clouds looked close to the ground | cell width vs layer thickness — the fair-weather family was authored with cumulonimbus proportions |
+| a far quad not drawn at all | a float depth buffer vs a standard-Z distribution that throws its precision away |
+
+Four of those are the **same disagreement found four times**, which is the strongest argument in this
+document: when a relation is wrong, fixing one symptom leaves the others standing. Ask what the two
+sides of your change are, and assert their agreement rather than each side.
 
 **Not one is a wrong line in isolation.** Each side is individually correct, so a unit test of
 either passes. When two values must agree, assert the agreement:
@@ -117,7 +165,54 @@ Two properties worth reaching for, because they catch whole classes rather than 
 - **A monotonicity.** "More cloud lies above a low sample than a high one" — catches inversions
   and off-by-one indexing that a spot value never will.
 
-## 5. Before you commit
+## 5. Finding the mechanism: instrument, knock out, then change something
+
+Every defect in the table above was found the same way, and none was found by reading code and
+guessing. The method, in order:
+
+1. **Render the suspect quantity as colour.** Write the sample count, the tier a ray ended in, the
+   profile value, the fade weight — whatever your hypothesis is about — straight into the frame. A
+   frame that is entirely red because every ray exhausted its budget is an argument no code review
+   produces.
+2. **Knock out one contributor at a time** and measure the artefact each time. Publish the table.
+   The cirrus weave was pinned by measuring its screen frequency (it matched the jitter noise's own
+   aliased fundamental exactly) and by rendering at Full instead of Half resolution, which HALVED
+   its period — proving it was locked to the buffer grid, not the world.
+3. **State the mechanism with numbers before you change anything.** "The stride is 700 m where the
+   volume's structure is 391 m, 1.8x past its own Nyquist limit" is a finding. "The far field looks
+   noisy" is not.
+4. **Build the ground truth when you can.** A converged reference march (tiny steps, huge budget) is
+   slow and worth it: it turns "better" into "17% below the reference instead of 25% above it".
+
+**A hypothesis you disprove is a result — write it down.** Several agents saved the next one real
+time by recording what was NOT the cause: the per-cell height bands were not the fringe, restricting
+the clamp box to fresh checkerboard taps makes Ultra strictly worse, and shrinking the weather cell
+makes the "clouds too low" complaint worse rather than better.
+
+## 5a. Measuring performance on this machine
+
+The frame-count slope is the house method: time `--shot-frames 300` and `--shot-frames 900`, then
+`slope = (t900 - t300) / 600`, which cancels the ~20 s fixed startup.
+
+- **The machine is shared with other agents.** Absolute slopes taken twenty minutes apart are not
+  comparable — one measured run drifted 40% with no code change, and another produced a physically
+  impossible result (more frames finishing faster). **Interleave A and B in one session and take the
+  minimum of N**, never the mean: the mean measures your neighbours.
+- **Say the machine was shared** in the report, and give the spread. A number without its noise
+  floor is not a measurement.
+- Prefer swapping a shader file over rebuilding when comparing — the shaders are cooked at runtime,
+  so A/B needs no second binary.
+
+## 5b. A refusal is a deliverable
+
+If the measurement says a feature does not earn its cost, **say so with the numbers and do not build
+it**. This is not failure and it is not laziness; four separate agents did it correctly, and one of
+them built a 3D mip generator, measured it at six tenths of a grey level, and removed it again. What
+is forbidden is shipping something that never fires, or shipping a knob that hides a defect instead
+of fixing it. Record the refusal where the next person will look — a commit message, the requirement
+doc, or a comment at the site.
+
+## 6. Before you commit
 
 1. `make Desert config=debug -j8` and `make Editor config=debug -j8` clean. New files ⇒
    `premake5 gmake` first (the generated makefiles list files explicitly).
@@ -126,9 +221,15 @@ Two properties worth reaching for, because they catch whole classes rather than 
    `/opt/homebrew/opt/llvm@18/bin/git-clang-format --binary /opt/homebrew/opt/llvm@18/bin/clang-format`.
    Local v22 disagrees with CI and passes work CI rejects.
 3. The full sweep from §3 — zero failures.
-4. Frames from §1 if anything on screen could have changed.
+4. Frames from §1 if anything on screen could have changed: **three elevations**, animation frozen
+   for any pixel comparison, and the repeat-noise number beside your diff.
 5. Report what you verified and *how*, and what you did not. A defect you name is a discussion; a
    defect found on review is a return.
+
+**When several branches land in a row:** CI is configured `cancel-in-progress`, and Windows takes
+~35 minutes against macOS's ten. Pushing a second commit while a run is in flight CANCELS Windows
+every time, so a series of back-to-back merges validates on macOS only. Batch them into one push, or
+wait for the run. **A cancelled job is not a pass and not a failure — it is no evidence.**
 
 ## Related
 

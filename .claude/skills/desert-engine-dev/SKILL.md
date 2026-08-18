@@ -155,6 +155,21 @@ Namespaces mirror the tree: `Desert::ECS`, `Desert::Graphic::Render`, `Desert::C
 - **Vulkan lifetime discipline**: pipeline layouts, push-constant ranges, descriptor set layouts must
   outlive the pipelines that reference them. A dangling `VkPushConstantRange` already cost real FPS
   once (commit `868b6b2`) — own these in a stable container, never a temporary.
+- **Depth is REVERSED-Z on `DEPTH32F`.** Every projection comes from `Core/Projection.hpp` (near and
+  far handed to GLM swapped), depth clears to **0**, the default compare is `Greater`, and the far
+  plane is 50 km. The shader DSL's `ZTest Less` still means "the nearer fragment wins" — that
+  reinterpretation lives once in `PipelineCache`'s mapping, so **never mirror it by editing a
+  `.shader`**, or the next shader written like all the others is invisible. **Shadow cascades keep
+  standard Z on purpose** (an orthographic projection has no 1/z curve for the float exponent to
+  cancel, so reversing buys exactly zero) and spell it with a raw compare op so they cannot silently
+  follow the convention later.
+- **Specialization constants are available** and need no permutation machinery: `ComputePipeline`'s
+  spec takes an int32 vector, and the stage info is copied by value at creation. That is how a loop
+  a scene never runs gets compiled away (the two-layer cloud march). Vulkan **silently ignores** a
+  constant id the module does not declare, so a test must walk the SPIR-V and assert the id is
+  really there — that failure mode is a correct, slow frame with no error anywhere.
+- **`texture()` in a compute shader is undefined** — no derivatives, so no implicit level of detail.
+  Always `textureLod(..., 0.0f)`. Three sites were relying on the driver happening to pick 0.
 
 ## Shader pipeline
 
@@ -238,6 +253,33 @@ without a rebuild.
 - **Optimizing without a profile** — no `OPTICK`/Perf HUD evidence, no perf change.
 - **Breaking asset compatibility** — adding a serialized field without a default breaks every old
   file; default it (`rfl::DefaultIfMissing`).
+- **A mirror with only one reader.** The house pattern is a C++/GLSL pair asserted equal by a test,
+  and it exists because two implementations of one quantity drift. But a mirror is a *guard*, not a
+  ritual: if only one side ever reads the value, a second copy is the defect shape rather than
+  protection from it. `CloudLayerAspect` is C++ only for exactly this reason, and says so.
+- **A metre-era constant.** The world unit is the CENTIMETRE, and the migration left survivors — a
+  grass draw distance of 45 (45 cm, so grass never drew), a blade width of 9 mm read as 0.09 mm, a
+  35 m wind gust read as 35 cm, a preview projection with a 1 mm near plane. When you touch an old
+  subsystem, **sweep it for lengths**: they are rarely alone, and a dimensionless ratio beside them
+  is usually fine and should say so in a comment.
+
+## Relations: when two numbers must agree, say so in code
+
+Several defects in this engine were two individually-correct values that disagreed, so the codebase
+now carries small headers whose whole job is to state a relation and let the engine complain:
+
+- `CloudWeatherScale` — the weather tile against the layer's altitude (or a ground camera sees one
+  cell overhead and a dozen at the horizon: an empty zenith over a dense band).
+- `CloudMarchScale` — the march stride against layer thickness, swept over ELEVATION rather than
+  evaluated at the zenith, because past the schedule's knee the stride grows faster than the chord.
+- `CloudLayerAspect` — the layer's own proportions, cell width over thickness, which is what neither
+  of the other two constrained: a 3.5 km deck under a 2.98 km cell passed both and looked like a
+  ceiling overhead.
+
+The pattern to copy: **derive the default from the relation**, let a preset choose inside a stated
+range, and have the renderer log a warning that names the number the scene should have had. A
+warning about physics ("a cloud narrower than it is tall is a convective tower, and a tower is
+deep") is worth shipping; a warning about taste is not.
 
 ## When you finish
 
