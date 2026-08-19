@@ -27,9 +27,13 @@
 layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuffer
 {
     vec4  u_CloudLayer;     // x planet radius (km), y layer bottom altitude (km), z thickness (km), w max view distance (km)
+    // w is the LAYER's extinction now, without any species' factor folded into it: with up to four kinds
+    // of cloud in one shell the factor became a property of the sample and travels in CloudFieldSample.
     vec4  u_CloudMarch;     // x max steps, y stop transmittance, z tracing start distance (km), w extinction (1/km)
-    vec4  u_CloudWeather;   // x coverage tile (km), y coverage, z coverage contrast, w detail character
-    vec4  u_CloudDetail;    // x detail tile (km), y detail strength, z density scale, w scattering albedo
+    vec4  u_CloudWeather;   // x coverage tile (km), y coverage, z coverage contrast, w detail tile (km)
+    // w is HOW MANY SPECIES this layer carries, 0..4, and it is the bound of the march's per-species loop.
+    // It is a count rather than a mask because the slots are filled from the front by PackCloudParams.
+    vec4  u_CloudDetail;    // x detail strength, y density scale, z scattering albedo, w species count
     vec4  u_CloudWind;      // xyz accumulated wind offset (km), w phase g
     vec4  u_CloudSun;       // xyz TOWARD the sun (normalized), w light march distance (km)
     vec4  u_CloudSunColour; // rgb sun irradiance (linear), w light march sample count
@@ -46,6 +50,19 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     // reaches full strength (km), z = distance at which the near-camera fade ends (km), w = the
     // distance at which it begins (km).
     vec4  u_CloudFade;
+    // THE FOUR SPECIES, one entry each, and both arrays are indexed by the same slot.
+    //
+    // u_CloudSpeciesEdge[k]:      x DetailCharacter, y DetailFactor, z DensityFactor, w ExtinctionFactor —
+    //                             what that kind of cloud is MADE OF, taken by whichever species wins the
+    //                             union at a sample and never averaged across them.
+    // u_CloudSpeciesPlacement[k]: xy the along-wind basis vector of that species' own placement field, zw
+    //                             the across-wind one. Scale and anisotropy are already in their lengths;
+    //                             the march divides by u_CloudWeather.x.
+    //
+    // Slots at or past u_CloudDetail.w are zero and are never read: the loop stops at the count, and the
+    // profile table's channel for an empty slot is zero everywhere anyway.
+    vec4  u_CloudSpeciesEdge[4];
+    vec4  u_CloudSpeciesPlacement[4];
     // x = aerial-perspective volume far extent (km), y = its read-side view-distance scale,
     // z = 1 when the volume exists and must be sampled.
     //
@@ -83,11 +100,18 @@ CloudFieldParams CloudUnpackFieldParams()
     p.WeatherTileKm    = u_CloudWeather.x;
     p.Coverage         = u_CloudWeather.y;
     p.CoverageContrast = u_CloudWeather.z;
-    p.DetailCharacter  = u_CloudWeather.w;
-    p.DetailTileKm     = u_CloudDetail.x;
-    p.DetailStrength   = u_CloudDetail.y;
-    p.DensityScale     = u_CloudDetail.z;
-    p.WindOffsetKm     = vec3( u_CloudWind.x, u_CloudWind.y, u_CloudWind.z );
+    p.DetailTileKm     = u_CloudWeather.w;
+    p.DetailStrength   = u_CloudDetail.x;
+    p.DensityScale     = u_CloudDetail.y;
+    p.SpeciesCount     = int( clamp( u_CloudDetail.w, 0.0f, float( CLOUD_SPECIES_SLOTS ) ) );
+
+    for ( int slot = 0; slot < CLOUD_SPECIES_SLOTS; ++slot )
+    {
+        p.SpeciesEdge[slot]      = u_CloudSpeciesEdge[slot];
+        p.SpeciesPlacement[slot] = u_CloudSpeciesPlacement[slot];
+    }
+
+    p.WindOffsetKm = vec3( u_CloudWind.x, u_CloudWind.y, u_CloudWind.z );
     return p;
 }
 

@@ -54,15 +54,21 @@ namespace
         return Desert::Assets::CloudTypeDefaultShape();
     }
 
+    // THE LAST TWO OF EACH ROW ARE T3'S: the placement scale and the stretch along the wind. Every fixture
+    // here carries the identity pair, because what this suite tests is the PROFILE and a fixture that also
+    // moved its patches would be changing two things between one measurement and the next. The one suite
+    // that varies them is CloudFieldSpecies at the bottom of this file, which is about placement and
+    // nothing else.
+
     // A SHEET: nearly the same height everywhere in a patch, thin, low.
-    constexpr CloudTypeShape kSheet{ 0.15f, 0.55f, 0.88f, 0.12f, 0.35f, 0.0f,
-                                     0.0f,  0.0f,  0.05f, 0.50f, 0.70f, 0.75f };
+    constexpr CloudTypeShape kSheet{ 0.15f, 0.55f, 0.88f, 0.12f, 0.35f, 0.0f,  0.0f,
+                                     0.0f,  0.05f, 0.50f, 0.70f, 0.75f, 1.00f, 1.00f };
     // A HEAP: a fair-weather cumulus, half its height at the rim of a patch.
-    constexpr CloudTypeShape kHeap{ 0.90f, 1.90f, 0.45f, 0.06f, 0.45f, 0.0f,
-                                    0.0f,  0.0f,  0.70f, 1.00f, 1.00f, 1.00f };
+    constexpr CloudTypeShape kHeap{ 0.90f, 1.90f, 0.45f, 0.06f, 0.45f, 0.0f,  0.0f,
+                                    0.0f,  0.70f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f };
     // A STORM: the only fixture with a second lobe, and the one the anvil tests are about.
-    constexpr CloudTypeShape kStorm{ 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f,
-                                     1.8f,  0.85f, 0.85f, 1.00f, 1.35f, 1.30f };
+    constexpr CloudTypeShape kStorm{ 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f,  1.8f,
+                                     0.85f, 0.85f, 1.00f, 1.35f, 1.30f, 1.00f, 1.00f };
 
     // The ENVELOPE the march intersects for a shape, computed the way Graphic::PackCloudParams computes it
     // rather than restated. There is no authored layer thickness any more — that is the whole point of the
@@ -83,13 +89,17 @@ namespace
         params.WeatherTileKm    = 12.0f; // Weather Tile Size 1 200 000 cm
         params.Coverage         = 0.10f; // Coverage
         params.CoverageContrast = 1.0f;  // Coverage Contrast
-        params.DetailCharacter  = shape.DetailCharacter;
-        params.DetailTileKm     = 4.0f; // Detail Tile Size 400 000 cm
-        params.DetailStrength   = 0.1f; // Detail Strength
-        // The packer folds the species' own density into the artist's scale, so the product is what the
-        // shader sees and the product is what this drives.
-        params.DensityScale = 1.0f * shape.DensityFactor;
+        params.DetailTileKm     = 4.0f;  // Detail Tile Size 400 000 cm
+        params.DetailStrength   = 0.1f;  // Detail Strength
+        // THE LAYER'S OWN SCALES, WITHOUT THE SPECIES' FACTORS IN THEM, which is where T3 moved the
+        // product: with four kinds of cloud in one shell the multiply cannot be done once, so it happens
+        // at the sample and the factor rides in CloudFieldSample.
+        params.DensityScale = 1.0f;
         params.WindOffsetKm = vec3( 0.0f, 0.0f, 0.0f );
+
+        // ONE SPECIES IN THE FIRST SLOT, table and arrays together, which is what a layer with a single
+        // type in it is. Every test below that does not say otherwise is testing that layer.
+        CloudBindSingleSpecies( params, shape );
         return params;
     }
 
@@ -442,7 +452,7 @@ TEST( CloudFieldProfileTable, TheShaderReadsBackExactlyWhatTheGeneratorWrote )
                 const float altitudeKm = bottomKm + fraction * spanKm;
 
                 const float generated = CloudProfileCurve( shape, altitudeKm, pattern );
-                const float read      = CloudSampleProfileTable( fraction, pattern );
+                const float read      = CloudSampleProfileTable( fraction, pattern, 0 );
 
                 worst = std::max( worst, std::abs( generated - read ) );
             }
@@ -471,13 +481,15 @@ TEST( CloudFieldProfileTable, TheReadIsClampedSoTheLayerCeilingDoesNotWrapOntoIt
         // species can grow, and the taper has run out by then. If the read wrapped, this would be reading
         // the FLOOR — which for a cumulus is a flat base at up to a third of full density — and the layer
         // would have a lid made of its own bottom.
-        EXPECT_LT( CloudSampleProfileTable( 1.0f, pattern ), 0.02f ) << "the layer ceiling is not empty";
+        EXPECT_LT( CloudSampleProfileTable( 1.0f, pattern, 0 ), 0.02f ) << "the layer ceiling is not empty";
 
         // Out of range on the altitude axis reads as the nearest edge and NOT as the opposite one. This is
         // the wrap itself: a march that asked for 1.5 with a REPEAT sampler and no clamp would get the
         // value at 0.5.
-        EXPECT_FLOAT_EQ( CloudSampleProfileTable( 1.5f, pattern ), CloudSampleProfileTable( 1.0f, pattern ) );
-        EXPECT_FLOAT_EQ( CloudSampleProfileTable( -0.5f, pattern ), CloudSampleProfileTable( 0.0f, pattern ) );
+        EXPECT_FLOAT_EQ( CloudSampleProfileTable( 1.5f, pattern, 0 ),
+                         CloudSampleProfileTable( 1.0f, pattern, 0 ) );
+        EXPECT_FLOAT_EQ( CloudSampleProfileTable( -0.5f, pattern, 0 ),
+                         CloudSampleProfileTable( 0.0f, pattern, 0 ) );
     }
 
     // THE FLOOR IS DELIBERATELY NOT EMPTY, and it would be wrong if it were. The envelope's bottom IS the
@@ -485,13 +497,13 @@ TEST( CloudFieldProfileTable, TheReadIsClampedSoTheLayerCeilingDoesNotWrapOntoIt
     // therefore carries real body — measured at about a third of full density for a thin column, whose
     // base ramp is a fraction of its own small height. A profile that faded in above the shell would be
     // fog, not cloud.
-    EXPECT_GT( CloudSampleProfileTable( 0.0f, 0.0f ), 0.1f )
+    EXPECT_GT( CloudSampleProfileTable( 0.0f, 0.0f, 0 ), 0.1f )
          << "the species' base has become a fade-in, so its clouds have rounded bottoms";
 
     // And the pattern axis does not wrap either: a pattern past 1 must read as a full patch and not as an
     // empty one.
-    EXPECT_NEAR( CloudSampleProfileTable( 0.5f, 1.5f ), CloudSampleProfileTable( 0.5f, 1.0f ), 1e-5f );
-    EXPECT_NEAR( CloudSampleProfileTable( 0.5f, -0.5f ), CloudSampleProfileTable( 0.5f, 0.0f ), 1e-5f );
+    EXPECT_NEAR( CloudSampleProfileTable( 0.5f, 1.5f, 0 ), CloudSampleProfileTable( 0.5f, 1.0f, 0 ), 1e-5f );
+    EXPECT_NEAR( CloudSampleProfileTable( 0.5f, -0.5f, 0 ), CloudSampleProfileTable( 0.5f, 0.0f, 0 ), 1e-5f );
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -742,12 +754,16 @@ namespace
     {
         CloudFieldSample sample;
         sample.Profile      = profile;
-        sample.DetailType   = params.DetailCharacter;
+        sample.DetailType   = params.SpeciesEdge[0].x;
         // ONE, not the params' scale: what is measured here is the fraction of the profile that survives
         // the EROSION, and the density scale is a multiplier applied after it. Since the packer folds the
         // species' own density into that scale, leaving it in would make every retention read 1.15 for a
         // congestus and 0.70 for a stratus, which says nothing about erosion at all.
         sample.DensityScale = 1.0f;
+        // The erosion depth is the WINNING species' factor times the layer's strength, so a fixture that
+        // left this at zero would erode nothing whatever the strength said.
+        sample.DetailFactor     = params.SpeciesEdge[0].y;
+        sample.ExtinctionFactor = params.SpeciesEdge[0].w;
 
         return CloudSampleDensity( params, sample, positionKm ) / profile;
     }
@@ -1027,12 +1043,21 @@ TEST( CloudFieldProducer, TheThickPartOfAPatchIsWhereTheTowerIsAndTheRimIsFlat )
 
 TEST( CloudFieldProducer, TheEdgeCharacterIsTheSpeciesAndDoesNotWanderAcrossTheSky )
 {
-    // The species decides whether its erosion is wispy or billowy, and it decides it for the whole layer.
-    // The scalar it replaced was mixed with a noise per sample, which meant the CHARACTER of an edge
-    // changed within one cloud — a stratus rim on one side of a cumulus and a cumulus rim on the other.
+    // The species decides whether its erosion is wispy or billowy, and where there is only one species it
+    // decides it for the whole layer. The scalar it replaced was mixed with a noise per sample, which meant
+    // the CHARACTER of an edge changed within one cloud — a stratus rim on one side of a cumulus and a
+    // cumulus rim on the other.
+    //
+    // WHERE THERE IS NO CLOUD THERE IS NO CHARACTER, and that changed with T3. A sample the union left
+    // empty carries zeroes, because the edge numbers are now the WINNING species' and an empty sample has
+    // no winner. Nothing reads them — CloudSampleDensity returns at a zero profile before it touches
+    // DetailType — and filling them from a species that did not win would be exactly the averaging across
+    // species this phase refuses. So the assertion is made where it means something.
     CloudFieldParams params = DefaultParams();
 
     const float envelopeKm = EnvelopeThicknessKm( DefaultShape() );
+
+    int inCloud = 0;
 
     for ( int iz = 0; iz < 24; ++iz )
     {
@@ -1040,10 +1065,432 @@ TEST( CloudFieldProducer, TheEdgeCharacterIsTheSpeciesAndDoesNotWanderAcrossTheS
         {
             const vec3 position( 8.0f * ( ix + 0.5f ) / 24.0f, 0.4f * envelopeKm, 8.0f * ( iz + 0.5f ) / 24.0f );
 
-            EXPECT_FLOAT_EQ( SampleCloudField( params, 0.4f, position ).DetailType, params.DetailCharacter )
+            const CloudFieldSample sample = SampleCloudField( params, 0.4f, position );
+            if ( sample.Profile <= 0.0f )
+                continue;
+
+            ++inCloud;
+            EXPECT_FLOAT_EQ( sample.DetailType, params.SpeciesEdge[0].x )
                  << "the erosion character wandered away from the species";
         }
     }
+
+    EXPECT_GT( inCloud, 0 ) << "no sample in the grid was inside cloud, so the loop above asserted nothing";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// SEVERAL KINDS OF CLOUD IN ONE SKY — the whole of T3, and the relation that guards it
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // A LOW DECK AND A TALL TOWER, which is the accepting frame of this phase stated as two shapes. The
+    // bands OVERLAP between 2.2 and 2.6 km, and that overlap is what every test below is about: it is
+    // exactly the region a partition of one field could never have produced, because weights that sum to
+    // one cannot both be non-zero.
+    //
+    // The deck is the shipped Stratocumulus' geometry with its own small placement scale; the tower is the
+    // built-in congestus at the layer's scale. Written out rather than loaded from disk because this suite
+    // does not read files, and because what is being tested is the arithmetic of the union rather than the
+    // library's numbers — Desert/Tests/Engine/CloudType owns those.
+    constexpr CloudTypeShape kDeck{ 0.60f, 2.60f, 0.80f, 0.10f, 0.35f, 0.0f,  0.0f,
+                                    0.0f,  0.95f, 0.70f, 0.95f, 1.00f, 0.35f, 1.60f };
+    constexpr CloudTypeShape kTower{ 2.20f, 5.80f, 0.15f, 0.04f, 0.50f, 0.0f,  0.0f,
+                                     0.0f,  1.00f, 1.00f, 1.15f, 1.00f, 1.00f, 1.00f };
+
+    CloudFieldParams TwoSpeciesParams( float coverage )
+    {
+        const CloudTypeShape pair[2] = { kDeck, kTower };
+
+        CloudFieldParams params = DefaultParams();
+        params.Coverage         = coverage;
+
+        CloudProfileTableSelectSet( pair, 2u );
+        CloudBindSpecies( params, pair, 2u, vec3( 1.0f, 0.0f, 0.0f ) );
+        return params;
+    }
+
+    // The height fraction of an absolute altitude inside the SET's envelope — the axis the table is built
+    // on and the axis the march hands the field.
+    float FractionOfSetEnvelope( float altitudeKm )
+    {
+        const CloudTypeShape                   pair[2]  = { kDeck, kTower };
+        const Desert::Graphic::CloudEnvelopeKm envelope = Desert::Graphic::CloudTypeSetEnvelopeKm( pair, 2u );
+
+        return ( altitudeKm - envelope.BottomKm ) / ( envelope.TopKm - envelope.BottomKm );
+    }
+} // namespace
+
+TEST( CloudFieldSpecies, TheEnvelopeIsTheUnionAndContainsEveryMemberOfTheSet )
+{
+    // THE RELATION THIS SUBSYSTEM GETS WRONG SILENTLY. A shell that does not contain a type does not
+    // error; it slices the top off that type's cloud, and the symptom is a sky with a ceiling nobody
+    // remembers setting (commit 54330ab9). T0 asserted it for a set of one; the claim T1 made was that
+    // widening the set would not need the code rewritten, so this is the same relation over a set.
+    const CloudTypeShape all[4] = { kDeck, kTower, kSheet, kStorm };
+
+    for ( std::uint32_t count = 1; count <= 4; ++count )
+    {
+        const Desert::Graphic::CloudEnvelopeKm envelope = Desert::Graphic::CloudTypeSetEnvelopeKm( all, count );
+
+        for ( std::uint32_t slot = 0; slot < count; ++slot )
+        {
+            EXPECT_LE( envelope.BottomKm, CloudTypeBaseKm( all[slot] ) )
+                 << "the shell starts above species " << slot << " of " << count;
+            EXPECT_GE( envelope.TopKm, CloudTypeTopKm( all[slot] ) )
+                 << "the shell ends below species " << slot << " of " << count;
+        }
+
+        // AND IT IS NOT LARGER THAN IT HAS TO BE. A generous envelope satisfies containment and wastes the
+        // whole altitude axis of the table on air nothing can put cloud in, so both ends must be SOME
+        // species' own.
+        bool bottomIsSomebodys = false;
+        bool topIsSomebodys    = false;
+        for ( std::uint32_t slot = 0; slot < count; ++slot )
+        {
+            bottomIsSomebodys = bottomIsSomebodys || envelope.BottomKm == CloudTypeBaseKm( all[slot] );
+            topIsSomebodys    = topIsSomebodys || envelope.TopKm == CloudTypeTopKm( all[slot] );
+        }
+        EXPECT_TRUE( bottomIsSomebodys ) << "the shell's floor belongs to no species in the set";
+        EXPECT_TRUE( topIsSomebodys ) << "the shell's ceiling belongs to no species in the set";
+    }
+}
+
+namespace
+{
+    // ONE SPECIES' PROFILE AT ONE POINT, built the way the producer builds it.
+    //
+    // A DELIBERATE MIRROR OF THE COORDINATE, and the test below is what keeps it honest: it compares the
+    // union the producer returns against the max of what this computes, so a mirror that drifted from the
+    // producer fails the test rather than making it vacuous. There is no other way to ask "what would
+    // species k alone have said here" — the slot decides both the table's channel and the field's offset,
+    // so a species cannot be moved into slot 0 to be measured on its own.
+    float SpeciesProfileAt( const CloudFieldParams& params, int slot, float fraction, vec3 positionKm )
+    {
+        const vec4 basis      = params.SpeciesPlacement[slot];
+        const vec2 along      = vec2( basis.x, basis.y );
+        const vec2 across     = vec2( basis.z, basis.w );
+        const vec2 horizontal = vec2( positionKm.x, positionKm.z );
+
+        const float verticalFreq = CLOUD_COVERAGE_FREQ_Y * length( across ) / CLOUD_COVERAGE_FREQ_Z;
+
+        const vec3 texturePos = vec3( dot( horizontal, along ) / params.WeatherTileKm,
+                                      positionKm.y * verticalFreq / params.WeatherTileKm,
+                                      dot( horizontal, across ) / params.WeatherTileKm ) +
+                                CloudSpeciesPlacementOffset( slot );
+
+        return CloudSpeciesProfile( params, CLOUD_SAMPLE_NOISE( texturePos ), fraction, slot );
+    }
+} // namespace
+
+TEST( CloudFieldSpecies, TwoSpeciesCanOccupyTheSamePointAndTheUnionTakesTheDeeperOne )
+{
+    // THE FRAME THIS PHASE EXISTS FOR, reduced to the one number that makes it possible: there is a point
+    // of the sky at which BOTH species have a non-zero profile at once.
+    //
+    // A partition — one placement field sliced between the species, weights summing to one — cannot
+    // produce such a point at all, by arithmetic and not by tuning. That construction was written into the
+    // plan and taken out again (D-14), and this test is what stops it coming back: it fails the moment the
+    // weights are made to sum to anything.
+    CloudFieldParams params = TwoSpeciesParams( 0.55f );
+
+    // The bands overlap on [2.2, 2.6] km. Sampled in the middle of that, where both are alive.
+    const float altitudeKm = 2.40f;
+    const float fraction   = FractionOfSetEnvelope( altitudeKm );
+
+    const vec4 alive = CloudSampleProfileTableAll( fraction, 1.0f );
+    ASSERT_GT( alive.x, 0.0f ) << "the deck's channel is empty inside its own band";
+    ASSERT_GT( alive.y, 0.0f ) << "the tower's channel is empty inside its own band";
+
+    int bothPresent = 0;
+    int unionWrong  = 0;
+    int winnerWrong = 0;
+
+    constexpr int kColumns = 96;
+
+    for ( int iz = 0; iz < kColumns; ++iz )
+    {
+        for ( int ix = 0; ix < kColumns; ++ix )
+        {
+            // The producer is handed the ALTITUDE ABOVE THE SHELL'S FLOOR in y, exactly as the march hands
+            // it, and the height fraction separately.
+            const vec3 position( 24.0f * ( ix + 0.5f ) / kColumns, altitudeKm - kDeck.BaseAltitudeKm,
+                                 24.0f * ( iz + 0.5f ) / kColumns );
+
+            const float deck  = SpeciesProfileAt( params, 0, fraction, position );
+            const float tower = SpeciesProfileAt( params, 1, fraction, position );
+
+            const CloudFieldSample united = SampleCloudField( params, fraction, position );
+
+            if ( std::abs( united.Profile - std::max( deck, tower ) ) > 1e-5f )
+                ++unionWrong;
+
+            if ( deck <= 0.0f || tower <= 0.0f )
+                continue;
+
+            ++bothPresent;
+
+            // AND THE WINNER TAKES ITS OWN CHARACTER, unaveraged. This is the other half of D-14: a
+            // stratocumulus edge on the tower, or an average of the two, is the smear the winner-take-all
+            // rule exists to prevent.
+            const float expected = deck > tower ? kDeck.DetailCharacter : kTower.DetailCharacter;
+            if ( std::abs( united.DetailType - expected ) > 1e-5f )
+                ++winnerWrong;
+        }
+    }
+
+    std::printf( "[CloudFieldSpecies] of %d columns, %d carried BOTH the deck and the tower at %.2f km\n",
+                 kColumns * kColumns, bothPresent, altitudeKm );
+
+    EXPECT_GT( bothPresent, 0 ) << "no point of the sky held two kinds of cloud at once — which is what a "
+                                   "partition of one field would produce, and what D-14 rejected";
+    EXPECT_EQ( unionWrong, 0 ) << "the union is not the max of the two profiles";
+    EXPECT_EQ( winnerWrong, 0 ) << "the winning species did not keep its own edge character";
+}
+
+TEST( CloudFieldSpecies, EverySpeciesSeesTheSameDistributionSoOneCoverageSliderMeansOneThing )
+{
+    // THE NUMBER THAT DECIDES WHERE A SPECIES' PLACEMENT FIELD COMES FROM. Each species reads the same
+    // channel pair of the same volume at its own scale, its own stretch and its own offset — and the
+    // argument for that, rather than for "a channel of the volume each", is statistical.
+    //
+    // The quantile map in the producer is calibrated to ONE distribution (the Alligator blend's, half
+    // width 0.32). `Coverage` selects a FRACTION of the field, so a species reading a differently
+    // distributed field would answer the same setting with a different fraction of sky — which is exactly
+    // the defect the quantile map was introduced to remove, put back once per species. A change of scale,
+    // of stretch and of offset leaves the distribution alone, because the field is statistically
+    // stationary; a change of channel does not, because the wispy pair is `1 - Alligator`.
+    //
+    // WHAT IS ASSERTED IS AGREEMENT, NOT A VALUE. The absolute quantiles of this particular grid are not
+    // the calibration data — Desert/Tests/Engine/CloudField's own quantile test above owns those, over the
+    // population the producer actually reads. What matters here is that the four species agree with each
+    // other, because that is precisely what makes one Coverage slider mean one thing for all of them.
+    const CloudTypeShape four[4] = {
+         kDeck,  // scale 0.35, stretched 1.6 along the wind
+         kTower, // scale 1.00, round
+         CloudTypeShape{ 0.60f, 2.60f, 0.80f, 0.10f, 0.35f, 0.0f, 0.0f, 0.0f, 0.5f, 1.0f, 1.0f, 1.0f, 2.50f,
+                         8.00f }, // a cirrus' placement
+         CloudTypeShape{ 0.60f, 2.60f, 0.80f, 0.10f, 0.35f, 0.0f, 0.0f, 0.0f, 0.5f, 1.0f, 1.0f, 1.0f, 0.80f,
+                         0.20f }, // a lenticular's, stretched ACROSS the wind
+    };
+
+    CloudFieldParams params = DefaultParams();
+    CloudBindSpecies( params, four, 4u, vec3( 1.0f, 0.0f, 0.0f ) );
+
+    constexpr int kColumns   = 96;
+    constexpr int kQuantiles = 3;
+
+    // p25, p50, p75 — three points of the curve rather than one, because two distributions can share a
+    // median and differ everywhere else.
+    const float fractions[kQuantiles] = { 0.25f, 0.50f, 0.75f };
+
+    float measured[4][kQuantiles] = {};
+
+    for ( int slot = 0; slot < 4; ++slot )
+    {
+        std::vector<float> field;
+        field.reserve( kColumns * kColumns );
+
+        for ( int iz = 0; iz < kColumns; ++iz )
+        {
+            for ( int ix = 0; ix < kColumns; ++ix )
+            {
+                const vec3 position( 60.0f * ( ix + 0.5f ) / kColumns, 1.7f, 60.0f * ( iz + 0.5f ) / kColumns );
+
+                const vec4  basis        = params.SpeciesPlacement[slot];
+                const vec2  along        = vec2( basis.x, basis.y );
+                const vec2  across       = vec2( basis.z, basis.w );
+                const vec2  horizontal   = vec2( position.x, position.z );
+                const float verticalFreq = CLOUD_COVERAGE_FREQ_Y * length( across ) / CLOUD_COVERAGE_FREQ_Z;
+
+                const vec3 texturePos = vec3( dot( horizontal, along ) / params.WeatherTileKm,
+                                              position.y * verticalFreq / params.WeatherTileKm,
+                                              dot( horizontal, across ) / params.WeatherTileKm ) +
+                                        CloudSpeciesPlacementOffset( slot );
+
+                const vec4  noise   = CLOUD_SAMPLE_NOISE( texturePos );
+                const float blended = noise.z * 0.65f + noise.w * 0.35f;
+                field.push_back( smoothstep( 0.5f - 0.32f, 0.5f + 0.32f, blended ) );
+            }
+        }
+
+        std::sort( field.begin(), field.end() );
+        for ( int q = 0; q < kQuantiles; ++q )
+            measured[slot][q] = field[static_cast<size_t>( fractions[q] * ( field.size() - 1 ) )];
+    }
+
+    for ( int slot = 0; slot < 4; ++slot )
+    {
+        std::printf( "[CloudFieldSpecies] species %d (scale %.2f, stretch %.2f): p25 %.3f  p50 %.3f  p75 %.3f\n",
+                     slot, four[slot].PlacementScale, four[slot].PlacementAnisotropy, measured[slot][0],
+                     measured[slot][1], measured[slot][2] );
+    }
+
+    for ( int q = 0; q < kQuantiles; ++q )
+    {
+        float low  = measured[0][q];
+        float high = measured[0][q];
+        for ( int slot = 1; slot < 4; ++slot )
+        {
+            low  = std::min( low, measured[slot][q] );
+            high = std::max( high, measured[slot][q] );
+        }
+
+        EXPECT_LT( high - low, 0.06f )
+             << "the four species disagree by " << ( high - low ) << " at the " << fractions[q]
+             << " quantile, so one Coverage setting selects a different fraction of sky for each of them";
+    }
+
+    // AND THE SPREAD IS THE SAMPLING ERROR, not zero: four different scales read four different parts of
+    // the same field, so identical quantiles would mean the offsets are not decorrelating anything.
+    float widest = 0.0f;
+    for ( int q = 0; q < kQuantiles; ++q )
+    {
+        float low  = measured[0][q];
+        float high = measured[0][q];
+        for ( int slot = 1; slot < 4; ++slot )
+        {
+            low  = std::min( low, measured[slot][q] );
+            high = std::max( high, measured[slot][q] );
+        }
+        widest = std::max( widest, high - low );
+    }
+    EXPECT_GT( widest, 0.0f ) << "the four species read the identical field, so the per-slot offsets are "
+                                 "not decorrelating them at all";
+}
+
+TEST( CloudFieldSpecies, TheAnisotropyStretchesThePatchesAlongTheWindAndNotAcrossIt )
+{
+    // DEFECT ONE OF THE THREE T3 WAS HANDED: cirrus reads as a mackerel sky rather than as fibrous bands,
+    // and no profile can fix it because a profile does not decide the shape of a patch in plan.
+    //
+    // Measured as the DECORRELATION LENGTH of the placement field along each of the two axes: how far you
+    // have to walk before the field stops resembling itself. A round patch gives the same answer both
+    // ways; a band gives a longer one downwind, and the ratio of the two is the thing the control claims
+    // to set.
+    const CloudTypeShape round{ 2.20f, 5.80f, 0.15f, 0.04f, 0.50f, 0.0f,  0.0f,
+                                0.0f,  1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f };
+    CloudTypeShape       streaked = round;
+    streaked.PlacementAnisotropy  = 8.0f;
+
+    const auto correlationAt = []( const CloudTypeShape& shape, float alongKm, float acrossKm )
+    {
+        const Desert::Graphic::CloudPlacementBasis basis =
+             Desert::Graphic::CloudSpeciesPlacementBasis( shape, 1.0f, 0.0f );
+
+        constexpr int   kSamples = 40;
+        constexpr float kTileKm  = 12.0f;
+
+        double sum = 0.0;
+        for ( int iz = 0; iz < kSamples; ++iz )
+        {
+            for ( int ix = 0; ix < kSamples; ++ix )
+            {
+                const vec2 origin( 60.0f * ( ix + 0.5f ) / kSamples, 60.0f * ( iz + 0.5f ) / kSamples );
+                const vec2 moved( origin.x + alongKm, origin.y + acrossKm );
+
+                const auto sample = [&]( vec2 horizontal )
+                {
+                    const vec2 along( basis.AlongX, basis.AlongZ );
+                    const vec2 across( basis.AcrossX, basis.AcrossZ );
+                    const vec3 texturePos( dot( horizontal, along ) / kTileKm, 0.0f,
+                                           dot( horizontal, across ) / kTileKm );
+                    const vec4 noise = CLOUD_SAMPLE_NOISE( texturePos );
+                    return noise.z * 0.65f + noise.w * 0.35f;
+                };
+
+                sum += std::abs( sample( origin ) - sample( moved ) );
+            }
+        }
+        return static_cast<float>( sum / ( kSamples * kSamples ) );
+    };
+
+    // One kilometre of walk, once downwind and once across it.
+    const float roundAlong   = correlationAt( round, 1.0f, 0.0f );
+    const float roundAcross  = correlationAt( round, 0.0f, 1.0f );
+    const float streakAlong  = correlationAt( streaked, 1.0f, 0.0f );
+    const float streakAcross = correlationAt( streaked, 0.0f, 1.0f );
+
+    std::printf( "[CloudFieldSpecies] mean |difference| over 1 km — round %.4f along / %.4f across, "
+                 "streaked %.4f along / %.4f across\n",
+                 roundAlong, roundAcross, streakAlong, streakAcross );
+
+    // A ROUND PATCH CHANGES BY ABOUT AS MUCH EITHER WAY. Not exactly: the two horizontal frequencies
+    // differ by the 6.65 % Unreal's own coefficients carry, which is why this is a loose bound and not an
+    // equality.
+    EXPECT_NEAR( roundAlong / roundAcross, 1.0f, 0.25f ) << "an anisotropy of 1 is not producing a round patch";
+
+    // A STREAKED ONE CHANGES FAR LESS DOWNWIND, because that is what a band is.
+    EXPECT_LT( streakAlong, 0.5f * streakAcross )
+         << "an anisotropy of 8 did not draw the patches out along the wind";
+
+    // AND THE ACROSS-WIND SCALE IS UNTOUCHED, which is the property that makes the control one control
+    // rather than two: stretching a cirrus must not also make it coarser side to side.
+    EXPECT_NEAR( streakAcross, roundAcross, 0.02f )
+         << "the stretch along the wind moved the period across it as well";
+}
+
+TEST( CloudFieldSpecies, TheFrequencyTRIPLESAreTheSameOnBothSidesOfTheSeam )
+{
+    // TWO STATEMENTS OF THREE NUMBERS — the #defines in Common/CloudField.glslh and the constants in
+    // Engine/Graphic/Clouds/CloudProfileTable.hpp that the packer builds the basis vectors from. This is
+    // the only place both spellings are in scope, so this is where they are held equal. Without it a
+    // change to one produces a placement field whose frequency the shader and the CPU disagree about, and
+    // the symptom is a sky that is subtly the wrong scale with nothing in any log.
+    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudCoverageFreqX, CLOUD_COVERAGE_FREQ_X );
+    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudCoverageFreqY, CLOUD_COVERAGE_FREQ_Y );
+    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudCoverageFreqZ, CLOUD_COVERAGE_FREQ_Z );
+
+    // And the ceiling on how many kinds of cloud a sky holds, which is the width of a texel on one side
+    // and a #define on the other.
+    EXPECT_EQ( static_cast<int>( Desert::Graphic::kCloudSpeciesSlots ), CLOUD_SPECIES_SLOTS );
+}
+
+TEST( CloudFieldSpecies, AnEmptySetStillHasASkyAndAnUnfilledSlotCostsNothing )
+{
+    // THE EMPTY SET IS A DOCUMENTED ANSWER, and the renderer's answer to it is one built-in congestus —
+    // which is a set of one and therefore already covered above. What is tested HERE is the other half of
+    // that promise: that slots past the count cannot put cloud in the sky even if their arrays were
+    // filled, because the profile table's channel for them is zero everywhere.
+    const CloudTypeShape one[1] = { kTower };
+
+    CloudFieldParams params = DefaultParams();
+    params.Coverage         = 0.9f; // a nearly solid sky, so an unfilled slot leaking would be obvious
+
+    CloudProfileTableSelectSet( one, 1u );
+    // Deliberately hostile: the arrays carry a SECOND species with a large density, and only the count
+    // and the table's empty channel stand between it and the frame.
+    const CloudTypeShape two[2] = { kTower, kDeck };
+    CloudBindSpecies( params, two, 2u, vec3( 1.0f, 0.0f, 0.0f ) );
+    params.SpeciesCount = 1; // ...but the layer says there is one
+
+    const float envelopeKm = EnvelopeThicknessKm( kTower );
+
+    for ( int i = 0; i < 64; ++i )
+    {
+        const vec3 position( 37.0f * i / 64.0f, 0.5f * envelopeKm, 11.0f * i / 64.0f );
+
+        const CloudFieldSample sample = SampleCloudField( params, 0.5f, position );
+        if ( sample.Profile <= 0.0f )
+            continue;
+
+        EXPECT_FLOAT_EQ( sample.DetailType, kTower.DetailCharacter )
+             << "a slot past the species count reached the frame";
+    }
+
+    // And the table itself: channel 1 of a one-species table is zero at every altitude and every pattern,
+    // which is the second, independent reason the slot cannot be read.
+    for ( int i = 0; i <= 32; ++i )
+    {
+        const float fraction = static_cast<float>( i ) / 32.0f;
+        const vec4  profiles = CloudSampleProfileTableAll( fraction, 1.0f );
+
+        EXPECT_FLOAT_EQ( profiles.y, 0.0f ) << "an unwritten channel is not zero";
+        EXPECT_FLOAT_EQ( profiles.z, 0.0f ) << "an unwritten channel is not zero";
+        EXPECT_FLOAT_EQ( profiles.w, 0.0f ) << "an unwritten channel is not zero";
+    }
+
+    CloudProfileTableSelect( DefaultShape() );
 }
 
 int main( int argc, char** argv )

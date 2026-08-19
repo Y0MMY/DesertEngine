@@ -48,6 +48,14 @@ namespace Desert::ECS
     // duplicated or shipped and the whole point of the programme is that an artist makes their own kinds
     // of cloud. The enum is gone rather than deprecated (§4.1) and the v4 -> v5 scene migration turns each
     // of its four values into the shipped preset that carries the same numbers.
+    //
+    // AND THE ONE HANDLE IS NOW A SET OF FOUR. One type in one slot is one sky of one kind of cloud, which
+    // is not what was asked for: an artist composes a sky FROM their types. The slots overlap by
+    // construction rather than dividing the sky between them — each carries its own placement field —
+    // because the accepting frame for this phase is a stratocumulus deck with a congestus tower standing
+    // in it, and any rule whose weights sum to one forbids exactly that (decision D-14). The v5 -> v6
+    // migration renames the single `CloudType` key to `CloudType1`; nothing else about a scene changes,
+    // and a scene that went in with one kind of cloud comes out rendering the same sky.
     struct VolumetricCloudData
     {
         REFLECT()
@@ -59,19 +67,56 @@ namespace Desert::ECS
                            "zero GPU cost, exactly like a scene without the component." ) )
         bool Enabled = true;
 
-        PROPERTY( DisplayName( "Cloud Type" ), Category( "Cloud Layer" ), Summary, Asset<CloudTypeAsset>,
+        // FOUR SLOTS AND NOT ONE, which is what "a sky made of several kinds of cloud" costs in fields.
+        //
+        // WHY FOUR. A type owns one CHANNEL of the profile table, so the ceiling is the width of a texel
+        // rather than a preference — Unreal fixes exactly four types to R, G, B and A of its three layout
+        // textures (EpicDoc_CloudMaterial.md §2-3). The LIBRARY on disk is not limited by this; a project
+        // may ship a hundred `.decloudtype` files and this is how many of them one sky holds at once.
+        //
+        // WHY FOUR NAMED FIELDS AND NOT A LIST. A slot is a channel, and a channel is a place rather than a
+        // position in a sequence: dragging a type into the third slot has to mean the third channel, and
+        // the profile table's decorrelation offsets are per SLOT. A container would also lose the asset
+        // picker, the drag-and-drop target and the per-row tooltip the Details panel gives every reflected
+        // asset field, and gain a reorder operation that changes the sky for no reason an artist can see.
+        //
+        // THEY ARE FILLED FROM THE FRONT. The renderer packs the non-empty ones down to a prefix and sends
+        // a count; a gap in the middle is closed rather than carried, so slot 3 alone behaves exactly like
+        // slot 1 alone. That is what makes "how many species" one number instead of a mask.
+        //
+        // ALL FOUR EMPTY IS A DOCUMENTED ANSWER, not a hole: the layer resolves to one
+        // Assets::CloudTypeDefaultShape, which is T0's cumulus congestus digit for digit. A scene nobody
+        // has authored a type for still has to have a sky, and that is a load-bearing requirement of the
+        // whole programme rather than a convenience — it is also why every default here is 0 and not the id
+        // of a shipped file, which would make every scene depend on a file being present.
+        PROPERTY( DisplayName( "Cloud Type 1" ), Category( "Cloud Layer" ), Summary, Asset<CloudTypeAsset>,
                   Tooltip( "Which kind of cloud this layer is made of — drag a .decloudtype from the "
                            "Content Browser or author one in Window > Cloud Type. The type carries its own "
                            "base and top in kilometres, its own family of vertical profiles, its own edge "
-                           "character and its own density, and the shell the march intersects is COMPUTED "
-                           "from it: changing this moves the clouds to the altitude that kind of cloud "
-                           "actually lives at. Empty uses the engine's built-in cumulus congestus." ) )
-        // AN EMPTY HANDLE IS A DOCUMENTED ANSWER, not a hole: it resolves to Assets::CloudTypeDefaultShape,
-        // which is T0's cumulus congestus digit for digit. A scene nobody has authored a type for still has
-        // to have a sky, and that is a load-bearing requirement of the whole programme rather than a
-        // convenience — it is also why the default here is 0 and not the id of a shipped file, which would
-        // make every scene depend on a file being present.
-        Assets::AssetHandle CloudType;
+                           "character, its own density and its own placement scale, and the shell the "
+                           "march intersects is COMPUTED from all of them together. A layer may carry up "
+                           "to four; they OVERLAP rather than divide the sky between them, so a low deck "
+                           "and a tall tower can stand in the same place. All four empty uses the engine's "
+                           "built-in cumulus congestus." ) )
+        Assets::AssetHandle CloudType1;
+
+        PROPERTY( DisplayName( "Cloud Type 2" ), Category( "Cloud Layer" ), Asset<CloudTypeAsset>,
+                  Tooltip( "A second kind of cloud in the same sky. Its placement field is its OWN — its "
+                           "own scale, its own stretch along the wind, its own patches — so it is not a "
+                           "share of the first type's sky but an independent one laid over it. Where two "
+                           "types meet, the deeper body wins and keeps its own edge and density." ) )
+        Assets::AssetHandle CloudType2;
+
+        PROPERTY( DisplayName( "Cloud Type 3" ), Category( "Cloud Layer" ), Asset<CloudTypeAsset>,
+                  Tooltip( "A third kind of cloud. Costs one noise fetch per sample only at altitudes its "
+                           "own base and top actually reach — a cirrus at eight kilometres is free "
+                           "everywhere a cumulus lives." ) )
+        Assets::AssetHandle CloudType3;
+
+        PROPERTY( DisplayName( "Cloud Type 4" ), Category( "Cloud Layer" ), Asset<CloudTypeAsset>,
+                  Tooltip( "The fourth and last kind. Four is the ceiling because a type owns one channel "
+                           "of the vertical profile table, which is how Unreal arranges it too." ) )
+        Assets::AssetHandle CloudType4;
 
         PROPERTY( DisplayName( "Planet Radius" ), Category( "Cloud Layer" ), Units( "km" ),
                   Range( 100.0f, 7000.0f ), Advanced,

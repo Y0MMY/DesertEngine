@@ -99,10 +99,29 @@ namespace Desert::Graphic::System
         // freshly created image mean nothing. Returns false having logged the reason and latched the
         // failure.
         bool EnsureTraceTargets( uint32_t halfWidth, uint32_t halfHeight );
-        // Points m_NoiseVolume at the volume this layer's CLOUD TYPE names, through
+        // Points m_NoiseVolume at the volume this layer's FIRST cloud type names, through
         // Runtime::CloudTypeService and then Runtime::CloudNoiseService. Returns false having logged the
         // reason when there is not even a default to fall back on.
         bool EnsureNoiseVolume();
+
+        /**
+         * The types in this layer's four slots, packed down to a prefix, with the empty ones removed and
+         * an all-empty layer answered by ONE built-in default.
+         *
+         * PACKED AND NOT SPARSE, which is the one decision in this function. A layer with slots 1 and 3
+         * filled behaves exactly like a layer with slots 1 and 2 filled: the count is a count, the loop in
+         * the march has no holes to skip, and a species' identity is its position in the packed set rather
+         * than in the panel. The one thing that DOES follow the packed position is the placement field's
+         * decorrelation offset — so moving a type from slot 3 to slot 2 moves its clouds, which is the same
+         * thing that happens when the artist changes its scale and is visible for the same reason.
+         *
+         * @param shapes  filled from the front with the resolved shapes.
+         * @param handles filled from the front with the handles they came from — the cache key of the
+         *                profile table, and the reason this returns both.
+         * @return how many of the two arrays were written, always at least 1.
+         */
+        uint32_t ResolveSpecies( CloudTypeShape ( &shapes )[kCloudSpeciesSlots],
+                                 Assets::AssetHandle ( &handles )[kCloudSpeciesSlots] ) const;
         // Builds and uploads the vertical profile table for this layer's cloud type, and only when that
         // type — or the file behind it — has changed. The table is a pure function of the type's twelve
         // numbers (Graphic::CloudBuildProfileTable), so rebuilding it per frame would be 16 384 curve
@@ -151,8 +170,13 @@ namespace Desert::Graphic::System
         // without the handle changing at all. A null handle with generation 0 is the "no table yet" state,
         // and it is unreachable as a real answer because a registered type always bumps the generation
         // past zero.
-        Assets::AssetHandle m_ProfileType;
-        uint32_t            m_ProfileGeneration = 0;
+        // FOUR HANDLES NOW, in the packed order ResolveSpecies produced them, plus how many of them were
+        // real. Comparing the whole set rather than one handle is what makes dropping a second type into
+        // the layer rebuild the table: the first slot has not changed, and a cache keyed on it alone would
+        // show a one-species sky until something else happened to invalidate it.
+        Assets::AssetHandle m_ProfileTypes[kCloudSpeciesSlots]{};
+        uint32_t            m_ProfileSpeciesCount = 0;
+        uint32_t            m_ProfileGeneration   = 0;
 
         ECS::VolumetricCloudData m_Data{};
         glm::vec3                m_WindOffset{ 0.0f };

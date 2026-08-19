@@ -144,6 +144,13 @@ namespace Desert::Tests::CloudFieldRef
             ProfileTable().Texels = Desert::Graphic::CloudBuildProfileTable( shape );
         }
 
+        /// The multi-species form: channel k is shapes[k], all of them over the union envelope. The march
+        /// binds exactly this image, so a test that drives the set drives what the GPU would.
+        void CloudProfileTableSelectSet( const Desert::Graphic::CloudTypeShape* shapes, std::uint32_t count )
+        {
+            ProfileTable().Texels = Desert::Graphic::CloudBuildProfileTable( shapes, count );
+        }
+
         // A bilinear, REPEAT-wrapped fetch — the filter and the address mode VulkanImage2D creates for
         // every sampled image, written out here because the difference between this and a nearest fetch is
         // exactly the half-texel error the relation test exists to catch.
@@ -187,6 +194,48 @@ namespace Desert::Tests::CloudFieldRef
 #define CLOUD_SAMPLE_PROFILE( uv ) CloudSampleProfileTexture( uv )
 
 #include <Common/CloudField.glslh>
+
+        // ------------------------------------------------------------------------------------------
+        // The species arrays, filled the way Graphic::PackCloudParams fills them
+        // ------------------------------------------------------------------------------------------
+        //
+        // THE PACKER ITSELF IS NOT REACHABLE FROM HERE — CloudPayload.hpp pulls in the component, the
+        // reflection macros and the atmosphere, none of which this GPU-free suite links — so what is
+        // shared instead is the PURE HALF of it: Graphic::CloudSpeciesPlacementBasis and the two
+        // per-species products. Those are the parts that can be wrong; the rest of the packer is a
+        // transcription that ComponentReflection drives directly against the real function.
+        void CloudBindSpecies( CloudFieldParams& params, const Desert::Graphic::CloudTypeShape* shapes,
+                               std::uint32_t count, vec3 windDirection )
+        {
+            params.SpeciesCount = static_cast<int>( count );
+
+            for ( std::uint32_t slot = 0; slot < CLOUD_SPECIES_SLOTS; ++slot )
+            {
+                if ( slot >= count )
+                {
+                    params.SpeciesEdge[slot]      = vec4( 0.0f );
+                    params.SpeciesPlacement[slot] = vec4( 0.0f );
+                    continue;
+                }
+
+                const Desert::Graphic::CloudTypeShape& shape = shapes[slot];
+
+                params.SpeciesEdge[slot] = vec4( shape.DetailCharacter, shape.DetailFactor, shape.DensityFactor,
+                                                 shape.ExtinctionFactor );
+
+                const Desert::Graphic::CloudPlacementBasis basis =
+                     Desert::Graphic::CloudSpeciesPlacementBasis( shape, windDirection.x, windDirection.z );
+                params.SpeciesPlacement[slot] = vec4( basis.AlongX, basis.AlongZ, basis.AcrossX, basis.AcrossZ );
+            }
+        }
+
+        /// Bind one species into the table AND into the params, which is what every single-type test in
+        /// this suite wants and what a layer with one slot filled actually does.
+        void CloudBindSingleSpecies( CloudFieldParams& params, const Desert::Graphic::CloudTypeShape& shape )
+        {
+            CloudProfileTableSelect( shape );
+            CloudBindSpecies( params, &shape, 1u, vec3( 1.0f, 0.0f, 0.0f ) );
+        }
 
     } // namespace
 } // namespace Desert::Tests::CloudFieldRef

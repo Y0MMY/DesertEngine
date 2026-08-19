@@ -754,6 +754,69 @@ namespace Desert::Core
         return report;
     }
 
+    CloudSetMigrationReport MigrateCloudSetV5ToV6( std::vector<Assets::EntityData>& entities )
+    {
+        static constexpr const char* kTypeKey = "CloudType";
+        static constexpr const char* kSlotKey = "CloudType1";
+
+        CloudSetMigrationReport report;
+
+        for ( auto& entity : entities )
+        {
+            const auto clouds = entity.Components.get( "VolumetricCloud" );
+            if ( !clouds.has_value() )
+                continue;
+
+            const auto fields = clouds.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': the VolumetricCloud payload is {1}, not an object - "
+                          "its cloud type could not be moved into the first slot of the set",
+                          entity.Tag.value_or( "Entity" ), Describe( clouds.value() ) );
+                continue;
+            }
+
+            // Rebuilt rather than renamed in place, like every migration above it: rfl::Object is an
+            // ordered vector of pairs with no rename, and copying every key while changing one name states
+            // the intent more plainly than an index dance. Order is preserved, so the slot lands exactly
+            // where the single type used to be.
+            rfl::Generic::Object kept;
+            bool                 touched = false;
+
+            for ( const auto& [key, value] : fields.value() )
+            {
+                if ( key != kTypeKey )
+                {
+                    kept[key] = value;
+                    continue;
+                }
+
+                touched = true;
+                report.SlotsCarried += 1;
+
+                // NOT INSPECTED BEYOND THIS. Whatever the value is — a path to a `.decloudtype`, the empty
+                // handle, or something a hand-edit put there — it meant "the kind of cloud this layer is
+                // made of" and it still does; the key it lives under is the only thing that changed. A
+                // migration that also validated would be answering a question the loader answers next, and
+                // answering it twice is how two readers of one field end up disagreeing.
+                const auto text = value.to_string();
+                if ( ( text.has_value() && text.value().empty() ) ||
+                     ( value.to_int().has_value() && value.to_int().value() == 0 ) )
+                    report.SlotsEmpty += 1;
+
+                kept[kSlotKey] = value;
+            }
+
+            if ( !touched )
+                continue; // already raised, or authored after the move - leave the tree byte-identical
+
+            entity.Components["VolumetricCloud"] = rfl::Generic( std::move( kept ) );
+            report.Entities += 1;
+        }
+
+        return report;
+    }
+
     SceneMigrationReport MigrateScene( SceneSerialized& scene )
     {
         SceneMigrationReport report;
@@ -795,6 +858,16 @@ namespace Desert::Core
         {
             report.CloudTypeRaised = true;
             report.CloudType       = MigrateCloudTypeV4ToV5( scene.Entities );
+        }
+
+        // AFTER the step above for the same reason that one follows its own: v4 -> v5 WRITES the
+        // "CloudType" key that this one renames. Three of the six steps in this function now form one
+        // chain — Species integer, then CloudType path, then CloudType1 slot — and each is gated on its own
+        // version integer precisely so that a file entering at any point along it comes out at the end.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudSet )
+        {
+            report.CloudSetRaised = true;
+            report.CloudSet       = MigrateCloudSetV5ToV6( scene.Entities );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

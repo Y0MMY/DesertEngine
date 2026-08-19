@@ -51,6 +51,13 @@ namespace Desert::Assets
              /* DetailFactor     */ 1.00f,
              /* DensityFactor    */ 1.15f,
              /* ExtinctionFactor */ 1.00f,
+             // T3'S TWO, AND BOTH ARE THE IDENTITY HERE, for exactly the reason the three factors above
+             // are 1: this row is the reference every other type is stated against, and a placement scale
+             // of anything but 1 would move the sky of every scene that has ever used the default while
+             // claiming to be the default. A congestus field at the layer's own tile with round patches is
+             // what T1 shipped, and this is that, digit for digit.
+             /* PlacementScale      */ 1.00f,
+             /* PlacementAnisotropy */ 1.00f,
         };
         return kDefault;
     }
@@ -116,6 +123,22 @@ namespace Desert::Assets
         if ( auto r = InRange( "ExtinctionFactor", shape.ExtinctionFactor, 0.0f, 8.0f ); !r )
             return r;
 
+        // THE PLACEMENT PAIR. Strictly above zero on the scale, because the packer divides by it to build
+        // the field's frequency and a zero there is an infinity in a texture coordinate — a sky that is
+        // black or white in bands, with nothing in the log. The ceiling of 8 is a placement period eight
+        // times the layer's tile, which at the shipped 12 km is a 96 km cell: one cloud from horizon to
+        // horizon, which is a legitimate overcast and the largest thing worth authoring.
+        if ( auto r = InRange( "PlacementScale", shape.PlacementScale, 0.05f, 8.0f ); !r )
+            return r;
+        // BELOW ONE IS LEGAL AND MEANS SOMETHING. Above 1 the patches are drawn out ALONG the wind, which
+        // is fibrous cirrus and cloud streets; below 1 they are drawn out ACROSS it, which is what a wave
+        // cloud is — a lenticular stands in a mountain's lee wave with its crest perpendicular to the flow,
+        // and so do the bars of an altocumulus undulatus. One number covers both because they are the same
+        // stretch about the same axis, and forbidding one half of it would have made the lenticular
+        // unreachable.
+        if ( auto r = InRange( "PlacementAnisotropy", shape.PlacementAnisotropy, 0.1f, 16.0f ); !r )
+            return r;
+
         return BOOLSUCCESS;
     }
 
@@ -124,15 +147,40 @@ namespace Desert::Assets
         if ( text.empty() )
             return Common::MakeFormattedError<CloudTypeData>( "the file is empty" );
 
+        // THE VERSION IS READ FIRST, ON ITS OWN, and that ordering is the whole difference between a
+        // diagnosable refusal and a puzzling one. A version-1 file is missing the two placement numbers
+        // T3 added, so a full parse fails with "field PlacementScale not found" — true, and useless: the
+        // reader is looking at a file that was correct when it was written, and what they need to be told
+        // is that the FORMAT moved, not that a field is absent. Reading the header alone lets the version
+        // check answer first.
+        //
+        // AN UNKNOWN FORMAT IS REFUSED, NOT READ ANYWAY, in either direction. A file claiming a version
+        // this build does not know was written by a build this one is not, and reading its numbers as if
+        // they meant what they mean here is how a field that moved becomes a sky nobody can explain.
+        // Read as an untyped tree rather than into a header struct: a struct would impose the rest of the
+        // schema on a document whose whole problem may be that it does not match the schema, which is the
+        // circularity this read exists to break.
+        if ( const auto tree = rfl::json::read<rfl::Generic>( text ); tree )
+        {
+            if ( const auto fields = tree.value().to_object(); fields )
+            {
+                if ( const auto stated = fields.value().get( "FormatVersion" ); stated.has_value() )
+                {
+                    const auto number = stated.value().to_int();
+                    if ( number.has_value() && number.value() != kCloudTypeFormatVersion )
+                        return Common::MakeFormattedError<CloudTypeData>(
+                             "format version {} was written by a different build; this one reads version {}",
+                             number.value(), kCloudTypeFormatVersion );
+                }
+            }
+        }
+
         const auto parsed = rfl::json::read<CloudTypeData>( text );
         if ( !parsed )
             return Common::MakeFormattedError<CloudTypeData>( "{}", parsed.error().what() );
 
         CloudTypeData data = parsed.value();
 
-        // AN UNKNOWN FORMAT IS REFUSED, NOT READ ANYWAY. There is exactly one version today, so a file
-        // claiming another was written by a build this one is not — reading its numbers as if they meant
-        // what they mean here is how a field that moved becomes a sky nobody can explain.
         const int32_t version = data.FormatVersion.value_or( kCloudTypeFormatVersion );
         if ( version != kCloudTypeFormatVersion )
             return Common::MakeFormattedError<CloudTypeData>(

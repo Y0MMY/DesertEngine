@@ -287,7 +287,15 @@ TEST( SceneCloudSpeciesMigration, MigrateSceneRunsItAndStampsTheFileSoItNeverRun
     EXPECT_TRUE( report.CloudTypeRaised );
     EXPECT_EQ( report.CloudType.TypesSet, 1 );
     EXPECT_FALSE( Has( CloudPayloadOf( scene.Entities.front() ), "Species" ) );
-    EXPECT_TRUE( Has( CloudPayloadOf( scene.Entities.front() ), "CloudType" ) );
+
+    // AND THE STEP AFTER THAT ONE RAN TOO. The chain is three long now: a v3 file arrives with a scalar,
+    // becomes a species integer, becomes a `.decloudtype` path, and ends as the FIRST SLOT of a set of
+    // four. Each of the three intermediate keys exists for exactly one version, which is what gating each
+    // step on its own version integer buys and what asserting the whole chain here protects.
+    EXPECT_TRUE( report.CloudSetRaised );
+    EXPECT_EQ( report.CloudSet.SlotsCarried, 1 );
+    EXPECT_FALSE( Has( CloudPayloadOf( scene.Entities.front() ), "CloudType" ) );
+    EXPECT_TRUE( Has( CloudPayloadOf( scene.Entities.front() ), "CloudType1" ) );
 
     // Second pass over the stamped tree: nothing left to do.
     const auto again = MigrateScene( scene );
@@ -331,8 +339,16 @@ TEST( SceneCloudSpeciesMigration, TheReflectedComponentCarriesTheSlotThatReplace
     EXPECT_EQ( species, type->Fields.end() )
          << "the species is still an enumerator on the component, so the asset did not replace it";
 
+    // AND THE SLOT IS THE FIRST OF FOUR since T3, because a layer carries a SET of kinds of cloud. The
+    // singular name is gone rather than kept for the first of them: `CloudType` beside `CloudType2` reads
+    // as one field of a different kind next to three of another.
+    EXPECT_EQ( std::find_if( type->Fields.begin(), type->Fields.end(),
+                             []( const auto& field ) { return field.Name == "CloudType"; } ),
+               type->Fields.end() )
+         << "the singular cloud type slot is still a field, so the set did not replace it";
+
     const auto slot = std::find_if( type->Fields.begin(), type->Fields.end(),
-                                    []( const auto& field ) { return field.Name == "CloudType"; } );
+                                    []( const auto& field ) { return field.Name == "CloudType1"; } );
     ASSERT_NE( slot, type->Fields.end() ) << "the component has no cloud type, so nothing replaced the "
                                              "four fields the migration deletes";
 

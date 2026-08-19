@@ -222,6 +222,23 @@ namespace Desert::Editor
             ImGui::SetTooltip( "The three factors MULTIPLY the layer's own Detail Strength, Density Scale "
                                "and Extinction Scale rather than replacing them, so 1 means \"this kind as "
                                "it is\" and the layer's sliders keep meaning what they meant." );
+
+        Utils::ImGuiUtilities::SectionHeader( "Where it sits in the sky" );
+
+        ImGui::SliderFloat( "Placement Scale", &s.PlacementScale, 0.05f, 8.0f, "%.2f" );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "How big this kind's patches are, as a MULTIPLE of the layer's Weather Tile "
+                               "Size. Below 1 gives many small cells — a stratocumulus deck of one-kilometre "
+                               "lumps; above 1 gives few large ones — a storm cell, or a sheet that never "
+                               "ends. Each kind of cloud in the layer has its own, which is why a low deck "
+                               "and a tall tower can be different sizes in the same sky." );
+
+        ImGui::SliderFloat( "Placement Anisotropy", &s.PlacementAnisotropy, 0.1f, 16.0f, "%.2f" );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "How much longer the patches are along the wind than across it. 1 is round. "
+                               "Above 1 combs them out downwind, which is what makes cirrus fibrous instead "
+                               "of blotchy; BELOW 1 stretches them ACROSS the wind, which is what a wave "
+                               "cloud is — a lenticular's crest lies perpendicular to the flow." );
     }
 
     void CloudTypePanel::DrawNoiseSection()

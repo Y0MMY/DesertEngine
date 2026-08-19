@@ -75,6 +75,67 @@ namespace Desert::Graphic
         float DetailFactor;     // multiplies the layer's Detail Strength: how deeply the erosion cuts
         float DensityFactor;    // multiplies the layer's Density Scale: how much matter this type is
         float ExtinctionFactor; // multiplies the layer's Extinction Scale: how opaque that matter is
+
+        // ---- WHERE THIS TYPE IS, which is a different question from what shape it is -----------------
+        //
+        // These two are T3's, and they exist because the profile could not answer either of the two
+        // questions below however it was authored:
+        //
+        //   * a cirrus is not a field of blobs that happen to be thin, it is a set of FIBROUS BANDS
+        //     drawn out along the wind. No profile makes a band out of a round patch: the patch is the
+        //     placement field's, and until T3 there was one placement field, isotropic, shared by
+        //     everything in the sky;
+        //   * a stratocumulus deck one kilometre thick made of three-kilometre cells is a single cell
+        //     filling the zenith. The cell size is the placement field's period, and one period for the
+        //     whole layer means the type that wants small cells and the type that wants large ones
+        //     cannot both have them.
+        //
+        // Unreal answers the same two with `Layout_CloudGlobalPattern` — one CHANNEL of placement per
+        // type — and `Layout_CloudPerTypeScale`, a scale per type on top of it (decision D-14,
+        // Docs/Clouds/ANALYSIS_APPROACH.md §7, and EpicDoc_CloudMaterial.md §2-3). These are that pair.
+
+        // The period of THIS type's placement field, as a MULTIPLE of the layer's Weather Tile Size.
+        //
+        // RELATIVE AND NOT ABSOLUTE, which is the opposite of the choice made for the altitudes above, and
+        // the reason is that the two numbers are anchored to different things. An altitude is anchored to
+        // meteorology — a stratus at 400 m is a fact about weather — so §5.1 of the analysis demands it be
+        // absolute or no test can catch a layer that has drifted. A placement period is anchored to the
+        // CAMERA: Max View Distance divided by the tile is the number of times the field repeats between
+        // the viewer and the vanishing point, and five repeats against twenty is the difference between a
+        // cumulus field and unmissable moire (CALIBRATION.md §4). That ratio is the layer's to keep, so a
+        // type states how much coarser or finer than the layer it is and the pair stays calibrated.
+        float PlacementScale;
+
+        // How much longer the placement field's period is ALONG THE WIND than across it. 1 is a round
+        // patch; above 1 the patches are drawn out downwind into bands.
+        //
+        // THE AXIS IS THE WIND'S rather than a second authored angle, because that is what the shape is
+        // made of: fibrous cirrus is ice falling through a shear, and the streak lies along the flow by
+        // construction. A separate angle would be a second statement of a direction the layer already
+        // carries — two values that can disagree, the §2.3.1 defect class.
+        float PlacementAnisotropy;
+    };
+
+    /**
+     * HOW MANY KINDS OF CLOUD ONE SKY HOLDS AT ONCE, and the number is structural rather than chosen.
+     *
+     * The profile table is one RGBA image and a type owns one CHANNEL of it — which is Unreal's
+     * arrangement exactly: its three layout textures fix four types to R, G, B and A (Stratocumulus,
+     * Altostratus, Cirrostratus, Nimbostratus — EpicDoc_CloudMaterial.md §2-3). Four channels, four types.
+     *
+     * The LIBRARY on disk is not limited by this at all; a project may ship a hundred `.decloudtype`
+     * files. What is limited is how many of them a single layer carries, and the limit is the width of a
+     * texel.
+     */
+    inline constexpr uint32_t kCloudSpeciesSlots = 4;
+
+    /// The shell a set of types needs: the union of their altitude ranges. Bottom above top means "no
+    /// active type", which the packer answers with the built-in default rather than with a degenerate
+    /// shell.
+    struct CloudEnvelopeKm
+    {
+        float BottomKm;
+        float TopKm;
     };
 
     // The bottom and the top of the shell a layer of this type needs. The ANVIL is above the tower, so
@@ -90,6 +151,42 @@ namespace Desert::Graphic
     {
         const float anvilTop = shape.AnvilStrength > 0.0f ? shape.AnvilAltitudeKm + shape.AnvilThicknessKm : 0.0f;
         return std::max( shape.TopAltitudeKm, anvilTop );
+    }
+
+    /**
+     * THE ENVELOPE OF A SET, and it is the union of the members' ranges rather than any of them.
+     *
+     * This is the same rule T0 wrote for one type — the shell is computed, never authored — carried
+     * unchanged to a set, which is the whole claim T1 made about the shape of this code and the one T3 had
+     * to check. A union and not an intersection: a stratocumulus deck from 0.6 to 1.6 km standing beside a
+     * congestus tower from 2.2 to 5.8 km needs a shell from 0.6 to 5.8, and marching only where they
+     * overlap would render neither.
+     *
+     * @p count above kCloudSpeciesSlots is clamped rather than read past; a count of zero returns an
+     * inverted range, which is the caller's signal that no type is active.
+     */
+    inline CloudEnvelopeKm CloudTypeSetEnvelopeKm( const CloudTypeShape* shapes, uint32_t count )
+    {
+        CloudEnvelopeKm envelope{ 0.0f, -1.0f };
+
+        const uint32_t used = std::min( count, kCloudSpeciesSlots );
+        for ( uint32_t i = 0; i < used; ++i )
+        {
+            const float base = CloudTypeBaseKm( shapes[i] );
+            const float top  = CloudTypeTopKm( shapes[i] );
+
+            if ( envelope.TopKm < envelope.BottomKm )
+            {
+                envelope.BottomKm = base;
+                envelope.TopKm    = top;
+                continue;
+            }
+
+            envelope.BottomKm = std::min( envelope.BottomKm, base );
+            envelope.TopKm    = std::max( envelope.TopKm, top );
+        }
+
+        return envelope;
     }
 
     /**
@@ -168,12 +265,16 @@ namespace Desert::Graphic
     inline constexpr uint32_t kCloudProfileTableAltitudeTexels = 256;
     inline constexpr uint32_t kCloudProfileTablePatternTexels  = 64;
 
-    // RGBA32F because it is the only float format Core::Formats::ImageFormat offers that this engine can
-    // upload from a std::vector<float> without a half-precision conversion of our own. The profile lives
-    // in .r; .g, .b and .a are written zero and nothing reads them. That is a property of the FORMAT and
-    // not a reservation — there is no single-channel image format in this engine, exactly as there is no
-    // two-channel one for the march's depth guide, and the same note stands beside that image.
+    // RGBA32F, AND ALL FOUR CHANNELS ARE THE POINT NOW. Channel k is species k's profile over the shared
+    // envelope, which is Epic's own arrangement in Epic's own words: "each channel describes the profile
+    // shape and relative altitude of a different cloud type" (EpicDoc_CloudMaterial.md §2).
+    //
+    // T0 wrote the profile into .r and zeroed the rest, and the note here said the three spare channels
+    // were a property of the format rather than a reservation. They were both, as it turns out: the format
+    // has no one-channel variant AND the fourth type was always going to want the fourth channel.
     inline constexpr uint32_t kCloudProfileTableChannels = 4;
+    static_assert( kCloudProfileTableChannels == kCloudSpeciesSlots,
+                   "One channel per species is what fixes the number of species at four." );
 
     inline constexpr uint32_t kCloudProfileTableFloats =
          kCloudProfileTableAltitudeTexels * kCloudProfileTablePatternTexels * kCloudProfileTableChannels;
@@ -188,16 +289,31 @@ namespace Desert::Graphic
      * Desert/Tests/Engine/CloudField compares this function against the shader's read of its output and
      * turns the half-texel into a failing test.
      *
-     * The envelope is the type's own [base, top] — see CloudTypeBaseKm / CloudTypeTopKm — so the altitude
-     * axis is spent entirely on the cloud rather than on the empty air a fixed ceiling would put above a
-     * stratus.
+     * The envelope is the SET'S union of [base, top] — see CloudTypeSetEnvelopeKm — so the altitude axis
+     * is spent entirely on air some type can put cloud in, rather than on the empty air a fixed ceiling
+     * would put above a stratus.
+     *
+     * ONE ALTITUDE AXIS FOR EVERY SPECIES, and that is what makes the containment relation structural
+     * rather than asserted. Each channel is evaluated at the SAME absolute altitude, so a species whose
+     * band does not reach here writes a zero here — the table itself says which species are alive at an
+     * altitude, and the march reads that in one fetch instead of testing four ranges. A species could not
+     * be outside the envelope even if someone wanted it to be: the envelope is the union, so every
+     * species' band lies inside the axis by construction.
+     *
+     * A slot beyond @p count leaves its channel zero, which is exactly the "not alive anywhere" state, so
+     * an empty slot costs the march nothing and needs no flag to say so.
      */
-    inline std::vector<float> CloudBuildProfileTable( const CloudTypeShape& shape )
+    inline std::vector<float> CloudBuildProfileTable( const CloudTypeShape* shapes, uint32_t count )
     {
-        const float bottomKm = CloudTypeBaseKm( shape );
-        const float spanKm   = std::max( CloudTypeTopKm( shape ) - bottomKm, 1e-3f );
+        const uint32_t        used     = std::min( count, kCloudSpeciesSlots );
+        const CloudEnvelopeKm envelope = CloudTypeSetEnvelopeKm( shapes, used );
 
         std::vector<float> texels( kCloudProfileTableFloats, 0.0f );
+        if ( used == 0 )
+            return texels;
+
+        const float bottomKm = envelope.BottomKm;
+        const float spanKm   = std::max( envelope.TopKm - bottomKm, 1e-3f );
 
         for ( uint32_t j = 0; j < kCloudProfileTablePatternTexels; ++j )
         {
@@ -212,10 +328,87 @@ namespace Desert::Graphic
 
                 const size_t texel = ( static_cast<size_t>( j ) * kCloudProfileTableAltitudeTexels + i ) *
                                      kCloudProfileTableChannels;
-                texels[texel] = CloudProfileCurve( shape, altitudeKm, pattern );
+
+                for ( uint32_t k = 0; k < used; ++k )
+                    texels[texel + k] = CloudProfileCurve( shapes[k], altitudeKm, pattern );
             }
         }
 
         return texels;
+    }
+
+    /// One type on its own, which is what every caller outside the renderer wants and what the whole
+    /// library was before T3. Written in terms of the set so there is one generator and not two.
+    inline std::vector<float> CloudBuildProfileTable( const CloudTypeShape& shape )
+    {
+        return CloudBuildProfileTable( &shape, 1u );
+    }
+
+    /**
+     * THE ANISOTROPY OF THE PLACEMENT FIELD, mirrored from Common/CloudField.glslh's
+     * CLOUD_COVERAGE_FREQ_{X,Y,Z}.
+     *
+     * TWO STATEMENTS OF THREE NUMBERS, and they are only safe because the relation is a test: the shader
+     * header is compiled as C++ by Desert/Tests/Engine/CloudField, which has both spellings in scope and
+     * asserts they are equal. The alternative — the packer not knowing the frequencies — is worse: the
+     * basis vectors below would have to be sent as a scale plus an angle and rebuilt per sample, which is
+     * a trigonometric rotation in the innermost loop of the march to avoid writing a number twice.
+     *
+     * They are Unreal's Noise1 coefficients normalised to the first horizontal axis (ShapeModel.md §11.2);
+     * the long note on why one number could never have expressed them is in the shader header.
+     */
+    inline constexpr float kCloudCoverageFreqX = 1.0f;
+    inline constexpr float kCloudCoverageFreqY = 2.182f;
+    inline constexpr float kCloudCoverageFreqZ = 1.0665f;
+
+    /// The two horizontal basis vectors of one species' placement field, in the world XZ plane, before the
+    /// layer's own tile divides them. Four floats rather than two glm::vec2 so that this header stays free
+    /// of every dependency, which is what lets the asset layer, the packer and two test suites all include
+    /// it.
+    struct CloudPlacementBasis
+    {
+        float AlongX;
+        float AlongZ;
+        float AcrossX;
+        float AcrossZ;
+    };
+
+    /**
+     * Build that basis from a type and the layer's wind.
+     *
+     * Pure, and separated from the packer so the tests can drive it directly and check the two properties
+     * that matter: that the ACROSS-wind period is the type's own scale whatever the anisotropy is, and
+     * that an anisotropy of 1 with a wind along +X reproduces the single-species field T1 shipped,
+     * coefficient for coefficient.
+     *
+     * A wind with no horizontal part falls back to +X — a vertical or zero wind names no axis, and an
+     * arbitrary axis chosen silently would rotate the whole sky the first time somebody zeroed the field.
+     */
+    inline CloudPlacementBasis CloudSpeciesPlacementBasis( const CloudTypeShape& shape, float windX, float windZ )
+    {
+        const float axisLength = std::sqrt( windX * windX + windZ * windZ );
+
+        float axisX = 1.0f;
+        float axisZ = 0.0f;
+        if ( axisLength > 1e-6f )
+        {
+            axisX = windX / axisLength;
+            axisZ = windZ / axisLength;
+        }
+
+        // Floored rather than trusted: the asset layer refuses a scale outside [0.05, 8] and an anisotropy
+        // outside [0.1, 16], but this function is also reachable from a test and from a hand-built shape,
+        // and a zero here is a division that puts an infinity into a texture coordinate.
+        const float scale      = std::max( shape.PlacementScale, 1e-3f );
+        const float anisotropy = std::max( shape.PlacementAnisotropy, 1e-3f );
+
+        // ALONG THE WIND THE PERIOD IS LONGER, so the FREQUENCY is smaller — hence the division by the
+        // anisotropy on this axis and not on the other. That is what turns a field of round patches into
+        // bands drawn out downwind, and it is the only thing in this subsystem that can.
+        const float alongFreq  = kCloudCoverageFreqX / ( scale * anisotropy );
+        const float acrossFreq = kCloudCoverageFreqZ / scale;
+
+        return CloudPlacementBasis{ axisX * alongFreq, axisZ * alongFreq, -axisZ * acrossFreq,
+                                    axisX * acrossFreq };
     }
 } // namespace Desert::Graphic

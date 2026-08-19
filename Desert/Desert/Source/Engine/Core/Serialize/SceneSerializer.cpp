@@ -8,6 +8,7 @@
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionSerializer.hpp>
 #include <Engine/Core/SceneSettings.hpp>
+#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Units.hpp>
@@ -131,6 +132,19 @@ namespace Desert::Core
                       sceneData->SceneName, kSceneVersionCloudSpecies, kSceneVersionCloudType,
                       migration.CloudType.Entities, migration.CloudType.TypesSet, migration.CloudType.VolumesLost,
                       migration.CloudType.FieldsBroken );
+        }
+        if ( migration.CloudSetRaised && migration.CloudSet.Entities > 0 )
+        {
+            LOG_INFO( "[SceneMigration] '{0}': scene schema v{1} -> v{2} - a cloud layer carries a SET of up "
+                      "to {3} kinds of cloud now instead of one, so {4} entity(ies) were touched and {5} "
+                      "cloud type(s) moved into the first slot ({6} of them empty). The sky is unchanged: "
+                      "the union of a one-element set is that element, and the first slot reads the same "
+                      "placement field the single slot did. Drop a second type into Cloud Type 2 to put two "
+                      "kinds of cloud in one sky. Re-save (or run SceneMigrator) to stamp the file so this "
+                      "never runs again.",
+                      sceneData->SceneName, kSceneVersionCloudType, kSceneVersionCloudSet,
+                      Graphic::kCloudSpeciesSlots, migration.CloudSet.Entities, migration.CloudSet.SlotsCarried,
+                      migration.CloudSet.SlotsEmpty );
         }
         if ( migration.UnitsRaised )
         {

@@ -24,7 +24,8 @@
 // HOW THE DATA ARRIVES. Through two macros, never through a sampler declared here:
 //
 //     CLOUD_SAMPLE_NOISE( vec3 texturePosition )   ->  vec4, the four channels of the noise volume
-//     CLOUD_SAMPLE_PROFILE( vec2 uv )              ->  vec4, the vertical profile table (.x is the profile)
+//     CLOUD_SAMPLE_PROFILE( vec2 uv )              ->  vec4, the vertical profile table — ONE CHANNEL PER
+//                                                      SPECIES, in the order of the layer's slots
 //
 // The march defines them as `texture()` fetches; the unit tests define the first as a call into the same
 // CloudNoiseVolumeChannels that baked the volume and the second as a filtered read of the very table
@@ -42,27 +43,74 @@
 // no forward declarations, so include order is the caller's responsibility and is stated here rather than
 // discovered as a compile error.
 
+// HOW MANY KINDS OF CLOUD ONE SKY HOLDS AT ONCE. Four, and the number is the width of a texel rather than
+// a preference: a species owns one CHANNEL of the profile table, which is Unreal's arrangement exactly
+// (EpicDoc_CloudMaterial.md §2-3 fixes four types to R, G, B and A). Graphic::kCloudSpeciesSlots is the
+// same constant on the C++ side. The LIBRARY on disk is not limited by this; a single LAYER is.
+#define CLOUD_SPECIES_SLOTS 4
+
 // What every producer returns and what the whole renderer consumes.
+//
+// THE LAST THREE ARE THE WINNING SPECIES', and they travel here rather than in the parameter block for a
+// reason that only exists once a sky has more than one kind of cloud in it. What a cloud is MADE OF — how
+// deeply its edge erodes, how much matter is in it, how opaque that matter is — is a property of the kind
+// of cloud, so with four kinds in one sky it stops being a constant of the march and becomes a property of
+// the SAMPLE. Carried from the species whose profile won the union, never blended: a blend of a
+// stratocumulus and a congestus is a third thing that is neither, and the seam where two bodies meet is
+// exactly where a floating average is visible as a smear of the wrong character.
 struct CloudFieldSample
 {
-    float Profile;      // 0..1, depth inside the cloud body (see the header note)
-    float DetailType;   // 0 = wispy, 1 = billowy — selects which erosion the up-rez applies
-    float DensityScale; // per-sample multiplier applied AFTER erosion (deck p.118)
+    float Profile;          // 0..1, depth inside the cloud body (see the header note)
+    float DetailType;       // 0 = wispy, 1 = billowy — selects which erosion the up-rez applies
+    float DensityScale;     // per-sample multiplier applied AFTER erosion (deck p.118)
+    float DetailFactor;     // the winner's multiplier on the layer's erosion depth
+    float ExtinctionFactor; // the winner's multiplier on the layer's extinction
 };
 
 // Everything the procedural producer needs, unpacked from the GPU block by Common/CloudParams.glslh.
 // Distances are KILOMETRES, matching Common/CloudGeometry.glslh.
 struct CloudFieldParams
 {
-    float WeatherTileKm;    // horizontal period of the coverage field
+    float WeatherTileKm;    // horizontal period of the LAYER's coverage field; a species scales it
     float Coverage;         // 0 = clear, 1 = solid
     float CoverageContrast; // sharpness of the cloud/clear transition; >1 narrows the band
-    float DetailCharacter;  // 0 = wispy erosion, 1 = billowy — the SPECIES' edge, not its silhouette
     float DetailTileKm;     // period of the erosion field
-    float DetailStrength;   // how deeply the erosion cuts into the profile
-    float DensityScale;     // global density multiplier, with the species' own density already folded in
-    vec3  WindOffsetKm;     // accumulated wind displacement, subtracted from the sample position
+    float DetailStrength;   // how deeply the erosion cuts into the profile, for the LAYER
+    float DensityScale;     // the LAYER's density multiplier; the species' own is folded in per sample
+    int   SpeciesCount;     // how many slots of the two arrays below are filled, 0..CLOUD_SPECIES_SLOTS
+
+    // Per species k: x DetailCharacter, y DetailFactor, z DensityFactor, w ExtinctionFactor. Four numbers
+    // that describe what that kind of cloud is made of, and all four are read.
+    vec4 SpeciesEdge[CLOUD_SPECIES_SLOTS];
+
+    // Per species k: the two HORIZONTAL basis vectors of that species' own placement field, in the world
+    // XZ plane and already carrying its scale and its anisotropy. xy is the along-wind axis, zw the
+    // across-wind one; both are divided by WeatherTileKm here rather than on the CPU so that the layer's
+    // calibrated tile stays one number with one consumer.
+    //
+    // TWO VECTORS AND NOT A SCALE PLUS AN ANGLE, because the rotation into the wind's frame is the same
+    // arithmetic for every sample and depends on nothing the march knows — so it is done once, on the
+    // CPU, where PackCloudParams already forms every other product of a type's factor with a layer's
+    // setting.
+    vec4 SpeciesPlacement[CLOUD_SPECIES_SLOTS];
+
+    vec3 WindOffsetKm; // accumulated wind displacement, subtracted from the sample position
 };
+
+// WHERE EACH SPECIES' PLACEMENT FIELD IS READ FROM, and it is a displacement in TEXTURE space rather than
+// in kilometres so that it does not move when the scale does.
+//
+// Two species that happen to share a placement scale would otherwise read the identical field and land
+// their patches on top of each other exactly — which is the one arrangement a set of independent fields
+// must not produce, because it is indistinguishable from the partition D-14 rejects. The volume is
+// periodic with period 1, so any offset that is not a small rational is a different realization of the
+// same statistics; these are multiples of three mutually irrational-ish constants, and slot 0 gets zero so
+// that a layer carrying ONE species reads the field T1 read, texel for texel.
+vec3 CloudSpeciesPlacementOffset( int slot )
+{
+    float f = float( slot );
+    return vec3( f * 137.13f, f * 61.71f, f * 211.37f );
+}
 
 // There are deliberately NO SEEDS AND NO OCTAVE COUNTS here. Both are properties of the BAKE — they
 // decide what is in the volume, not how it is read — so carrying them into the march would be four
@@ -168,7 +216,10 @@ struct CloudFieldParams
 #define CLOUD_PROFILE_TABLE_PATTERN_TEXELS  64.0f
 
 #ifdef CLOUD_SAMPLE_PROFILE
-float CloudSampleProfileTable( float heightFraction, float pattern )
+// ALL FOUR SPECIES IN ONE FETCH, which is the whole economy of putting a species on a channel. The march
+// asks "which kinds of cloud can be here at all" once, and a 64 KiB table that is certainly in cache
+// answers for four of them together.
+vec4 CloudSampleProfileTableAll( float heightFraction, float pattern )
 {
     float halfU = 0.5f / CLOUD_PROFILE_TABLE_ALTITUDE_TEXELS;
     float halfV = 0.5f / CLOUD_PROFILE_TABLE_PATTERN_TEXELS;
@@ -176,7 +227,16 @@ float CloudSampleProfileTable( float heightFraction, float pattern )
     float u = clamp( heightFraction, halfU, 1.0f - halfU );
     float v = clamp( pattern, halfV, 1.0f - halfV );
 
-    return clamp( CLOUD_SAMPLE_PROFILE( vec2( u, v ) ).x, 0.0f, 1.0f );
+    vec4 profiles = CLOUD_SAMPLE_PROFILE( vec2( u, v ) );
+
+    return vec4( clamp( profiles.x, 0.0f, 1.0f ), clamp( profiles.y, 0.0f, 1.0f ),
+                 clamp( profiles.z, 0.0f, 1.0f ), clamp( profiles.w, 0.0f, 1.0f ) );
+}
+
+// One species, by slot. The tests read the table this way and so does anything that wants a single kind.
+float CloudSampleProfileTable( float heightFraction, float pattern, int slot )
+{
+    return CloudSampleProfileTableAll( heightFraction, pattern )[slot];
 }
 #endif // CLOUD_SAMPLE_PROFILE
 
@@ -198,32 +258,13 @@ float CloudSampleProfileTable( float heightFraction, float pattern )
 //
 // The vertical axis is sampled at a higher frequency than the horizontal, because a cloud is wider than
 // it is tall — and by a DIFFERENT factor per axis and per octave, see the frequency triples above.
-CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heightFraction, vec3 positionKm )
+
+// One species' profile at one point: the coverage threshold, the pattern axis and the table read, exactly
+// as T1 wrote them for the single species this used to have. Split out rather than inlined because it is
+// the half of the producer that is the SAME for every species — only the field it is handed differs — and
+// four copies of a threshold is four places for a constant to drift.
+float CloudSpeciesProfile( CloudFieldParams params, vec4 noise, float heightFraction, int slot )
 {
-    CloudFieldSample result;
-    result.Profile      = 0.0f;
-    result.DetailType   = clamp( params.DetailCharacter, 0.0f, 1.0f );
-    result.DensityScale = max( params.DensityScale, 0.0f );
-
-    // THE CHEAP REJECTION, and it is exact rather than conservative. The profile table's support grows
-    // monotonically with the pattern — a fuller patch is taller and its anvil is more present, never less
-    // — so a height at which the pattern's own maximum yields nothing yields nothing at any pattern. One
-    // 2D fetch, from a 64 KiB table that will be in cache, in place of the two 3D fetches below. Without
-    // it the march pays for the whole shell on every ray, which is what the old profile's early-out used
-    // to prevent.
-    if ( CloudSampleProfileTable( heightFraction, 1.0f ) <= 0.0f )
-        return result;
-
-    vec3 windPos = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
-                         positionKm.z - params.WindOffsetKm.z );
-
-    float tile = max( params.WeatherTileKm, 1e-3f );
-
-    vec3 coveragePos = vec3( windPos.x * CLOUD_COVERAGE_FREQ_X / tile, windPos.y * CLOUD_COVERAGE_FREQ_Y / tile,
-                             windPos.z * CLOUD_COVERAGE_FREQ_Z / tile );
-
-    vec4 noise = CLOUD_SAMPLE_NOISE( coveragePos );
-
     // THE COVERAGE FIELD IS THE BILLOWY PAIR, AND WHICH PAIR IT IS DECIDES WHETHER THERE ARE CLOUDS.
     //
     // This read the WISPY pair — channels R and G, low- and high-frequency Curly-Alligator — and that is
@@ -338,13 +379,119 @@ CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heig
     float patternFloor = threshold - halfWidth;
     float pattern      = clamp( ( field - patternFloor ) / max( 1.0f - patternFloor, 1e-3f ), 0.0f, 1.0f );
 
-    float vertical = CloudSampleProfileTable( heightFraction, pattern );
+    float vertical = CloudSampleProfileTable( heightFraction, pattern, slot );
 
-    result.Profile = clamp( vertical * coverage, 0.0f, 1.0f );
+    return clamp( vertical * coverage, 0.0f, 1.0f );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// FOUR SPECIES, FOUR INDEPENDENT PLACEMENT FIELDS, JOINED BY `max`
+// ---------------------------------------------------------------------------------------------------
+//
+// WHAT WAS PLANNED AND WHY IT WAS WRONG. The first written form of this was a PARTITION: one placement
+// field, sliced between the species by smoothsteps, weights summing to one. That construction forbids the
+// only frame this phase exists to produce — a low stratocumulus deck with a congestus tower standing in it
+// and partly behind it — because weights that sum to one mean no point of the sky can belong to two kinds
+// of cloud at once. The plan recorded the frame and the rule that makes it unreachable on the same page
+// (PLAN_CLOUD_TYPES.md §3a).
+//
+// WHAT IT IS INSTEAD (decision D-14). A species' placement field is its OWN field: its own scale, its own
+// anisotropy, its own realization of the noise. Nothing is normalized across species, nothing sums to
+// anything, and two species overlapping is the ordinary case rather than the impossible one. Unreal says
+// the same thing in one line — `Layout_CloudGlobalPattern` "defines the world location for each type of
+// cloud where EACH CHANNEL describes a different cloud type", with `Layout_CloudPerTypeScale` beside it.
+//
+// WHY THE JOIN IS STILL `max`. Profile means "how deep inside a body of cloud this point is", not
+// "density", so the deeper of two answers is the answer and the order the species were listed in cannot
+// matter. Adding them would make an overlap denser than either body — the same argument, from the same
+// paragraph, that joins the seam's two producers (ANALYSIS_APPROACH.md §4.3) and joins a cumulonimbus'
+// tower to its own anvil.
+//
+// WHERE THE FIELDS COME FROM, AND THE NUMBER THAT DECIDES IT. Each species reads the SAME pair of channels
+// of the same volume — the billowy Alligator pair — at its own scale, its own anisotropy and its own
+// offset. It does NOT read a different channel pair per species, and that is the one option a reader would
+// expect and has to be argued away: the quantile map below is calibrated to the Alligator blend's
+// distribution (p05 0.273 / p50 0.517 / p95 0.786, half-width 0.32), and the wispy pair is `1 - Alligator`
+// with the complementary shape. A species reading it would answer the SAME `Coverage` setting with a
+// different fraction of sky — which is precisely the defect the quantile map was introduced to remove, put
+// back four-fold. A change of scale and offset leaves the distribution exactly where it is, because the
+// field is statistically stationary; Desert/Tests/Engine/CloudField measures the four species' quantiles
+// and asserts they agree.
+//
+// WHAT IT COSTS. One profile fetch decides which species are alive here; each live one then costs one 3D
+// fetch and one more profile fetch. In the ordinary sky that is one species, and the cost is T1's. Where
+// two bands overlap it is two. The four-species case is a sky nobody has authored yet.
+CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heightFraction, vec3 positionKm )
+{
+    CloudFieldSample result;
+    result.Profile          = 0.0f;
+    result.DetailType       = 0.0f;
+    result.DensityScale     = 0.0f;
+    result.DetailFactor     = 0.0f;
+    result.ExtinctionFactor = 0.0f;
+
+    // THE CHEAP REJECTION, and it is exact rather than conservative, and it now answers for four species
+    // at once. The profile table's support grows monotonically with the pattern — a fuller patch is taller
+    // and its anvil is more present, never less — so a height at which the pattern's own maximum yields
+    // nothing yields nothing at any pattern. One 2D fetch, from a 64 KiB table that will be in cache, in
+    // place of every 3D fetch below. A species whose band does not reach this altitude has a zero here and
+    // costs nothing at all; so does an empty slot, whose channel was never written.
+    vec4 alive = CloudSampleProfileTableAll( heightFraction, 1.0f );
+    if ( max( max( alive.x, alive.y ), max( alive.z, alive.w ) ) <= 0.0f )
+        return result;
+
+    vec3 windPos = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
+                         positionKm.z - params.WindOffsetKm.z );
+
+    float tile = max( params.WeatherTileKm, 1e-3f );
+
+    int speciesCount = min( params.SpeciesCount, CLOUD_SPECIES_SLOTS );
+
+    for ( int slot = 0; slot < speciesCount; ++slot )
+    {
+        if ( alive[slot] <= 0.0f )
+            continue;
+
+        // THIS SPECIES' OWN FRAME. The two basis vectors already carry its scale and its stretch along the
+        // wind; dividing by the layer's tile here is what keeps Max View Distance / Weather Tile Size —
+        // the calibrated pair of CALIBRATION.md §4 — a relation between two numbers the artist can see.
+        vec4 basis      = params.SpeciesPlacement[slot];
+        vec2 alongAxis  = vec2( basis.x, basis.y );
+        vec2 acrossAxis = vec2( basis.z, basis.w );
+        vec2 horizontal = vec2( windPos.x, windPos.z );
+
+        // The VERTICAL frequency follows the ACROSS-wind axis and not the along-wind one, because a
+        // stretch along the wind is a horizontal shear: a fibrous cirrus is drawn out downwind and is no
+        // taller for it. Derived from the across axis' length rather than sent as a fifth number, so the
+        // two cannot disagree.
+        float verticalFreq = CLOUD_COVERAGE_FREQ_Y * length( acrossAxis ) / CLOUD_COVERAGE_FREQ_Z;
+
+        vec3 coveragePos = vec3( dot( horizontal, alongAxis ) / tile, windPos.y * verticalFreq / tile,
+                                 dot( horizontal, acrossAxis ) / tile );
+
+        coveragePos = coveragePos + CloudSpeciesPlacementOffset( slot );
+
+        vec4 noise = CLOUD_SAMPLE_NOISE( coveragePos );
+
+        float speciesProfile = CloudSpeciesProfile( params, noise, heightFraction, slot );
+        if ( speciesProfile <= result.Profile )
+            continue;
+
+        // THE WINNER TAKES ALL FOUR, and does not share any of them. See the note on CloudFieldSample.
+        vec4 edge = params.SpeciesEdge[slot];
+
+        result.Profile          = speciesProfile;
+        result.DetailType       = clamp( edge.x, 0.0f, 1.0f );
+        result.DetailFactor     = max( edge.y, 0.0f );
+        result.DensityScale     = max( params.DensityScale, 0.0f ) * max( edge.z, 0.0f );
+        result.ExtinctionFactor = max( edge.w, 0.0f );
+    }
+
     return result;
 }
 
-// The seam itself. Today one producer; tomorrow the max of two.
+// The seam itself. One producer that already unions up to four species; tomorrow the max of that and the
+// authored one — the same `max`, one level up, which is what the union above was written to make obvious.
 CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction, vec3 positionKm )
 {
     return CloudSampleProceduralField( params, heightFraction, positionKm );
@@ -408,8 +555,13 @@ float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 
     // eaten into billows and wisps. It is the same principle the deck states as a frequency blend driven
     // by the dimensional profile (p.101, p.105) — the profile decides how much detail belongs here — and
     // it is why that field means "depth inside the body" rather than "density".
+    // THE DEPTH OF THE CUT IS THE WINNING SPECIES', multiplied into the layer's own strength here rather
+    // than folded together on the CPU as it was while a layer had one kind of cloud in it. A lenticular
+    // has to stay a smooth lens and a cirrus has to stay shredded when the two are in the same sky, and a
+    // single product formed once could only describe one of them.
     float edgeWeight = 1.0f - clamp( field.Profile, 0.0f, 1.0f );
-    float erosion    = detailField * clamp( params.DetailStrength, 0.0f, 1.0f ) * edgeWeight;
+    float erosion =
+         detailField * clamp( params.DetailStrength * max( field.DetailFactor, 0.0f ), 0.0f, 1.0f ) * edgeWeight;
 
     float density = CloudRemap( field.Profile, erosion, 1.0f, 0.0f, 1.0f );
 

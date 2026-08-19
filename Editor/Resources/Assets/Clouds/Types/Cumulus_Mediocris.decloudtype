@@ -1,7 +1,7 @@
 {
-    "FormatVersion": 1,
+    "FormatVersion": 2,
     "DisplayName": "Cumulus mediocris",
-    "Notes": "The fair-weather heap: base on the condensation level, top a kilometre above it.",
+    "Notes": "The fair-weather heap: base on the condensation level, top a kilometre above it. Placement scale 0.80 - a shade tighter than a congestus field, because a mediocris tops out before it has grown its patch out.",
     "Shape": {
         "BaseAltitudeKm": 0.9,
         "TopAltitudeKm": 1.9,
@@ -14,6 +14,8 @@
         "DetailCharacter": 0.7,
         "DetailFactor": 1.0,
         "DensityFactor": 1.0,
-        "ExtinctionFactor": 1.0
+        "ExtinctionFactor": 1.0,
+        "PlacementScale": 0.8,
+        "PlacementAnisotropy": 1.0
     }
 }

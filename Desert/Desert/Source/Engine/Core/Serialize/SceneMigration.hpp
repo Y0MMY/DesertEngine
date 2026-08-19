@@ -30,12 +30,16 @@ namespace Desert::Core
     //                   and the shell is computed from them
     //   5             - the species is an ASSET. The enumerator becomes a handle to a `.decloudtype`, and
     //                   the layer's own noise-volume slot moves into that type
+    //   6             - a layer carries a SET of up to four kinds of cloud instead of one. `CloudType`
+    //                   becomes `CloudType1`, the first of four slots; nothing else about a scene changes
+    //                   and a one-type layer renders the sky it rendered before
     inline constexpr int kSceneVersionSky          = 1;
     inline constexpr int kSceneVersionTonemap      = 2;
     inline constexpr int kSceneVersionCloudNoise   = 3;
     inline constexpr int kSceneVersionCloudSpecies = 4;
     inline constexpr int kSceneVersionCloudType    = 5;
-    inline constexpr int kSceneVersion             = kSceneVersionCloudType;
+    inline constexpr int kSceneVersionCloudSet     = 6;
+    inline constexpr int kSceneVersion             = kSceneVersionCloudSet;
 
     // World-unit generation of a .desce file. Absent (or 0) means the scene was authored when one world
     // unit was one METRE; today a unit is a CENTIMETRE (Common/Core/Units.hpp), so such a scene is scaled
@@ -281,6 +285,38 @@ namespace Desert::Core
     // SHELF LIFE: this raises v4 to v5 and nothing else. It is deleted once no v4 file remains.
     CloudTypeMigrationReport MigrateCloudTypeV4ToV5( std::vector<Assets::EntityData>& entities );
 
+    // What MigrateCloudSetV5ToV6 did to one file.
+    struct CloudSetMigrationReport
+    {
+        int Entities     = 0; // entities carrying a "VolumetricCloud" payload that was touched
+        int SlotsCarried = 0; // "CloudType" keys that became "CloudType1"
+        int SlotsEmpty   = 0; // of those, the ones whose value was the empty handle
+    };
+
+    // Raises a scene from schema v5 to v6: a layer stopped carrying ONE kind of cloud and started carrying
+    // a SET of up to four.
+    //
+    // WHAT IT DOES, AND WHY IT IS A RENAME AND NOTHING MORE. The single `CloudType` key becomes
+    // `CloudType1`, the first of four slots, and the other three are left absent — which the component
+    // reads as the empty handle they default to. A scene that named one kind of cloud comes out of this
+    // naming the same kind of cloud in the first slot, and renders the sky it went in with: the union of a
+    // one-element set is that element, and the slot's placement field is the one T1 read (slot 0 takes the
+    // zero decorrelation offset for exactly this reason).
+    //
+    // WHY THE KEY MOVES AT ALL, when leaving it named `CloudType` would have been a migration of nothing.
+    // Because four slots that are not called the same thing is the point: `CloudType` beside `CloudType2`,
+    // `CloudType3` and `CloudType4` reads as one field of a different kind sitting next to three of
+    // another, and the first person to add a fifth would have had to guess which end it belonged at. The
+    // rename costs one function and makes the set look like a set in the file as well as in the panel.
+    //
+    // PURE - no GPU, no filesystem, no global state. The counters go back to the loader, which is the one
+    // that knows which file this was.
+    //
+    // Idempotent: a payload with no "CloudType" key is left byte-identical and reports zero.
+    //
+    // SHELF LIFE: this raises v5 to v6 and nothing else. It is deleted once no v5 file remains.
+    CloudSetMigrationReport MigrateCloudSetV5ToV6( std::vector<Assets::EntityData>& entities );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -296,11 +332,13 @@ namespace Desert::Core
         CloudSpeciesMigrationReport CloudSpecies;
         bool                        CloudTypeRaised = false; // the schema was below kSceneVersionCloudType
         CloudTypeMigrationReport    CloudType;
+        bool                        CloudSetRaised = false; // the schema was below kSceneVersionCloudSet
+        CloudSetMigrationReport     CloudSet;
 
         bool Changed() const
         {
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
-                   CloudTypeRaised;
+                   CloudTypeRaised || CloudSetRaised;
         }
     };
 
