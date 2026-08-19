@@ -183,7 +183,11 @@ TEST( SceneCloudNoiseMigration, MigrateSceneRunsItAndStampsTheFileSoItNeverRunsA
     EXPECT_EQ( report.CloudNoise.FieldsDropped, 4 );
     EXPECT_TRUE( report.Changed() );
     EXPECT_EQ( scene.SceneVersion.value_or( 0 ), kSceneVersion );
-    EXPECT_EQ( kSceneVersion, kSceneVersionCloudNoise );
+    // The head has moved PAST this migration — v4 is the cloud species — so what is asserted is that this
+    // step is still on the way to it and still gated on its own constant. Written as an inequality rather
+    // than deleted: an equality here would have to be edited by every future migration, which is how a
+    // guard turns into a chore and then into a rubber stamp.
+    EXPECT_GE( kSceneVersion, kSceneVersionCloudNoise );
 
     // Second pass over the stamped tree: nothing left to do.
     const auto again = MigrateScene( scene );

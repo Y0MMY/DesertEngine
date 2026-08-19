@@ -25,10 +25,14 @@ namespace Desert::Core
     // sky-migrated the moment someone re-saved it for units, and vice versa.
     //   3             - the cloud noise volume is an ASSET, so the four bake settings are gone from the
     //                   component and from the file
-    inline constexpr int kSceneVersionSky        = 1;
-    inline constexpr int kSceneVersionTonemap    = 2;
-    inline constexpr int kSceneVersionCloudNoise = 3;
-    inline constexpr int kSceneVersion           = kSceneVersionCloudNoise;
+    //   4             - a cloud layer names a SPECIES. The scalar cloud type, its variance and the two
+    //                   fields that stated the shell by hand are gone: the species carries its altitudes
+    //                   and the shell is computed from them
+    inline constexpr int kSceneVersionSky          = 1;
+    inline constexpr int kSceneVersionTonemap      = 2;
+    inline constexpr int kSceneVersionCloudNoise   = 3;
+    inline constexpr int kSceneVersionCloudSpecies = 4;
+    inline constexpr int kSceneVersion             = kSceneVersionCloudSpecies;
 
     // World-unit generation of a .desce file. Absent (or 0) means the scene was authored when one world
     // unit was one METRE; today a unit is a CENTIMETRE (Common/Core/Units.hpp), so such a scene is scaled
@@ -194,6 +198,47 @@ namespace Desert::Core
     // SHELF LIFE: this raises v2 to v3 and nothing else. It is deleted once no v2 file remains.
     CloudNoiseMigrationReport MigrateCloudNoiseV2ToV3( std::vector<Assets::EntityData>& entities );
 
+    // What MigrateCloudSpeciesV3ToV4 did to one file.
+    struct CloudSpeciesMigrationReport
+    {
+        int Entities      = 0; // entities carrying a "VolumetricCloud" payload that was touched
+        int FieldsDropped = 0; // "LayerBottomAltitude", "LayerThickness", "CloudTypeVariance" (0..3 each)
+        int SpeciesSet    = 0; // entities whose old scalar "CloudType" became a named species
+    };
+
+    // Raises a scene from schema v3 to v4: the vertical profile stopped being one analytic curve driven by
+    // a scalar and became a per-SPECIES table, so the file has to name a species instead of a number.
+    //
+    // WHAT IS DROPPED AND WHY NOTHING IS CARRIED FROM IT.
+    //
+    //   * "LayerBottomAltitude", "LayerThickness" - the shell is now the union of the altitude ranges of
+    //     the species in the layer and is computed by Graphic::PackCloudParams. An authored shell and a
+    //     species' own altitudes are two numbers obliged to agree, which is the defect class this whole
+    //     move removes; carrying the authored pair forward would reintroduce it under a new name.
+    //   * "CloudTypeVariance" - it mixed noise into the scalar so that neighbouring clouds would not all
+    //     reach the same ceiling. The table's second axis is the placement pattern's own value, which
+    //     answers the same question with height that CORRELATES with how much cloud is there. There is
+    //     nothing on the component for it to become.
+    //
+    // WHAT IS CARRIED. "CloudType" was a scalar from "flat sheet low in the layer" to "tall heaped
+    // cloud", and the library is ordered along exactly that axis, so the scalar picks the species by
+    // quarters: below 0.25 Stratus, below 0.55 CumulusMediocris, below 0.85 CumulusCongestus, and above
+    // it Cumulonimbus. The boundaries are placed so that the component's own former default of 0.6 lands
+    // on CumulusCongestus, which is the species the new default names - a scene that carried the default
+    // therefore comes out of the migration looking like what it was.
+    //
+    // A payload with no "CloudType" at all keeps the C++ default by NOT writing a species: an absent key
+    // is how the reflection serializer spells "leave it alone", and inventing Stratus for a file that
+    // never said anything would be a guess about intent.
+    //
+    // PURE - no GPU, no filesystem, no global state. The counters go back to the loader, which is the one
+    // that knows which file this was.
+    //
+    // Idempotent: a payload with none of the four keys is left byte-identical and reports zero.
+    //
+    // SHELF LIFE: this raises v3 to v4 and nothing else. It is deleted once no v3 file remains.
+    CloudSpeciesMigrationReport MigrateCloudSpeciesV3ToV4( std::vector<Assets::EntityData>& entities );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -205,10 +250,12 @@ namespace Desert::Core
         TonemapMigrationReport Tonemap;
         bool                      CloudNoiseRaised = false; // the schema was below kSceneVersionCloudNoise
         CloudNoiseMigrationReport CloudNoise;
+        bool                        CloudSpeciesRaised = false; // the schema was below kSceneVersionCloudSpecies
+        CloudSpeciesMigrationReport CloudSpecies;
 
         bool Changed() const
         {
-            return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised;
+            return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised;
         }
     };
 

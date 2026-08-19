@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 
 #include <Engine/Assets/Common.hpp>
+#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
 #include <Engine/Reflection/ReflectionMacros.hpp>
 
 #include <cstdint>
@@ -35,10 +36,13 @@ namespace Desert::ECS
     // kilometres, because 6360 km is 636 000 000 cm and no slider is useful at that scale; UE authors it
     // in kilometres for the same reason.
     //
-    // ALTITUDES ARE ANCHORED TO METEOROLOGY, not to a relation. The default base of 1.5 km is a cumulus
-    // mediocris base (real ones sit at 0.8-2.0 km), and the accompanying test asserts the range rather
-    // than a ratio. A system whose altitudes are only constrained relative to its own tile sizes is one
-    // that can be moved wholesale into the stratosphere without a single test noticing.
+    // ALTITUDES ARE ANCHORED TO METEOROLOGY, not to a relation, and they are NOT AUTHORED HERE. A species
+    // carries its own base and top in kilometres (Graphic::CloudSpeciesShapeOf), and the shell the march
+    // intersects is COMPUTED from them by Graphic::PackCloudParams. The two fields that used to state it —
+    // Layer Bottom Altitude and Layer Thickness — are gone, and their removal is the point rather than a
+    // tidy-up: an envelope and a species' altitudes are two numbers obliged to agree, which is the exact
+    // class of defect §2.3.1 of the contract is about. Nothing that has to agree with the species is left
+    // for a hand to move.
     struct VolumetricCloudData
     {
         REFLECT()
@@ -50,27 +54,16 @@ namespace Desert::ECS
                            "zero GPU cost, exactly like a scene without the component." ) )
         bool Enabled = true;
 
-        PROPERTY( DisplayName( "Layer Bottom Altitude" ), Category( "Cloud Layer" ), Length,
-                  Range( 0.0f, 2000000.0f ), Summary,
-                  Tooltip( "Height of the cloud base above the ground. It does not only move the layer up "
-                           "— together with Weather Tile Size it decides how BIG a cloud looks: the "
-                           "angle one subtends overhead is its cell size over this altitude." ) )
-        // FIVE KILOMETRES — UE's shipped default, and it is safe to be this high only because the layer
-        // is an envelope rather than the cloud (see LayerThickness). The apparent size of a cloud overhead
-        // is its coverage cell over this altitude, so raising one without the other is how a sky ends up
-        // correct in every relation and wrong in every frame.
-        float LayerBottomAltitude = 500000.0f; // 5 km
-
-        PROPERTY( DisplayName( "Layer Thickness" ), Category( "Cloud Layer" ), Length,
-                  Range( 10000.0f, 2000000.0f ),
-                  Tooltip( "Vertical extent of the layer. The cloud type decides how much of it a cloud "
-                           "actually fills; this is the ceiling, not the height of the cloud." ) )
-        // TEN KILOMETRES, matching UE, and the reason it is safe to be this generous is that the layer is
-        // an ENVELOPE, not the cloud. UE's height-profile texture confines a stratocumulus to a small
-        // fraction of these ten kilometres; the thickness only says how much room the tallest species is
-        // allowed. Our vertical profile now does the same — see CloudVerticalProfile, whose occupancy was
-        // cut to a fifth when this changed.
-        float LayerThickness = 1000000.0f; // 10 km
+        PROPERTY( DisplayName( "Species" ), Category( "Cloud Layer" ), Summary,
+                  Tooltip( "Which kind of cloud this layer is made of. It is not a look-up of presets: the "
+                           "species carries its own base and top in kilometres, its own family of vertical "
+                           "profiles, its own edge character and its own density, and the shell the march "
+                           "intersects is COMPUTED from it. Changing this moves the clouds to the altitude "
+                           "that species actually lives at." ) )
+        // CONGESTUS IS THE DEFAULT because it is what the previous scalar's default of 0.6 described — "a
+        // heaped cloud that fills the layer" — and because it is the species whose family of profiles
+        // varies most across a patch, which is what a new scene should show off rather than hide.
+        Graphic::CloudSpecies Species = Graphic::CloudSpecies::CumulusCongestus;
 
         PROPERTY( DisplayName( "Planet Radius" ), Category( "Cloud Layer" ), Units( "km" ),
                   Range( 100.0f, 7000.0f ), Advanced,
@@ -114,15 +107,22 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Coverage" ), Category( "Weather" ), Range( 0.0f, 1.0f ), Summary,
                   Tooltip( "How much of the sky has cloud in it. Applied as a THRESHOLD on the coverage "
                            "field, so lowering it opens clear gaps rather than thinning everything." ) )
-        // 0.15, MEASURED — and the metric is stated, which the first version of this table was not.
+        // 0.10, MEASURED — and the metric is stated, which the first version of this table was not.
         //
         // "sky cover" below is the fraction of vertical COLUMNS through the layer whose cloud hides at
         // least half the sky behind it, over one period of the coverage field at contrast 1 with the
         // defaults of this component. Desert/Tests/Engine/CloudField measures it and prints exactly this
         // row, so it is reproducible rather than remembered:
         //
-        //     Coverage   0.05   0.10   0.15   0.20   0.25   0.30   0.50
-        //     sky cover    11%    25%    40%    52%    62%    71%    95%
+        //     Coverage   0.05   0.10   0.15   0.20   0.30   0.50
+        //     sky cover    17%    36%    49%    60%    75%    95%
+        //
+        // THE ROW MOVED WITH THE ENVELOPE, and the default moved with the row. The envelope used to be an
+        // authored ten kilometres of which a cloud filled a fraction; it is now the SPECIES' OWN [base,
+        // top] and the shipped congestus fills all 3.6 km of it, so a column that carries cloud carries
+        // three times as much of it. 0.10 is the setting that reproduces the ~40 % sky cover the previous
+        // default of 0.15 produced — the slider means something different and the sky looks the same,
+        // which is the same kind of move, for the same kind of reason, as the one recorded below.
         //
         // THE SLIDER STOPPED BEING A LEVEL AND BECAME A QUANTILE, and the default moved once, by exactly
         // the amount needed to leave the sky where it was. Common/CloudField.glslh now maps the coverage
@@ -136,15 +136,15 @@ namespace Desert::ECS
         // what it LOOKS like and changed in what it reads.
         //
         // Both ends are still exact by construction: the mapped field reaches 0 and 1, and the threshold
-        // is pushed past both, so 0 is genuinely clear and 1 genuinely solid. The useful band is now 0.05
-        // to 0.30 — the curve is steep because a slanted ray crosses many columns, and that steepness is a
+        // is pushed past both, so 0 is genuinely clear and 1 genuinely solid. The useful band is now 0.03
+        // to 0.25 — the curve is steep because a slanted ray crosses many columns, and that steepness is a
         // property of the geometry rather than of the slider.
         //
         // THE THREE SHIPPED CLOUD SCENES WERE NOT RE-AUTHORED. Their Coverage is an authored value and all
         // three still read as cloud; Clouds_Showcase and Clouds_Sunset simply read fuller than they did.
         // Migrating an authored number to preserve an appearance is a guess about intent, and this
         // component is not the place to make it.
-        float Coverage = 0.15f;
+        float Coverage = 0.10f;
 
         PROPERTY( DisplayName( "Coverage Contrast" ), Category( "Weather" ), Range( 0.1f, 4.0f ),
                   Tooltip( "Sharpness of the transition from clear to cloudy, as the WIDTH of the band "
@@ -152,19 +152,25 @@ namespace Desert::ECS
                            "the islands get hard edges; below 1 it widens and they melt into haze." ) )
         float CoverageContrast = 1.0f;
 
-        PROPERTY( DisplayName( "Cloud Type" ), Category( "Weather" ), Range( 0.0f, 1.0f ), Summary,
-                  Tooltip( "0 is a flat sheet lying in the bottom quarter of the layer; 1 is a heaped "
-                           "cloud that fills it. Drives the vertical profile and the erosion frequency "
-                           "together, because a stratus and a cumulus differ in both." ) )
-        float CloudType = 0.6f;
-
-        PROPERTY( DisplayName( "Cloud Type Variance" ), Category( "Weather" ), Range( 0.0f, 1.0f ),
-                  Tooltip( "How far the cloud type wanders from the value above across the sky. AT ZERO "
-                           "EVERY CLOUD IN THE LAYER REACHES THE SAME ALTITUDE, because the vertical "
-                           "profile is then the same function everywhere and the layer reads as a slab "
-                           "with a lid. Raising it lets one island be a low sheet and its neighbour a "
-                           "tower, and gives a single large island an uneven top." ) )
-        float CloudTypeVariance = 0.4f;
+        // THE TWO FIELDS THAT USED TO STAND HERE ARE GONE, and neither has moved anywhere. `Cloud Type`
+        // was a scalar between "flat sheet" and "heaped cloud" that fed one analytic curve, and
+        // `Cloud Type Variance` mixed noise into it so that neighbouring clouds would not all reach the
+        // same ceiling. Both are answered by the profile TABLE and answered better: the table's second
+        // axis is the placement pattern's own value, so a cloud is low and flat at the rim of a patch and
+        // a tower in its middle — height that is CORRELATED with how much cloud is there, instead of
+        // height sprinkled by a noise that knew nothing about the patch it was decorating. A tower on a
+        // thin edge was the visible cost of the old arrangement.
+        //
+        // A THIRD FIELD WAS BUILT HERE AND MEASURED AWAY. `Shape Distortion` drove Unreal's
+        // height-dependent domain warp — the second noise that displaces the coverage field's coordinates
+        // so that one flat pattern cannot be extruded upward into a column. Over the WHOLE travel of the
+        // control it moved ImageStat contrast by at most 0.018 and with no consistent sign, against the
+        // 0.08 the profile table itself moved and the 0.2 that separates two species; the six rows of
+        // numbers are in Common/CloudField.glslh. It buys nothing HERE because our coverage field is
+        // already sampled in full three dimensions, which is a different solution to the same problem —
+        // and it cost one fetch of the noise volume per sample, in the march and in every light-march
+        // sample beneath it. A control that moves nothing is what §1.3 of the contract calls a TODO
+        // wearing a feature's clothes.
 
         PROPERTY( DisplayName( "Weather Tile Size" ), Category( "Weather" ), Length,
                   Range( 200000.0f, 8000000.0f ),

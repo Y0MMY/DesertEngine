@@ -2,6 +2,7 @@
 
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Graphic/AtmosphereEnv.hpp>
+#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
 
 #include <glm/glm.hpp>
 
@@ -22,24 +23,32 @@ namespace Desert::Graphic
      * Units: KILOMETRES throughout. This packer is where the component's world-unit distances are
      * converted, exactly once.
      *
-     * EVERY SLOT IS READ. The block is 48 floats with no padding and no reserved field. That is a deliberate
-     * constraint rather than an accident of packing: a spare slot is where a future parameter gets quietly stashed
-     * without a name, a range or a tooltip.
+     * EVERY SLOT IS READ. The block is 47 floats with no reserved field, and that is a deliberate
+     * constraint rather than an accident of packing: a spare slot is where a future parameter gets quietly
+     * stashed without a name, a range or a tooltip. It is 47 rather than 48 because the last member is a
+     * vec3 — when the domain warp came out, the slot it had occupied came out with it rather than staying
+     * behind as somewhere to put things.
      */
     struct CloudGpuPayload
     {
         glm::vec4 Layer;        // x planet radius, y bottom altitude, z thickness, w max view distance (km)
         glm::vec4 March;        // x max steps, y stop transmittance, z tracing start (km), w extinction (1/km)
-        glm::vec4 Weather;      // x coverage tile (km), y coverage, z coverage contrast, w cloud type
+        glm::vec4 Weather;      // x coverage tile (km), y coverage, z coverage contrast, w detail character
         glm::vec4 Detail;       // x detail tile (km), y detail strength, z density scale, w scattering albedo
         glm::vec4 Wind;         // xyz accumulated wind offset (km), w phase g
         glm::vec4 Sun;          // xyz TOWARD the sun (normalized), w light march distance (km)
         glm::vec4 SunColour;    // rgb sun irradiance (linear), w light march sample count
         glm::vec4 Ambient;      // rgb ambient radiance OR its scale, w = 1 when the distant sky light is read
         glm::vec4 MultiScatter; // x octave count, y contribution, z occlusion, w eccentricity
-        glm::vec4 Aerial;       // x AP far extent (km), y AP view-distance scale, z AP gate, w type variance
         glm::vec4 Phase;        // x second lobe g, y phase blend, z AO strength, w tracing start max (km)
         glm::vec4 Fade;         // x AP start (km), y AP fade (km), z near fade end (km), w near fade start (km)
+        // A vec3 AND LAST, which is the only shape in which three values can be three values. It was a
+        // vec4 whose fourth slot carried the cloud type's variance, and then briefly the domain warp's
+        // amount; the warp was measured and taken out again (Common/CloudField.glslh has the numbers), and
+        // a float nobody reads is where the next parameter gets stashed without a name, a range or a
+        // tooltip. Moving it to the end is what lets it shrink: std430 aligns it to 16 and the block ends
+        // at 188 bytes.
+        glm::vec3 Aerial; // x AP far extent (km), y AP view-distance scale, z AP gate
     };
 
     static_assert( offsetof( CloudGpuPayload, Layer ) == 0 );
@@ -51,13 +60,17 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudGpuPayload, SunColour ) == 96 );
     static_assert( offsetof( CloudGpuPayload, Ambient ) == 112 );
     static_assert( offsetof( CloudGpuPayload, MultiScatter ) == 128 );
-    static_assert( offsetof( CloudGpuPayload, Aerial ) == 144 );
-    static_assert( offsetof( CloudGpuPayload, Phase ) == 160 );
-    static_assert( offsetof( CloudGpuPayload, Fade ) == 176 );
-    static_assert( sizeof( CloudGpuPayload ) == 192,
-                   "Twelve vec4s — the shader reads exactly this and nothing more." );
+    static_assert( offsetof( CloudGpuPayload, Phase ) == 144 );
+    static_assert( offsetof( CloudGpuPayload, Fade ) == 160 );
+    static_assert( offsetof( CloudGpuPayload, Aerial ) == 176 );
+    // 188, NOT 192, and the difference is the point. std430 rounds a block's STRIDE up to a multiple of
+    // 16, but a stride only exists for an ARRAY of blocks and this is a single one — the shader never
+    // reads past the last member, so the block ends at 188 and so does this. glm::vec3 aligns to 4 rather
+    // than to 16, so the C++ struct ends there too and there is no trailing padding to explain. Same
+    // arrangement, and the same reasoning, as CloudResolveParams below.
+    static_assert( sizeof( CloudGpuPayload ) == 188,
+                   "Eleven vec4s and a vec3 — the shader reads exactly this and nothing more." );
 
-    // Already a multiple of std430's 16-byte block alignment, so the buffer size IS the struct size.
     inline constexpr uint32_t kCloudPayloadBytes = sizeof( CloudGpuPayload );
 
     // The bindings of the cloud compute pass. SetOutput / SetStorageBuffer / SetInput take these as
@@ -80,6 +93,10 @@ namespace Desert::Graphic
     // and scene distance, kilometres). A storage image like binding 0, not a sampler, so it is bound with
     // SetOutput and lives in the same GENERAL-layout round trip as the scatter target.
     inline constexpr uint32_t kCloudGuideOutputBinding = 6;
+    // The vertical profile table (Engine/Graphic/Clouds/CloudProfileTable.hpp): 256 x 64 RGBA32F, U the
+    // height fraction in the envelope, V how deep inside a placement patch the column is. Owned by the
+    // renderer and rebuilt only when the layer's species changes.
+    inline constexpr uint32_t kCloudProfileBinding = 7;
 
     // The TEMPORAL RESOLVE pass (Programs/Clouds/CloudTemporalResolve.shader). Same rule as above: these
     // numbers are handed to SetInput / SetOutput / SetStorageBuffer verbatim and must equal the ones
@@ -293,10 +310,24 @@ namespace Desert::Graphic
     {
         const bool physical = atmosphere.Valid && atmosphere.DistantSkyLight != nullptr;
 
-        // Repaired at the boundary rather than trusted, like every payload packer: each of these is one
-        // hand-edited scene file away from a division by zero or a loop that does not terminate.
-        const float thicknessKm = std::max( data.LayerThickness, 1000.0f ) / kCloudWorldUnitsPerKm;
-        const float bottomKm    = std::max( data.LayerBottomAltitude, 0.0f ) / kCloudWorldUnitsPerKm;
+        // THE ENVELOPE IS COMPUTED, NOT AUTHORED, and this is the one place it is computed. It is the
+        // union of the altitude ranges of the species this layer actually carries — one of them today,
+        // two to four when T3 puts several in a sky — and nothing in the component states it.
+        //
+        // The reason is the class of defect §2.3.1 of the contract names: an authored shell and a
+        // species' own altitudes are two numbers obliged to agree, each of them individually legal, and
+        // the symptom of their disagreeing is not an error but a cumulonimbus with its anvil sliced off
+        // by a ceiling nobody remembers setting. Computing it makes the agreement structural, and
+        // Desert/Tests/Engine/ComponentReflection asserts `envelope ⊇ every active species` on the packed
+        // block rather than on the intention.
+        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( data.Species );
+
+        const float bottomKm = std::max( CloudSpeciesBaseKm( shape ), 0.0f );
+        // Floored at a metre for the same reason CloudMakeLayer floors it: a shell of zero thickness has
+        // a coincident pair of roots and every grazing ray produces a segment the step schedule divides
+        // by. The library cannot produce one, but the packer does not depend on its caller having
+        // checked something.
+        const float thicknessKm = std::max( CloudSpeciesTopKm( shape ) - bottomKm, 0.001f );
         const float planetKm    = std::max( data.PlanetRadius, 1.0f );
 
         glm::vec3 sunDirection{ 0.0f, 1.0f, 0.0f };
@@ -317,11 +348,20 @@ namespace Desert::Graphic
                                std::clamp( data.StopTransmittance, 0.0f, 1.0f ),
                                std::max( data.TracingStartDistance, 0.0f ) / kCloudWorldUnitsPerKm,
                                std::max( data.ExtinctionScale, 0.0f ) );
+        // The species' EDGE, which is the one thing about it the profile table cannot carry: the table
+        // says where the body is, and this says whether what the erosion cuts out of that body is wispy
+        // or billowy. A stratus and a congestus differ in both, which is why the old single scalar drove
+        // both and why the species now supplies each of them separately.
         p.Weather = glm::vec4( std::max( data.WeatherTileSize, 1.0f ) / kCloudWorldUnitsPerKm,
                                std::clamp( data.Coverage, 0.0f, 1.0f ), std::max( data.CoverageContrast, 0.01f ),
-                               std::clamp( data.CloudType, 0.0f, 1.0f ) );
+                               std::clamp( shape.DetailCharacter, 0.0f, 1.0f ) );
+        // THE SPECIES' DENSITY IS FOLDED IN HERE rather than sent as a second number. A cumulonimbus is
+        // made of more water than a stratus, and that is a fact about the species; the artist's Density
+        // Scale is a multiplier ON it, so "1" keeps meaning "this species as it is" whichever species is
+        // selected. Two slots for a product would be two values that can disagree.
         p.Detail  = glm::vec4( std::max( data.DetailTileSize, 1.0f ) / kCloudWorldUnitsPerKm,
-                               std::clamp( data.DetailStrength, 0.0f, 1.0f ), std::max( data.DensityScale, 0.0f ),
+                               std::clamp( data.DetailStrength, 0.0f, 1.0f ),
+                               std::max( data.DensityScale, 0.0f ) * std::max( shape.DensityFactor, 0.0f ),
                                std::clamp( data.ScatteringAlbedo, 0.0f, 1.0f ) );
         p.Wind    = glm::vec4( windOffsetWorld / kCloudWorldUnitsPerKm, std::clamp( data.PhaseG, -0.9f, 0.9f ) );
         p.Sun     = glm::vec4( sunDirection, std::max( data.LightMarchDistance, 0.0f ) / kCloudWorldUnitsPerKm );
@@ -338,9 +378,8 @@ namespace Desert::Graphic
         // from the cloud component because they describe the VOLUME, and the volume belongs to the sky —
         // a second authored copy here is how the fill and the read end up disagreeing about the slice
         // mapping.
-        p.Aerial = glm::vec4( atmosphere.AerialPerspectiveDepthKm, atmosphere.AerialPerspectiveViewDistanceScale,
-                              atmosphere.AerialPerspectiveVolume != nullptr ? 1.0f : 0.0f,
-                              std::clamp( data.CloudTypeVariance, 0.0f, 1.0f ) );
+        p.Aerial = glm::vec3( atmosphere.AerialPerspectiveDepthKm, atmosphere.AerialPerspectiveViewDistanceScale,
+                              atmosphere.AerialPerspectiveVolume != nullptr ? 1.0f : 0.0f );
 
         // The second phase lobe, the ambient-occlusion amount and the distance past which the layer is not
         // traced at all. The last is Unreal's TracingStartMaxDistance, and its absence was found on review:

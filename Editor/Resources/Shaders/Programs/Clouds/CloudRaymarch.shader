@@ -97,9 +97,23 @@ Shader "CloudRaymarch"
         // read only when u_CloudAerial.z says the volume exists.
         Uniform(5) sampler3D u_CloudAerialPerspective;
 
-        // The seam's noise callback. Declared here, next to the sampler, because Common/CloudField.glslh
+        // THE VERTICAL PROFILE TABLE, 256 x 64 RGBA32F, built on the CPU by
+        // Graphic::CloudBuildProfileTable from the layer's species and uploaded by
+        // VolumetricCloudRenderer whenever that species changes. U is the height fraction in the
+        // envelope, V is how deep inside a placement patch the column is, .r is the profile — the same
+        // arrangement as Unreal's Layout_CloudHeightProfile, whose axes are (NormAltitudeInLayer,
+        // layout value).
+        //
+        // LINEAR AND REPEAT, like every sampler this engine creates. The wrap is why
+        // CloudSampleProfileTable clamps both coordinates to the texel centres rather than to [0, 1]: a
+        // height fraction of exactly 1 would otherwise wrap to the bottom row and grow the cloud's base
+        // back on top of its own top.
+        Uniform(7) sampler2D u_CloudProfile;
+
+        // The seam's two callbacks. Declared here, next to the samplers, because Common/CloudField.glslh
         // must stay free of samplers to remain compilable as C++ by its tests.
         #define CLOUD_SAMPLE_NOISE(p) texture(u_CloudNoise, (p))
+        #define CLOUD_SAMPLE_PROFILE(uv) texture(u_CloudProfile, (uv))
 
         #include <Common/CloudField.glslh>
         #include <Common/CloudParams.glslh>

@@ -426,7 +426,7 @@ TEST( HeightFogReflection, DistancesAreLengthsAndEveryFieldIsAnnotatedWellEnough
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 37 fields in seven groups. The layer geometry and the tracing limits are
+// VolumetricCloudData — 34 fields in seven groups. The layer geometry and the tracing limits are
 // UVolumetricCloudComponent's name for name, so a UE-calibrated sky transplants number for number; the
 // shape group is ours, because UE has no cloud-shape parameter on the component at all (its density is a
 // material graph). Every scalar is packed into Graphic::CloudGpuPayload and the one asset field names the
@@ -438,16 +438,13 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
 {
     const std::vector<std::string> expected = {
          "Enabled",
-         "LayerBottomAltitude",
-         "LayerThickness",
+         "Species",
          "PlanetRadius",
          "MaxViewDistance",
          "TracingStartMaxDistance",
          "TracingStartDistance",
          "Coverage",
          "CoverageContrast",
-         "CloudType",
-         "CloudTypeVariance",
          "WeatherTileSize",
          "NoiseVolume",
          "DetailTileSize",
@@ -477,11 +474,11 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 37u );
+    EXPECT_EQ( cloud.Fields.size(), 34u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
-    EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 7u );
-    EXPECT_EQ( CountInCategory( cloud, "Weather" ), 5u );
+    EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 6u );
+    EXPECT_EQ( CountInCategory( cloud, "Weather" ), 3u );
     EXPECT_EQ( CountInCategory( cloud, "Noise" ), 1u );
     EXPECT_EQ( CountInCategory( cloud, "Detail" ), 6u );
     EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 14u );
@@ -494,6 +491,15 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     // names the volume instead. A field that came back here would be a knob that rebakes nothing.
     for ( const char* gone : { "WeatherSeed", "WeatherOctaves", "DetailSeed", "DetailOctaves" } )
         EXPECT_EQ( Find( cloud, gone ), nullptr ) << gone << " is a bake setting and the bake is gone";
+
+    // AND SO ARE THE FOUR THE SPECIES REPLACED. LayerBottomAltitude and LayerThickness stated by hand a
+    // shell that is now computed from the species' own altitudes — two numbers obliged to agree with a
+    // third, which is the §2.3.1 defect class — and CloudType and CloudTypeVariance drove one analytic
+    // profile curve, which is now a per-species table indexed by the placement pattern. A field that came
+    // back here would be an authored value contradicting a computed one.
+    for ( const char* gone : { "LayerBottomAltitude", "LayerThickness", "CloudType", "CloudTypeVariance" } )
+        EXPECT_EQ( Find( cloud, gone ), nullptr )
+             << gone << " was replaced by the species and must not have a second life";
 
     const FieldInfo* volume = Find( cloud, "NoiseVolume" );
     ASSERT_NE( volume, nullptr );
@@ -514,27 +520,28 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
 
     EXPECT_TRUE( DefaultOf<bool>( cloud, "Enabled" ) );
 
-    // Layer: UE's shipped 5 km base and 10 km envelope, with UE's own 6360 km planet. The envelope is a
-    // CEILING and not a cloud — the vertical profile confines a stratocumulus to six per cent of it,
-    // which Desert/Tests/Engine/CloudField asserts directly.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "LayerBottomAltitude" ), 500000.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "LayerThickness" ), 1000000.0f );
+    // Layer: THE SHELL IS NOT AUTHORED. It is computed from the species' own altitudes by
+    // Graphic::PackCloudParams, and the relation `envelope contains the species` is asserted further
+    // down on the packed block. What is left here is the planet the shell curves around — UE's own
+    // 6360 km — and the species itself.
+    EXPECT_EQ( static_cast<int>( DefaultOf<Desert::Graphic::CloudSpecies>( cloud, "Species" ) ),
+               static_cast<int>( Desert::Graphic::CloudSpecies::CumulusCongestus ) );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PlanetRadius" ), 6360.0f );
     // 60 km, half of the calibrated pair; the relation the pair exists for is asserted separately below.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MaxViewDistance" ), 6000000.0f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartDistance" ), 0.0f );
 
     // Weather: the coverage default is a MEASURED point inside the slider's useful band, not a taste. It
-    // moved from 0.25 to 0.15 when the coverage field became a quantile rather than a level
-    // (Common/CloudField.glslh): the same setting now selects about three times as much field, and 0.15 is
-    // the point that reproduces the sky cover the old default produced. Both numbers come from the table
-    // Desert/Tests/Engine/CloudField prints.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "Coverage" ), 0.15f );
+    // has moved twice, each time to keep the SKY the same while the field under it changed — to 0.15 when
+    // the coverage field became a quantile rather than a level, and to 0.10 when the envelope stopped
+    // being an authored ten kilometres and became the species' own three-and-a-half. Both numbers come
+    // from the table Desert/Tests/Engine/CloudField prints.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "Coverage" ), 0.10f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CoverageContrast" ), 1.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CloudType" ), 0.6f );
-    // NON-ZERO ON PURPOSE: at zero every cloud in the layer reaches the same altitude, because the
-    // vertical profile is then the same function everywhere, and the layer reads as a slab with a lid.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CloudTypeVariance" ), 0.4f );
+    // AND NOTHING ELSE ABOUT THE SHAPE IS AUTHORED HERE. The species decides the altitudes and the profile
+    // table decides the silhouette at each of them. The domain warp that briefly stood between the two was
+    // measured and removed; VolumetricCloudComponent.hpp records with what numbers.
+    EXPECT_EQ( Find( cloud, "ShapeDistortion" ), nullptr );
     // 12 km, the other half of the calibrated pair.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "WeatherTileSize" ), 1200000.0f );
 
@@ -712,6 +719,92 @@ TEST( VolumetricCloudPayload, ALegalNearFadeSurvivesThePackerUnchangedAndInKilom
     EXPECT_FLOAT_EQ( fromCamera.Fade.z, 5.0f );
 }
 
+TEST( VolumetricCloudPayload, TheEnvelopeContainsEverySpeciesItIsBuiltFrom )
+{
+    // THE RELATION THAT REPLACED TWO AUTHORED FIELDS. The shell the march intersects used to be
+    // Layer Bottom Altitude and Layer Thickness, and a species' altitudes used to be two more numbers
+    // that had to agree with them — the §2.3.1 shape of defect exactly: each side individually legal, the
+    // disagreement visible only as a cumulonimbus whose anvil has been sliced off by a ceiling nobody
+    // remembers setting.
+    //
+    // The shell is now COMPUTED, and this is the statement that it is computed correctly: whatever
+    // species a layer names, the block the shader reads describes a shell that contains all of that
+    // species and no more of the sky than it needs.
+    const Desert::Graphic::AtmosphereEnv atmosphere{};
+
+    for ( const Desert::Graphic::CloudSpecies species :
+          { Desert::Graphic::CloudSpecies::Stratus, Desert::Graphic::CloudSpecies::CumulusMediocris,
+            Desert::Graphic::CloudSpecies::CumulusCongestus, Desert::Graphic::CloudSpecies::Cumulonimbus } )
+    {
+        Desert::ECS::VolumetricCloudData data;
+        data.Species = species;
+
+        const Desert::Graphic::CloudGpuPayload payload =
+             Desert::Graphic::PackCloudParams( data, atmosphere, glm::vec3( 0.0f ) );
+
+        const float bottomKm = payload.Layer.y;
+        const float topKm    = payload.Layer.y + payload.Layer.z;
+
+        const Desert::Graphic::CloudSpeciesShape& shape = Desert::Graphic::CloudSpeciesShapeOf( species );
+
+        const float speciesBottomKm = Desert::Graphic::CloudSpeciesBaseKm( shape );
+        const float speciesTopKm    = Desert::Graphic::CloudSpeciesTopKm( shape );
+
+        EXPECT_LE( bottomKm, speciesBottomKm )
+             << "species " << static_cast<int>( species ) << " has its base below the shell";
+        EXPECT_GE( topKm, speciesTopKm )
+             << "species " << static_cast<int>( species ) << " has its top above the shell";
+
+        // AND THE SHELL IS NOT LARGER THAN IT NEEDS TO BE. A generous envelope satisfies the containment
+        // above trivially — ten kilometres contains every species in the library — while charging every
+        // ray for the empty air it has to march through. Tight in both directions is the property.
+        EXPECT_NEAR( bottomKm, speciesBottomKm, 1e-4f );
+        EXPECT_NEAR( topKm, speciesTopKm, 1e-3f );
+
+        // The anvil is ABOVE the tower, so a top taken from TopAltitudeKm alone would cut it off. Stated
+        // separately because it is the one case in which the two are not the same number.
+        if ( shape.AnvilStrength > 0.0f )
+            EXPECT_GT( topKm, shape.TopAltitudeKm ) << "the anvil is outside the shell";
+    }
+}
+
+TEST( VolumetricCloudPayload, TheSpeciesDensityAndEdgeReachTheGpu )
+{
+    // The two slots the scalar cloud type and its variance left behind, and neither of them is spare: a
+    // vec4 with three used members is a vec4 whose fourth will be repurposed without a name.
+    const Desert::Graphic::AtmosphereEnv atmosphere{};
+
+    for ( const Desert::Graphic::CloudSpecies species :
+          { Desert::Graphic::CloudSpecies::Stratus, Desert::Graphic::CloudSpecies::CumulusMediocris,
+            Desert::Graphic::CloudSpecies::CumulusCongestus, Desert::Graphic::CloudSpecies::Cumulonimbus } )
+    {
+        Desert::ECS::VolumetricCloudData data;
+        data.Species      = species;
+        data.DensityScale = 0.5f;
+
+        const Desert::Graphic::CloudGpuPayload payload =
+             Desert::Graphic::PackCloudParams( data, atmosphere, glm::vec3( 0.0f ) );
+
+        const Desert::Graphic::CloudSpeciesShape& shape = Desert::Graphic::CloudSpeciesShapeOf( species );
+
+        // The edge character travels as itself.
+        EXPECT_FLOAT_EQ( payload.Weather.w, shape.DetailCharacter );
+
+        // The density is the PRODUCT of the artist's scale and the species' own, folded once so the two
+        // cannot arrive as values that disagree.
+        EXPECT_FLOAT_EQ( payload.Detail.z, 0.5f * shape.DensityFactor );
+    }
+
+    // A stratus is genuinely thinner stuff than a cumulonimbus, or the species differ in shape alone.
+    Desert::ECS::VolumetricCloudData stratus;
+    stratus.Species = Desert::Graphic::CloudSpecies::Stratus;
+    Desert::ECS::VolumetricCloudData storm;
+    storm.Species = Desert::Graphic::CloudSpecies::Cumulonimbus;
+
+    EXPECT_LT( Desert::Graphic::PackCloudParams( stratus, atmosphere, glm::vec3( 0.0f ) ).Detail.z,
+               Desert::Graphic::PackCloudParams( storm, atmosphere, glm::vec3( 0.0f ) ).Detail.z );
+}
+
 TEST( VolumetricCloudReflection, EveryDefaultLiesInsideItsOwnRange )
 {
     // A RELATION, and one that is easy to break by editing a default and not its slider: a value the
@@ -740,8 +833,8 @@ TEST( VolumetricCloudReflection, DistancesAreLengthsExceptTheTwoThatCarryTheirOw
 {
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
 
-    for ( const char* name : { "LayerBottomAltitude", "LayerThickness", "MaxViewDistance", "TracingStartDistance",
-                               "WeatherTileSize", "DetailTileSize", "LightMarchDistance", "WindSpeed" } )
+    for ( const char* name : { "MaxViewDistance", "TracingStartDistance", "WeatherTileSize", "DetailTileSize",
+                               "LightMarchDistance", "WindSpeed" } )
         EXPECT_TRUE( Find( cloud, name )->Meta.IsLength ) << name;
 
     // The two that are NOT world units, and say which units they are instead. Marking either as a length
@@ -752,8 +845,8 @@ TEST( VolumetricCloudReflection, DistancesAreLengthsExceptTheTwoThatCarryTheirOw
     EXPECT_EQ( Find( cloud, "ExtinctionScale" )->Meta.Units, "/km" );
 
     // The dimensionless ones stay dimensionless.
-    for ( const char* name : { "Coverage", "CoverageContrast", "CloudType", "CloudTypeVariance", "DetailStrength",
-                               "DensityScale", "ScatteringAlbedo", "PhaseG", "StopTransmittance" } )
+    for ( const char* name : { "Coverage", "CoverageContrast", "DetailStrength", "DensityScale",
+                               "ScatteringAlbedo", "PhaseG", "StopTransmittance" } )
         EXPECT_FALSE( Find( cloud, name )->Meta.IsLength ) << name;
 
     EXPECT_TRUE( Find( cloud, "AmbientScale" )->Meta.IsColor ) << "the ambient scale must draw as a colour";
