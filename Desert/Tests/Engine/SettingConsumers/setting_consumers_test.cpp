@@ -170,18 +170,20 @@ namespace
     // Volumetric clouds: every field is WIRED, and there are three consumers rather than one because the
     // component's fields reach the GPU by three different routes.
     //
-    //   * PackCloudParams turns the per-frame settings into the ten-vec4 block the march reads, and
-    //     MakeCloudNoiseBakeKey turns the four bake settings into the push constant of the noise bake AND
-    //     into the key that decides whether to rebake. Both live in CloudPayload.hpp.
+    //   * PackCloudParams turns the per-frame settings into the twelve-vec4 block the march reads. It
+    //     lives in CloudPayload.hpp.
     //   * The ECS system owns the timestep, so the two wind fields are integrated there into the offset
     //     the packer is handed - the component carries no accumulated state of its own.
     //   * Enabled is the renderer's dispatch gate: off allocates nothing and dispatches nothing, which is
-    //     a decision the packer cannot make because it runs after it.
+    //     a decision the packer cannot make because it runs after it. NoiseVolume is the renderer's too:
+    //     it is a handle, not a number, and EnsureNoiseVolume resolves it through
+    //     Runtime::CloudNoiseService into the Image3D the march samples.
     //
-    // The seeds and the octave counts deserve a note, because they are the fields most likely to look
-    // dead: they appear NOWHERE in the march's parameter block on purpose (Common/CloudParams.glslh says
-    // so), since they decide what the baked volume CONTAINS rather than how it is read. Their consumer is
-    // the bake key, and moving one of them re-runs the bake.
+    // WHAT USED TO BE HERE AND IS NOT. Four rows - WeatherSeed, WeatherOctaves, DetailSeed and
+    // DetailOctaves - pointed at a bake key that turned them into the push constant of a compute pass.
+    // That pass is gone: the noise volume is an asset generated offline, its seed and lattice periods live
+    // in the container's own header, and the component names the volume instead of describing how to bake
+    // one. Four rows removed rather than repointed, because there is nothing left for them to point at.
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kCloudPayload = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp";
@@ -200,21 +202,19 @@ namespace
          { "TracingStartDistance", kCloudPayload },
          { "TracingStartMaxDistance", kCloudPayload },
 
-         // Weather - the coverage field. The two seed/octave rows are consumed by the BAKE key, not by
-         // the march's block.
+         // Weather - the coverage field.
          { "Coverage", kCloudPayload },
          { "CoverageContrast", kCloudPayload },
          { "CloudType", kCloudPayload },
          { "CloudTypeVariance", kCloudPayload },
          { "WeatherTileSize", kCloudPayload },
-         { "WeatherSeed", kCloudPayload },
-         { "WeatherOctaves", kCloudPayload },
 
-         // Detail - the erosion field, on the same split: two settings for the march, two for the bake.
+         // Noise - the volume itself, resolved by the renderer rather than packed by the packer.
+         { "NoiseVolume", kCloudRenderer },
+
+         // Detail - the erosion field.
          { "DetailTileSize", kCloudPayload },
          { "DetailStrength", kCloudPayload },
-         { "DetailSeed", kCloudPayload },
-         { "DetailOctaves", kCloudPayload },
          { "DensityScale", kCloudPayload },
          { "NearFadeStartDistance", kCloudPayload },
          { "NearFadeEndDistance", kCloudPayload },

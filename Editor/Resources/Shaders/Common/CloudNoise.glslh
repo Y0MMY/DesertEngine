@@ -1,7 +1,13 @@
 // The cloud noise library: periodic, seeded, and written ONCE in a dialect that compiles both as GLSL
-// (inside the cloud passes) and as C++ (by Desert/Tests/Engine/CloudNoise). The tests therefore drive
-// the exact text the raymarch compiles rather than a CPU re-implementation of it, which is the only
-// arrangement in which "the test passes" says anything about the picture.
+// (inside the cloud passes) and as C++ (by Desert/Tests/Engine/CloudNoise and by the offline volume
+// generator, Engine/Graphic/Clouds/CloudNoiseGenerator.cpp). The tests therefore drive the exact text
+// the generator runs rather than a CPU re-implementation of it, which is the only arrangement in which
+// "the test passes" says anything about the picture.
+//
+// WHO EVALUATES THIS AND WHO DOES NOT. Since the volume became an asset, NOTHING evaluates these
+// functions on the GPU: the march samples a 3D texture and the arithmetic runs once, offline, in the
+// generator. The dialect is kept all the same, because the file's other reader is the test suite that
+// compiles it as C++, and because `CloudRemap` below IS still compiled as GLSL by Common/CloudField.glslh.
 //
 // PERIODICITY IS STRUCTURAL, not a property we hope for. Every lattice index is wrapped into the period
 // BEFORE it is hashed, so the field tiles exactly at the period for every seed and every octave. A noise
@@ -131,57 +137,6 @@ float CloudPerlinPeriodic( vec3 position, float period, uint seed )
     return mix( y0i, y1i, uz );
 }
 
-// Fractal sum of the above, normalized to the same range as one octave.
-//
-// The period DOUBLES with the frequency, which is what keeps the sum periodic: an octave sampled at twice
-// the frequency against the original period would wrap halfway through its own cells and reintroduce the
-// seam the base octave was careful to avoid.
-//
-// The seed is perturbed per octave so that two octaves cannot land on the same lattice values and produce
-// a self-similar smear along the diagonal where their maxima coincide.
-float CloudPerlinFbm( vec3 position, float period, uint seed, int octaves )
-{
-    float sum       = 0.0f;
-    float amplitude = 0.5f;
-    float total     = 0.0f;
-    float frequency = 1.0f;
-    float wrap      = period;
-
-    for ( int i = 0; i < octaves; ++i )
-    {
-        vec3 sampleAt = vec3( position.x * frequency, position.y * frequency, position.z * frequency );
-        sum   = sum + amplitude * CloudPerlinPeriodic( sampleAt, wrap, seed + uint( i ) * 101u );
-        total = total + amplitude;
-
-        amplitude = amplitude * 0.5f;
-        frequency = frequency * 2.0f;
-        wrap      = wrap * 2.0f;
-    }
-
-    return sum / max( total, 1e-6f );
-}
-
-// The [0, 1] form, which is what every consumer of coverage and erosion actually wants. Kept as its own
-// function rather than left to each caller: a remap written five times is a remap that disagrees with
-// itself four times.
-//
-// THE GAIN IS A MEASUREMENT, NOT A TASTE. Perlin's practical range is far narrower than its theoretical
-// one, and normalizing a fractal sum by the sum of its amplitudes narrows it again. The naive
-// `value * 0.5 + 0.5` was measured by Desert/Tests/Engine/CloudNoise to occupy 0.30 to 0.69 between the
-// 1st and 99th percentile — so a coverage threshold of the form `remap(field, 1 - Coverage, 1, 0, 1)`,
-// which assumes the field reaches 1, could never saturate. Full Coverage produced translucent haze and
-// the slider looked broken while being arithmetically correct.
-//
-// 1.25 is the factor that puts the 99th percentile at 0.98. The few per cent that clip at each end are
-// not a loss: they are what makes solid cloud and genuinely clear sky reachable at all, and a coverage
-// field wants exactly that.
-#define CLOUD_FBM_RANGE_GAIN 1.25f
-
-float CloudPerlinFbm01( vec3 position, float period, uint seed, int octaves )
-{
-    return clamp( CloudPerlinFbm( position, period, seed, octaves ) * CLOUD_FBM_RANGE_GAIN + 0.5f, 0.0f, 1.0f );
-}
-
 // The remap every cloud paper writes inline and every implementation eventually gets wrong at the
 // degenerate end. Defined once, with the division guarded: originalMin == originalMax is one hand-edited
 // scene away, and an unguarded version turns the whole layer into NaN, which reads as a black sky.
@@ -192,34 +147,44 @@ float CloudRemap( float value, float originalMin, float originalMax, float newMi
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Periodic Worley (cellular) noise
+// Periodic Alligator noise
 // ---------------------------------------------------------------------------------------------------
 //
-// WHY THIS EXISTS AT ALL, given there is already a gradient noise above. Gradient noise is smooth
-// everywhere by construction: its extrema are rounded and its level sets are blobs. A cumulus is the
-// opposite — a heap of ROUNDED LOBES separated by creases, and the crease is the shape. Cellular noise
-// produces exactly that, because its level sets are the boundaries between the cells of a point set, and
-// inverting it turns each cell into a lobe swelling out from its own centre.
+// WHY THIS AND NOT WORLEY, which is what stood here before. Guerrilla state the reason in their own words
+// (Nubis Cubed, SIGGRAPH 2023, deck p.95): "we used inverted Worley noise to create billowy details, but
+// we had to do quite a lot of layering and work in the sampler to get something that looked like cloud
+// billows as opposed to PACKED SPHERES. This time we decided to use Houdini's Alligator noise, which looks
+// very much like our layered Worley noise but with more appropriate cloud-like LACUNARITY to these
+// structures." The lacunarity is the difference and it is structural, not a matter of tuning: inverted
+// Worley gives every cell the same peak value, so the field is a lattice of equal spheres; Alligator gives
+// each feature point its own amplitude and subtracts the runner-up, so lobes come in a range of sizes with
+// creases between them.
 //
-// This is the difference between cloud that looks like cauliflower and cloud that looks like cotton
-// wool, and no amount of tuning the Perlin gets from one to the other.
-
-// Distance from @p position to the nearest feature point of a periodic point lattice.
+// THE ALGORITHM IS NOT IN THE DECK. Slide 96 names the noise, shows the four channels and links the source
+// instead of printing it: "Alligator Noise Code (via SideFX),
+// https://www.sidefx.com/docs/hdk/alligator_2alligator_8_c-example.html". That HDK example is the
+// definition followed here, and it is four steps:
 //
-// One feature point per cell, its offset inside the cell taken from three disjoint bit-slices of the same
-// hash. Slicing rather than hashing three times is safe HERE and only here: the finalizer's avalanche is
-// measured, so its bits are independent of one another, and the three slices are as uncorrelated as three
-// separate hashes would be at a third of the cost.
+//   1. one feature point per lattice cell, at a hashed offset inside the cell;
+//   2. each feature point carries its OWN hashed amplitude — this is the part Worley does not have;
+//   3. a radial basis with unit radius, `smoothstep`'s own polynomial: rbf(d) = (1-d)^2 * (3 - 2*(1-d));
+//   4. the value is the LARGEST weighted contribution MINUS the second largest.
 //
-// The 3x3x3 neighbourhood is not an approximation: a feature point lies somewhere in its own cell, so
-// nothing outside the immediate neighbours can ever be the closest.
-float CloudWorleyPeriodic( vec3 position, float period, uint seed )
+// Step 4 is what puts the creases in. Where two feature points contribute equally the two largest cancel
+// and the field is 0, so cell boundaries are zero-valued seams; near a feature point one contribution
+// dominates and the field rises to that point's amplitude. Inverted, those seams become the web the deck
+// describes as the starting point for the wispy channel.
+//
+// The 3x3x3 neighbourhood is exact rather than an approximation: an offset lies inside its own cell, so a
+// point two cells away is at least one cell distant and the unit-radius basis is already zero there.
+float CloudAlligator( vec3 position, float period, uint seed )
 {
     float x0f = floor( position.x );
     float y0f = floor( position.y );
     float z0f = floor( position.z );
 
-    float nearest = 1e9f;
+    float best   = 0.0f;
+    float second = 0.0f;
 
     for ( int dz = -1; dz <= 1; ++dz )
     {
@@ -234,92 +199,94 @@ float CloudWorleyPeriodic( vec3 position, float period, uint seed )
                 uint h = CloudHashCell( CloudWrapIndex( cx, period ), CloudWrapIndex( cy, period ),
                                         CloudWrapIndex( cz, period ), seed );
 
+                // The offset comes from three disjoint ten-bit slices of one hash. Safe HERE because the
+                // finalizer's avalanche is MEASURED (see the suite): its bits are mutually independent, so
+                // three slices are as uncorrelated as three separate hashes at a third of the cost.
                 float ox = float( h & 1023u ) * ( 1.0f / 1024.0f );
                 float oy = float( ( h >> 10u ) & 1023u ) * ( 1.0f / 1024.0f );
                 float oz = float( ( h >> 20u ) & 1023u ) * ( 1.0f / 1024.0f );
+
+                // The amplitude needs its OWN hash rather than the two bits left over above: those two bits
+                // would give four amplitudes for the whole volume, which is not lacunarity, it is banding.
+                // Re-finalizing the cell hash is cheaper than hashing the cell again and, the avalanche
+                // being what it is, just as independent of the ten-bit slices already spent.
+                uint  ha        = CloudHashFinalize( h ^ 0x68BC21EBu );
+                float amplitude = float( ha & 0xFFFFu ) * ( 1.0f / 65535.0f );
 
                 float px = cx + ox - position.x;
                 float py = cy + oy - position.y;
                 float pz = cz + oz - position.z;
 
-                nearest = min( nearest, px * px + py * py + pz * pz );
+                float d = sqrt( px * px + py * py + pz * pz );
+                if ( d < 1.0f )
+                {
+                    // SideFX's radial basis, verbatim: smooth(1-d) with smooth(t) = t*t*(3 - 2*t).
+                    float t     = 1.0f - d;
+                    float value = amplitude * t * t * ( 3.0f - 2.0f * t );
+
+                    // Two running maxima rather than a sort: the algorithm needs the top two and nothing
+                    // else, and a 27-element sort in a dialect without arrays is not expressible anyway.
+                    if ( value > best )
+                    {
+                        second = best;
+                        best   = value;
+                    }
+                    else if ( value > second )
+                    {
+                        second = value;
+                    }
+                }
             }
         }
     }
 
-    return sqrt( nearest );
+    return best - second;
 }
 
-// INVERTED and normalized: 1 at a feature point, falling toward the cell boundary. This is the billow —
-// each cell reads as a lobe swelling out of its own centre, which is what a convective cloud is made of.
+// The [0, 1] form. MEASURED, exactly like every other range constant in this file and for the same reason:
+// the difference of the two largest contributions is mostly small, and a field whose 99th percentile sits
+// well below 1 cannot cut a cloud open however hard the erosion strength is driven. The raw field measures
+// min 0.000 / p01 0.001 / p50 0.117 / p99 0.700 / max 0.952 over a 48^3 grid at period 4, so the window is
+// its own p01..p99 and the suite prints those numbers and asserts that the remapped field still reaches
+// both ends — a change to the amplitude or the basis therefore fails here rather than in a frame six
+// weeks later.
 //
-// The distance is divided by 1.1 rather than by 1: the farthest a point can be from every feature point
-// exceeds one cell diagonal only in the degenerate case where all 27 offsets sit in the far corners, and
-// dividing by the theoretical bound would leave the field permanently short of 1 — the same defect the
-// range test caught in the fractal sum.
-float CloudWorley01( vec3 position, float period, uint seed )
-{
-    return clamp( 1.0f - CloudWorleyPeriodic( position, period, seed ) * ( 1.0f / 1.1f ), 0.0f, 1.0f );
-}
-
-// Fractal sum of inverted Worley, at Guerrilla's weights (0.625 / 0.25 / 0.125 — deck lineage, and they
-// do not sum to 1 by accident: the coarse octave has to dominate or the billows dissolve into gravel).
-// The period doubles with the frequency, for the same reason it does in the Perlin sum.
-// MEASURED, LIKE THE GRADIENT SUM ABOVE, and for the same reason. Averaging cellular octaves pulls the
-// result toward the middle: Desert/Tests/Engine/CloudNoise measures the raw sum at 0.29 to 0.77 between
-// the 1st and 99th percentile. Left there, an erosion field that never reaches 0 cannot cut a cloud open
-// and one that never reaches 1 cannot leave a core solid — the edges turn to mush and the whole layer
-// loses contrast, which is exactly what it did.
-#define CLOUD_WORLEY_FBM_LOW  0.29f
-#define CLOUD_WORLEY_FBM_HIGH 0.78f
-
-float CloudWorleyFbm( vec3 position, float period, uint seed, int octaves )
-{
-    float sum       = 0.0f;
-    float total     = 0.0f;
-    float amplitude = 0.625f;
-    float frequency = 1.0f;
-    float wrap      = period;
-
-    for ( int i = 0; i < octaves; ++i )
-    {
-        vec3 sampleAt = vec3( position.x * frequency, position.y * frequency, position.z * frequency );
-        sum   = sum + amplitude * CloudWorley01( sampleAt, wrap, seed + uint( i ) * 313u );
-        total = total + amplitude;
-
-        amplitude = amplitude * 0.4f;
-        frequency = frequency * 2.0f;
-        wrap      = wrap * 2.0f;
-    }
-
-    float raw = sum / max( total, 1e-6f );
-    return clamp( CloudRemap( raw, CLOUD_WORLEY_FBM_LOW, CLOUD_WORLEY_FBM_HIGH, 0.0f, 1.0f ), 0.0f, 1.0f );
-}
-
-// Perlin-Worley: Schneider's composite (Horizon Zero Dawn, SIGGRAPH 2015), and the base shape every
-// cloud renderer since has been built on.
+// THE HISTOGRAM IS SKEWED BY CONSTRUCTION and has to be stated, not left to be discovered. The difference
+// of the two largest contributions is near zero over most of space — that IS the noise, it is what "billows
+// as opposed to packed spheres" (deck p.95) means numerically, and it is exactly the asymmetry inverted
+// Worley does not have. Linearly remapped, the field measures p01 0.001 / p25 0.057 / p50 0.152 / p75 0.324
+// / p99 0.927 over a 64^3 grid at period 6.
 //
-// The construction is a remap of the gradient noise into a range whose FLOOR is the cellular field. Where
-// the cells are dense the Perlin is pushed up; where they are sparse it is pulled down. The result keeps
-// Perlin's connected, wind-blown continuity — which pure Worley does not have, it looks like foam — while
-// taking its local relief from the cells. Neither noise alone reads as cloud.
-// MEASURED AGAIN, and this one was not optional. The composite's lower bound moves DOWN with the
-// cellular field, so the remap's window widens exactly where the result would otherwise be small: the
-// raw form was measured at 0.32 to 0.99 with a median of 0.66 and a floor of 0.166. Used as a coverage
-// field it therefore passed almost any threshold, and the sky rendered as a uniform overcast haze at
-// every setting of the Coverage slider — the second time in this programme that an unmeasured noise
-// range produced a picture that looked like a tuning problem and was not one.
-#define CLOUD_PERLIN_WORLEY_LOW  0.32f
-#define CLOUD_PERLIN_WORLEY_HIGH 0.99f
+// (Those figures are the raw field at period 6; the shipped volume's coarser periods narrow the tails a
+// little without moving the middle, which is what the suite prints and pins.)
+//
+// AND A FIELD THIS SKEWED CANNOT BE THRESHOLDED BY A SLIDER CALIBRATED AGAINST A SYMMETRIC ONE. Every
+// consumer of this volume compares it against a number: the coverage threshold, the erosion depth, the type
+// variance. The four channels it replaces measured a median of 0.48 to 0.53 apiece, and every default and
+// every documented table in the component was measured against that. Dropped in unshaped, the wispy pair
+// (which is one minus this field) carries a median of 0.83, and the FIRST FRAME rendered was a solid
+// overcast ceiling at a Coverage of 0.25 whose documented meaning is scattered cumulus — not because the
+// noise was wrong but because the slider was now reading a different part of the distribution.
+//
+// So the exponent below, and it is the only honest way to fix that: it is MONOTONE, so it does not move a
+// single level set — the silhouettes, the webs and the lobes are bit for bit the ones the Alligator
+// produces — it only relabels the values so that the median lands at 0.5 where every consumer expects it.
+// The character of the noise is the change we wanted; the calibration of the slider is not.
+//
+// 0.367 = ln(0.5)/ln(0.152), the one number that puts the measured median at the middle. Afterwards the
+// field measures p01 0.089 / p25 0.348 / p50 0.500 / p75 0.661 / p99 0.972, against 0.000 / 0.310 / 0.479 /
+// 0.654 / 1.000 for the inverted-Worley channel it replaces — the same calibration, a different shape.
+#define CLOUD_ALLIGATOR_LOW          0.0f
+#define CLOUD_ALLIGATOR_HIGH         0.70f
+#define CLOUD_ALLIGATOR_MEDIAN_SHAPE 0.367f
 
-float CloudPerlinWorley01( vec3 position, float period, uint seed, int octaves )
+float CloudAlligator01( vec3 position, float period, uint seed )
 {
-    float perlin = CloudPerlinFbm01( position, period, seed, octaves );
-    float worley = CloudWorleyFbm( position, period, seed + 7717u, octaves );
+    float linear = clamp( CloudRemap( CloudAlligator( position, period, seed ), CLOUD_ALLIGATOR_LOW,
+                                      CLOUD_ALLIGATOR_HIGH, 0.0f, 1.0f ),
+                          0.0f, 1.0f );
 
-    float composite = CloudRemap( perlin, worley - 1.0f, 1.0f, 0.0f, 1.0f );
-    return clamp( CloudRemap( composite, CLOUD_PERLIN_WORLEY_LOW, CLOUD_PERLIN_WORLEY_HIGH, 0.0f, 1.0f ), 0.0f,
-                  1.0f );
+    return pow( linear, CLOUD_ALLIGATOR_MEDIAN_SHAPE );
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -366,16 +333,68 @@ vec3 CloudCurl( vec3 position, float period, uint seed )
     return vec3( cx, cy, cz );
 }
 
-// A gradient field whose sample position has been sheared by the curl above. This is the wispy end of the
-// erosion: the same fractal sum, dragged sideways by a divergence-free flow.
-float CloudCurlyPerlin01( vec3 position, float period, uint seed, int octaves, float strength )
+// Curly-Alligator, and it is the deck's construction in the deck's own order (p.95): "we started with
+// INVERTED alligator noise, which creates nice web like shapes, and then DISTORTED it using curl noise. We
+// call this Curly-Alligator noise."
+//
+// Both halves are load-bearing. The inversion turns the Alligator's zero-valued cell seams into ridges, so
+// the field reads as a web of filaments rather than as a scatter of lobes — the wispy end of the erosion,
+// which is what the deck says Perlin-Worley was not pure enough to supply. The curl then shears that web
+// sideways along a DIVERGENCE-FREE flow: a divergent offset field would pull the filaments apart into
+// holes, while a divergence-free one drags them, which is what turns a straight strand into the hooks a
+// real cloud edge has where air is moving past it.
+//
+// The distortion is applied to the SAMPLE POSITION, not to the value, which is why the result is still a
+// periodic field: the curl potential shares the period, so a shift by one period moves the flow and the
+// alligator lattice by exactly the same amount.
+float CloudCurlyAlligator01( vec3 position, float period, uint seed, float strength )
 {
     vec3 flow = CloudCurl( position, period, seed + 5051u );
 
     vec3 sheared = vec3( position.x + flow.x * strength, position.y + flow.y * strength,
                          position.z + flow.z * strength );
 
-    return CloudPerlinFbm01( sheared, period, seed, octaves );
+    return 1.0f - CloudAlligator01( sheared, period, seed );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The volume
+// ---------------------------------------------------------------------------------------------------
+
+// THE FOUR CHANNELS OF THE CLOUD NOISE VOLUME, in one place, written once.
+//
+// The layout is the deck's (p.96), channel for channel: "The first two channels are low and high frequency
+// Curly-Alligator noise and the last two are Low and High frequency Alligator Noise."
+//
+//   R  Curly-Alligator, low  frequency   WISPY, coarse   — also the coarse coverage field
+//   G  Curly-Alligator, high frequency   WISPY, fine     — also the coverage field's edge roughening
+//   B  Alligator,       low  frequency   BILLOWY, coarse — the erosion of a heaped cloud
+//   A  Alligator,       high frequency   BILLOWY, fine   — the erosion of a flat sheet
+//
+// The deck's own volume is 128^3 with four channels (p.96) and ours is the same resolution in RGBA8,
+// 8 MiB — which is also UE's arrangement for `Noise_Texture3D`, "each color channel describes a different
+// noise pattern" (UEReference/Documentation/EpicDoc_CloudMaterial.md section 4). The one place we differ
+// from UE is that our alpha IS used; UE's is not, and a channel nobody reads is a quarter of the bandwidth
+// of every sample in the march paid forever.
+//
+// WHY THIS IS A FUNCTION AND NOT FOUR CALLS AT THE CALL SITE. It has exactly two callers — the offline
+// generator that writes the volume and the field test that reads a volume it did not bake — and they are
+// obliged to agree channel for channel. Written twice, they agree until the first tuning pass.
+//
+// The periods are lattice cells across the unit cube and must divide it a whole number of times, or REPEAT
+// sampling puts a seam through the sky. They are parameters rather than constants because they are what an
+// artist changes to get a different edge: the same four noises at half the period is a different cloud.
+vec4 CloudNoiseVolumeChannels( vec3 uvw, uint seed, float curlStrength, float wispyPeriodLF,
+                               float wispyPeriodHF, float billowPeriodLF, float billowPeriodHF )
+{
+    // The seed offsets are distinct primes so that two channels sharing a period cannot land on the same
+    // lattice values and read as one channel with a strange amplitude.
+    float r = CloudCurlyAlligator01( uvw * wispyPeriodLF, wispyPeriodLF, seed + 0u, curlStrength );
+    float g = CloudCurlyAlligator01( uvw * wispyPeriodHF, wispyPeriodHF, seed + 977u, curlStrength );
+    float b = CloudAlligator01( uvw * billowPeriodLF, billowPeriodLF, seed + 1861u );
+    float a = CloudAlligator01( uvw * billowPeriodHF, billowPeriodHF, seed + 2749u );
+
+    return vec4( r, g, b, a );
 }
 
 #endif // CLOUD_NOISE_GLSLH

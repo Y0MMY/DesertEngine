@@ -3,6 +3,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 
+#include <Engine/Assets/Common.hpp>
 #include <Engine/Reflection/ReflectionMacros.hpp>
 
 #include <cstdint>
@@ -20,15 +21,14 @@ namespace Desert::ECS
     // vertical profile multiplied by a coverage field (deck p.19), eroded by a remap rather than a
     // subtraction (p.120).
     //
-    // EVERY FIELD BELOW IS READ, and it reaches the GPU by one of two routes rather than one. Most of the
-    // fields are packed into Graphic::CloudGpuPayload — TWELVE vec4s, that is 48 floats and 192 bytes,
-    // with no padding and no reserved slot. The four bake settings (the two seeds and the two octave
-    // counts) are NOT in that block: they decide what the noise volume CONTAINS rather than how the march
-    // reads it, so they travel as Graphic::CloudNoiseBakeKey, four unsigned words riding a push constant,
-    // which doubles as the key that decides whether to rebake. Either way each field has a named consumer,
-    // and Desert/Tests/Engine/SettingConsumers names it. The contract forbids a knob that moves nothing,
-    // and this component is where that is easiest to get wrong, because a cloud parameter that does
-    // nothing still LOOKS like it does when the sky is already busy.
+    // EVERY FIELD BELOW IS READ, and it reaches the GPU by one of two routes rather than one. Every scalar
+    // is packed into Graphic::CloudGpuPayload — TWELVE vec4s, that is 48 floats and 192 bytes, with no
+    // padding and no reserved slot. The one field that is not a scalar is NoiseVolume, which names an
+    // asset: Graphic::System::VolumetricCloudRenderer resolves the handle, uploads the container's voxels
+    // into an Image3D and binds it. Either way each field has a named consumer, and
+    // Desert/Tests/Engine/SettingConsumers names it. The contract forbids a knob that moves nothing, and
+    // this component is where that is easiest to get wrong, because a cloud parameter that does nothing
+    // still LOOKS like it does when the sky is already busy.
     //
     // UNITS. Distances are world units — centimetres (Length) — and are converted to kilometres exactly
     // once, in Graphic::PackCloudParams. The planet radius is the one exception and is authored in
@@ -120,15 +120,21 @@ namespace Desert::ECS
         // renderable density, over one period of the coverage field at contrast 1 with the defaults of
         // this component. Desert/Tests/Engine/CloudField measures it and prints exactly this row, so it
         // is reproducible rather than remembered — the figures here are the ones that suite emitted after
-        // the weather tile moved onto the calibrated 12 km:
+        // the noise volume became an asset and its channels became Alligator and Curly-Alligator:
         //
         //     Coverage   0.00   0.10   0.20   0.30   0.40   0.50
-        //     sky cover     0%     11%    48%    85%    96%   100%
+        //     sky cover     0%      2%    37%    89%    99%   100%
         //
-        // Both ends are exact by construction, which they were NOT before: the threshold spans the field's
-        // whole range, so 0 is genuinely clear and 1 genuinely solid. The useful band is 0.15 to 0.35 —
-        // the curve is steep because a slanted ray crosses many columns, and that steepness is a property
-        // of the geometry rather than of the slider.
+        // THE ROW MOVED WHEN THE NOISE DID. It read 0 / 11 / 48 / 85 / 96 / 100 while the coverage field
+        // was two octaves of Perlin-Worley; the whole curve has since shifted about five points of slider
+        // to the right, because the combined field's median went from 0.524 to 0.477. The default did NOT
+        // have to move with it: 0.25 used to sit near the top of the useful band and now sits in the
+        // middle of it, which is where a default belongs.
+        //
+        // Both ends are exact by construction: the threshold spans the field's whole range, so 0 is
+        // genuinely clear and 1 genuinely solid. The useful band is 0.15 to 0.35 — the curve is steep
+        // because a slanted ray crosses many columns, and that steepness is a property of the geometry
+        // rather than of the slider.
         float Coverage = 0.25f;
 
         PROPERTY( DisplayName( "Coverage Contrast" ), Category( "Weather" ), Range( 0.1f, 4.0f ),
@@ -162,15 +168,21 @@ namespace Desert::ECS
         // MaxViewDistance for what the two of them together decide and for where it was measured.
         float WeatherTileSize = 1200000.0f; // 12 km -> 3 km cells, a cumulus field
 
-        PROPERTY( DisplayName( "Weather Seed" ), Category( "Weather" ), Range( 0, 100000 ), Advanced,
-                  Tooltip( "Changes which clouds the coverage field produces without changing their "
-                           "statistics. Rebakes the noise volume." ) )
-        int32_t WeatherSeed = 1337;
+        // ---- Noise ----------------------------------------------------------------------------------
 
-        PROPERTY( DisplayName( "Weather Octaves" ), Category( "Weather" ), Range( 1, 6 ), Advanced,
-                  Tooltip( "How many octaves of the coverage field are summed. More octaves means more "
-                           "irregular island outlines and a proportionally more expensive bake." ) )
-        int32_t WeatherOctaves = 3;
+        PROPERTY( DisplayName( "Noise Volume" ), Category( "Noise" ), Asset<CloudNoiseVolumeAsset>,
+                  Tooltip( "The 3D noise the shape is built from — drag a .dcnv from the Content Browser or "
+                           "bake one in Window > Cloud Noise Volume. Empty uses the engine's built-in "
+                           "default. Two volumes with different seeds or periods give the same weather a "
+                           "different EDGE, which is the whole reason this is an asset." ) )
+        // THE SEEDS AND OCTAVE COUNTS THAT USED TO SIT HERE ARE GONE, and they are not hidden anywhere:
+        // WeatherSeed, WeatherOctaves, DetailSeed and DetailOctaves described a GPU bake that no longer
+        // exists. They were properties of what the volume CONTAINS, so they moved into the volume — the
+        // container's header stores the seed, the four lattice periods and the curl strength, the panel
+        // authors them, and the generator is the only thing that reads them. Left on the component they
+        // would have been four sliders that rebake nothing, which is the exact shape of dead setting this
+        // programme's contract forbids.
+        Assets::AssetHandle NoiseVolume;
 
         // ---- Detail ---------------------------------------------------------------------------------
 
@@ -187,15 +199,6 @@ namespace Desert::ECS
         // shape it cuts into. At 0.5 the erosion was removing most of the layer and leaving a veil, which
         // is the symptom I chased for several iterations before this reference arrived.
         float DetailStrength = 0.1f;
-
-        PROPERTY( DisplayName( "Detail Seed" ), Category( "Detail" ), Range( 0, 100000 ), Advanced,
-                  Tooltip( "Seeds the erosion field independently of the coverage field, so the two "
-                           "cannot produce correlated structure. Rebakes the noise volume." ) )
-        int32_t DetailSeed = 13;
-
-        PROPERTY( DisplayName( "Detail Octaves" ), Category( "Detail" ), Range( 1, 6 ), Advanced,
-                  Tooltip( "How many octaves of the erosion field are summed." ) )
-        int32_t DetailOctaves = 2;
 
         PROPERTY( DisplayName( "Density Scale" ), Category( "Detail" ), Range( 0.0f, 2.0f ),
                   Tooltip( "Multiplies the eroded density. Below 1 the whole layer thins toward haze; "

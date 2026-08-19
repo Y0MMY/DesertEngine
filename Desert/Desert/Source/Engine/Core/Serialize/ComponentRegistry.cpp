@@ -13,6 +13,7 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
+#include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -223,6 +224,11 @@ namespace Desert::Core::Serialize
                     auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) );
                     return a ? a->GetMetadata().Filepath.string() : "";
                 }
+                if ( type == "CloudNoiseVolumeAsset" )
+                {
+                    auto a = mgr.FindByHandle<Assets::CloudNoiseVolumeAsset>( Common::UUID( handle ) );
+                    return a ? a->GetMetadata().Filepath.string() : "";
+                }
                 if ( type == "FontAsset" )
                 {
                     // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
@@ -291,6 +297,24 @@ namespace Desert::Core::Serialize
                     // Textures are registered from cooked paths by the preloader; just look up by path.
                     auto a = mgr.FindByPath<Assets::TextureAsset>( path );
                     return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
+                }
+                if ( type == "CloudNoiseVolumeAsset" )
+                {
+                    // A scene may name a volume the Assets/Clouds scan never saw — one saved elsewhere in
+                    // the project. Create, load and upload it here so the reference survives a cold start
+                    // and not only an in-session pick, exactly as the material branch above does.
+                    auto a = mgr.FindByPath<Assets::CloudNoiseVolumeAsset>( path );
+                    if ( !a )
+                        a = m.CreateAsset<Assets::CloudNoiseVolumeAsset>( Assets::AssetPriority::Medium, path );
+                    if ( !a )
+                        return 0;
+                    if ( !a->IsReadyForUse() && !a->Load() )
+                        return 0;
+                    if ( const auto uploaded = Runtime::ResourceRegistry::GetCloudNoiseService()->Register( a );
+                         !uploaded )
+                        LOG_ERROR( "[Clouds] Noise volume '{}' named by the scene could not be uploaded: {}", path,
+                                   uploaded.GetError() );
+                    return static_cast<uint64_t>( a->GetMetadata().Handle );
                 }
                 if ( type == "FontAsset" )
                 {

@@ -79,6 +79,7 @@ namespace Desert::Player
         m_AssetPreloader->PreloadShaders(); // MUST precede the render systems (ctors resolve shaders)
         m_AssetPreloader->PreloadMeshes();
         m_AssetPreloader->PreloadSkyboxes();
+        m_AssetPreloader->PreloadCloudNoiseVolumes();
 
         // Same system set + order as the editor's Play mode.
         m_Scene->AddSystem<ECS::MeshECSSystem>();

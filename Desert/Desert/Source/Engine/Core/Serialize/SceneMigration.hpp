@@ -23,9 +23,12 @@ namespace Desert::Core
     // it below - "bump this only if the world unit changes again" - so reusing it would couple two
     // migrations that have nothing to do with each other: an old metres-era scene would be declared
     // sky-migrated the moment someone re-saved it for units, and vice versa.
-    inline constexpr int kSceneVersionSky     = 1;
-    inline constexpr int kSceneVersionTonemap = 2;
-    inline constexpr int kSceneVersion        = kSceneVersionTonemap;
+    //   3             - the cloud noise volume is an ASSET, so the four bake settings are gone from the
+    //                   component and from the file
+    inline constexpr int kSceneVersionSky        = 1;
+    inline constexpr int kSceneVersionTonemap    = 2;
+    inline constexpr int kSceneVersionCloudNoise = 3;
+    inline constexpr int kSceneVersion           = kSceneVersionCloudNoise;
 
     // World-unit generation of a .desce file. Absent (or 0) means the scene was authored when one world
     // unit was one METRE; today a unit is a CENTIMETRE (Common/Core/Units.hpp), so such a scene is scaled
@@ -159,6 +162,38 @@ namespace Desert::Core
     // arrives it gets its own v2 -> v3 successor, and this one is deleted once no v1 file remains.
     TonemapMigrationReport MigrateTonemapperV1ToV2( std::optional<rfl::Generic>& settings );
 
+    // What MigrateCloudNoiseV2ToV3 removed, returned rather than logged, for the same reason as the three
+    // above.
+    struct CloudNoiseMigrationReport
+    {
+        int Entities      = 0; // entities carrying a "VolumetricCloud" payload that was touched
+        int FieldsDropped = 0; // individual bake settings deleted (0..4 per entity)
+    };
+
+    // Raises a scene from schema v2 to v3: deletes "WeatherSeed", "WeatherOctaves", "DetailSeed" and
+    // "DetailOctaves" from every "VolumetricCloud" payload.
+    //
+    // WHY DELETE AND NOT CARRY. Those four numbers parameterised a GPU bake that no longer exists; the
+    // noise volume is an asset now, and the seed and periods that make one live in the volume's own header
+    // (Engine/Assets/CloudNoiseVolume.hpp). There is nowhere on the component to carry them TO. Turning
+    // each scene's seed into a freshly baked volume would have been the other option and was rejected: a
+    // 128^3 bake costs tens of seconds, it would have written an 8 MiB file per scene for a value nobody
+    // authored deliberately, and the volumes would differ between scenes for no reason an artist could see.
+    // The scenes therefore adopt the default volume, and the entity keeps every parameter that still means
+    // something.
+    //
+    // Left BEHIND on purpose: the new "NoiseVolume" slot is not written. An absent key is how the
+    // reflection serializer spells "keep the C++ default", and the C++ default is an empty handle, which is
+    // exactly "use the built-in default volume". Writing a path here would invent a choice for the artist.
+    //
+    // PURE - no GPU, no filesystem, no global state, and not even a log line: the counters go back to the
+    // loader, which is the one that knows which file this was.
+    //
+    // Idempotent: a payload with none of the four keys is left byte-identical and reports zero.
+    //
+    // SHELF LIFE: this raises v2 to v3 and nothing else. It is deleted once no v2 file remains.
+    CloudNoiseMigrationReport MigrateCloudNoiseV2ToV3( std::vector<Assets::EntityData>& entities );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -168,10 +203,12 @@ namespace Desert::Core
         UnitMigrationReport    Units;
         bool                   TonemapperRaised = false; // the schema was below kSceneVersionTonemap
         TonemapMigrationReport Tonemap;
+        bool                      CloudNoiseRaised = false; // the schema was below kSceneVersionCloudNoise
+        CloudNoiseMigrationReport CloudNoise;
 
         bool Changed() const
         {
-            return SkyRaised || UnitsRaised || TonemapperRaised;
+            return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised;
         }
     };
 

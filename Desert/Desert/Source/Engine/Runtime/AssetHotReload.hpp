@@ -23,6 +23,9 @@ namespace Desert::Runtime
     //   .demat  — re-parses the material asset and re-applies it onto its runtime material
     //             (PBR fast path or DataDrivenMaterial); a SHADER change in the file rebuilds
     //             the runtime material and refreshes every mesh component using that slot.
+    //   .dcnv   — re-reads the cloud noise volume and re-uploads it, so a bake in the Cloud Noise Volume
+    //             panel is visible in the sky the next frame without a restart. Nothing needs telling:
+    //             the cloud renderer resolves its volume through the service every frame.
     //   .shader — recompiles the program (errors land in the log / Logs panel, the old
     //             pipelines keep drawing); on success the pipeline cache entries for that
     //             shader are dropped after a device-idle wait, so the next frame draws with
@@ -40,6 +43,9 @@ namespace Desert::Runtime
     private:
         void PollMaterials( Assets::AssetManager& assetManager, Core::Scene* scene );
         void PollShaders( Assets::AssetManager& assetManager, Core::Scene* scene );
+        // No scene argument: a volume is not referenced by any component the way a material is — the
+        // renderer looks its own up by handle every frame — so there is nothing in the scene to refresh.
+        void PollCloudNoiseVolumes( Assets::AssetManager& assetManager );
 
         // Records @p path's mtime and reports whether it MOVED since the last poll. A file seen for the
         // first time returns false: the first sighting is a baseline, not an edit.

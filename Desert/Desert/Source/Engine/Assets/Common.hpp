@@ -29,5 +29,9 @@ namespace Desert::Assets
         Skeleton,
         Animation,
         Prefab,
+        // The volumetric clouds' 3D noise (`.dcnv`). A first-class asset rather than a bake output, so an
+        // artist can author several and drop one into the cloud component's slot — see
+        // Engine/Assets/CloudNoiseVolume.hpp.
+        CloudNoiseVolume,
     };
 } // namespace Desert::Assets

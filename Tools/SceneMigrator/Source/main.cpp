@@ -129,6 +129,17 @@ int main( int argc, char** argv )
                       << ( report.Tonemap.OperatorPinned ? "tonemapper pinned to Reinhard"
                                                          : "tonemapper NOT pinned — see the warning above" )
                       << ( report.Tonemap.SettingsCreated ? ", settings block created" : "" ) << ")";
+        if ( report.CloudNoiseRaised )
+        {
+            std::cout << " scene v" << Desert::Core::kSceneVersionTonemap << "->v"
+                      << Desert::Core::kSceneVersionCloudNoise << " (";
+            if ( report.CloudNoise.Entities > 0 )
+                std::cout << report.CloudNoise.FieldsDropped << " cloud bake setting(s) dropped from "
+                          << report.CloudNoise.Entities << " entity(ies)";
+            else
+                std::cout << "stamp only — no cloud layer carried a bake setting";
+            std::cout << ")";
+        }
         if ( report.UnitsRaised )
             std::cout << " units v0->v" << Desert::Core::kUnitVersion << " (" << report.Units.Entities
                       << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected

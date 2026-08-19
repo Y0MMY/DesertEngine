@@ -273,21 +273,23 @@ TEST( CloudFieldCoverage, TheUsefulBandIsTheOneTheComponentsDefaultSitsIn )
     // the component's own documentation assume it is. A change that moves the whole mapping without
     // anybody noticing is exactly how a sky ends up "needing retuning" in every scene at once.
     //
-    // MEASURED HERE, and re-measured when the weather tile moved onto the calibrated 12 km
-    // (32 columns, 36 heights, contrast 1, layer and seeds as shipped) — the row this test prints:
+    // MEASURED HERE, and re-measured whenever the field underneath it changes
+    // (32 columns, 36 heights, contrast 1, layer and volume as shipped) — the row this test prints:
     //
     //     Coverage    0.05   0.10   0.12   0.20   0.30   0.50
-    //     opaque        0%     1%     4%    20%    58%    98%
+    //     opaque        0%     0%     0%     4%    50%   100%
     //
-    // The tile size moves these figures without moving the mapping: the coverage field is periodic in the
-    // tile and the grid spans one period of it, so the population is the same one — what changes is the
-    // phase of the EROSION field against it, which is what shifts the opaque column by a couple of points.
-    // The row before the tile changed was 0 / 1 / 2 / 20 / 63 / 99, inside these same tolerances.
+    // THE ROW MOVED WHEN THE NOISE DID, and by how much is the number worth keeping. Until the volume
+    // became an asset the coverage field was two octaves of Perlin-Worley and this row read
+    // 0 / 1 / 4 / 20 / 58 / 98; it is now two frequencies of Curly-Alligator (Nubis Cubed p.96) and the
+    // whole curve has shifted about five points of slider to the RIGHT. The cause is measurable and is in
+    // Common/CloudNoise.glslh: the combined field's median went from 0.524 to 0.477 and its upper quartile
+    // from 0.636 to 0.592, so the same threshold now cuts a slightly thinner sky.
     //
-    // The qualitative claim the default rests on does survive: the slider does its work between about
-    // 0.05 and 0.30 and is saturated well before its top, so the advice to stay low is right even though
-    // the percentages are not. The tolerances are wide enough to survive a reseed and narrow enough to
-    // catch a shift the size of the one above.
+    // The qualitative claim the default rests on survives and is if anything better placed: the slider
+    // does its work between about 0.15 and 0.35 and is saturated well before its top, so the shipped
+    // default of 0.25 now sits in the MIDDLE of the useful band instead of near its top. The tolerances
+    // are wide enough to survive a reseed and narrow enough to catch a shift the size of the one above.
     constexpr int kColumns = 32;
     constexpr int kHeights = 36;
 
@@ -309,21 +311,23 @@ TEST( CloudFieldCoverage, TheUsefulBandIsTheOneTheComponentsDefaultSitsIn )
     // the statistic, so anything larger than this is the mapping itself having moved.
     EXPECT_NEAR( atFive.Opaque, 0.00f, 0.10f );
     EXPECT_NEAR( atTen.Opaque, 0.00f, 0.10f );
-    EXPECT_NEAR( atTwelve.Opaque, 0.01f, 0.10f );
-    EXPECT_NEAR( atTwenty.Opaque, 0.20f, 0.12f );
-    EXPECT_NEAR( atThirty.Opaque, 0.63f, 0.12f );
+    EXPECT_NEAR( atTwelve.Opaque, 0.00f, 0.10f );
+    EXPECT_NEAR( atTwenty.Opaque, 0.04f, 0.12f );
+    EXPECT_NEAR( atThirty.Opaque, 0.50f, 0.12f );
     EXPECT_GT( atFifty.Opaque, 0.97f ) << "the top half of the slider is not saturated";
 
     // The bottom of the band leaves the sky essentially open, and the top of it is essentially overcast.
-    // These two are what "the useful band is 0.05 to 0.20" has to mean if it means anything.
+    // These two are what "the useful band is 0.15 to 0.35" has to mean if it means anything.
     EXPECT_LT( atFive.Opaque, 0.15f ) << "the bottom of the useful band is already busy";
-    EXPECT_GT( atThirty.Opaque, 0.55f ) << "the band has not closed by 0.30 and the slider's top half is "
+    EXPECT_GT( atThirty.Opaque, 0.40f ) << "the band has not closed by 0.30 and the slider's top half is "
                                            "no longer the dead zone the component documents";
 
     // Strictly rising ACROSS the band, which is the part an artist feels. Ten points of slider must buy
-    // at least ten points of sky, or the control is mush exactly where it is meant to work.
-    EXPECT_GT( atTwenty.Opaque, atTen.Opaque + 0.10f );
+    // at least ten points of sky where the band actually is, or the control is mush exactly where it is
+    // meant to work. The pair is 0.20 -> 0.30 rather than 0.10 -> 0.20 because that is where the band now
+    // sits; below it the slider is deliberately in its dead zone and buying nothing is correct there.
     EXPECT_GT( atThirty.Opaque, atTwenty.Opaque + 0.15f );
+    EXPECT_GT( atFifty.Opaque, atThirty.Opaque + 0.10f );
 
     // And the thin half of the answer, which is the one that has bitten this programme before: a sky
     // that is mostly TOUCHED by cloud and hardly at all hidden by it is a sky full of veil. At the

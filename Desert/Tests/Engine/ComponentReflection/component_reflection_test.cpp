@@ -426,11 +426,12 @@ TEST( HeightFogReflection, DistancesAreLengthsAndEveryFieldIsAnnotatedWellEnough
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 32 fields in six groups. The layer geometry and the tracing limits are
+// VolumetricCloudData — 37 fields in seven groups. The layer geometry and the tracing limits are
 // UVolumetricCloudComponent's name for name, so a UE-calibrated sky transplants number for number; the
 // shape group is ours, because UE has no cloud-shape parameter on the component at all (its density is a
-// material graph). Every one of them is packed into Graphic::CloudGpuPayload or into the noise bake key —
-// SettingConsumers holds that half of the promise, this test holds the roster, the order and the defaults.
+// material graph). Every scalar is packed into Graphic::CloudGpuPayload and the one asset field names the
+// noise volume — SettingConsumers holds that half of the promise, this test holds the roster, the order
+// and the defaults.
 // ---------------------------------------------------------------------------------------------------
 
 TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
@@ -448,12 +449,9 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "CloudType",
          "CloudTypeVariance",
          "WeatherTileSize",
-         "WeatherSeed",
-         "WeatherOctaves",
+         "NoiseVolume",
          "DetailTileSize",
          "DetailStrength",
-         "DetailSeed",
-         "DetailOctaves",
          "DensityScale",
          "ExtinctionScale",
          "NearFadeStartDistance",
@@ -479,21 +477,28 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 40u );
+    EXPECT_EQ( cloud.Fields.size(), 37u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
     EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 7u );
-    EXPECT_EQ( CountInCategory( cloud, "Weather" ), 7u );
-    EXPECT_EQ( CountInCategory( cloud, "Detail" ), 8u );
+    EXPECT_EQ( CountInCategory( cloud, "Weather" ), 5u );
+    EXPECT_EQ( CountInCategory( cloud, "Noise" ), 1u );
+    EXPECT_EQ( CountInCategory( cloud, "Detail" ), 6u );
     EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 14u );
     EXPECT_EQ( CountInCategory( cloud, "Quality" ), 2u );
     EXPECT_EQ( CountInCategory( cloud, "Animation" ), 2u );
 
-    // The seeds and the octave counts belong to the BAKE and are deliberately absent from the march's
-    // parameter block (Common/CloudParams.glslh says so). They are still component fields, because the
-    // artist authors them — this pins that they did not migrate into some second home.
-    for ( const char* onTheComponent : { "WeatherSeed", "WeatherOctaves", "DetailSeed", "DetailOctaves" } )
-        EXPECT_NE( Find( cloud, onTheComponent ), nullptr ) << onTheComponent;
+    // THE FOUR BAKE SETTINGS ARE GONE, and this is where that is pinned. WeatherSeed, WeatherOctaves,
+    // DetailSeed and DetailOctaves parameterised a GPU bake that no longer exists; the seed and the
+    // lattice periods that make a volume live in the volume asset's own header now, and the component
+    // names the volume instead. A field that came back here would be a knob that rebakes nothing.
+    for ( const char* gone : { "WeatherSeed", "WeatherOctaves", "DetailSeed", "DetailOctaves" } )
+        EXPECT_EQ( Find( cloud, gone ), nullptr ) << gone << " is a bake setting and the bake is gone";
+
+    const FieldInfo* volume = Find( cloud, "NoiseVolume" );
+    ASSERT_NE( volume, nullptr );
+    EXPECT_TRUE( volume->Meta.IsAsset );
+    EXPECT_EQ( volume->Meta.AssetType, "CloudNoiseVolumeAsset" );
 
     // The wind OFFSET is not a field: it is state the ECS system integrates against the timestep. A
     // second copy on the component is a value that can disagree with the one the packer is handed.
@@ -528,15 +533,16 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CloudTypeVariance" ), 0.4f );
     // 12 km, the other half of the calibrated pair.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "WeatherTileSize" ), 1200000.0f );
-    EXPECT_EQ( DefaultOf<int32_t>( cloud, "WeatherSeed" ), 1337 );
-    EXPECT_EQ( DefaultOf<int32_t>( cloud, "WeatherOctaves" ), 3 );
+
+    // Noise: an EMPTY handle, which is the documented "use the engine's built-in default volume". A scene
+    // that names no volume — every scene in the repository, after the v2->v3 migration — must still have a
+    // sky, and that requirement is the reason the empty slot has a meaning rather than being a hole.
+    EXPECT_EQ( DefaultOf<uint64_t>( cloud, "NoiseVolume" ), 0u );
 
     // Detail: the erosion is an order of magnitude weaker than the shape it cuts into, which is UE's own
     // ratio (base noise 0.8 against detail 0.08). At 0.5 it removed most of the layer and left a veil.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailTileSize" ), 400000.0f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailStrength" ), 0.1f );
-    EXPECT_EQ( DefaultOf<int32_t>( cloud, "DetailSeed" ), 13 );
-    EXPECT_EQ( DefaultOf<int32_t>( cloud, "DetailOctaves" ), 2 );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DensityScale" ), 1.0f );
     // The EFFECTIVE extinction of a three-octave approximation, not the ~45/km of real cloud: at the
     // physical value every scattering order arrives at zero and the cloud renders uniformly grey.

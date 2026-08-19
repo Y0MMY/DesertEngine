@@ -263,13 +263,15 @@ TEST( SceneTonemapMigration, AV0SceneIsRaisedAllTheWay )
     EXPECT_FALSE( again.Changed() );
 }
 
-TEST( SceneTonemapMigration, TheTonemapperGenerationIsTheCurrentOne )
+TEST( SceneTonemapMigration, TheTonemapperGenerationIsBEHINDTheCurrentOneAndStillGatedOnItself )
 {
-    // States the relation the gate above depends on: the tonemapper migration is the newest one, so
-    // kSceneVersion is its target. A third migration added without moving this line would be gated on a
-    // version the loader already stamps, and would therefore never run.
-    EXPECT_EQ( kSceneVersion, kSceneVersionTonemap );
+    // States the relation the gate above depends on, and it is no longer "the tonemapper is the newest
+    // migration": the cloud-noise migration (v2 -> v3) landed behind it. What still has to hold is that
+    // each step is gated on ITS OWN constant — gating them all on kSceneVersion would send every v2 file
+    // back through the tonemapper the moment the head moved, and re-pin an operator somebody has since
+    // changed. That is why this asserts an ORDER rather than an equality.
     EXPECT_GT( kSceneVersionTonemap, kSceneVersionSky );
+    EXPECT_GE( kSceneVersion, kSceneVersionTonemap );
 }
 
 // ----------------------------------------------------------------------------------------------------

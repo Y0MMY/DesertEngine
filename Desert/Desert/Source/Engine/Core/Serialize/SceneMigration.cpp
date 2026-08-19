@@ -473,6 +473,59 @@ namespace Desert::Core
         return report;
     }
 
+    CloudNoiseMigrationReport MigrateCloudNoiseV2ToV3( std::vector<Assets::EntityData>& entities )
+    {
+        // The four keys the GPU bake was parameterised by. Named as data rather than tested for one at a
+        // time so the list can be read in one look and so the count in the report cannot drift from it.
+        static constexpr const char* kRemovedBakeKeys[] = { "WeatherSeed", "WeatherOctaves", "DetailSeed",
+                                                            "DetailOctaves" };
+
+        CloudNoiseMigrationReport report;
+
+        for ( auto& entity : entities )
+        {
+            const auto clouds = entity.Components.get( "VolumetricCloud" );
+            if ( !clouds.has_value() )
+                continue;
+
+            const auto fields = clouds.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': the VolumetricCloud payload is {1}, not an object - "
+                          "its bake settings could not be removed",
+                          entity.Tag.value_or( "Entity" ), Describe( clouds.value() ) );
+                continue;
+            }
+
+            // Rebuilt rather than erased in place: rfl::Object is an ordered vector of pairs with no erase,
+            // and copying every key except the four states the intent more plainly than an index dance
+            // would. Order is preserved, so a re-saved file differs from the old one only by the four lines.
+            rfl::Generic::Object kept;
+            int                  dropped = 0;
+
+            for ( const auto& [key, value] : fields.value() )
+            {
+                const bool isBakeKey = std::any_of( std::begin( kRemovedBakeKeys ), std::end( kRemovedBakeKeys ),
+                                                    [&key]( const char* removed ) { return key == removed; } );
+                if ( isBakeKey )
+                {
+                    ++dropped;
+                    continue;
+                }
+                kept[key] = value;
+            }
+
+            if ( dropped == 0 )
+                continue; // already raised, or authored after the move - leave the tree byte-identical
+
+            entity.Components["VolumetricCloud"] = rfl::Generic( std::move( kept ) );
+            report.Entities += 1;
+            report.FieldsDropped += dropped;
+        }
+
+        return report;
+    }
+
     SceneMigrationReport MigrateScene( SceneSerialized& scene )
     {
         SceneMigrationReport report;
@@ -493,6 +546,12 @@ namespace Desert::Core
         {
             report.TonemapperRaised = true;
             report.Tonemap          = MigrateTonemapperV1ToV2( scene.Settings );
+        }
+
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudNoise )
+        {
+            report.CloudNoiseRaised = true;
+            report.CloudNoise       = MigrateCloudNoiseV2ToV3( scene.Entities );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

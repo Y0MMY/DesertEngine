@@ -14,14 +14,12 @@ namespace Desert::Graphic::System
 {
     namespace
     {
-        // 8x8 for the screen-space march and 8x8x8 for the volume bake, matching the LocalSize each
-        // shader declares. Both are 64 or 512 invocations, inside every implementation's guaranteed
-        // maximum, and both dispatches bounds-check, so any target size is fine.
+        // 8x8 for the screen-space march, matching the LocalSize the shader declares. 64 invocations is
+        // inside every implementation's guaranteed maximum and the dispatch bounds-checks, so any target
+        // size is fine.
         constexpr uint32_t kMarchWorkGroupSize = 8;
-        constexpr uint32_t kBakeWorkGroupSize  = 8;
 
         constexpr const char* kMarchShaderName     = "CloudRaymarch";
-        constexpr const char* kNoiseBakeShaderName = "CloudNoiseBake";
         constexpr const char* kResolveShaderName   = "CloudTemporalResolve";
         constexpr const char* kCompositeShaderName = "CloudComposite";
 
@@ -54,8 +52,7 @@ namespace Desert::Graphic::System
     {
         if ( !CreatePipelines() )
             return Common::MakeError( "VolumetricCloudRenderer: the cloud shaders could not be resolved "
-                                      "(CloudRaymarch / CloudNoiseBake / CloudTemporalResolve / "
-                                      "CloudComposite)" );
+                                      "(CloudRaymarch / CloudTemporalResolve / CloudComposite)" );
 
         // Non-persistent, so the backend keeps one copy per (frame x recording renderer slot) — the
         // Docs/RENDERER_FRAME_STATE.md rule. A shared buffer would let an asset-thumbnail renderer
@@ -81,7 +78,6 @@ namespace Desert::Graphic::System
     void VolumetricCloudRenderer::Shutdown()
     {
         m_MarchPipeline.reset();
-        m_NoiseBakePipeline.reset();
         m_ResolvePipeline.reset();
         m_CompositePipeline.reset();
         m_CompositeMaterial.reset();
@@ -92,7 +88,6 @@ namespace Desert::Graphic::System
             m_HistoryImage[i].reset();
             m_HistoryGuideImage[i].reset();
         }
-        m_NoiseVolume.reset();
         m_ParamsBuffer.reset();
         m_ResolveParamsBuffer.reset();
     }
@@ -115,20 +110,6 @@ namespace Desert::Graphic::System
         if ( !m_MarchPipeline )
             return false;
         m_MarchPipeline->Invalidate();
-
-        const auto bakeShader = shaderService->GetByName( kNoiseBakeShaderName );
-        if ( !bakeShader )
-        {
-            LOG_ERROR( "[Clouds] Compute shader '{}' is not registered. Expected "
-                       "Editor/Resources/Shaders/Programs/Clouds/{}.shader.",
-                       kNoiseBakeShaderName, kNoiseBakeShaderName );
-            return false;
-        }
-        m_NoiseBakePipeline =
-             ComputePipeline::Create( { .Shader = bakeShader, .DebugName = kNoiseBakeShaderName } );
-        if ( !m_NoiseBakePipeline )
-            return false;
-        m_NoiseBakePipeline->Invalidate();
 
         const auto resolveShader = shaderService->GetByName( kResolveShaderName );
         if ( !resolveShader )
@@ -181,7 +162,7 @@ namespace Desert::Graphic::System
         if ( m_CompositePipeline )
             m_CompositePipeline->Invalidate();
 
-        return m_MarchPipeline && m_NoiseBakePipeline && m_ResolvePipeline && m_CompositePipeline;
+        return m_MarchPipeline && m_ResolvePipeline && m_CompositePipeline;
     }
 
     void VolumetricCloudRenderer::SetCloudSettings( bool present, const ECS::VolumetricCloudData& data,
@@ -291,61 +272,34 @@ namespace Desert::Graphic::System
         return true;
     }
 
-    bool VolumetricCloudRenderer::EnsureNoiseVolume( const CloudNoiseBakeKey& key )
+    bool VolumetricCloudRenderer::EnsureNoiseVolume()
     {
-        if ( m_NoiseFailed )
-            return false;
+        auto* service = Runtime::ResourceRegistry::GetCloudNoiseService();
 
-        if ( !m_NoiseVolume )
+        // Asked EVERY frame rather than cached behind a "have I got one" flag, because the answer changes
+        // for two independent reasons — the artist picks a different volume, or the file behind the one
+        // they already picked is re-baked and hot-reloaded. A flag would answer neither. The lookup is a
+        // hash-map probe against a handle; it is not worth a cache that can be wrong.
+        Image3D* volume = service->Get( m_Data.NoiseVolume );
+        if ( !volume )
         {
-            const Core::Formats::Image3DSpecification spec{
-                 .Tag        = "CloudNoise",
-                 .Width      = kCloudNoiseResolution,
-                 .Height     = kCloudNoiseResolution,
-                 .Depth      = kCloudNoiseResolution,
-                 .Format     = Core::Formats::ImageFormat::RGBA8F,
-                 .Properties = Core::Formats::Storage | Core::Formats::Sample,
-            };
-
-            m_NoiseVolume = Image3D::Create( spec );
-            if ( !m_NoiseVolume )
+            // The service has already logged which volume is missing and why. Latched so a scene with a
+            // broken reference does not print once per frame forever.
+            if ( !m_NoiseFailed )
             {
-                LOG_ERROR( "[Clouds] The {0}x{0}x{0} RGBA8 noise volume ({1:.2f} MiB) could not be created; "
-                           "the clouds will not render for this view.",
-                           kCloudNoiseResolution,
-                           BytesToMiB( Core::Formats::CalculateImageSize(
-                                kCloudNoiseResolution, kCloudNoiseResolution, kCloudNoiseResolution,
-                                Core::Formats::ImageFormat::RGBA8F ) ) );
                 m_NoiseFailed = true;
-                return false;
+                LOG_ERROR( "[Clouds] No noise volume could be resolved for this layer; the clouds will not "
+                           "render for this view until one is registered." );
             }
-
-            LOG_INFO( "[Clouds] Noise volume {0}x{0}x{0} RGBA8 ({1:.2f} MiB) allocated — baked on demand, "
-                      "not per frame.",
-                      kCloudNoiseResolution,
-                      BytesToMiB( Core::Formats::CalculateImageSize( kCloudNoiseResolution, kCloudNoiseResolution,
-                                                                     kCloudNoiseResolution,
-                                                                     Core::Formats::ImageFormat::RGBA8F ) ) );
+            return false;
         }
 
-        if ( m_NoiseBaked && m_BakedNoiseKey == key.Value )
-            return true;
+        // Cleared as soon as a volume does resolve: the failure above is a state of the SCENE, not of this
+        // renderer, and dropping a project's clouds for the rest of the session because one scene was
+        // opened with a stale reference is the kind of latch that reads as a broken build.
+        m_NoiseFailed = false;
 
-        auto& renderer = Renderer::GetInstance();
-
-        const uint32_t groups = GroupCount( kCloudNoiseResolution, kBakeWorkGroupSize );
-
-        renderer.ComputeImageBeginWrite( m_NoiseVolume.get() );
-        m_NoiseBakePipeline->SetOutput( kCloudNoiseBakeOutputBinding, m_NoiseVolume.get(), 0 );
-        m_NoiseBakePipeline->SetPushConstants( &key, static_cast<uint32_t>( sizeof( key ) ) );
-        renderer.DispatchComputeInFrame( m_NoiseBakePipeline.get(), groups, groups, groups );
-        renderer.ComputeImageEndWrite( m_NoiseVolume.get() );
-
-        m_BakedNoiseKey = key.Value;
-        m_NoiseBaked    = true;
-
-        LOG_INFO( "[Clouds] Noise volume baked: coverage seed {}, erosion seed {}, {} / {} octaves.", key.Value.x,
-                  key.Value.y, key.Value.z, key.Value.w );
+        m_NoiseVolume = volume;
         return true;
     }
 
@@ -355,8 +309,8 @@ namespace Desert::Graphic::System
 
         m_HasFrameResult = false;
 
-        if ( !m_MarchPipeline || !m_NoiseBakePipeline || !m_ResolvePipeline || !m_CompositePipeline ||
-             !m_ParamsBuffer || !m_ResolveParamsBuffer )
+        if ( !m_MarchPipeline || !m_ResolvePipeline || !m_CompositePipeline || !m_ParamsBuffer ||
+             !m_ResolveParamsBuffer )
             return;
 
         if ( !m_Present || !m_Data.Enabled )
@@ -382,7 +336,7 @@ namespace Desert::Graphic::System
                                   HalfExtent( target->GetFramebufferHeight() ) ) )
             return;
 
-        if ( !EnsureNoiseVolume( MakeCloudNoiseBakeKey( m_Data ) ) )
+        if ( !EnsureNoiseVolume() )
             return;
 
         const CloudGpuPayload payload = PackCloudParams( m_Data, atmosphere, m_WindOffset );
@@ -405,7 +359,7 @@ namespace Desert::Graphic::System
         // layout is not legal for a combined image sampler, and SetInput binds the tracked layout
         // verbatim.
         renderer.ComputeImageBeginRead( depthImage );
-        renderer.ComputeImageBeginRead( m_NoiseVolume.get() );
+        renderer.ComputeImageBeginRead( m_NoiseVolume );
         renderer.ComputeImageBeginWrite( m_TraceImage.get() );
         renderer.ComputeImageBeginWrite( m_TraceGuideImage.get() );
 
@@ -413,7 +367,7 @@ namespace Desert::Graphic::System
         m_MarchPipeline->SetOutput( kCloudGuideOutputBinding, m_TraceGuideImage.get(), 0 );
         m_MarchPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
         m_MarchPipeline->SetInput( kCloudSceneDepthBinding, depthImage );
-        m_MarchPipeline->SetInput( kCloudNoiseBinding, m_NoiseVolume.get() );
+        m_MarchPipeline->SetInput( kCloudNoiseBinding, m_NoiseVolume );
 
         // ALWAYS bound, even when the payload's gate says it will not be read: a declared sampler with no
         // image is an invalid descriptor set, not an unused one, and this backend answers an invalid set
@@ -443,7 +397,7 @@ namespace Desert::Graphic::System
 
         renderer.ComputeImageEndWrite( m_TraceGuideImage.get() );
         renderer.ComputeImageEndWrite( m_TraceImage.get() );
-        renderer.ComputeImageEndRead( m_NoiseVolume.get() );
+        renderer.ComputeImageEndRead( m_NoiseVolume );
         renderer.ComputeImageEndRead( depthImage );
 
         // S2 — THE TEMPORAL RECONSTRUCTION. The slot written alternates with the frame index, so the one

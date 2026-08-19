@@ -32,6 +32,11 @@ namespace Common::Constants
         inline std::filesystem::path PREFAB_PATH        = "Resources/Assets/Prefabs/";
         inline std::filesystem::path SCRIPT_PATH        = "Resources/Assets/Scripts/";
         inline std::filesystem::path COLLECTIONS_PATH   = "Resources/Assets/Collections/";
+        // Cloud noise volumes (`.dcnv`) the artist bakes in the Cloud Noise Volume panel. Its own folder
+        // rather than Textures/ because a volume is not a texture to this engine: it has no importer, no
+        // cooked twin and no 2D preview, and mixing it into the texture scan would offer it in every
+        // texture slot in the editor.
+        inline std::filesystem::path CLOUD_NOISE_PATH = "Resources/Assets/Clouds/";
 
         // --- Cooked / intermediate (generated; PROJECT-owned) ---
         inline std::filesystem::path COOKED_PATH         = "Cooked/";
@@ -57,6 +62,7 @@ namespace Common::Constants
             PREFAB_PATH        = assets / "Prefabs/";
             SCRIPT_PATH        = assets / "Scripts/";
             COLLECTIONS_PATH   = assets / "Collections/";
+            CLOUD_NOISE_PATH   = assets / "Clouds/";
 
             const std::filesystem::path cooked = ( projectDir / "Cooked" ).lexically_normal();
             COOKED_PATH                        = cooked / "";
