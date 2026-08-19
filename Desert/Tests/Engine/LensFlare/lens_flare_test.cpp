@@ -18,6 +18,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 
 using namespace Desert::Tests::LensFlareRef;
@@ -28,12 +29,83 @@ using Desert::Graphic::SunScreen;
 
 namespace
 {
-    constexpr float kAspect = 1280.0f / 766.0f; // the shot resolution these were tuned at
+    constexpr float kAspect     = 1280.0f / 766.0f; // the shot resolution these were tuned at
+    constexpr float kShotWidth  = 1280.0f;
+    constexpr float kShotHeight = 766.0f;
     const glm::vec2 kCentre( 0.5f, 0.5f );
+
+    // The authored ghost train — Core::SceneSettings defaults, which is what Clouds_Demo and
+    // Sky_PhysicalShowcase both ship with. The continuity test below is about the train we actually draw,
+    // not an invented one.
+    constexpr float kGhostCount   = 4.0f;
+    constexpr float kGhostSpacing = 0.35f;
+    constexpr float kGhostNear    = 1.0f;
+    constexpr float kGhostFar     = 3.0f;
+
+    // The largest change in ghost weight allowed between two neighbouring PIXELS of the rendered frame.
+    //
+    // Where the number comes from. A band is visible when the weight's step times the ghost's own local
+    // radiance clears one 8-bit code value, 1/255. The brightest ghost contribution this programme has
+    // ever measured in a frame is 0.054 of displayed luminance — that is exactly the size of the Ц9 band,
+    // which was a full 1 -> 0 step, so it IS the ghost's local radiance there. Allowing a quarter of the
+    // displayed range, a 4.6x margin over that measurement, gives (1/255) / 0.25 = 1/64.
+    //
+    // A hard `step` cannot come near this and that is the point: it moves the weight by the whole rim
+    // value in one pixel — 0.99 with the sun low in the frame — sixty-three times the bound. The fade that
+    // replaced it peaks at 0.0078, exactly the 1.5/(w*scale*pixels) above and half of what is allowed here.
+    constexpr float kMaxWeightStepPerPixel = 1.0f / 64.0f;
 
     float Dist( const glm::vec2& a, const glm::vec2& b, float aspect )
     {
         return LensFlareDistance( a, b, aspect );
+    }
+
+    struct EdgeWalk
+    {
+        float MaxStep;    // largest change in weight between neighbouring pixels
+        float MaxWeight;  // how alive the ghost was along the walk — a walk through a dead ghost proves nothing
+        float AtBoundary; // the weight exactly ON the source frame's edge
+    };
+
+    // Walks one ghost's weight straight across the source frame, one rendered PIXEL at a time, and reports
+    // the biggest jump it took. The walk is laid out in SOURCE uv (from just outside one edge to just
+    // outside the other) and converted back to screen positions, because that is the axis the frame's
+    // boundary lives on: sourceUv.y depends only on uv.y, which is why a discontinuity here is a straight
+    // horizontal line on the screen rather than a rough edge somewhere.
+    EdgeWalk WalkAcrossTheSourceFrame( const glm::vec2& sun, int index, bool vertical )
+    {
+        const float     scale  = LensFlareGhostScale( float( index ), kGhostCount, kGhostNear, kGhostFar );
+        const glm::vec2 centre = LensFlareGhostCenter( sun, float( index ), kGhostSpacing );
+
+        // One screen pixel is this much of the source's uv. A ghost divides screen offsets by its own
+        // scale, so a big ghost crosses the source slowly and the smallest authored one — scale 1 — the
+        // fastest, which makes it the worst case and the reason the sweep below starts at index 0.
+        const float pixels = vertical ? kShotHeight : kShotWidth;
+        const float step   = 1.0f / ( pixels * scale );
+
+        EdgeWalk walk{ 0.0f, 0.0f, -1.0f };
+        float    previous = -1.0f;
+        for ( float s = -0.02f; s <= 1.02f; s += step )
+        {
+            glm::vec2 uv = centre;
+            if ( vertical )
+                uv.y = centre.y + ( s - sun.y ) * scale;
+            else
+                uv.x = centre.x + ( s - sun.x ) * scale;
+
+            const glm::vec2 source = LensFlareGhostSourceUv( uv, centre, scale, sun );
+            const float     weight = LensFlareGhostWeight( source, uv, centre, scale, kAspect );
+
+            if ( previous >= 0.0f )
+                walk.MaxStep = std::max( walk.MaxStep, std::fabs( weight - previous ) );
+            previous       = weight;
+            walk.MaxWeight = std::max( walk.MaxWeight, weight );
+
+            // The first sample at or past the near edge is the boundary itself, to within one pixel.
+            if ( walk.AtBoundary < 0.0f && s >= 0.0f )
+                walk.AtBoundary = weight;
+        }
+        return walk;
     }
 } // namespace
 
@@ -148,6 +220,58 @@ TEST( LensFlareGhosts, WeightIsZeroOutsideTheSourceFrame )
     EXPECT_FLOAT_EQ( LensFlareGhostWeight( glm::vec2( 1.4f, 0.5f ), centre, centre, 1.0f, kAspect ), 0.0f );
     EXPECT_FLOAT_EQ( LensFlareGhostWeight( glm::vec2( 0.5f, -0.2f ), centre, centre, 1.0f, kAspect ), 0.0f );
     EXPECT_GT( LensFlareGhostWeight( sun, centre, centre, 1.0f, kAspect ), 0.0f );
+
+    // And zero ON the boundary, not merely past it. The wrap starts at the first texel outside, so a gate
+    // that is still open AT the edge is a gate that hands the opposite edge to the very next sample.
+    EXPECT_FLOAT_EQ( LensFlareGhostWeight( glm::vec2( 0.0f, 0.5f ), centre, centre, 1.0f, kAspect ), 0.0f );
+    EXPECT_FLOAT_EQ( LensFlareGhostWeight( glm::vec2( 0.5f, 1.0f ), centre, centre, 1.0f, kAspect ), 0.0f );
+}
+
+TEST( LensFlareGhosts, WeightReachesZeroAtTheSourceFrameWithoutAStep )
+{
+    // THE Ц9 defect, as a relation rather than a value. "Zero outside the frame" and "more than zero
+    // inside it" are both true of a hard `step`, which is exactly how a full-width band survived to be
+    // found by a rendered frame instead of by this suite. What a step cannot satisfy is the relation
+    // BETWEEN neighbouring samples: sourceUv.y depends only on uv.y, so the gate closes on one constant
+    // screen ROW across the entire width — one straight line per ghost — and the aperture rim beside it
+    // can never soften that, because the rim only reaches zero past radius 0.75 while this boundary is
+    // crossed at min(sunUv.y, 1 - sunUv.y) <= 0.5, always sooner. In the frame that found it the rim was
+    // still 1.000 where the step fired: the ghost switched off at full brightness.
+    //
+    // So the assertion is continuity at the sampling rate we render at, on BOTH axes — the x boundary
+    // draws the same line down a column, and was invisible in that frame only because the source happened
+    // to be dark on that side.
+    const glm::vec2 suns[] = {
+         glm::vec2( 0.165f, 0.146f ), // the Ц9 shot: Clouds_Demo, camera 0,200,0, look 0,0.9,1
+         glm::vec2( 0.5f, 0.35f ),    // sun high in a centred frame — the rim is 0.90 at the crossing
+         glm::vec2( 0.78f, 0.30f ),   // mirrored, so the far edges (sourceUv -> 1) are walked too
+         glm::vec2( 0.30f, 0.72f ),   // sun low: the crossing is the BOTTOM edge
+    };
+
+    for ( const glm::vec2& sun : suns )
+        for ( int index = 0; index < static_cast<int>( kGhostCount ); ++index )
+            for ( bool vertical : { true, false } )
+            {
+                const EdgeWalk walk = WalkAcrossTheSourceFrame( sun, index, vertical );
+                const char*    axis = vertical ? "vertical" : "horizontal";
+
+                // Not a vacuous pass: the walk has to go through a ghost that is actually on. Without
+                // this a weight of zero everywhere would satisfy every line below.
+                ASSERT_GT( walk.MaxWeight, 0.1f )
+                     << "sun " << sun.x << "," << sun.y << " ghost " << index << " " << axis
+                     << ": the walk never met a live ghost, so it proves nothing";
+
+                EXPECT_LE( walk.MaxStep, kMaxWeightStepPerPixel )
+                     << "sun " << sun.x << "," << sun.y << " ghost " << index << " " << axis
+                     << ": the ghost's weight jumps " << walk.MaxStep
+                     << " between neighbouring pixels — that is a hard line across the frame, not an edge";
+
+                EXPECT_LE( walk.AtBoundary, kMaxWeightStepPerPixel )
+                     << "sun " << sun.x << "," << sun.y << " ghost " << index << " " << axis
+                     << ": the ghost is still at " << walk.AtBoundary
+                     << " where the source frame ends — it has to have arrived at zero by then, or the "
+                        "REPEAT sampler hands it the opposite edge one pixel later";
+            }
 }
 
 // --- Halo -------------------------------------------------------------------------------------------
