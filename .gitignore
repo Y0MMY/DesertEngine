@@ -111,6 +111,11 @@ Docs/Clouds/*.pdf
 # analysis lives in Docs/Clouds/UEReference/Documentation/ and IS committed.
 Docs/Clouds/UEReference/*.png
 Docs/Clouds/UEReference/*.graph.txt
+# Epic's own source, dropped here to be cited line by line. Local only: the licence record covers using
+# it as a reference, not redistributing it in our tree. Keep UE's own layout underneath
+# (Engine/Shaders/Private/...) so a citation stays checkable, and record the engine version beside it —
+# line numbers mean nothing against an unnamed release.
+Docs/Clouds/UEReference/Source/
 
 # Scratch git worktrees created by tooling. They are checkouts, not content.
 .claude/worktrees/
