@@ -55,11 +55,21 @@ drive the render through the flags above.
 **Take at least two frames: what the change fixed, and what it could have broken.** These fail in
 opposite directions and one alone is not evidence.
 
-### For anything in the sky: THREE elevations, never one
+### For anything in the sky: THREE elevations, never one — and TWO azimuths, never one
 
 ```
 zenith   --look 0,0.9,-1      mid   --look 0,0.45,-1      horizon   --look 0,0.12,-1
 ```
+
+**Those three vary only Y.** X is zero and Z is -1 in all of them, so the camera faces one compass
+direction, and an entire programme was shot that way for a phase and a half. The sun sits at one
+azimuth: toward it and away from it are a different phase function, a different silver lining and a
+different lit side of the cloud. Flip Z and shoot again — `--look 0,0.9,1` and so on.
+
+The first frame ever taken sunward at high elevation showed **hard full-width horizontal bands**
+cutting through both sky and cloud, deterministic and reproducible to three decimals, needing BOTH
+conditions at once — sunward azimuth AND high elevation. It had been there, unseen, the whole time
+(`Docs/Clouds/REVIEW_622a01a6.md` Ц9). One axis of coverage hid it completely.
 
 A ten-merge cloud and sky programme was verified almost entirely from the horizon, and the owner
 found two defects by simply looking up: a zenith that was empty above ~20 degrees, and vertical
