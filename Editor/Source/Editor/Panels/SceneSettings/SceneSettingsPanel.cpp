@@ -101,6 +101,18 @@ namespace Desert::Editor
 
         if ( Utils::ImGuiUtilities::SectionHeader( "Post-Processing" ) )
         {
+            // The operator first: it decides what the knobs below it mean, and one of them (White Point)
+            // exists only for Reinhard.
+            const char* tonemappers[] = { "ACES (filmic)", "Reinhard (extended)" };
+            int         tonemapper    = static_cast<int>( s.Tonemapper );
+            if ( ImGui::Combo( "Tonemapper", &tonemapper, tonemappers, IM_ARRAYSIZE( tonemappers ) ) )
+                s.Tonemapper = static_cast<Core::TonemapOperator>( tonemapper );
+            Utils::ImGuiUtilities::Tooltip(
+                 "The curve that maps HDR luminance onto the display. ACES is the default and is the "
+                 "film curve Unreal grades through, so frames of ours can be measured against frames of "
+                 "theirs. Reinhard is the operator every scene authored before 2026-08-19 was lit on; it "
+                 "takes a White Point, ACES does not." );
+
             // Live — consumed by the tonemap pass.
             ImGui::Checkbox( "Auto Exposure (eye adaptation)", &s.AutoExposure );
             ImGui::BeginDisabled( !s.AutoExposure );
@@ -114,11 +126,20 @@ namespace Desert::Editor
             ImGui::SliderFloat( "Exposure (manual)", &s.Exposure, 0.0f, 5.0f );
             ImGui::EndDisabled();
             ImGui::SliderFloat( "Gamma", &s.Gamma, 1.0f, 3.0f );
-            ImGui::SliderFloat( "White Point", &s.WhitePoint, 1.0f, 20.0f );
-            Utils::ImGuiUtilities::Tooltip(
-                 "Luminance that maps to pure white. At 1.0 the tonemapper is the identity and every "
-                 "highlight above 1.0 clips to flat white; raise it to keep shading inside bright "
-                 "content (the sun's surroundings, emissive surfaces)." );
+
+            // White Point is extended Reinhard's parameter and nothing else's — the ACES fit carries the
+            // white of the ODT it reproduces. Shown only in the mode that reads it, the same way
+            // Anisotropy below appears only in Anisotropic filtering: a slider that moves nothing in the
+            // current mode is a dead setting, and dead settings are how "half the options do nothing"
+            // starts.
+            if ( s.Tonemapper == Core::TonemapOperator::Reinhard )
+            {
+                ImGui::SliderFloat( "White Point", &s.WhitePoint, 1.0f, 20.0f );
+                Utils::ImGuiUtilities::Tooltip(
+                     "Luminance that maps to pure white. At 1.0 the operator is the identity and every "
+                     "highlight above 1.0 clips to flat white; raise it to keep shading inside bright "
+                     "content (the sun's surroundings, emissive surfaces)." );
+            }
 
             ImGui::Spacing();
             ImGui::Checkbox( "Bloom", &s.EnableBloom );

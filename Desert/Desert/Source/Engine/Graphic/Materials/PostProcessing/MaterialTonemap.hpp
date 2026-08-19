@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Engine/Core/SceneSettings.hpp>
 #include <Engine/Graphic/Materials/Material.hpp>
 
 namespace Desert::Graphic
@@ -11,13 +12,17 @@ namespace Desert::Graphic
 
         struct Params
         {
-            float     Exposure;
-            float     Gamma;
-            float     BloomIntensity;
-            float     ExposureKey;
-            bool      AutoExposure;
-            float     ChromaticBloom;      // lens dispersion strength on the bloom halo (0 = off)
-            float     WhitePoint;          // luminance that maps to pure white (1 = no rolloff at all)
+            // The scene's tonemapping curve, carried as the ENUM and not as an int: the shader reads it
+            // as a float and there is exactly one place (below) where that conversion happens, so no
+            // caller can be wrong about which number meant which operator.
+            Core::TonemapOperator Operator;
+            float                 Exposure;
+            float                 Gamma;
+            float                 BloomIntensity;
+            float                 ExposureKey;
+            bool                  AutoExposure;
+            float                 ChromaticBloom; // lens dispersion strength on the bloom halo (0 = off)
+            float                 WhitePoint; // REINHARD only: luminance that maps to pure white (1 = identity)
             float     LightShaftIntensity; // Bloom Scale x screen fade of the sun light's shafts (0 = off)
             glm::vec3 LightShaftTint;      // the sun light's Bloom Tint
             float     LensFlareIntensity;  // Lens Flare Intensity x screen fade (0 = off)
@@ -35,6 +40,8 @@ namespace Desert::Graphic
         MPROPERTY( float, AutoExposureEnabled, "u_AutoExposureEnabled", 0.0f )
         MPROPERTY( float, ChromaticBloom,      "u_ChromaticBloom",      0.0f )
         MPROPERTY( float, WhitePoint, "u_WhitePoint", 8.0f )
+        // 0 = ACES, 1 = extended Reinhard — Core::TonemapOperator's own numbering, converted in Bind().
+        MPROPERTY( float, TonemapOperator, "u_TonemapOperator", 0.0f )
         // rgb = tint, a = intensity: one vec4 slot, and the two cannot disagree about being on.
         MPROPERTY( glm::vec4, LightShaftTintIntensity, "u_LightShaftTintIntensity",
                    ( glm::vec4( 1.0f, 1.0f, 1.0f, 0.0f ) ) )

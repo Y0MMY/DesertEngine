@@ -35,8 +35,16 @@ namespace Desert::Graphic::System
             m_Gamma    = gamma;
         }
 
-        // The luminance that maps to pure white. At 1 the operator is the identity and every HDR value
-        // above 1 clips flat — see the note in SceneComposite.shader.
+        // The scene's tonemapping curve. ACES is the default and the one the sky programme measures
+        // against a UE frame; Reinhard is what every scene authored before 2026-08-19 was graded on.
+        void SetTonemapOperator( Core::TonemapOperator op )
+        {
+            m_TonemapOperator = op;
+        }
+
+        // The luminance that maps to pure white — REINHARD only. At 1 that operator is the identity and
+        // every HDR value above 1 clips flat; see the note in SceneComposite.shader. The ACES branch
+        // never reads it, which is why the editor hides the slider in that mode.
         void SetWhitePoint( float whitePoint )
         {
             m_WhitePoint = whitePoint;
@@ -104,9 +112,10 @@ namespace Desert::Graphic::System
 
         std::unique_ptr<MaterialTonemap> m_MaterialTonemap;
 
-        float m_Exposure   = 1.0f;
-        float m_Gamma      = 2.2f;
-        float m_WhitePoint = 8.0f;
+        Core::TonemapOperator m_TonemapOperator = Core::TonemapOperator::ACES;
+        float                 m_Exposure        = 1.0f;
+        float                 m_Gamma           = 2.2f;
+        float                 m_WhitePoint      = 8.0f;
 
         std::weak_ptr<Image2D> m_BloomImage;
         float                  m_BloomIntensity = 0.0f;

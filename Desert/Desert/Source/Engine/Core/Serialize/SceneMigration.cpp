@@ -1,5 +1,7 @@
 #include <Engine/Core/Serialize/SceneMigration.hpp>
 
+#include <Engine/Core/SceneSettings.hpp>
+
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Units.hpp>
 
@@ -428,11 +430,54 @@ namespace Desert::Core
         return report;
     }
 
+    namespace
+    {
+        // The reflected field name of SceneSettings::Tonemapper - the key the generic serializer reads
+        // and writes. Stated once so the migration and the round trip cannot disagree about spelling.
+        constexpr const char* kTonemapperKey = "Tonemapper";
+    } // namespace
+
+    TonemapMigrationReport MigrateTonemapperV1ToV2( std::optional<rfl::Generic>& settings )
+    {
+        TonemapMigrationReport report;
+
+        rfl::Generic::Object fields;
+        if ( settings.has_value() )
+        {
+            auto parsed = settings->to_object();
+            if ( !parsed.has_value() )
+            {
+                // Not an object: this scene's whole settings block is unreadable. Replacing it with a
+                // fresh one would discard every other scene-wide value to save this single field, so it
+                // is left exactly as found and said out loud instead - the scene will load on the C++
+                // default (ACES) and its author needs to know that before wondering why it re-graded.
+                LOG_WARN( "[SceneMigration] the Settings payload is {0}, not an object - the tonemapper "
+                          "could not be pinned and this scene will load on the default operator",
+                          Describe( *settings ) );
+                return report;
+            }
+            fields = std::move( parsed.value() );
+        }
+        else
+        {
+            report.SettingsCreated = true;
+        }
+
+        if ( fields.get( kTonemapperKey ).has_value() )
+            return report; // the file already states its operator - see the idempotence note in the header
+
+        fields[kTonemapperKey] = static_cast<int64_t>( TonemapOperator::Reinhard );
+        report.OperatorPinned  = true;
+
+        settings = rfl::Generic( std::move( fields ) );
+        return report;
+    }
+
     SceneMigrationReport MigrateScene( SceneSerialized& scene )
     {
         SceneMigrationReport report;
 
-        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersion )
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionSky )
         {
             report.SkyRaised = true;
             report.Sky       = MigrateSkyV0ToV1( scene.Entities );
@@ -442,6 +487,12 @@ namespace Desert::Core
         {
             report.UnitsRaised = true;
             report.Units       = MigrateMetresToUnits( scene.Entities, scene.Settings );
+        }
+
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionTonemap )
+        {
+            report.TonemapperRaised = true;
+            report.Tonemap          = MigrateTonemapperV1ToV2( scene.Settings );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

@@ -8,14 +8,24 @@
 
 namespace Desert::Core
 {
-    // Schema generation of a .desce file. Absent (or 0) means the file was written while the procedural
-    // sky still lived inside SkyboxComponent; 1 means the sky lives in its own "SkyAtmosphere" payload.
+    // Schema generation of a .desce file, and what each step of it means:
+    //
+    //   absent (or 0) - written while the procedural sky still lived inside SkyboxComponent
+    //   1             - the sky lives in its own "SkyAtmosphere" payload
+    //   2             - the tonemapping operator is a scene property, and the file states which one
+    //
+    // Each step has its OWN constant and each migration is gated on its own, not on kSceneVersion. Gating
+    // them all on the head would re-run every earlier migration the moment the head moved: raising the
+    // head to 2 would have sent every v1 file in the repository back through the sky migration and
+    // reported a schema move that did not happen.
     //
     // This is deliberately a SECOND integer and not UnitVersion. UnitVersion's contract is written beside
     // it below - "bump this only if the world unit changes again" - so reusing it would couple two
     // migrations that have nothing to do with each other: an old metres-era scene would be declared
     // sky-migrated the moment someone re-saved it for units, and vice versa.
-    inline constexpr int kSceneVersion = 1;
+    inline constexpr int kSceneVersionSky     = 1;
+    inline constexpr int kSceneVersionTonemap = 2;
+    inline constexpr int kSceneVersion        = kSceneVersionTonemap;
 
     // World-unit generation of a .desce file. Absent (or 0) means the scene was authored when one world
     // unit was one METRE; today a unit is a CENTIMETRE (Common/Core/Units.hpp), so such a scene is scaled
@@ -112,17 +122,53 @@ namespace Desert::Core
     UnitMigrationReport MigrateMetresToUnits( std::vector<Assets::EntityData>& entities,
                                               std::optional<rfl::Generic>&     settings );
 
+    // What MigrateTonemapperV1ToV2 did, returned rather than logged, for the same reason as the two
+    // above: the function is pure and only the caller knows which file this was.
+    struct TonemapMigrationReport
+    {
+        bool SettingsCreated = false; // the file carried no "Settings" block at all - one was made for it
+        bool OperatorPinned  = false; // "Tonemapper" was written; false when the file already stated one
+    };
+
+    // Raises a scene from schema v1 to v2: writes the tonemapping operator the file was AUTHORED under
+    // into its settings block. PURE - no GPU, no filesystem, no global state; a LOG_WARN on a settings
+    // payload that is not an object is the only side effect beyond the argument.
+    //
+    // WHY IT WRITES REINHARD AND NOT THE NEW DEFAULT. Decision D-10 made ACES the default operator. A
+    // default change is the one change that silently rewrites every file which never mentioned the
+    // setting: an absent key means "the C++ default", so on the day the default moved, every existing
+    // scene would have been re-graded through a curve its author never chose, with nothing in the file
+    // to say so. Exposure and White Point in those scenes were dialled in by eye on extended Reinhard -
+    // the cloud demo carries an exposure of 0.22 against a sun of 22 - so this is not a subtle drift, it
+    // is the whole grade. Pinning Reinhard makes the operator EXPLICIT at the value that leaves each
+    // picture exactly as it was, and moving a scene to ACES then becomes a deliberate, visible edit.
+    // (The repository's own scenes were moved that way, by this same task - see Docs/Clouds/CALIBRATION.md.)
+    //
+    // A scene with no "Settings" block at all - MainMenu.desce is one - gets a block containing only the
+    // operator. Every other field stays absent, which is how the reflection serializer spells "keep the
+    // C++ default", so no value is invented for it.
+    //
+    // Idempotent: a tree that already states an operator is left byte-identical, whichever operator that
+    // is. A scene may be re-read (undo, a second load) after it was raised, and overwriting an operator
+    // the user has since chosen would be worse than not migrating at all.
+    //
+    // SHELF LIFE: this raises v1 to v2 and nothing else. It is not "support for the old format"; when v3
+    // arrives it gets its own v2 -> v3 successor, and this one is deleted once no v1 file remains.
+    TonemapMigrationReport MigrateTonemapperV1ToV2( std::optional<rfl::Generic>& settings );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
-        bool                SkyRaised = false; // the sky schema was below kSceneVersion
-        SkyMigrationReport  Sky;
-        bool                UnitsRaised = false; // the world unit was below kUnitVersion
-        UnitMigrationReport Units;
+        bool                   SkyRaised = false; // the sky schema was below kSceneVersionSky
+        SkyMigrationReport     Sky;
+        bool                   UnitsRaised = false; // the world unit was below kUnitVersion
+        UnitMigrationReport    Units;
+        bool                   TonemapperRaised = false; // the schema was below kSceneVersionTonemap
+        TonemapMigrationReport Tonemap;
 
         bool Changed() const
         {
-            return SkyRaised || UnitsRaised;
+            return SkyRaised || UnitsRaised || TonemapperRaised;
         }
     };
 
@@ -132,8 +178,9 @@ namespace Desert::Core
     // the repository and writes the result back - the contract's "data migrates once, and is written back
     // in the new form" is only true if something actually writes it back.
     //
-    // The two migrations are independent (no sky field is a length; no length lives under "SkyAtmosphere"),
-    // so the order below is the order they were written and nothing depends on it.
+    // The three migrations are independent (no sky field is a length, no length lives under
+    // "SkyAtmosphere", and the tonemapper touches neither), so the order below is the order they were
+    // written and nothing depends on it.
     SceneMigrationReport MigrateScene( SceneSerialized& scene );
 
 } // namespace Desert::Core

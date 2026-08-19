@@ -129,6 +129,12 @@ TEST( SceneUnitMigration, StampedSceneIsLeftByteIdentical )
 {
     SceneSerialized scene = Parse( kUnstampedScene );
     scene.UnitVersion     = kUnitVersion;
+    // "Current" means current on BOTH counters. This line used to be absent, because when the test was
+    // written the only other migration was gated on a version an unstamped scene already satisfied. It is
+    // here now so that adding a third migration cannot make this test quietly assert nothing: a fixture
+    // that is not fully stamped would go through MigrateScene and the "byte-identical" claim would be
+    // about a tree that never had anything to migrate.
+    scene.SceneVersion = kSceneVersion;
 
     const std::string          before = Json( scene );
     const SceneMigrationReport report = MigrateScene( scene );
@@ -222,6 +228,11 @@ TEST( SceneUnitMigration, AbsentKeysAreNotInvented )
     SceneSerialized scene;
     scene.Entities.push_back( Entity( "UI Panel" ) ); // no Translation, no Rotation, no Scale
     scene.Entities.push_back( Entity( "Empty" ) );
+    // Stamped at the current SCENE generation so the only thing running here is the unit migration,
+    // which is what this test is about. The tonemapper migration (v1 -> v2) deliberately DOES create a
+    // settings block on a scene that has none - see SceneTonemapMigration - and letting it run here
+    // would turn this assertion into a test of the wrong migration.
+    scene.SceneVersion = kSceneVersion;
 
     const SceneMigrationReport report = MigrateScene( scene );
 
@@ -236,6 +247,7 @@ TEST( SceneUnitMigration, AbsentKeysAreNotInvented )
     EXPECT_FALSE( scene.Settings.has_value() );
 
     SceneSerialized      withSettings;
+    withSettings.SceneVersion = kSceneVersion; // same reason as above
     rfl::Generic::Object empty;
     empty["ShowGrid"]     = true;
     withSettings.Settings = rfl::Generic( empty );
