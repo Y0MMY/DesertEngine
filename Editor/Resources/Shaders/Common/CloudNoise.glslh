@@ -1,0 +1,381 @@
+// The cloud noise library: periodic, seeded, and written ONCE in a dialect that compiles both as GLSL
+// (inside the cloud passes) and as C++ (by Desert/Tests/Engine/CloudNoise). The tests therefore drive
+// the exact text the raymarch compiles rather than a CPU re-implementation of it, which is the only
+// arrangement in which "the test passes" says anything about the picture.
+//
+// PERIODICITY IS STRUCTURAL, not a property we hope for. Every lattice index is wrapped into the period
+// BEFORE it is hashed, so the field tiles exactly at the period for every seed and every octave. A noise
+// that only almost tiles shows as a seam running the length of the sky, and no amount of tuning removes
+// it.
+//
+// THE HASH IS AN INTEGER FINALIZER, not `fract(sin(dot(...)))`. The trigonometric hash is
+// implementation-defined at the precision where it matters, differs between drivers, and — the reason it
+// is banned here rather than merely discouraged — differs between the GPU and the CPU, which would make
+// the C++ test above assert against numbers the shader never produces.
+//
+// DIALECT RULES (shared with Common/SkyMedium.glslh and enforced by the fact that this file is compiled
+// as C++): no swizzles beyond .x/.y/.z, no `out` parameters, no arrays, no `inline`, no namespaces;
+// float literals carry the `f` suffix; a struct is returned through a named local with per-field
+// assignment; every function is defined before it is used, because GLSL has no forward declarations.
+
+#ifndef CLOUD_NOISE_GLSLH
+#define CLOUD_NOISE_GLSLH
+
+// ---------------------------------------------------------------------------------------------------
+// Integer hash
+// ---------------------------------------------------------------------------------------------------
+
+// The MurmurHash3 32-bit finalizer. Chosen because its avalanche is measured rather than asserted: one
+// flipped input bit changes every output bit with probability ~0.5, which is what makes neighbouring
+// lattice cells uncorrelated. The three constants are Appleby's and are not interchangeable with
+// arbitrary large odd numbers.
+uint CloudHashFinalize( uint h )
+{
+    h = h ^ ( h >> 16u );
+    h = h * 0x85EBCA6Bu;
+    h = h ^ ( h >> 13u );
+    h = h * 0xC2B2AE35u;
+    h = h ^ ( h >> 16u );
+    return h;
+}
+
+// Hashes a lattice cell. The three odd primes are pairwise coprime so that the x, y and z contributions
+// cannot alias onto one another along a diagonal — a cheaper combiner shows as visible structure running
+// at 45 degrees through the noise.
+uint CloudHashCell( uint x, uint y, uint z, uint seed )
+{
+    uint h = seed * 0x9E3779B1u;
+    h = h + x * 0x27D4EB2Du;
+    h = h + y * 0x85EBCA77u;
+    h = h + z * 0xC2B2AE3Du;
+    return CloudHashFinalize( h );
+}
+
+// Wraps a lattice coordinate into [0, period) as an unsigned index. `mod` is used rather than a cast
+// because the cast truncates toward zero and would fold -0.5 and +0.5 onto the same cell, putting a
+// mirror seam through the origin. glm::mod and GLSL mod agree on x - y*floor(x/y), which is
+// non-negative for a positive period.
+uint CloudWrapIndex( float coordinate, float period )
+{
+    return uint( mod( floor( coordinate ), period ) );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Periodic improved Perlin noise
+// ---------------------------------------------------------------------------------------------------
+
+// Perlin's quintic fade, 6t^5 - 15t^4 + 10t^3. Its first AND second derivatives vanish at 0 and 1, which
+// is why the classic cubic (3t^2 - 2t^3) is not used here: the cubic's second derivative is discontinuous
+// at the lattice planes, and that discontinuity is directly visible as a faint grid once the noise is
+// used as an erosion threshold.
+float CloudFade( float t )
+{
+    return t * t * t * ( t * ( t * 6.0f - 15.0f ) + 10.0f );
+}
+
+// Perlin's gradient selector: the hash picks one of twelve edge-of-cube directions and returns its dot
+// product with the offset. Written with ternaries rather than a lookup table because the dialect forbids
+// arrays — the arithmetic is Perlin's own and produces the same twelve gradients.
+float CloudGradientDot( uint h, float x, float y, float z )
+{
+    uint  bits = h & 15u;
+    float u    = bits < 8u ? x : y;
+    float v    = bits < 4u ? y : ( ( bits == 12u || bits == 14u ) ? x : z );
+    float su   = ( bits & 1u ) == 0u ? u : -u;
+    float sv   = ( bits & 2u ) == 0u ? v : -v;
+    return su + sv;
+}
+
+// Improved Perlin noise that tiles exactly with @p period lattice cells on every axis.
+//
+// Returns roughly [-1, 1]; the theoretical bound of 3D Perlin is +-sqrt(3)/2 but the practical range is
+// narrower, so callers that need [0, 1] should remap and saturate rather than assume.
+float CloudPerlinPeriodic( vec3 position, float period, uint seed )
+{
+    float x0f = floor( position.x );
+    float y0f = floor( position.y );
+    float z0f = floor( position.z );
+
+    float fx = position.x - x0f;
+    float fy = position.y - y0f;
+    float fz = position.z - z0f;
+
+    uint x0 = CloudWrapIndex( x0f, period );
+    uint y0 = CloudWrapIndex( y0f, period );
+    uint z0 = CloudWrapIndex( z0f, period );
+    uint x1 = CloudWrapIndex( x0f + 1.0f, period );
+    uint y1 = CloudWrapIndex( y0f + 1.0f, period );
+    uint z1 = CloudWrapIndex( z0f + 1.0f, period );
+
+    float ux = CloudFade( fx );
+    float uy = CloudFade( fy );
+    float uz = CloudFade( fz );
+
+    float g000 = CloudGradientDot( CloudHashCell( x0, y0, z0, seed ), fx, fy, fz );
+    float g100 = CloudGradientDot( CloudHashCell( x1, y0, z0, seed ), fx - 1.0f, fy, fz );
+    float g010 = CloudGradientDot( CloudHashCell( x0, y1, z0, seed ), fx, fy - 1.0f, fz );
+    float g110 = CloudGradientDot( CloudHashCell( x1, y1, z0, seed ), fx - 1.0f, fy - 1.0f, fz );
+    float g001 = CloudGradientDot( CloudHashCell( x0, y0, z1, seed ), fx, fy, fz - 1.0f );
+    float g101 = CloudGradientDot( CloudHashCell( x1, y0, z1, seed ), fx - 1.0f, fy, fz - 1.0f );
+    float g011 = CloudGradientDot( CloudHashCell( x0, y1, z1, seed ), fx, fy - 1.0f, fz - 1.0f );
+    float g111 = CloudGradientDot( CloudHashCell( x1, y1, z1, seed ), fx - 1.0f, fy - 1.0f, fz - 1.0f );
+
+    float x00 = mix( g000, g100, ux );
+    float x10 = mix( g010, g110, ux );
+    float x01 = mix( g001, g101, ux );
+    float x11 = mix( g011, g111, ux );
+
+    float y0i = mix( x00, x10, uy );
+    float y1i = mix( x01, x11, uy );
+
+    return mix( y0i, y1i, uz );
+}
+
+// Fractal sum of the above, normalized to the same range as one octave.
+//
+// The period DOUBLES with the frequency, which is what keeps the sum periodic: an octave sampled at twice
+// the frequency against the original period would wrap halfway through its own cells and reintroduce the
+// seam the base octave was careful to avoid.
+//
+// The seed is perturbed per octave so that two octaves cannot land on the same lattice values and produce
+// a self-similar smear along the diagonal where their maxima coincide.
+float CloudPerlinFbm( vec3 position, float period, uint seed, int octaves )
+{
+    float sum       = 0.0f;
+    float amplitude = 0.5f;
+    float total     = 0.0f;
+    float frequency = 1.0f;
+    float wrap      = period;
+
+    for ( int i = 0; i < octaves; ++i )
+    {
+        vec3 sampleAt = vec3( position.x * frequency, position.y * frequency, position.z * frequency );
+        sum   = sum + amplitude * CloudPerlinPeriodic( sampleAt, wrap, seed + uint( i ) * 101u );
+        total = total + amplitude;
+
+        amplitude = amplitude * 0.5f;
+        frequency = frequency * 2.0f;
+        wrap      = wrap * 2.0f;
+    }
+
+    return sum / max( total, 1e-6f );
+}
+
+// The [0, 1] form, which is what every consumer of coverage and erosion actually wants. Kept as its own
+// function rather than left to each caller: a remap written five times is a remap that disagrees with
+// itself four times.
+//
+// THE GAIN IS A MEASUREMENT, NOT A TASTE. Perlin's practical range is far narrower than its theoretical
+// one, and normalizing a fractal sum by the sum of its amplitudes narrows it again. The naive
+// `value * 0.5 + 0.5` was measured by Desert/Tests/Engine/CloudNoise to occupy 0.30 to 0.69 between the
+// 1st and 99th percentile — so a coverage threshold of the form `remap(field, 1 - Coverage, 1, 0, 1)`,
+// which assumes the field reaches 1, could never saturate. Full Coverage produced translucent haze and
+// the slider looked broken while being arithmetically correct.
+//
+// 1.25 is the factor that puts the 99th percentile at 0.98. The few per cent that clip at each end are
+// not a loss: they are what makes solid cloud and genuinely clear sky reachable at all, and a coverage
+// field wants exactly that.
+#define CLOUD_FBM_RANGE_GAIN 1.25f
+
+float CloudPerlinFbm01( vec3 position, float period, uint seed, int octaves )
+{
+    return clamp( CloudPerlinFbm( position, period, seed, octaves ) * CLOUD_FBM_RANGE_GAIN + 0.5f, 0.0f, 1.0f );
+}
+
+// The remap every cloud paper writes inline and every implementation eventually gets wrong at the
+// degenerate end. Defined once, with the division guarded: originalMin == originalMax is one hand-edited
+// scene away, and an unguarded version turns the whole layer into NaN, which reads as a black sky.
+float CloudRemap( float value, float originalMin, float originalMax, float newMin, float newMax )
+{
+    float t = ( value - originalMin ) / max( originalMax - originalMin, 1e-6f );
+    return newMin + clamp( t, 0.0f, 1.0f ) * ( newMax - newMin );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Periodic Worley (cellular) noise
+// ---------------------------------------------------------------------------------------------------
+//
+// WHY THIS EXISTS AT ALL, given there is already a gradient noise above. Gradient noise is smooth
+// everywhere by construction: its extrema are rounded and its level sets are blobs. A cumulus is the
+// opposite — a heap of ROUNDED LOBES separated by creases, and the crease is the shape. Cellular noise
+// produces exactly that, because its level sets are the boundaries between the cells of a point set, and
+// inverting it turns each cell into a lobe swelling out from its own centre.
+//
+// This is the difference between cloud that looks like cauliflower and cloud that looks like cotton
+// wool, and no amount of tuning the Perlin gets from one to the other.
+
+// Distance from @p position to the nearest feature point of a periodic point lattice.
+//
+// One feature point per cell, its offset inside the cell taken from three disjoint bit-slices of the same
+// hash. Slicing rather than hashing three times is safe HERE and only here: the finalizer's avalanche is
+// measured, so its bits are independent of one another, and the three slices are as uncorrelated as three
+// separate hashes would be at a third of the cost.
+//
+// The 3x3x3 neighbourhood is not an approximation: a feature point lies somewhere in its own cell, so
+// nothing outside the immediate neighbours can ever be the closest.
+float CloudWorleyPeriodic( vec3 position, float period, uint seed )
+{
+    float x0f = floor( position.x );
+    float y0f = floor( position.y );
+    float z0f = floor( position.z );
+
+    float nearest = 1e9f;
+
+    for ( int dz = -1; dz <= 1; ++dz )
+    {
+        for ( int dy = -1; dy <= 1; ++dy )
+        {
+            for ( int dx = -1; dx <= 1; ++dx )
+            {
+                float cx = x0f + float( dx );
+                float cy = y0f + float( dy );
+                float cz = z0f + float( dz );
+
+                uint h = CloudHashCell( CloudWrapIndex( cx, period ), CloudWrapIndex( cy, period ),
+                                        CloudWrapIndex( cz, period ), seed );
+
+                float ox = float( h & 1023u ) * ( 1.0f / 1024.0f );
+                float oy = float( ( h >> 10u ) & 1023u ) * ( 1.0f / 1024.0f );
+                float oz = float( ( h >> 20u ) & 1023u ) * ( 1.0f / 1024.0f );
+
+                float px = cx + ox - position.x;
+                float py = cy + oy - position.y;
+                float pz = cz + oz - position.z;
+
+                nearest = min( nearest, px * px + py * py + pz * pz );
+            }
+        }
+    }
+
+    return sqrt( nearest );
+}
+
+// INVERTED and normalized: 1 at a feature point, falling toward the cell boundary. This is the billow —
+// each cell reads as a lobe swelling out of its own centre, which is what a convective cloud is made of.
+//
+// The distance is divided by 1.1 rather than by 1: the farthest a point can be from every feature point
+// exceeds one cell diagonal only in the degenerate case where all 27 offsets sit in the far corners, and
+// dividing by the theoretical bound would leave the field permanently short of 1 — the same defect the
+// range test caught in the fractal sum.
+float CloudWorley01( vec3 position, float period, uint seed )
+{
+    return clamp( 1.0f - CloudWorleyPeriodic( position, period, seed ) * ( 1.0f / 1.1f ), 0.0f, 1.0f );
+}
+
+// Fractal sum of inverted Worley, at Guerrilla's weights (0.625 / 0.25 / 0.125 — deck lineage, and they
+// do not sum to 1 by accident: the coarse octave has to dominate or the billows dissolve into gravel).
+// The period doubles with the frequency, for the same reason it does in the Perlin sum.
+// MEASURED, LIKE THE GRADIENT SUM ABOVE, and for the same reason. Averaging cellular octaves pulls the
+// result toward the middle: Desert/Tests/Engine/CloudNoise measures the raw sum at 0.29 to 0.77 between
+// the 1st and 99th percentile. Left there, an erosion field that never reaches 0 cannot cut a cloud open
+// and one that never reaches 1 cannot leave a core solid — the edges turn to mush and the whole layer
+// loses contrast, which is exactly what it did.
+#define CLOUD_WORLEY_FBM_LOW  0.29f
+#define CLOUD_WORLEY_FBM_HIGH 0.78f
+
+float CloudWorleyFbm( vec3 position, float period, uint seed, int octaves )
+{
+    float sum       = 0.0f;
+    float total     = 0.0f;
+    float amplitude = 0.625f;
+    float frequency = 1.0f;
+    float wrap      = period;
+
+    for ( int i = 0; i < octaves; ++i )
+    {
+        vec3 sampleAt = vec3( position.x * frequency, position.y * frequency, position.z * frequency );
+        sum   = sum + amplitude * CloudWorley01( sampleAt, wrap, seed + uint( i ) * 313u );
+        total = total + amplitude;
+
+        amplitude = amplitude * 0.4f;
+        frequency = frequency * 2.0f;
+        wrap      = wrap * 2.0f;
+    }
+
+    float raw = sum / max( total, 1e-6f );
+    return clamp( CloudRemap( raw, CLOUD_WORLEY_FBM_LOW, CLOUD_WORLEY_FBM_HIGH, 0.0f, 1.0f ), 0.0f, 1.0f );
+}
+
+// Perlin-Worley: Schneider's composite (Horizon Zero Dawn, SIGGRAPH 2015), and the base shape every
+// cloud renderer since has been built on.
+//
+// The construction is a remap of the gradient noise into a range whose FLOOR is the cellular field. Where
+// the cells are dense the Perlin is pushed up; where they are sparse it is pulled down. The result keeps
+// Perlin's connected, wind-blown continuity — which pure Worley does not have, it looks like foam — while
+// taking its local relief from the cells. Neither noise alone reads as cloud.
+// MEASURED AGAIN, and this one was not optional. The composite's lower bound moves DOWN with the
+// cellular field, so the remap's window widens exactly where the result would otherwise be small: the
+// raw form was measured at 0.32 to 0.99 with a median of 0.66 and a floor of 0.166. Used as a coverage
+// field it therefore passed almost any threshold, and the sky rendered as a uniform overcast haze at
+// every setting of the Coverage slider — the second time in this programme that an unmeasured noise
+// range produced a picture that looked like a tuning problem and was not one.
+#define CLOUD_PERLIN_WORLEY_LOW  0.32f
+#define CLOUD_PERLIN_WORLEY_HIGH 0.99f
+
+float CloudPerlinWorley01( vec3 position, float period, uint seed, int octaves )
+{
+    float perlin = CloudPerlinFbm01( position, period, seed, octaves );
+    float worley = CloudWorleyFbm( position, period, seed + 7717u, octaves );
+
+    float composite = CloudRemap( perlin, worley - 1.0f, 1.0f, 0.0f, 1.0f );
+    return clamp( CloudRemap( composite, CLOUD_PERLIN_WORLEY_LOW, CLOUD_PERLIN_WORLEY_HIGH, 0.0f, 1.0f ), 0.0f,
+                  1.0f );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Curl noise
+// ---------------------------------------------------------------------------------------------------
+
+// The curl of a vector potential built from three decorrelated Perlin fields. Being a curl, it is
+// DIVERGENCE-FREE by construction — the field neither creates nor destroys volume — and that is the whole
+// reason to use it rather than three independent noises as an offset: a divergent offset field pulls the
+// material apart into holes, while a divergence-free one shears it, which is what turns a smooth edge
+// into the wisps and hooks that a real cloud has where the air is moving past it.
+//
+// Central differences at a fixed epsilon rather than analytic derivatives: the potential is a fractal sum
+// and its analytic gradient is neither cheaper nor more accurate at this scale. The epsilon is a
+// hundredth of a lattice cell — small enough to be a derivative, large enough to stay clear of float
+// cancellation in the subtraction.
+vec3 CloudCurl( vec3 position, float period, uint seed )
+{
+    float e = 0.01f;
+
+    // Three potential components, decorrelated by seed rather than by offsetting the position: an offset
+    // large enough to decorrelate would break the periodicity that the whole tiling scheme depends on.
+    float p1yPlus  = CloudPerlinPeriodic( vec3( position.x, position.y + e, position.z ), period, seed );
+    float p1yMinus = CloudPerlinPeriodic( vec3( position.x, position.y - e, position.z ), period, seed );
+    float p1zPlus  = CloudPerlinPeriodic( vec3( position.x, position.y, position.z + e ), period, seed );
+    float p1zMinus = CloudPerlinPeriodic( vec3( position.x, position.y, position.z - e ), period, seed );
+
+    float p2xPlus  = CloudPerlinPeriodic( vec3( position.x + e, position.y, position.z ), period, seed + 1319u );
+    float p2xMinus = CloudPerlinPeriodic( vec3( position.x - e, position.y, position.z ), period, seed + 1319u );
+    float p2zPlus  = CloudPerlinPeriodic( vec3( position.x, position.y, position.z + e ), period, seed + 1319u );
+    float p2zMinus = CloudPerlinPeriodic( vec3( position.x, position.y, position.z - e ), period, seed + 1319u );
+
+    float p3xPlus  = CloudPerlinPeriodic( vec3( position.x + e, position.y, position.z ), period, seed + 2633u );
+    float p3xMinus = CloudPerlinPeriodic( vec3( position.x - e, position.y, position.z ), period, seed + 2633u );
+    float p3yPlus  = CloudPerlinPeriodic( vec3( position.x, position.y + e, position.z ), period, seed + 2633u );
+    float p3yMinus = CloudPerlinPeriodic( vec3( position.x, position.y - e, position.z ), period, seed + 2633u );
+
+    float inv2e = 1.0f / ( 2.0f * e );
+
+    float cx = ( ( p3yPlus - p3yMinus ) - ( p2zPlus - p2zMinus ) ) * inv2e;
+    float cy = ( ( p1zPlus - p1zMinus ) - ( p3xPlus - p3xMinus ) ) * inv2e;
+    float cz = ( ( p2xPlus - p2xMinus ) - ( p1yPlus - p1yMinus ) ) * inv2e;
+
+    return vec3( cx, cy, cz );
+}
+
+// A gradient field whose sample position has been sheared by the curl above. This is the wispy end of the
+// erosion: the same fractal sum, dragged sideways by a divergence-free flow.
+float CloudCurlyPerlin01( vec3 position, float period, uint seed, int octaves, float strength )
+{
+    vec3 flow = CloudCurl( position, period, seed + 5051u );
+
+    vec3 sheared = vec3( position.x + flow.x * strength, position.y + flow.y * strength,
+                         position.z + flow.z * strength );
+
+    return CloudPerlinFbm01( sheared, period, seed, octaves );
+}
+
+#endif // CLOUD_NOISE_GLSLH

@@ -1,0 +1,244 @@
+// THE SEAM. This file is the one place where "what shape are the clouds" is answered, and everything
+// downstream of it — the march, the lighting, the temporal accumulation, the composite — is written
+// against `CloudFieldSample` and never against a producer.
+//
+// That matters because the programme has two producers by design (Docs/Clouds/ANALYSIS_APPROACH.md §4):
+//
+//   P  PROCEDURAL  computed from the component's parameters. Infinite, needs no content, and is the
+//                  right tool for the far field, where a cloud's angular size is already below what the
+//                  march can resolve and vertical structure is invisible in principle.
+//   A  AUTHORED    sampled from voxel volumes an artist sculpted. Arbitrary silhouettes, tunnels, a cloud
+//                  shaped like anything at all — the near field and the hero clouds.
+//
+// Only P exists today. A joins here, as a `max` of the two profiles with the winner's detail type and
+// density scale, and nothing above this file changes when it does. The seam is written first precisely so
+// that the second producer is a plug rather than a rewrite.
+//
+// THE MEANING OF `Profile` IS LOAD-BEARING and is Nubis's, not a density: it is how deep inside the body
+// of the cloud a point is, 0 at the surface and 1 in the core (deck p.85, where it is generated from a
+// signed distance field for exactly this gradient). Six different calculations end up hanging off it —
+// the silhouette, the frequency blend of the wispy noise, the frequency blend of the billowy noise, the
+// multiple-scattering volume, the ambient term, and the early-out — which is why it is worth carrying a
+// quantity that means "depth inside" rather than the density a naive implementation would store.
+//
+// HOW THE NOISE ARRIVES. Through two macros, never through a sampler declared here:
+//
+//     CLOUD_SAMPLE_NOISE( vec3 texturePosition )   ->  vec4, the four periodic octaves
+//
+// The march defines it as a `texture()` fetch of the baked volume; the unit tests define it as a call
+// into the same CloudPerlinFbm01 that baked the volume. This is the mechanism SkyScattering.glslh already
+// uses for its LUT callbacks, and it exists because a sampler cannot appear in text that is also compiled
+// as C++ — which is the only way the maths below gets a test at all. When the macro is undefined the
+// structural half of this header still compiles, which is what lets a consumer include it for the types
+// alone.
+//
+// Dialect rules as in Common/CloudNoise.glslh.
+
+#ifndef CLOUD_FIELD_GLSLH
+#define CLOUD_FIELD_GLSLH
+
+// Requires Common/CloudNoise.glslh and Common/CloudGeometry.glslh to have been included first. GLSL has
+// no forward declarations, so include order is the caller's responsibility and is stated here rather than
+// discovered as a compile error.
+
+// What every producer returns and what the whole renderer consumes.
+struct CloudFieldSample
+{
+    float Profile;      // 0..1, depth inside the cloud body (see the header note)
+    float DetailType;   // 0 = wispy, 1 = billowy — selects which erosion the up-rez applies
+    float DensityScale; // per-sample multiplier applied AFTER erosion (deck p.118)
+};
+
+// Everything the procedural producer needs, unpacked from the GPU block by Common/CloudParams.glslh.
+// Distances are KILOMETRES, matching Common/CloudGeometry.glslh.
+struct CloudFieldParams
+{
+    float WeatherTileKm;    // horizontal period of the coverage field
+    float Coverage;         // 0 = clear, 1 = solid
+    float CoverageContrast; // sharpness of the cloud/clear transition; >1 narrows the band
+    float CloudType;        // 0 = flat sheet low in the layer, 1 = tall heaped cloud
+    float CloudTypeVariance; // how far the type wanders from CloudType across the sky
+    float DetailTileKm;     // period of the erosion field
+    float DetailStrength;   // how deeply the erosion cuts into the profile
+    float DensityScale;     // global density multiplier
+    vec3  WindOffsetKm;     // accumulated wind displacement, subtracted from the sample position
+};
+
+// There are deliberately NO SEEDS AND NO OCTAVE COUNTS here. Both are properties of the BAKE — they
+// decide what is in the volume, not how it is read — so carrying them into the march would be four
+// parameters that every sample copies and no sample uses. They live in the bake pass's push constant,
+// which is the only place they are read.
+
+// The vertical profile: what fraction of the layer this cloud type occupies and how it tapers at both
+// ends. Deck p.19 composes the shape as `dimensional_profile = vertical_profile * cloud_coverage` — a
+// PRODUCT, and the multiplication is the point: the coverage field owns WHERE a cloud is, the vertical
+// profile owns its silhouette, and neither has to encode the other.
+//
+// The two ends are not symmetric, because real cloud is not. The base is a sharp ramp — a cumulus base
+// sits on the lifting condensation level and is genuinely flat — while the top tapers over nearly half
+// the cloud's height, because that is where the rising parcel is losing against the surrounding air.
+float CloudVerticalProfile( float heightFraction, float cloudType )
+{
+    float type = clamp( cloudType, 0.0f, 1.0f );
+
+    // THE CLOUD OCCUPIES A FRACTION OF THE LAYER, not the layer. With a ten-kilometre envelope a
+    // stratocumulus fills the bottom six per cent of it and a congestus a third — which is 0.6 km and
+    // 3.5 km of actual cloud, the right numbers for those species. Letting the profile fill the envelope
+    // instead, as it did when the envelope was two kilometres, makes every cloud a three-kilometre slab
+    // and the sky an overcast.
+    float topEnd  = mix( 0.06f, 0.35f, type );
+    float baseEnd = mix( 0.01f, 0.05f, type );
+
+    float baseRamp = CloudRemap( heightFraction, 0.0f, baseEnd, 0.0f, 1.0f );
+    float topRamp  = CloudRemap( heightFraction, topEnd * 0.55f, topEnd, 1.0f, 0.0f );
+
+    return baseRamp * topRamp;
+}
+
+#ifdef CLOUD_SAMPLE_NOISE
+
+// The procedural producer.
+//
+// THE BASE SHAPE IS SAMPLED IN FULL 3D, and that correction is the single most important line in this
+// file. It was first written with y dropped — the coverage field read as a horizontal plane and extruded
+// vertically by the profile — and the result is not a subtle loss of quality: every cloud becomes a
+// literal vertical column, and from any angle other than straight up you see its SIDE WALL. In motion
+// the sky reads as a row of hanging curtains with flat bottoms and hard vertical edges. It is invisible
+// at the zenith, where you look along the columns, which is exactly how it survived the first round of
+// checks.
+//
+// The published construction (Schneider, SIGGRAPH 2015) has it the other way round from the start: a 3D
+// noise supplies the SILHOUETTE, and the weather map only decides where a cloud is allowed to be. That is
+// what this now does.
+//
+// The vertical axis is scaled four times harder than the horizontal, because a cloud is about four times
+// wider than it is tall and an isotropic sample would give it the proportions of a ball.
+CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heightFraction, vec3 positionKm )
+{
+    CloudFieldSample result;
+    result.Profile      = 0.0f;
+    result.DetailType   = clamp( params.CloudType, 0.0f, 1.0f );
+    result.DensityScale = max( params.DensityScale, 0.0f );
+
+    vec3 windPos = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
+                         positionKm.z - params.WindOffsetKm.z );
+
+    float tile         = max( params.WeatherTileKm, 1e-3f );
+    // The vertical axis is sampled at a higher frequency than the horizontal, because a cloud is wider
+    // than it is tall. UE's shipped instance uses roughly 2.2 to 1 (Noise1 scale 4.17/4.44 horizontal
+    // against 9.09 vertical); this follows it rather than the 4 to 1 first guessed.
+    float verticalTile = tile / 2.2f;
+
+    vec3 coveragePos = vec3( windPos.x / tile, windPos.y / verticalTile, windPos.z / tile );
+
+    vec4 noise = CLOUD_SAMPLE_NOISE( coveragePos );
+
+    // THE CLOUD TYPE IS A FIELD, NOT A CONSTANT, and this is what stops the layer having one flat top.
+    //
+    // The type drives how much of the layer a cloud fills. Held constant, every cloud in the sky reaches
+    // exactly the same altitude and the whole layer reads as a slab with a lid — the defect is
+    // geometric, not a matter of tuning, because the vertical profile is then the same function
+    // everywhere. Varying it at the scale of the finer coverage octave means one island can be a low
+    // sheet and its neighbour a tower, and a single large island can rise on one side and not the other.
+    //
+    // It costs nothing: it reads a channel of a fetch that has already happened.
+    float typeNoise = ( noise.y - 0.5f ) * 2.0f;
+    float type      = clamp( params.CloudType + params.CloudTypeVariance * typeNoise, 0.0f, 1.0f );
+
+    result.DetailType = type;
+
+    float vertical = CloudVerticalProfile( heightFraction, type );
+    if ( vertical <= 0.0f )
+        return result;
+
+    // Two octaves of the baked volume, weighted so the coarse one owns the island and the finer one
+    // roughens its edge. The weights sum to one so that `Coverage` keeps meaning the same thing whatever
+    // the noise happens to be doing locally.
+    float field = clamp( noise.x * 0.65f + noise.y * 0.35f, 0.0f, 1.0f );
+
+    // Coverage as a SOFT MASK around a threshold, not a remap of the whole range above it.
+    //
+    // The remap was the obvious form and it is quietly wrong. `remap(field, 1 - Coverage, 1, 0, 1)`
+    // rescales everything above the threshold across the full output range, so at a coverage of 0.55 the
+    // MEDIAN of the field lands at 0.09 — a value that survives no erosion at all. The result was a sky
+    // uniformly filled with veil: mathematically there was cloud almost everywhere, and visibly there was
+    // cloud nowhere. Only the top per cent of the field ever produced a body.
+    //
+    // A smoothstep centred on the threshold behaves the way a weather map has to: most of the sky is
+    // decisively inside a cloud or decisively outside one, with a transition band whose WIDTH is the
+    // contrast. That is what puts an edge on an island and clear blue between islands.
+    // COVERAGE 0 MUST MEAN A CLEAR SKY, and the obvious threshold does not deliver it. Written as
+    // `1 - Coverage`, the smoothstep at Coverage 0 still spans 1 +- halfWidth, so every part of the field
+    // above 0.82 produced cloud: measured, forty per cent of columns were still touched at a setting whose
+    // documented meaning is "clear". The same error eats the bottom of the slider, where the interesting
+    // settings are.
+    //
+    // Interpolating the threshold across the FULL span instead makes both ends exact: at 0 the band starts
+    // at 1.0, which the field never exceeds, and at 1 it ends at 0.0, which the field never falls below.
+    float halfWidth = 0.06f / max( params.CoverageContrast, 0.05f );
+    // The epsilon is float arithmetic, not slack. At Coverage 0 the band's lower edge is
+    // `threshold - halfWidth`, and 1.06f - 0.06f evaluates to 0.99999994 rather than to 1 — so a field
+    // value of exactly 1, which the clamp above produces, lands a hair INSIDE the band and one column in a
+    // thousand grows a cloud in a sky the artist asked to be empty. Pushing both ends a millimetre past
+    // the field's range makes "clear" and "solid" exact rather than nearly exact.
+    float threshold = mix( 1.0f + halfWidth + 1e-3f, -halfWidth - 1e-3f, clamp( params.Coverage, 0.0f, 1.0f ) );
+
+    float coverage = smoothstep( threshold - halfWidth, threshold + halfWidth, field );
+
+    result.Profile = clamp( vertical * coverage, 0.0f, 1.0f );
+    return result;
+}
+
+// The seam itself. Today one producer; tomorrow the max of two.
+CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction, vec3 positionKm )
+{
+    return CloudSampleProceduralField( params, heightFraction, positionKm );
+}
+
+// The up-rez: turn the low-frequency profile into something with a cloud's edge.
+//
+// The erosion is a REMAP, not a subtraction (deck p.120, `ValueErosion`). The difference shows at the
+// core: subtracting noise thins a dense cloud as much as a wispy one, so a cumulus turns translucent in
+// the middle, while remapping leaves anything already deep inside the body at full density and only cuts
+// where the profile was already falling off.
+//
+// `DetailType` selects between the volume's two finest octaves rather than blending two separate noises,
+// which is the cheap half of what the deck does with its four-channel noise (p.122): the wispy end erodes
+// with the finer field, the billowy end with the coarser one, continuously.
+float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
+{
+    if ( field.Profile <= 0.0f )
+        return 0.0f;
+
+    vec3 windPos = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
+                         positionKm.z - params.WindOffsetKm.z );
+
+    float tile      = max( params.DetailTileKm, 1e-4f );
+    vec3  detailPos = vec3( windPos.x / tile, windPos.y / tile, windPos.z / tile );
+
+    vec4  noise       = CLOUD_SAMPLE_NOISE( detailPos );
+    float detailField = clamp( mix( noise.w, noise.z, clamp( field.DetailType, 0.0f, 1.0f ) ), 0.0f, 1.0f );
+
+    // THE EROSION IS WEIGHTED BY DEPTH, and this is the difference between clouds and fog.
+    //
+    // Applied uniformly, the erosion subtracts as much from the core of a cloud as from its edge — and
+    // since the profile is only high in a thin band anyway, a strength of 0.5 removes most of the layer
+    // and what survives is a translucent veil. That is not a tuning failure: a cut of fixed depth into a
+    // field whose typical value is small removes the field.
+    //
+    // Weighting by (1 - Profile) puts the whole cut where the cloud is already ending. The core, which is
+    // deep inside the body, keeps its density and stays solid; the edge, which is barely inside it, is
+    // eaten into billows and wisps. It is the same principle the deck states as a frequency blend driven
+    // by the dimensional profile (p.101, p.105) — the profile decides how much detail belongs here — and
+    // it is why that field means "depth inside the body" rather than "density".
+    float edgeWeight = 1.0f - clamp( field.Profile, 0.0f, 1.0f );
+    float erosion    = detailField * clamp( params.DetailStrength, 0.0f, 1.0f ) * edgeWeight;
+
+    float density = CloudRemap( field.Profile, erosion, 1.0f, 0.0f, 1.0f );
+
+    return clamp( density * field.DensityScale, 0.0f, 1.0f );
+}
+
+#endif // CLOUD_SAMPLE_NOISE
+
+#endif // CLOUD_FIELD_GLSLH

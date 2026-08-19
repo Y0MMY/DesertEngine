@@ -166,6 +166,86 @@ namespace
          { "DirectionalInscatteringLuminance", kFogPayload },
     };
 
+    // ------------------------------------------------------------------------------------------------
+    // Volumetric clouds: every field is WIRED, and there are three consumers rather than one because the
+    // component's fields reach the GPU by three different routes.
+    //
+    //   * PackCloudParams turns the per-frame settings into the ten-vec4 block the march reads, and
+    //     MakeCloudNoiseBakeKey turns the four bake settings into the push constant of the noise bake AND
+    //     into the key that decides whether to rebake. Both live in CloudPayload.hpp.
+    //   * The ECS system owns the timestep, so the two wind fields are integrated there into the offset
+    //     the packer is handed - the component carries no accumulated state of its own.
+    //   * Enabled is the renderer's dispatch gate: off allocates nothing and dispatches nothing, which is
+    //     a decision the packer cannot make because it runs after it.
+    //
+    // The seeds and the octave counts deserve a note, because they are the fields most likely to look
+    // dead: they appear NOWHERE in the march's parameter block on purpose (Common/CloudParams.glslh says
+    // so), since they decide what the baked volume CONTAINS rather than how it is read. Their consumer is
+    // the bake key, and moving one of them re-runs the bake.
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr const char* kCloudPayload = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp";
+    constexpr const char* kCloudSystem  = "Desert/Desert/Source/Engine/ECS/System/VolumetricCloudECSSystem.hpp";
+    constexpr const char* kCloudRenderer =
+         "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.cpp";
+
+    constexpr Row kCloudRows[] = {
+         { "Enabled", kCloudRenderer }, // the zero-cost gate: off means no allocation and no dispatch
+
+         // Cloud Layer - the shell the march intersects, converted to kilometres by the packer.
+         { "LayerBottomAltitude", kCloudPayload },
+         { "LayerThickness", kCloudPayload },
+         { "PlanetRadius", kCloudPayload },
+         { "MaxViewDistance", kCloudPayload },
+         { "TracingStartDistance", kCloudPayload },
+         { "TracingStartMaxDistance", kCloudPayload },
+
+         // Weather - the coverage field. The two seed/octave rows are consumed by the BAKE key, not by
+         // the march's block.
+         { "Coverage", kCloudPayload },
+         { "CoverageContrast", kCloudPayload },
+         { "CloudType", kCloudPayload },
+         { "CloudTypeVariance", kCloudPayload },
+         { "WeatherTileSize", kCloudPayload },
+         { "WeatherSeed", kCloudPayload },
+         { "WeatherOctaves", kCloudPayload },
+
+         // Detail - the erosion field, on the same split: two settings for the march, two for the bake.
+         { "DetailTileSize", kCloudPayload },
+         { "DetailStrength", kCloudPayload },
+         { "DetailSeed", kCloudPayload },
+         { "DetailOctaves", kCloudPayload },
+         { "DensityScale", kCloudPayload },
+         { "NearFadeStartDistance", kCloudPayload },
+         { "NearFadeEndDistance", kCloudPayload },
+         { "ExtinctionScale", kCloudPayload },
+
+         // Lighting.
+         { "ScatteringAlbedo", kCloudPayload },
+         { "PhaseG", kCloudPayload },
+         { "PhaseGBackward", kCloudPayload },
+         { "PhaseBlend", kCloudPayload },
+         { "AmbientOcclusionStrength", kCloudPayload },
+         { "AerialPerspectiveStartDistance", kCloudPayload },
+         { "AerialPerspectiveFadeDistance", kCloudPayload },
+         { "LightMarchDistance", kCloudPayload },
+         { "LightMarchSamples", kCloudPayload },
+         { "MultiScatterOctaves", kCloudPayload },
+         { "MultiScatterContribution", kCloudPayload },
+         { "MultiScatterOcclusion", kCloudPayload },
+         { "MultiScatterEccentricity", kCloudPayload },
+         { "AmbientScale", kCloudPayload },
+
+         // Quality.
+         { "MaxSteps", kCloudPayload },
+         { "StopTransmittance", kCloudPayload },
+
+         // Animation - integrated against the timestep by the system that owns it, and handed to the
+         // packer as an offset.
+         { "WindDirection", kCloudSystem },
+         { "WindSpeed", kCloudSystem },
+    };
+
     // The repository root, found by walking up from wherever the test binary was started - the same
     // approach the font-baker test uses, so neither has to be run from one exact directory.
     std::string RepoRoot()
@@ -269,6 +349,11 @@ TEST( SettingConsumers, EveryFogFieldNamesItsConsumer )
     CheckTableCoversTypeExactly( Type( "ExponentialHeightFogData" ), kFogRows, std::size( kFogRows ) );
 }
 
+TEST( SettingConsumers, EveryCloudFieldNamesItsConsumer )
+{
+    CheckTableCoversTypeExactly( Type( "VolumetricCloudData" ), kCloudRows, std::size( kCloudRows ) );
+}
+
 TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
 {
     const std::string root = RepoRoot();
@@ -276,6 +361,7 @@ TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
 
     CheckWiredRowsReadTheirField( root, kSkyRows, std::size( kSkyRows ) );
     CheckWiredRowsReadTheirField( root, kFogRows, std::size( kFogRows ) );
+    CheckWiredRowsReadTheirField( root, kCloudRows, std::size( kCloudRows ) );
 }
 
 // The fog shipped WHOLE - component, pass and couplings in one task (Sky plan Phase 5) - so it owes
@@ -300,6 +386,23 @@ TEST( SettingConsumers, TheFogComponentOwesNothing )
 TEST( SettingConsumers, TheSkyComponentOwesNothing )
 {
     const std::ptrdiff_t pending = std::count_if( std::begin( kSkyRows ), std::end( kSkyRows ),
+                                                  []( const Row& r ) { return r.Task != nullptr; } );
+
+    EXPECT_EQ( pending, 0 );
+}
+
+// The cloud component shipped the same way the fog did - component, packer, bake and march in one
+// programme - so it owes nothing either. The count is a count rather than "no PENDING rows exist" for the
+// reason the two above give: a later phase may well add a field before it adds its reader, and when that
+// happens the number has to rise in a reviewable edit instead of a field quietly joining the component
+// with nobody accountable for it.
+//
+// It matters more here than anywhere else in this file. A cloud parameter that does nothing still LOOKS
+// like it does, because the sky it is supposed to change is already busy - which is precisely why this
+// programme's contract forbids a knob that moves nothing.
+TEST( SettingConsumers, TheCloudComponentOwesNothing )
+{
+    const std::ptrdiff_t pending = std::count_if( std::begin( kCloudRows ), std::end( kCloudRows ),
                                                   []( const Row& r ) { return r.Task != nullptr; } );
 
     EXPECT_EQ( pending, 0 );

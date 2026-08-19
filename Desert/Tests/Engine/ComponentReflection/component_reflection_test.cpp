@@ -423,6 +423,217 @@ TEST( HeightFogReflection, DistancesAreLengthsAndEveryFieldIsAnnotatedWellEnough
 }
 
 // ---------------------------------------------------------------------------------------------------
+// VolumetricCloudData — 32 fields in six groups. The layer geometry and the tracing limits are
+// UVolumetricCloudComponent's name for name, so a UE-calibrated sky transplants number for number; the
+// shape group is ours, because UE has no cloud-shape parameter on the component at all (its density is a
+// material graph). Every one of them is packed into Graphic::CloudGpuPayload or into the noise bake key —
+// SettingConsumers holds that half of the promise, this test holds the roster, the order and the defaults.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
+{
+    const std::vector<std::string> expected = {
+         "Enabled",
+         "LayerBottomAltitude",
+         "LayerThickness",
+         "PlanetRadius",
+         "MaxViewDistance",
+         "TracingStartMaxDistance",
+         "TracingStartDistance",
+         "Coverage",
+         "CoverageContrast",
+         "CloudType",
+         "CloudTypeVariance",
+         "WeatherTileSize",
+         "WeatherSeed",
+         "WeatherOctaves",
+         "DetailTileSize",
+         "DetailStrength",
+         "DetailSeed",
+         "DetailOctaves",
+         "DensityScale",
+         "ExtinctionScale",
+         "NearFadeStartDistance",
+         "NearFadeEndDistance",
+         "ScatteringAlbedo",
+         "PhaseG",
+         "PhaseGBackward",
+         "PhaseBlend",
+         "AmbientOcclusionStrength",
+         "LightMarchDistance",
+         "LightMarchSamples",
+         "MultiScatterOctaves",
+         "MultiScatterContribution",
+         "MultiScatterOcclusion",
+         "MultiScatterEccentricity",
+         "AerialPerspectiveStartDistance",
+         "AerialPerspectiveFadeDistance",
+         "AmbientScale",
+         "MaxSteps",
+         "StopTransmittance",
+         "WindDirection",
+         "WindSpeed",
+    };
+
+    const TypeInfo& cloud = Type( "VolumetricCloudData" );
+    EXPECT_EQ( cloud.Fields.size(), 40u );
+    EXPECT_EQ( FieldNames( cloud ), expected );
+
+    EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 7u );
+    EXPECT_EQ( CountInCategory( cloud, "Weather" ), 7u );
+    EXPECT_EQ( CountInCategory( cloud, "Detail" ), 8u );
+    EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 14u );
+    EXPECT_EQ( CountInCategory( cloud, "Quality" ), 2u );
+    EXPECT_EQ( CountInCategory( cloud, "Animation" ), 2u );
+
+    // The seeds and the octave counts belong to the BAKE and are deliberately absent from the march's
+    // parameter block (Common/CloudParams.glslh says so). They are still component fields, because the
+    // artist authors them — this pins that they did not migrate into some second home.
+    for ( const char* onTheComponent : { "WeatherSeed", "WeatherOctaves", "DetailSeed", "DetailOctaves" } )
+        EXPECT_NE( Find( cloud, onTheComponent ), nullptr ) << onTheComponent;
+
+    // The wind OFFSET is not a field: it is state the ECS system integrates against the timestep. A
+    // second copy on the component is a value that can disagree with the one the packer is handed.
+    EXPECT_EQ( Find( cloud, "WindOffset" ), nullptr );
+}
+
+// The authored defaults, each of which was argued for in the component's own comments and several of
+// which were corrected against a rendered frame. Pinned so that a change to any of them is a reviewable
+// edit rather than a sky that quietly became a different sky.
+TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
+{
+    const TypeInfo& cloud = Type( "VolumetricCloudData" );
+
+    EXPECT_TRUE( DefaultOf<bool>( cloud, "Enabled" ) );
+
+    // Layer: UE's shipped 5 km base and 10 km envelope, with UE's own 6360 km planet. The envelope is a
+    // CEILING and not a cloud — the vertical profile confines a stratocumulus to six per cent of it,
+    // which Desert/Tests/Engine/CloudField asserts directly.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "LayerBottomAltitude" ), 500000.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "LayerThickness" ), 1000000.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PlanetRadius" ), 6360.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MaxViewDistance" ), 5000000.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartDistance" ), 0.0f );
+
+    // Weather: the coverage default is a MEASURED point inside the slider's useful band, not a taste.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "Coverage" ), 0.25f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CoverageContrast" ), 1.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CloudType" ), 0.6f );
+    // NON-ZERO ON PURPOSE: at zero every cloud in the layer reaches the same altitude, because the
+    // vertical profile is then the same function everywhere, and the layer reads as a slab with a lid.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CloudTypeVariance" ), 0.4f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "WeatherTileSize" ), 800000.0f );
+    EXPECT_EQ( DefaultOf<int32_t>( cloud, "WeatherSeed" ), 1337 );
+    EXPECT_EQ( DefaultOf<int32_t>( cloud, "WeatherOctaves" ), 3 );
+
+    // Detail: the erosion is an order of magnitude weaker than the shape it cuts into, which is UE's own
+    // ratio (base noise 0.8 against detail 0.08). At 0.5 it removed most of the layer and left a veil.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailTileSize" ), 400000.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailStrength" ), 0.1f );
+    EXPECT_EQ( DefaultOf<int32_t>( cloud, "DetailSeed" ), 13 );
+    EXPECT_EQ( DefaultOf<int32_t>( cloud, "DetailOctaves" ), 2 );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DensityScale" ), 1.0f );
+    // The EFFECTIVE extinction of a three-octave approximation, not the ~45/km of real cloud: at the
+    // physical value every scattering order arrives at zero and the cloud renders uniformly grey.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "ExtinctionScale" ), 8.0f );
+
+    // Lighting: UE's Cloud_AlbedoColor, and a forward-scattering phase.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "ScatteringAlbedo" ), 0.98f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PhaseG" ), 0.8f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PhaseGBackward" ), 0.1667f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PhaseBlend" ), 0.575f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "AmbientOcclusionStrength" ), 0.5f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartMaxDistance" ), 35000000.0f );
+    // FIFTEEN kilometres, not the five hundred metres this line used to assert, and the change was
+    // forced by a measurement rather than chosen: a shadow ray that starts inside a two-kilometre cloud
+    // and is only 500 m long never leaves it, so every sample in the body reads the same optical depth
+    // and the body shades flat. Docs/Clouds/CALIBRATION.md holds the frame it was found in; Unreal's
+    // own ShadowTracingDistance is the same 15 km.
+    //
+    // Six samples rather than four is not six times the cost of a longer ray either — they are placed
+    // on a squared distribution, so the first few still land in the metres nearest the sample and the
+    // extra length is covered by the tail.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "LightMarchDistance" ), 1500000.0f );
+    EXPECT_EQ( DefaultOf<int32_t>( cloud, "LightMarchSamples" ), 6 );
+    // THREE, not one. A cloud lit by single scattering alone is physically grey; what makes a real one
+    // white is light that has bounced inside it many times.
+    EXPECT_EQ( DefaultOf<int32_t>( cloud, "MultiScatterOctaves" ), 3 );
+    // UE's shipped Multiscatter_Controls, channel for channel. The occlusion is the one that matters:
+    // at 0.5 each successive order was absorbed twice as hard as it should be, light never reached the
+    // core, and the cloud read grey rather than white.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MultiScatterContribution" ), 0.667f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MultiScatterOcclusion" ), 0.25f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MultiScatterEccentricity" ), 0.18f );
+    EXPECT_EQ( DefaultOf<glm::vec3>( cloud, "AmbientScale" ), glm::vec3( 1.0f ) );
+
+    // Quality: a ceiling rather than a fixed cost, affordable only because the march spends a coarse step
+    // on empty sky.
+    EXPECT_EQ( DefaultOf<int32_t>( cloud, "MaxSteps" ), 256 );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "StopTransmittance" ), 0.005f );
+
+    // Animation: 30 m/s along +X.
+    EXPECT_EQ( DefaultOf<glm::vec3>( cloud, "WindDirection" ), glm::vec3( 1.0f, 0.0f, 0.0f ) );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "WindSpeed" ), 3000.0f );
+}
+
+TEST( VolumetricCloudReflection, EveryDefaultLiesInsideItsOwnRange )
+{
+    // A RELATION, and one that is easy to break by editing a default and not its slider: a value the
+    // Details panel clamps away the moment the row is touched is a value the artist can never get back,
+    // and the only symptom is that the sky changes when somebody drags a control and lets go.
+    const TypeInfo& cloud = Type( "VolumetricCloudData" );
+
+    for ( const auto& f : cloud.Fields )
+    {
+        if ( !f.Meta.HasRange )
+            continue;
+
+        const double value = f.Type == FieldType::Int
+                                  ? static_cast<double>( DefaultOf<int32_t>( cloud, f.Name.c_str() ) )
+                                  : static_cast<double>( DefaultOf<float>( cloud, f.Name.c_str() ) );
+
+        EXPECT_GE( value, f.Meta.RangeMin ) << f.Name << " defaults below its own slider";
+        EXPECT_LE( value, f.Meta.RangeMax ) << f.Name << " defaults above its own slider";
+    }
+}
+
+// One world unit is one centimetre, and every distance on this component says so with Length — except
+// the planet radius, which is authored in kilometres because 6360 km is 636 000 000 cm and no slider is
+// useful at that scale. UE authors it the same way and for the same reason.
+TEST( VolumetricCloudReflection, DistancesAreLengthsExceptTheTwoThatCarryTheirOwnUnit )
+{
+    const TypeInfo& cloud = Type( "VolumetricCloudData" );
+
+    for ( const char* name : { "LayerBottomAltitude", "LayerThickness", "MaxViewDistance", "TracingStartDistance",
+                               "WeatherTileSize", "DetailTileSize", "LightMarchDistance", "WindSpeed" } )
+        EXPECT_TRUE( Find( cloud, name )->Meta.IsLength ) << name;
+
+    // The two that are NOT world units, and say which units they are instead. Marking either as a length
+    // would be a lie, and the editor would convert it.
+    EXPECT_FALSE( Find( cloud, "PlanetRadius" )->Meta.IsLength );
+    EXPECT_EQ( Find( cloud, "PlanetRadius" )->Meta.Units, "km" );
+    EXPECT_FALSE( Find( cloud, "ExtinctionScale" )->Meta.IsLength );
+    EXPECT_EQ( Find( cloud, "ExtinctionScale" )->Meta.Units, "/km" );
+
+    // The dimensionless ones stay dimensionless.
+    for ( const char* name : { "Coverage", "CoverageContrast", "CloudType", "CloudTypeVariance", "DetailStrength",
+                               "DensityScale", "ScatteringAlbedo", "PhaseG", "StopTransmittance" } )
+        EXPECT_FALSE( Find( cloud, name )->Meta.IsLength ) << name;
+
+    EXPECT_TRUE( Find( cloud, "AmbientScale" )->Meta.IsColor ) << "the ambient scale must draw as a colour";
+    EXPECT_EQ( Find( cloud, "AmbientScale" )->Type, FieldType::Vec3 );
+    EXPECT_EQ( Find( cloud, "WindDirection" )->Type, FieldType::Vec3 );
+
+    for ( const auto& f : cloud.Fields )
+    {
+        EXPECT_FALSE( f.Meta.Tooltip.empty() ) << f.Name << " has no tooltip";
+        EXPECT_FALSE( f.Meta.DisplayName.empty() ) << f.Name << " has no display name";
+        if ( f.Type == FieldType::Float || f.Type == FieldType::Int )
+            EXPECT_TRUE( f.Meta.HasRange ) << f.Name << " has no Range, so it draws as a bare drag field";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
 // What moved OUT of SkyboxComponent, and the two fields the directional light gained
 // ---------------------------------------------------------------------------------------------------
 

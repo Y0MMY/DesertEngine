@@ -1,0 +1,274 @@
+Shader "CloudTemporalResolve"
+{
+    Compute
+    {
+        // THE TEMPORAL RECONSTRUCTION — Unreal's VolumetricRenderTarget mode 0, reconstruct stage.
+        //
+        // CloudRaymarch.shader traces at a QUARTER of the framebuffer's size and jitters its rays so that
+        // each quarter-res texel holds one of the four HALF-resolution pixels of its 2x2 block, a
+        // different one every frame, walking {0, 2, 3, 1}. This pass turns that stream into a HALF-
+        // resolution image, and CloudComposite.shader upsamples the result exactly as it upsampled the
+        // half-res trace before this stage existed.
+        //
+        // For each half-res pixel there are three cases:
+        //
+        //   1. THIS FRAME OWNS IT. The pixel's sub-pixel index equals the frame's, so the quarter-res
+        //      texel above it holds a ray cast through this very pixel. Its value is fetched exactly,
+        //      with a texelFetch and no filtering — it is the only sample in the whole scheme that is not
+        //      an estimate.
+        //
+        //   2. HISTORY IS USABLE. Walk the pixel's ray to the guide's CLOUD FRONT distance, project that
+        //      world point with the previous frame's view-projection — Unreal's ClipToPrevClip, factored
+        //      so the walk can happen in world space — and read the reconstruction of the frame before.
+        //      This frame's sample is then blended into it, by kOwnedSampleWeight for case 1 and by the
+        //      much smaller kNewSampleWeight otherwise; see those constants for why the two differ.
+        //
+        //   3. NO USABLE HISTORY. Take the bilinear reconstruction of the quarter-res trace, and nothing
+        //      cleverer. Unreal does not dilate or search for a valid neighbour here and neither does
+        //      this pass: a search finds a value that belongs to a different surface, which reads as a
+        //      smear that follows the camera and is far harder to attribute than a frame of extra noise.
+        //
+        // WHY THE FRONT DISTANCE AND NOT A VELOCITY BUFFER. There is no velocity buffer, and clouds do
+        // not want one: Unreal reprojects the whole layer as a single front surface, because a volume has
+        // no single motion vector and the front is what the eye tracks. The guide's .x channel is that
+        // surface.
+        //
+        // WHAT IS VALIDATED, and each rule is Unreal's:
+        //   * the reprojected UV must land on screen — off-screen history is not history, it is the edge
+        //     texel repeated, and this engine's samplers are REPEAT, so it would be the OPPOSITE edge;
+        //   * the scene distance must not have jumped between the history and this frame — that is a
+        //     DISOCCLUSION, geometry that moved in front of or out from behind the cloud;
+        //   * neither the history colour nor its guide may be NaN or Inf. One such texel, blended
+        //     forward, poisons an ever-growing region of the screen for the rest of the session, which is
+        //     the single most expensive failure mode a history buffer has.
+        //
+        // LINEAR HDR IN, LINEAR HDR OUT. Premultiplied radiance in .rgb, TRANSMITTANCE in .a, exactly as
+        // the march produced it and the composite expects it. Blending a premultiplied pair componentwise
+        // is legitimate: both channels are linear in the same integral.
+
+        // Included for CLOUD_WORLD_UNITS_PER_KM alone. Written out as a literal here instead, it would be
+        // the second copy of a conversion factor, and this programme has already paid twice for two places
+        // that had to agree and did not.
+        #include <Common/CloudGeometry.glslh>
+
+        // The reconstruction's two outputs, both HALF resolution. rgba16f for the same reason the march's
+        // targets are: radiance is pre-tonemap HDR and transmittance is in [0,1].
+        layout(binding = 4, rgba16f) restrict writeonly uniform image2D u_ReconstructedScatter;
+
+        // The reconstructed guide, which serves two readers: CloudComposite.shader upsamples through it,
+        // and NEXT frame's run of this pass reads it back as the history guide to detect disocclusions.
+        // It carries THIS frame's distances with no temporal blending at all — a distance is a property of
+        // the geometry in front of the camera now, and mixing it with a distance from three frames ago
+        // would produce a number describing nothing, which the composite would then treat as an edge.
+        layout(binding = 5, rgba16f) restrict writeonly uniform image2D u_ReconstructedGuide;
+
+        // This frame's QUARTER-resolution trace and its guide.
+        Uniform(0) sampler2D u_CloudTrace;
+        Uniform(1) sampler2D u_CloudTraceGuide;
+
+        // The PREVIOUS frame's half-resolution reconstruction and its guide. On the first frame after the
+        // targets are allocated these are bound to the engine's fallback texture rather than left unbound
+        // — a declared sampler with no image is an INVALID descriptor set, not an unused one, and this
+        // backend answers an invalid set by skipping the entire dispatch, which would lose the clouds with
+        // nothing in the log. u_HistoryValid is what says the bytes mean anything.
+        Uniform(2) sampler2D u_CloudHistory;
+        Uniform(3) sampler2D u_CloudHistoryGuide;
+
+        // The C++ side of this block is Graphic::CloudResolveParams (Engine/Graphic/Clouds/CloudPayload.hpp),
+        // where a static_assert pins every offset. Raw std430 rather than the ReadBuffer(n) sugar, as
+        // CloudParams.glslh does, because this header describes a structure.
+        //
+        // A BUFFER AND NOT A PUSH CONSTANT: two 4x4 matrices are already 128 bytes, which is the whole
+        // size Vulkan guarantees for push constants, and several desktop drivers report exactly that
+        // minimum. The camera and the frame state would not fit.
+        layout(std430, binding = 6) readonly buffer CloudResolveBuffer
+        {
+            mat4  u_InverseViewProjection; // clip -> world, this frame
+            mat4  u_PrevViewProjection;    // world -> clip, the previous frame
+            vec3  u_CameraPosition;        // world units (centimetres)
+            float u_HistoryValid;          // 1 when the history targets hold a real previous frame
+            ivec2 u_SubPixelOffset;        // this frame's traced sub-pixel, {0,1} x {0,1}
+        };
+
+        LocalSize(8, 8, 1);
+
+        // THE DISOCCLUSION THRESHOLD, kilometres. Unreal rejects a history sample whose scene depth has
+        // moved by more than a couple of kilometres at cloud scale; below that the difference is the
+        // guide's own quantisation and the camera's motion, above it something has come between the
+        // camera and the layer. Absolute rather than relative, deliberately: the quantity is a SCENE
+        // distance, and at sky distances a relative threshold would accept a mountain appearing in front
+        // of a cloud thirty kilometres away.
+        const float kDisocclusionKm = 2.0f;
+
+        // HOW MUCH OF THIS FRAME REPLACES A VALIDATED HISTORY SAMPLE. Two weights, because the two cases
+        // carry very different information, and both numbers were measured rather than assumed — the
+        // sweep is in the task report.
+        //
+        //   OWNED. The quarter-res texel above this pixel holds a ray cast through this very pixel, so
+        //   the sample is exact. It is still not taken whole: each trace carries one realisation of the
+        //   march's start-offset dither, and replacing outright preserves that realisation intact, which
+        //   is the speckle this work exists to remove. Blending successive realisations is the only place
+        //   in the scheme where the dither is actually AVERAGED rather than merely held.
+        //
+        //   NOT OWNED. All that is available is a bilinear reconstruction of a grid that was traced
+        //   through DIFFERENT sub-pixels, so its sampling position moves every frame; feeding much of it
+        //   in puts that movement into every pixel of the screen. It is admitted only enough to stop a
+        //   pixel drifting away from the truth between the frames that own it — at zero the image
+        //   visibly ghosts (measured: 4.7x the frame-to-frame difference of the pass this replaces).
+        //
+        // RAISED FROM 0.25 AFTER MEASURING THE AXIS THE FIRST SWEEP DID NOT HAVE.
+        //
+        // That sweep chose 0.25 because it minimised sigma. Sigma cannot tell a cloud that lost its
+        // noise from one that lost its edges — both shrink the variance of a neighbourhood — so
+        // minimising it walks straight into blur, and the frames at 0.25 were visibly soft. Measuring
+        // the gradient energy of the far-field band against a pre-temporal render, on the settled
+        // frame, prices it:
+        //
+        //     owned   sigma    edge energy     vs pre-temporal
+        //     0.25    6.253      3.4631          -10.9 %
+        //     0.50    6.448      3.8683           -0.5 %
+        //     0.75    6.558      4.0943           +5.3 %
+        //     1.00    6.633      4.2560           +9.4 %
+        //
+        // 0.50 is where the detail merely comes BACK; 0.75 is where it ends up ahead of where the pass
+        // found it, and 2 % more noise is a fair price for 5 % more edge on a subject made of edges.
+        // It is not a compromise between the two either: the original sweep's own inter-frame |dY|
+        // column puts 0.50 at 0.1199-0.1499 against 0.25's 0.1270 — the same temporal stability, from
+        // twice the weight. The quarter weight was buying softness, not steadiness.
+        //
+        // The ceiling above this is structural rather than a number to turn: the march traces at a
+        // QUARTER of the framebuffer and this pass reconstructs a half-resolution image from four such
+        // frames. Wanting more than +5 % means either tracing at a higher resolution — which is the
+        // cost the quarter-res trace was adopted to avoid — or a neighbourhood clamp on the history,
+        // which is the standard way to hold detail at a higher weight and is not implemented yet.
+        //
+        // Setting kOwnedSampleWeight to 1 is the pure hand-over-the-new-sample scheme, and it still
+        // improves on the pass this replaces; it just improves half as much. The numbers are in the
+        // report and the constant is here so the choice can be re-measured rather than re-argued.
+        const float kOwnedSampleWeight = 0.75f;
+        const float kNewSampleWeight   = 0.06f;
+
+        // Half a texel in, on both axes. This engine's samplers are REPEAT, so a uv inside [0,1] but
+        // within half a texel of the border still gathers from the OPPOSITE edge of the image — a bright
+        // fringe along one side that no amount of staring at the march explains.
+        vec2 ClampToTexelCentres(vec2 uv, ivec2 size)
+        {
+            vec2 half_texel = 0.5f / vec2(size);
+            return clamp(uv, half_texel, vec2(1.0f, 1.0f) - half_texel);
+        }
+
+        bool IsFinite(vec4 v)
+        {
+            return !any(isnan(v)) && !any(isinf(v));
+        }
+
+        void main()
+        {
+            ivec2 size  = imageSize(u_ReconstructedScatter);
+            ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+            if (coord.x >= size.x || coord.y >= size.y)
+                return;
+
+            ivec2 traceSize = textureSize(u_CloudTrace, 0);
+
+            // Which sub-pixel of its 2x2 block this half-res pixel is, and the quarter-res texel that
+            // covers the block. `& 1` and `>> 1` rather than `% 2` and `/ 2`: the coordinates are
+            // non-negative by construction and the bit forms have no sign-handling to get wrong.
+            ivec2 subPixel   = coord & ivec2(1, 1);
+            ivec2 traceCoord = coord >> ivec2(1, 1);
+
+            bool owned = subPixel == u_SubPixelOffset;
+
+            // THIS FRAME'S LOW-RESOLUTION ESTIMATE, with the jitter undone. A quarter-res texel does not
+            // hold the value at its own centre — it holds the value at the half-res pixel
+            // (2 * texel + offset + 0.5), which is where its ray was cast. Sampling the texture at this
+            // pixel's position directly would therefore be wrong by half a half-res pixel in a direction
+            // that CHANGES EVERY FRAME, and a reconstruction that wobbles with the jitter is precisely
+            // the artefact this pass exists to remove. Inverting the placement instead costs one
+            // subtraction: the continuous texel index whose sample lands on this pixel is
+            // (halfPos - offset - 0.5) / 2.
+            vec2 halfPos    = vec2(coord) + vec2(0.5f, 0.5f);
+            vec2 traceTexel = (halfPos - vec2(u_SubPixelOffset) - vec2(0.5f, 0.5f)) * 0.5f;
+            vec2 traceUv    = ClampToTexelCentres((traceTexel + vec2(0.5f, 0.5f)) / vec2(traceSize), traceSize);
+
+            vec4 traceScatter = texture(u_CloudTrace, traceUv);
+            vec4 traceGuide   = texture(u_CloudTraceGuide, traceUv);
+
+            // Case 1. The pixel this frame traced: the exact texel, fetched rather than filtered.
+            if (owned)
+            {
+                traceScatter = texelFetch(u_CloudTrace, traceCoord, 0);
+                traceGuide   = texelFetch(u_CloudTraceGuide, traceCoord, 0);
+            }
+
+            // The guide always describes THIS frame, whichever branch the radiance comes from: it is what
+            // the composite measures edges with and what next frame's disocclusion test compares against,
+            // and both questions are about the geometry in front of the camera now. It is never blended
+            // with the history's own distances — mixing a distance from three frames ago with this one
+            // produces a number describing nothing, which the composite would then read as an edge.
+            imageStore(u_ReconstructedGuide, coord, traceGuide);
+
+            float newWeight = owned ? kOwnedSampleWeight : kNewSampleWeight;
+
+            // Case 3, taken by fall-through: every rejection below leaves this value in place. That is
+            // Unreal's rule and the reason there is no dilation or search here — a neighbour that passes
+            // validation belongs to a different surface, and the smear it produces follows the camera.
+            vec4 resolved = traceScatter;
+
+            if (u_HistoryValid > 0.5f)
+            {
+                // The pixel's ray, from this frame's inverse view-projection. REVERSED-Z, like everything
+                // else in this engine (Core/Projection.hpp): 1 is the near plane and 0 the far one.
+                vec2 uv  = halfPos / vec2(size);
+                vec2 ndc = vec2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
+
+                vec4 nearH = u_InverseViewProjection * vec4(ndc.x, ndc.y, 1.0f, 1.0f);
+                vec4 farH  = u_InverseViewProjection * vec4(ndc.x, ndc.y, 0.0f, 1.0f);
+                vec3 nearP = nearH.xyz / max(nearH.w, 1e-9f);
+                vec3 farP  = farH.xyz / max(farH.w, 1e-9f);
+                vec3 rayDir = normalize(farP - nearP);
+
+                // THE SINGLE FRONT SURFACE. The guide's .x is where this ray first met material, or the
+                // end of its search when it met none; either way it is a real distance, so the point
+                // below is always on the ray and never a sentinel projected into the previous frame.
+                vec3 frontWorld = u_CameraPosition +
+                                  rayDir * (traceGuide.x * CLOUD_WORLD_UNITS_PER_KM);
+
+                vec4 prevClip = u_PrevViewProjection * vec4(frontWorld, 1.0f);
+
+                // Behind the previous camera's eye. Dividing by a w at or below zero mirrors the point
+                // through the origin and lands it somewhere plausible on screen, which is the worst
+                // possible failure: a confident wrong answer rather than a rejected one.
+                if (prevClip.w > 1e-6f)
+                {
+                    vec2 prevNdc = prevClip.xy / prevClip.w;
+                    vec2 prevUv  = vec2(prevNdc.x * 0.5f + 0.5f, 0.5f - prevNdc.y * 0.5f);
+
+                    bool onScreen = all(greaterThanEqual(prevUv, vec2(0.0f, 0.0f))) &&
+                                    all(lessThanEqual(prevUv, vec2(1.0f, 1.0f)));
+
+                    if (onScreen)
+                    {
+                        vec2 fetchUv = ClampToTexelCentres(prevUv, size);
+
+                        vec4 history      = texture(u_CloudHistory, fetchUv);
+                        vec4 historyGuide = texture(u_CloudHistoryGuide, fetchUv);
+
+                        bool finite      = IsFinite(history) && IsFinite(historyGuide);
+                        bool sameSurface = abs(historyGuide.y - traceGuide.y) <= kDisocclusionKm;
+
+                        if (finite && sameSurface)
+                            resolved = mix(history, traceScatter, newWeight);
+                    }
+                }
+            }
+
+            // Transmittance is clamped both ways because it multiplies the scene behind the cloud: a
+            // value above 1 brightens what is BEHIND it, which reads as a glowing rectangle and is very
+            // hard to trace back to a filter. Radiance is clamped only against negatives, which no blend
+            // of two non-negative values can produce but a poisoned history texel can.
+            imageStore(u_ReconstructedScatter, coord,
+                       vec4(max(resolved.rgb, vec3(0.0f)), clamp(resolved.a, 0.0f, 1.0f)));
+        }
+    }
+}

@@ -23,6 +23,7 @@ include "Tools/ProjectHub/"
 include "Tools/DShaderTool/"
 include "Tools/PakTool/"
 include "Tools/SceneMigrator/"
+include "Tools/ImageStat/"
 group ""
 
 include "Desert/"

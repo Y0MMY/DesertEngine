@@ -1,0 +1,94 @@
+// The scattering maths of the cloud march: the phase function, Beer's law, the energy-conserving
+// integration of one step, and the profile-driven ambient occlusion. Dual-compile dialect
+// (Common/CloudNoise.glslh states the rules); driven as C++ by Desert/Tests/Engine/CloudLighting.
+//
+// This header owns the maths and nothing else. It has no samplers, no parameter block and no knowledge
+// of how the light reached the sample — the march passes in radiance and gets back radiance, which is
+// what lets the same functions serve the view ray, the light ray and the tests.
+
+#ifndef CLOUD_LIGHTING_GLSLH
+#define CLOUD_LIGHTING_GLSLH
+
+#define CLOUD_PI 3.14159265358979323846f
+
+// The phase function of a medium that has forgotten which way the light came from: energy spread evenly
+// over the sphere. It is the limit the multiple-scattering octaves blend toward, because light that has
+// bounced many times inside a cloud genuinely has no preferred direction left.
+#define CLOUD_ISOTROPIC_PHASE ( 1.0f / ( 4.0f * CLOUD_PI ) )
+
+// Henyey-Greenstein, the standard single-lobe phase. `g` in (-1, 1): positive scatters forward, which is
+// what puts the bright rim on the cloud you are looking at through the sun.
+//
+// The denominator is floored. At g -> 1 and cosTheta -> 1 it goes to zero, and the unguarded pow(0, 1.5)
+// is an infinity that propagates through the integral and lands as a permanently white pixel — the kind
+// of defect that survives every unit test because it needs one exact alignment of view, sun and g.
+float CloudPhaseHG( float cosTheta, float g )
+{
+    float gg    = clamp( g, -0.95f, 0.95f );
+    float g2    = gg * gg;
+    float denom = 1.0f + g2 - 2.0f * gg * cosTheta;
+    return ( 1.0f - g2 ) / ( 4.0f * CLOUD_PI * pow( max( denom, 1e-4f ), 1.5f ) );
+}
+
+// TWO LOBES, blended — and the reason one is not enough is visible in every photograph of a cloud with
+// the sun behind it. A single Henyey-Greenstein lobe has to be either strong, which lights the rim and
+// leaves the body black, or weak, which lights the body and loses the rim. The pair does both: a sharp
+// forward lobe carries the silver lining, a nearly isotropic one carries the body, and the blend decides
+// how much of each.
+//
+// The blend is Unreal's arrangement — `HG(g1) + blend * (HG(g2) - HG(g1))` — and its shipped instance
+// weights it toward the BODY: g 0.8, g2 0.1667, blend 0.575. That distribution is worth keeping when
+// tuning: more than half the answer comes from the near-isotropic lobe, and the sharp one is a highlight
+// on top rather than the main term.
+float CloudPhaseDualLobe( float cosTheta, float forwardG, float backwardG, float blend )
+{
+    float forward  = CloudPhaseHG( cosTheta, forwardG );
+    float backward = CloudPhaseHG( cosTheta, backwardG );
+    return mix( forward, backward, clamp( blend, 0.0f, 1.0f ) );
+}
+
+// Beer-Lambert transmittance across a segment. Extinction is per kilometre and the distance is in
+// kilometres, matching Common/CloudGeometry.glslh.
+float CloudBeerTransmittance( float extinctionPerKm, float distanceKm )
+{
+    return exp( -max( extinctionPerKm, 0.0f ) * max( distanceKm, 0.0f ) );
+}
+
+// The energy-conserving integral of in-scattered radiance across one step, assuming the extinction and
+// the in-scattered radiance are constant along it:
+//
+//     integral = (S - S * T) / sigma_t     with     T = exp(-sigma_t * dt)
+//
+// It matters that this is the closed form and not `S * dt`. The naive product over-brightens as the step
+// grows, so a cloud's appearance would change with the step schedule — meaning it would change with
+// distance from the camera and with the quality tier. Two tiers that disagree about how bright a cloud is
+// are the same defect as two shaders that disagree about a constant, and it is just as invisible in a
+// unit test of either one alone.
+//
+// The extinction is floored rather than special-cased at zero: the limit of the expression as sigma_t
+// goes to zero is S * dt, and a floor of 1e-6 reproduces that to well inside half-float precision while
+// keeping the function branchless.
+vec3 CloudScatterIntegral( vec3 scattering, float extinctionPerKm, float stepKm )
+{
+    float sigma = max( extinctionPerKm, 1e-6f );
+    float t     = exp( -sigma * max( stepKm, 0.0f ) );
+    return ( scattering - scattering * t ) / sigma;
+}
+
+// Ambient occlusion from the dimensional profile: deck p.144, `pow(1 - dimensional_profile, 0.5)`.
+//
+// It is a geometric argument rather than a fitted curve. Most of the ambient light a cloud receives comes
+// from the whole sky and penetrates only the surface, so the deeper inside the body a sample is, the less
+// of that light reaches it — and the profile already IS the depth inside the body. Without this term the
+// core of a three-kilometre cumulus is lit exactly as brightly as a wisp on its edge, which reads as a
+// flat white cut-out no matter how good the silhouette is.
+//
+// @p strength blends toward no occlusion at 0, so the term is authorable without being removable by
+// accident.
+float CloudAmbientOcclusion( float profile, float strength )
+{
+    float occluded = pow( clamp( 1.0f - profile, 0.0f, 1.0f ), 0.5f );
+    return mix( 1.0f, occluded, clamp( strength, 0.0f, 1.0f ) );
+}
+
+#endif // CLOUD_LIGHTING_GLSLH

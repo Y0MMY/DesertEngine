@@ -38,6 +38,7 @@
 #include "Systems/Scene/Deferred/SSRRenderer.hpp"
 #include "Systems/Scene/Deferred/GIResolveRenderer.hpp"
 #include "Systems/Scene/Particles/ParticleRenderer.hpp"
+#include "Systems/Scene/Clouds/VolumetricCloudRenderer.hpp"
 #include "Systems/Scene/Fog/HeightFogRenderer.hpp"
 
 #include <Engine/Core/SceneSettings.hpp>
@@ -138,6 +139,11 @@ namespace Desert::Graphic
         // `fogHeightY` is the fog entity's transform Y — the fog floor, owned by the transform and never
         // authored twice.
         void SetHeightFog( bool present, const ECS::ExponentialHeightFogData& data, float fogHeightY );
+
+        // This frame's volumetric cloud layer (from VolumetricCloudComponent, via the ECS). The wind
+        // offset is accumulated by the ECS system, which is where the timestep lives.
+        void SetVolumetricClouds( bool present, const ECS::VolumetricCloudData& data,
+                                  const glm::vec3& windOffset );
 
         // The evaluated per-frame sky: sun direction and radiance, ambient above/below, night factor, the
         // planet radius, and an OPAQUE handle to the packed sky-parameter buffer. Consumers never see the
@@ -272,6 +278,12 @@ namespace Desert::Graphic
         // they composite over the fogged scene. When Sky Phase 3 lands, this pass composes fog OVER the
         // aerial perspective (UE's order).
         void ExecuteAtmosphericFog();
+
+        // The cloud march and its noise bake. Issued immediately after the atmospheric fog: both are
+        // in-frame compute and must be outside an open render pass, and by that point the scene depth is
+        // final and this frame's atmosphere LUTs have been filled. The composite itself is a graph pass in
+        // Transparency at RenderPassOrder::FarField, ABOVE the fog and BELOW the particles.
+        void ExecuteVolumetricClouds();
         // UI-phase passes (the Render2D canvas) drawn as a LOAD overlay AFTER the deferred lighting
         // composite — same reason as ExecuteTransparency/ExecuteDebugOverlay: recorded inside the graph
         // they land on the target BEFORE the composite (painted over) AND a CLEAR begin would wipe the

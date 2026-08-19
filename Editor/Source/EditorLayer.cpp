@@ -79,6 +79,7 @@
 #include <Engine/ECS/System/TextECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
 #include <Engine/ECS/System/HeightFogECSSystem.hpp>
+#include <Engine/ECS/System/VolumetricCloudECSSystem.hpp>
 #include <Engine/ECS/System/TimeOfDayECSSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
@@ -760,6 +761,7 @@ namespace Desert::Editor
         // A pure render-data collector: reads the fog component (and its entity's transform Y, the fog
         // floor) and emits one command.
         scene.AddSystem<ECS::HeightFogECSSystem>();
+        scene.AddSystem<ECS::VolumetricCloudECSSystem>();
         scene.AddSystem<ECS::TerrainECSSystem>();
         scene.AddSystem<ECS::PointLightECSSystem>();
         scene.AddSystem<ECS::SpotLightECSSystem>();

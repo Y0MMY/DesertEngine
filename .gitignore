@@ -59,6 +59,23 @@ Desert/Common/Source/Common/Core/Version.gen.hpp
 # Cooked artifacts (mesh/texture cooks, SPIR-V shader cache) — machine-local, content-addressed
 Cooked/
 
+# ...with one deliberate exception. A texture only becomes referenceable by a .demat once a .tex exists
+# under Cooked/Textures/ carrying its handle, and the drag-drop importer mints that handle from the
+# texture's ABSOLUTE path — so a texture the repo itself ships would get a different handle on every
+# machine and every material pointing at it would resolve to nothing. This one .tex is therefore SOURCE,
+# not a cook: its handle is fixed and its SourcePath is relative. The importer preserves the handle of an
+# existing .tex, so re-cooking it changes nothing.
+#
+# Re-included one directory level at a time, and the intermediate `/*` lines are load-bearing: git will
+# not look inside a directory it has already excluded, so `!.../T_Checker.tex` alone matches nothing.
+# Each level is re-ignored immediately after being opened, which is what keeps the other ~660 cooked
+# files (shader cache, pipeline cache, mesh cooks) ignored.
+!Editor/Cooked/
+Editor/Cooked/*
+!Editor/Cooked/Textures/
+Editor/Cooked/Textures/*
+!Editor/Cooked/Textures/T_Checker.tex
+
 # Fetched by scripts/MacOS/Setup.sh (not a submodule)
 ThirdParty/meshoptimizer/
 dist/
@@ -82,3 +99,18 @@ Editor/Resources/Assets/Scenes/Autosave/
 
 # macOS Finder junk
 .DS_Store
+
+# --- Cloud programme reference material -------------------------------------------------------------
+# The two SIGGRAPH PDFs (63 MB) are third-party conference material. Our analysis of them is committed
+# (Docs/Clouds/*.md); the papers themselves are not ours to redistribute.
+Docs/Clouds/*.pdf
+
+# Material copied out of the Unreal editor: the material-graph dump and screenshots of Epic's UI. The
+# waiver on file (Docs/Clouds/LICENCE_RECORD.md) covers USING it; committing Epic's asset verbatim into
+# this repository is a different question and is not one to answer by accident. Our own extracted
+# analysis lives in Docs/Clouds/UEReference/Documentation/ and IS committed.
+Docs/Clouds/UEReference/*.png
+Docs/Clouds/UEReference/*.graph.txt
+
+# Scratch git worktrees created by tooling. They are checkouts, not content.
+.claude/worktrees/

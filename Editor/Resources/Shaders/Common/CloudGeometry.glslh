@@ -1,0 +1,188 @@
+// The geometry of a cloud layer: where a view ray enters and leaves the shell, how high inside it a
+// sample sits, and how many steps the march is allowed to take. Written once in the dual-compile dialect
+// (see Common/CloudNoise.glslh for the rules) and driven as C++ by Desert/Tests/Engine/CloudGeometry.
+//
+// THE LAYER IS A SPHERICAL SHELL, not a slab. Two spheres concentric with the planet, and the ray is
+// intersected against both. A flat slab is the cheaper thing to write and it is wrong in the way that
+// matters most: it puts the horizon at infinity, so a layer 3 km thick either fills the whole lower sky
+// or is clipped by an invisible plane, and no amount of parameter tuning moves that. This is also UE's
+// arrangement (VolumetricCloud.usf: two RayIntersectSphereSolution calls against BottomRadiusKm and
+// TopRadiusKm) and Nubis's, and it is the reason the planet radius is a parameter at all.
+//
+// EVERYTHING HERE IS IN KILOMETRES, and positions are RELATIVE TO THE PLANET CENTRE. Both conventions are
+// deliberate. Kilometres because the shell radii are ~6360 and float32 resolves that to about 0.4 m,
+// which is finer than any cloud feature we render; world units (centimetres) would put the same radius at
+// 6.36e8, where float32 resolves 64 m and the two shells of a thin layer would quantize onto each other.
+// Planet-centre-relative because that is the frame in which both spheres are centred on the origin, so
+// the intersection never forms the planet centre as a large coordinate and never subtracts two nearly
+// equal squares.
+//
+// THE ROOTS ARE SIGNED. A ray pointing away from the shell produces negative roots and must be treated as
+// a miss; taking their absolute value — the obvious-looking simplification — makes every ray "hit" the
+// layer behind the camera, which renders as clouds mirrored below the horizon.
+
+#ifndef CLOUD_GEOMETRY_GLSLH
+#define CLOUD_GEOMETRY_GLSLH
+
+// One world unit is one centimetre (Common::Units), so a kilometre is 100 000 of them. Mirrored by
+// Graphic::kCloudWorldUnitsPerKm.
+#define CLOUD_WORLD_UNITS_PER_KM 100000.0f
+
+// The shell this frame marches. Radii are measured from the planet centre, which is what lets the
+// intersection below be two plain sphere tests.
+struct CloudLayer
+{
+    float PlanetRadiusKm;
+    float BottomRadiusKm;
+    float TopRadiusKm;
+};
+
+// Builds the shell from what the artist actually authors: an altitude above the ground and a thickness.
+//
+// The thickness is floored at a metre rather than at zero. A shell of exactly zero thickness has a
+// coincident pair of roots, and every ray that grazes it produces a segment of length zero which the step
+// schedule then divides by — the floor turns an authorable division by zero into an invisible layer.
+CloudLayer CloudMakeLayer( float planetRadiusKm, float bottomAltitudeKm, float thicknessKm )
+{
+    CloudLayer layer;
+    layer.PlanetRadiusKm = planetRadiusKm;
+    layer.BottomRadiusKm = planetRadiusKm + max( bottomAltitudeKm, 0.0f );
+    layer.TopRadiusKm    = layer.BottomRadiusKm + max( thicknessKm, 0.001f );
+    return layer;
+}
+
+// Ray against a sphere centred on the origin. Returns the two signed roots, nearest first; a MISS is
+// encoded as x > y, which is a state the hit path can never produce.
+//
+// The constant term is written as (len - r) * (len + r) rather than dot(o,o) - r*r. Algebraically they
+// are the same; numerically they are not. With |o| and r both near 6360, dot(o,o) - r*r subtracts two
+// numbers near 4.0e7 whose difference is of order 1, discarding roughly seven of the eight significant
+// digits float32 has. The factored form subtracts before it multiplies, so the small quantity is computed
+// exactly and only then scaled. This is the difference between a layer whose boundaries are resolved to
+// the metre and one whose boundaries jitter by kilometres near the horizon.
+vec2 CloudRaySphere( vec3 originKm, vec3 rayDir, float radiusKm )
+{
+    vec2 result;
+
+    float len  = length( originKm );
+    float b    = 2.0f * dot( originKm, rayDir );
+    float c    = ( len - radiusKm ) * ( len + radiusKm );
+    float disc = b * b - 4.0f * c;
+
+    if ( disc < 0.0f )
+    {
+        result.x = 1.0f;
+        result.y = -1.0f;
+        return result;
+    }
+
+    float root = sqrt( disc );
+    result.x   = ( -b - root ) * 0.5f;
+    result.y   = ( -b + root ) * 0.5f;
+    return result;
+}
+
+// The segment of the ray that lies inside the shell, as (tEnter, tExit) in kilometres along @p rayDir.
+//
+// NOTHING TO MARCH is reported as y <= x, and callers must test it. There are three ways to get there and
+// all of them are ordinary: the ray points away from the planet's sky, the ray is below the layer and
+// aimed at the ground, or the camera is above the layer looking up.
+//
+// The case analysis is Unreal's (VolumetricCloud.usf, the TMin/TMax block) and it is not obvious enough
+// to re-derive: the reason the top chord is clamped to its NEAR root when both bottom roots are ahead is
+// that the camera is then below the layer looking up through it, and the far top root is on the other
+// side of the planet.
+vec2 CloudLayerIntersect( CloudLayer layer, vec3 originKm, vec3 rayDir )
+{
+    vec2 result;
+
+    vec2 top = CloudRaySphere( originKm, rayDir, layer.TopRadiusKm );
+    if ( top.x > top.y )
+    {
+        result.x = 1.0f;
+        result.y = -1.0f;
+        return result;
+    }
+
+    vec2 bottom = CloudRaySphere( originKm, rayDir, layer.BottomRadiusKm );
+
+    float tMin;
+    float tMax;
+
+    if ( bottom.x > bottom.y )
+    {
+        // The inner sphere is not on the path at all: the whole outer chord is inside the shell.
+        tMin = top.x;
+        tMax = top.y;
+    }
+    else
+    {
+        bool  bottomAhead = bottom.x > 0.0f && bottom.y > 0.0f;
+        float tempTop     = ( top.x > 0.0f && top.y > 0.0f ) ? top.x : top.y;
+        float tempBottom  = bottomAhead ? bottom.x : bottom.y;
+
+        if ( bottomAhead )
+            tempTop = max( 0.0f, top.x );
+
+        tMin = min( tempBottom, tempTop );
+        tMax = max( tempBottom, tempTop );
+    }
+
+    // The camera may already be inside the shell, in which case the entry root is behind it.
+    result.x = max( tMin, 0.0f );
+    result.y = tMax;
+
+    // THE PLANET IS OPAQUE, and without this the function happily reports the shell on the FAR SIDE of it.
+    //
+    // Both sphere tests above are pure geometry: a ray aimed at the ground leaves the layer behind, passes
+    // through the planet, and meets both shells again twelve thousand kilometres later. Nothing in the
+    // case analysis rejects that, because nothing in it knows the planet is solid — it only knows two
+    // radii. Measured, a ray straight down from half a kilometre up returns the segment
+    // 12725.50 .. 12735.50 km and the march runs it.
+    //
+    // The scene depth hides it wherever there IS ground: the march cuts the segment at the geometry and
+    // the result collapses to nothing. It shows the moment a downward ray finds no geometry — off the edge
+    // of a terrain, through a hole, over water that is not drawn — as cloud rendered BELOW the horizon.
+    //
+    // One extra sphere test per ray, not per step, and it is the exact statement rather than a distance
+    // cutoff that happens to catch it: if the planet is met before the layer is entered, there is nothing
+    // to march.
+    vec2 planet = CloudRaySphere( originKm, rayDir, layer.PlanetRadiusKm );
+    if ( planet.x <= planet.y && planet.x > 0.0f && planet.x < result.x )
+    {
+        result.x = 1.0f;
+        result.y = -1.0f;
+    }
+
+    return result;
+}
+
+// Where a sample sits inside the layer, 0 at the base and 1 at the top.
+//
+// Measured from the planet centre, so it follows the curvature: a sample twenty kilometres away is at the
+// same fraction as one overhead when both are the same height above the ground. Taking the world Y
+// instead — the tempting simplification, since near the camera the two agree — puts every distant cloud
+// progressively lower in its own layer until, at the horizon, the whole layer is compressed into its
+// floor.
+float CloudHeightFraction( CloudLayer layer, vec3 positionKm )
+{
+    float altitude  = length( positionKm ) - layer.BottomRadiusKm;
+    float thickness = max( layer.TopRadiusKm - layer.BottomRadiusKm, 1e-6f );
+    return clamp( altitude / thickness, 0.0f, 1.0f );
+}
+
+// How many steps this ray is allowed. Unreal's heuristic, and the reason to prefer it over anything
+// adaptive is that it is PREDICTABLE: the count depends only on the length of the segment, so the cost of
+// a frame can be reasoned about before it is measured, and no ray can be made expensive by the contents
+// of the scene.
+//
+// The count rises linearly with the segment until @p distanceToMaxKm and saturates after it. A ray that
+// skims the underside of the layer is the expensive case — its segment is long — and the saturation is
+// what stops it from being unboundedly so.
+float CloudStepCount( float segmentLengthKm, float minCount, float maxCount, float distanceToMaxKm )
+{
+    float t = clamp( segmentLengthKm / max( distanceToMaxKm, 1e-6f ), 0.0f, 1.0f );
+    return max( minCount, maxCount * t );
+}
+
+#endif // CLOUD_GEOMETRY_GLSLH

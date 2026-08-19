@@ -83,21 +83,25 @@ Shader "ProceduralSky"
 
             vec3 sunIlluminance = UnpackSkyConfig(s).sunColor * UnpackSunIntensity(s);
 
-            if (SkyViewHitsGround(atm.BottomRadiusKm, viewHeight, viewZenithCos))
-            {
-                // v1 below-horizon: the ground as a Lambertian sphere under the transmitted sun, seen
-                // through the marched air (the LUT's alpha). NdotL and the sun transmittance are taken
-                // at the camera's footprint rather than the exact hit point — the difference is a
-                // fraction of a degree at ground-level view distances.
-                float sunZenithCos = clamp(dot(zenith, sunDir), -1.0f, 1.0f);
-                vec3  sunT         = texture(u_TransmittanceLut,
-                                             SkyTransmittanceLutUvFromParams(
-                                                  atm.BottomRadiusKm, atm.TopRadiusKm,
-                                                  atm.BottomRadiusKm + SKY_PLANET_RADIUS_OFFSET_KM,
-                                                  sunZenithCos)).rgb;
-                sky += SkyGroundLuminance(atm, sunIlluminance, sunT, sunZenithCos) * lut.a;
-            }
-            else
+            // BELOW THE HORIZON THIS PASS DRAWS ONLY AIR — never a lit ground, which is what it used to
+            // do and what made the lower half of an empty scene a flat beige plate that no scene setting
+            // could remove. `sky` already holds the in-scattering marched along the ray up to where it
+            // meets the planet, and that is the whole of the sky's contribution downward.
+            //
+            // This is Unreal's behaviour and it is checkable in one action: switch off the
+            // ExponentialHeightFog in a UE scene with no geometry and the ground goes BLACK. The colour
+            // that is normally there belongs to the fog, not to the sky — the sky atmosphere never
+            // shades the planet in the main pass. `GroundAlbedo` still matters, but through the
+            // multiple-scattering LUT, where it brightens the sky near the horizon by light that bounced
+            // off the ground and came back up. That is the ONLY route it should take to the screen, and
+            // the tooltip on the field has always said so.
+            //
+            // The ground bounce stays where it is genuinely light rather than a picture: the IBL bake
+            // (Compute/BakeProceduralSky.shader) and the distant sky light the fog reads
+            // (SkyScattering.glslh, SkyDistantLightRadiance). A scene lit from below by ground bounce is
+            // correct; a scene that DRAWS that bounce as a floor is not, and only the second one is a
+            // divergence.
+            if (!SkyViewHitsGround(atm.BottomRadiusKm, viewHeight, viewZenithCos))
             {
                 // The analytic sun disc: outer-space luminance (illuminance over the disc's solid
                 // angle) times the transmittance toward the view, limb-darkened, soft-edged. Not in

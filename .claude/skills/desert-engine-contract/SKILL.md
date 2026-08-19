@@ -14,7 +14,9 @@ description: >
 
 From `Docs/Clouds/DEV_CONTRACT.md`, written for the sky-and-clouds programme and applied to the
 repository generally. That document is the authority and carries the history of why each rule
-exists — usually a specific defect. This is its operative core.
+exists — usually a specific defect. This is its operative core. The full original (Russian) is
+bundled next to this file as `DEV_CONTRACT.md` — read it when a rule's wording or its history
+matters.
 
 **How to use it:** the rules in §1 are absolute; a change that breaks one is returned regardless of
 how good the rest is. Everything else is judgement, and the contract says which way to lean.

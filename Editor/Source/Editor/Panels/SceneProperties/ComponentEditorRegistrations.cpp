@@ -92,6 +92,9 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIDropdownComponent, Data, "
 // scene, and the fog height deliberately is not a field (it is the entity's transform Y).
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::ExponentialHeightFogComponent, Data,
                                      "ExponentialHeightFogData", "Exponential Height Fog" )
+
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::VolumetricCloudComponent, Data, "VolumetricCloudData",
+                                     "Volumetric Cloud" )
 // Sky Atmosphere is a CUSTOM entry: the reflected fields PLUS the sky-colour ramp (which needs the scene's
 // sun elevation, and that is not a field) and the IBL bake button. See
 // ComponentWidgets/SkyAtmosphereComponent.cpp.

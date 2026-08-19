@@ -1,0 +1,556 @@
+// The geometry of the cloud shell, tested against the geometry it claims to be.
+//
+// Common/CloudGeometry.glslh is compiled here AS C++ (CloudGeometryReference.hpp), so every assertion
+// below is about the text the march compiles. The four things this suite exists for are the four a frame
+// cannot show:
+//
+//   * THE ROOTS ARE SIGNED. A ray aimed away from the shell must come back negative and read as a miss.
+//     Take the absolute value — the obvious simplification — and every ray "hits" the layer behind the
+//     camera, which renders as cloud mirrored below the horizon and looks like a coverage problem.
+//   * THE CONSTANT TERM IS FACTORED. At |o| and r both near 6360, dot(o,o) - r*r discards seven of the
+//     eight digits float32 has. The factored form is metres where the naive one is tens of metres, and
+//     the difference is only visible as jitter on a boundary near the horizon.
+//   * THE SEGMENT IS THE SHELL, in all three camera cases, with "nothing to march" encoded as y <= x.
+//   * THE HEIGHT FRACTION FOLLOWS THE CURVATURE. Measured from the planet centre, a sample twenty
+//     kilometres away at the same ALTITUDE sits at the same fraction as one overhead. Measured on the
+//     world Y — which agrees near the camera and is therefore what a close-up frame endorses — the whole
+//     layer compresses into its own floor at the horizon.
+
+#include "CloudGeometryReference.hpp"
+
+#include <gtest/gtest.h>
+
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using namespace Desert::Tests::CloudGeometryRef;
+
+namespace
+{
+    // A planet and a layer with the component's own defaults in kilometres: 6360 km planet, base at
+    // 5 km, ten kilometres thick. Written as numbers rather than read from the component because this
+    // suite is about the geometry, not about the defaults — ComponentReflection owns those.
+    constexpr float kPlanetKm = 6360.0f;
+    constexpr float kBottomKm = 6365.0f;
+    constexpr float kTopKm    = 6367.0f;
+
+    CloudLayer MakeTestLayer()
+    {
+        return CloudMakeLayer( kPlanetKm, kBottomKm - kPlanetKm, kTopKm - kBottomKm );
+    }
+
+    // The same quadratic solved in double from the same float inputs. Everything it differs from the
+    // shader by is float rounding inside the shader's own arithmetic, which is exactly what the precision
+    // test is measuring.
+    glm::dvec2 ExactRoots( vec3 originKm, vec3 rayDir, float radiusKm )
+    {
+        const glm::dvec3 o( originKm );
+        const glm::dvec3 d( rayDir );
+        const double     r = static_cast<double>( radiusKm );
+
+        const double b    = 2.0 * glm::dot( o, d );
+        const double c    = glm::dot( o, o ) - r * r;
+        const double disc = b * b - 4.0 * c;
+
+        if ( disc < 0.0 )
+            return { 1.0, -1.0 };
+
+        const double root = std::sqrt( disc );
+        return { ( -b - root ) * 0.5, ( -b + root ) * 0.5 };
+    }
+
+    vec3 DirectionAtElevation( float degrees )
+    {
+        const float radians = degrees * 3.14159265358979323846f / 180.0f;
+        return glm::normalize( vec3( std::cos( radians ), std::sin( radians ), 0.0f ) );
+    }
+
+    // The repository root, found by walking up from wherever the binary was started — the same approach
+    // SettingConsumers uses, so neither has to be run from one exact directory.
+    std::string RepoRoot()
+    {
+        std::string prefix = "./";
+        for ( int up = 0; up < 6; ++up )
+        {
+            std::ifstream probe( prefix + "Editor/Resources/Shaders/Common/CloudParams.glslh" );
+            if ( probe )
+                return prefix;
+            prefix += "../";
+        }
+        return {};
+    }
+
+    // Reads `#define <name> <number>` out of a shader header. Used to pin the two step-schedule constants
+    // to the file that declares them: they live in Common/CloudParams.glslh (with the parameter block,
+    // because they are not component fields) while the function that consumes them lives in
+    // Common/CloudGeometry.glslh, and two files that must agree are exactly what nobody checks.
+    double ParseDefine( const std::string& text, const std::string& name )
+    {
+        const std::string needle = "#define " + name;
+        const std::size_t at     = text.find( needle );
+        if ( at == std::string::npos )
+            return std::nan( "" );
+
+        // strtod rather than a stream extraction, because the value carries GLSL's `f` suffix and the
+        // stream's number grammar treats `f` as a hexadecimal digit: it swallows "2.0f", fails to convert
+        // it, and hands back a silent zero.
+        return std::strtod( text.c_str() + at + needle.size(), nullptr );
+    }
+
+    std::string ReadFile( const std::string& path )
+    {
+        std::ifstream in( path );
+        if ( !in )
+            return {};
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    }
+} // namespace
+
+// ---------------------------------------------------------------------------------------------------
+// CloudRaySphere — signs and encodings
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CloudGeometryRaySphere, ARayAimedAwayFromTheSphereProducesNEGATIVERootsAndNotAHitAhead )
+{
+    // The camera is above the shell and looking up. The line still crosses the sphere — behind the
+    // camera — so this is NOT the disc < 0 case, and that is the whole point: the only thing separating
+    // it from a hit is the SIGN. An implementation that took abs() of the roots here would report a
+    // segment 12 700 km long starting three kilometres ahead.
+    const vec3 origin( 0.0f, 6370.0f, 0.0f );
+    const vec3 up( 0.0f, 1.0f, 0.0f );
+
+    const vec2 roots = CloudRaySphere( origin, up, kTopKm );
+
+    EXPECT_LE( roots.x, roots.y ) << "the line does cross the sphere, so this must not read as disc < 0";
+    EXPECT_LT( roots.y, 0.0f ) << "both roots are behind the camera and must stay negative";
+    EXPECT_LT( roots.x, roots.y ) << "nearest root first, and both behind";
+
+    // And the same ray pointing the other way is a hit ahead, which is what makes the sign meaningful
+    // rather than an accident of this configuration.
+    const vec2 down = CloudRaySphere( origin, vec3( 0.0f, -1.0f, 0.0f ), kTopKm );
+    EXPECT_GT( down.x, 0.0f );
+    EXPECT_NEAR( down.x, 3.0f, 1e-3f );
+}
+
+TEST( CloudGeometryRaySphere, AMissIsEncodedAsXGreaterThanYAndAHitCanNeverProduceThatOrder )
+{
+    // The camera stands 6360 km from the centre and looks along the horizon at a sphere of 6355 — the
+    // line passes outside it, so the discriminant is genuinely negative.
+    const vec3 origin( 0.0f, kPlanetKm, 0.0f );
+    const vec2 miss = CloudRaySphere( origin, vec3( 1.0f, 0.0f, 0.0f ), 6355.0f );
+    EXPECT_GT( miss.x, miss.y ) << "a geometric miss must be reported in the order the callers test for";
+
+    // Now sweep: every direction on a circle, against four radii spanning below, around and above the
+    // camera. Whenever the exact double solution says the line meets the sphere, the float function must
+    // return the roots in order; whenever it says it does not, it must return the miss encoding. The two
+    // encodings must never be confusable, because CloudLayerIntersect distinguishes the cases by nothing
+    // else.
+    for ( int step = 0; step < 360; ++step )
+    {
+        const vec3 dir = DirectionAtElevation( static_cast<float>( step ) );
+
+        for ( const float radius : { 6355.0f, 6360.5f, kBottomKm, kTopKm } )
+        {
+            const vec2       actual = CloudRaySphere( origin, dir, radius );
+            const glm::dvec2 exact  = ExactRoots( origin, dir, radius );
+
+            const bool actualMiss = actual.x > actual.y;
+            const bool exactMiss  = exact.x > exact.y;
+
+            EXPECT_EQ( actualMiss, exactMiss )
+                 << "elevation " << step << " deg, radius " << radius << ": the float solution and the "
+                 << "exact one disagree about whether the line meets the sphere at all";
+        }
+    }
+}
+
+TEST( CloudGeometryRaySphere, TheFactoredConstantTermResolvesTheShellToMETRESAtSixThousandKilometres )
+{
+    // WHY THE ORIGINS ARE AXIS-ALIGNED AND INTEGRAL. length() of (0, y, 0) is exact when y*y is exactly
+    // representable, which 6360 and 6364 both are. That removes the ONE rounding this test is not about —
+    // the length itself — and leaves the quadratic's own arithmetic, which is what the factored constant
+    // term exists to protect.
+    //
+    // The measured worst case below is well under a metre. The naive dot(o,o) - r*r form, dropped into
+    // the same configurations, is off by twenty-three metres on the horizontal ray against the 6364.5 km
+    // shell — because there the whole discriminant IS the constant term, and the naive form computes it
+    // by subtracting two numbers near 4.05e7 whose difference is 6364.
+    struct Config
+    {
+        vec3  Origin;
+        float RadiusKm;
+    };
+
+    const Config configs[] = {
+         { vec3( 0.0f, 6364.0f, 0.0f ), 6364.5f }, // just inside the shell: the constant term is tiny
+         { vec3( 0.0f, 6364.0f, 0.0f ), 6365.0f },     { vec3( 0.0f, 6364.0f, 0.0f ), 6370.0f },
+         { vec3( 0.0f, kPlanetKm, 0.0f ), kBottomKm }, { vec3( 0.0f, kPlanetKm, 0.0f ), kTopKm },
+         { vec3( 0.0f, kPlanetKm, 0.0f ), 6355.0f }, // the camera is OUTSIDE this one
+    };
+
+    double worstKm = 0.0;
+
+    for ( const Config& config : configs )
+    {
+        for ( const float elevation : { -60.0f, -30.0f, -10.0f, -2.0f, 0.0f, 2.0f, 10.0f, 30.0f, 60.0f, 89.0f } )
+        {
+            const vec3 dir = DirectionAtElevation( elevation );
+
+            const vec2       actual = CloudRaySphere( config.Origin, dir, config.RadiusKm );
+            const glm::dvec2 exact  = ExactRoots( config.Origin, dir, config.RadiusKm );
+
+            if ( exact.x > exact.y )
+                continue; // a miss carries no roots to compare
+
+            const double nearErr = std::abs( static_cast<double>( actual.x ) - exact.x );
+            const double farErr  = std::abs( static_cast<double>( actual.y ) - exact.y );
+            worstKm              = std::max( worstKm, std::max( nearErr, farErr ) );
+
+            EXPECT_LT( nearErr, 0.002 ) << "radius " << config.RadiusKm << " elevation " << elevation;
+            EXPECT_LT( farErr, 0.002 ) << "radius " << config.RadiusKm << " elevation " << elevation;
+        }
+    }
+
+    std::printf( "[CloudGeometry] worst root error at ~6360 km: %.4f m\n", worstKm * 1000.0 );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// CloudLayerIntersect — the three camera cases, and the encoding that says there is nothing to do
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CloudGeometryLayer, BelowTheLayerLookingUpEntersAtTheBaseAndLeavesAtTheTop )
+{
+    const CloudLayer layer = MakeTestLayer();
+
+    // Half a kilometre above the ground, straight up. The base is 4.5 km away and the top 6.5.
+    const vec3 origin( 0.0f, kPlanetKm + 0.5f, 0.0f );
+    const vec2 segment = CloudLayerIntersect( layer, origin, vec3( 0.0f, 1.0f, 0.0f ) );
+
+    EXPECT_NEAR( segment.x, 4.5f, 1e-2f );
+    EXPECT_NEAR( segment.y, 6.5f, 1e-2f );
+    EXPECT_GT( segment.y, segment.x ) << "there is something to march";
+}
+
+TEST( CloudGeometryLayer, InsideTheLayerTheSegmentStartsAtTheCameraAndReachesTheNearerShell )
+{
+    const CloudLayer layer = MakeTestLayer();
+
+    // One kilometre up inside a two-kilometre shell.
+    const vec3 origin( 0.0f, 6366.0f, 0.0f );
+
+    const vec2 up = CloudLayerIntersect( layer, origin, vec3( 0.0f, 1.0f, 0.0f ) );
+    EXPECT_FLOAT_EQ( up.x, 0.0f ) << "the entry root is behind a camera that is already inside";
+    EXPECT_NEAR( up.y, 1.0f, 1e-2f ) << "one kilometre to the top";
+
+    const vec2 down = CloudLayerIntersect( layer, origin, vec3( 0.0f, -1.0f, 0.0f ) );
+    EXPECT_FLOAT_EQ( down.x, 0.0f );
+    EXPECT_NEAR( down.y, 1.0f, 1e-2f ) << "one kilometre to the base";
+
+    // Sideways from inside: the ray stays in the shell for a long chord and must not be clipped by the
+    // inner sphere it never reaches.
+    const vec2 sideways = CloudLayerIntersect( layer, origin, vec3( 1.0f, 0.0f, 0.0f ) );
+    EXPECT_FLOAT_EQ( sideways.x, 0.0f );
+    EXPECT_GT( sideways.y, 100.0f ) << "the horizontal chord of a shell at 6366 km is over a hundred km";
+}
+
+TEST( CloudGeometryLayer, AboveTheLayerLookingDownEntersAtTheTopAndLeavesAtTheBase )
+{
+    const CloudLayer layer = MakeTestLayer();
+
+    // Ten kilometres up, three above the layer, looking straight down.
+    const vec3 origin( 0.0f, 6370.0f, 0.0f );
+    const vec2 segment = CloudLayerIntersect( layer, origin, vec3( 0.0f, -1.0f, 0.0f ) );
+
+    EXPECT_NEAR( segment.x, 3.0f, 1e-2f );
+    EXPECT_NEAR( segment.y, 5.0f, 1e-2f );
+}
+
+TEST( CloudGeometryLayer, AboveTheLayerLookingUpHasNothingToMarch )
+{
+    const CloudLayer layer = MakeTestLayer();
+
+    const vec3 origin( 0.0f, 6370.0f, 0.0f );
+    const vec2 segment = CloudLayerIntersect( layer, origin, vec3( 0.0f, 1.0f, 0.0f ) );
+
+    EXPECT_LE( segment.y, segment.x ) << "the whole layer is behind the camera; the caller tests y <= x";
+}
+
+TEST( CloudGeometryLayer, ARayThatLeavesTheAtmosphereEntirelyHasNothingToMarch )
+{
+    // Outside the outer shell and aimed away from the planet altogether: the outer sphere is not on the
+    // line at all, which is the disc < 0 early-out.
+    const CloudLayer layer = MakeTestLayer();
+
+    const vec3 origin( 0.0f, 6380.0f, 0.0f );
+    const vec2 segment = CloudLayerIntersect( layer, origin, vec3( 1.0f, 0.5f, 0.0f ) );
+
+    EXPECT_LE( segment.y, segment.x );
+}
+
+// THIS TEST FAILS TODAY, AND THE FAILURE IS THE POINT.
+//
+// CloudLayerIntersect's own header lists three ways to get "nothing to march", and the second is "the ray
+// is below the layer and aimed at the ground". The function does not produce it: there is no planet test
+// anywhere in the file, and CloudLayer::PlanetRadiusKm is used only to build the two shell radii. A ray
+// aimed at the ground from beneath the layer passes THROUGH the planet and meets both shells on the far
+// side, so the segment comes back at ~12 725 km — the antipodal cloud deck.
+//
+// It is not harmless: the march clamps the segment to entry + MaxViewDistance, which keeps 12 725.5 to
+// 12 727.5 km inside the window, so the far-side layer is marched at full quality. In any pixel where the
+// depth buffer holds no geometry — a scene with no terrain, an ocean gap, the void under a floating
+// island — that renders as cloud BELOW the horizon: the exact symptom the file's own header warns about
+// as the consequence of taking abs() of the roots.
+TEST( CloudGeometryLayer, ARayFromBelowTheLayerAimedAtTheGroundHasNothingToMarch )
+{
+    const CloudLayer layer = MakeTestLayer();
+
+    const vec3 origin( 0.0f, kPlanetKm + 0.5f, 0.0f );
+    const vec2 straightDown = CloudLayerIntersect( layer, origin, vec3( 0.0f, -1.0f, 0.0f ) );
+
+    EXPECT_LE( straightDown.y, straightDown.x ) << "the segment returned starts at " << straightDown.x
+                                                << " km, which is the layer on the far side of the planet";
+
+    // A shallow downward ray — the ordinary case of looking a little below the horizon — is the same
+    // defect and is the one a viewer actually sees.
+    const vec2 shallow = CloudLayerIntersect( layer, origin, DirectionAtElevation( -20.0f ) );
+    EXPECT_LE( shallow.y, shallow.x ) << "segment starts at " << shallow.x << " km";
+}
+
+TEST( CloudGeometryLayer, TheSegmentNeverStartsBehindTheCamera )
+{
+    // A relation rather than a case: whatever the geometry, the entry is clamped to zero, because the
+    // march adds a jittered offset to it and steps forward. A negative entry would sample the shell
+    // behind the viewer and blend it over the frame.
+    const CloudLayer layer = MakeTestLayer();
+
+    for ( const float altitude : { 0.1f, 1.0f, 5.5f, 6.0f, 6.9f, 12.0f } )
+    {
+        const vec3 origin( 0.0f, kPlanetKm + altitude, 0.0f );
+
+        for ( int step = 0; step < 72; ++step )
+        {
+            const vec2 segment = CloudLayerIntersect( layer, origin, DirectionAtElevation( step * 5.0f ) );
+            if ( segment.y <= segment.x )
+                continue;
+
+            EXPECT_GE( segment.x, 0.0f ) << "altitude " << altitude << ", elevation " << step * 5;
+        }
+    }
+}
+
+TEST( CloudGeometryLayer, EveryPointOfTheReturnedSegmentIsActuallyInsideTheShell )
+{
+    // The relation that gives the three case tests above their meaning: whatever the branch taken, the
+    // interval handed back has to lie in the shell. Sampling the midpoint and both ends catches an
+    // interval built from the wrong pair of roots, which is what the case analysis is easy to get wrong.
+    const CloudLayer layer = MakeTestLayer();
+
+    for ( const float altitude : { 0.1f, 1.0f, 5.5f, 6.0f, 6.9f, 12.0f } )
+    {
+        const vec3 origin( 0.0f, kPlanetKm + altitude, 0.0f );
+
+        for ( int step = 0; step < 72; ++step )
+        {
+            const vec3 dir     = DirectionAtElevation( step * 5.0f );
+            const vec2 segment = CloudLayerIntersect( layer, origin, dir );
+            if ( segment.y <= segment.x )
+                continue;
+
+            // The far-side segment this suite reports separately would fail here too; skipping it keeps
+            // this test about the shell membership rather than about the same defect twice.
+            if ( segment.x > 1000.0f )
+                continue;
+
+            for ( const float where : { 0.02f, 0.5f, 0.98f } )
+            {
+                const float radius =
+                     glm::length( origin + dir * ( segment.x + ( segment.y - segment.x ) * where ) );
+                EXPECT_GE( radius, layer.BottomRadiusKm - 0.01f )
+                     << "altitude " << altitude << ", elevation " << step * 5 << ", at " << where;
+                EXPECT_LE( radius, layer.TopRadiusKm + 0.01f )
+                     << "altitude " << altitude << ", elevation " << step * 5 << ", at " << where;
+            }
+        }
+    }
+}
+
+TEST( CloudGeometryLayer, AZeroThicknessLayerIsFlooredRatherThanLeftDegenerate )
+{
+    // One hand-edited scene away. A shell of exactly zero thickness has coincident roots, and the step
+    // schedule then divides by a segment of length zero.
+    const CloudLayer layer = CloudMakeLayer( kPlanetKm, 5.0f, 0.0f );
+    EXPECT_GT( layer.TopRadiusKm, layer.BottomRadiusKm );
+    EXPECT_NEAR( layer.TopRadiusKm - layer.BottomRadiusKm, 0.001f, 1e-4f );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// CloudHeightFraction — the curvature, which is the whole reason the shell is not a slab
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CloudGeometryHeight, ZeroAtTheBaseOneAtTheTopAndClampedOutside )
+{
+    const CloudLayer layer = MakeTestLayer();
+
+    EXPECT_FLOAT_EQ( CloudHeightFraction( layer, vec3( 0.0f, kBottomKm, 0.0f ) ), 0.0f );
+    EXPECT_FLOAT_EQ( CloudHeightFraction( layer, vec3( 0.0f, kTopKm, 0.0f ) ), 1.0f );
+    EXPECT_NEAR( CloudHeightFraction( layer, vec3( 0.0f, 0.5f * ( kBottomKm + kTopKm ), 0.0f ) ), 0.5f, 1e-3f );
+
+    EXPECT_FLOAT_EQ( CloudHeightFraction( layer, vec3( 0.0f, kPlanetKm, 0.0f ) ), 0.0f ) << "below the base";
+    EXPECT_FLOAT_EQ( CloudHeightFraction( layer, vec3( 0.0f, 6400.0f, 0.0f ) ), 1.0f ) << "above the top";
+}
+
+TEST( CloudGeometryHeight, ASampleTwentyKilometresAwayAtTheSameALTITUDEHasTheSameHeightFraction )
+{
+    // THE TEST THE FLAT-Y IMPLEMENTATION FAILS. Twenty kilometres along the ground is an angle of
+    // 20/6366 radians at the planet centre; a point at the same altitude there has dropped 31 metres in
+    // world Y, which on a two-kilometre layer is 0.0157 of the fraction — ten times the tolerance below.
+    // At fifty kilometres it is 0.098, and by the horizon the whole layer has collapsed into its floor.
+    const CloudLayer layer = MakeTestLayer();
+
+    const float overheadRadius   = 6366.0f; // the middle of the shell
+    const float overheadFraction = CloudHeightFraction( layer, vec3( 0.0f, overheadRadius, 0.0f ) );
+    ASSERT_NEAR( overheadFraction, 0.5f, 1e-3f );
+
+    for ( const float groundDistanceKm : { 5.0f, 20.0f, 50.0f, 200.0f } )
+    {
+        const float angle = groundDistanceKm / overheadRadius;
+        const vec3  away( overheadRadius * std::sin( angle ), overheadRadius * std::cos( angle ), 0.0f );
+
+        EXPECT_NEAR( CloudHeightFraction( layer, away ), overheadFraction, 2e-3f )
+             << groundDistanceKm << " km away at the same altitude must be at the same height fraction; "
+             << "its world Y is " << away.y << " and reading THAT as the altitude is the flat-slab bug";
+    }
+}
+
+TEST( CloudGeometryHeight, TheFractionRisesWithAltitudeAndNeverLeavesZeroToOne )
+{
+    const CloudLayer layer = MakeTestLayer();
+
+    float previous = -1.0f;
+    for ( int step = 0; step <= 100; ++step )
+    {
+        const float radius   = kPlanetKm + 0.1f * static_cast<float>( step );
+        const float fraction = CloudHeightFraction( layer, vec3( 0.0f, radius, 0.0f ) );
+
+        EXPECT_GE( fraction, 0.0f );
+        EXPECT_LE( fraction, 1.0f );
+        EXPECT_GE( fraction, previous ) << "radius " << radius;
+        previous = fraction;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// CloudStepCount — a schedule that has to be predictable, and two constants that live in another file
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // The values Common/CloudParams.glslh declares. Read from the file rather than copied, so that
+    // changing one of them without looking at the function that consumes it fails here.
+    struct ScheduleConstants
+    {
+        float MinSteps;
+        float DistanceToMaxKm;
+    };
+
+    ScheduleConstants ReadScheduleConstants()
+    {
+        const std::string root = RepoRoot();
+        EXPECT_FALSE( root.empty() ) << "repository root not found - run from the workspace root";
+
+        const std::string text = ReadFile( root + "Editor/Resources/Shaders/Common/CloudParams.glslh" );
+        EXPECT_FALSE( text.empty() ) << "Common/CloudParams.glslh could not be read";
+
+        ScheduleConstants constants{};
+        constants.MinSteps        = static_cast<float>( ParseDefine( text, "CLOUD_MIN_STEPS" ) );
+        constants.DistanceToMaxKm = static_cast<float>( ParseDefine( text, "CLOUD_DISTANCE_TO_MAX_STEPS_KM" ) );
+        return constants;
+    }
+} // namespace
+
+TEST( CloudGeometrySteps, TheScheduleConstantsAreTheOnesTheParameterBlockDeclares )
+{
+    // Not a tautology: this suite asserts behaviour AT those two numbers below, and the numbers live in
+    // a file this one does not compile. Pinning them here is what makes the saturation test a statement
+    // about the shipped schedule rather than about a literal somebody typed twice.
+    const ScheduleConstants constants = ReadScheduleConstants();
+
+    EXPECT_FLOAT_EQ( constants.MinSteps, 2.0f );
+    EXPECT_FLOAT_EQ( constants.DistanceToMaxKm, 15.0f );
+    EXPECT_GT( constants.DistanceToMaxKm, 0.0f ) << "the schedule divides by this";
+}
+
+TEST( CloudGeometrySteps, TheCountRisesWithTheSegmentAndSaturatesAtTheDeclaredDistance )
+{
+    const ScheduleConstants constants = ReadScheduleConstants();
+
+    constexpr float kMaxCount = 256.0f; // the component's Max Steps default
+
+    float previous = 0.0f;
+    for ( int step = 0; step <= 400; ++step )
+    {
+        const float segmentKm = 0.1f * static_cast<float>( step );
+        const float count = CloudStepCount( segmentKm, constants.MinSteps, kMaxCount, constants.DistanceToMaxKm );
+
+        EXPECT_GE( count, constants.MinSteps ) << "segment " << segmentKm << " km fell below the floor";
+        EXPECT_LE( count, kMaxCount ) << "segment " << segmentKm << " km exceeded the ceiling";
+        EXPECT_GE( count, previous ) << "segment " << segmentKm << " km: the count went DOWN";
+
+        if ( segmentKm >= constants.DistanceToMaxKm )
+            EXPECT_FLOAT_EQ( count, kMaxCount ) << "segment " << segmentKm << " km must be saturated";
+
+        previous = count;
+    }
+
+    // Strictly rising in the middle of the ramp, which is what "the cost of a ray is a function of its
+    // segment" means. A schedule that is flat there is one that spends the same budget on a ray that
+    // grazes the layer and one that crosses it.
+    const float atThree = CloudStepCount( 3.0f, constants.MinSteps, kMaxCount, constants.DistanceToMaxKm );
+    const float atSix   = CloudStepCount( 6.0f, constants.MinSteps, kMaxCount, constants.DistanceToMaxKm );
+    EXPECT_GT( atSix, atThree * 1.5f );
+}
+
+TEST( CloudGeometrySteps, TheFloorHoldsForAZeroLengthSegmentAndForADegenerateSaturationDistance )
+{
+    // A zero segment is reachable — the shell floor makes the thinnest authorable layer 1 m — and the
+    // count must still be the minimum rather than zero, because the march turns it into an int and uses
+    // it as a divisor.
+    EXPECT_FLOAT_EQ( CloudStepCount( 0.0f, 2.0f, 256.0f, 15.0f ), 2.0f );
+    EXPECT_FLOAT_EQ( CloudStepCount( -5.0f, 2.0f, 256.0f, 15.0f ), 2.0f );
+
+    // And the division inside is guarded: a saturation distance of zero would otherwise be an infinity
+    // that becomes an int of undefined value and a step size of zero.
+    const float degenerate = CloudStepCount( 4.0f, 2.0f, 256.0f, 0.0f );
+    EXPECT_TRUE( std::isfinite( degenerate ) );
+    EXPECT_FLOAT_EQ( degenerate, 256.0f );
+}
+
+TEST( CloudGeometrySteps, TheStepSizeTheMarchDerivesIsAlwaysPositiveAndBoundedByTheSegment )
+{
+    // The relation the loop depends on: length / count is the fine step, and the coarse step is four
+    // times it. Both have to be positive and neither may exceed the segment, or a single iteration would
+    // step past the exit and the layer would be sampled once.
+    for ( const float segmentKm : { 0.001f, 0.1f, 1.0f, 7.5f, 15.0f, 60.0f, 400.0f } )
+    {
+        const float count = CloudStepCount( segmentKm, 2.0f, 256.0f, 15.0f );
+        ASSERT_GT( count, 0.0f );
+
+        const float stepKm = segmentKm / count;
+        EXPECT_GT( stepKm, 0.0f ) << "segment " << segmentKm;
+        EXPECT_LE( stepKm, segmentKm ) << "segment " << segmentKm;
+        EXPECT_GE( static_cast<int>( count ), 2 ) << "segment " << segmentKm << ": the loop would not run";
+    }
+}
+
+int main( int argc, char** argv )
+{
+    ::testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
+}

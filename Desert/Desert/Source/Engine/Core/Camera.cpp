@@ -79,11 +79,34 @@ namespace Desert::Core
 
         UpdateProjectionMatrix( width, height );
 
-        constexpr glm::vec3 InitialPosition = { 500, 500, 500 };
-        m_Distance                          = glm::distance( InitialPosition, m_FocalPoint );
+        // THE EDITOR OPENS LOOKING AT THE HORIZON, NOT AT THE FLOOR.
+        //
+        // It used to open at (500, 500, 500) with a pitch of forty-five degrees DOWN, so the entire frame
+        // was below the horizon: every scene opened on its ground, the sky was off-screen, and the editor
+        // grid — which lies in the y = 0 plane — was seen from five metres up at a steep angle.
+        //
+        // Now: two metres above the plane, aimed a few degrees below the horizon. The grid stays visible
+        // and gives the scale, the horizon sits just above centre, and the sky — which in this engine
+        // carries an atmosphere and a cloud layer — is the larger half of the frame. Two metres is eye
+        // height, which is also the height every sky and cloud calibration in this repository is checked
+        // from.
+        // Eye height, aimed slightly ABOVE the horizon.
+        //
+        // The orbit camera derives its position from the focal point: position = focal - forward *
+        // distance. With the focal point at the origin, an upward pitch puts the camera BELOW the ground,
+        // which is why the old default could only look down. Lifting the focal point to eye height frees
+        // it: the camera sits just under the pivot and looks up past it, and both stay above the plane.
+        //
+        // Eight degrees up puts the horizon in the lower fifth of the frame. The grid and the ground stay
+        // visible for scale, and the rest is sky — which in this engine carries an atmosphere and a cloud
+        // layer and is the thing most scenes are opened to look at.
+        constexpr float kEyeHeightWorldUnits = 200.0f; // 2 m, in centimetres
+        constexpr float kPitchAboveHorizon   = -0.14f; // radians, ~8 degrees up
 
-        m_Yaw   = 3.0f * glm::pi<float>() / 4.0f;
-        m_Pitch = glm::pi<float>() / 4.0f;
+        m_FocalPoint = glm::vec3( 0.0f, kEyeHeightWorldUnits, 0.0f );
+        m_Pitch      = kPitchAboveHorizon;
+        m_Yaw        = 3.0f * glm::pi<float>() / 4.0f;
+        m_Distance   = 100.0f; // 1 m — the pivot sits just in front of the eye
 
         m_Position                  = m_FocalPoint - GetForwardDirection() * m_Distance + m_LocationDelta;
         const glm::quat orientation = GetOrientation();

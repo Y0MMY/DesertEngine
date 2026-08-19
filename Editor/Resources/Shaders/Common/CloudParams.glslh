@@ -1,0 +1,90 @@
+// THE cloud parameter block, byte for byte. The C++ side of this layout is Graphic::CloudGpuPayload
+// (Engine/Graphic/Clouds/CloudPayload.hpp), where a static_assert pins every offset. A layout declared
+// twice diverges the first time somebody inserts a field into the middle of one of them, and the failure
+// mode is a corrupted frame with no error message — the asserts turn it into a build error instead.
+//
+// Raw `layout(std430, ...)` rather than the ReadBuffer(n) sugar, for the reason FogParams.glslh gives:
+// this header describes a structure, and raw layout is the sanctioned escape for structural GLSL.
+//
+// UNITS: KILOMETRES throughout, already converted on the C++ side by PackCloudParams. Nothing in this
+// block is in world units, and nothing downstream converts a second time.
+//
+// EVERY SLOT HAS A CONSUMER. The block is packed to exactly 48 floats with no padding and no
+// reserved field, because a slot nobody reads is a dead setting wearing a parameter's
+// clothes — and the first person to need a new one will quietly repurpose it.
+//
+// FIELDS ARE APPENDED, NEVER INSERTED. Every offset here is a promise to the shader; a field placed in
+// the middle silently reinterprets every field after it.
+
+#ifndef CLOUD_PARAMS_GLSLH
+#define CLOUD_PARAMS_GLSLH
+
+// ComputePipeline::SetStorageBuffer takes the binding as an explicit argument and never consults the
+// shader's reflection, so this number and Graphic::kCloudParamsBinding must be the same one. A mismatch
+// lands the buffer on a different descriptor rather than on an error.
+#define CLOUD_PARAMS_BINDING 1
+
+layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuffer
+{
+    vec4  u_CloudLayer;     // x planet radius (km), y layer bottom altitude (km), z thickness (km), w max view distance (km)
+    vec4  u_CloudMarch;     // x max steps, y stop transmittance, z tracing start distance (km), w extinction (1/km)
+    vec4  u_CloudWeather;   // x coverage tile (km), y coverage, z coverage contrast, w cloud type
+    vec4  u_CloudDetail;    // x detail tile (km), y detail strength, z density scale, w scattering albedo
+    vec4  u_CloudWind;      // xyz accumulated wind offset (km), w phase g
+    vec4  u_CloudSun;       // xyz TOWARD the sun (normalized), w light march distance (km)
+    vec4  u_CloudSunColour; // rgb sun irradiance (linear), w light march sample count
+    // rgb: in the ARTISTIC gradient model this IS the ambient sky radiance; in the PHYSICAL model it is
+    // the SCALE applied to the marched distant-sky-light texel, whose value lives on the GPU and never
+    // reaches the CPU. w says which: 1 when the texel must be sampled, 0 when rgb is already the value.
+    // Same arrangement as the height fog's u_FogAmbient, and for the same reason.
+    vec4  u_CloudAmbient;
+    vec4  u_CloudMultiScatter; // x octave count, y contribution, z occlusion, w eccentricity
+    // x = aerial-perspective volume far extent (km), y = its read-side view-distance scale,
+    // z = 1 when the volume exists and must be sampled, w = cloud type variance.
+    // The type variance shares this block rather than earning one of its own because a vec4 with three
+    // used slots is a vec4 with one slot waiting to be repurposed without a name.
+    vec4  u_CloudAerial;
+    // x = second phase lobe g, y = phase blend, z = ambient occlusion strength,
+    // w = the distance past which the layer is not traced at all (km).
+    vec4  u_CloudPhase;
+    // x = distance at which the aerial perspective starts to apply (km), y = distance over which it
+    // reaches full strength (km), z = distance at which the near-camera fade ends (km), w = the
+    // distance at which it begins (km).
+    vec4  u_CloudFade;
+};
+
+// The block is TWELVE vec4s and stops there. Seeds and octave counts are absent on purpose: they decide
+// what the baked noise volume CONTAINS, not how the march reads it, so they belong to the bake pass's
+// push constant and would be four values copied into every dispatch here for nothing.
+
+// The two step-schedule constants that are NOT component parameters, for the same reason they are cvars
+// in Unreal rather than fields of UVolumetricCloudComponent: they trade cost against quality identically
+// in every scene, so exposing them would be handing an artist two knobs whose only correct setting is the
+// one we shipped. The authorable half of the schedule is the step CEILING, which is a quality tier.
+#define CLOUD_MIN_STEPS 2.0f
+// Segment length at which the step count saturates. Unreal's r.VolumetricCloud.DistanceToSampleMaxCount.
+#define CLOUD_DISTANCE_TO_MAX_STEPS_KM 15.0f
+
+// Builds the shell this frame marches. Requires Common/CloudGeometry.glslh.
+CloudLayer CloudUnpackLayer()
+{
+    return CloudMakeLayer( u_CloudLayer.x, u_CloudLayer.y, u_CloudLayer.z );
+}
+
+// Builds the producer's parameters. Requires Common/CloudField.glslh.
+CloudFieldParams CloudUnpackFieldParams()
+{
+    CloudFieldParams p;
+    p.WeatherTileKm    = u_CloudWeather.x;
+    p.Coverage         = u_CloudWeather.y;
+    p.CoverageContrast = u_CloudWeather.z;
+    p.CloudType        = u_CloudWeather.w;
+    p.CloudTypeVariance = u_CloudAerial.w;
+    p.DetailTileKm     = u_CloudDetail.x;
+    p.DetailStrength   = u_CloudDetail.y;
+    p.DensityScale     = u_CloudDetail.z;
+    p.WindOffsetKm     = vec3( u_CloudWind.x, u_CloudWind.y, u_CloudWind.z );
+    return p;
+}
+
+#endif // CLOUD_PARAMS_GLSLH
