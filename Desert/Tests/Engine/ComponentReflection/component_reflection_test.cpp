@@ -524,8 +524,12 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MaxViewDistance" ), 6000000.0f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartDistance" ), 0.0f );
 
-    // Weather: the coverage default is a MEASURED point inside the slider's useful band, not a taste.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "Coverage" ), 0.25f );
+    // Weather: the coverage default is a MEASURED point inside the slider's useful band, not a taste. It
+    // moved from 0.25 to 0.15 when the coverage field became a quantile rather than a level
+    // (Common/CloudField.glslh): the same setting now selects about three times as much field, and 0.15 is
+    // the point that reproduces the sky cover the old default produced. Both numbers come from the table
+    // Desert/Tests/Engine/CloudField prints.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "Coverage" ), 0.15f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CoverageContrast" ), 1.0f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CloudType" ), 0.6f );
     // NON-ZERO ON PURPOSE: at zero every cloud in the layer reaches the same altitude, because the

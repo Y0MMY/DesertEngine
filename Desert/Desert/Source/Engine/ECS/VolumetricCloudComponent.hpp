@@ -114,28 +114,37 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Coverage" ), Category( "Weather" ), Range( 0.0f, 1.0f ), Summary,
                   Tooltip( "How much of the sky has cloud in it. Applied as a THRESHOLD on the coverage "
                            "field, so lowering it opens clear gaps rather than thinning everything." ) )
-        // 0.25, MEASURED — and the metric is stated, which the first version of this table was not.
+        // 0.15, MEASURED — and the metric is stated, which the first version of this table was not.
         //
-        // "sky cover" below is the fraction of vertical COLUMNS through the layer that contain any
-        // renderable density, over one period of the coverage field at contrast 1 with the defaults of
-        // this component. Desert/Tests/Engine/CloudField measures it and prints exactly this row, so it
-        // is reproducible rather than remembered — the figures here are the ones that suite emitted after
-        // the noise volume became an asset and its channels became Alligator and Curly-Alligator:
+        // "sky cover" below is the fraction of vertical COLUMNS through the layer whose cloud hides at
+        // least half the sky behind it, over one period of the coverage field at contrast 1 with the
+        // defaults of this component. Desert/Tests/Engine/CloudField measures it and prints exactly this
+        // row, so it is reproducible rather than remembered:
         //
-        //     Coverage   0.00   0.10   0.20   0.30   0.40   0.50
-        //     sky cover     0%      2%    37%    89%    99%   100%
+        //     Coverage   0.05   0.10   0.15   0.20   0.25   0.30   0.50
+        //     sky cover    11%    25%    40%    52%    62%    71%    95%
         //
-        // THE ROW MOVED WHEN THE NOISE DID. It read 0 / 11 / 48 / 85 / 96 / 100 while the coverage field
-        // was two octaves of Perlin-Worley; the whole curve has since shifted about five points of slider
-        // to the right, because the combined field's median went from 0.524 to 0.477. The default did NOT
-        // have to move with it: 0.25 used to sit near the top of the useful band and now sits in the
-        // middle of it, which is where a default belongs.
+        // THE SLIDER STOPPED BEING A LEVEL AND BECAME A QUANTILE, and the default moved once, by exactly
+        // the amount needed to leave the sky where it was. Common/CloudField.glslh now maps the coverage
+        // field through its own cumulative distribution before thresholding it, so a setting selects a
+        // FRACTION OF THE FIELD rather than a value of it — which is what makes the slider mean the same
+        // thing whatever volume is in the Noise Volume slot, the property this component needs now that
+        // the slot takes an artist's asset. The consequence here is arithmetic: the same setting selects
+        // about three times as much field as before, so the useful band moved down and the default with
+        // it. 0.15 is the point that produces the 40% sky cover the old 0.25 produced against the old
+        // Perlin-Worley field (its row read 20% at 0.20 and 58% at 0.30) — the default is unchanged in
+        // what it LOOKS like and changed in what it reads.
         //
-        // Both ends are exact by construction: the threshold spans the field's whole range, so 0 is
-        // genuinely clear and 1 genuinely solid. The useful band is 0.15 to 0.35 — the curve is steep
-        // because a slanted ray crosses many columns, and that steepness is a property of the geometry
-        // rather than of the slider.
-        float Coverage = 0.25f;
+        // Both ends are still exact by construction: the mapped field reaches 0 and 1, and the threshold
+        // is pushed past both, so 0 is genuinely clear and 1 genuinely solid. The useful band is now 0.05
+        // to 0.30 — the curve is steep because a slanted ray crosses many columns, and that steepness is a
+        // property of the geometry rather than of the slider.
+        //
+        // THE THREE SHIPPED CLOUD SCENES WERE NOT RE-AUTHORED. Their Coverage is an authored value and all
+        // three still read as cloud; Clouds_Showcase and Clouds_Sunset simply read fuller than they did.
+        // Migrating an authored number to preserve an appearance is a guess about intent, and this
+        // component is not the place to make it.
+        float Coverage = 0.15f;
 
         PROPERTY( DisplayName( "Coverage Contrast" ), Category( "Weather" ), Range( 0.1f, 4.0f ),
                   Tooltip( "Sharpness of the transition from clear to cloudy, as the WIDTH of the band "
