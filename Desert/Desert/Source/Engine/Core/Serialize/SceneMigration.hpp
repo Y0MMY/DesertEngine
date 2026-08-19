@@ -142,7 +142,10 @@ namespace Desert::Core
     // the cloud demo carries an exposure of 0.22 against a sun of 22 - so this is not a subtle drift, it
     // is the whole grade. Pinning Reinhard makes the operator EXPLICIT at the value that leaves each
     // picture exactly as it was, and moving a scene to ACES then becomes a deliberate, visible edit.
-    // (The repository's own scenes were moved that way, by this same task - see Docs/Clouds/CALIBRATION.md.)
+    // (Ten of the eleven repository scenes were moved that way, by this same task. The eleventh,
+    // Fog_Showcase, was measured breaking under ACES because its EXPOSURE was authored for Reinhard, and
+    // so it stays on Reinhard until it is re-exposed - which is the case the operator is a per-scene
+    // property for in the first place. Numbers in Docs/Clouds/CALIBRATION.md, T-ACES section.)
     //
     // A scene with no "Settings" block at all - MainMenu.desce is one - gets a block containing only the
     // operator. Every other field stays absent, which is how the reflection serializer spells "keep the

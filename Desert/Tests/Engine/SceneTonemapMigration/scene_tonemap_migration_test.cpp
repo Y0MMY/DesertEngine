@@ -16,6 +16,11 @@
 //      measuring itself against a UE frame through a different curve, which is the whole defect D-10
 //      was raised to remove.
 //
+// With ONE stated exception, which is the third thing asserted and the reason the operator is a scene
+// property at all: Fog_Showcase is exposed for Reinhard and measurably breaks under ACES, so it stays on
+// Reinhard until it is re-exposed. That exception carries its precondition with it - see the constants
+// below - so it expires by itself instead of becoming folklore.
+//
 // Everything below runs on the parsed tree. No GPU, no scene graph, no asset manager - the migration is
 // a pure function and this is what that buys.
 
@@ -117,6 +122,20 @@ namespace
          "DepthPrecisionProbe.desce",  "Desert_Sandbox.desce",  "Fog_Showcase.desce",  "MainMenu.desce",
          "Sky_PhysicalShowcase.desce", "Starter.desce",         "Terrain_Grass.desce",
     };
+
+    // The one scene deliberately NOT on the default operator, and the reason stated as a number.
+    //
+    // Fog_Showcase is exposed one to two stops hot: measured through Reinhard, the DARKEST twentieth of
+    // its sky sits at 0.650 (Docs/Clouds/CALIBRATION.md, the T-ACES section). Reinhard's gentle
+    // compression hid that; ACES has a shoulder, so the same radiance lands on it and the sky
+    // desaturates from 0.237 to 0.120 - it stops being blue. The operator is a scene property precisely
+    // so a scene in that state can stay on the curve it was authored for until somebody re-exposes it.
+    //
+    // The exposure below is the PRECONDITION, not decoration. This test does not forbid moving the scene
+    // to ACES; it forbids moving it to ACES *while it is still exposed the way it was for Reinhard*. Fix
+    // the exposure and this test tells you so instead of standing in your way.
+    constexpr const char* kSceneHeldOnReinhard            = "Fog_Showcase.desce";
+    constexpr double      kReinhardEraExposureOfThatScene = 1.0;
 } // namespace
 
 // ----------------------------------------------------------------------------------------------------
@@ -266,10 +285,13 @@ TEST( SceneTonemapMigration, ACESIsTheDefaultOperator )
     EXPECT_EQ( LoadedOperator( rfl::Generic::Object{} ), TonemapOperator::ACES );
 }
 
-// The repository's scenes were re-authored onto ACES by this task. This is the assertion that keeps them
-// there: a scene re-saved by an editor build that had lost the change would come back on Reinhard, and
-// every calibration number measured after that would be measuring the wrong curve.
-TEST( SceneTonemapMigration, EveryRepositorySceneIsStampedAndOnACES )
+// Every shipped scene is stamped, and every one of them SAYS which curve it is graded through.
+//
+// "Says" is the assertion, and it is not the same as "is on ACES": an absent key deserializes to the
+// C++ default, which IS ACES, so a value check alone would pass on a file that never mentioned the
+// operator at all. The whole point of the migration is that the choice is written down, so the raw key
+// is what gets checked here.
+TEST( SceneTonemapMigration, EveryRepositorySceneIsStampedAndStatesItsOperator )
 {
     const std::string root = RepoRoot();
     ASSERT_FALSE( root.empty() ) << "could not locate the repository root from the working directory";
@@ -290,7 +312,62 @@ TEST( SceneTonemapMigration, EveryRepositorySceneIsStampedAndOnACES )
         const auto settings = parsed.value().Settings->to_object();
         ASSERT_TRUE( settings.has_value() ) << path << ": Settings is not an object";
 
-        EXPECT_EQ( LoadedOperator( settings.value() ), TonemapOperator::ACES ) << path << " is not on ACES";
+        EXPECT_TRUE( settings.value().get( kTonemapperKey ).has_value() )
+             << path
+             << " does not state an operator - it would load on the default by accident, which "
+                "is the silent re-grade the v1 -> v2 migration exists to prevent";
+    }
+}
+
+// ACES everywhere except the one scene that is not yet exposed for it.
+//
+// Both halves matter. The first keeps the calibration honest: a scene re-saved by a build that had lost
+// this change would come back on Reinhard, and every number measured after that would be measuring the
+// wrong curve. The second keeps a MEASURED regression out of the tree - and states the condition under
+// which it stops applying, so this is a signpost rather than a padlock.
+TEST( SceneTonemapMigration, EveryRepositorySceneIsOnACESExceptTheOneNotYetExposedForIt )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    for ( const char* name : kRepositoryScenes )
+    {
+        const std::string path   = root + "Editor/Resources/Assets/Scenes/" + name;
+        auto              parsed = rfl::json::read<SceneSerialized>( ReadFile( path ) );
+        ASSERT_TRUE( parsed ) << path;
+        ASSERT_TRUE( parsed.value().Settings.has_value() ) << path;
+        const auto settings = parsed.value().Settings->to_object();
+        ASSERT_TRUE( settings.has_value() ) << path;
+
+        if ( std::string( name ) != kSceneHeldOnReinhard )
+        {
+            EXPECT_EQ( LoadedOperator( settings.value() ), TonemapOperator::ACES ) << path << " is not on ACES";
+            continue;
+        }
+
+        const auto exposure = settings.value().get( "Exposure" );
+        ASSERT_TRUE( exposure.has_value() ) << path << " no longer states an Exposure";
+        const double authored = exposure.value().to_double().value_or( -1.0 );
+
+        if ( authored == kReinhardEraExposureOfThatScene )
+        {
+            EXPECT_EQ( LoadedOperator( settings.value() ), TonemapOperator::Reinhard )
+                 << path << " was moved to ACES while still carrying its Reinhard-era exposure of "
+                 << kReinhardEraExposureOfThatScene
+                 << ". Measured, that turns its sky from blue into a flat wash (saturation 0.237 -> "
+                    "0.120); the numbers and the re-exposure probe are in Docs/Clouds/CALIBRATION.md, "
+                    "T-ACES section. Re-expose the scene first - then this assertion stands down by "
+                    "itself.";
+        }
+        else
+        {
+            // The precondition is gone: somebody did the re-exposure this was waiting for. Say so
+            // loudly rather than keeping the scene pinned to a curve it no longer needs.
+            ADD_FAILURE() << path << " has been re-exposed (Exposure " << authored << " instead of "
+                          << kReinhardEraExposureOfThatScene
+                          << "). That was the condition for moving it to ACES: re-measure it, move it, "
+                             "and delete kSceneHeldOnReinhard from this test.";
+        }
     }
 }
 
