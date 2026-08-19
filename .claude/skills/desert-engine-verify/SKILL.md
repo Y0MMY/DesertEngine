@@ -90,21 +90,28 @@ disocclusion, the neighbourhood clamp under translation, or the Ultra tier's che
 change touches anything temporal, move the camera. A translation under a cloud deck is also the
 strongest test of whether a layer reads as sitting at altitude.
 
-### Before you compare two frames, measure the noise floor
+### The noise floor of `--shot` is ZERO, so a pixel diff is an exact instrument
 
-Cloud and sky scenes are **not byte-reproducible run to run** — the timestep is wall-clock, so the
-same binary twice already differs (measured: mean 0.02-0.08 grey levels, max 14-24). Two rules
-follow, and agents have been caught by both:
+**Corrected 2026-08-19.** This section used to say cloud and sky scenes are not byte-reproducible
+run to run, and prescribed freezing animation and measuring a noise floor before any comparison.
+That is wrong for the headless `--shot` path. Two independent measurements on the same day:
 
-- **Freeze animation for any pixel comparison**: copy the scene with `AnimationSpeed: 0` and the
-  wind strength at 0. Without that, frame 90 of two runs lands at different elapsed times and the
-  diff is meaningless.
-- **Shoot the same build against itself first** and quote that number beside your before/after. "Max
-  delta 11" means nothing until you know the repeat is 21.
+- the same command run twice, `Clouds_Demo` sunward at 42°, 1103x668 — **0 differing bytes** of
+  2 947 884;
+- a developer's own repeat at 1280x766 — **0 differing pixels** of 980 480.
 
-Byte-identity IS achievable and IS the right bar for a feature that is switched off, a scene the
-change should not touch, or a specialization constant that alters which code the driver compiles
-rather than what it computes. Claim it only where it is real.
+Whatever the interactive editor does with a wall-clock timestep, `--shot-frames` advances the same
+way every run. So:
+
+- **Diff the pixels.** "18.4% of pixels changed, max delta 1/255" and "1.3% changed, max delta 14/255"
+  are two different findings about two different fixes, and that separation was only available
+  because the floor is zero. It is how the RD task proved the phase change was everywhere-but-tiny
+  while the guide change was rare-but-large.
+- **You still have to look.** A zero floor tells you WHERE a change landed, never whether it is an
+  improvement. The same task measured a fix as live and correct while the artefact it was expected
+  to remove stayed put — the numbers said "this changed 1.3% of pixels on the silhouettes", and only
+  the frame said "the speckle is still there".
+- **Do not claim a floor you did not measure.** Take the repeat shot; it costs one run.
 
 ## 2. What is NOT verification
 
