@@ -106,7 +106,8 @@ Eccentricity 0.18 sends the higher orders almost straight to isotropic.
 
 | Parameter | Value | Reading |
 |---|---|---|
-| `Noise_Bias` | (0.800, 0.080, 0.030, 2.5) | base 0.8, detail 0.08, third 0.03; alpha is StormyDistortFactor |
+| ~~`Noise_Bias`~~ **`Noise_Strength`** | (0.800, 0.080, 0.030, 2.5) | base 0.8, detail 0.08, third 0.03; alpha is StormyDistortFactor |
+| `Noise_Bias` (the actual one) | **(0.500, 0.800, 0.500, 0.0)** | what is SUBTRACTED from each octave before its strength is applied |
 | `Noise1_Coordinates` | (4.167, 4.444, **9.091**, 7.0) | vertical frequency ~2.2x the horizontal; alpha is the wind multiplier |
 | `Noise2_Coordinates` | (60, 60, **75**, **-6.0**) | ~14x the base frequency, and the wind runs the OTHER WAY |
 | `Noise3_Coordinates` | (30, 40, 25, 8.0) | third octave, unused by default (`UseNoise3` off) |
@@ -114,6 +115,18 @@ Eccentricity 0.18 sends the higher orders almost straight to isotropic.
 
 The opposed wind multipliers (+7 and -6) are worth copying: two noise layers drifting against each other
 is what stops the whole sky reading as one rigid object sliding past.
+
+## Три поправки к этому документу (2026-08-19)
+
+Внесены после полного разбора графа — `ShapeModel.md`. Проверены тимлидом по исходному файлу.
+
+1. **Вектор `(0.8, 0.08, 0.03, 2.5)` — это `Noise_Strength`, а не `Noise_Bias`** (L5519–L5521).
+   Настоящий `Noise_Bias` = `(0.5, 0.8, 0.5, 0.0)` (L5482–L5484). Разница не косметическая: одно
+   умножает октаву, другое вычитается из неё до умножения. Таблица выше исправлена.
+2. **Четыре канала `ConservativeDensity` — не четыре вида облаков.** Вывод «дешёвый ранний выход
+   считается на вид» из этого не следует; см. `ShapeModel.md`.
+3. **`VT_PerlinWorley_Balanced` в графе отсутствует** — там `DefaultVolumeTexture` (L2262). Имя взято
+   из инстанса, то есть из скриншота, и должно так и цитироваться.
 
 ## Two techniques we do not have
 
