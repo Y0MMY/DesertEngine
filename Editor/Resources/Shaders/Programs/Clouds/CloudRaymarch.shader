@@ -75,7 +75,10 @@ Shader "CloudRaymarch"
         // averages foreground and background into a distance where nothing is.
         Uniform(2) sampler2D u_SceneDepth;
 
-        // The baked four-octave noise volume (Programs/Clouds/CloudNoiseBake.shader). REPEAT and LINEAR,
+        // The noise volume, now an ASSET rather than a bake: four named channels from the Nubis deck
+        // (p.96) — R,G Curly-Alligator LF/HF, B,A Alligator LF/HF — generated on the CPU by
+        // Engine::Assets::CloudNoiseVolumeGenerator from the same Common/CloudNoise.glslh this shader
+        // includes, and shipped as a .dcnv file. REPEAT and LINEAR,
         // which every volume sampler in this engine is; the volume was baked to tile exactly under that
         // assumption.
         Uniform(3) sampler3D u_CloudNoise;
