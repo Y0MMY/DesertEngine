@@ -79,13 +79,13 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
 // they decide what the baked noise volume CONTAINS, not how the march reads it, so they belong to the
 // generator and would be four values copied into every dispatch here for nothing.
 
-// The two step-schedule constants that are NOT component parameters, for the same reason they are cvars
-// in Unreal rather than fields of UVolumetricCloudComponent: they trade cost against quality identically
-// in every scene, so exposing them would be handing an artist two knobs whose only correct setting is the
-// one we shipped. The authorable half of the schedule is the step CEILING, which is a quality tier.
-#define CLOUD_MIN_STEPS 2.0f
-// Segment length at which the step count saturates. Unreal's r.VolumetricCloud.DistanceToSampleMaxCount.
-#define CLOUD_DISTANCE_TO_MAX_STEPS_KM 15.0f
+// THE STEP SCHEDULE IS NOT HERE ANY MORE. CLOUD_MIN_STEPS and CLOUD_DISTANCE_TO_MAX_STEPS_KM used to be
+// declared in this file, beside the parameter block, and their two siblings — the coarse multiplier and
+// the empty-sample count — already lived in Common/CloudGeometry.glslh for a reason this pair shares: a
+// uniform block cannot be compiled as C++, so a constant declared here can only ever be PARSED OUT OF THE
+// FILE AS TEXT by a test, never driven. Desert/Tests/Engine/CloudGeometry did exactly that, and the
+// arrangement hid a relation that text cannot express — that the schedule's step has to resolve the cloud
+// the library places. All four now live together in CloudGeometry.glslh, which that suite compiles.
 
 // Builds the shell this frame marches. Requires Common/CloudGeometry.glslh.
 CloudLayer CloudUnpackLayer()

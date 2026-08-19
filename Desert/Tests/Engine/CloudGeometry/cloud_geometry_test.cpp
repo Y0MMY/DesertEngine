@@ -85,10 +85,11 @@ namespace
         return {};
     }
 
-    // Reads `#define <name> <number>` out of a shader header. Used to pin the two step-schedule constants
-    // to the file that declares them: they live in Common/CloudParams.glslh (with the parameter block,
-    // because they are not component fields) while the function that consumes them lives in
-    // Common/CloudGeometry.glslh, and two files that must agree are exactly what nobody checks.
+    // Reads `#define <name> <number>` out of a shader header. It used to be how the two step-schedule
+    // constants were reached at all — they were declared in Common/CloudParams.glslh, which cannot be
+    // compiled as C++ because it declares a uniform block, so a test could only read the digits as text.
+    // They now live in Common/CloudGeometry.glslh and this suite COMPILES them; the parser survives to
+    // assert the other half of that move, that no second copy was left behind.
     double ParseDefine( const std::string& text, const std::string& name )
     {
         const std::string needle = "#define " + name;
@@ -452,58 +453,53 @@ TEST( CloudGeometryHeight, TheFractionRisesWithAltitudeAndNeverLeavesZeroToOne )
 
 namespace
 {
-    // The values Common/CloudParams.glslh declares. Read from the file rather than copied, so that
-    // changing one of them without looking at the function that consumes it fails here.
-    struct ScheduleConstants
-    {
-        float MinSteps;
-        float DistanceToMaxKm;
-    };
-
-    ScheduleConstants ReadScheduleConstants()
-    {
-        const std::string root = RepoRoot();
-        EXPECT_FALSE( root.empty() ) << "repository root not found - run from the workspace root";
-
-        const std::string text = ReadFile( root + "Editor/Resources/Shaders/Common/CloudParams.glslh" );
-        EXPECT_FALSE( text.empty() ) << "Common/CloudParams.glslh could not be read";
-
-        ScheduleConstants constants{};
-        constants.MinSteps        = static_cast<float>( ParseDefine( text, "CLOUD_MIN_STEPS" ) );
-        constants.DistanceToMaxKm = static_cast<float>( ParseDefine( text, "CLOUD_DISTANCE_TO_MAX_STEPS_KM" ) );
-        return constants;
-    }
+    // The component's Max Steps default, which is the quality tier the shipped library is calibrated
+    // against. ComponentReflection owns the default itself; this suite owns what the schedule does at it.
+    constexpr float kMaxCount = 256.0f;
 } // namespace
 
-TEST( CloudGeometrySteps, TheScheduleConstantsAreTheOnesTheParameterBlockDeclares )
+TEST( CloudGeometrySteps, TheScheduleIsDeclaredWhereItIsConsumedAndNowhereElse )
 {
-    // Not a tautology: this suite asserts behaviour AT those two numbers below, and the numbers live in
-    // a file this one does not compile. Pinning them here is what makes the saturation test a statement
-    // about the shipped schedule rather than about a literal somebody typed twice.
-    const ScheduleConstants constants = ReadScheduleConstants();
+    // THE MOVE, ASSERTED. All four schedule constants are declared in the one file this suite compiles,
+    // and Common/CloudParams.glslh — which cannot be compiled as C++ — declares none of them. A second
+    // copy left behind there is the failure this catches: the shader includes both headers, so a stale
+    // duplicate would either redefine the macro or, worse, be the one a future reader edits.
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() ) << "repository root not found - run from the workspace root";
 
-    EXPECT_FLOAT_EQ( constants.MinSteps, 2.0f );
-    EXPECT_FLOAT_EQ( constants.DistanceToMaxKm, 15.0f );
-    EXPECT_GT( constants.DistanceToMaxKm, 0.0f ) << "the schedule divides by this";
+    const std::string params = ReadFile( root + "Editor/Resources/Shaders/Common/CloudParams.glslh" );
+    ASSERT_FALSE( params.empty() ) << "Common/CloudParams.glslh could not be read";
+
+    EXPECT_EQ( params.find( "#define CLOUD_MIN_STEPS" ), std::string::npos )
+         << "CLOUD_MIN_STEPS is declared in CloudParams.glslh again; the schedule lives in "
+            "CloudGeometry.glslh, which is the only one of the two a test can compile";
+    EXPECT_EQ( params.find( "#define CLOUD_DISTANCE_TO_MAX_STEPS_KM" ), std::string::npos )
+         << "CLOUD_DISTANCE_TO_MAX_STEPS_KM is declared in CloudParams.glslh again";
+
+    const std::string geometry = ReadFile( root + "Editor/Resources/Shaders/Common/CloudGeometry.glslh" );
+    ASSERT_FALSE( geometry.empty() ) << "Common/CloudGeometry.glslh could not be read";
+
+    EXPECT_FLOAT_EQ( static_cast<float>( ParseDefine( geometry, "CLOUD_MIN_STEPS" ) ), CLOUD_MIN_STEPS );
+    EXPECT_FLOAT_EQ( static_cast<float>( ParseDefine( geometry, "CLOUD_DISTANCE_TO_MAX_STEPS_KM" ) ),
+                     CLOUD_DISTANCE_TO_MAX_STEPS_KM );
+
+    EXPECT_GT( CLOUD_DISTANCE_TO_MAX_STEPS_KM, 0.0f ) << "the schedule divides by this";
 }
 
 TEST( CloudGeometrySteps, TheCountRisesWithTheSegmentAndSaturatesAtTheDeclaredDistance )
 {
-    const ScheduleConstants constants = ReadScheduleConstants();
-
-    constexpr float kMaxCount = 256.0f; // the component's Max Steps default
-
     float previous = 0.0f;
     for ( int step = 0; step <= 400; ++step )
     {
         const float segmentKm = 0.1f * static_cast<float>( step );
-        const float count = CloudStepCount( segmentKm, constants.MinSteps, kMaxCount, constants.DistanceToMaxKm );
+        const float count =
+             CloudStepCount( segmentKm, CLOUD_MIN_STEPS, kMaxCount, CLOUD_DISTANCE_TO_MAX_STEPS_KM );
 
-        EXPECT_GE( count, constants.MinSteps ) << "segment " << segmentKm << " km fell below the floor";
+        EXPECT_GE( count, CLOUD_MIN_STEPS ) << "segment " << segmentKm << " km fell below the floor";
         EXPECT_LE( count, kMaxCount ) << "segment " << segmentKm << " km exceeded the ceiling";
         EXPECT_GE( count, previous ) << "segment " << segmentKm << " km: the count went DOWN";
 
-        if ( segmentKm >= constants.DistanceToMaxKm )
+        if ( segmentKm >= CLOUD_DISTANCE_TO_MAX_STEPS_KM )
             EXPECT_FLOAT_EQ( count, kMaxCount ) << "segment " << segmentKm << " km must be saturated";
 
         previous = count;
@@ -511,10 +507,69 @@ TEST( CloudGeometrySteps, TheCountRisesWithTheSegmentAndSaturatesAtTheDeclaredDi
 
     // Strictly rising in the middle of the ramp, which is what "the cost of a ray is a function of its
     // segment" means. A schedule that is flat there is one that spends the same budget on a ray that
-    // grazes the layer and one that crosses it.
-    const float atThree = CloudStepCount( 3.0f, constants.MinSteps, kMaxCount, constants.DistanceToMaxKm );
-    const float atSix   = CloudStepCount( 6.0f, constants.MinSteps, kMaxCount, constants.DistanceToMaxKm );
-    EXPECT_GT( atSix, atThree * 1.5f );
+    // grazes the layer and one that crosses it. Sampled at a quarter and a half of the saturation
+    // distance, so the pair moves with the constant instead of pinning it a second time.
+    const float atQuarter = CloudStepCount( CLOUD_DISTANCE_TO_MAX_STEPS_KM * 0.25f, CLOUD_MIN_STEPS, kMaxCount,
+                                            CLOUD_DISTANCE_TO_MAX_STEPS_KM );
+    const float atHalf    = CloudStepCount( CLOUD_DISTANCE_TO_MAX_STEPS_KM * 0.5f, CLOUD_MIN_STEPS, kMaxCount,
+                                            CLOUD_DISTANCE_TO_MAX_STEPS_KM );
+    EXPECT_GT( atHalf, atQuarter * 1.5f );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// WHAT THE MARCH CAN FIND, which is the relation the speckle came out of
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CloudGeometrySteps, TheFineStepIsTheSaturationDistanceOverTheCeilingForEveryShortSegment )
+{
+    // THE PROPERTY THAT MAKES THE SATURATION DISTANCE THE MARCH'S RESOLUTION, and it is not obvious from
+    // the formula. Below the saturation distance the count is proportional to the segment, so the segment
+    // CANCELS: every ray shorter than that gets the same step, `distanceToMax / maxCount`, whatever its
+    // own length is. That is why a shell 400 m thick was marched at the same 58.6 m as one 15 km thick,
+    // and why moving this one number is what moves the resolution of every thin layer in the library.
+    const float expected = CLOUD_DISTANCE_TO_MAX_STEPS_KM / kMaxCount;
+
+    for ( const float fraction : { 0.05f, 0.1f, 0.25f, 0.5f, 0.75f, 0.99f } )
+    {
+        const float segmentKm = CLOUD_DISTANCE_TO_MAX_STEPS_KM * fraction;
+        const float stepKm =
+             CloudFineStepKm( segmentKm, CLOUD_MIN_STEPS, kMaxCount, CLOUD_DISTANCE_TO_MAX_STEPS_KM );
+
+        // The floor bites only for segments so short that the ramp would ask for fewer than two samples.
+        if ( CloudStepCount( segmentKm, CLOUD_MIN_STEPS, kMaxCount, CLOUD_DISTANCE_TO_MAX_STEPS_KM ) >
+             CLOUD_MIN_STEPS )
+            EXPECT_NEAR( stepKm, expected, expected * 1e-4f ) << "segment " << segmentKm << " km";
+    }
+
+    // And past it the step is the segment over the ceiling, which is the half no schedule constant can
+    // improve — the ceiling is the artist's quality tier.
+    EXPECT_NEAR( CloudFineStepKm( 60.0f, CLOUD_MIN_STEPS, kMaxCount, CLOUD_DISTANCE_TO_MAX_STEPS_KM ),
+                 60.0f / kMaxCount, 1e-5f );
+}
+
+TEST( CloudGeometrySteps, TheResolvableChordIsTwoCOARSEStepsAndNotTwoFineOnes )
+{
+    // THE DISTINCTION THIS FILE EXISTS TO KEEP. The fine step is what the march INTEGRATES at; the coarse
+    // step is what it SEARCHES at, because outside cloud it strides coarsely and only drops to fine after
+    // a coarse sample has found something. Nyquist against the search lattice is therefore two COARSE
+    // steps, and reading it as two fine steps understates the march's blindness by the multiplier — the
+    // factor of four that put five of nine shipped types past Nyquist while the fine step said all nine
+    // were inside it.
+    for ( const float fineStepKm : { 0.0001f, 0.0156f, 0.0586f, 0.234f, 1.0f } )
+    {
+        EXPECT_FLOAT_EQ( CloudResolvableChordKm( fineStepKm ), 2.0f * CLOUD_COARSE_STEP_MULTIPLIER * fineStepKm );
+        EXPECT_GT( CloudResolvableChordKm( fineStepKm ), 2.0f * fineStepKm )
+             << "the search lattice is coarser than the integration lattice; a chord bound written "
+                "against the fine step is optimistic by the coarse multiplier";
+    }
+
+    // The library's own bound: the finest chord the schedule resolves anywhere. Every ray shorter than the
+    // saturation distance is marched at exactly this resolution and no ray is ever marched finer.
+    EXPECT_FLOAT_EQ( CloudFinestResolvableChordKm( kMaxCount ),
+                     CloudResolvableChordKm( CLOUD_DISTANCE_TO_MAX_STEPS_KM / kMaxCount ) );
+
+    // A degenerate ceiling must not become a division by zero: the count is floored, not trusted.
+    EXPECT_TRUE( std::isfinite( CloudFinestResolvableChordKm( 0.0f ) ) );
 }
 
 TEST( CloudGeometrySteps, TheFloorHoldsForAZeroLengthSegmentAndForADegenerateSaturationDistance )
@@ -539,10 +594,12 @@ TEST( CloudGeometrySteps, TheStepSizeTheMarchDerivesIsAlwaysPositiveAndBoundedBy
     // step past the exit and the layer would be sampled once.
     for ( const float segmentKm : { 0.001f, 0.1f, 1.0f, 7.5f, 15.0f, 60.0f, 400.0f } )
     {
-        const float count = CloudStepCount( segmentKm, 2.0f, 256.0f, 15.0f );
+        const float count =
+             CloudStepCount( segmentKm, CLOUD_MIN_STEPS, kMaxCount, CLOUD_DISTANCE_TO_MAX_STEPS_KM );
         ASSERT_GT( count, 0.0f );
 
-        const float stepKm = segmentKm / count;
+        const float stepKm =
+             CloudFineStepKm( segmentKm, CLOUD_MIN_STEPS, kMaxCount, CLOUD_DISTANCE_TO_MAX_STEPS_KM );
         EXPECT_GT( stepKm, 0.0f ) << "segment " << segmentKm;
         EXPECT_LE( stepKm, segmentKm ) << "segment " << segmentKm;
         EXPECT_GE( static_cast<int>( count ), 2 ) << "segment " << segmentKm << ": the loop would not run";
@@ -628,6 +685,14 @@ TEST( CloudGeometryTwoTier, TheMarchRunsTheseConstantsAndNotACopyOfThem )
          << "the march no longer takes its empty-run length from CloudGeometry.glslh";
     EXPECT_EQ( march.find( "stepKm * 4.0f" ), std::string::npos )
          << "the coarse multiplier is a literal in the march again, where no test can reach it";
+
+    // And the fine step itself, which the march used to form as a division of its own. One division in one
+    // place is what lets the resolvable-chord relation above be a statement about the shipped march rather
+    // than about a function nobody calls.
+    EXPECT_NE( march.find( "CloudFineStepKm(" ), std::string::npos )
+         << "the march divides out its own fine step again instead of taking CloudGeometry.glslh's";
+    EXPECT_NE( march.find( "CLOUD_DISTANCE_TO_MAX_STEPS_KM" ), std::string::npos )
+         << "the march no longer takes its saturation distance from CloudGeometry.glslh";
 }
 
 int main( int argc, char** argv )
