@@ -15,8 +15,9 @@ namespace Desert::Assets
          : AssetBase( priority, filepath, AssetTypeID::CloudType )
     {
         // The base class hands out a RANDOM uuid, which is correct for an asset with no source of identity
-        // and wrong for this one: a fresh id every launch is a service cache that misses on every restart,
-        // and it is what the noise volume asset next door still does. Derived from the PATH, like a mesh's,
+        // and wrong for this one: a fresh id every launch is a service cache that misses on every restart.
+        // (The noise volume asset next door was the same defect and now derives its handle the same way.)
+        // Derived from the PATH, like a mesh's,
         // and that is enough because a scene stores this reference as a path rather than as a handle (see
         // the CloudTypeAsset branch of Core::MakeAssetResolver) — the handle only has to be stable and
         // unique within a session.
