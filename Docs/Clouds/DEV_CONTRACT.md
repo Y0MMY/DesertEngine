@@ -89,6 +89,16 @@
 `scripts/MacOS/RunEditor.sh Debug` поднимает редактор, а движок умеет отрендерить сцену сам:
 
 ```
+# The three MoltenVK variables are NOT optional and are the reason this command used to fail for
+# people who copied it: scripts/MacOS/RunEditor.sh exports them, so anyone who had only ever launched
+# the editor through the script never saw it. Without them glfwVulkanSupported() returns false and the
+# binary dies at VulkanContext.cpp:50 before a single frame -- which reads like a broken build rather
+# than a missing environment.
+B=$(brew --prefix)
+export VK_ICD_FILENAMES="$B/etc/vulkan/icd.d/MoltenVK_icd.json"
+export VK_LAYER_PATH="$B/share/vulkan/explicit_layer.d"
+export DYLD_FALLBACK_LIBRARY_PATH="$B/lib"
+
 cd Editor && ../build/Bin/Debug/Editor --project Desert.deproj \
     --scene Resources/Assets/Scenes/Clouds/Clouds_PartlyCloudy.desce \
     --shot /tmp/out.png --shot-frames 90 --camera 0,200,0 --look 0,0.9,-1

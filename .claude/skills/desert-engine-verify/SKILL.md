@@ -26,6 +26,14 @@ wrong and it cost a lot.) Vulkan works through MoltenVK, and the engine can rend
 PNG with no human present:
 
 ```bash
+# NOT optional. RunEditor.sh exports these, so anyone who has only ever launched through the script
+# will not know they exist -- and without them glfwVulkanSupported() is false and the binary dies at
+# VulkanContext.cpp:50 before one frame, which reads as a broken build rather than a bare environment.
+B=$(brew --prefix)
+export VK_ICD_FILENAMES="$B/etc/vulkan/icd.d/MoltenVK_icd.json"
+export VK_LAYER_PATH="$B/share/vulkan/explicit_layer.d"
+export DYLD_FALLBACK_LIBRARY_PATH="$B/lib"
+
 cd Editor && ../build/Bin/Debug/Editor --project Desert.deproj \
     --scene Resources/Assets/Scenes/Clouds/Clouds_PartlyCloudy.desce \
     --shot /tmp/out.png --shot-frames 90 \
