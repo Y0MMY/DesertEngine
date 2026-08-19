@@ -38,7 +38,7 @@ namespace
     {
         CloudFieldParams params;
         params.WeatherTileKm     = 12.0f; // Weather Tile Size 1 200 000 cm
-        params.Coverage          = 0.25f; // Coverage
+        params.Coverage          = 0.15f; // Coverage
         params.CoverageContrast  = 1.0f;  // Coverage Contrast
         params.CloudType         = 0.6f;  // Cloud Type
         params.CloudTypeVariance = 0.4f;  // Cloud Type Variance
@@ -273,63 +273,122 @@ TEST( CloudFieldCoverage, TheUsefulBandIsTheOneTheComponentsDefaultSitsIn )
     // the component's own documentation assume it is. A change that moves the whole mapping without
     // anybody noticing is exactly how a sky ends up "needing retuning" in every scene at once.
     //
-    // MEASURED HERE, and re-measured when the weather tile moved onto the calibrated 12 km
-    // (32 columns, 36 heights, contrast 1, layer and seeds as shipped) — the row this test prints:
+    // MEASURED HERE, and re-measured whenever the field underneath it changes
+    // (32 columns, 36 heights, contrast 1, layer and volume as shipped) — the row this test prints:
     //
-    //     Coverage    0.05   0.10   0.12   0.20   0.30   0.50
-    //     opaque        0%     1%     4%    20%    58%    98%
+    //     Coverage    0.05   0.10   0.15   0.20   0.30   0.50
+    //     opaque       11%    25%    40%    52%    71%    95%
     //
-    // The tile size moves these figures without moving the mapping: the coverage field is periodic in the
-    // tile and the grid spans one period of it, so the population is the same one — what changes is the
-    // phase of the EROSION field against it, which is what shifts the opaque column by a couple of points.
-    // The row before the tile changed was 0 / 1 / 2 / 20 / 63 / 99, inside these same tolerances.
+    // THE ROW MOVED TWICE AND THE SECOND MOVE IS THE ONE THAT MATTERS. While the coverage field was two
+    // octaves of Perlin-Worley it read 0 / 1 / 4(at 0.12) / 20 / 58 / 98; when the volume became an asset
+    // and the field became two frequencies of Curly-Alligator it read 0 / 0 / 0 / 4 / 50 / 100, five
+    // points of slider to the right. Both rows were properties of WHICH NOISE happened to be in the
+    // volume, and a slider that means something different for every asset dropped into the slot is a
+    // defect the asset feature itself would have introduced.
     //
-    // The qualitative claim the default rests on does survive: the slider does its work between about
-    // 0.05 and 0.30 and is saturated well before its top, so the advice to stay low is right even though
-    // the percentages are not. The tolerances are wide enough to survive a reseed and narrow enough to
-    // catch a shift the size of the one above.
+    // Common/CloudField.glslh now maps the coverage field through its own cumulative distribution before
+    // thresholding it, so the setting selects a FRACTION of the field rather than a level of it. The row
+    // is therefore a property of the LAYER GEOMETRY — how many columns a slanted ray crosses, how much of
+    // the envelope a cloud fills — and no longer of the noise, which is what the test below asserts
+    // directly. The default moved from 0.25 to 0.15 with it, to the point that reproduces the 40% sky
+    // cover the old default produced against the old field.
+    //
+    // The tolerances are wide enough to survive a reseed and narrow enough to catch a shift the size of
+    // either of the two above.
     constexpr int kColumns = 32;
     constexpr int kHeights = 36;
 
-    const SkyCover atFive   = MeasureSkyCover( 0.05f, kColumns, kHeights );
-    const SkyCover atTen    = MeasureSkyCover( 0.10f, kColumns, kHeights );
-    const SkyCover atTwelve = MeasureSkyCover( 0.12f, kColumns, kHeights ); // low in the useful band
-    const SkyCover atTwenty = MeasureSkyCover( 0.20f, kColumns, kHeights );
-    const SkyCover atThirty = MeasureSkyCover( 0.30f, kColumns, kHeights );
-    const SkyCover atFifty  = MeasureSkyCover( 0.50f, kColumns, kHeights );
+    const SkyCover atFive    = MeasureSkyCover( 0.05f, kColumns, kHeights );
+    const SkyCover atTen     = MeasureSkyCover( 0.10f, kColumns, kHeights );
+    const SkyCover atFifteen = MeasureSkyCover( 0.15f, kColumns, kHeights ); // the shipped default
+    const SkyCover atTwenty  = MeasureSkyCover( 0.20f, kColumns, kHeights );
+    const SkyCover atThirty  = MeasureSkyCover( 0.30f, kColumns, kHeights );
+    const SkyCover atFifty   = MeasureSkyCover( 0.50f, kColumns, kHeights );
 
-    std::printf( "[CloudField] opaque sky cover: 0.05 %.0f%%  0.10 %.0f%%  0.12 %.0f%%  0.20 %.0f%%  "
+    std::printf( "[CloudField] opaque sky cover: 0.05 %.0f%%  0.10 %.0f%%  0.15 %.0f%%  0.20 %.0f%%  "
                  "0.30 %.0f%%  0.50 %.0f%%\n",
-                 atFive.Opaque * 100.0f, atTen.Opaque * 100.0f, atTwelve.Opaque * 100.0f, atTwenty.Opaque * 100.0f,
-                 atThirty.Opaque * 100.0f, atFifty.Opaque * 100.0f );
-    std::printf( "[CloudField] at Coverage 0.12 the sky is %.0f%% TOUCHED by cloud and %.0f%% hidden by it\n",
-                 atTwelve.Touched * 100.0f, atTwelve.Opaque * 100.0f );
+                 atFive.Opaque * 100.0f, atTen.Opaque * 100.0f, atFifteen.Opaque * 100.0f,
+                 atTwenty.Opaque * 100.0f, atThirty.Opaque * 100.0f, atFifty.Opaque * 100.0f );
+    std::printf( "[CloudField] at the default the sky is %.0f%% TOUCHED by cloud and %.0f%% hidden by it\n",
+                 atFifteen.Touched * 100.0f, atFifteen.Opaque * 100.0f );
 
     // The pinned table, with a tolerance of ten points of sky — a reseed moves individual clouds and not
     // the statistic, so anything larger than this is the mapping itself having moved.
-    EXPECT_NEAR( atFive.Opaque, 0.00f, 0.10f );
-    EXPECT_NEAR( atTen.Opaque, 0.00f, 0.10f );
-    EXPECT_NEAR( atTwelve.Opaque, 0.01f, 0.10f );
-    EXPECT_NEAR( atTwenty.Opaque, 0.20f, 0.12f );
-    EXPECT_NEAR( atThirty.Opaque, 0.63f, 0.12f );
-    EXPECT_GT( atFifty.Opaque, 0.97f ) << "the top half of the slider is not saturated";
+    EXPECT_NEAR( atFive.Opaque, 0.11f, 0.10f );
+    EXPECT_NEAR( atTen.Opaque, 0.25f, 0.10f );
+    EXPECT_NEAR( atFifteen.Opaque, 0.40f, 0.10f );
+    EXPECT_NEAR( atTwenty.Opaque, 0.52f, 0.12f );
+    EXPECT_NEAR( atThirty.Opaque, 0.71f, 0.12f );
+    EXPECT_GT( atFifty.Opaque, 0.90f ) << "the top half of the slider is not saturated";
 
-    // The bottom of the band leaves the sky essentially open, and the top of it is essentially overcast.
-    // These two are what "the useful band is 0.05 to 0.20" has to mean if it means anything.
-    EXPECT_LT( atFive.Opaque, 0.15f ) << "the bottom of the useful band is already busy";
-    EXPECT_GT( atThirty.Opaque, 0.55f ) << "the band has not closed by 0.30 and the slider's top half is "
-                                           "no longer the dead zone the component documents";
+    // THE DEFAULT IS A SCATTERED SKY AND NOT AN OVERCAST, which is what its tooltip promises and what the
+    // frame has to show. Two-fifths hidden is the meteorological "scattered to broken"; past two-thirds
+    // the sky reads as a lid whatever the noise is doing.
+    EXPECT_GT( atFifteen.Opaque, 0.25f ) << "the default leaves the sky nearly empty";
+    EXPECT_LT( atFifteen.Opaque, 0.60f ) << "the default is an overcast";
 
     // Strictly rising ACROSS the band, which is the part an artist feels. Ten points of slider must buy
-    // at least ten points of sky, or the control is mush exactly where it is meant to work.
-    EXPECT_GT( atTwenty.Opaque, atTen.Opaque + 0.10f );
-    EXPECT_GT( atThirty.Opaque, atTwenty.Opaque + 0.15f );
+    // at least ten points of sky where the band actually is, or the control is mush exactly where it is
+    // meant to work.
+    EXPECT_GT( atFifteen.Opaque, atFive.Opaque + 0.15f );
+    EXPECT_GT( atThirty.Opaque, atFifteen.Opaque + 0.15f );
 
     // And the thin half of the answer, which is the one that has bitten this programme before: a sky
-    // that is mostly TOUCHED by cloud and hardly at all hidden by it is a sky full of veil. At the
-    // default seventy per cent of it carries cloud too thin to hide anything, which is worth knowing when
-    // the layer is retuned — it is the state the coverage mapping was rewritten to escape.
-    EXPECT_GT( atTwelve.Touched, atTwelve.Opaque );
+    // that is mostly TOUCHED by cloud and hardly at all hidden by it is a sky full of veil.
+    EXPECT_GT( atFifteen.Touched, atFifteen.Opaque );
+}
+
+TEST( CloudFieldCoverage, TheFieldTheSliderThresholdsIsItsOwnQuantileSoTheSliderSurvivesANewVolume )
+{
+    // THE PROPERTY THE ASSET SLOT NEEDS, and the one the two shifts recorded above would each have failed.
+    //
+    // `Coverage` is a threshold on the coverage field, so what a setting MEANS is decided by that field's
+    // distribution. Twice now the distribution has changed under it — Perlin-Worley to Curly-Alligator,
+    // and the wispy pair to the billowy one — and each time the whole slider moved without anything
+    // failing. Now that the volume is an artist's asset the same shift is one drag-and-drop away.
+    //
+    // Common/CloudField.glslh removes the dependency by mapping the blended field through its own
+    // cumulative distribution: the value handed to the threshold is the FRACTION of the field below it,
+    // so the field is uniform on [0, 1] by construction and the threshold's linear sweep of [0, 1] is
+    // finally reading what it was written for. Uniform means quantile equals value, and that is what is
+    // asserted — one statement that pins the calibration constant, the channel choice and the weights at
+    // once, and that a differently baked volume must also satisfy.
+    CloudFieldParams params = DefaultParams();
+
+    std::vector<float> field;
+    field.reserve( 40 * 40 * 40 );
+
+    // One period of the coverage field in every direction, so this is the population and not a sample of
+    // one neighbourhood. The height range is the layer's, because the field is sampled in full 3D.
+    for ( int iz = 0; iz < 40; ++iz )
+        for ( int iy = 0; iy < 40; ++iy )
+            for ( int ix = 0; ix < 40; ++ix )
+            {
+                const vec3 uvw( ( ix + 0.5f ) / 40.0f, ( iy + 0.5f ) / 40.0f, ( iz + 0.5f ) / 40.0f );
+                const vec4 noise = CLOUD_SAMPLE_NOISE( uvw );
+
+                // The same two channels and the same two weights Common/CloudField.glslh blends, followed
+                // by the same calibration. Stated here rather than reached through SampleCloudField
+                // because what is under test is the DISTRIBUTION of that intermediate, and the vertical
+                // profile downstream of it would mask exactly the property being asserted.
+                const float blended = noise.z * 0.65f + noise.w * 0.35f;
+                field.push_back( glm::smoothstep( 0.5f - 0.32f, 0.5f + 0.32f, blended ) );
+            }
+
+    std::sort( field.begin(), field.end() );
+
+    const auto quantile = [&]( float f ) { return field[static_cast<size_t>( f * ( field.size() - 1 ) )]; };
+
+    std::printf( "[CloudField] coverage field quantiles: p05 %.3f p25 %.3f p50 %.3f p75 %.3f p95 %.3f\n",
+                 quantile( 0.05f ), quantile( 0.25f ), quantile( 0.50f ), quantile( 0.75f ), quantile( 0.95f ) );
+
+    // Uniform to within five points of quantile. Tighter than that would be asserting that a smoothstep
+    // IS a normal cumulative distribution, which it only approximates; looser would not catch the two
+    // shifts this exists to prevent, both of which moved the median by more than a tenth.
+    for ( const float f : { 0.05f, 0.25f, 0.50f, 0.75f, 0.95f } )
+        EXPECT_NEAR( quantile( f ), f, 0.05f )
+             << "the coverage field's " << f * 100.0f << "th percentile is not at " << f
+             << ", so a Coverage setting no longer selects the fraction of the field it names";
 }
 
 TEST( CloudFieldCoverage, TheContrastNarrowsTheTransitionBandWithoutMovingItsCentre )

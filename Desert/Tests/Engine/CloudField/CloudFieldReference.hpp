@@ -6,16 +6,17 @@
 //
 // THE NOISE CALLBACK IS THE POINT OF THE SEAM. CloudField.glslh declares no sampler; it asks for the four
 // octaves through CLOUD_SAMPLE_NOISE, which the march defines as a fetch of the baked volume and this
-// header defines as a call into the very functions that BAKED it — same noises, same periods, same seed
-// offsets as Programs/Clouds/CloudNoiseBake.shader. A test written against a different field would be a
-// test of a different sky.
+// header defines as a call into the very function that GENERATES it — CloudNoiseVolumeChannels, the same
+// text Engine/Assets/CloudNoiseVolumeGenerator.cpp compiles to write the file. A test written against a
+// different field would be a test of a different sky.
 //
 // The two differences from the GPU path are deliberate and stated rather than discovered:
 //   * the volume is RGBA8, so the GPU sees the field quantized to 1/255 and trilinearly interpolated
 //     between 128 voxels per axis, while this evaluates it analytically. Nothing asserted here is finer
 //     than that quantization.
-//   * the seeds and octave counts are the component's defaults, because that is what the shipped bake
-//     writes; a different seed moves individual clouds and not one of the statistics measured here.
+//   * the parameters are the volume asset's defaults, because that is what the shipped
+//     CloudNoise_Default.dcnv carries; a different seed moves individual clouds and not one of the
+//     statistics measured here.
 //
 // THE RESULTS ARE MEMOIZED. The coverage measurement evaluates the same grid of positions once per
 // Coverage setting, and the field depends only on the position — so the cache turns a six-fold cost into
@@ -54,26 +55,26 @@ namespace Desert::Tests::CloudFieldRef
 #include <Common/CloudNoise.glslh>
 #include <Common/CloudGeometry.glslh>
 
-        // Programs/Clouds/CloudNoiseBake.shader, channel for channel. The seeds are the component's
-        // Weather Seed and Detail Seed defaults and the octave counts its Weather Octaves and Detail
-        // Octaves defaults; the per-channel offsets, periods and curl strength are the bake's own.
-        constexpr uint  kCoverageSeed    = 1337u;
-        constexpr uint  kErosionSeed     = 13u;
-        constexpr int   kCoverageOctaves = 3;
-        constexpr int   kErosionOctaves  = 2;
-        constexpr float kCurlStrength    = 0.33f;
+        // ONE call into the ONE function that writes the volume — Common/CloudNoise.glslh's
+        // CloudNoiseVolumeChannels — rather than four calls this file has to keep in step with the
+        // generator's. The four-line copy that used to be here mirrored the compute bake and was a second
+        // statement of the channel layout; it is exactly the shape of duplication that agrees with itself
+        // until the first tuning pass.
+        //
+        // The parameters are the defaults of Engine/Assets/CloudNoiseVolume.hpp's CloudNoiseVolumeParams,
+        // which is what the shipped CloudNoise_Default.dcnv was baked with. A different seed moves
+        // individual clouds and not one of the statistics measured here.
+        constexpr uint  kVolumeSeed     = 1337u;
+        constexpr float kCurlStrength   = 0.33f;
+        constexpr float kWispyPeriodLF  = 2.0f;
+        constexpr float kWispyPeriodHF  = 4.0f;
+        constexpr float kBillowPeriodLF = 3.0f;
+        constexpr float kBillowPeriodHF = 6.0f;
 
         vec4 CloudEvaluateBakedVolume( vec3 texturePosition )
         {
-            const float r =
-                 CloudPerlinWorley01( texturePosition * 4.0f, 4.0f, kCoverageSeed + 0u, kCoverageOctaves );
-            const float g =
-                 CloudPerlinWorley01( texturePosition * 8.0f, 8.0f, kCoverageSeed + 977u, kCoverageOctaves );
-            const float b =
-                 CloudWorleyFbm( texturePosition * 12.0f, 12.0f, kErosionSeed + 1861u, kErosionOctaves );
-            const float a = CloudCurlyPerlin01( texturePosition * 16.0f, 16.0f, kErosionSeed + 2749u,
-                                                kErosionOctaves, kCurlStrength );
-            return vec4( r, g, b, a );
+            return CloudNoiseVolumeChannels( texturePosition, kVolumeSeed, kCurlStrength, kWispyPeriodLF,
+                                             kWispyPeriodHF, kBillowPeriodLF, kBillowPeriodHF );
         }
 
         // Exact-key memoization: the key is the bit pattern of the three coordinates, so two callers that

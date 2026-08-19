@@ -62,4 +62,10 @@ namespace Desert::Runtime
         return &videoService;
     }
 
+    CloudNoiseService* ResourceRegistry::GetCloudNoiseService()
+    {
+        static CloudNoiseService cloudNoiseService;
+        return &cloudNoiseService;
+    }
+
 } // namespace Desert::Runtime

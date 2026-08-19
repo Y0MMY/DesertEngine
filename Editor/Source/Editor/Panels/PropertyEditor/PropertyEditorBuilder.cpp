@@ -6,6 +6,7 @@
 #include <Engine/Graphic/ColorTemperature.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
+#include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Font/FontService.hpp>
 #include <Engine/Graphic/Texture.hpp>
@@ -783,6 +784,98 @@ namespace Desert::Editor
                             changed = true;
                         }
                     }
+                    break;
+                }
+
+                // Cloud noise volume slot: a 3D noise the artist bakes in the Cloud Noise Volume panel.
+                //
+                // It gets its own branch rather than the texture one below because a volume is not a
+                // texture here: there is nothing to thumbnail (a 128^3 field has no 2D preview that means
+                // anything outside the panel that slices it), the import path is a bake rather than a
+                // cook, and "None" has a DEFINITE meaning — the built-in default volume, not an empty
+                // slot. Offering it in the texture picker would have been the third of those mistakes.
+                if ( field.Meta.AssetType == "CloudNoiseVolumeAsset" )
+                {
+                    uint64_t* volumeHandle = static_cast<uint64_t*>( p );
+
+                    std::string preview = "Default";
+                    if ( *volumeHandle != 0 )
+                    {
+                        preview = "(missing)";
+                        if ( assetMgr )
+                        {
+                            if ( auto volume = assetMgr->FindByHandle<Assets::CloudNoiseVolumeAsset>(
+                                      Common::UUID( *volumeHandle ) ) )
+                                preview = volume->GetMetadata().Filepath.filename().string();
+                        }
+                    }
+
+                    ImGui::SetNextItemWidth( -1.0f );
+                    if ( ImGui::BeginCombo( "##cloudnoise", preview.c_str() ) )
+                    {
+                        if ( ImGui::Selectable( "Default", *volumeHandle == 0 ) )
+                        {
+                            *volumeHandle = 0;
+                            changed       = true;
+                        }
+                        if ( assetMgr )
+                        {
+                            for ( const auto& [h, volume] :
+                                  assetMgr->FindAllByType<Assets::CloudNoiseVolumeAsset>() )
+                            {
+                                const bool        selected = ( static_cast<uint64_t>( h ) == *volumeHandle );
+                                const std::string name     = volume->GetMetadata().Filepath.filename().string();
+                                if ( ImGui::Selectable( name.c_str(), selected ) )
+                                {
+                                    *volumeHandle = static_cast<uint64_t>( h );
+                                    changed       = true;
+                                }
+                                if ( selected )
+                                    ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+
+                    if ( ImGui::BeginDragDropTarget() )
+                    {
+                        if ( const ImGuiPayload* pl =
+                                  ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::AssetFile ) )
+                        {
+                            const std::string path( static_cast<const char*>( pl->Data ),
+                                                    pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                            // The extension is checked HERE because the Content Browser emits one generic
+                            // AssetFile payload for every type it has no icon for. Without the check this
+                            // slot would accept a dropped .lua and bind a handle to a file that can never
+                            // decode.
+                            if ( assetMgr && !path.empty() &&
+                                 std::filesystem::path( path ).extension() == Assets::kCloudNoiseVolumeExtension )
+                            {
+                                auto& mutableManager = const_cast<Assets::AssetManager&>( *assetMgr );
+                                auto  volume = mutableManager.FindByPath<Assets::CloudNoiseVolumeAsset>( path );
+                                if ( !volume )
+                                    volume = mutableManager.CreateAsset<Assets::CloudNoiseVolumeAsset>(
+                                         Assets::AssetPriority::Medium, path );
+                                if ( volume && volume->IsReadyForUse() )
+                                {
+                                    if ( const auto uploaded =
+                                              Runtime::ResourceRegistry::GetCloudNoiseService()->Register(
+                                                   volume );
+                                         !uploaded )
+                                        LOG_ERROR( "[Clouds] Dropped noise volume '{}' could not be "
+                                                   "uploaded: {}",
+                                                   path, uploaded.GetError() );
+
+                                    *volumeHandle = static_cast<uint64_t>( volume->GetMetadata().Handle );
+                                    changed       = true;
+                                }
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Pick a baked volume or drag a .dcnv here. \"Default\" is the "
+                                           "engine's built-in volume, so a scene always has one." );
                     break;
                 }
 

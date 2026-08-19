@@ -7,6 +7,7 @@
 #include "Mesh/SkinnedMeshAsset.hpp"
 #include "Mesh/AnimationAsset.hpp"
 #include "TextureAsset.hpp"
+#include "CloudNoiseVolumeAsset.hpp"
 
 namespace Desert::Assets
 {
@@ -19,6 +20,7 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_TEXTURE_EXTENSIONS      = { ".tex" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS       = { ".hdr" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS      = { ".shader" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_NOISE_EXTENSIONS  = { ".dcnv" };
 
     AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager )
          : m_AssetManager( assetManager )
@@ -30,6 +32,7 @@ namespace Desert::Assets
         PreloadShaders();
         PreloadMeshes();
         PreloadSkyboxes();
+        PreloadCloudNoiseVolumes();
     }
 
     namespace
@@ -170,6 +173,36 @@ namespace Desert::Assets
                 // it. Then selecting an HDR skybox in the editor is instant (no per-select compute stall).
                 // Runs after PreloadShaders (the compute shaders must be registered first).
                 Runtime::ResourceRegistry::GetSkyboxService()->Register( skyboxAsset );
+            }
+        }
+    }
+
+    void AssetPreloader::PreloadCloudNoiseVolumes()
+    {
+        // Loaded eagerly, unlike meshes: a volume is 8 MiB of bytes with no parse to speak of, and the
+        // renderer needs its contents on the first frame the component asks for it. Deferring would buy a
+        // stall exactly where the sky first appears.
+        ProcessAssetFiles<CloudNoiseVolumeAsset>( Common::Constants::Path::CLOUD_NOISE_PATH,
+                                                  SUPPORTED_CLOUD_NOISE_EXTENSIONS, m_AssetManager,
+                                                  AssetPriority::Medium );
+
+        if ( auto manager = m_AssetManager.lock() )
+        {
+            auto* service = Runtime::ResourceRegistry::GetCloudNoiseService();
+            for ( const auto& [handle, volumeAsset] : manager->FindAllByType<Assets::CloudNoiseVolumeAsset>() )
+            {
+                if ( const auto result = service->Register( volumeAsset ); !result )
+                {
+                    LOG_ERROR( "[Clouds] Noise volume '{}' could not be uploaded: {}",
+                               volumeAsset->GetMetadata().Filepath.string(), result.GetError() );
+                    continue;
+                }
+
+                // The default is chosen by FILE NAME, and it is a project-owned file rather than something
+                // compiled in: a project that ships its own CloudNoise_Default.dcnv replaces the engine's
+                // without touching code, which is the same way every other built-in default here works.
+                if ( volumeAsset->GetMetadata().Filepath.filename().string() == kCloudNoiseDefaultVolumeName )
+                    service->SetDefault( handle );
             }
         }
     }

@@ -26,6 +26,9 @@ namespace Desert::Assets
         void PreloadMeshes();
         void PreloadSkyboxes();
         void PreloadShaders();
+        // Cloud noise volumes (`.dcnv`). Scanned so the component's slot can offer them by name and so a
+        // scene that names one finds it already loaded; no GPU work happens here, the renderer uploads.
+        void PreloadCloudNoiseVolumes();
 
     private:
         std::weak_ptr<AssetManager> m_AssetManager;

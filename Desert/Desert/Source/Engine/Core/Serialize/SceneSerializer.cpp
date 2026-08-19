@@ -100,6 +100,15 @@ namespace Desert::Core
                       sceneData->SceneName, kSceneVersionSky, kSceneVersionTonemap,
                       migration.Tonemap.SettingsCreated ? ", in a settings block created for it" : "" );
         }
+        if ( migration.CloudNoiseRaised && migration.CloudNoise.Entities > 0 )
+        {
+            LOG_INFO( "[SceneMigration] '{0}': scene schema v{1} -> v{2} - the cloud noise volume is an asset "
+                      "now, so {3} bake setting(s) were dropped from {4} entity(ies). Those layers use the "
+                      "built-in default volume; pick another in the component's Noise Volume slot. Re-save "
+                      "(or run SceneMigrator) to stamp the file so this never runs again.",
+                      sceneData->SceneName, kSceneVersionTonemap, kSceneVersionCloudNoise,
+                      migration.CloudNoise.FieldsDropped, migration.CloudNoise.Entities );
+        }
         if ( migration.UnitsRaised )
         {
             LOG_INFO( "[SceneMigration] '{0}': world units v0 -> v{1} (metres -> centimetres, x{2}) - {3} "

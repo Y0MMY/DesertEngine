@@ -3,6 +3,7 @@
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Shader/ShaderAsset.hpp>
+#include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
@@ -64,7 +65,61 @@ namespace Desert::Runtime
 
         PollMaterials( assetManager, scene );
         PollShaders( assetManager, scene );
+        PollCloudNoiseVolumes( assetManager );
         m_FirstScan = false;
+    }
+
+    void AssetHotReload::PollCloudNoiseVolumes( Assets::AssetManager& assetManager )
+    {
+        auto* service = ResourceRegistry::GetCloudNoiseService();
+
+        for ( const auto& [handle, asset] : assetManager.FindAllByType<Assets::CloudNoiseVolumeAsset>() )
+        {
+            if ( !asset )
+                continue;
+            const auto& path = asset->GetMetadata().Filepath;
+
+            std::error_code ec;
+            const auto      mtime = std::filesystem::last_write_time( path, ec );
+            if ( ec )
+                continue; // deleted/missing — leave the in-memory volume alone
+
+            const std::string key = path.generic_string();
+            auto              it  = m_KnownTimes.find( key );
+            if ( it == m_KnownTimes.end() )
+            {
+                m_KnownTimes[key] = mtime;
+                continue; // first sighting — baseline only
+            }
+            if ( it->second == mtime || m_FirstScan )
+            {
+                it->second = mtime;
+                continue;
+            }
+            it->second = mtime;
+
+            // A FAILED RE-READ LEAVES THE OLD VOLUME BOUND, deliberately. The panel writes a volume with a
+            // single truncating stream write, so a poll that lands mid-write sees a short file; refusing it
+            // and keeping the bytes that are already on the device costs one poll interval, where accepting
+            // a half-file would put a seam across the sky and then never mention it again.
+            if ( const auto reloaded = asset->Load(); !reloaded )
+            {
+                LOG_ERROR( "[HotReload] Cloud noise volume '{}' could not be re-read: {}", key,
+                           reloaded.GetError() );
+                continue;
+            }
+
+            if ( const auto uploaded = service->Register( asset ); !uploaded )
+            {
+                LOG_ERROR( "[HotReload] Cloud noise volume '{}' was re-read but not uploaded: {}", key,
+                           uploaded.GetError() );
+                continue;
+            }
+
+            // Nothing else to notify. VolumetricCloudRenderer asks the service for its volume every frame
+            // rather than caching it, so the next frame binds the new image without anyone telling it.
+            LOG_INFO( "[HotReload] Cloud noise volume '{}' reloaded — the next frame marches the new one.", key );
+        }
     }
 
     void AssetHotReload::PollMaterials( Assets::AssetManager& assetManager, Core::Scene* scene )

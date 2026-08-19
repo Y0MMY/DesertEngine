@@ -142,7 +142,13 @@ CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heig
     // sheet and its neighbour a tower, and a single large island can rise on one side and not the other.
     //
     // It costs nothing: it reads a channel of a fetch that has already happened.
-    float typeNoise = ( noise.y - 0.5f ) * 2.0f;
+    // The driver is the WISPY coarse channel and not one of the two the coverage field is built from. It
+    // has to be a field the islands do not already carry, or the type would be a function of the coverage
+    // and every big cloud would be a tower for the same reason it is big. At period 2 against the billowy
+    // pair's 3 and 6 its cells are the coarsest in the volume, so the type wanders at a scale LARGER than
+    // one island: neighbouring clouds differ, and a single wide one still rises on one side and not the
+    // other.
+    float typeNoise = ( noise.x - 0.5f ) * 2.0f;
     float type      = clamp( params.CloudType + params.CloudTypeVariance * typeNoise, 0.0f, 1.0f );
 
     result.DetailType = type;
@@ -151,10 +157,74 @@ CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heig
     if ( vertical <= 0.0f )
         return result;
 
-    // Two octaves of the baked volume, weighted so the coarse one owns the island and the finer one
-    // roughens its edge. The weights sum to one so that `Coverage` keeps meaning the same thing whatever
-    // the noise happens to be doing locally.
-    float field = clamp( noise.x * 0.65f + noise.y * 0.35f, 0.0f, 1.0f );
+    // THE COVERAGE FIELD IS THE BILLOWY PAIR, AND WHICH PAIR IT IS DECIDES WHETHER THERE ARE CLOUDS.
+    //
+    // This read the WISPY pair — channels R and G, low- and high-frequency Curly-Alligator — and that is
+    // not a tuning error, it is a category error, and it has one visible symptom: the sky comes out as a
+    // COBWEB. Curly-Alligator is `1 - Alligator`, and the Alligator's zero set is the seams BETWEEN its
+    // cells (Common/CloudNoise.glslh: the field is `best - second`, which vanishes where two feature points
+    // contribute equally). Inverted, those seams are the field's maxima — so thresholding it near the top,
+    // which is exactly what a coverage of 0.25 does, selects the seams and nothing else. What survives is a
+    // net of filaments, and the deck says as much about what that channel is FOR: "nice web like shapes"
+    // (p.95), the wispy DETAIL, never the shape.
+    //
+    // The billowy pair is the other half of the same volume and it is the complementary set: the Alligator
+    // itself, whose maxima are the feature points. Thresholding it near the top selects the LOBES — "the
+    // lobes a convective cloud is made of", which is what the channel is labelled in
+    // Engine/Assets/CloudNoiseVolume.hpp — and one lobe crossed by a view ray is hundreds of metres of
+    // cloud instead of tens. Measured on the shipped scene at three elevations: the median cloud crossing
+    // along a view ray went from 60 / 70 / 150 m to 430 / 550 / 920 m, against a march step of 221 / 233 /
+    // 234 m. Same two weights, the other pair.
+    //
+    // WHAT IT REALLY WANTS IS NOT A CHANNEL OF THIS VOLUME AT ALL, and that has to be said here rather than
+    // discovered again. In Nubis Cubed the coverage comes from a weather map and the shape from MODELLING
+    // volumes an artist sculpts; this four-channel volume is the deck's DETAIL noise and nothing in it was
+    // designed to be a silhouette. That producer is the seam's slot A at the top of this file, and until it
+    // exists the coverage borrows the only lobe-shaped field the tree has. The borrow is legitimate — the
+    // Alligator's lacunarity is what the deck chose it for, and a range of lobe sizes with creases between
+    // them is a cumulus field — but it is a borrow, and slot A is where it is repaid.
+    //
+    // The weights are the coarse octave owning the island and the finer one roughening its edge, and they
+    // sum to one so that `Coverage` keeps meaning the same thing whatever the noise is doing locally.
+    float coarseWeight = 0.65f;
+    float fineWeight   = 0.35f;
+    float blended      = noise.z * coarseWeight + noise.w * fineWeight;
+
+    // AND THEN THE BLEND IS TURNED INTO A QUANTILE, WHICH IS WHAT MAKES THE SLIDER SURVIVE A NEW VOLUME.
+    //
+    // The threshold below sweeps the whole of [0, 1] and therefore assumes the field is spread over the
+    // whole of [0, 1]. It is not, and it never was. A weighted mean of two independent fields is NARROWER
+    // than either — variances add as the square of the weights, so this blend's standard deviation is
+    // sqrt(0.65^2 + 0.35^2) = 0.738 of one channel's — and the raw blend measures
+    // p05 0.273 / p50 0.517 / p95 0.786. At the shipped Coverage of 0.24 the threshold lands at 0.79, ABOVE
+    // the blend's own 95th percentile: a setting documented as scattered cumulus was selecting the top
+    // twentieth of the field, and the zenith came out nearly empty. The threshold's span against the
+    // field's span — 1.0 of slider travel against 0.51 of field — is this programme's classic relation
+    // defect, and it was invisible while the field was the wispy pair, because thresholding a web produces
+    // SOMETHING at any level.
+    //
+    // The fix is not a nicer constant, it is a change of what the field MEANS: the smoothstep below is the
+    // blend's own cumulative distribution, so `field` stops being a value and becomes the QUANTILE of that
+    // value — the fraction of the sky whose coverage field is below this point. `Coverage` then addresses a
+    // fraction of sky directly, and it does so for ANY volume the generator produces, because every
+    // Alligator channel leaves it with the same distribution whatever seed and periods it was baked with.
+    // THAT IS THE PROPERTY T2 NEEDS: the slot now takes an artist's asset, and a slider whose meaning moves
+    // with the asset dropped into it is a defect the asset feature itself would have introduced. It already
+    // happened once without an asset in sight — the component's coverage table shifted five points of
+    // slider when the noise changed from Perlin-Worley to Alligator, and that whole class of shift is what
+    // this removes.
+    //
+    // 0.32 IS MEASURED, exactly like CLOUD_ALLIGATOR_MEDIAN_SHAPE in Common/CloudNoise.glslh and for the
+    // same reason: it is the half-width at which the mapped field's quantiles equal its own values. The
+    // suite prints them and asserts it — 0.057 / 0.287 / 0.540 / 0.791 / 0.992 against the ideal
+    // 0.05 / 0.25 / 0.50 / 0.75 / 0.95 — so a change to the noise or to the weights fails here rather than
+    // in a frame six weeks later. Being monotone it moves no level set: the islands are exactly where the
+    // Alligator put them and only their labels change.
+    //
+    // Both ends stay exact. The mapped field reaches 1, and at Coverage 0 the band starts past 1; it
+    // reaches 0, and at Coverage 1 the band ends below 0.
+    float distributionHalfWidth = 0.32f;
+    float field = smoothstep( 0.5f - distributionHalfWidth, 0.5f + distributionHalfWidth, blended );
 
     // Coverage as a SOFT MASK around a threshold, not a remap of the whole range above it.
     //
@@ -202,9 +272,10 @@ CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction
 // the middle, while remapping leaves anything already deep inside the body at full density and only cuts
 // where the profile was already falling off.
 //
-// `DetailType` selects between the volume's two finest octaves rather than blending two separate noises,
-// which is the cheap half of what the deck does with its four-channel noise (p.122): the wispy end erodes
-// with the finer field, the billowy end with the coarser one, continuously.
+// `DetailType` selects between the volume's two CHARACTERS — wispy and billowy — and each of them is
+// itself a frequency blend driven by the profile. That is the deck's composite on p.122 in full rather
+// than the two-channel half of it that stood here, and the difference is that the erosion's frequency now
+// follows how deep inside the body the sample is instead of being constant through the whole cloud.
 float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 positionKm )
 {
     if ( field.Profile <= 0.0f )
@@ -216,8 +287,23 @@ float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 
     float tile      = max( params.DetailTileKm, 1e-4f );
     vec3  detailPos = vec3( windPos.x / tile, windPos.y / tile, windPos.z / tile );
 
-    vec4  noise       = CLOUD_SAMPLE_NOISE( detailPos );
-    float detailField = clamp( mix( noise.w, noise.z, clamp( field.DetailType, 0.0f, 1.0f ) ), 0.0f, 1.0f );
+    vec4 noise = CLOUD_SAMPLE_NOISE( detailPos );
+
+    // THE DECK'S OWN COMPOSITE (p.122), and it uses all four channels rather than two of them.
+    //
+    // Each character of erosion is a blend of ITS OWN pair across frequency, and the blend is driven by the
+    // profile — deep inside the body the coarse octave, out at the edge the fine one, which is the
+    // frequency-follows-depth relation the deck states on p.101 and p.105. The wispy end blends linearly;
+    // the billowy end blends on the fourth root, so a billowy cloud reaches its fine octave much earlier
+    // and its edge breaks into lobes rather than fading into one smooth frequency.
+    //
+    // Only THEN do the two characters mix, on DetailType. Written the other way round — pick a channel by
+    // type and never blend by depth — the erosion has one frequency everywhere inside a cloud, which is
+    // what the two-channel version this replaces did.
+    float wispy   = mix( noise.x, noise.y, field.Profile );
+    float billowy = mix( noise.z, noise.w, pow( field.Profile, 0.25f ) );
+
+    float detailField = clamp( mix( wispy, billowy, clamp( field.DetailType, 0.0f, 1.0f ) ), 0.0f, 1.0f );
 
     // THE EROSION IS WEIGHTED BY DEPTH, and this is the difference between clouds and fog.
     //

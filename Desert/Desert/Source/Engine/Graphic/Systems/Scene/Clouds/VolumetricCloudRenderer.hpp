@@ -20,11 +20,12 @@ namespace Desert::Graphic::System
      * @brief The volumetric cloud pass: a per-pixel march through a spherical shell around the planet,
      *        composited over the scene at sky distance.
      *
-     * Three stages:
+     * Three stages. There used to be a fourth in front of them — a compute bake that filled the noise
+     * volume from a seed — and it is gone: the volume is an ASSET now (Engine/Assets/CloudNoiseVolume.hpp),
+     * generated offline and uploaded once by Runtime::CloudNoiseService, because a volume that only ever
+     * existed on the GPU could not be saved, shown, or replaced by one the artist made.
      *
-     *   S0  BAKE       compute, 128x128x128 RGBA8. Four periodic octaves of Perlin noise, one per
-     *                  channel. Runs ONLY when the seeds or octave counts change — it depends on nothing
-     *                  else — so in a steady scene it costs nothing at all.
+     *
      *   S1  MARCH      compute, RGBA16F at a QUARTER of the target's size. Reconstructs each pixel's ray
      *                  from the camera's inverse view-projection — through the HALF-resolution pixel this
      *                  frame's sub-pixel offset owns, which is the projection jitter — intersects the
@@ -96,12 +97,12 @@ namespace Desert::Graphic::System
         // freshly created image mean nothing. Returns false having logged the reason and latched the
         // failure.
         bool EnsureTraceTargets( uint32_t halfWidth, uint32_t halfHeight );
-        // Allocates the noise volume and bakes it if @p key differs from what is in it. Returns false
-        // having logged the reason and latched the failure.
-        bool EnsureNoiseVolume( const CloudNoiseBakeKey& key );
+        // Points m_NoiseVolume at the volume this layer's slot resolves to, through
+        // Runtime::CloudNoiseService. Returns false having logged the reason when there is not even a
+        // default to fall back on.
+        bool EnsureNoiseVolume();
 
         std::shared_ptr<ComputePipeline>  m_MarchPipeline;
-        std::shared_ptr<ComputePipeline>  m_NoiseBakePipeline;
         std::shared_ptr<ComputePipeline>  m_ResolvePipeline;
         std::shared_ptr<GraphicsPipeline> m_CompositePipeline;
 
@@ -114,7 +115,6 @@ namespace Desert::Graphic::System
         // comment inserted mid-group is what clang-format and this repository's style disagree about.
         std::shared_ptr<Image2D>                        m_TraceImage;
         std::shared_ptr<Image2D>                        m_TraceGuideImage;
-        std::shared_ptr<Image3D>                        m_NoiseVolume;
         std::shared_ptr<ShaderResources::StorageBuffer> m_ParamsBuffer;
         std::shared_ptr<ShaderResources::StorageBuffer> m_ResolveParamsBuffer;
 
@@ -125,6 +125,13 @@ namespace Desert::Graphic::System
         std::shared_ptr<Image2D> m_HistoryImage[2];
         std::shared_ptr<Image2D> m_HistoryGuideImage[2];
 
+        // BORROWED, not owned: Runtime::CloudNoiseService owns every noise volume and shares one upload
+        // across all views. A raw pointer says that plainly, where a shared_ptr here would suggest this
+        // renderer has a say in the image's lifetime and would keep an unloaded volume alive on the device.
+        // Refreshed from the service every frame, so a hot reload swaps the image under it with no state of
+        // its own to go stale.
+        Image3D* m_NoiseVolume = nullptr;
+
         ECS::VolumetricCloudData m_Data{};
         glm::vec3                m_WindOffset{ 0.0f };
         bool                     m_Present = false;
@@ -134,12 +141,6 @@ namespace Desert::Graphic::System
         // rather than stored, so the two cannot drift apart on an odd viewport.
         uint32_t m_HalfWidth  = 0;
         uint32_t m_HalfHeight = 0;
-
-        // What is actually IN the noise volume, as opposed to what the component currently asks for. The
-        // two being compared is the whole rebake decision; a bool "baked" would answer the wrong question
-        // the moment a seed changed.
-        glm::uvec4 m_BakedNoiseKey{ 0u };
-        bool       m_NoiseBaked = false;
 
         // Latched by EnsureTraceTargets and covering ALL SIX images: any one missing means the pass cannot
         // run, and retrying an allocation that already failed once per frame only fills the log.

@@ -92,14 +92,6 @@ namespace Desert::Graphic
     inline constexpr uint32_t kCloudResolveGuideOutputBinding  = 5; // half-res reconstructed guide
     inline constexpr uint32_t kCloudResolveParamsBinding       = 6; // CloudResolveParams
 
-    // The bake pass writes the noise volume through binding 0 and takes its seed as a push constant.
-    inline constexpr uint32_t kCloudNoiseBakeOutputBinding = 0;
-
-    // 128^3 four-channel, exactly as the Nubis deck sizes its own noise volume (p.96). At RGBA8 that is
-    // 8 MiB — the engine has no compressed 3D format, so the deck's 4.2 MiB is not reachable here and the
-    // number is stated rather than hoped for.
-    inline constexpr uint32_t kCloudNoiseResolution = 128;
-
     /**
      * Per-dispatch data: everything that changes with the CAMERA rather than with the cloud settings.
      * Rides in the push constant because ComputePipeline has no SetUniformBuffer, and a second storage
@@ -374,28 +366,8 @@ namespace Desert::Graphic
         return p;
     }
 
-    /**
-     * Everything the noise bake depends on, and nothing else: the two seeds and the two octave counts.
-     *
-     * It doubles as the bake pass's push constant AND as the key the renderer compares to decide whether
-     * to rebake. Those being the same value is the point — a separate "has it changed" predicate is
-     * exactly the kind of second source of truth that ends up disagreeing with the thing it guards, and
-     * the symptom would be an artist moving a seed slider and seeing nothing happen.
-     */
-    struct CloudNoiseBakeKey
-    {
-        glm::uvec4 Value; // x coverage seed, y erosion seed, z coverage octaves, w erosion octaves
-    };
-
-    static_assert( sizeof( CloudNoiseBakeKey ) == 16 );
-
-    inline CloudNoiseBakeKey MakeCloudNoiseBakeKey( const ECS::VolumetricCloudData& data )
-    {
-        CloudNoiseBakeKey key;
-        key.Value = glm::uvec4( static_cast<uint32_t>( std::max( data.WeatherSeed, 0 ) ),
-                                static_cast<uint32_t>( std::max( data.DetailSeed, 0 ) ),
-                                static_cast<uint32_t>( std::clamp( data.WeatherOctaves, 1, 6 ) ),
-                                static_cast<uint32_t>( std::clamp( data.DetailOctaves, 1, 6 ) ) );
-        return key;
-    }
+    // THERE IS NO BAKE KEY HERE ANY MORE. `CloudNoiseBakeKey` packed the component's two seeds and two
+    // octave counts into a push constant for the compute bake that filled the noise volume; the volume is
+    // now an asset generated offline (Engine/Assets/CloudNoiseVolume.hpp), so the pass, the push constant
+    // and the four fields behind them are gone together rather than left as a struct nobody constructs.
 } // namespace Desert::Graphic
