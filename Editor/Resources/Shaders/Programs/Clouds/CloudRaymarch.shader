@@ -165,7 +165,12 @@ Shader "CloudRaymarch"
                 CloudFieldSample field   = SampleCloudField(params, heightFraction, fieldPos);
                 float            density = CloudSampleDensity(params, field, fieldPos);
 
-                accumulated += density * extinctionPerKm * segment;
+                // THE EXTINCTION IS THE SAMPLE'S, NOT THE LAYER'S, and it has to be read here as well as
+                // in the view march. A shadow ray from a congestus tower passes through the stratocumulus
+                // deck beneath it: with one extinction for the whole shell the deck would shade the tower
+                // as if it were made of the tower's own material, and the ice of a cirrus at a quarter of
+                // a cumulus' opacity would cast a cumulus' shadow.
+                accumulated += density * extinctionPerKm * field.ExtinctionFactor * segment;
                 previous = current;
             }
 
@@ -314,7 +319,7 @@ Shader "CloudRaymarch"
             float phase        = CloudPhaseDualLobe(dot(rayDir, toSun), u_CloudWind.w,
                                                     u_CloudPhase.x, u_CloudPhase.y);
             float extinction   = max(u_CloudMarch.w, 0.0f);
-            float albedo       = clamp(u_CloudDetail.w, 0.0f, 1.0f);
+            float albedo       = clamp(u_CloudDetail.z, 0.0f, 1.0f);
             float lightMarchKm = max(u_CloudSun.w, 0.0f);
             int   lightSamples = int(clamp(u_CloudSunColour.w, 1.0f, 16.0f));
             float stopT        = clamp(u_CloudMarch.y, 0.0f, 1.0f);
@@ -431,7 +436,9 @@ Shader "CloudRaymarch"
                         if (cloudFrontKm < 0.0f)
                             cloudFrontKm = t;
 
-                        float sigmaT = density * extinction;
+                        // The winning species' own opacity, per sample. See the note in
+                        // CloudLightOpticalDepth.
+                        float sigmaT = density * extinction * field.ExtinctionFactor;
 
                         // ONE shadow ray serves every scattering order. That is the whole economy of the
                         // octave approximation: the expensive part is finding how much material lies

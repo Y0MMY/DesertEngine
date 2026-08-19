@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -23,18 +24,26 @@ namespace Desert::Graphic
      * Units: KILOMETRES throughout. This packer is where the component's world-unit distances are
      * converted, exactly once.
      *
-     * EVERY SLOT IS READ. The block is 47 floats with no reserved field, and that is a deliberate
+     * EVERY SLOT IS READ. The block is 79 floats with no reserved field, and that is a deliberate
      * constraint rather than an accident of packing: a spare slot is where a future parameter gets quietly
-     * stashed without a name, a range or a tooltip. It is 47 rather than 48 because the last member is a
+     * stashed without a name, a range or a tooltip. It is 79 rather than 80 because the last member is a
      * vec3 — when the domain warp came out, the slot it had occupied came out with it rather than staying
      * behind as somewhere to put things.
+     *
+     * THIRTY-TWO OF THE SEVENTY-NINE ARE THE FOUR SPECIES', and the three slots T3 freed by moving a
+     * type's factors out of the layer's own vec4s were spent rather than kept: `Weather.w` held the one
+     * species' DetailCharacter, `Detail.y` and `Detail.z` held the products of the layer's strength and
+     * density with that species' factors, and `March.w` held the product with its extinction. With four
+     * kinds of cloud in one shell none of those products can be formed once, so each became a per-species
+     * number and the vec4s they left closed up around the layer's own settings.
      */
     struct CloudGpuPayload
     {
         glm::vec4 Layer;        // x planet radius, y bottom altitude, z thickness, w max view distance (km)
+        // w is the LAYER's extinction alone; the winning species' factor multiplies it in the march.
         glm::vec4 March;        // x max steps, y stop transmittance, z tracing start (km), w extinction (1/km)
-        glm::vec4 Weather;      // x coverage tile (km), y coverage, z coverage contrast, w detail character
-        glm::vec4 Detail;       // x detail tile (km), y detail strength, z density scale, w scattering albedo
+        glm::vec4 Weather;      // x coverage tile (km), y coverage, z coverage contrast, w detail tile (km)
+        glm::vec4 Detail;       // x detail strength, y density scale, z scattering albedo, w species count
         glm::vec4 Wind;         // xyz accumulated wind offset (km), w phase g
         glm::vec4 Sun;          // xyz TOWARD the sun (normalized), w light march distance (km)
         glm::vec4 SunColour;    // rgb sun irradiance (linear), w light march sample count
@@ -42,12 +51,27 @@ namespace Desert::Graphic
         glm::vec4 MultiScatter; // x octave count, y contribution, z occlusion, w eccentricity
         glm::vec4 Phase;        // x second lobe g, y phase blend, z AO strength, w tracing start max (km)
         glm::vec4 Fade;         // x AP start (km), y AP fade (km), z near fade end (km), w near fade start (km)
+
+        // THE FOUR SPECIES. Both arrays are indexed by the same slot, and slots at or past Detail.w are
+        // zero — the loop in the march stops at the count, and an unfilled slot's channel of the profile
+        // table is zero at every altitude anyway, so there are two independent reasons it is never read.
+        //
+        // x DetailCharacter, y DetailFactor, z DensityFactor, w ExtinctionFactor: what that kind of cloud
+        // is MADE OF. The winner of the union at a sample takes all four; nothing is averaged.
+        glm::vec4 SpeciesEdge[kCloudSpeciesSlots];
+        // xy the along-wind basis vector of that species' own placement field, zw the across-wind one, both
+        // dimensionless and divided by Weather.x in the march. Scale and anisotropy are already in their
+        // lengths and the wind's own axis is already in their direction, because that rotation is the same
+        // for every sample of the frame and this is where every other product of a type with a layer is
+        // formed.
+        glm::vec4 SpeciesPlacement[kCloudSpeciesSlots];
+
         // A vec3 AND LAST, which is the only shape in which three values can be three values. It was a
         // vec4 whose fourth slot carried the cloud type's variance, and then briefly the domain warp's
         // amount; the warp was measured and taken out again (Common/CloudField.glslh has the numbers), and
         // a float nobody reads is where the next parameter gets stashed without a name, a range or a
         // tooltip. Moving it to the end is what lets it shrink: std430 aligns it to 16 and the block ends
-        // at 188 bytes.
+        // at 316 bytes rather than at 320.
         glm::vec3 Aerial; // x AP far extent (km), y AP view-distance scale, z AP gate
     };
 
@@ -62,14 +86,21 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudGpuPayload, MultiScatter ) == 128 );
     static_assert( offsetof( CloudGpuPayload, Phase ) == 144 );
     static_assert( offsetof( CloudGpuPayload, Fade ) == 160 );
-    static_assert( offsetof( CloudGpuPayload, Aerial ) == 176 );
-    // 188, NOT 192, and the difference is the point. std430 rounds a block's STRIDE up to a multiple of
+    // The two species arrays sit BEFORE the trailing vec3 rather than after it, and that is the only
+    // reason they are there rather than appended. std430 aligns an array of vec4 to 16; appended after a
+    // vec3 that ends at 188 they would start at 192 and leave four bytes nobody wrote — which is a
+    // reserved slot with extra steps. Both sides of the layout move together in one commit and the offsets
+    // below are what makes a half-move a build error rather than a frame read from the wrong place.
+    static_assert( offsetof( CloudGpuPayload, SpeciesEdge ) == 176 );
+    static_assert( offsetof( CloudGpuPayload, SpeciesPlacement ) == 240 );
+    static_assert( offsetof( CloudGpuPayload, Aerial ) == 304 );
+    // 316, NOT 320, and the difference is the point. std430 rounds a block's STRIDE up to a multiple of
     // 16, but a stride only exists for an ARRAY of blocks and this is a single one — the shader never
-    // reads past the last member, so the block ends at 188 and so does this. glm::vec3 aligns to 4 rather
+    // reads past the last member, so the block ends at 316 and so does this. glm::vec3 aligns to 4 rather
     // than to 16, so the C++ struct ends there too and there is no trailing padding to explain. Same
     // arrangement, and the same reasoning, as CloudResolveParams below.
-    static_assert( sizeof( CloudGpuPayload ) == 188,
-                   "Eleven vec4s and a vec3 — the shader reads exactly this and nothing more." );
+    static_assert( sizeof( CloudGpuPayload ) == 316,
+                   "Eleven vec4s, two vec4[4] and a vec3 — the shader reads exactly this and nothing more." );
 
     inline constexpr uint32_t kCloudPayloadBytes = sizeof( CloudGpuPayload );
 
@@ -227,6 +258,17 @@ namespace Desert::Graphic
     // CLOUD_WORLD_UNITS_PER_KM in Common/CloudGeometry.glslh.
     inline constexpr float kCloudWorldUnitsPerKm = 100000.0f;
 
+    /// The species placement basis as the payload carries it: the same four numbers
+    /// Graphic::CloudSpeciesPlacementBasis produces, in a vec4. One line of adaptation rather than a
+    /// second implementation, because the maths belongs to the dependency-free header the tests drive.
+    inline glm::vec4 CloudSpeciesPlacementVector( const CloudTypeShape& shape,
+                                                  const glm::vec3&      windDirectionWorld )
+    {
+        const CloudPlacementBasis basis =
+             CloudSpeciesPlacementBasis( shape, windDirectionWorld.x, windDirectionWorld.z );
+        return glm::vec4( basis.AlongX, basis.AlongZ, basis.AcrossX, basis.AcrossZ );
+    }
+
     /**
      * The near-camera fade's interval, in kilometres and in the order the shader consumes it.
      *
@@ -280,12 +322,17 @@ namespace Desert::Graphic
      * Fill the GPU block from the component, the atmosphere and this frame's accumulated wind offset.
      * Pure: no GPU, no globals, no clock — the CloudPayload tests drive it directly.
      *
-     * @param shape           the twelve numbers of the cloud type in the layer's slot, already resolved by
-     *                        the caller (Runtime::CloudTypeService) — a parameter rather than something
+     * @param shapes          the cloud types in the layer's slots, packed to the front, already resolved
+     *                        by the caller (Runtime::CloudTypeService) — a parameter rather than something
      *                        looked up here, because a pure function that reaches for a service is not a
-     *                        pure function and this one is driven directly by three test suites. An empty
-     *                        slot arrives as Assets::CloudTypeDefaultShape, which is the ONE place the
-     *                        "no type chosen" answer is decided.
+     *                        pure function and this one is driven directly by three test suites. A layer
+     *                        whose slots are all empty arrives as ONE Assets::CloudTypeDefaultShape, which
+     *                        is the ONE place the "no type chosen" answer is decided; a count of zero is
+     *                        answered here with an empty shell rather than with a guess, because a packer
+     *                        that depends on its caller having checked something will one day be called by
+     *                        someone who did not.
+     * @param speciesCount    how many of @p shapes are filled, 0..kCloudSpeciesSlots. Above the ceiling it
+     *                        is clamped rather than read past.
      * @param windOffsetWorld the drift accumulated by the ECS system, world units. It is a parameter
      *                        rather than a member because the accumulator belongs to the system that
      *                        owns the timestep, and a second copy here would be state that can disagree.
@@ -311,27 +358,33 @@ namespace Desert::Graphic
      * a packer that depends on its caller having checked something is a packer that will one day be
      * called by someone who did not.
      */
-    inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const CloudTypeShape& shape,
-                                            const AtmosphereEnv& atmosphere, const glm::vec3& windOffsetWorld )
+    inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const CloudTypeShape* shapes,
+                                            uint32_t speciesCount, const AtmosphereEnv& atmosphere,
+                                            const glm::vec3& windOffsetWorld )
     {
-        const bool physical = atmosphere.Valid && atmosphere.DistantSkyLight != nullptr;
+        const bool     physical = atmosphere.Valid && atmosphere.DistantSkyLight != nullptr;
+        const uint32_t species  = std::min( speciesCount, kCloudSpeciesSlots );
 
         // THE ENVELOPE IS COMPUTED, NOT AUTHORED, and this is the one place it is computed. It is the
-        // union of the altitude ranges of the cloud types this layer actually carries — one of them today,
-        // two to four when T3 puts several in a sky — and nothing in the component states it.
+        // UNION of the altitude ranges of the cloud types this layer actually carries — and that sentence
+        // was written by T0 for a set of one and is unchanged for a set of four, which is the whole of
+        // what T1 promised about extending this code and the first thing T3 checked.
         //
         // The reason is the class of defect §2.3.1 of the contract names: an authored shell and a type's
         // own altitudes are two numbers obliged to agree, each of them individually legal, and the symptom
         // of their disagreeing is not an error but a cumulonimbus with its anvil sliced off by a ceiling
         // nobody remembers setting. Computing it makes the agreement structural, and
         // Desert/Tests/Engine/ComponentReflection asserts `envelope ⊇ every active type` on the packed
-        // block rather than on the intention.
-        const float bottomKm = std::max( CloudTypeBaseKm( shape ), 0.0f );
+        // block rather than on the intention — for every member of the set, which is the version of that
+        // test a partition-based blend would never have needed and a union does.
+        const CloudEnvelopeKm envelope = CloudTypeSetEnvelopeKm( shapes, species );
+
+        const float bottomKm = species > 0 ? std::max( envelope.BottomKm, 0.0f ) : 0.0f;
         // Floored at a metre for the same reason CloudMakeLayer floors it: a shell of zero thickness has
         // a coincident pair of roots and every grazing ray produces a segment the step schedule divides
         // by. The library cannot produce one, but the packer does not depend on its caller having
         // checked something.
-        const float thicknessKm = std::max( CloudTypeTopKm( shape ) - bottomKm, 0.001f );
+        const float thicknessKm = species > 0 ? std::max( envelope.TopKm - bottomKm, 0.001f ) : 0.001f;
         const float planetKm    = std::max( data.PlanetRadius, 1.0f );
 
         glm::vec3 sunDirection{ 0.0f, 1.0f, 0.0f };
@@ -351,30 +404,42 @@ namespace Desert::Graphic
         p.March   = glm::vec4( static_cast<float>( std::clamp( data.MaxSteps, 8, 512 ) ),
                                std::clamp( data.StopTransmittance, 0.0f, 1.0f ),
                                std::max( data.TracingStartDistance, 0.0f ) / kCloudWorldUnitsPerKm,
-                               std::max( data.ExtinctionScale, 0.0f ) * std::max( shape.ExtinctionFactor, 0.0f ) );
-        // The type's EDGE, which is the one thing about it the profile table cannot carry: the table says
-        // where the body is, and this says whether what the erosion cuts out of that body is wispy or
-        // billowy. A stratus and a congestus differ in both, which is why the old single scalar drove both
-        // and why the type now supplies each of them separately.
+                               std::max( data.ExtinctionScale, 0.0f ) );
         p.Weather = glm::vec4( std::max( data.WeatherTileSize, 1.0f ) / kCloudWorldUnitsPerKm,
                                std::clamp( data.Coverage, 0.0f, 1.0f ), std::max( data.CoverageContrast, 0.01f ),
-                               std::clamp( shape.DetailCharacter, 0.0f, 1.0f ) );
-        // THE TYPE'S THREE FACTORS ARE FOLDED IN HERE rather than sent as three more numbers. A
-        // cumulonimbus is made of more water than a stratus, a cirrus is a quarter as opaque as either,
-        // and a lenticular has almost no erosion at all — those are facts about the KIND of cloud. The
-        // artist's Density Scale, Extinction Scale and Detail Strength are multipliers ON them, so "1"
-        // keeps meaning "this type as it is" whichever type is in the slot. Two slots for a product would
-        // be two values that can disagree.
-        //
-        // The erosion product is clamped here as well as in the shader: the shader's clamp is what keeps a
-        // hand-edited scene from cutting past the whole field, and doing it here too means the block a test
-        // reads carries the value the march will actually use rather than one it is about to discard.
-        p.Detail = glm::vec4(
-             std::max( data.DetailTileSize, 1.0f ) / kCloudWorldUnitsPerKm,
-             std::clamp( std::clamp( data.DetailStrength, 0.0f, 1.0f ) * std::max( shape.DetailFactor, 0.0f ),
-                         0.0f, 1.0f ),
-             std::max( data.DensityScale, 0.0f ) * std::max( shape.DensityFactor, 0.0f ),
-             std::clamp( data.ScatteringAlbedo, 0.0f, 1.0f ) );
+                               std::max( data.DetailTileSize, 1.0f ) / kCloudWorldUnitsPerKm );
+        p.Detail  = glm::vec4( std::clamp( data.DetailStrength, 0.0f, 1.0f ), std::max( data.DensityScale, 0.0f ),
+                               std::clamp( data.ScatteringAlbedo, 0.0f, 1.0f ), static_cast<float>( species ) );
+
+        // THE TYPES' FACTORS ARE NO LONGER FOLDED INTO THE LAYER'S, and the reason is arithmetic rather
+        // than taste. A cumulonimbus is made of more water than a stratus, a cirrus is a quarter as opaque
+        // as either, and a lenticular has almost no erosion at all — those are facts about the KIND of
+        // cloud, and while a layer had exactly one kind the product `layer x type` could be formed here,
+        // once, and sent as one number. Four kinds in one shell have four different products and the march
+        // does not know which one it needs until it knows which species won the sample, so the factor
+        // travels per species and the multiply moves to the point of use. The artist's Density Scale,
+        // Extinction Scale and Detail Strength are still multipliers ON them, so "1" keeps meaning "these
+        // types as they are"; what changed is where the multiplication happens, not what it means.
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+        {
+            if ( slot >= species )
+            {
+                // Zero rather than the default type's numbers. An unfilled slot must not be able to put
+                // cloud in the sky if the count is ever wrong, and a zero density factor is the state in
+                // which it cannot.
+                p.SpeciesEdge[slot]      = glm::vec4( 0.0f );
+                p.SpeciesPlacement[slot] = glm::vec4( 0.0f );
+                continue;
+            }
+
+            const CloudTypeShape& shape = shapes[slot];
+
+            p.SpeciesEdge[slot] =
+                 glm::vec4( std::clamp( shape.DetailCharacter, 0.0f, 1.0f ), std::max( shape.DetailFactor, 0.0f ),
+                            std::max( shape.DensityFactor, 0.0f ), std::max( shape.ExtinctionFactor, 0.0f ) );
+            p.SpeciesPlacement[slot] = CloudSpeciesPlacementVector( shape, data.WindDirection );
+        }
+
         p.Wind    = glm::vec4( windOffsetWorld / kCloudWorldUnitsPerKm, std::clamp( data.PhaseG, -0.9f, 0.9f ) );
         p.Sun     = glm::vec4( sunDirection, std::max( data.LightMarchDistance, 0.0f ) / kCloudWorldUnitsPerKm );
         p.SunColour =

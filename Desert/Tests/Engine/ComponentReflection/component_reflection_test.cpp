@@ -427,7 +427,7 @@ TEST( HeightFogReflection, DistancesAreLengthsAndEveryFieldIsAnnotatedWellEnough
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 33 fields in six groups. The layer geometry and the tracing limits are
+// VolumetricCloudData — 36 fields in six groups. The layer geometry and the tracing limits are
 // UVolumetricCloudComponent's name for name, so a UE-calibrated sky transplants number for number; the
 // shape group is ours, because UE has no cloud-shape parameter on the component at all (its density is a
 // material graph). Every scalar is packed into Graphic::CloudGpuPayload and the one asset field names the
@@ -440,7 +440,10 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
 {
     const std::vector<std::string> expected = {
          "Enabled",
-         "CloudType",
+         "CloudType1",
+         "CloudType2",
+         "CloudType3",
+         "CloudType4",
          "PlanetRadius",
          "MaxViewDistance",
          "TracingStartMaxDistance",
@@ -475,10 +478,10 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 33u );
+    EXPECT_EQ( cloud.Fields.size(), 36u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
-    EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 6u );
+    EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 9u );
     EXPECT_EQ( CountInCategory( cloud, "Weather" ), 3u );
     // NO "Noise" GROUP ANY MORE: it held one row, the noise volume slot, and that moved onto the cloud
     // type. A group with nothing in it is a heading an artist opens and finds empty.
@@ -514,10 +517,24 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     EXPECT_EQ( Find( cloud, "NoiseVolume" ), nullptr )
          << "the noise volume is a field of the cloud type now, not of the layer";
 
-    const FieldInfo* type = Find( cloud, "CloudType" );
-    ASSERT_NE( type, nullptr );
-    EXPECT_TRUE( type->Meta.IsAsset );
-    EXPECT_EQ( type->Meta.AssetType, "CloudTypeAsset" );
+    // FOUR SLOTS AND NOT ONE, and the singular name is gone rather than kept as the first of them. A
+    // `CloudType` standing beside `CloudType2` would read as one field of a different kind next to three
+    // of another; the v5 -> v6 migration renames it, and this is what stops it coming back.
+    EXPECT_EQ( Find( cloud, "CloudType" ), nullptr )
+         << "the single cloud type slot became a set of four and must not have a second life";
+
+    for ( const char* slot : { "CloudType1", "CloudType2", "CloudType3", "CloudType4" } )
+    {
+        const FieldInfo* type = Find( cloud, slot );
+        ASSERT_NE( type, nullptr ) << slot;
+        EXPECT_TRUE( type->Meta.IsAsset ) << slot;
+        EXPECT_EQ( type->Meta.AssetType, "CloudTypeAsset" ) << slot;
+    }
+
+    // AND THERE ARE EXACTLY AS MANY AS THE PROFILE TABLE HAS CHANNELS. The ceiling is the width of a
+    // texel, so a fifth slot here would be a slot with nowhere to put its profile — and the failure would
+    // be a species that silently never appears rather than an error.
+    EXPECT_EQ( Desert::Graphic::kCloudSpeciesSlots, 4u );
 
     // The wind OFFSET is not a field: it is state the ECS system integrates against the timestep. A
     // second copy on the component is a value that can disagree with the one the packer is handed.
@@ -541,7 +558,8 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     // names no type — and a scene created from these defaults names none — must still have a sky, and
     // that requirement is why the empty handle has a meaning rather than being a hole. The default is NOT
     // the id of a shipped file, which would make every new scene depend on a file being present.
-    EXPECT_EQ( DefaultOf<uint64_t>( cloud, "CloudType" ), 0u );
+    for ( const char* slot : { "CloudType1", "CloudType2", "CloudType3", "CloudType4" } )
+        EXPECT_EQ( DefaultOf<uint64_t>( cloud, slot ), 0u ) << slot;
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PlanetRadius" ), 6360.0f );
     // 60 km, half of the calibrated pair; the relation the pair exists for is asserted separately below.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MaxViewDistance" ), 6000000.0f );
@@ -677,7 +695,7 @@ TEST( VolumetricCloudPayload, TheNearFadeReachesTheGpuAsAnIntervalOrNotAtAll )
             data.NearFadeEndDistance   = endWorld;
 
             const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
-                 data, Desert::Assets::CloudTypeDefaultShape(), atmosphere, glm::vec3( 0.0f ) );
+                 data, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
 
             const float endKm   = payload.Fade.z;
             const float startKm = payload.Fade.w;
@@ -715,7 +733,7 @@ TEST( VolumetricCloudPayload, ALegalNearFadeSurvivesThePackerUnchangedAndInKilom
     data.NearFadeEndDistance   = 500000.0f; // 5 km
 
     const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
-         data, Desert::Assets::CloudTypeDefaultShape(), atmosphere, glm::vec3( 0.0f ) );
+         data, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
 
     EXPECT_FLOAT_EQ( payload.Fade.w, 1.0f );
     EXPECT_FLOAT_EQ( payload.Fade.z, 5.0f );
@@ -724,7 +742,7 @@ TEST( VolumetricCloudPayload, ALegalNearFadeSurvivesThePackerUnchangedAndInKilom
     // "apply it in full from the camera".
     data.NearFadeStartDistance = 0.0f;
     const Desert::Graphic::CloudGpuPayload fromCamera = Desert::Graphic::PackCloudParams(
-         data, Desert::Assets::CloudTypeDefaultShape(), atmosphere, glm::vec3( 0.0f ) );
+         data, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
 
     EXPECT_FLOAT_EQ( fromCamera.Fade.w, 0.0f );
     EXPECT_FLOAT_EQ( fromCamera.Fade.z, 5.0f );
@@ -755,42 +773,95 @@ TEST( VolumetricCloudPayload, TheEnvelopeContainsEveryTypeItIsBuiltFrom )
 
     const Fixture fixtures[] = {
          { "a sheet on the ground",
-           { 0.15f, 0.55f, 0.88f, 0.12f, 0.35f, 0.0f, 0.0f, 0.0f, 0.05f, 0.5f, 0.70f, 0.75f } },
+           { 0.15f, 0.55f, 0.88f, 0.12f, 0.35f, 0.0f, 0.0f, 0.0f, 0.05f, 0.5f, 0.70f, 0.75f, 1.0f, 1.0f } },
          { "a fair-weather heap",
-           { 0.90f, 1.90f, 0.45f, 0.06f, 0.45f, 0.0f, 0.0f, 0.0f, 0.70f, 1.0f, 1.00f, 1.00f } },
+           { 0.90f, 1.90f, 0.45f, 0.06f, 0.45f, 0.0f, 0.0f, 0.0f, 0.70f, 1.0f, 1.00f, 1.00f, 1.0f, 1.0f } },
          { "the built-in default", Desert::Assets::CloudTypeDefaultShape() },
          { "a storm with an anvil",
-           { 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f, 1.8f, 0.85f, 0.85f, 1.0f, 1.35f, 1.30f } },
+           { 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f, 1.8f, 0.85f, 0.85f, 1.0f, 1.35f, 1.30f, 1.0f, 1.0f } },
          { "a wisp two hundred metres thick, high up",
-           { 8.00f, 8.20f, 0.90f, 0.25f, 0.55f, 0.0f, 0.0f, 0.0f, 0.00f, 2.5f, 0.35f, 0.25f } },
+           { 8.00f, 8.20f, 0.90f, 0.25f, 0.55f, 0.0f, 0.0f, 0.0f, 0.00f, 2.5f, 0.35f, 0.25f, 1.0f, 1.0f } },
     };
 
-    for ( const Fixture& fixture : fixtures )
+    // EVERY SUBSET OF THE FIXTURES UP TO THE CEILING, and not just each of them alone. The relation is
+    // now over a SET — T3 made the shell the union of up to four bands — and a union is exactly the kind
+    // of computation that is right for one member and wrong for two. The subsets are enumerated as bit
+    // patterns so nothing is left out by hand.
+    constexpr int kFixtureCount = static_cast<int>( std::size( fixtures ) );
+
+    for ( int mask = 1; mask < ( 1 << kFixtureCount ); ++mask )
     {
+        Desert::Graphic::CloudTypeShape set[Desert::Graphic::kCloudSpeciesSlots]{};
+        const char*                     names[Desert::Graphic::kCloudSpeciesSlots]{};
+
+        uint32_t count = 0;
+        for ( int i = 0; i < kFixtureCount && count < Desert::Graphic::kCloudSpeciesSlots; ++i )
+        {
+            if ( ( mask & ( 1 << i ) ) == 0 )
+                continue;
+            names[count] = fixtures[i].Name;
+            set[count]   = fixtures[i].Shape;
+            ++count;
+        }
+
         Desert::ECS::VolumetricCloudData data;
 
         const Desert::Graphic::CloudGpuPayload payload =
-             Desert::Graphic::PackCloudParams( data, fixture.Shape, atmosphere, glm::vec3( 0.0f ) );
+             Desert::Graphic::PackCloudParams( data, set, count, atmosphere, glm::vec3( 0.0f ) );
 
         const float bottomKm = payload.Layer.y;
         const float topKm    = payload.Layer.y + payload.Layer.z;
 
-        const float typeBottomKm = Desert::Graphic::CloudTypeBaseKm( fixture.Shape );
-        const float typeTopKm    = Desert::Graphic::CloudTypeTopKm( fixture.Shape );
+        float tightestBottom = 1e9f;
+        float tightestTop    = -1e9f;
 
-        EXPECT_LE( bottomKm, typeBottomKm ) << fixture.Name << " has its base below the shell";
-        EXPECT_GE( topKm, typeTopKm ) << fixture.Name << " has its top above the shell";
+        for ( uint32_t slot = 0; slot < count; ++slot )
+        {
+            const float typeBottomKm = Desert::Graphic::CloudTypeBaseKm( set[slot] );
+            const float typeTopKm    = Desert::Graphic::CloudTypeTopKm( set[slot] );
+
+            EXPECT_LE( bottomKm, typeBottomKm ) << names[slot] << " has its base below the shell";
+            EXPECT_GE( topKm, typeTopKm ) << names[slot] << " has its top above the shell";
+
+            tightestBottom = std::min( tightestBottom, typeBottomKm );
+            tightestTop    = std::max( tightestTop, typeTopKm );
+
+            // The anvil is ABOVE the tower, so a top taken from TopAltitudeKm alone would cut it off.
+            // Stated separately because it is the one case in which the two are not the same number.
+            if ( set[slot].AnvilStrength > 0.0f )
+                EXPECT_GE( topKm, set[slot].AnvilAltitudeKm + set[slot].AnvilThicknessKm )
+                     << "the anvil is outside the shell";
+        }
 
         // AND THE SHELL IS NOT LARGER THAN IT NEEDS TO BE. A generous envelope satisfies the containment
         // above trivially — ten kilometres contains every type in the library — while charging every
-        // ray for the empty air it has to march through. Tight in both directions is the property.
-        EXPECT_NEAR( bottomKm, typeBottomKm, 1e-4f );
-        EXPECT_NEAR( topKm, typeTopKm, 1e-3f );
+        // ray for the empty air it has to march through. Tight in both directions is the property, and
+        // over a set "tight" means the lowest base and the highest top of the MEMBERS.
+        EXPECT_NEAR( bottomKm, tightestBottom, 1e-4f );
+        EXPECT_NEAR( topKm, tightestTop, 1e-3f );
+    }
+}
 
-        // The anvil is ABOVE the tower, so a top taken from TopAltitudeKm alone would cut it off. Stated
-        // separately because it is the one case in which the two are not the same number.
-        if ( fixture.Shape.AnvilStrength > 0.0f )
-            EXPECT_GT( topKm, fixture.Shape.TopAltitudeKm ) << "the anvil is outside the shell";
+TEST( VolumetricCloudPayload, AnEmptySetPacksAShellThatDrawsNothingRatherThanAGuess )
+{
+    // The renderer answers an all-empty layer with ONE built-in congestus, so a count of zero never
+    // reaches the packer in the running engine. It is asserted anyway, because a packer that depends on
+    // its caller having checked something is a packer that will one day be called by someone who did not:
+    // what comes out is a legal, degenerate shell rather than a NaN thickness or a species count the
+    // march would loop over.
+    const Desert::Graphic::AtmosphereEnv atmosphere{};
+    Desert::ECS::VolumetricCloudData     data;
+
+    const Desert::Graphic::CloudGpuPayload payload =
+         Desert::Graphic::PackCloudParams( data, nullptr, 0u, atmosphere, glm::vec3( 0.0f ) );
+
+    EXPECT_FLOAT_EQ( payload.Detail.w, 0.0f ) << "an empty set claims to have species in it";
+    EXPECT_GT( payload.Layer.z, 0.0f ) << "a shell of zero thickness divides by zero in the step schedule";
+
+    for ( uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+    {
+        EXPECT_FLOAT_EQ( payload.SpeciesEdge[slot].z, 0.0f )
+             << "an unfilled slot carries a density that could put cloud in the sky";
     }
 }
 
@@ -802,10 +873,10 @@ TEST( VolumetricCloudPayload, TheTypesMatterAndEdgeReachTheGpuAsProductsOfTheLay
     // be an artist's Density Scale doing nothing because the type had already decided.
     const Desert::Graphic::AtmosphereEnv atmosphere{};
 
-    const Desert::Graphic::CloudTypeShape ice{ 8.00f, 9.40f, 0.90f, 0.25f, 0.55f, 0.0f,
-                                               0.0f,  0.0f,  0.00f, 2.50f, 0.35f, 0.25f };
-    const Desert::Graphic::CloudTypeShape storm{ 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f,
-                                                 1.8f,  0.85f, 0.85f, 1.00f, 1.35f, 1.30f };
+    const Desert::Graphic::CloudTypeShape ice{ 8.00f, 9.40f, 0.90f, 0.25f, 0.55f, 0.0f,  0.0f,
+                                               0.0f,  0.00f, 2.50f, 0.35f, 0.25f, 2.50f, 8.00f };
+    const Desert::Graphic::CloudTypeShape storm{ 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f,  1.8f,
+                                                 0.85f, 0.85f, 1.00f, 1.35f, 1.30f, 2.00f, 1.00f };
 
     for ( const Desert::Graphic::CloudTypeShape& shape : { ice, storm, Desert::Assets::CloudTypeDefaultShape() } )
     {
@@ -815,25 +886,113 @@ TEST( VolumetricCloudPayload, TheTypesMatterAndEdgeReachTheGpuAsProductsOfTheLay
         data.DetailStrength  = 0.2f;
 
         const Desert::Graphic::CloudGpuPayload payload =
-             Desert::Graphic::PackCloudParams( data, shape, atmosphere, glm::vec3( 0.0f ) );
+             Desert::Graphic::PackCloudParams( data, &shape, 1u, atmosphere, glm::vec3( 0.0f ) );
 
-        // The edge character travels as itself — it is a kind, not an amount, so nothing multiplies it.
-        EXPECT_FLOAT_EQ( payload.Weather.w, shape.DetailCharacter );
+        // THE PRODUCT IS NO LONGER FORMED HERE, and that is T3's one change to this relation. With four
+        // kinds of cloud in one shell the march does not know which factor it needs until it knows which
+        // species won the sample, so the layer's scale and the type's factor travel separately and the
+        // multiply happens at the point of use. What is asserted is therefore that each half arrives
+        // intact AND that their product is still the number the single-type build sent.
+        EXPECT_FLOAT_EQ( payload.SpeciesEdge[0].x, shape.DetailCharacter );
 
-        EXPECT_FLOAT_EQ( payload.Detail.z, 0.5f * shape.DensityFactor );
-        EXPECT_FLOAT_EQ( payload.March.w, 8.0f * shape.ExtinctionFactor );
-        EXPECT_FLOAT_EQ( payload.Detail.y, std::min( 0.2f * shape.DetailFactor, 1.0f ) );
+        EXPECT_FLOAT_EQ( payload.Detail.y, 0.5f );
+        EXPECT_FLOAT_EQ( payload.SpeciesEdge[0].z, shape.DensityFactor );
+        EXPECT_FLOAT_EQ( payload.Detail.y * payload.SpeciesEdge[0].z, 0.5f * shape.DensityFactor );
+
+        EXPECT_FLOAT_EQ( payload.March.w, 8.0f );
+        EXPECT_FLOAT_EQ( payload.SpeciesEdge[0].w, shape.ExtinctionFactor );
+        EXPECT_FLOAT_EQ( payload.March.w * payload.SpeciesEdge[0].w, 8.0f * shape.ExtinctionFactor );
+
+        EXPECT_FLOAT_EQ( payload.Detail.x, 0.2f );
+        EXPECT_FLOAT_EQ( payload.SpeciesEdge[0].y, shape.DetailFactor );
+
+        // ONE SPECIES IN THE LAYER MEANS ONE IN THE COUNT, and the other three slots are ZERO rather than
+        // the default type's numbers: an unfilled slot must not be able to put cloud in the sky even if
+        // the count were ever wrong.
+        EXPECT_FLOAT_EQ( payload.Detail.w, 1.0f );
+        for ( uint32_t slot = 1; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+        {
+            EXPECT_FLOAT_EQ( payload.SpeciesEdge[slot].z, 0.0f ) << slot;
+            EXPECT_FLOAT_EQ( payload.SpeciesPlacement[slot].x, 0.0f ) << slot;
+        }
     }
 
     // And the products SEPARATE the types: ice is thinner stuff than a storm in both of the two ways a
     // frame can show it. If this ever fails, the library has two names for one cloud.
     Desert::ECS::VolumetricCloudData layer;
 
-    const auto icePayload   = Desert::Graphic::PackCloudParams( layer, ice, atmosphere, glm::vec3( 0.0f ) );
-    const auto stormPayload = Desert::Graphic::PackCloudParams( layer, storm, atmosphere, glm::vec3( 0.0f ) );
+    const auto icePayload   = Desert::Graphic::PackCloudParams( layer, &ice, 1u, atmosphere, glm::vec3( 0.0f ) );
+    const auto stormPayload = Desert::Graphic::PackCloudParams( layer, &storm, 1u, atmosphere, glm::vec3( 0.0f ) );
 
-    EXPECT_LT( icePayload.Detail.z, stormPayload.Detail.z );
-    EXPECT_LT( icePayload.March.w, stormPayload.March.w );
+    EXPECT_LT( icePayload.SpeciesEdge[0].z, stormPayload.SpeciesEdge[0].z );
+    EXPECT_LT( icePayload.SpeciesEdge[0].w, stormPayload.SpeciesEdge[0].w );
+}
+
+TEST( VolumetricCloudPayload, EachSpeciesGetsItsOwnPlacementFieldAndTheWindIsItsAxis )
+{
+    // THE OTHER HALF OF D-14, on the block the shader reads: a species' placement field is its OWN, so
+    // two types in one layer must not arrive with the same basis vectors. If they did, the two would read
+    // the identical field at the identical scale and the "independent field per type" claim would be a
+    // comment rather than a fact.
+    const Desert::Graphic::AtmosphereEnv atmosphere{};
+
+    const Desert::Graphic::CloudTypeShape deck{ 0.60f, 1.60f, 0.80f, 0.10f, 0.35f, 0.0f,  0.0f,
+                                                0.0f,  0.95f, 0.70f, 0.95f, 1.00f, 0.35f, 1.60f };
+    const Desert::Graphic::CloudTypeShape tower = Desert::Assets::CloudTypeDefaultShape();
+
+    const Desert::Graphic::CloudTypeShape pair[2] = { deck, tower };
+
+    Desert::ECS::VolumetricCloudData data;
+    data.WindDirection = glm::vec3( 1.0f, 0.0f, 0.0f );
+
+    const Desert::Graphic::CloudGpuPayload payload =
+         Desert::Graphic::PackCloudParams( data, pair, 2u, atmosphere, glm::vec3( 0.0f ) );
+
+    EXPECT_FLOAT_EQ( payload.Detail.w, 2.0f );
+
+    // The deck's scale is 0.35 of the layer's, so its frequency is 1/0.35 = 2.857 times higher ACROSS the
+    // wind. The tower's is the identity.
+    const float deckAcross  = std::sqrt( payload.SpeciesPlacement[0].z * payload.SpeciesPlacement[0].z +
+                                         payload.SpeciesPlacement[0].w * payload.SpeciesPlacement[0].w );
+    const float towerAcross = std::sqrt( payload.SpeciesPlacement[1].z * payload.SpeciesPlacement[1].z +
+                                         payload.SpeciesPlacement[1].w * payload.SpeciesPlacement[1].w );
+
+    EXPECT_NEAR( deckAcross / towerAcross, 1.0f / 0.35f, 1e-3f )
+         << "the two species' placement fields are at the same scale, so a per-type scale does nothing";
+
+    // AND THE STRETCH IS ALONG THE WIND. The deck is 1.6 times longer downwind, so its along-wind
+    // frequency is 1.6 times lower than its across-wind one; the round tower's two are equal up to the
+    // 6.65 % Unreal's own coefficients carry between the two horizontal axes.
+    const float deckAlong = std::sqrt( payload.SpeciesPlacement[0].x * payload.SpeciesPlacement[0].x +
+                                       payload.SpeciesPlacement[0].y * payload.SpeciesPlacement[0].y );
+
+    EXPECT_NEAR( deckAcross / deckAlong,
+                 1.6f * Desert::Graphic::kCloudCoverageFreqZ / Desert::Graphic::kCloudCoverageFreqX, 1e-3f );
+
+    // The axis itself is the wind's: with the wind along +X the along-wind vector has no Z part and the
+    // across-wind one has no X part.
+    EXPECT_NEAR( payload.SpeciesPlacement[0].y, 0.0f, 1e-6f );
+    EXPECT_NEAR( payload.SpeciesPlacement[0].z, 0.0f, 1e-6f );
+
+    // Turn the wind a quarter and the whole field turns with it, which is what makes a cirrus lie along
+    // the flow without a second authored angle to disagree with the one the layer already has.
+    data.WindDirection = glm::vec3( 0.0f, 0.0f, 1.0f );
+
+    const Desert::Graphic::CloudGpuPayload turned =
+         Desert::Graphic::PackCloudParams( data, pair, 2u, atmosphere, glm::vec3( 0.0f ) );
+
+    EXPECT_NEAR( turned.SpeciesPlacement[0].x, 0.0f, 1e-6f );
+    EXPECT_NEAR( turned.SpeciesPlacement[0].y, deckAlong, 1e-4f );
+
+    // A wind with no horizontal part names no axis, so the field falls back to +X rather than to whatever
+    // a normalize of a zero vector produces.
+    data.WindDirection = glm::vec3( 0.0f, 1.0f, 0.0f );
+
+    const Desert::Graphic::CloudGpuPayload still =
+         Desert::Graphic::PackCloudParams( data, pair, 2u, atmosphere, glm::vec3( 0.0f ) );
+
+    EXPECT_NEAR( still.SpeciesPlacement[0].x, deckAlong, 1e-4f );
+    EXPECT_NEAR( still.SpeciesPlacement[0].y, 0.0f, 1e-6f );
 }
 
 TEST( VolumetricCloudReflection, EveryDefaultLiesInsideItsOwnRange )

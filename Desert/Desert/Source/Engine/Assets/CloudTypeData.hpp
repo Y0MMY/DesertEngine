@@ -44,7 +44,13 @@ namespace Desert::Assets
     /// The FILE layout's version, bumped when a field moves. It is not the maths' version: the profile
     /// generator lives in Engine/Graphic/Clouds/CloudProfileTable.hpp and changing it changes every type at
     /// once, which is a change to the engine rather than to any file.
-    inline constexpr int32_t kCloudTypeFormatVersion = 1;
+    /// VERSION 2 SINCE T3. The shape gained `PlacementScale` and `PlacementAnisotropy` — where a type puts
+    /// itself in the sky and how it is drawn out by the wind — and a version-1 file does not carry them.
+    /// It is REFUSED rather than defaulted: a fibrous cirrus and a round-patched one are different kinds of
+    /// cloud, so filling the missing numbers in silently would render a sky the file does not describe
+    /// while claiming it does. The nine shipped files were rewritten in the same commit (§4.5), which is
+    /// what makes the loud refusal affordable.
+    inline constexpr int32_t kCloudTypeFormatVersion = 2;
 
     /**
      * @brief One cloud type on disk, and in memory — the same struct, because there is nothing to convert.

@@ -1,7 +1,7 @@
 {
-    "FormatVersion": 1,
+    "FormatVersion": 2,
     "DisplayName": "Altocumulus",
-    "Notes": "The mid-level sheet of small lumps. Thin (700 m), high (3.2 km) and half as dense as a cumulus, so the sky reads through it - which is what distinguishes it from the stratocumulus it otherwise resembles.",
+    "Notes": "The mid-level sheet of small lumps. Thin (700 m), high (3.2 km) and half as dense as a cumulus, so the sky reads through it - which is what distinguishes it from the stratocumulus it otherwise resembles. Placement scale 0.30 and anisotropy 1.50 - many small cells in rows, which is the 'mackerel sky'. It is the SAME pair of controls that make the lenticular next door a different kind of cloud rather than a thicker version of this one: this stretches ALONG the wind, that one across it.",
     "Shape": {
         "BaseAltitudeKm": 3.2,
         "TopAltitudeKm": 3.9,
@@ -14,6 +14,8 @@
         "DetailCharacter": 0.8,
         "DetailFactor": 1.6,
         "DensityFactor": 0.55,
-        "ExtinctionFactor": 0.55
+        "ExtinctionFactor": 0.55,
+        "PlacementScale": 0.3,
+        "PlacementAnisotropy": 1.5
     }
 }

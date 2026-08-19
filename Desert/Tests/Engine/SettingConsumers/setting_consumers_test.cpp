@@ -205,13 +205,21 @@ namespace
     constexpr Row kCloudRows[] = {
          { "Enabled", kCloudRenderer }, // the zero-cost gate: off means no allocation and no dispatch
 
-         // Cloud Layer - the shell the march intersects. The CLOUD TYPE is what the shell is built from,
-         // and unlike every other row here it is resolved rather than packed: the renderer turns the
-         // handle into twelve numbers through Runtime::CloudTypeService, and those numbers become
-         // Layer.y/Layer.z (the shell), Weather.w (the edge) and the three products in March.w, Detail.y
-         // and Detail.z. Two fields that used to state the shell by hand are gone, because an authored
-         // shell and a type's altitudes are two numbers obliged to agree.
-         { "CloudType", kCloudRenderer },
+         // Cloud Layer - the shell the march intersects. The CLOUD TYPES are what the shell is built
+         // from, and unlike every other row here they are resolved rather than packed: the renderer turns
+         // each handle into fourteen numbers through Runtime::CloudTypeService, and those numbers become
+         // Layer.y/Layer.z (the shell, the UNION of the set's bands) and one entry each of SpeciesEdge
+         // and SpeciesPlacement. Two fields that used to state the shell by hand are gone, because an
+         // authored shell and a type's altitudes are two numbers obliged to agree.
+         //
+         // FOUR ROWS AND NOT ONE SINCE T3: a layer carries a SET of kinds of cloud. Every one of them has
+         // to have a consumer or it is a slot an artist can fill and never see - which is the exact shape
+         // of the defect this whole suite exists to catch, and the easiest one to introduce by wiring only
+         // the first slot.
+         { "CloudType1", kCloudRenderer },
+         { "CloudType2", kCloudRenderer },
+         { "CloudType3", kCloudRenderer },
+         { "CloudType4", kCloudRenderer },
          { "PlanetRadius", kCloudPayload },
          { "MaxViewDistance", kCloudPayload },
          { "TracingStartDistance", kCloudPayload },

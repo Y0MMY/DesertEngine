@@ -53,6 +53,8 @@ namespace
              /* DetailFactor     */ 1.00f,
              /* DensityFactor    */ 1.00f,
              /* ExtinctionFactor */ 1.00f,
+             /* PlacementScale      */ 1.00f,
+             /* PlacementAnisotropy */ 1.00f,
         };
     }
 
@@ -194,7 +196,8 @@ TEST( CloudTypeFormat, TheOptionalFieldsAreOptionalAndTheShapeIsNot )
     const std::string minimal = R"({"Shape":{
         "BaseAltitudeKm":1.0,"TopAltitudeKm":3.0,"EdgeTopFraction":0.4,"BaseRampFraction":0.1,
         "TopTaper":0.4,"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
-        "DetailCharacter":0.6,"DetailFactor":1.0,"DensityFactor":1.0,"ExtinctionFactor":1.0}})";
+        "DetailCharacter":0.6,"DetailFactor":1.0,"DensityFactor":1.0,"ExtinctionFactor":1.0,
+        "PlacementScale":1.0,"PlacementAnisotropy":1.0}})";
 
     auto parsed = ParseCloudType( minimal );
     ASSERT_TRUE( parsed ) << parsed.GetError();
@@ -206,8 +209,24 @@ TEST( CloudTypeFormat, TheOptionalFieldsAreOptionalAndTheShapeIsNot )
     const std::string incomplete = R"({"Shape":{
         "BaseAltitudeKm":1.0,"TopAltitudeKm":3.0,"EdgeTopFraction":0.4,"BaseRampFraction":0.1,
         "TopTaper":0.4,"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
-        "DetailCharacter":0.6,"DetailFactor":1.0,"DensityFactor":1.0}})";
+        "DetailCharacter":0.6,"DetailFactor":1.0,"DensityFactor":1.0,
+        "PlacementScale":1.0,"PlacementAnisotropy":1.0}})";
     EXPECT_FALSE( ParseCloudType( incomplete ) ) << "a shape missing ExtinctionFactor was accepted";
+
+    // A VERSION-1 FILE IS REFUSED, NOT FILLED IN. It carries the twelve numbers T1 shipped and neither of
+    // the two T3 added, and a fibrous cirrus and a round-patched one are different KINDS of cloud — so
+    // guessing the missing pair would render a sky the file does not describe while claiming it does. The
+    // nine shipped files were rewritten in the same commit, which is what makes the loud refusal
+    // affordable (§4.5).
+    const std::string versionOne = R"({"FormatVersion":1,"Shape":{
+        "BaseAltitudeKm":1.0,"TopAltitudeKm":3.0,"EdgeTopFraction":0.4,"BaseRampFraction":0.1,
+        "TopTaper":0.4,"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
+        "DetailCharacter":0.6,"DetailFactor":1.0,"DensityFactor":1.0,"ExtinctionFactor":1.0}})";
+
+    const auto refused = ParseCloudType( versionOne );
+    ASSERT_FALSE( refused ) << "a version-1 file was read as if it were a version-2 one";
+    EXPECT_NE( refused.GetError().find( "version" ), std::string::npos )
+         << "the refusal does not say the format version is the problem: " << refused.GetError();
 }
 
 TEST( CloudTypeFormat, EveryRefusalNamesTheNumberThatIsWrong )
@@ -281,6 +300,21 @@ TEST( CloudTypeFormat, EveryRefusalNamesTheNumberThatIsWrong )
                s.BaseAltitudeKm = std::nanf( "" );
                return s;
            } },
+         // T3'S TWO. The scale is a DIVISOR in the placement basis, so a zero there is an infinity in a
+         // texture coordinate and a sky that is banded black with nothing in any log - which is exactly
+         // the class of failure this table exists to refuse at the door.
+         { "PlacementScale",
+           []( CloudTypeShape s )
+           {
+               s.PlacementScale = 0.0f;
+               return s;
+           } },
+         { "PlacementAnisotropy",
+           []( CloudTypeShape s )
+           {
+               s.PlacementAnisotropy = 40.0f;
+               return s;
+           } },
     };
 
     for ( const Case& c : cases )
@@ -336,6 +370,8 @@ TEST( CloudTypeLibrary, TheBuiltInDefaultIsTheShippedCumulusCongestus )
     EXPECT_FLOAT_EQ( shipped.DetailFactor, builtIn.DetailFactor );
     EXPECT_FLOAT_EQ( shipped.DensityFactor, builtIn.DensityFactor );
     EXPECT_FLOAT_EQ( shipped.ExtinctionFactor, builtIn.ExtinctionFactor );
+    EXPECT_FLOAT_EQ( shipped.PlacementScale, builtIn.PlacementScale );
+    EXPECT_FLOAT_EQ( shipped.PlacementAnisotropy, builtIn.PlacementAnisotropy );
 }
 
 TEST( CloudTypeLibrary, TheFourTypesT0ShippedAreUnchanged )
@@ -426,6 +462,70 @@ TEST( CloudTypeLibrary, EveryTypeSitsWhereMeteorologyPutsIt )
     // Lenticular: it stands over a mountain, in the low-to-mid band.
     EXPECT_GE( ProfileBaseKm( LoadShipped( kCloudTypeLenticular ).Shape ), 1.5f );
     EXPECT_LE( ProfileTopKm( LoadShipped( kCloudTypeLenticular ).Shape ), 6.0f );
+}
+
+TEST( CloudTypeLibrary, ThePlacementFieldSaysWhatKindOfPatchEachTypeMakes )
+{
+    // THE THREE DEFECTS T3 WAS HANDED BY NAME, pinned to the numbers that answer them. Each of the three
+    // was named as unreachable by any profile — a profile decides a silhouette in ELEVATION, and all three
+    // are about the shape of a patch in PLAN.
+    //
+    // 1. CIRRUS READS AS A MACKEREL SKY RATHER THAN AS FIBROUS BANDS. A band is a patch far longer along
+    //    the wind than across it, and until a type carried its own anisotropy the placement field was one
+    //    field, isotropic, shared by everything in the sky.
+    const CloudTypeShape cirrus = LoadShipped( kCloudTypeCirrus ).Shape;
+    EXPECT_GE( cirrus.PlacementAnisotropy, 4.0f )
+         << "cirrus is not stretched along the wind, so it is a field of thin blobs rather than fibres";
+
+    // 2. LENTICULAR AND ALTOCUMULUS DIFFER QUANTITATIVELY RATHER THAN IN KIND. They now differ in the SIGN
+    //    of the stretch: a wave cloud's crest lies ACROSS the flow (anisotropy below 1), a mackerel sky's
+    //    rows lie ALONG it (above 1). That is a difference of kind and not of degree, and no setting of
+    //    the two profiles could have produced it.
+    const CloudTypeShape lenticular = LoadShipped( kCloudTypeLenticular ).Shape;
+    const CloudTypeShape alto       = LoadShipped( kCloudTypeAltocumulus ).Shape;
+
+    EXPECT_LT( lenticular.PlacementAnisotropy, 1.0f )
+         << "the lenticular is not stretched across the wind, so it is not a wave cloud";
+    EXPECT_GT( alto.PlacementAnisotropy, 1.0f ) << "the altocumulus is not rowed along the wind";
+
+    // 3. STRATOCUMULUS IN THE ZENITH: ONE CELL FILLING THE FRAME. The layer's shipped Weather Tile Size is
+    //    12 km and its coarse cell is a quarter of that — 3 km — under a deck 1 km thick. A cell three
+    //    times the layer's own depth is one lump from horizon to horizon looking up. The type's own scale
+    //    is what fixes it, and the number below is the one that puts the cell near the deck's thickness.
+    const CloudTypeShape strato = LoadShipped( kCloudTypeStratocumulus ).Shape;
+
+    constexpr float kLayerTileKm = 12.0f;
+    constexpr float kCellOfTile  = 0.25f;
+
+    const float cellKm  = kLayerTileKm * kCellOfTile * strato.PlacementScale;
+    const float depthKm = ProfileTopKm( strato ) - ProfileBaseKm( strato );
+
+    EXPECT_LT( cellKm, 2.0f * depthKm )
+         << "a stratocumulus cell of " << cellKm << " km under a deck " << depthKm
+         << " km thick is one lump filling the zenith, which is the defect this number answers";
+
+    // AND THE LIBRARY DOES NOT COLLAPSE ONTO ONE PLACEMENT. Nine types that all placed themselves at the
+    // layer's tile would be the T3 version of "nine labels on one cloud": the profiles would differ and
+    // every patch would be the same size and shape.
+    const char* names[] = { kCloudTypeStratus,          kCloudTypeCumulusHumilis, kCloudTypeCumulusMediocris,
+                            kCloudTypeCumulusCongestus, kCloudTypeCumulonimbus,   kCloudTypeStratocumulus,
+                            kCloudTypeAltocumulus,      kCloudTypeCirrus,         kCloudTypeLenticular };
+
+    float smallest = 1e9f;
+    float largest  = 0.0f;
+    for ( const char* name : names )
+    {
+        const CloudTypeShape shape = LoadShipped( name ).Shape;
+        smallest                   = std::min( smallest, shape.PlacementScale );
+        largest                    = std::max( largest, shape.PlacementScale );
+    }
+
+    std::printf( "[CloudTypeLibrary] shipped placement scales span %.2f to %.2f of the layer's tile\n", smallest,
+                 largest );
+
+    EXPECT_GT( largest / smallest, 4.0f )
+         << "every shipped type places itself at nearly the same scale, so the per-type placement field is "
+            "authored but says nothing";
 }
 
 TEST( CloudTypeLibrary, NoTwoTypesAreTheSameCloudUnderTwoNames )

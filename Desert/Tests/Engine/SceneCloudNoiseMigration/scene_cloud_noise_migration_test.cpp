@@ -233,7 +233,7 @@ TEST( SceneCloudNoiseMigration, TheVolumeSlotThatReplacedThemHasMovedOntoTheClou
             "of truth for one thing";
 
     const auto slot = std::find_if( type->Fields.begin(), type->Fields.end(),
-                                    []( const auto& field ) { return field.Name == "CloudType"; } );
+                                    []( const auto& field ) { return field.Name == "CloudType1"; } );
     ASSERT_NE( slot, type->Fields.end() ) << "the component has no cloud type, so nothing replaced the "
                                              "four fields the migration deletes";
 
@@ -243,8 +243,13 @@ TEST( SceneCloudNoiseMigration, TheVolumeSlotThatReplacedThemHasMovedOntoTheClou
     // The default is an EMPTY handle, which is the documented "use the built-in type, whose own volume
     // slot is empty, which is the built-in default volume". A scene that names neither must still render,
     // and that chain of two documented empties is what this asserts.
+    // FOUR SLOTS SINCE T3, and every one of them is empty by default: a scene created from these
+    // defaults names no kind of cloud at all and still has to have a sky.
     const Desert::ECS::VolumetricCloudData defaults;
-    EXPECT_EQ( static_cast<uint64_t>( defaults.CloudType ), 0u );
+    EXPECT_EQ( static_cast<uint64_t>( defaults.CloudType1 ), 0u );
+    EXPECT_EQ( static_cast<uint64_t>( defaults.CloudType2 ), 0u );
+    EXPECT_EQ( static_cast<uint64_t>( defaults.CloudType3 ), 0u );
+    EXPECT_EQ( static_cast<uint64_t>( defaults.CloudType4 ), 0u );
     EXPECT_FALSE( Desert::Assets::CloudTypeDefault().NoiseVolume.has_value() );
 }
 

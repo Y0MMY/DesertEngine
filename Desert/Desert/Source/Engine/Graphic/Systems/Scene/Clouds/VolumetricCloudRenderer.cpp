@@ -89,23 +89,80 @@ namespace Desert::Graphic::System
             m_HistoryGuideImage[i].reset();
         }
         m_ProfileTable.reset();
-        m_ProfileType       = Assets::AssetHandle::Null();
-        m_ProfileGeneration = 0;
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+            m_ProfileTypes[slot] = Assets::AssetHandle::Null();
+        m_ProfileSpeciesCount = 0;
+        m_ProfileGeneration   = 0;
         m_ParamsBuffer.reset();
         m_ResolveParamsBuffer.reset();
+    }
+
+    uint32_t VolumetricCloudRenderer::ResolveSpecies( CloudTypeShape ( &shapes )[kCloudSpeciesSlots],
+                                                      Assets::AssetHandle ( &handles )[kCloudSpeciesSlots] ) const
+    {
+        auto* types = Runtime::ResourceRegistry::GetCloudTypeService();
+
+        // The panel's four slots, in the order they are drawn. The one statement of that order.
+        const Assets::AssetHandle authored[kCloudSpeciesSlots] = { m_Data.CloudType1, m_Data.CloudType2,
+                                                                   m_Data.CloudType3, m_Data.CloudType4 };
+
+        uint32_t count = 0;
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+        {
+            if ( authored[slot] == Assets::AssetHandle::Null() )
+                continue;
+
+            // DUPLICATES ARE DROPPED, and this is not tidiness. The same type twice is the same placement
+            // field twice — same scale, same anisotropy — differing only by the slot's decorrelation
+            // offset, so it is two independent skies of one kind of cloud laid over each other at twice
+            // the cost of one and for no visible gain but a denser sky the Coverage slider no longer
+            // describes. An artist who wants two of a kind wants two TYPES with different scales, and the
+            // slot they freed is there for it.
+            bool seen = false;
+            for ( uint32_t taken = 0; taken < count; ++taken )
+                seen = seen || handles[taken] == authored[slot];
+            if ( seen )
+                continue;
+
+            handles[count] = authored[slot];
+            shapes[count]  = types->GetShape( authored[slot] );
+            ++count;
+        }
+
+        if ( count == 0 )
+        {
+            // ALL FOUR EMPTY IS A DOCUMENTED ANSWER, and it is the SAME answer an empty single slot gave
+            // before there were four: one built-in cumulus congestus. A scene nobody has authored a type
+            // for still has to have a sky.
+            handles[0] = Assets::AssetHandle::Null();
+            shapes[0]  = Assets::CloudTypeDefaultShape();
+            count      = 1;
+        }
+
+        return count;
     }
 
     bool VolumetricCloudRenderer::EnsureProfileTable()
     {
         auto* types = Runtime::ResourceRegistry::GetCloudTypeService();
 
-        // TWO REASONS TO REBUILD, AND BOTH ARE ASKED ABOUT. The handle changes when the artist drops a
-        // different type into the slot; the SERVICE GENERATION changes when the file behind the handle
-        // they already chose is edited and hot-reloaded. A cache keyed on the handle alone would show the
-        // old numbers forever after a save, which is the difference between a tool an artist iterates in
-        // and one they restart.
+        CloudTypeShape      shapes[kCloudSpeciesSlots]{};
+        Assets::AssetHandle handles[kCloudSpeciesSlots]{};
+        const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
+
+        // TWO REASONS TO REBUILD, AND BOTH ARE ASKED ABOUT. The SET of handles changes when the artist
+        // drops a different type into any slot, adds one or clears one; the SERVICE GENERATION changes
+        // when a file behind a handle they already chose is edited and hot-reloaded. A cache keyed on the
+        // handle alone would show the old numbers forever after a save, which is the difference between a
+        // tool an artist iterates in and one they restart.
         const uint32_t generation = types->GetGeneration();
-        if ( m_ProfileTable && m_ProfileType == m_Data.CloudType && m_ProfileGeneration == generation )
+
+        bool sameSet =
+             m_ProfileTable && m_ProfileSpeciesCount == speciesCount && m_ProfileGeneration == generation;
+        for ( uint32_t slot = 0; sameSet && slot < speciesCount; ++slot )
+            sameSet = m_ProfileTypes[slot] == handles[slot];
+
+        if ( sameSet )
             return true;
 
         // A FRESH IMAGE RATHER THAN AN IN-PLACE UPLOAD, which is the same choice CloudNoiseService makes
@@ -116,8 +173,7 @@ namespace Desert::Graphic::System
         if ( m_ProfileTable )
             Renderer::GetInstance().WaitDeviceIdle();
 
-        const CloudTypeShape&    shape  = types->GetShape( m_Data.CloudType );
-        const std::vector<float> texels = CloudBuildProfileTable( shape );
+        const std::vector<float> texels = CloudBuildProfileTable( shapes, speciesCount );
 
         const Core::Formats::Image2DSpecification spec{
              .Tag        = "CloudProfileTable",
@@ -133,25 +189,42 @@ namespace Desert::Graphic::System
         m_ProfileTable = Image2D::Create( spec, nullptr );
         if ( !m_ProfileTable )
         {
-            m_ProfileType       = Assets::AssetHandle::Null();
-            m_ProfileGeneration = 0;
-            LOG_ERROR( "[Clouds] The {}x{} RGBA32F vertical profile table for cloud type {} could not be "
-                       "created on the device; the clouds will not render for this view.",
-                       kCloudProfileTableAltitudeTexels, kCloudProfileTablePatternTexels,
-                       static_cast<uint64_t>( m_Data.CloudType ) );
+            m_ProfileSpeciesCount = 0;
+            m_ProfileGeneration   = 0;
+            LOG_ERROR( "[Clouds] The {}x{} RGBA32F vertical profile table for this layer's {} cloud type(s) "
+                       "could not be created on the device; the clouds will not render for this view.",
+                       kCloudProfileTableAltitudeTexels, kCloudProfileTablePatternTexels, speciesCount );
             return false;
         }
 
-        m_ProfileType       = m_Data.CloudType;
-        m_ProfileGeneration = generation;
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+            m_ProfileTypes[slot] = slot < speciesCount ? handles[slot] : Assets::AssetHandle::Null();
+        m_ProfileSpeciesCount = speciesCount;
+        m_ProfileGeneration   = generation;
 
-        LOG_INFO( "[Clouds] Vertical profile table rebuilt for cloud type {} — envelope {:.2f} to {:.2f} km, "
+        // EVERY SPECIES' OWN BAND IS PRINTED BESIDE THE ENVELOPE, not just the envelope. The containment
+        // relation is the one this subsystem gets wrong silently — a type whose top is above the shell has
+        // its anvil sliced off and nothing says so — and a log line that only prints the union cannot be
+        // read against anything.
+        const CloudEnvelopeKm envelope = CloudTypeSetEnvelopeKm( shapes, speciesCount );
+
+        LOG_INFO( "[Clouds] Vertical profile table rebuilt for {} cloud type(s) — envelope {:.2f} to {:.2f} km, "
                   "{}x{} RGBA32F ({:.2f} MiB).",
-                  static_cast<uint64_t>( m_Data.CloudType ), CloudTypeBaseKm( shape ), CloudTypeTopKm( shape ),
-                  kCloudProfileTableAltitudeTexels, kCloudProfileTablePatternTexels,
+                  speciesCount, envelope.BottomKm, envelope.TopKm, kCloudProfileTableAltitudeTexels,
+                  kCloudProfileTablePatternTexels,
                   BytesToMiB( Core::Formats::CalculateImageSize( kCloudProfileTableAltitudeTexels,
                                                                  kCloudProfileTablePatternTexels,
                                                                  Core::Formats::ImageFormat::RGBA32F ) ) );
+
+        for ( uint32_t slot = 0; slot < speciesCount; ++slot )
+        {
+            LOG_INFO( "[Clouds]   channel {} — type {}, {:.2f} to {:.2f} km, placement x{:.2f} stretched "
+                      "x{:.2f} along the wind.",
+                      slot, static_cast<uint64_t>( handles[slot] ), CloudTypeBaseKm( shapes[slot] ),
+                      CloudTypeTopKm( shapes[slot] ), shapes[slot].PlacementScale,
+                      shapes[slot].PlacementAnisotropy );
+        }
+
         return true;
     }
 
@@ -348,8 +421,26 @@ namespace Desert::Graphic::System
         // THE VOLUME COMES THROUGH THE TYPE, which is the one structural change T1 made to this path: the
         // character of a cloud's edge is a property of what kind of cloud it is, so the type names it and
         // the layer does not. An empty slot on either side lands on the built-in default volume.
+        //
+        // ONE VOLUME FOR THE WHOLE LAYER, TAKEN FROM THE FIRST SLOT, AND THAT IS A LIMIT RATHER THAN A
+        // DESIGN — it is stated here so the next person meets it in the code and not in a frame. There is
+        // one `sampler3D` on the march, so four types in one sky share one volume, and a Cirrus in slot 2
+        // beside a Cumulus in slot 1 is cut from the cumulus' volume. Two things make it survivable and
+        // neither makes it right: the per-species DetailCharacter already chooses between the volume's
+        // wispy and billowy PAIRS, which is most of what a type's edge is; and the quantile map that makes
+        // `Coverage` mean one fraction of sky is calibrated to one distribution, so four volumes in one
+        // layer would need four calibrations before they meant anything. Lifting it is a sampler array on
+        // the march and a fetch indexed by the winning slot — a contained change, and not this task's.
+        Assets::AssetHandle firstType = m_Data.CloudType1;
+        if ( firstType == Assets::AssetHandle::Null() )
+            firstType = m_Data.CloudType2;
+        if ( firstType == Assets::AssetHandle::Null() )
+            firstType = m_Data.CloudType3;
+        if ( firstType == Assets::AssetHandle::Null() )
+            firstType = m_Data.CloudType4;
+
         Image3D* volume =
-             service->Get( Runtime::ResourceRegistry::GetCloudTypeService()->GetNoiseVolume( m_Data.CloudType ) );
+             service->Get( Runtime::ResourceRegistry::GetCloudTypeService()->GetNoiseVolume( firstType ) );
         if ( !volume )
         {
             // The service has already logged which volume is missing and why. Latched so a scene with a
@@ -411,9 +502,14 @@ namespace Desert::Graphic::System
         if ( !EnsureProfileTable() )
             return;
 
-        const CloudGpuPayload payload = PackCloudParams(
-             m_Data, Runtime::ResourceRegistry::GetCloudTypeService()->GetShape( m_Data.CloudType ), atmosphere,
-             m_WindOffset );
+        // RESOLVED AGAIN RATHER THAN CACHED FROM EnsureProfileTable. Two hash-map probes per slot against
+        // handles that have not moved is not worth a member that can disagree with the table it was built
+        // beside — and the one thing that must not diverge is exactly the set the table's channels are in.
+        CloudTypeShape      shapes[kCloudSpeciesSlots]{};
+        Assets::AssetHandle handles[kCloudSpeciesSlots]{};
+        const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
+
+        const CloudGpuPayload payload = PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         const glm::mat4     viewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();

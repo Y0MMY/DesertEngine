@@ -288,7 +288,14 @@ TEST( SceneCloudTypeMigration, MigrateSceneRunsItAndStampsTheFileSoItNeverRunsAg
     EXPECT_EQ( report.CloudType.TypesSet, 1 );
     EXPECT_TRUE( report.Changed() );
     EXPECT_EQ( scene.SceneVersion.value_or( 0 ), kSceneVersion );
-    EXPECT_EQ( kSceneVersion, kSceneVersionCloudType );
+
+    // AND THE STEP AFTER THIS ONE RAN TOO, on the very key this one wrote. v4 -> v5 turns the species into
+    // a `CloudType` path and v5 -> v6 renames that key into the first slot of the set, so a v4 file
+    // arrives at the current generation in one call — which is what gating each step on its own version
+    // integer is for, and the reason `kSceneVersion` is no longer this step's own number.
+    EXPECT_TRUE( report.CloudSetRaised );
+    EXPECT_EQ( report.CloudSet.SlotsCarried, 1 );
+    EXPECT_GT( kSceneVersion, kSceneVersionCloudType );
 
     // Second pass over the stamped tree: nothing left to do.
     const auto again = MigrateScene( scene );
