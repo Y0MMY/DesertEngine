@@ -112,7 +112,7 @@ int main( int argc, char** argv )
         const Desert::Core::SceneMigrationReport report = Desert::Core::MigrateScene( parsed.value() );
         if ( !report.Changed() )
         {
-            std::cout << "ok     " << path.string() << " — already at sky v" << Desert::Core::kSceneVersion
+            std::cout << "ok     " << path.string() << " — already at scene v" << Desert::Core::kSceneVersion
                       << " / units v" << Desert::Core::kUnitVersion << "\n";
             continue;
         }
@@ -120,9 +120,15 @@ int main( int argc, char** argv )
         ++changed;
         std::cout << ( check ? "WOULD  " : "raised " ) << path.string() << " —";
         if ( report.SkyRaised )
-            std::cout << " sky v0->v" << Desert::Core::kSceneVersion << " (" << report.Sky.Entities
+            std::cout << " sky v0->v" << Desert::Core::kSceneVersionSky << " (" << report.Sky.Entities
                       << " entity(ies), " << report.Sky.FieldsCarried << " carried, " << report.Sky.FieldsRejected
                       << " rejected)";
+        if ( report.TonemapperRaised )
+            std::cout << " scene v" << Desert::Core::kSceneVersionSky << "->v"
+                      << Desert::Core::kSceneVersionTonemap << " ("
+                      << ( report.Tonemap.OperatorPinned ? "tonemapper pinned to Reinhard"
+                                                         : "tonemapper NOT pinned — see the warning above" )
+                      << ( report.Tonemap.SettingsCreated ? ", settings block created" : "" ) << ")";
         if ( report.UnitsRaised )
             std::cout << " units v0->v" << Desert::Core::kUnitVersion << " (" << report.Units.Entities
                       << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected

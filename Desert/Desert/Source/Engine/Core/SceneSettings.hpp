@@ -75,6 +75,25 @@ namespace Desert::Core
         RSM         = 2,
     };
 
+    // The curve that maps HDR scene luminance onto the 0..1 the display can show. Not a compatibility
+    // switch: both branches are authored features, and which one a scene is graded through is a property
+    // of the scene, the way film stock was a property of the shoot.
+    //
+    //  ACES     — the filmic curve Unreal ships as its default. It is OURS by default too (decision D-10,
+    //             Docs/Clouds/ANALYSIS_APPROACH.md §7) for one measurable reason: the reference frame this
+    //             programme calibrates the sky against was captured through it, so until both sides use
+    //             the same operator, every number in Docs/Clouds/CALIBRATION.md measures the difference
+    //             between two TONEMAPPERS and not between two skies. It takes no white point — the ODT
+    //             the fit reproduces carries its own.
+    //  Reinhard — extended Reinhard with an explicit WhitePoint (below). Every scene authored before
+    //             2026-08-19 had its Exposure and WhitePoint chosen by eye on this curve, which is why it
+    //             stays selectable and why the scene migration pins it onto files that predate the field.
+    enum class TonemapOperator : int
+    {
+        ACES     = 0,
+        Reinhard = 1,
+    };
+
     // Reflected (REFLECT/PROPERTY) so the whole block (de)serializes generically via the reflection
     // serializer (no hand-written mirror) and the editor can build its panel from the same metadata.
     struct SceneSettings
@@ -129,15 +148,25 @@ namespace Desert::Core
         PROPERTY( DisplayName( "Shadow Debug" ), Category( "Shadows" ) )
         ShadowDebugMode ShadowDebug   = ShadowDebugMode::Off;
 
-        // Post-processing
+        // Post-processing. The operator comes FIRST because it decides what the knobs under it mean:
+        // WhitePoint belongs to Reinhard alone and the editor hides it in the other mode.
+        PROPERTY( DisplayName( "Tonemapper" ), Category( "Post Processing" ) )
+        TonemapOperator Tonemapper = TonemapOperator::ACES;
         PROPERTY( DisplayName( "Exposure" ), Category( "Post Processing" ), Range( 0.0f, 10.0f ) )
         float Exposure       = 1.0f; // manual exposure (used when auto-exposure is off)
         PROPERTY( DisplayName( "Gamma" ), Category( "Post Processing" ), Range( 1.0f, 3.0f ) )
         float Gamma          = 2.2f;
-        // The luminance that tonemaps to pure white. 1.0 makes extended Reinhard the IDENTITY — which is
-        // what this pass used to hard-code, and why every HDR highlight clipped to
-        // a flat white silhouette instead of keeping its shading.
-        PROPERTY( DisplayName( "White Point" ), Category( "Post Processing" ), Range( 1.0f, 20.0f ) )
+        // REINHARD ONLY — the luminance that tonemaps to pure white. 1.0 makes extended Reinhard the
+        // IDENTITY, which is what this pass used to hard-code, and why every HDR highlight clipped to a
+        // flat white silhouette instead of keeping its shading.
+        //
+        // The ACES branch does not read it and must not be given a version of it: the fit reproduces a
+        // specific ODT, whose white is part of the curve. Inventing a knob that slides that curve would
+        // make our "ACES" a different operator from the one the reference frame was shot through, which
+        // is precisely the confound D-10 exists to remove. So the editor shows this slider only in
+        // Reinhard mode — a slider that moves nothing in the current mode is the dead setting
+        // DEV_CONTRACT §1.3 forbids.
+        PROPERTY( DisplayName( "White Point (Reinhard)" ), Category( "Post Processing" ), Range( 1.0f, 20.0f ) )
         float WhitePoint = 8.0f;
 
         // Auto-exposure / eye adaptation.

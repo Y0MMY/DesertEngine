@@ -84,10 +84,10 @@ namespace Desert::Graphic::System
 
         std::shared_ptr<Image2D> lensFlare = m_LensFlareImage.lock();
 
-        MaterialTonemap::Params params{
-             m_Exposure,       m_Gamma,      m_BloomIntensity,      m_ExposureKey,    m_AutoExposureEnabled,
-             m_ChromaticBloom, m_WhitePoint, m_LightShaftIntensity, m_LightShaftTint, m_LensFlareIntensity,
-             m_LensFlareTint };
+        MaterialTonemap::Params params{ m_TonemapOperator, m_Exposure,           m_Gamma,
+                                        m_BloomIntensity,  m_ExposureKey,        m_AutoExposureEnabled,
+                                        m_ChromaticBloom,  m_WhitePoint,         m_LightShaftIntensity,
+                                        m_LightShaftTint,  m_LensFlareIntensity, m_LensFlareTint };
 
         auto& renderer = Renderer::GetInstance();
         m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage(), bloomImage, avgLuminance, lightShafts,

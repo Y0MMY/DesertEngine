@@ -41,6 +41,7 @@ namespace Desert::Graphic
         SetAutoExposureEnabled( params.AutoExposure ? 1.0f : 0.0f );
         SetChromaticBloom( params.ChromaticBloom );
         SetWhitePoint( params.WhitePoint );
+        SetTonemapOperator( static_cast<float>( static_cast<int>( params.Operator ) ) );
         SetLightShaftTintIntensity( glm::vec4( params.LightShaftTint, params.LightShaftIntensity ) );
         SetLensFlareTintIntensity( glm::vec4( params.LensFlareTint, params.LensFlareIntensity ) );
 

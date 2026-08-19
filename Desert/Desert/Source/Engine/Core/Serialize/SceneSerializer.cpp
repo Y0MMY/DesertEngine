@@ -88,8 +88,17 @@ namespace Desert::Core
         {
             LOG_INFO( "[SceneMigration] '{0}': sky schema v0 -> v{1} - {2} entity(ies), {3} carried, {4} "
                       "defaulted, {5} rejected",
-                      sceneData->SceneName, kSceneVersion, migration.Sky.Entities, migration.Sky.FieldsCarried,
+                      sceneData->SceneName, kSceneVersionSky, migration.Sky.Entities, migration.Sky.FieldsCarried,
                       migration.Sky.FieldsDefaulted, migration.Sky.FieldsRejected );
+        }
+        if ( migration.TonemapperRaised && migration.Tonemap.OperatorPinned )
+        {
+            LOG_INFO( "[SceneMigration] '{0}': scene schema v{1} -> v{2} - the tonemapper is now a scene "
+                      "property and this file predates it, so it was pinned to the operator it was "
+                      "authored on (Reinhard){3}. Re-save (or run SceneMigrator) to stamp the file so "
+                      "this never runs again.",
+                      sceneData->SceneName, kSceneVersionSky, kSceneVersionTonemap,
+                      migration.Tonemap.SettingsCreated ? ", in a settings block created for it" : "" );
         }
         if ( migration.UnitsRaised )
         {
