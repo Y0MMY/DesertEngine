@@ -202,13 +202,19 @@ cd Editor && ../build/Bin/Debug/Editor --project Desert.deproj \
    выполнив прежнюю формулировку буквально, и откатил переформатирование чужого файла.)*
 4. Новых `TODO`/заглушек/мёртвых параметров нет.
 5. Тесты на чистую логику написаны и проходят.
-5a. **Прогнаны ВСЕ сюиты репозитория, а не те, чьё имя похоже на задачу.** Сквозные стражи падают
+5a. **Прогнаны ВСЕ сюиты репозитория, а не те, чьё имя похоже на задачу.**
+   ⚠️ **Список исключений ниже — не «прочее», а инструменты, и он уже дважды устаревал.** `ImageStat`
+   и `SceneMigrator` лежат в `Tools/`, gtest не линкуют и кладутся в `build/Bin/Debug/`, а не в
+   `build/Bin/Tests/Debug/`. Пока их не было в списке, счёт «makefile'ов против бинарников» не сходился
+   на две единицы, и разработчик, который честно этот счёт сверял, каждый раз должен был выяснять
+   заново, что расхождение безвредно. **Сверяй числа и называй их в отчёте**: расхождение обязано
+   объясняться, а не приниматься. Сквозные стражи падают
    от изменений далеко от своего названия — перепись полей, реестр потребителей, счётчик
    дескрипторов. Тестовые `*.make` не существуют, пока не выполнить `CI=true premake5 gmake`
    (без `CI` тестовые проекты не генерируются вовсе). Одной строкой:
 
    ```
-   for f in *.make; do t="${f%.make}"; case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|PakTool|BuildAllTests|RunAllTests) continue;; esac; make -f "$f" config=debug -j8 >/dev/null 2>&1; [ -x "build/Bin/Tests/Debug/$t" ] && ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"; done
+   for f in *.make; do t="${f%.make}"; case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|MeshSimplifier|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|DShaderParser|PakTool|FontBaker|CloudVolumeBaker|ImageStat|SceneMigrator|BuildAllTests|RunAllTests) continue;; esac; make -f "$f" config=debug -j8 >/dev/null 2>&1; [ -x "build/Bin/Tests/Debug/$t" ] && ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"; done
    ```
 5b. **Если задача трогала рендер — в отчёте есть кадры** (см. 2.3), и они показывают то, что
    задача чинила, И то, что она могла сломать.
