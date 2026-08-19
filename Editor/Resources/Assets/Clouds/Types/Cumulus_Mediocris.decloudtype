@@ -1,0 +1,19 @@
+{
+    "FormatVersion": 1,
+    "DisplayName": "Cumulus mediocris",
+    "Notes": "The fair-weather heap: base on the condensation level, top a kilometre above it.",
+    "Shape": {
+        "BaseAltitudeKm": 0.9,
+        "TopAltitudeKm": 1.9,
+        "EdgeTopFraction": 0.45,
+        "BaseRampFraction": 0.06,
+        "TopTaper": 0.45,
+        "AnvilAltitudeKm": 0.0,
+        "AnvilThicknessKm": 0.0,
+        "AnvilStrength": 0.0,
+        "DetailCharacter": 0.7,
+        "DetailFactor": 1.0,
+        "DensityFactor": 1.0,
+        "ExtinctionFactor": 1.0
+    }
+}

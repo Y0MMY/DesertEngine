@@ -1,0 +1,20 @@
+{
+    "FormatVersion": 1,
+    "DisplayName": "Cirrus",
+    "Notes": "Ice, eight kilometres up, a quarter of a cumulus' extinction and a wispy edge cut by the finer of the two shipped noise volumes. The only type in the library that names a volume of its own, and the proof that a type's edge travels with the type.",
+    "NoiseVolume": "Clouds/CloudNoise_FineWisp.dcnv",
+    "Shape": {
+        "BaseAltitudeKm": 8.0,
+        "TopAltitudeKm": 9.4,
+        "EdgeTopFraction": 0.9,
+        "BaseRampFraction": 0.25,
+        "TopTaper": 0.55,
+        "AnvilAltitudeKm": 0.0,
+        "AnvilThicknessKm": 0.0,
+        "AnvilStrength": 0.0,
+        "DetailCharacter": 0.0,
+        "DetailFactor": 2.5,
+        "DensityFactor": 0.35,
+        "ExtinctionFactor": 0.25
+    }
+}

@@ -80,6 +80,7 @@ namespace Desert::Player
         m_AssetPreloader->PreloadMeshes();
         m_AssetPreloader->PreloadSkyboxes();
         m_AssetPreloader->PreloadCloudNoiseVolumes();
+        m_AssetPreloader->PreloadCloudTypes(); // MUST follow the volumes: a type binds the one it names
 
         // Same system set + order as the editor's Play mode.
         m_Scene->AddSystem<ECS::MeshECSSystem>();

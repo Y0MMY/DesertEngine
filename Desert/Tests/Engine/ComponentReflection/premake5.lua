@@ -20,6 +20,9 @@ project(test_name)
         test_files,
         "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
+        -- The cloud packer takes a cloud TYPE's twelve numbers as an argument now, and the payload tests
+        -- drive it with the built-in default: the shape an empty slot resolves to lives here.
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
     }
 
     includedirs {

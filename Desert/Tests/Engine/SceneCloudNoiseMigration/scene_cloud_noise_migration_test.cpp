@@ -9,14 +9,16 @@
 //
 //   1. A v2 file's "VolumetricCloud" payload comes out of the migration WITHOUT the four keys, with every
 //      other key untouched and in its original order, and the entity counted in the report.
-//   2. The reflected VolumetricCloudData no longer has fields by those names, and DOES have the
-//      NoiseVolume slot that replaced them. A migration that stripped a field the struct still carried
-//      would be a silent data loss; a struct that still carried a field nothing writes would be the dead
-//      setting the contract forbids.
+//   2. The reflected VolumetricCloudData no longer has fields by those names, and DOES have the slot that
+//      replaced them — which is the CLOUD TYPE now: T1 moved the noise volume onto the type, because the
+//      character of an edge belongs to the kind of cloud. A migration that stripped a field the struct
+//      still carried would be a silent data loss; a struct that still carried a field nothing writes would
+//      be the dead setting the contract forbids.
 //
 // Everything below runs on the parsed tree. No GPU, no scene graph, no asset manager — the migration is a
 // pure function and this is what that buys.
 
+#include <Engine/Assets/CloudTypeData.hpp>
 #include <Engine/Core/Serialize/SceneMigration.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 
@@ -213,23 +215,37 @@ TEST( SceneCloudNoiseMigration, TheReflectedComponentNoLongerCarriesTheBakeSetti
     }
 }
 
-TEST( SceneCloudNoiseMigration, TheReflectedComponentCarriesTheVolumeSlotThatReplacedThem )
+TEST( SceneCloudNoiseMigration, TheVolumeSlotThatReplacedThemHasMovedOntoTheCloudType )
 {
     const auto* type = ReflectionRegistry::Get().Find( "VolumetricCloudData" );
     ASSERT_NE( type, nullptr );
 
+    // THE SLOT THIS MIGRATION CREATED IS NO LONGER ON THIS COMPONENT, one version later. v2 -> v3 replaced
+    // four bake settings with a NoiseVolume handle on the layer; T1 moved that handle onto the CLOUD TYPE,
+    // because the character of a cloud's edge is a property of the kind of cloud rather than of the
+    // weather the layer is having. This test therefore asserts the same thing it always did — that the
+    // four deleted fields were replaced by something an artist can point at — and follows the slot to
+    // where it went.
+    const auto volume = std::find_if( type->Fields.begin(), type->Fields.end(),
+                                      []( const auto& field ) { return field.Name == "NoiseVolume"; } );
+    EXPECT_EQ( volume, type->Fields.end() )
+         << "the layer carries a noise volume slot again, and the cloud type carries one too — two sources "
+            "of truth for one thing";
+
     const auto slot = std::find_if( type->Fields.begin(), type->Fields.end(),
-                                    []( const auto& field ) { return field.Name == "NoiseVolume"; } );
-    ASSERT_NE( slot, type->Fields.end() ) << "the component has no volume slot, so nothing replaced the "
+                                    []( const auto& field ) { return field.Name == "CloudType"; } );
+    ASSERT_NE( slot, type->Fields.end() ) << "the component has no cloud type, so nothing replaced the "
                                              "four fields the migration deletes";
 
     EXPECT_TRUE( slot->Meta.IsAsset );
-    EXPECT_EQ( slot->Meta.AssetType, "CloudNoiseVolumeAsset" );
+    EXPECT_EQ( slot->Meta.AssetType, "CloudTypeAsset" );
 
-    // The default is an EMPTY handle, which is the documented "use the built-in default volume". A scene
-    // that names no volume must still render, and that requirement is what this asserts.
+    // The default is an EMPTY handle, which is the documented "use the built-in type, whose own volume
+    // slot is empty, which is the built-in default volume". A scene that names neither must still render,
+    // and that chain of two documented empties is what this asserts.
     const Desert::ECS::VolumetricCloudData defaults;
-    EXPECT_EQ( static_cast<uint64_t>( defaults.NoiseVolume ), 0u );
+    EXPECT_EQ( static_cast<uint64_t>( defaults.CloudType ), 0u );
+    EXPECT_FALSE( Desert::Assets::CloudTypeDefault().NoiseVolume.has_value() );
 }
 
 int main( int argc, char** argv )

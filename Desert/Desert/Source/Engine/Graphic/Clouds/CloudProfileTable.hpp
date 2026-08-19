@@ -18,114 +18,75 @@ namespace Desert::Graphic
      * (Docs/Clouds/UEReference/Documentation/ShapeModel.md §3, L2320). A curve `f(h)` cannot express
      * either half of that:
      *
-     *   * it gives every cloud of a species the same height wherever it is in the sky, so a species is
-     *     flat at the rim of a patch and flat at its core, when the whole point of a cumulus field is
-     *     that the thick middle of a patch is where the tower is;
+     *   * it gives every cloud of a type the same height wherever it is in the sky, so a type is flat at
+     *     the rim of a patch and flat at its core, when the whole point of a cumulus field is that the
+     *     thick middle of a patch is where the tower is;
      *   * it is single-humped by construction, so a cumulonimbus ANVIL — a second lobe of cloud at the
      *     tropopause, spreading far wider than the tower that fed it — is not reachable by any choice of
      *     ramp constants. `baseRamp * topRamp` has one maximum, always.
      *
-     * WHY THE GENERATOR SURVIVES. A table nobody can author is a table nobody can ship: T0 has no asset
-     * and no editor for one (that is T1), so the table has to come from somewhere on a scene that was
-     * never touched by an artist. It comes from here — eleven numbers per species, evaluated into
-     * 256 x 64 texels once per species change. When T1 wraps the table in an asset, THIS is what the
-     * asset's authoring surface generates from, and the runtime side does not change at all: it already
-     * reads a table.
+     * WHY THE GENERATOR SURVIVES, AND WHERE ITS INPUT NOW COMES FROM. T0 kept eleven numbers per species
+     * in a table compiled into this header, because it had no asset to read them from. T1 gave it one:
+     * the numbers are the payload of a `.decloudtype` (Engine/Assets/CloudTypeData.hpp), the artist edits
+     * them in the Cloud Type panel, and this file kept exactly the half that is MATHS. The runtime did not
+     * change at all — it already read a table.
      *
-     * THIS HEADER IS DEPENDENCY-FREE ON PURPOSE. It is included by the ECS component (which owns the
-     * species enum an artist picks), by CloudPayload.hpp (which computes the envelope from the species'
-     * absolute altitudes) and by Desert/Tests/Engine/CloudField (which asserts that what the generator
-     * writes is what the shader reads). Anything heavier here would drag the renderer into a test that
-     * links nothing.
+     * THIS HEADER IS DEPENDENCY-FREE ON PURPOSE. It is included by the asset layer (which owns the
+     * numbers), by CloudPayload.hpp (which computes the shell from a type's absolute altitudes) and by
+     * Desert/Tests/Engine/CloudField (which asserts that what the generator writes is what the shader
+     * reads). Anything heavier here would drag the renderer into a test that links nothing.
      *
      * UNITS: KILOMETRES, and they are ABSOLUTE altitudes above the ground rather than fractions of a
      * layer. That is the §5.1 anchor in its strongest form — a set of ratios is satisfied at any absolute
      * scale, so a layer that has drifted into the stratosphere fails no test unless some number is
-     * pinned in metres. These are those numbers, and Desert/Tests/Engine/CloudField pins them against
-     * meteorology.
+     * pinned in metres. These are those numbers, and Desert/Tests/Engine/CloudType pins the SHIPPED
+     * LIBRARY against meteorology — the library being content now, the anchor moved to where the content
+     * is rather than staying on a table that no longer exists.
      */
-
-    // The species a layer can be. FOUR, and the ceiling is not taste: Epic's layout textures carry one
-    // species per RGBA channel, which is the structural limit on how many can share one sky
-    // (EpicDoc_CloudMaterial.md §1). T0 puts ONE of them in a layer; T3 is what puts several in one.
-    //
-    // Reflected: DesertHeaderTool scans every header under Engine/ for enum definitions before it parses
-    // the reflected structs, so the combo in the Details panel and the integer in the .desce file both
-    // come from this declaration.
-    enum class CloudSpecies
-    {
-        Stratus,
-        CumulusMediocris,
-        CumulusCongestus,
-        Cumulonimbus
-    };
-
-    inline constexpr uint32_t kCloudSpeciesCount = 4;
 
     /**
-     * Everything the generator needs to draw one species' family of curves.
+     * Everything the generator needs to draw one cloud type's family of curves, plus the three factors
+     * that describe what the type is MADE OF rather than what shape it is.
      *
-     * The pattern axis is what makes it a FAMILY. `EdgeTopFraction` is how much of its full height the
-     * species reaches where the placement pattern has only just crossed into cloud; at the core of a
-     * patch it reaches all of it. A stratus is near 1 — a sheet is a sheet everywhere — and a congestus
-     * is near a tenth, which is the difference between a flat pad at the rim of a patch and a tower in
-     * its middle.
+     * The pattern axis is what makes the profile a FAMILY. `EdgeTopFraction` is how much of its full
+     * height the type reaches where the placement pattern has only just crossed into cloud; at the core
+     * of a patch it reaches all of it. A stratus is near 1 — a sheet is a sheet everywhere — and a
+     * congestus is near a tenth, which is the difference between a flat pad at the rim of a patch and a
+     * tower in its middle.
+     *
+     * THE THREE FACTORS ARE MULTIPLIERS ON THE ARTIST'S OWN SCALES, not second copies of them. The
+     * component carries Density Scale, Extinction Scale and Detail Strength for the LAYER; a type carries
+     * how much of each it is relative to a cumulus. The product is formed once, in PackCloudParams, so
+     * "1" on the component keeps meaning "this type as it is" whichever type is in the slot. Two absolute
+     * values for one quantity would be two numbers that can disagree — the defect class §2.3.1 of the
+     * contract is about.
      */
-    struct CloudSpeciesShape
+    struct CloudTypeShape
     {
-        float BaseAltitudeKm;   // where the cloud base sits — the lifting condensation level of the species
+        float BaseAltitudeKm;   // where the cloud base sits — the lifting condensation level of the type
         float TopAltitudeKm;    // the top it reaches at the CORE of a placement patch
         float EdgeTopFraction;  // fraction of (Top - Base) it reaches where the patch has just begun
         float BaseRampFraction; // fraction of the cloud's own height the base ramp takes to reach full
         float TopTaper;         // fraction of the cloud's own height over which the top melts away
-        float AnvilAltitudeKm;  // centre of the SECOND lobe; zero strength means the species has none
+        float AnvilAltitudeKm;  // centre of the SECOND lobe; zero strength means the type has none
         float AnvilThicknessKm; // half-height of that lobe
         float AnvilStrength;    // how dense the anvil is against the tower that feeds it
-        float DetailCharacter;  // 0 = wispy erosion, 1 = billowy — the species' edge, not its silhouette
-        float DensityFactor;    // how much matter this species is made of, against the artist's own scale
+        float DetailCharacter;  // 0 = wispy erosion, 1 = billowy — the type's edge, not its silhouette
+        float DetailFactor;     // multiplies the layer's Detail Strength: how deeply the erosion cuts
+        float DensityFactor;    // multiplies the layer's Density Scale: how much matter this type is
+        float ExtinctionFactor; // multiplies the layer's Extinction Scale: how opaque that matter is
     };
 
-    // The library. Every altitude here is meteorology and is asserted as such by
-    // Desert/Tests/Engine/CloudField: a stratus that has grown past 600 m, or a cumulonimbus whose base
-    // has left the 0.5-1.5 km band, is a failing test rather than a sky somebody will call "wrong" three
-    // weeks later.
-    //
-    //   Stratus            a featureless sheet a few hundred metres thick, sitting almost on the ground.
-    //                      EdgeTopFraction 0.88 because a sheet does not thin into a pad at its rim.
-    //   CumulusMediocris   the fair-weather heap: base on the condensation level, top a kilometre above.
-    //   CumulusCongestus   the same base, four times the height, and a rim that is a flat pad —
-    //                      EdgeTopFraction 0.15. This is the species the ⬛ show contrasts against the
-    //                      other two.
-    //   Cumulonimbus       a tower to nine kilometres plus the ANVIL, a lobe at 9.5 km that the curve
-    //                      form cannot produce and the table can. The anvil is what makes the species
-    //                      recognisable from the ground, and it is why the profile is multimodal.
-    inline const CloudSpeciesShape& CloudSpeciesShapeOf( CloudSpecies species )
-    {
-        static const CloudSpeciesShape kLibrary[kCloudSpeciesCount] = {
-             // Base   Top   Edge  Ramp  Taper  AnvilKm  AnvilTh  AnvilStr  Detail  Density
-             { 0.15f, 0.55f, 0.88f, 0.12f, 0.35f, 0.0f, 0.0f, 0.0f, 0.05f, 0.70f },
-             { 0.90f, 1.90f, 0.45f, 0.06f, 0.45f, 0.0f, 0.0f, 0.0f, 0.70f, 1.00f },
-             { 2.20f, 5.80f, 0.15f, 0.04f, 0.50f, 0.0f, 0.0f, 0.0f, 1.00f, 1.15f },
-             { 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f, 1.8f, 0.85f, 0.85f, 1.35f },
-        };
-
-        const uint32_t index = static_cast<uint32_t>( species );
-        // A hand-edited scene can carry any integer at all in the species field, and reading past this
-        // array would be undefined behaviour rather than a wrong-looking sky. Clamped rather than
-        // asserted because the loader has already accepted the file by the time this is called.
-        return kLibrary[index < kCloudSpeciesCount ? index : 0u];
-    }
-
-    // The bottom and the top of the shell a layer of this species needs. The ANVIL is above the tower, so
-    // the top is not simply TopAltitudeKm — a species whose second lobe is outside the shell would have
-    // that lobe silently cut off by the layer geometry, which is the "sky was a ceiling" defect in a new
+    // The bottom and the top of the shell a layer of this type needs. The ANVIL is above the tower, so
+    // the top is not simply TopAltitudeKm — a type whose second lobe is outside the shell would have that
+    // lobe silently cut off by the layer geometry, which is the "sky was a ceiling" defect in a new
     // costume (commit 54330ab9).
-    inline float CloudSpeciesBaseKm( const CloudSpeciesShape& shape )
+    inline float CloudTypeBaseKm( const CloudTypeShape& shape )
     {
         return shape.BaseAltitudeKm;
     }
 
-    inline float CloudSpeciesTopKm( const CloudSpeciesShape& shape )
+    inline float CloudTypeTopKm( const CloudTypeShape& shape )
     {
         const float anvilTop = shape.AnvilStrength > 0.0f ? shape.AnvilAltitudeKm + shape.AnvilThicknessKm : 0.0f;
         return std::max( shape.TopAltitudeKm, anvilTop );
@@ -141,9 +102,11 @@ namespace Desert::Graphic
      * The two ends are deliberately asymmetric because real cloud is: a cumulus base sits flat on the
      * lifting condensation level, while the top tapers over half the cloud's height because that is where
      * the rising parcel is losing against the air around it. A symmetric profile — the obvious thing to
-     * write — gives every cloud a rounded bottom, which reads as fog lying in the air.
+     * write — gives every cloud a rounded bottom, which reads as fog lying in the air. A lenticular is the
+     * ONE type in the library that wants the symmetric answer, and it gets it by authoring a base ramp as
+     * long as its taper rather than by a second code path.
      */
-    inline float CloudProfileCurve( const CloudSpeciesShape& shape, float altitudeKm, float pattern )
+    inline float CloudProfileCurve( const CloudTypeShape& shape, float altitudeKm, float pattern )
     {
         const float p = std::clamp( pattern, 0.0f, 1.0f );
 
@@ -152,7 +115,7 @@ namespace Desert::Graphic
             return 0.0f;
 
         // THE HEIGHT THIS COLUMN REACHES, and the whole reason the profile is two-dimensional. At the rim
-        // of a patch the species gets EdgeTopFraction of its span; at the core it gets all of it.
+        // of a patch the type gets EdgeTopFraction of its span; at the core it gets all of it.
         const float top =
              shape.BaseAltitudeKm + span * ( shape.EdgeTopFraction + ( 1.0f - shape.EdgeTopFraction ) * p );
 
@@ -195,8 +158,8 @@ namespace Desert::Graphic
     // The table's own resolution.
     //
     // 256 ALONG THE ALTITUDE AXIS is Unreal's (T_Profile_08 is 256 x 256, textures_3.png), and against a
-    // shell that is the SPECIES' OWN span rather than a fixed ten kilometres it is a fine grid: the
-    // thinnest species in the library, a 400 m stratus, still gets all 256 rows of it.
+    // shell that is the TYPE'S OWN span rather than a fixed ten kilometres it is a fine grid: the
+    // thinnest type in the library, a 400 m stratus, still gets all 256 rows of it.
     //
     // 64 ALONG THE PATTERN AXIS rather than 256. The pattern axis carries how the shape morphs from the
     // rim of a patch to its core, and that morph is a two-point interpolation plus one smoothstep — it
@@ -225,16 +188,14 @@ namespace Desert::Graphic
      * Desert/Tests/Engine/CloudField compares this function against the shader's read of its output and
      * turns the half-texel into a failing test.
      *
-     * The envelope is the species' own [base, top] — see CloudSpeciesBaseKm / CloudSpeciesTopKm — so the
-     * altitude axis is spent entirely on the cloud rather than on the empty air a fixed ceiling would
-     * put above a stratus.
+     * The envelope is the type's own [base, top] — see CloudTypeBaseKm / CloudTypeTopKm — so the altitude
+     * axis is spent entirely on the cloud rather than on the empty air a fixed ceiling would put above a
+     * stratus.
      */
-    inline std::vector<float> CloudBuildProfileTable( CloudSpecies species )
+    inline std::vector<float> CloudBuildProfileTable( const CloudTypeShape& shape )
     {
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( species );
-
-        const float bottomKm = CloudSpeciesBaseKm( shape );
-        const float spanKm   = std::max( CloudSpeciesTopKm( shape ) - bottomKm, 1e-3f );
+        const float bottomKm = CloudTypeBaseKm( shape );
+        const float spanKm   = std::max( CloudTypeTopKm( shape ) - bottomKm, 1e-3f );
 
         std::vector<float> texels( kCloudProfileTableFloats, 0.0f );
 

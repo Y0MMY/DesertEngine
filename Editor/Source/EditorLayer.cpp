@@ -70,6 +70,7 @@
 #include "Editor/Panels/History/HistoryPanel.hpp"
 #include "Editor/Panels/Validation/SceneValidationPanel.hpp"
 #include "Editor/Panels/Clouds/CloudNoiseVolumePanel.hpp"
+#include "Editor/Panels/Clouds/CloudTypePanel.hpp"
 #include "Editor/Panels/Animation/AnimLayersPanel.hpp"
 #include "Editor/Core/ToastManager.hpp"
 
@@ -251,6 +252,10 @@ namespace Desert::Editor
              { "Preloading environments...", [this] { m_AssetPreloader->PreloadSkyboxes(); } } );
         m_StartupStages.push_back(
              { "Preloading cloud noise volumes...", [this] { m_AssetPreloader->PreloadCloudNoiseVolumes(); } } );
+        // AFTER the volumes, always: a cloud type binds the volume it names the moment it is created, and
+        // one created first would find nothing to bind and render with the default edge.
+        m_StartupStages.push_back(
+             { "Preloading cloud types...", [this] { m_AssetPreloader->PreloadCloudTypes(); } } );
 
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
@@ -423,6 +428,7 @@ namespace Desert::Editor
         m_Panels.emplace_back(
              std::make_unique<Editor::SceneValidationPanel>( m_MainScene, m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::CloudNoiseVolumePanel>( m_AssetManager.get() ) );
+        m_Panels.emplace_back( std::make_unique<Editor::CloudTypePanel>( m_AssetManager.get() ) );
 
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.

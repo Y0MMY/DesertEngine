@@ -6,7 +6,7 @@
 #include <Engine/Graphic/ColorTemperature.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
-#include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
+#include <Engine/Assets/CloudTypeAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Font/FontService.hpp>
 #include <Engine/Graphic/Texture.hpp>
@@ -787,48 +787,52 @@ namespace Desert::Editor
                     break;
                 }
 
-                // Cloud noise volume slot: a 3D noise the artist bakes in the Cloud Noise Volume panel.
-                //
-                // It gets its own branch rather than the texture one below because a volume is not a
-                // texture here: there is nothing to thumbnail (a 128^3 field has no 2D preview that means
-                // anything outside the panel that slices it), the import path is a bake rather than a
-                // cook, and "None" has a DEFINITE meaning — the built-in default volume, not an empty
-                // slot. Offering it in the texture picker would have been the third of those mistakes.
-                if ( field.Meta.AssetType == "CloudNoiseVolumeAsset" )
-                {
-                    uint64_t* volumeHandle = static_cast<uint64_t*>( p );
+                // THE CLOUD NOISE VOLUME SLOT USED TO BE HERE, and it went with the field it drew. A
+                // `.dcnv` is named by a cloud TYPE now (Engine/Assets/CloudTypeData.hpp) and picked in
+                // the Cloud Type panel, so no reflected field carries that asset type and this branch
+                // could never be entered — which is the dead path §4.1 says goes with the value it served.
 
-                    std::string preview = "Default";
-                    if ( *volumeHandle != 0 )
+                // Cloud type slot: the named kind of cloud a layer is made of. Its own branch rather than
+                // the texture one below for three reasons — there is nothing to thumbnail (twelve numbers
+                // have no picture), the file is authored in a panel rather than imported, and "Default"
+                // MEANS something (the built-in cumulus congestus) rather than being an empty slot.
+                //
+                // Shown by DISPLAY NAME rather than by file name, unlike every other slot here: a type
+                // carries one, and "Lenticular (orographic)" is what an artist called it where
+                // "Lenticular.decloudtype" is where they happened to put it.
+                if ( field.Meta.AssetType == "CloudTypeAsset" )
+                {
+                    uint64_t* typeHandle = static_cast<uint64_t*>( p );
+
+                    std::string preview = "Default (cumulus congestus)";
+                    if ( *typeHandle != 0 )
                     {
                         preview = "(missing)";
                         if ( assetMgr )
                         {
-                            if ( auto volume = assetMgr->FindByHandle<Assets::CloudNoiseVolumeAsset>(
-                                      Common::UUID( *volumeHandle ) ) )
-                                preview = volume->GetMetadata().Filepath.filename().string();
+                            if ( auto type = assetMgr->FindByHandle<Assets::CloudTypeAsset>(
+                                      Common::UUID( *typeHandle ) ) )
+                                preview = type->GetDisplayName();
                         }
                     }
 
                     ImGui::SetNextItemWidth( -1.0f );
-                    if ( ImGui::BeginCombo( "##cloudnoise", preview.c_str() ) )
+                    if ( ImGui::BeginCombo( "##cloudtype", preview.c_str() ) )
                     {
-                        if ( ImGui::Selectable( "Default", *volumeHandle == 0 ) )
+                        if ( ImGui::Selectable( "Default (cumulus congestus)", *typeHandle == 0 ) )
                         {
-                            *volumeHandle = 0;
-                            changed       = true;
+                            *typeHandle = 0;
+                            changed     = true;
                         }
                         if ( assetMgr )
                         {
-                            for ( const auto& [h, volume] :
-                                  assetMgr->FindAllByType<Assets::CloudNoiseVolumeAsset>() )
+                            for ( const auto& [h, type] : assetMgr->FindAllByType<Assets::CloudTypeAsset>() )
                             {
-                                const bool        selected = ( static_cast<uint64_t>( h ) == *volumeHandle );
-                                const std::string name     = volume->GetMetadata().Filepath.filename().string();
-                                if ( ImGui::Selectable( name.c_str(), selected ) )
+                                const bool selected = ( static_cast<uint64_t>( h ) == *typeHandle );
+                                if ( ImGui::Selectable( type->GetDisplayName().c_str(), selected ) )
                                 {
-                                    *volumeHandle = static_cast<uint64_t>( h );
-                                    changed       = true;
+                                    *typeHandle = static_cast<uint64_t>( h );
+                                    changed     = true;
                                 }
                                 if ( selected )
                                     ImGui::SetItemDefaultFocus();
@@ -846,36 +850,37 @@ namespace Desert::Editor
                                                     pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
                             // The extension is checked HERE because the Content Browser emits one generic
                             // AssetFile payload for every type it has no icon for. Without the check this
-                            // slot would accept a dropped .lua and bind a handle to a file that can never
-                            // decode.
+                            // slot would accept a dropped .dcnv and bind a handle to a file that can never
+                            // parse as a cloud type.
                             if ( assetMgr && !path.empty() &&
-                                 std::filesystem::path( path ).extension() == Assets::kCloudNoiseVolumeExtension )
+                                 std::filesystem::path( path ).extension() == Assets::kCloudTypeExtension )
                             {
                                 auto& mutableManager = const_cast<Assets::AssetManager&>( *assetMgr );
-                                auto  volume = mutableManager.FindByPath<Assets::CloudNoiseVolumeAsset>( path );
-                                if ( !volume )
-                                    volume = mutableManager.CreateAsset<Assets::CloudNoiseVolumeAsset>(
+                                auto  type           = mutableManager.FindByPath<Assets::CloudTypeAsset>( path );
+                                if ( !type )
+                                    type = mutableManager.CreateAsset<Assets::CloudTypeAsset>(
                                          Assets::AssetPriority::Medium, path );
-                                if ( volume && volume->IsReadyForUse() )
+                                if ( type && type->IsReadyForUse() )
                                 {
-                                    if ( const auto uploaded =
-                                              Runtime::ResourceRegistry::GetCloudNoiseService()->Register(
-                                                   volume );
-                                         !uploaded )
-                                        LOG_ERROR( "[Clouds] Dropped noise volume '{}' could not be "
-                                                   "uploaded: {}",
-                                                   path, uploaded.GetError() );
+                                    if ( const auto registered =
+                                              Runtime::ResourceRegistry::GetCloudTypeService()->Register( type );
+                                         !registered )
+                                        LOG_ERROR( "[Clouds] Dropped cloud type '{}' could not be "
+                                                   "registered: {}",
+                                                   path, registered.GetError() );
 
-                                    *volumeHandle = static_cast<uint64_t>( volume->GetMetadata().Handle );
-                                    changed       = true;
+                                    *typeHandle = static_cast<uint64_t>( type->GetMetadata().Handle );
+                                    changed     = true;
                                 }
                             }
                         }
                         ImGui::EndDragDropTarget();
                     }
                     if ( ImGui::IsItemHovered() )
-                        ImGui::SetTooltip( "Pick a baked volume or drag a .dcnv here. \"Default\" is the "
-                                           "engine's built-in volume, so a scene always has one." );
+                        ImGui::SetTooltip( "Pick a cloud type or drag a .decloudtype here. \"Default\" is "
+                                           "the engine's built-in cumulus congestus, so a scene nobody has "
+                                           "authored a type for still has a sky. Author your own in "
+                                           "Window > Cloud Type." );
                     break;
                 }
 

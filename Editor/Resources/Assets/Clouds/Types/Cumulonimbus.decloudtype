@@ -1,0 +1,19 @@
+{
+    "FormatVersion": 1,
+    "DisplayName": "Cumulonimbus",
+    "Notes": "A tower to nine kilometres plus the ANVIL, a second lobe at 9.5 km that no single-humped curve can produce and the profile table can. The anvil is what makes the type recognisable from the ground.",
+    "Shape": {
+        "BaseAltitudeKm": 0.9,
+        "TopAltitudeKm": 9.0,
+        "EdgeTopFraction": 0.12,
+        "BaseRampFraction": 0.04,
+        "TopTaper": 0.4,
+        "AnvilAltitudeKm": 9.5,
+        "AnvilThicknessKm": 1.8,
+        "AnvilStrength": 0.85,
+        "DetailCharacter": 0.85,
+        "DetailFactor": 1.0,
+        "DensityFactor": 1.35,
+        "ExtinctionFactor": 1.3
+    }
+}

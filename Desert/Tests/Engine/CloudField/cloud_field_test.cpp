@@ -33,25 +33,43 @@ using namespace Desert::Tests::CloudFieldRef;
 
 using Desert::Graphic::CloudBuildProfileTable;
 using Desert::Graphic::CloudProfileCurve;
-using Desert::Graphic::CloudSpecies;
-using Desert::Graphic::CloudSpeciesBaseKm;
-using Desert::Graphic::CloudSpeciesShape;
-using Desert::Graphic::CloudSpeciesShapeOf;
-using Desert::Graphic::CloudSpeciesTopKm;
+using Desert::Graphic::CloudTypeBaseKm;
+using Desert::Graphic::CloudTypeShape;
+using Desert::Graphic::CloudTypeTopKm;
 
 namespace
 {
-    // The species the coverage measurements below are made on: the component's own default, and the one
-    // whose family of profiles varies most across a patch.
-    constexpr CloudSpecies kDefaultSpecies = CloudSpecies::CumulusCongestus;
-
-    // The ENVELOPE the march intersects for that species, computed the way Graphic::PackCloudParams
-    // computes it rather than restated. There is no authored layer thickness any more — that is the whole
-    // point of the phase — so a constant here would be a second statement of the species' own altitudes.
-    float EnvelopeThicknessKm( CloudSpecies species )
+    // THE FIXTURES ARE THIS SUITE'S OWN, and only one of them comes from elsewhere. What is tested here is
+    // the MATHS — where the generator puts material, how the pattern axis moves it, whether the anvil is a
+    // second lobe — so the shapes below are chosen to exercise it rather than to describe the weather.
+    // The library that DOES describe the weather is content on disk now, and
+    // Desert/Tests/Engine/CloudType is what holds it to meteorology: that anchor moved with the numbers
+    // when T1 turned them into files, because a test of a table that no longer exists tests nothing.
+    //
+    // The one exception is the default, which is imported rather than copied: the coverage measurements
+    // below are calibration data for the shipped sky, so they have to be made on the shape a scene with an
+    // empty slot actually renders.
+    const CloudTypeShape& DefaultShape()
     {
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( species );
-        return CloudSpeciesTopKm( shape ) - CloudSpeciesBaseKm( shape );
+        return Desert::Assets::CloudTypeDefaultShape();
+    }
+
+    // A SHEET: nearly the same height everywhere in a patch, thin, low.
+    constexpr CloudTypeShape kSheet{ 0.15f, 0.55f, 0.88f, 0.12f, 0.35f, 0.0f,
+                                     0.0f,  0.0f,  0.05f, 0.50f, 0.70f, 0.75f };
+    // A HEAP: a fair-weather cumulus, half its height at the rim of a patch.
+    constexpr CloudTypeShape kHeap{ 0.90f, 1.90f, 0.45f, 0.06f, 0.45f, 0.0f,
+                                    0.0f,  0.0f,  0.70f, 1.00f, 1.00f, 1.00f };
+    // A STORM: the only fixture with a second lobe, and the one the anvil tests are about.
+    constexpr CloudTypeShape kStorm{ 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f,
+                                     1.8f,  0.85f, 0.85f, 1.00f, 1.35f, 1.30f };
+
+    // The ENVELOPE the march intersects for a shape, computed the way Graphic::PackCloudParams computes it
+    // rather than restated. There is no authored layer thickness any more — that is the whole point of the
+    // phase — so a constant here would be a second statement of the type's own altitudes.
+    float EnvelopeThicknessKm( const CloudTypeShape& shape )
+    {
+        return CloudTypeTopKm( shape ) - CloudTypeBaseKm( shape );
     }
 
     // The component's defaults, converted to the kilometres this header works in exactly as
@@ -59,7 +77,7 @@ namespace
     // ComponentReflection owns the defaults; what this suite owns is what they PRODUCE.
     CloudFieldParams DefaultParams()
     {
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( kDefaultSpecies );
+        const CloudTypeShape& shape = DefaultShape();
 
         CloudFieldParams params;
         params.WeatherTileKm    = 12.0f; // Weather Tile Size 1 200 000 cm
@@ -106,7 +124,7 @@ namespace
         CloudFieldParams params = DefaultParams();
         params.Coverage         = coverage;
 
-        const float envelopeKm = EnvelopeThicknessKm( kDefaultSpecies );
+        const float envelopeKm = EnvelopeThicknessKm( DefaultShape() );
         const float stepKm     = envelopeKm / static_cast<float>( heightSamples );
 
         int touched = 0;
@@ -144,12 +162,10 @@ namespace
         return { static_cast<float>( touched ) / total, static_cast<float>( opaque ) / total };
     }
 
-    // The highest ABSOLUTE altitude at which this species has any body at all, at the fullest patch it
-    // can stand in. Kilometres, because kilometres are the anchor.
-    float ProfileTopKm( CloudSpecies species )
+    // The highest ABSOLUTE altitude at which this shape has any body at all, at the fullest patch it can
+    // stand in. Kilometres, because kilometres are the anchor.
+    float ProfileTopKm( const CloudTypeShape& shape )
     {
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( species );
-
         float top = 0.0f;
         for ( int step = 0; step <= 4000; ++step )
         {
@@ -161,10 +177,8 @@ namespace
     }
 
     // And the lowest.
-    float ProfileBaseKm( CloudSpecies species )
+    float ProfileBaseKm( const CloudTypeShape& shape )
     {
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( species );
-
         for ( int step = 0; step <= 4000; ++step )
         {
             const float altitudeKm = 15.0f * static_cast<float>( step ) / 4000.0f;
@@ -174,12 +188,10 @@ namespace
         return 0.0f;
     }
 
-    // How much cloud a species is, in kilometre-units of profile, at a given fullness of patch. It is the
+    // How much cloud a shape is, in kilometre-units of profile, at a given fullness of patch. It is the
     // one number that says "these are different shapes" without depending on where either of them sits.
-    float ProfileIntegralKm( CloudSpecies species, float pattern )
+    float ProfileIntegralKm( const CloudTypeShape& shape, float pattern )
     {
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( species );
-
         constexpr int kSteps = 4000;
         const float   stepKm = 15.0f / static_cast<float>( kSteps );
 
@@ -194,29 +206,41 @@ namespace
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------
-// The profile generator — where a species lives, and whether three of them are three shapes
+// The profile generator — where a type's material lies, and whether three shapes are three shapes
+//
+// WHERE THE METEOROLOGY WENT. T0 asserted its four species' altitude bands here, because the library was
+// a table compiled into the header this suite includes. T1 turned that library into nine files an artist
+// can open, so the anchor moved to Desert/Tests/Engine/CloudType, which reads those files off the disk.
+// The anchor is stronger there and would be vacuous here: this suite would be asserting meteorology about
+// fixtures it wrote itself.
 // ---------------------------------------------------------------------------------------------------
 
-TEST( CloudFieldProfile, ThereIsNothingOutsideTheSpeciesOwnAltitudeBand )
+TEST( CloudFieldProfile, ThereIsNothingOutsideAShapesOwnAltitudeBand )
 {
     // The support of the curve is exactly [base, top] and there is no material a millimetre outside it.
     // This matters twice: the envelope the march intersects is computed FROM those two numbers, so a
     // curve that leaked past them would be cloud sliced off by the shell; and the table's rows are that
     // interval, so a leak would be silently clipped by the texture rather than seen.
-    for ( const CloudSpecies species : { CloudSpecies::Stratus, CloudSpecies::CumulusMediocris,
-                                         CloudSpecies::CumulusCongestus, CloudSpecies::Cumulonimbus } )
+    struct Fixture
     {
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( species );
+        const char*    Name;
+        CloudTypeShape Shape;
+    };
 
-        const float baseKm = CloudSpeciesBaseKm( shape );
-        const float topKm  = CloudSpeciesTopKm( shape );
+    for ( const Fixture& fixture : { Fixture{ "sheet", kSheet }, Fixture{ "heap", kHeap },
+                                     Fixture{ "tower", DefaultShape() }, Fixture{ "storm", kStorm } } )
+    {
+        const CloudTypeShape& shape = fixture.Shape;
+
+        const float baseKm = CloudTypeBaseKm( shape );
+        const float topKm  = CloudTypeTopKm( shape );
 
         for ( const float pattern : { 0.0f, 0.2f, 0.5f, 0.8f, 1.0f } )
         {
             EXPECT_FLOAT_EQ( CloudProfileCurve( shape, baseKm, pattern ), 0.0f )
-                 << "species " << static_cast<int>( species ) << " has body at its own base";
+                 << fixture.Name << " has body at its own base";
             EXPECT_FLOAT_EQ( CloudProfileCurve( shape, topKm, pattern ), 0.0f )
-                 << "species " << static_cast<int>( species ) << " has body at its own ceiling";
+                 << fixture.Name << " has body at its own ceiling";
 
             // And well outside, including the negative altitude a hand-written caller could ask for.
             EXPECT_FLOAT_EQ( CloudProfileCurve( shape, baseKm - 0.5f, pattern ), 0.0f );
@@ -228,97 +252,68 @@ TEST( CloudFieldProfile, ThereIsNothingOutsideTheSpeciesOwnAltitudeBand )
         // separate check because the envelope is what PackCloudParams reads, and a curve that stopped
         // short of its declared top would waste shell rather than lose cloud — a different defect with
         // the same cause.
-        EXPECT_GE( ProfileBaseKm( species ), baseKm );
-        EXPECT_LE( ProfileTopKm( species ), topKm );
+        EXPECT_GE( ProfileBaseKm( shape ), baseKm );
+        EXPECT_LE( ProfileTopKm( shape ), topKm );
     }
 }
 
-TEST( CloudFieldProfile, EverySpeciesSitsWhereMeteorologyPutsIt )
+TEST( CloudFieldProfile, ThreeShapesAreThreeShapesAndNotThreeLabels )
 {
-    // THE ABSOLUTE ANCHOR (Docs/Clouds/ANALYSIS_APPROACH.md §5.1). Every relation in this subsystem —
-    // tile against thickness, step against thickness, view distance against tile — is a RATIO, and a set
-    // of ratios is satisfied at any absolute scale whatsoever. Move the whole layer to twelve kilometres
-    // and not one relation notices. These are the numbers that notice, and they are metres rather than
-    // fractions for exactly that reason.
-    //
-    // Stratus: a sheet that lies on the ground and does not reach 600 m.
-    EXPECT_LE( ProfileTopKm( CloudSpecies::Stratus ), 0.6f )
-         << "stratus has grown into something that is not stratus";
-    EXPECT_GE( ProfileBaseKm( CloudSpecies::Stratus ), 0.0f );
-
-    // Cumulus mediocris: the whole cloud lives between 0.8 and 2.0 km.
-    EXPECT_GE( ProfileBaseKm( CloudSpecies::CumulusMediocris ), 0.8f );
-    EXPECT_LE( ProfileTopKm( CloudSpecies::CumulusMediocris ), 2.0f );
-
-    // Cumulonimbus: it BEGINS between 0.5 and 1.5 km. Where it ends is the tropopause and is not bounded
-    // by the same rule — that is the difference between a base and an extent, and getting it the other
-    // way round would forbid the species from being what it is.
-    EXPECT_GE( ProfileBaseKm( CloudSpecies::Cumulonimbus ), 0.5f );
-    EXPECT_LE( ProfileBaseKm( CloudSpecies::Cumulonimbus ), 1.5f );
-    EXPECT_GT( ProfileTopKm( CloudSpecies::Cumulonimbus ), 8.0f )
-         << "a cumulonimbus that does not reach the upper troposphere is a congestus";
-
-    std::printf( "[CloudField] species bands (km): stratus %.2f-%.2f  mediocris %.2f-%.2f  "
-                 "congestus %.2f-%.2f  cumulonimbus %.2f-%.2f\n",
-                 ProfileBaseKm( CloudSpecies::Stratus ), ProfileTopKm( CloudSpecies::Stratus ),
-                 ProfileBaseKm( CloudSpecies::CumulusMediocris ), ProfileTopKm( CloudSpecies::CumulusMediocris ),
-                 ProfileBaseKm( CloudSpecies::CumulusCongestus ), ProfileTopKm( CloudSpecies::CumulusCongestus ),
-                 ProfileBaseKm( CloudSpecies::Cumulonimbus ), ProfileTopKm( CloudSpecies::Cumulonimbus ) );
-}
-
-TEST( CloudFieldProfile, ThreeSpeciesAreThreeShapesAndNotThreeLabels )
-{
-    // THE CRITERION THE WHOLE PHASE EXISTS FOR. A library of species on top of one curve gives nine
+    // THE CRITERION THE WHOLE PROGRAMME EXISTS FOR. A library of types on top of one curve gives nine
     // captions to one cloud; the way to state "these are different clouds" without appealing to a
     // screenshot is that they hold different amounts of cloud in the vertical.
     //
-    // Measured at a FULL patch, because that is where a species is most itself, and in kilometre-units so
-    // that a species which merely sits higher does not count as a different shape.
-    const float stratus      = ProfileIntegralKm( CloudSpecies::Stratus, 1.0f );
-    const float congestus    = ProfileIntegralKm( CloudSpecies::CumulusCongestus, 1.0f );
-    const float cumulonimbus = ProfileIntegralKm( CloudSpecies::Cumulonimbus, 1.0f );
+    // Measured at a FULL patch, because that is where a type is most itself, and in kilometre-units so
+    // that a shape which merely sits higher does not count as a different shape.
+    const float sheet = ProfileIntegralKm( kSheet, 1.0f );
+    const float tower = ProfileIntegralKm( DefaultShape(), 1.0f );
+    const float storm = ProfileIntegralKm( kStorm, 1.0f );
 
-    std::printf( "[CloudField] profile integrals at a full patch (km): stratus %.3f  congestus %.3f  "
-                 "cumulonimbus %.3f\n",
-                 stratus, congestus, cumulonimbus );
+    std::printf( "[CloudField] profile integrals at a full patch (km): sheet %.3f  tower %.3f  storm %.3f\n",
+                 sheet, tower, storm );
 
     // Each is at least half again the one below it. A tolerance rather than "not equal": two shapes that
     // differ in the fourth decimal are two labels, and the show has to be visible.
-    EXPECT_GT( congestus, stratus * 1.5f ) << "a congestus holds no more cloud than a stratus";
-    EXPECT_GT( cumulonimbus, congestus * 1.5f ) << "a cumulonimbus holds no more cloud than a congestus";
+    EXPECT_GT( tower, sheet * 1.5f ) << "a tower holds no more cloud than a sheet";
+    EXPECT_GT( storm, tower * 1.5f ) << "a storm holds no more cloud than a tower";
 
-    // And the fourth species is not a duplicate of one of the three either.
-    const float mediocris = ProfileIntegralKm( CloudSpecies::CumulusMediocris, 1.0f );
-    EXPECT_GT( mediocris, stratus * 1.5f );
-    EXPECT_LT( mediocris, congestus * 0.7f );
+    // And the fourth fixture is not a duplicate of one of the three either.
+    const float heap = ProfileIntegralKm( kHeap, 1.0f );
+    EXPECT_GT( heap, sheet * 1.5f );
+    EXPECT_LT( heap, tower * 0.7f );
 }
 
-TEST( CloudFieldProfile, AFullerPatchIsATallerCloudOfTheSameSpecies )
+TEST( CloudFieldProfile, AFullerPatchIsATallerCloudOfTheSameType )
 {
     // THE SECOND AXIS, and the reason the profile is a table at all. At the rim of a placement patch the
-    // species is a flat pad; at its core it is the full thing. Stated as a relation over the axis rather
+    // type is a flat pad; at its core it is the full thing. Stated as a relation over the axis rather
     // than at two points, because a table that had its axes swapped would still pass a two-point test at
     // some patterns.
-    for ( const CloudSpecies species :
-          { CloudSpecies::CumulusMediocris, CloudSpecies::CumulusCongestus, CloudSpecies::Cumulonimbus } )
+    struct Fixture
+    {
+        const char*    Name;
+        CloudTypeShape Shape;
+    };
+
+    for ( const Fixture& fixture :
+          { Fixture{ "heap", kHeap }, Fixture{ "tower", DefaultShape() }, Fixture{ "storm", kStorm } } )
     {
         float previous = -1.0f;
         for ( int step = 0; step <= 20; ++step )
         {
             const float pattern  = 0.05f * static_cast<float>( step );
-            const float integral = ProfileIntegralKm( species, pattern );
+            const float integral = ProfileIntegralKm( fixture.Shape, pattern );
 
-            EXPECT_GE( integral, previous - 1e-4f )
-                 << "species " << static_cast<int>( species ) << " holds LESS cloud at pattern " << pattern
-                 << " than at the thinner patch below it";
+            EXPECT_GE( integral, previous - 1e-4f ) << fixture.Name << " holds LESS cloud at pattern " << pattern
+                                                    << " than at the thinner patch below it";
             previous = integral;
         }
 
         // And the two ends genuinely differ, or the axis is decoration. The threshold is the one
         // ShapeModel.md §14 asks for by name: the integral at a thin patch is strictly below the one at a
         // full patch.
-        EXPECT_LT( ProfileIntegralKm( species, 0.2f ), ProfileIntegralKm( species, 0.9f ) * 0.8f )
-             << "species " << static_cast<int>( species )
+        EXPECT_LT( ProfileIntegralKm( fixture.Shape, 0.2f ), ProfileIntegralKm( fixture.Shape, 0.9f ) * 0.8f )
+             << fixture.Name
              << " is the same height at the rim of a patch as in its middle, so the profile is still a "
                 "curve wearing a table's clothes";
     }
@@ -332,7 +327,7 @@ TEST( CloudFieldProfile, TheCumulonimbusProfileHasTwoHumpsAndNoCurveCanDoThat )
     //
     // What is asserted is the SHAPE of the sequence and not the values: rising, falling to a genuine
     // trough, rising again. A single-humped profile cannot produce the middle term.
-    const CloudSpeciesShape& shape = CloudSpeciesShapeOf( CloudSpecies::Cumulonimbus );
+    const CloudTypeShape& shape = kStorm;
 
     // A patch full enough for the anvil to be present but not so full that the tower has grown into it.
     constexpr float kPattern = 0.55f;
@@ -382,7 +377,7 @@ TEST( CloudFieldProfile, TheBaseIsASharpRampAndTheTopTapersOverNearlyHalfTheClou
     // condensation level and is flat, while the top tapers over nearly half the cloud's height. A
     // symmetric profile — the obvious thing to write — gives every cloud a rounded bottom, which reads
     // as fog lying in the air rather than as a cloud sitting on a level.
-    const CloudSpeciesShape& shape = CloudSpeciesShapeOf( CloudSpecies::CumulusCongestus );
+    const CloudTypeShape& shape = DefaultShape();
 
     const float baseKm = shape.BaseAltitudeKm;
     const float topKm  = shape.TopAltitudeKm;
@@ -416,15 +411,20 @@ TEST( CloudFieldProfileTable, TheShaderReadsBackExactlyWhatTheGeneratorWrote )
     // The shader side is CloudSampleProfileTable — the ACTUAL text the march compiles — reading the
     // ACTUAL buffer CloudBuildProfileTable produced, through a bilinear REPEAT sampler that is the one
     // VulkanImage2D creates.
-    for ( const CloudSpecies species : { CloudSpecies::Stratus, CloudSpecies::CumulusMediocris,
-                                         CloudSpecies::CumulusCongestus, CloudSpecies::Cumulonimbus } )
+    struct Fixture
     {
-        CloudProfileTableSelect( species );
+        const char*    Name;
+        CloudTypeShape Shape;
+    };
 
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( species );
+    for ( const Fixture& fixture : { Fixture{ "sheet", kSheet }, Fixture{ "heap", kHeap },
+                                     Fixture{ "tower", DefaultShape() }, Fixture{ "storm", kStorm } } )
+    {
+        const CloudTypeShape& shape = fixture.Shape;
+        CloudProfileTableSelect( shape );
 
-        const float bottomKm = CloudSpeciesBaseKm( shape );
-        const float spanKm   = CloudSpeciesTopKm( shape ) - bottomKm;
+        const float bottomKm = CloudTypeBaseKm( shape );
+        const float spanKm   = CloudTypeTopKm( shape ) - bottomKm;
 
         float worst = 0.0f;
 
@@ -448,14 +448,13 @@ TEST( CloudFieldProfileTable, TheShaderReadsBackExactlyWhatTheGeneratorWrote )
             }
         }
 
-        std::printf( "[CloudField] species %d: worst generator-vs-shader disagreement %.7f\n",
-                     static_cast<int>( species ), worst );
+        std::printf( "[CloudField] %s: worst generator-vs-shader disagreement %.7f\n", fixture.Name, worst );
 
-        EXPECT_LT( worst, 1e-5f ) << "species " << static_cast<int>( species )
+        EXPECT_LT( worst, 1e-5f ) << fixture.Name
                                   << ": the table the shader reads is not the table the generator wrote";
     }
 
-    CloudProfileTableSelect( CloudSpecies::CumulusCongestus );
+    CloudProfileTableSelect( DefaultShape() );
 }
 
 TEST( CloudFieldProfileTable, TheReadIsClampedSoTheLayerCeilingDoesNotWrapOntoItsFloor )
@@ -464,7 +463,7 @@ TEST( CloudFieldProfileTable, TheReadIsClampedSoTheLayerCeilingDoesNotWrapOntoIt
     // profile table is the one kind of image for which that is wrong. Without the clamp inside
     // CloudSampleProfileTable a height fraction of 1 reads the bottom row and the top of the layer grows
     // the cloud's own base back on top of itself — a lid, and one that no coverage setting removes.
-    CloudProfileTableSelect( CloudSpecies::CumulusCongestus );
+    CloudProfileTableSelect( DefaultShape() );
 
     for ( const float pattern : { 0.0f, 0.5f, 1.0f } )
     {
@@ -714,7 +713,7 @@ TEST( CloudFieldCoverage, TheContrastNarrowsTheTransitionBandWithoutMovingItsCen
             for ( int ih = 0; ih < kHeights; ++ih )
             {
                 const float heightFraction = ( static_cast<float>( ih ) + 0.5f ) / kHeights;
-                const vec3  positionKm( x, heightFraction * EnvelopeThicknessKm( kDefaultSpecies ), z );
+                const vec3  positionKm( x, heightFraction * EnvelopeThicknessKm( DefaultShape() ), z );
 
                 inSoft = inSoft || SampleCloudField( soft, heightFraction, positionKm ).Profile > 0.0f;
                 inHard = inHard || SampleCloudField( hard, heightFraction, positionKm ).Profile > 0.0f;
@@ -957,7 +956,7 @@ TEST( CloudFieldProducer, TheThickPartOfAPatchIsWhereTheTowerIsAndTheRimIsFlat )
     constexpr int kColumns = 40;
     constexpr int kHeights = 48;
 
-    const float envelopeKm = EnvelopeThicknessKm( kDefaultSpecies );
+    const float envelopeKm = EnvelopeThicknessKm( DefaultShape() );
 
     struct Column
     {
@@ -1033,7 +1032,7 @@ TEST( CloudFieldProducer, TheEdgeCharacterIsTheSpeciesAndDoesNotWanderAcrossTheS
     // changed within one cloud — a stratus rim on one side of a cumulus and a cumulus rim on the other.
     CloudFieldParams params = DefaultParams();
 
-    const float envelopeKm = EnvelopeThicknessKm( kDefaultSpecies );
+    const float envelopeKm = EnvelopeThicknessKm( DefaultShape() );
 
     for ( int iz = 0; iz < 24; ++iz )
     {

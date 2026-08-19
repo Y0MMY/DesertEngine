@@ -1,0 +1,19 @@
+{
+    "FormatVersion": 1,
+    "DisplayName": "Stratocumulus",
+    "Notes": "A low deck with lumps in it: it covers the sky like stratus but is made of rolls rather than of nothing. EdgeTopFraction 0.80 - the lumps vary the top by a fifth, not by five sixths as a cumulus field does.",
+    "Shape": {
+        "BaseAltitudeKm": 0.6,
+        "TopAltitudeKm": 1.6,
+        "EdgeTopFraction": 0.8,
+        "BaseRampFraction": 0.1,
+        "TopTaper": 0.35,
+        "AnvilAltitudeKm": 0.0,
+        "AnvilThicknessKm": 0.0,
+        "AnvilStrength": 0.0,
+        "DetailCharacter": 0.95,
+        "DetailFactor": 0.7,
+        "DensityFactor": 0.95,
+        "ExtinctionFactor": 1.0
+    }
+}

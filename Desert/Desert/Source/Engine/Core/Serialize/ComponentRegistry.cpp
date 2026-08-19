@@ -13,7 +13,7 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
-#include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
+#include <Engine/Assets/CloudTypeAsset.hpp>
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -224,10 +224,29 @@ namespace Desert::Core::Serialize
                     auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) );
                     return a ? a->GetMetadata().Filepath.string() : "";
                 }
-                if ( type == "CloudNoiseVolumeAsset" )
+                // NO "CloudNoiseVolumeAsset" BRANCH ANY MORE. It served exactly one reflected field — the
+                // cloud layer's own noise slot — and that field moved onto the cloud TYPE, which stores its
+                // volume as a path of its own rather than through this resolver. A branch keyed on a
+                // metadata string no reflected field produces is a path nothing can reach (§4.1).
+                if ( type == "CloudTypeAsset" )
                 {
-                    auto a = mgr.FindByHandle<Assets::CloudNoiseVolumeAsset>( Common::UUID( handle ) );
-                    return a ? a->GetMetadata().Filepath.string() : "";
+                    auto a = mgr.FindByHandle<Assets::CloudTypeAsset>( Common::UUID( handle ) );
+                    if ( !a )
+                        return "";
+
+                    // RELATIVE to the assets root, unlike every branch around it, and the difference is
+                    // deliberate rather than an oversight. Those branches write absolute paths, so every
+                    // scene in this repository carries one developer's home directory and a cloud type
+                    // shipped with the engine would be unresolvable on any other machine — while the
+                    // library it names is content that ships WITH the project. The v4 -> v5 migration has
+                    // to produce this string too, and it is a pure function that cannot read a path root,
+                    // so relative is also the only form it could write. FromPath below accepts either.
+                    std::error_code ec;
+                    const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
+                                                                     Common::Constants::Path::ASSETS_PATH, ec );
+                    if ( ec || rel.empty() || rel.native().rfind( "..", 0 ) == 0 )
+                        return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
+                    return rel.generic_string();
                 }
                 if ( type == "FontAsset" )
                 {
@@ -298,22 +317,33 @@ namespace Desert::Core::Serialize
                     auto a = mgr.FindByPath<Assets::TextureAsset>( path );
                     return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
                 }
-                if ( type == "CloudNoiseVolumeAsset" )
+                // The read side of the volume branch is gone with the write side above, and for the same
+                // reason: no reflected field names that asset type any more. A cloud type's own volume is
+                // bound in Assets::CloudTypeAsset::ResolveDependencies, from the path inside the type's
+                // file, which is where a reference to a `.dcnv` now lives.
+                if ( type == "CloudTypeAsset" )
                 {
-                    // A scene may name a volume the Assets/Clouds scan never saw — one saved elsewhere in
-                    // the project. Create, load and upload it here so the reference survives a cold start
-                    // and not only an in-session pick, exactly as the material branch above does.
-                    auto a = mgr.FindByPath<Assets::CloudNoiseVolumeAsset>( path );
+                    // BOTH FORMS ARE ACCEPTED, and neither is a legacy path. A file written by ToPath above
+                    // (or by the v4 -> v5 migration) carries a path relative to the assets root, because
+                    // the library ships with the project; a file an artist points at outside the project
+                    // carries an absolute one. Joining a relative path to the root is the whole difference,
+                    // and doing it here means it happens exactly once.
+                    const std::filesystem::path named( path );
+                    const std::filesystem::path full =
+                         named.is_absolute() ? named
+                                             : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+
+                    auto a = mgr.FindByPath<Assets::CloudTypeAsset>( full );
                     if ( !a )
-                        a = m.CreateAsset<Assets::CloudNoiseVolumeAsset>( Assets::AssetPriority::Medium, path );
+                        a = m.CreateAsset<Assets::CloudTypeAsset>( Assets::AssetPriority::Medium, full );
                     if ( !a )
                         return 0;
                     if ( !a->IsReadyForUse() && !a->Load() )
                         return 0;
-                    if ( const auto uploaded = Runtime::ResourceRegistry::GetCloudNoiseService()->Register( a );
-                         !uploaded )
-                        LOG_ERROR( "[Clouds] Noise volume '{}' named by the scene could not be uploaded: {}", path,
-                                   uploaded.GetError() );
+                    if ( const auto registered = Runtime::ResourceRegistry::GetCloudTypeService()->Register( a );
+                         !registered )
+                        LOG_ERROR( "[Clouds] Cloud type '{}' named by the scene could not be registered: {}",
+                                   full.string(), registered.GetError() );
                     return static_cast<uint64_t>( a->GetMetadata().Handle );
                 }
                 if ( type == "FontAsset" )

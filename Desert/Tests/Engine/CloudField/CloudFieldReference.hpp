@@ -30,6 +30,7 @@
 // so `what the generator writes` and `what the shader reads` can be compared directly, which is the one
 // relation a table nobody can inspect on the GPU would otherwise never be checked on.
 
+#include <Engine/Assets/CloudTypeData.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
 
 #include <glm/glm.hpp>
@@ -122,28 +123,25 @@ namespace Desert::Tests::CloudFieldRef
         // The profile table, exactly as the device would see it
         // ------------------------------------------------------------------------------------------
 
-        // Which species the bound table describes. A test that wants another species calls
+        // Which cloud type the bound table describes. A test that wants another one calls
         // CloudProfileTableSelect and the next read comes from the new table — the same thing the renderer
-        // does when the artist changes the combo box, and the same single source (CloudBuildProfileTable).
+        // does when the artist drops a different `.decloudtype` into the slot, and the same single source
+        // (CloudBuildProfileTable).
         struct ProfileTableState
         {
-            Desert::Graphic::CloudSpecies Species = Desert::Graphic::CloudSpecies::CumulusCongestus;
-            std::vector<float>            Texels;
+            std::vector<float> Texels;
         };
 
         ProfileTableState& ProfileTable()
         {
             static ProfileTableState state{
-                 Desert::Graphic::CloudSpecies::CumulusCongestus,
-                 Desert::Graphic::CloudBuildProfileTable( Desert::Graphic::CloudSpecies::CumulusCongestus ) };
+                 Desert::Graphic::CloudBuildProfileTable( Desert::Assets::CloudTypeDefaultShape() ) };
             return state;
         }
 
-        void CloudProfileTableSelect( Desert::Graphic::CloudSpecies species )
+        void CloudProfileTableSelect( const Desert::Graphic::CloudTypeShape& shape )
         {
-            ProfileTableState& state = ProfileTable();
-            state.Species            = species;
-            state.Texels             = Desert::Graphic::CloudBuildProfileTable( species );
+            ProfileTable().Texels = Desert::Graphic::CloudBuildProfileTable( shape );
         }
 
         // A bilinear, REPEAT-wrapped fetch — the filter and the address mode VulkanImage2D creates for

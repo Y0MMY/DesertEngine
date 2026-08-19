@@ -28,11 +28,14 @@ namespace Desert::Core
     //   4             - a cloud layer names a SPECIES. The scalar cloud type, its variance and the two
     //                   fields that stated the shell by hand are gone: the species carries its altitudes
     //                   and the shell is computed from them
+    //   5             - the species is an ASSET. The enumerator becomes a handle to a `.decloudtype`, and
+    //                   the layer's own noise-volume slot moves into that type
     inline constexpr int kSceneVersionSky          = 1;
     inline constexpr int kSceneVersionTonemap      = 2;
     inline constexpr int kSceneVersionCloudNoise   = 3;
     inline constexpr int kSceneVersionCloudSpecies = 4;
-    inline constexpr int kSceneVersion             = kSceneVersionCloudSpecies;
+    inline constexpr int kSceneVersionCloudType    = 5;
+    inline constexpr int kSceneVersion             = kSceneVersionCloudType;
 
     // World-unit generation of a .desce file. Absent (or 0) means the scene was authored when one world
     // unit was one METRE; today a unit is a CENTIMETRE (Common/Core/Units.hpp), so such a scene is scaled
@@ -239,6 +242,45 @@ namespace Desert::Core
     // SHELF LIFE: this raises v3 to v4 and nothing else. It is deleted once no v3 file remains.
     CloudSpeciesMigrationReport MigrateCloudSpeciesV3ToV4( std::vector<Assets::EntityData>& entities );
 
+    // What MigrateCloudTypeV4ToV5 did to one file.
+    struct CloudTypeMigrationReport
+    {
+        int Entities     = 0; // entities carrying a "VolumetricCloud" payload that was touched
+        int TypesSet     = 0; // entities whose "Species" enumerator became a "CloudType" asset handle
+        int VolumesLost  = 0; // entities that named a noise volume the component no longer carries
+        int FieldsBroken = 0; // "Species" values that were not a usable integer - the layer keeps default
+    };
+
+    // Raises a scene from schema v4 to v5: the kind of cloud a layer is made of stopped being an
+    // enumerator compiled into the engine and became an ASSET an artist can author, name and ship.
+    //
+    // WHAT IS CARRIED, AND WHY IT IS EXACT RATHER THAN APPROXIMATE. The four enumerators of
+    // the deleted Graphic::CloudSpecies - stratus, cumulus mediocris, cumulus congestus, cumulonimbus -
+    // ship as four files under Resources/Assets/Clouds/Types carrying the SAME twelve numbers T0 compiled
+    // in. So the migration is a rename, not a reinterpretation: what it writes is the PATH of that file,
+    // relative to the assets root, which is the form Core::MakeAssetResolver reads an asset field back
+    // from — and it is composed from Assets::CloudTypeAssetRelativePath rather than spelt out, so this
+    // function stays pure and cannot disagree with the directory the preloader scans.
+    // Desert/Tests/Engine/CloudType asserts that the four files hold T0's numbers. A scene therefore comes
+    // out of this migration rendering the sky it went in with.
+    //
+    // WHAT IS DROPPED. "NoiseVolume" - the layer's own slot for the 3D noise. It moved onto the cloud TYPE,
+    // because the character of a cloud's edge is a property of the kind of cloud rather than of the weather
+    // it is having, and the component must not keep a second copy (§4.2). A scene that named one cannot be
+    // carried automatically: the handle it holds identifies a `.dcnv`, and turning that into a NEW cloud
+    // type file would mean this function writing to disk, which the contract's "migration is a pure
+    // function" forbids for good reason. Every such entity is COUNTED and named in the loader's log so the
+    // artist is told which layer to re-point, rather than finding out from a sky that lost its edge. No
+    // scene in this repository carries one, which is what makes the loud drop affordable.
+    //
+    // PURE - no GPU, no filesystem, no global state. The counters go back to the loader, which is the one
+    // that knows which file this was.
+    //
+    // Idempotent: a payload with neither key is left byte-identical and reports zero.
+    //
+    // SHELF LIFE: this raises v4 to v5 and nothing else. It is deleted once no v4 file remains.
+    CloudTypeMigrationReport MigrateCloudTypeV4ToV5( std::vector<Assets::EntityData>& entities );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -252,10 +294,13 @@ namespace Desert::Core
         CloudNoiseMigrationReport CloudNoise;
         bool                        CloudSpeciesRaised = false; // the schema was below kSceneVersionCloudSpecies
         CloudSpeciesMigrationReport CloudSpecies;
+        bool                        CloudTypeRaised = false; // the schema was below kSceneVersionCloudType
+        CloudTypeMigrationReport    CloudType;
 
         bool Changed() const
         {
-            return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised;
+            return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
+                   CloudTypeRaised;
         }
     };
 

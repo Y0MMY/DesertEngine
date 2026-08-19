@@ -26,9 +26,14 @@ namespace Desert::Assets
         void PreloadMeshes();
         void PreloadSkyboxes();
         void PreloadShaders();
-        // Cloud noise volumes (`.dcnv`). Scanned so the component's slot can offer them by name and so a
-        // scene that names one finds it already loaded; no GPU work happens here, the renderer uploads.
+        // Cloud noise volumes (`.dcnv`). Scanned so the type asset's slot can offer them by name and so a
+        // type that names one finds it already loaded; no GPU work happens here, the renderer uploads.
         void PreloadCloudNoiseVolumes();
+        // Cloud types (`.decloudtype`). MUST run after PreloadCloudNoiseVolumes: a type names its noise
+        // volume by path and binds it in ResolveDependencies, which the AssetManager calls the moment the
+        // type is created — a volume that is not in the manager yet resolves to nothing and the type
+        // renders with the default edge instead of its own.
+        void PreloadCloudTypes();
 
     private:
         std::weak_ptr<AssetManager> m_AssetManager;

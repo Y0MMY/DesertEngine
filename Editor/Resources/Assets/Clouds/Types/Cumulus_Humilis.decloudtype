@@ -1,0 +1,19 @@
+{
+    "FormatVersion": 1,
+    "DisplayName": "Cumulus humilis",
+    "Notes": "Fair-weather cumulus in its flattest form: wider than it is tall, the top barely 400 m above a base on the condensation level. It differs from mediocris in the one number that matters - it stops growing.",
+    "Shape": {
+        "BaseAltitudeKm": 0.9,
+        "TopAltitudeKm": 1.3,
+        "EdgeTopFraction": 0.7,
+        "BaseRampFraction": 0.08,
+        "TopTaper": 0.45,
+        "AnvilAltitudeKm": 0.0,
+        "AnvilThicknessKm": 0.0,
+        "AnvilStrength": 0.0,
+        "DetailCharacter": 0.8,
+        "DetailFactor": 0.85,
+        "DensityFactor": 0.8,
+        "ExtinctionFactor": 0.9
+    }
+}
