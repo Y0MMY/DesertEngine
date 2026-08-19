@@ -128,10 +128,26 @@ namespace Desert::Graphic
      * Unreal's VolumetricRenderTarget sub-pixel walk, mode 0.
      *
      * Four frames cover the four half-resolution pixels of one quarter-resolution texel, in the order
-     * {0, 2, 3, 1} rather than {0, 1, 2, 3}: consecutive frames land DIAGONALLY opposite each other, so
-     * the two frames a viewer's eye fuses most strongly are the two that sample the most different part
-     * of the block. A raster order would spend two frames on the top row before touching the bottom one,
-     * which reads as a horizontal crawl at exactly the frequency the eye is best at seeing.
+     * {0, 2, 3, 1} rather than {0, 1, 2, 3}.
+     *
+     * WHY THAT ORDER. It is the 2x2 BAYER MATRIX read row by row — [[0, 2], [3, 1]] — so the four frames
+     * visit the block in the ordered-dithering sequence rather than in raster order. Epic's own name for
+     * the table says exactly this and is the only justification Epic gives: VolumetricRenderTarget.cpp:308
+     * declares it as `OrderDithering2x2`, and the neighbouring branch at :314 carries
+     * {0,8,2,10, 12,4,14,6, 3,11,1,9, 15,7,13,5} — the canonical 4x4 Bayer matrix — for its own
+     * downsample factor. One family of tables, one rule, two sizes.
+     *
+     * A raster order would spend two consecutive frames on the top row before touching the bottom one,
+     * which reads as a horizontal crawl at exactly the frequency the eye is best at seeing; the Bayer
+     * order is the standard answer to that and spreads each successive sample as far as it can from the
+     * ones already taken.
+     *
+     * (The comment this replaces claimed the order puts consecutive frames DIAGONALLY opposite each
+     * other. It does not, and no order could: unrolled through the formula below the walk is
+     * (0,0) -> (0,1) -> (1,1) -> (1,0) -> (0,0), which is the four SIDES of the square, and a diagonal
+     * 4-cycle on a 2x2 block does not exist at all because the two diagonals are disjoint pairs. The
+     * table was right and its stated reason was not, which is worse than no reason — the reason is what
+     * the next person will decide by.)
      *
      * Pure and constexpr, so it can be evaluated where it is needed rather than cached into a member
      * that can disagree with the frame counter beside it.
@@ -201,6 +217,55 @@ namespace Desert::Graphic
     // One world unit is one centimetre (Common::Units), so a kilometre is 100 000 of them. Mirrored by
     // CLOUD_WORLD_UNITS_PER_KM in Common/CloudGeometry.glslh.
     inline constexpr float kCloudWorldUnitsPerKm = 100000.0f;
+
+    /**
+     * The near-camera fade's interval, in kilometres and in the order the shader consumes it.
+     *
+     * WHY THIS IS A PAIR AND NOT TWO NUMBERS. The march evaluates `smoothstep(start, end, t)`, and GLSL
+     * leaves smoothstep UNDEFINED when start >= end: at start > end the ratio is negative before the
+     * clamp on some implementations and not on others, and at start == end it is a division by zero.
+     * Repairing each field on its own — which is what every other line of the packer does, and correctly
+     * — cannot reach this, because both `Start = 5 km` and `End = 1 km` are individually legal, inside
+     * their own sliders, and one edit apart in the Details panel. The RELATION is the thing that has to
+     * be repaired, so it is repaired once, here, where the component becomes bytes.
+     *
+     * WHAT A CONTRADICTORY PAIR MEANS: nothing, so it is answered with OFF rather than with a guess. An
+     * interval whose end does not lie past its start is not a fade over some other interval — reordering
+     * the two, or nudging the end past the start, would put a distance nobody authored into a frame
+     * nobody can explain, and that is the failure mode this programme has paid for most often. OFF is
+     * also the shipped state: both fields default to zero, so the disabled interval is the one every
+     * scene already carries.
+     *
+     * The shader's gate (`u_CloudFade.z > 0`) is exactly equivalent to `end > start` under this
+     * guarantee, because the only pair with a zero end this returns is the pair with a zero start.
+     */
+    struct CloudNearFadeKm
+    {
+        float StartKm;
+        float EndKm;
+    };
+
+    inline constexpr CloudNearFadeKm CloudResolveNearFade( float startWorld, float endWorld )
+    {
+        const float startKm = ( startWorld > 0.0f ? startWorld : 0.0f ) / kCloudWorldUnitsPerKm;
+        const float endKm   = ( endWorld > 0.0f ? endWorld : 0.0f ) / kCloudWorldUnitsPerKm;
+
+        if ( !( endKm > startKm ) )
+            return CloudNearFadeKm{ 0.0f, 0.0f };
+
+        return CloudNearFadeKm{ startKm, endKm };
+    }
+
+    // OFF is a fixed point: feeding the disabled pair back in leaves it disabled, so a scene that has been
+    // through the packer once cannot acquire a fade by being saved and loaded.
+    static_assert( CloudResolveNearFade( 0.0f, 0.0f ).EndKm == 0.0f );
+    // The contradiction the review found, and the one the sliders make reachable in a single edit.
+    static_assert( CloudResolveNearFade( 500000.0f, 100000.0f ).EndKm == 0.0f );
+    // A degenerate interval of zero width is a division by zero in the shader, not a fade of zero length.
+    static_assert( CloudResolveNearFade( 100000.0f, 100000.0f ).EndKm == 0.0f );
+    // And a legal pair survives untouched, in kilometres.
+    static_assert( CloudResolveNearFade( 100000.0f, 500000.0f ).StartKm == 1.0f );
+    static_assert( CloudResolveNearFade( 100000.0f, 500000.0f ).EndKm == 5.0f );
 
     /**
      * Fill the GPU block from the component, the atmosphere and this frame's accumulated wind offset.
@@ -297,10 +362,15 @@ namespace Desert::Graphic
         // is CORRECT at ninety kilometres and it correctly erases a cloud on the horizon; whether a sky is
         // wanted to look that way is an art decision, so it gets a dial rather than an argument. Zero fade
         // distance means "apply it in full from the camera", which is UE's default and the physical answer.
+        //
+        // The near fade is repaired as a PAIR — see CloudResolveNearFade — because its two fields feed a
+        // smoothstep and GLSL leaves that undefined unless the second is strictly past the first.
+        const CloudNearFadeKm nearFade =
+             CloudResolveNearFade( data.NearFadeStartDistance, data.NearFadeEndDistance );
+
         p.Fade = glm::vec4( std::max( data.AerialPerspectiveStartDistance, 0.0f ) / kCloudWorldUnitsPerKm,
                             std::max( data.AerialPerspectiveFadeDistance, 0.0f ) / kCloudWorldUnitsPerKm,
-                            std::max( data.NearFadeEndDistance, 0.0f ) / kCloudWorldUnitsPerKm,
-                            std::max( data.NearFadeStartDistance, 0.0f ) / kCloudWorldUnitsPerKm );
+                            nearFade.EndKm, nearFade.StartKm );
         return p;
     }
 

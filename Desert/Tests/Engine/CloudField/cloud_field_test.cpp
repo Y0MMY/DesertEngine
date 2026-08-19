@@ -37,7 +37,7 @@ namespace
     CloudFieldParams DefaultParams()
     {
         CloudFieldParams params;
-        params.WeatherTileKm     = 8.0f;  // Weather Tile Size 800 000 cm
+        params.WeatherTileKm     = 12.0f; // Weather Tile Size 1 200 000 cm
         params.Coverage          = 0.25f; // Coverage
         params.CoverageContrast  = 1.0f;  // Coverage Contrast
         params.CloudType         = 0.6f;  // Cloud Type
@@ -273,16 +273,16 @@ TEST( CloudFieldCoverage, TheUsefulBandIsTheOneTheComponentsDefaultSitsIn )
     // the component's own documentation assume it is. A change that moves the whole mapping without
     // anybody noticing is exactly how a sky ends up "needing retuning" in every scene at once.
     //
-    // MEASURED HERE (1024 columns, 36 heights, contrast 1, layer and seeds as shipped):
+    // MEASURED HERE, and re-measured when the weather tile moved onto the calibrated 12 km
+    // (32 columns, 36 heights, contrast 1, layer and seeds as shipped) — the row this test prints:
     //
     //     Coverage    0.05   0.10   0.12   0.20   0.30   0.50
-    //     touched      60%    78%    85%    96%    99%   100%
-    //     opaque        3%    10%    15%    44%    81%   100%
+    //     opaque        0%     1%     4%    20%    58%    98%
     //
-    // THE COMPONENT'S OWN TABLE IS NEITHER OF THESE. It reads 32/69/90/99/100 at 0.10/0.20/0.30/0.40/0.50
-    // — between the two rows above and matching neither, so whatever it counted is not recorded and
-    // cannot be reproduced. What is reproducible is the pair measured here, and it is pinned so that the
-    // NEXT change to the geometry or the noise moves a number in a test rather than in somebody's memory.
+    // The tile size moves these figures without moving the mapping: the coverage field is periodic in the
+    // tile and the grid spans one period of it, so the population is the same one — what changes is the
+    // phase of the EROSION field against it, which is what shifts the opaque column by a couple of points.
+    // The row before the tile changed was 0 / 1 / 2 / 20 / 63 / 99, inside these same tolerances.
     //
     // The qualitative claim the default rests on does survive: the slider does its work between about
     // 0.05 and 0.30 and is saturated well before its top, so the advice to stay low is right even though
@@ -293,7 +293,7 @@ TEST( CloudFieldCoverage, TheUsefulBandIsTheOneTheComponentsDefaultSitsIn )
 
     const SkyCover atFive   = MeasureSkyCover( 0.05f, kColumns, kHeights );
     const SkyCover atTen    = MeasureSkyCover( 0.10f, kColumns, kHeights );
-    const SkyCover atTwelve = MeasureSkyCover( 0.12f, kColumns, kHeights ); // the component's default
+    const SkyCover atTwelve = MeasureSkyCover( 0.12f, kColumns, kHeights ); // low in the useful band
     const SkyCover atTwenty = MeasureSkyCover( 0.20f, kColumns, kHeights );
     const SkyCover atThirty = MeasureSkyCover( 0.30f, kColumns, kHeights );
     const SkyCover atFifty  = MeasureSkyCover( 0.50f, kColumns, kHeights );
@@ -302,7 +302,7 @@ TEST( CloudFieldCoverage, TheUsefulBandIsTheOneTheComponentsDefaultSitsIn )
                  "0.30 %.0f%%  0.50 %.0f%%\n",
                  atFive.Opaque * 100.0f, atTen.Opaque * 100.0f, atTwelve.Opaque * 100.0f, atTwenty.Opaque * 100.0f,
                  atThirty.Opaque * 100.0f, atFifty.Opaque * 100.0f );
-    std::printf( "[CloudField] at the default the sky is %.0f%% TOUCHED by cloud and %.0f%% hidden by it\n",
+    std::printf( "[CloudField] at Coverage 0.12 the sky is %.0f%% TOUCHED by cloud and %.0f%% hidden by it\n",
                  atTwelve.Touched * 100.0f, atTwelve.Opaque * 100.0f );
 
     // The pinned table, with a tolerance of ten points of sky — a reseed moves individual clouds and not

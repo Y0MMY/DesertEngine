@@ -9,6 +9,9 @@
 
 #include <Common/Core/Units.hpp>
 
+// The cloud packer, for the near-fade relation below: the component's fields are only half of that
+// story, and the half that can be undefined behaviour is the one on the GPU side of PackCloudParams.
+#include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionTypes.hpp>
 
@@ -512,7 +515,8 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "LayerBottomAltitude" ), 500000.0f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "LayerThickness" ), 1000000.0f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PlanetRadius" ), 6360.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MaxViewDistance" ), 5000000.0f );
+    // 60 km, half of the calibrated pair; the relation the pair exists for is asserted separately below.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MaxViewDistance" ), 6000000.0f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartDistance" ), 0.0f );
 
     // Weather: the coverage default is a MEASURED point inside the slider's useful band, not a taste.
@@ -522,7 +526,8 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     // NON-ZERO ON PURPOSE: at zero every cloud in the layer reaches the same altitude, because the
     // vertical profile is then the same function everywhere, and the layer reads as a slab with a lid.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CloudTypeVariance" ), 0.4f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "WeatherTileSize" ), 800000.0f );
+    // 12 km, the other half of the calibrated pair.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "WeatherTileSize" ), 1200000.0f );
     EXPECT_EQ( DefaultOf<int32_t>( cloud, "WeatherSeed" ), 1337 );
     EXPECT_EQ( DefaultOf<int32_t>( cloud, "WeatherOctaves" ), 3 );
 
@@ -574,6 +579,127 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     // Animation: 30 m/s along +X.
     EXPECT_EQ( DefaultOf<glm::vec3>( cloud, "WindDirection" ), glm::vec3( 1.0f, 0.0f, 0.0f ) );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "WindSpeed" ), 3000.0f );
+}
+
+// A RELATION BETWEEN TWO DEFAULTS, and the one that Docs/Clouds/CALIBRATION.md section 4 was written
+// about. Neither number is wrong on its own — 50 km of view distance is a perfectly ordinary setting and
+// so is an 8 km weather tile — and that is exactly why this needs a test rather than two pinned values.
+//
+// THE QUANTITY THAT HAS TO BE BOUNDED IS THE NUMBER OF TILE REPEATS TO THE HORIZON: MaxViewDistance
+// divided by WeatherTileSize. The coverage field is periodic with a period of one tile, so a ray bundle
+// running out to the view distance crosses that many copies of the same field, and copies seen end-on
+// toward the vanishing point read as streaks radiating from it. That is the radial moire section 4
+// records, and the arithmetic reproduces its two data points exactly: the frame that showed the defect
+// was 150 km against an 8 km tile — 18.75 repeats, which the document rounds to "about twenty times" —
+// and the pair that cured it was 60 km against 12 km, five repeats.
+//
+// The ceiling is therefore the calibrated pair's own value and not a margin invented here. Five is the
+// largest repeat count that has ever been LOOKED at and found clean.
+TEST( VolumetricCloudReflection, TheWeatherTileRepeatsNoMoreOftenToTheHorizonThanTheCalibratedSkyDid )
+{
+    const TypeInfo& cloud = Type( "VolumetricCloudData" );
+
+    constexpr float kCalibratedRepeats = 5.0f;
+
+    const float viewDistance = DefaultOf<float>( cloud, "MaxViewDistance" );
+    const float tileSize     = DefaultOf<float>( cloud, "WeatherTileSize" );
+
+    ASSERT_GT( tileSize, 0.0f ) << "a tile of zero size makes the repeat count infinite";
+
+    const float repeats = viewDistance / tileSize;
+
+    EXPECT_LE( repeats, kCalibratedRepeats )
+         << "the coverage field repeats " << repeats << " times between the camera and the vanishing point, "
+         << "against the " << kCalibratedRepeats << " of the sky the calibration was measured on "
+         << "(Docs/Clouds/CALIBRATION.md section 4). A new scene created from these defaults starts FURTHER "
+         << "from the calibration than the scene the calibration was performed on.";
+
+    // The other end. A tile so large relative to the view distance that the field never repeats at all is
+    // not a moire problem, but it is the OTHER failure this pair produces — one cloud cell wider than the
+    // whole visible field, which is how the zenith came out empty. One repeat is the floor.
+    EXPECT_GE( repeats, 1.0f ) << "the visible field is smaller than one period of the coverage noise, so "
+                                  "the whole sky is a single cell of it";
+}
+
+// THE NEAR FADE IS ONE SETTING SPELT WITH TWO FIELDS, and this is the relation between them.
+//
+// The march evaluates smoothstep(Start, End, t). GLSL leaves smoothstep UNDEFINED when Start >= End: past
+// it the ratio is negative before the clamp on some implementations and not on others, and at equality it
+// is a division by zero. Every OTHER repair in the packer is per-field and correct, and none of them can
+// reach this, because Start = 5 km and End = 1 km are each inside their own slider and one edit apart in
+// the Details panel.
+//
+// What is asserted is the RELATION on the packed block rather than the two numbers: whatever the artist
+// authored, the pair that reaches the GPU either describes a real interval (End strictly past Start) or
+// is switched off. Driving Graphic::PackCloudParams itself rather than the helper, because the block is
+// what the shader reads and the .z/.w swap between the component and the payload is part of what could
+// go wrong.
+TEST( VolumetricCloudPayload, TheNearFadeReachesTheGpuAsAnIntervalOrNotAtAll )
+{
+    const Desert::Graphic::AtmosphereEnv atmosphere{};
+
+    // Every combination of an authored Start and an authored End over the sliders' own range, including
+    // the illegal orderings and the negatives a hand-edited scene file can carry.
+    for ( const float startWorld : { -100000.0f, 0.0f, 1.0f, 50000.0f, 500000.0f, 2000000.0f } )
+    {
+        for ( const float endWorld : { -100000.0f, 0.0f, 1.0f, 50000.0f, 500000.0f, 2000000.0f } )
+        {
+            Desert::ECS::VolumetricCloudData data;
+            data.NearFadeStartDistance = startWorld;
+            data.NearFadeEndDistance   = endWorld;
+
+            const Desert::Graphic::CloudGpuPayload payload =
+                 Desert::Graphic::PackCloudParams( data, atmosphere, glm::vec3( 0.0f ) );
+
+            const float endKm   = payload.Fade.z;
+            const float startKm = payload.Fade.w;
+
+            const bool off      = endKm == 0.0f && startKm == 0.0f;
+            const bool interval = endKm > startKm;
+
+            EXPECT_TRUE( off || interval ) << "Start " << startWorld << " cm, End " << endWorld
+                                           << " cm packed to start " << startKm << " km, end " << endKm
+                                           << " km — smoothstep(start, end, t) is undefined in GLSL unless "
+                                              "end is strictly past start";
+
+            // The gate the shader actually uses is `end > 0`, so "off" and "no interval" have to be the
+            // SAME state or the gate lets a degenerate pair through.
+            EXPECT_EQ( endKm > 0.0f, interval )
+                 << "Start " << startWorld << " cm, End " << endWorld
+                 << " cm: the shader's gate disagrees with whether there is an interval";
+
+            // Neither end may be negative — a fade that begins behind the camera is not a fade.
+            EXPECT_GE( startKm, 0.0f );
+            EXPECT_GE( endKm, 0.0f );
+        }
+    }
+}
+
+TEST( VolumetricCloudPayload, ALegalNearFadeSurvivesThePackerUnchangedAndInKilometres )
+{
+    // The other half of the relation: switching a contradictory pair off must not be achieved by
+    // switching every pair off. A legal interval arrives as itself, converted once, in the .z/.w order
+    // the block documents.
+    const Desert::Graphic::AtmosphereEnv atmosphere{};
+
+    Desert::ECS::VolumetricCloudData data;
+    data.NearFadeStartDistance = 100000.0f; // 1 km
+    data.NearFadeEndDistance   = 500000.0f; // 5 km
+
+    const Desert::Graphic::CloudGpuPayload payload =
+         Desert::Graphic::PackCloudParams( data, atmosphere, glm::vec3( 0.0f ) );
+
+    EXPECT_FLOAT_EQ( payload.Fade.w, 1.0f );
+    EXPECT_FLOAT_EQ( payload.Fade.z, 5.0f );
+
+    // And a start of zero is a legal fade rather than an off one: it is UE's own default reading of
+    // "apply it in full from the camera".
+    data.NearFadeStartDistance = 0.0f;
+    const Desert::Graphic::CloudGpuPayload fromCamera =
+         Desert::Graphic::PackCloudParams( data, atmosphere, glm::vec3( 0.0f ) );
+
+    EXPECT_FLOAT_EQ( fromCamera.Fade.w, 0.0f );
+    EXPECT_FLOAT_EQ( fromCamera.Fade.z, 5.0f );
 }
 
 TEST( VolumetricCloudReflection, EveryDefaultLiesInsideItsOwnRange )

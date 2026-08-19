@@ -185,4 +185,44 @@ float CloudStepCount( float segmentLengthKm, float minCount, float maxCount, flo
     return max( minCount, maxCount * t );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// THE TWO-TIER SCHEDULE. These two numbers are the whole of it, and they are HERE rather than in the
+// march because they are the classic pair that has to agree and that nothing checks: they lived as two
+// literals inside CloudRaymarch.shader, which is not compiled as C++ and therefore could not be tested
+// at all. Moved into this header they are driven by Desert/Tests/Engine/CloudGeometry, which asserts the
+// RELATION below rather than the two values.
+//
+// The march spends the coarse step only where the answer is exactly zero — outside cloud, where any step
+// size gives it correctly — and the fine step everywhere the medium has something in it. On the first
+// coarse sample that finds material it steps BACK one coarse step and drops to fine, so the material
+// between the last two coarse samples is not skipped; it climbs back out after
+// CLOUD_EMPTY_FINE_SAMPLES_BEFORE_COARSE consecutive fine samples that find nothing.
+//
+// THE RELATION THAT HOLDS THE WHOLE THING UP: the number of empty fine samples must EXCEED the coarse
+// multiplier. One excursion into the fine tier costs one coarse step backwards and buys that many fine
+// steps forwards, so the net advance per cycle is (samples - multiplier) fine steps. At equality the
+// march stands exactly still; below it, it walks backwards. Either way it burns its entire step budget
+// without moving, and the symptom is not a wrong picture but a frame that costs its ceiling everywhere.
+// ---------------------------------------------------------------------------------------------------
+
+// How much longer the coarse step is than the fine one.
+#define CLOUD_COARSE_STEP_MULTIPLIER 4.0f
+
+// Consecutive fine samples with no profile after which the march returns to the coarse tier.
+#define CLOUD_EMPTY_FINE_SAMPLES_BEFORE_COARSE 6
+
+float CloudCoarseStepKm( float fineStepKm )
+{
+    return fineStepKm * CLOUD_COARSE_STEP_MULTIPLIER;
+}
+
+// The distance the march advances over one complete excursion into the fine tier that finds nothing:
+// one coarse step back, then a full run of fine steps before the tier flips again. It is the quantity
+// the two constants above exist to keep POSITIVE, and it is a function so that the test drives the
+// arithmetic the march performs rather than restating it.
+float CloudTwoTierCycleAdvanceKm( float fineStepKm )
+{
+    return float( CLOUD_EMPTY_FINE_SAMPLES_BEFORE_COARSE ) * fineStepKm - CloudCoarseStepKm( fineStepKm );
+}
+
 #endif // CLOUD_GEOMETRY_GLSLH
