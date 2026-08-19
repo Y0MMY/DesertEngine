@@ -4,7 +4,6 @@
 #include <glm/glm.hpp>
 
 #include <Engine/Assets/Common.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
 #include <Engine/Reflection/ReflectionMacros.hpp>
 
 #include <cstdint>
@@ -23,26 +22,32 @@ namespace Desert::ECS
     // subtraction (p.120).
     //
     // EVERY FIELD BELOW IS READ, and it reaches the GPU by one of two routes rather than one. Every scalar
-    // is packed into Graphic::CloudGpuPayload — TWELVE vec4s, that is 48 floats and 192 bytes, with no
-    // padding and no reserved slot. The one field that is not a scalar is NoiseVolume, which names an
-    // asset: Graphic::System::VolumetricCloudRenderer resolves the handle, uploads the container's voxels
-    // into an Image3D and binds it. Either way each field has a named consumer, and
-    // Desert/Tests/Engine/SettingConsumers names it. The contract forbids a knob that moves nothing, and
-    // this component is where that is easiest to get wrong, because a cloud parameter that does nothing
-    // still LOOKS like it does when the sky is already busy.
+    // is packed into Graphic::CloudGpuPayload — eleven vec4s and a vec3, with no padding and no reserved
+    // slot. The one field that is not a scalar is CloudType, which names an asset:
+    // Graphic::System::VolumetricCloudRenderer resolves the handle through Runtime::CloudTypeService and
+    // gets back the twelve numbers the profile table is generated from AND the noise volume that type's
+    // edge is cut from. Either way each field has a named consumer, and Desert/Tests/Engine/SettingConsumers
+    // names it. The contract forbids a knob that moves nothing, and this component is where that is easiest
+    // to get wrong, because a cloud parameter that does nothing still LOOKS like it does when the sky is
+    // already busy.
     //
     // UNITS. Distances are world units — centimetres (Length) — and are converted to kilometres exactly
     // once, in Graphic::PackCloudParams. The planet radius is the one exception and is authored in
     // kilometres, because 6360 km is 636 000 000 cm and no slider is useful at that scale; UE authors it
     // in kilometres for the same reason.
     //
-    // ALTITUDES ARE ANCHORED TO METEOROLOGY, not to a relation, and they are NOT AUTHORED HERE. A species
-    // carries its own base and top in kilometres (Graphic::CloudSpeciesShapeOf), and the shell the march
-    // intersects is COMPUTED from them by Graphic::PackCloudParams. The two fields that used to state it —
-    // Layer Bottom Altitude and Layer Thickness — are gone, and their removal is the point rather than a
-    // tidy-up: an envelope and a species' altitudes are two numbers obliged to agree, which is the exact
-    // class of defect §2.3.1 of the contract is about. Nothing that has to agree with the species is left
-    // for a hand to move.
+    // ALTITUDES ARE ANCHORED TO METEOROLOGY, not to a relation, and they are NOT AUTHORED HERE. A cloud
+    // TYPE carries its own base and top in kilometres, and the shell the march intersects is COMPUTED from
+    // them by Graphic::PackCloudParams. The two fields that used to state it — Layer Bottom Altitude and
+    // Layer Thickness — are gone, and their removal is the point rather than a tidy-up: an envelope and a
+    // type's altitudes are two numbers obliged to agree, which is the exact class of defect §2.3.1 of the
+    // contract is about. Nothing that has to agree with the type is left for a hand to move.
+    //
+    // AND THE TYPE ITSELF IS NO LONGER HERE EITHER. T0 put a four-valued Species enum on this component;
+    // T1 replaced it with a handle to a `.decloudtype`, because an enumerator cannot be authored, named,
+    // duplicated or shipped and the whole point of the programme is that an artist makes their own kinds
+    // of cloud. The enum is gone rather than deprecated (§4.1) and the v4 -> v5 scene migration turns each
+    // of its four values into the shipped preset that carries the same numbers.
     struct VolumetricCloudData
     {
         REFLECT()
@@ -54,16 +59,19 @@ namespace Desert::ECS
                            "zero GPU cost, exactly like a scene without the component." ) )
         bool Enabled = true;
 
-        PROPERTY( DisplayName( "Species" ), Category( "Cloud Layer" ), Summary,
-                  Tooltip( "Which kind of cloud this layer is made of. It is not a look-up of presets: the "
-                           "species carries its own base and top in kilometres, its own family of vertical "
-                           "profiles, its own edge character and its own density, and the shell the march "
-                           "intersects is COMPUTED from it. Changing this moves the clouds to the altitude "
-                           "that species actually lives at." ) )
-        // CONGESTUS IS THE DEFAULT because it is what the previous scalar's default of 0.6 described — "a
-        // heaped cloud that fills the layer" — and because it is the species whose family of profiles
-        // varies most across a patch, which is what a new scene should show off rather than hide.
-        Graphic::CloudSpecies Species = Graphic::CloudSpecies::CumulusCongestus;
+        PROPERTY( DisplayName( "Cloud Type" ), Category( "Cloud Layer" ), Summary, Asset<CloudTypeAsset>,
+                  Tooltip( "Which kind of cloud this layer is made of — drag a .decloudtype from the "
+                           "Content Browser or author one in Window > Cloud Type. The type carries its own "
+                           "base and top in kilometres, its own family of vertical profiles, its own edge "
+                           "character and its own density, and the shell the march intersects is COMPUTED "
+                           "from it: changing this moves the clouds to the altitude that kind of cloud "
+                           "actually lives at. Empty uses the engine's built-in cumulus congestus." ) )
+        // AN EMPTY HANDLE IS A DOCUMENTED ANSWER, not a hole: it resolves to Assets::CloudTypeDefaultShape,
+        // which is T0's cumulus congestus digit for digit. A scene nobody has authored a type for still has
+        // to have a sky, and that is a load-bearing requirement of the whole programme rather than a
+        // convenience — it is also why the default here is 0 and not the id of a shipped file, which would
+        // make every scene depend on a file being present.
+        Assets::AssetHandle CloudType;
 
         PROPERTY( DisplayName( "Planet Radius" ), Category( "Cloud Layer" ), Units( "km" ),
                   Range( 100.0f, 7000.0f ), Advanced,
@@ -183,23 +191,15 @@ namespace Desert::ECS
         // MaxViewDistance for what the two of them together decide and for where it was measured.
         float WeatherTileSize = 1200000.0f; // 12 km -> 3 km cells, a cumulus field
 
-        // ---- Noise ----------------------------------------------------------------------------------
-
-        PROPERTY( DisplayName( "Noise Volume" ), Category( "Noise" ), Asset<CloudNoiseVolumeAsset>,
-                  Tooltip( "The 3D noise the shape is built from — drag a .dcnv from the Content Browser or "
-                           "bake one in Window > Cloud Noise Volume. Empty uses the engine's built-in "
-                           "default. Two volumes with different seeds or periods give the same weather a "
-                           "different EDGE, which is the whole reason this is an asset." ) )
-        // THE SEEDS AND OCTAVE COUNTS THAT USED TO SIT HERE ARE GONE, and they are not hidden anywhere:
-        // WeatherSeed, WeatherOctaves, DetailSeed and DetailOctaves described a GPU bake that no longer
-        // exists. They were properties of what the volume CONTAINS, so they moved into the volume — the
-        // container's header stores the seed, the four lattice periods and the curl strength, the panel
-        // authors them, and the generator is the only thing that reads them. Left on the component they
-        // would have been four sliders that rebake nothing, which is the exact shape of dead setting this
-        // programme's contract forbids.
-        Assets::AssetHandle NoiseVolume;
-
         // ---- Detail ---------------------------------------------------------------------------------
+        //
+        // THE NOISE VOLUME SLOT THAT USED TO STAND BETWEEN Weather AND Detail IS GONE FROM HERE, and it
+        // moved rather than disappeared: it is a field of the CLOUD TYPE now. The reason is what the slot
+        // decides — the character of the cloud's edge, wispy against billowy, fine against coarse — and
+        // that is a property of the kind of cloud, not of the weather it is having. A cirrus cut from the
+        // same volume as a cumulonimbus is a cirrus with a cumulonimbus' edge; the shipped Cirrus type
+        // names CloudNoise_FineWisp.dcnv for exactly that reason. Two slots for it, one here and one on
+        // the type, would have been two values that can disagree (§4.2).
 
         PROPERTY( DisplayName( "Detail Tile Size" ), Category( "Detail" ), Length, Range( 20000.0f, 3000000.0f ),
                   Tooltip( "World size over which the erosion field repeats — the scale of the billows "
@@ -207,8 +207,10 @@ namespace Desert::ECS
         float DetailTileSize = 400000.0f; // 4 km
 
         PROPERTY( DisplayName( "Detail Strength" ), Category( "Detail" ), Range( 0.0f, 1.0f ),
-                  Tooltip( "How deeply the erosion cuts. At 0 the cloud keeps the smooth silhouette of "
-                           "its coverage field; at 1 the edge is eaten away into wisps." ) )
+                  Tooltip( "How deeply the erosion cuts, for the LAYER. At 0 the cloud keeps the smooth "
+                           "silhouette of its coverage field; at 1 the edge is eaten away into wisps. The "
+                           "cloud type multiplies this by its own factor, so a lenticular stays smooth and "
+                           "a cirrus stays wispy at whatever the layer is set to." ) )
         // 0.10, DOWN FROM 0.5, and the correction comes from UE's own numbers: its base noise strength
         // is 0.8 and its detail strength is 0.08 — the erosion is an order of magnitude weaker than the
         // shape it cuts into. At 0.5 the erosion was removing most of the layer and leaving a veil, which
@@ -216,13 +218,16 @@ namespace Desert::ECS
         float DetailStrength = 0.1f;
 
         PROPERTY( DisplayName( "Density Scale" ), Category( "Detail" ), Range( 0.0f, 2.0f ),
-                  Tooltip( "Multiplies the eroded density. Below 1 the whole layer thins toward haze; "
-                           "above 1 the thin edges fill in." ) )
+                  Tooltip( "Multiplies the eroded density, for the LAYER. Below 1 the whole layer thins "
+                           "toward haze; above 1 the thin edges fill in. The cloud type multiplies this by "
+                           "how much water that kind of cloud is made of, so 1 keeps meaning \"this type as "
+                           "it is\" whichever type is in the slot." ) )
         float DensityScale = 1.0f;
 
         PROPERTY( DisplayName( "Extinction Scale" ), Category( "Detail" ), Units( "/km" ), Range( 0.5f, 60.0f ),
                   Tooltip( "How strongly the medium absorbs and scatters, per kilometre at full density. "
-                           "This is what makes a cloud opaque rather than merely visible." ) )
+                           "This is what makes a cloud opaque rather than merely visible. The cloud type "
+                           "multiplies it: ice at a quarter of a cumulus, a storm at a third above it." ) )
         // EIGHT, NOT FORTY-FIVE, and the difference is the approximation rather than the physics. A real
         // cumulus extinguishes at roughly 45 per kilometre, at which the optical depth toward the sun is
         // ~25 everywhere inside the body and EVERY scattering order arrives at zero — the cloud renders

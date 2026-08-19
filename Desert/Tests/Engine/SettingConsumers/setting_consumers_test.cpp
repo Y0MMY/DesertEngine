@@ -186,10 +186,15 @@ namespace
     // one. Four rows removed rather than repointed, because there is nothing left for them to point at.
     //
     // And four more since: LayerBottomAltitude and LayerThickness stated the shell by hand, which the
-    // species now states in kilometres and the packer computes; CloudType and CloudTypeVariance drove one
-    // analytic profile curve, which is now a per-species TABLE indexed by the placement pattern's own
-    // value. Every one of the four was removed rather than repointed, and the two fields that took their
-    // place them - Species - is a row above like everything else.
+    // cloud type now states in kilometres and the packer computes; the old scalar CloudType and its
+    // variance drove one analytic profile curve, which is now a per-type TABLE indexed by the placement
+    // pattern's own value. Every one of the four was removed rather than repointed.
+    //
+    // And ONE more with T1: NoiseVolume. It was not removed - it MOVED, onto the cloud type asset, because
+    // the character of a cloud's edge is a property of the kind of cloud rather than of the layer's
+    // weather. There is no row for it here because it is no longer a field of this component; the row that
+    // replaced it is CloudType, and the renderer is what resolves that handle into both the twelve numbers
+    // and the volume.
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kCloudPayload = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp";
@@ -200,11 +205,13 @@ namespace
     constexpr Row kCloudRows[] = {
          { "Enabled", kCloudRenderer }, // the zero-cost gate: off means no allocation and no dispatch
 
-         // Cloud Layer - the shell the march intersects. The species is what the packer BUILDS it from:
-         // its altitudes become Layer.y and Layer.z, its edge character becomes Weather.w and its density
-         // is folded into Detail.z. Two fields that used to state the shell by hand are gone, because an
-         // authored shell and a species' altitudes are two numbers obliged to agree.
-         { "Species", kCloudPayload },
+         // Cloud Layer - the shell the march intersects. The CLOUD TYPE is what the shell is built from,
+         // and unlike every other row here it is resolved rather than packed: the renderer turns the
+         // handle into twelve numbers through Runtime::CloudTypeService, and those numbers become
+         // Layer.y/Layer.z (the shell), Weather.w (the edge) and the three products in March.w, Detail.y
+         // and Detail.z. Two fields that used to state the shell by hand are gone, because an authored
+         // shell and a type's altitudes are two numbers obliged to agree.
+         { "CloudType", kCloudRenderer },
          { "PlanetRadius", kCloudPayload },
          { "MaxViewDistance", kCloudPayload },
          { "TracingStartDistance", kCloudPayload },
@@ -214,9 +221,6 @@ namespace
          { "Coverage", kCloudPayload },
          { "CoverageContrast", kCloudPayload },
          { "WeatherTileSize", kCloudPayload },
-
-         // Noise - the volume itself, resolved by the renderer rather than packed by the packer.
-         { "NoiseVolume", kCloudRenderer },
 
          // Detail - the erosion field.
          { "DetailTileSize", kCloudPayload },

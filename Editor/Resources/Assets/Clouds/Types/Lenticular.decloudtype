@@ -1,0 +1,19 @@
+{
+    "FormatVersion": 1,
+    "DisplayName": "Lenticular (orographic)",
+    "Notes": "The lens that stands still over a mountain. Its signature is what it does NOT have: the base ramp is as long as the top taper, so the section is a symmetric lens rather than a flat-bottomed heap, and the erosion is turned almost off because a smooth surface is the whole point.",
+    "Shape": {
+        "BaseAltitudeKm": 2.6,
+        "TopAltitudeKm": 3.4,
+        "EdgeTopFraction": 0.9,
+        "BaseRampFraction": 0.45,
+        "TopTaper": 0.45,
+        "AnvilAltitudeKm": 0.0,
+        "AnvilThicknessKm": 0.0,
+        "AnvilStrength": 0.0,
+        "DetailCharacter": 0.4,
+        "DetailFactor": 0.15,
+        "DensityFactor": 1.1,
+        "ExtinctionFactor": 1.1
+    }
+}

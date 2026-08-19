@@ -23,7 +23,6 @@
 
 #include <Engine/Core/Serialize/SceneMigration.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
 
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
@@ -42,7 +41,6 @@ using Desert::Core::kSceneVersionCloudSpecies;
 using Desert::Core::MigrateCloudSpeciesV3ToV4;
 using Desert::Core::MigrateScene;
 using Desert::Core::SceneSerialized;
-using Desert::Graphic::CloudSpecies;
 using Desert::Reflection::ReflectionRegistry;
 
 namespace
@@ -125,18 +123,19 @@ TEST( SceneCloudSpeciesMigration, TheScalarPicksTheSpeciesAlongTheAxisItAlreadyR
     // a translation and not a preference — and 0.6, the component's former default, has to land on the
     // species the new default names, or every scene that carried the default changes appearance for no
     // reason its author would recognise.
+    // THE INTEGERS ARE THE LIBRARY'S ORDER, flattest first, and they are spelt as numbers here because
+    // the enumerator they used to name was deleted when the species became an asset (T1). This migration
+    // still writes the OLD key on purpose: v4 -> v5 is what turns it into a handle, and a chain of steps
+    // each gated on its own version integer is the arrangement SceneMigration.hpp argues for.
     struct Case
     {
-        double       Scalar;
-        CloudSpecies Expected;
+        double Scalar;
+        int    Expected;
     };
 
     const Case cases[] = {
-         { 0.0, CloudSpecies::Stratus },           { 0.24, CloudSpecies::Stratus },
-         { 0.25, CloudSpecies::CumulusMediocris }, { 0.45, CloudSpecies::CumulusMediocris },
-         { 0.55, CloudSpecies::CumulusCongestus }, { 0.60, CloudSpecies::CumulusCongestus },
-         { 0.75, CloudSpecies::CumulusCongestus }, { 0.85, CloudSpecies::Cumulonimbus },
-         { 1.0, CloudSpecies::Cumulonimbus },
+         { 0.0, 0 },  { 0.24, 0 }, { 0.25, 1 }, { 0.45, 1 }, { 0.55, 2 },
+         { 0.60, 2 }, { 0.75, 2 }, { 0.85, 3 }, { 1.0, 3 },
     };
 
     for ( const Case& c : cases )
@@ -148,12 +147,14 @@ TEST( SceneCloudSpeciesMigration, TheScalarPicksTheSpeciesAlongTheAxisItAlreadyR
              << "cloud type " << c.Scalar << " chose the wrong species";
     }
 
-    // The default of the component the migration is FOR, stated as its own assertion because it is the
-    // one case where "which species" is decided by something outside this function.
-    Desert::ECS::VolumetricCloudData        fresh;
+    // The old component's own default, stated as its own assertion because it is the one value whose
+    // translation decides whether EVERY scene that never touched the slider changes appearance. 0.6 has to
+    // land on index 2 — cumulus congestus — which is the kind of cloud the built-in default type is made
+    // of; that those two are the same twelve numbers is Desert/Tests/Engine/CloudType's assertion, and
+    // this is the half of the relation that lives on this side of the migration.
     std::vector<Desert::Assets::EntityData> entities{ EntityWithClouds( 0.6 ) };
     MigrateCloudSpeciesV3ToV4( entities );
-    EXPECT_EQ( SpeciesOf( CloudPayloadOf( entities.front() ) ), static_cast<int>( fresh.Species ) )
+    EXPECT_EQ( SpeciesOf( CloudPayloadOf( entities.front() ) ), 2 )
          << "a scene carrying the old default no longer carries the new one";
 }
 
@@ -235,8 +236,7 @@ TEST( SceneCloudSpeciesMigration, ItIsIdempotent )
     EXPECT_EQ( second.SpeciesSet, 0 );
 
     // And the species it wrote the first time is still the one it wrote.
-    EXPECT_EQ( SpeciesOf( CloudPayloadOf( entities.front() ) ),
-               static_cast<int>( CloudSpecies::CumulusCongestus ) );
+    EXPECT_EQ( SpeciesOf( CloudPayloadOf( entities.front() ) ), 2 ); // cumulus congestus
 }
 
 TEST( SceneCloudSpeciesMigration, AnEntityWithNoCloudLayerIsLeftAlone )
@@ -279,7 +279,15 @@ TEST( SceneCloudSpeciesMigration, MigrateSceneRunsItAndStampsTheFileSoItNeverRun
     EXPECT_EQ( report.CloudSpecies.FieldsDropped, 4 );
     EXPECT_TRUE( report.Changed() );
     EXPECT_EQ( scene.SceneVersion.value_or( 0 ), kSceneVersion );
-    EXPECT_EQ( kSceneVersion, kSceneVersionCloudSpecies );
+
+    // AND THE STEP AFTER THIS ONE RAN TOO, on the key this one wrote. The chain is the point: a v3 file
+    // arrives with a scalar, leaves with a `.decloudtype` path, and the species integer exists only in
+    // between. Asserting it here is what keeps the two steps in the right ORDER — reversed, the v4 -> v5
+    // step would find no Species and the scene would silently fall back to the built-in default.
+    EXPECT_TRUE( report.CloudTypeRaised );
+    EXPECT_EQ( report.CloudType.TypesSet, 1 );
+    EXPECT_FALSE( Has( CloudPayloadOf( scene.Entities.front() ), "Species" ) );
+    EXPECT_TRUE( Has( CloudPayloadOf( scene.Entities.front() ), "CloudType" ) );
 
     // Second pass over the stamped tree: nothing left to do.
     const auto again = MigrateScene( scene );
@@ -295,8 +303,11 @@ TEST( SceneCloudSpeciesMigration, TheReflectedComponentNoLongerCarriesWhatTheMig
     const auto* type = ReflectionRegistry::Get().Find( "VolumetricCloudData" );
     ASSERT_NE( type, nullptr );
 
+    // "CloudType" is NOT in this list any more, and its absence is the point: the name came back in T1 as
+    // the ASSET HANDLE that replaced the species enumerator. What must stay gone is the SCALAR, and the
+    // reflected field's type is what says which of the two it is — asserted below.
     for ( const std::string& key : { std::string( "LayerBottomAltitude" ), std::string( "LayerThickness" ),
-                                     std::string( "CloudType" ), std::string( "CloudTypeVariance" ) } )
+                                     std::string( "CloudTypeVariance" ) } )
     {
         const bool present = std::any_of( type->Fields.begin(), type->Fields.end(),
                                           [&key]( const auto& field ) { return field.Name == key; } );
@@ -306,21 +317,30 @@ TEST( SceneCloudSpeciesMigration, TheReflectedComponentNoLongerCarriesWhatTheMig
     }
 }
 
-TEST( SceneCloudSpeciesMigration, TheReflectedComponentCarriesTheSpeciesThatReplacedThem )
+TEST( SceneCloudSpeciesMigration, TheReflectedComponentCarriesTheSlotThatReplacedThem )
 {
     const auto* type = ReflectionRegistry::Get().Find( "VolumetricCloudData" );
     ASSERT_NE( type, nullptr );
 
-    const auto slot = std::find_if( type->Fields.begin(), type->Fields.end(),
-                                    []( const auto& field ) { return field.Name == "Species"; } );
-    ASSERT_NE( slot, type->Fields.end() ) << "the component has no species, so nothing replaced the four "
-                                             "fields the migration deletes";
+    // THE SPECIES ENUMERATOR IS GONE TOO, one version later. This test used to assert that the component
+    // carried a four-valued enum; T1 replaced it with a handle to a `.decloudtype`, because an enumerator
+    // is a kind of cloud nobody can author, name, duplicate or ship — which was the whole request. The
+    // key this migration writes therefore lives for exactly one version, between v3 -> v4 and v4 -> v5.
+    const auto species = std::find_if( type->Fields.begin(), type->Fields.end(),
+                                       []( const auto& field ) { return field.Name == "Species"; } );
+    EXPECT_EQ( species, type->Fields.end() )
+         << "the species is still an enumerator on the component, so the asset did not replace it";
 
-    // It draws as a COMBO and not as a number, which is what an enumerated field buys and the reason the
-    // scalar was not simply renamed: four named species an artist recognises, rather than a slider whose
-    // useful positions have to be remembered.
-    EXPECT_EQ( slot->Type, Desert::Reflection::FieldType::Enum );
-    EXPECT_EQ( slot->EnumValues.size(), Desert::Graphic::kCloudSpeciesCount );
+    const auto slot = std::find_if( type->Fields.begin(), type->Fields.end(),
+                                    []( const auto& field ) { return field.Name == "CloudType"; } );
+    ASSERT_NE( slot, type->Fields.end() ) << "the component has no cloud type, so nothing replaced the "
+                                             "four fields the migration deletes";
+
+    // It draws as an ASSET SLOT and not as a number: an artist drops a file into it, which is what the
+    // whole programme was asked for and what neither a slider nor a combo of four could be.
+    EXPECT_EQ( slot->Type, Desert::Reflection::FieldType::AssetHandle );
+    EXPECT_TRUE( slot->Meta.IsAsset );
+    EXPECT_EQ( slot->Meta.AssetType, "CloudTypeAsset" );
 }
 
 int main( int argc, char** argv )

@@ -89,25 +89,35 @@ namespace Desert::Graphic::System
             m_HistoryGuideImage[i].reset();
         }
         m_ProfileTable.reset();
-        m_ProfileSpecies.reset();
+        m_ProfileType       = Assets::AssetHandle::Null();
+        m_ProfileGeneration = 0;
         m_ParamsBuffer.reset();
         m_ResolveParamsBuffer.reset();
     }
 
     bool VolumetricCloudRenderer::EnsureProfileTable()
     {
-        if ( m_ProfileTable && m_ProfileSpecies.has_value() && m_ProfileSpecies.value() == m_Data.Species )
+        auto* types = Runtime::ResourceRegistry::GetCloudTypeService();
+
+        // TWO REASONS TO REBUILD, AND BOTH ARE ASKED ABOUT. The handle changes when the artist drops a
+        // different type into the slot; the SERVICE GENERATION changes when the file behind the handle
+        // they already chose is edited and hot-reloaded. A cache keyed on the handle alone would show the
+        // old numbers forever after a save, which is the difference between a tool an artist iterates in
+        // and one they restart.
+        const uint32_t generation = types->GetGeneration();
+        if ( m_ProfileTable && m_ProfileType == m_Data.CloudType && m_ProfileGeneration == generation )
             return true;
 
         // A FRESH IMAGE RATHER THAN AN IN-PLACE UPLOAD, which is the same choice CloudNoiseService makes
         // and for the same reason: SetData writes into an image that frames still in flight may be
-        // sampling, and the species changes when an artist touches a combo box — not often enough to be
+        // sampling, and the type changes when an artist touches a combo box — not often enough to be
         // worth the synchronisation argument. The old image goes through Image2D's deletion queue when
         // the last reference drops.
         if ( m_ProfileTable )
             Renderer::GetInstance().WaitDeviceIdle();
 
-        const std::vector<float> texels = CloudBuildProfileTable( m_Data.Species );
+        const CloudTypeShape&    shape  = types->GetShape( m_Data.CloudType );
+        const std::vector<float> texels = CloudBuildProfileTable( shape );
 
         const Core::Formats::Image2DSpecification spec{
              .Tag        = "CloudProfileTable",
@@ -123,20 +133,21 @@ namespace Desert::Graphic::System
         m_ProfileTable = Image2D::Create( spec, nullptr );
         if ( !m_ProfileTable )
         {
-            m_ProfileSpecies.reset();
-            LOG_ERROR( "[Clouds] The {}x{} RGBA32F vertical profile table for species {} could not be "
+            m_ProfileType       = Assets::AssetHandle::Null();
+            m_ProfileGeneration = 0;
+            LOG_ERROR( "[Clouds] The {}x{} RGBA32F vertical profile table for cloud type {} could not be "
                        "created on the device; the clouds will not render for this view.",
                        kCloudProfileTableAltitudeTexels, kCloudProfileTablePatternTexels,
-                       static_cast<uint32_t>( m_Data.Species ) );
+                       static_cast<uint64_t>( m_Data.CloudType ) );
             return false;
         }
 
-        m_ProfileSpecies = m_Data.Species;
+        m_ProfileType       = m_Data.CloudType;
+        m_ProfileGeneration = generation;
 
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( m_Data.Species );
-        LOG_INFO( "[Clouds] Vertical profile table rebuilt for species {} — envelope {:.2f} to {:.2f} km, "
+        LOG_INFO( "[Clouds] Vertical profile table rebuilt for cloud type {} — envelope {:.2f} to {:.2f} km, "
                   "{}x{} RGBA32F ({:.2f} MiB).",
-                  static_cast<uint32_t>( m_Data.Species ), CloudSpeciesBaseKm( shape ), CloudSpeciesTopKm( shape ),
+                  static_cast<uint64_t>( m_Data.CloudType ), CloudTypeBaseKm( shape ), CloudTypeTopKm( shape ),
                   kCloudProfileTableAltitudeTexels, kCloudProfileTablePatternTexels,
                   BytesToMiB( Core::Formats::CalculateImageSize( kCloudProfileTableAltitudeTexels,
                                                                  kCloudProfileTablePatternTexels,
@@ -329,10 +340,16 @@ namespace Desert::Graphic::System
         auto* service = Runtime::ResourceRegistry::GetCloudNoiseService();
 
         // Asked EVERY frame rather than cached behind a "have I got one" flag, because the answer changes
-        // for two independent reasons — the artist picks a different volume, or the file behind the one
-        // they already picked is re-baked and hot-reloaded. A flag would answer neither. The lookup is a
-        // hash-map probe against a handle; it is not worth a cache that can be wrong.
-        Image3D* volume = service->Get( m_Data.NoiseVolume );
+        // for three independent reasons now — the artist picks a different cloud TYPE, the type they
+        // already picked is edited to name a different volume, or the volume itself is re-baked and
+        // hot-reloaded. A flag would answer none of them. Both lookups are hash-map probes against a
+        // handle; they are not worth a cache that can be wrong.
+        //
+        // THE VOLUME COMES THROUGH THE TYPE, which is the one structural change T1 made to this path: the
+        // character of a cloud's edge is a property of what kind of cloud it is, so the type names it and
+        // the layer does not. An empty slot on either side lands on the built-in default volume.
+        Image3D* volume =
+             service->Get( Runtime::ResourceRegistry::GetCloudTypeService()->GetNoiseVolume( m_Data.CloudType ) );
         if ( !volume )
         {
             // The service has already logged which volume is missing and why. Latched so a scene with a
@@ -394,7 +411,9 @@ namespace Desert::Graphic::System
         if ( !EnsureProfileTable() )
             return;
 
-        const CloudGpuPayload payload = PackCloudParams( m_Data, atmosphere, m_WindOffset );
+        const CloudGpuPayload payload = PackCloudParams(
+             m_Data, Runtime::ResourceRegistry::GetCloudTypeService()->GetShape( m_Data.CloudType ), atmosphere,
+             m_WindOffset );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         const glm::mat4     viewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();

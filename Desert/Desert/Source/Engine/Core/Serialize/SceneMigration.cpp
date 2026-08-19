@@ -1,11 +1,12 @@
 #include <Engine/Core/Serialize/SceneMigration.hpp>
 
 #include <Engine/Core/SceneSettings.hpp>
-// For Graphic::CloudSpecies only. The v3 -> v4 migration writes a species enumerator into the tree, and
-// spelling the integers here instead would be a second statement of the library's order — the exact
-// duplication that agrees with itself until somebody inserts a species. The header is dependency-free and
-// carries no renderer, so it does not bring the layer below into this one.
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+// For the shipped presets' names and the directory they live in, and nothing else. The v4 -> v5 migration
+// turns the species integer a v4 file carries into the PATH of the preset that holds the same twelve
+// numbers, and spelling that path here as a literal would be a second statement of it — the exact
+// duplication that agrees with itself until somebody moves the library. The header carries no renderer and
+// no asset manager, so it does not bring another layer into this one.
+#include <Engine/Assets/CloudTypeData.hpp>
 
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Units.hpp>
@@ -593,18 +594,24 @@ namespace Desert::Core
 
                     // The library is ordered from the flattest species to the tallest, which is the axis
                     // the old scalar ran along, so the quarters below are a translation rather than a
-                    // guess. 0.6 - the component's own former default - lands on CumulusCongestus, which
-                    // the new default also names.
+                    // guess. 0.6 - the component's own former default - lands on cumulus congestus, which
+                    // the default of the version after this one also names.
+                    //
+                    // The integers are indices into kSpeciesOrder below, which is the ONE statement of that
+                    // order left in this file; the enumerator they used to name was deleted when the
+                    // species became an asset, and this migration deliberately still writes the OLD key,
+                    // because the v4 -> v5 step is what turns it into a handle. Chaining like that is the
+                    // whole reason each step is gated on its own version integer.
                     const double type = scalar.value();
                     int          species;
                     if ( type < 0.25 )
-                        species = static_cast<int>( Graphic::CloudSpecies::Stratus );
+                        species = 0; // Stratus
                     else if ( type < 0.55 )
-                        species = static_cast<int>( Graphic::CloudSpecies::CumulusMediocris );
+                        species = 1; // Cumulus mediocris
                     else if ( type < 0.85 )
-                        species = static_cast<int>( Graphic::CloudSpecies::CumulusCongestus );
+                        species = 2; // Cumulus congestus
                     else
-                        species = static_cast<int>( Graphic::CloudSpecies::Cumulonimbus );
+                        species = 3; // Cumulonimbus
 
                     kept[kSpeciesKey] = static_cast<int64_t>( species );
                     typed             = true;
@@ -621,6 +628,127 @@ namespace Desert::Core
             report.Entities += 1;
             report.FieldsDropped += dropped;
             report.SpeciesSet += typed ? 1 : 0;
+        }
+
+        return report;
+    }
+
+    CloudTypeMigrationReport MigrateCloudTypeV4ToV5( std::vector<Assets::EntityData>& entities )
+    {
+        static constexpr const char* kSpeciesKey = "Species";
+        static constexpr const char* kNoiseKey   = "NoiseVolume";
+        static constexpr const char* kTypeKey    = "CloudType";
+
+        // THE FOUR KINDS T0 COMPILED IN, IN ITS ORDER, and the only place that order is written down now
+        // that the enumerator is gone. The integer a v4 file carries in "Species" indexes this array, and
+        // each name is the stem of a shipped `.decloudtype` carrying the same twelve numbers T0 compiled
+        // in. Two statements of one library, and Desert/Tests/Engine/CloudType is what keeps them equal —
+        // it opens each file this array names and compares it against what T0 shipped.
+        static constexpr const char* kSpeciesOrder[] = {
+             Assets::kCloudTypeStratus,
+             Assets::kCloudTypeCumulusMediocris,
+             Assets::kCloudTypeCumulusCongestus,
+             Assets::kCloudTypeCumulonimbus,
+        };
+        constexpr int kSpeciesCount = static_cast<int>( std::size( kSpeciesOrder ) );
+
+        CloudTypeMigrationReport report;
+
+        for ( auto& entity : entities )
+        {
+            const auto clouds = entity.Components.get( "VolumetricCloud" );
+            if ( !clouds.has_value() )
+                continue;
+
+            const auto fields = clouds.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': the VolumetricCloud payload is {1}, not an object - "
+                          "its species could not be turned into a cloud type asset",
+                          entity.Tag.value_or( "Entity" ), Describe( clouds.value() ) );
+                continue;
+            }
+
+            // Rebuilt rather than erased in place, like the two migrations above it: rfl::Object is an
+            // ordered vector of pairs with no erase, and copying every key except the ones that move states
+            // the intent more plainly than an index dance. Order is preserved.
+            rfl::Generic::Object kept;
+            bool                 touched = false;
+
+            for ( const auto& [key, value] : fields.value() )
+            {
+                if ( key == kNoiseKey )
+                {
+                    touched = true;
+
+                    // NAMED, NOT SWALLOWED. The slot moved onto the cloud type and a pure function cannot
+                    // create the file it would have to move it into, so the artist is told exactly which
+                    // layer lost which volume and where to put it back. A value dropped without a message
+                    // is a value nobody will ever find again (§1.4).
+                    const auto handle = value.to_int();
+                    if ( handle.has_value() && handle.value() != 0 )
+                    {
+                        report.VolumesLost += 1;
+                        LOG_WARN( "[SceneMigration] entity '{0}': the layer named noise volume {1}, which "
+                                  "is now a field of the CLOUD TYPE rather than of the layer. Open the "
+                                  "type in Window > Cloud Type and point its Noise Volume at that .dcnv; "
+                                  "until then the layer uses the built-in default volume.",
+                                  entity.Tag.value_or( "Entity" ), handle.value() );
+                    }
+                    continue;
+                }
+
+                if ( key == kSpeciesKey )
+                {
+                    touched = true;
+
+                    const auto index = value.to_int();
+                    if ( !index.has_value() )
+                    {
+                        // A species that is not an integer says nothing about what the author wanted, and
+                        // the empty slot is a kind of cloud in its own right - the built-in congestus.
+                        report.FieldsBroken += 1;
+                        LOG_WARN( "[SceneMigration] entity '{0}': Species is {1}, not an integer - the "
+                                  "layer keeps the built-in default cloud type",
+                                  entity.Tag.value_or( "Entity" ), Describe( value ) );
+                        continue;
+                    }
+
+                    const int64_t species = index.value();
+                    if ( species < 0 || species >= kSpeciesCount )
+                    {
+                        // A hand-edited file can carry any integer. T0's own reader clamped this to the
+                        // first species; here it becomes the EMPTY slot instead, because "the value is not
+                        // one of the four" and "the author chose stratus" are different statements and only
+                        // the first one is true.
+                        report.FieldsBroken += 1;
+                        LOG_WARN( "[SceneMigration] entity '{0}': Species is {1}, which is not one of the {2} "
+                                  "kinds this file could name - the layer keeps the built-in default cloud "
+                                  "type",
+                                  entity.Tag.value_or( "Entity" ), species, kSpeciesCount );
+                        continue;
+                    }
+
+                    // A PATH AND NOT A HANDLE, because that is what a reflected asset field is written as
+                    // in this engine: Core::MakeAssetResolver turns every one of them into a path on save
+                    // and back into a handle on load, so a scene carrying a raw integer here would be read
+                    // through the resolver's string branch, fail it, and land on the empty slot. It is
+                    // relative to the assets root for the reason CloudTypeAssetRelativePath states — a
+                    // pure function cannot know where the project is installed, and the library ships
+                    // inside it.
+                    kept[kTypeKey] = Assets::CloudTypeAssetRelativePath( kSpeciesOrder[species] );
+                    report.TypesSet += 1;
+                    continue;
+                }
+
+                kept[key] = value;
+            }
+
+            if ( !touched )
+                continue; // already raised, or authored after the move - leave the tree byte-identical
+
+            entity.Components["VolumetricCloud"] = rfl::Generic( std::move( kept ) );
+            report.Entities += 1;
         }
 
         return report;
@@ -658,6 +786,15 @@ namespace Desert::Core
         {
             report.CloudSpeciesRaised = true;
             report.CloudSpecies       = MigrateCloudSpeciesV3ToV4( scene.Entities );
+        }
+
+        // AFTER the step above and not beside it: v3 -> v4 WRITES the "Species" key that this one reads.
+        // The two are the only pair in this function with an order that matters, and it is stated here
+        // rather than left to the sequence they happen to be written in.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudType )
+        {
+            report.CloudTypeRaised = true;
+            report.CloudType       = MigrateCloudTypeV4ToV5( scene.Entities );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

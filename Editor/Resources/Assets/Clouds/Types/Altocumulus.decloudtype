@@ -1,0 +1,19 @@
+{
+    "FormatVersion": 1,
+    "DisplayName": "Altocumulus",
+    "Notes": "The mid-level sheet of small lumps. Thin (700 m), high (3.2 km) and half as dense as a cumulus, so the sky reads through it - which is what distinguishes it from the stratocumulus it otherwise resembles.",
+    "Shape": {
+        "BaseAltitudeKm": 3.2,
+        "TopAltitudeKm": 3.9,
+        "EdgeTopFraction": 0.85,
+        "BaseRampFraction": 0.15,
+        "TopTaper": 0.35,
+        "AnvilAltitudeKm": 0.0,
+        "AnvilThicknessKm": 0.0,
+        "AnvilStrength": 0.0,
+        "DetailCharacter": 0.8,
+        "DetailFactor": 1.6,
+        "DensityFactor": 0.55,
+        "ExtinctionFactor": 0.55
+    }
+}

@@ -33,5 +33,10 @@ namespace Desert::Assets
         // artist can author several and drop one into the cloud component's slot — see
         // Engine/Assets/CloudNoiseVolume.hpp.
         CloudNoiseVolume,
+        // A named kind of cloud (`.decloudtype`): the twelve numbers a vertical profile is generated from,
+        // plus the noise volume its edge is cut from. A first-class asset because the owner's request was
+        // exactly that an artist be able to make one and load it into a slot — see
+        // Engine/Assets/CloudTypeData.hpp.
+        CloudType,
     };
 } // namespace Desert::Assets

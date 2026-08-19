@@ -4,6 +4,7 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Shader/ShaderAsset.hpp>
 #include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
+#include <Engine/Assets/CloudTypeAsset.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
@@ -66,6 +67,7 @@ namespace Desert::Runtime
         PollMaterials( assetManager, scene );
         PollShaders( assetManager, scene );
         PollCloudNoiseVolumes( assetManager );
+        PollCloudTypes( assetManager );
         m_FirstScan = false;
     }
 
@@ -119,6 +121,47 @@ namespace Desert::Runtime
             // Nothing else to notify. VolumetricCloudRenderer asks the service for its volume every frame
             // rather than caching it, so the next frame binds the new image without anyone telling it.
             LOG_INFO( "[HotReload] Cloud noise volume '{}' reloaded — the next frame marches the new one.", key );
+        }
+    }
+
+    void AssetHotReload::PollCloudTypes( Assets::AssetManager& assetManager )
+    {
+        auto* service = ResourceRegistry::GetCloudTypeService();
+
+        for ( const auto& [handle, asset] : assetManager.FindAllByType<Assets::CloudTypeAsset>() )
+        {
+            if ( !asset )
+                continue;
+
+            const auto& path = asset->GetMetadata().Filepath;
+            if ( !TouchWatched( path ) )
+                continue;
+
+            const std::string key = path.generic_string();
+
+            // A FAILED RE-READ LEAVES THE OLD NUMBERS REGISTERED, for the same reason the volume above
+            // keeps its bytes: the panel writes with one truncating stream write, so a poll that lands
+            // mid-write sees half a document. Refusing it costs one poll interval; accepting it would put
+            // the built-in default in a slot the artist is actively editing and never say why.
+            if ( const auto reloaded = asset->Load(); !reloaded )
+            {
+                LOG_ERROR( "[HotReload] Cloud type '{}' could not be re-read: {}", key, reloaded.GetError() );
+                continue;
+            }
+
+            // Re-resolved because the EDIT MAY HAVE BEEN THE NOISE VOLUME. Load parses the new path;
+            // nothing binds it to an asset until this runs, and without it a type edited to name a
+            // different volume would keep the old one until the next launch.
+            asset->ResolveDependencies( assetManager );
+
+            if ( const auto registered = service->Register( asset ); !registered )
+            {
+                LOG_ERROR( "[HotReload] Cloud type '{}' was re-read but not registered: {}", key,
+                           registered.GetError() );
+                continue;
+            }
+
+            LOG_INFO( "[HotReload] Cloud type '{}' reloaded — the next frame rebuilds its profile table.", key );
         }
     }
 

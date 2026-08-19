@@ -68,4 +68,10 @@ namespace Desert::Runtime
         return &cloudNoiseService;
     }
 
+    CloudTypeService* ResourceRegistry::GetCloudTypeService()
+    {
+        static CloudTypeService cloudTypeService;
+        return &cloudTypeService;
+    }
+
 } // namespace Desert::Runtime

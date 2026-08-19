@@ -37,6 +37,12 @@ namespace Common::Constants
         // cooked twin and no 2D preview, and mixing it into the texture scan would offer it in every
         // texture slot in the editor.
         inline std::filesystem::path CLOUD_NOISE_PATH = "Resources/Assets/Clouds/";
+        // Cloud types (`.decloudtype`) — the named kinds of cloud an artist authors in the Cloud Type
+        // panel and drops into a layer's slot. A SUBFOLDER of the volumes' directory rather than a
+        // directory of its own, because the two are one body of content: a type names a volume, and an
+        // artist who opens Clouds/ should see both halves of what makes a sky. Scanned separately all the
+        // same, so a `.dcnv` can never be offered in a type slot.
+        inline std::filesystem::path CLOUD_TYPE_PATH = "Resources/Assets/Clouds/Types/";
 
         // --- Cooked / intermediate (generated; PROJECT-owned) ---
         inline std::filesystem::path COOKED_PATH         = "Cooked/";
@@ -63,6 +69,7 @@ namespace Common::Constants
             SCRIPT_PATH        = assets / "Scripts/";
             COLLECTIONS_PATH   = assets / "Collections/";
             CLOUD_NOISE_PATH   = assets / "Clouds/";
+            CLOUD_TYPE_PATH    = assets / "Clouds/Types/";
 
             const std::filesystem::path cooked = ( projectDir / "Cooked" ).lexically_normal();
             COOKED_PATH                        = cooked / "";

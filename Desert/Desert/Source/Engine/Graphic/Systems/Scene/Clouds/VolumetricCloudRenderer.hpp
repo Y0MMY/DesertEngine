@@ -99,15 +99,15 @@ namespace Desert::Graphic::System
         // freshly created image mean nothing. Returns false having logged the reason and latched the
         // failure.
         bool EnsureTraceTargets( uint32_t halfWidth, uint32_t halfHeight );
-        // Points m_NoiseVolume at the volume this layer's slot resolves to, through
-        // Runtime::CloudNoiseService. Returns false having logged the reason when there is not even a
-        // default to fall back on.
+        // Points m_NoiseVolume at the volume this layer's CLOUD TYPE names, through
+        // Runtime::CloudTypeService and then Runtime::CloudNoiseService. Returns false having logged the
+        // reason when there is not even a default to fall back on.
         bool EnsureNoiseVolume();
-        // Builds and uploads the vertical profile table for this layer's species, and only when that
-        // species has changed. The table is a pure function of the species
-        // (Graphic::CloudBuildProfileTable), so rebuilding it per frame would be 16 384 curve evaluations
-        // and a synchronous staging upload for an answer that is identical. Returns false having logged
-        // the reason when the image could not be created.
+        // Builds and uploads the vertical profile table for this layer's cloud type, and only when that
+        // type — or the file behind it — has changed. The table is a pure function of the type's twelve
+        // numbers (Graphic::CloudBuildProfileTable), so rebuilding it per frame would be 16 384 curve
+        // evaluations and a synchronous staging upload for an answer that is identical. Returns false
+        // having logged the reason when the image could not be created.
         bool EnsureProfileTable();
 
         std::shared_ptr<ComputePipeline>  m_MarchPipeline;
@@ -141,13 +141,18 @@ namespace Desert::Graphic::System
         Image3D* m_NoiseVolume = nullptr;
 
         // The vertical profile table this view marches against — OWNED, unlike the noise volume, because
-        // it is generated from the component rather than resolved from an asset and there is no service
-        // to share it through. 64 KiB per view, which is two thousandths of the subsystem's budget.
+        // it is GENERATED here rather than resolved from an asset: the type ships twelve numbers, not
+        // sixteen thousand texels (decision D-13). 64 KiB per view, which is two thousandths of the
+        // subsystem's budget.
         std::shared_ptr<Image2D> m_ProfileTable;
-        // The species m_ProfileTable was built for. std::optional rather than a sentinel enumerator: the
-        // "no table yet" state is the absence of a species, not a fifth species, and a sentinel in the
-        // enum would appear in the Details panel's combo box.
-        std::optional<CloudSpecies> m_ProfileSpecies;
+        // WHAT THE TABLE WAS BUILT FROM, and it takes two values rather than one. The handle answers "is
+        // this still the type the artist chose"; the generation answers "is the FILE behind that type still
+        // the one I read", which is what makes an edit in the Cloud Type panel show up in the viewport
+        // without the handle changing at all. A null handle with generation 0 is the "no table yet" state,
+        // and it is unreachable as a real answer because a registered type always bumps the generation
+        // past zero.
+        Assets::AssetHandle m_ProfileType;
+        uint32_t            m_ProfileGeneration = 0;
 
         ECS::VolumetricCloudData m_Data{};
         glm::vec3                m_WindOffset{ 0.0f };

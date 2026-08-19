@@ -8,6 +8,7 @@
 #include "Mesh/AnimationAsset.hpp"
 #include "TextureAsset.hpp"
 #include "CloudNoiseVolumeAsset.hpp"
+#include "CloudTypeAsset.hpp"
 
 namespace Desert::Assets
 {
@@ -21,6 +22,7 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS       = { ".hdr" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS      = { ".shader" };
     constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_NOISE_EXTENSIONS  = { ".dcnv" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_TYPE_EXTENSIONS   = { ".decloudtype" };
 
     AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager )
          : m_AssetManager( assetManager )
@@ -33,6 +35,7 @@ namespace Desert::Assets
         PreloadMeshes();
         PreloadSkyboxes();
         PreloadCloudNoiseVolumes();
+        PreloadCloudTypes();
     }
 
     namespace
@@ -203,6 +206,33 @@ namespace Desert::Assets
                 // without touching code, which is the same way every other built-in default here works.
                 if ( volumeAsset->GetMetadata().Filepath.filename().string() == kCloudNoiseDefaultVolumeName )
                     service->SetDefault( handle );
+            }
+        }
+    }
+
+    void AssetPreloader::PreloadCloudTypes()
+    {
+        // Loaded eagerly like the volumes, and for a smaller version of the same reason: a type is a few
+        // hundred bytes of JSON, the renderer needs its numbers on the first frame the layer asks for
+        // them, and a scene that names one must find it already there rather than resolve to the built-in
+        // default for the first second of every session.
+        //
+        // THERE IS NO "DEFAULT TYPE" FILE to nominate here, unlike the volumes. The empty slot resolves to
+        // Assets::CloudTypeDefaultShape — twelve numbers compiled in — because a type costs nothing to
+        // synthesise where a 128^3 volume costs ten seconds, and because the sky of a project that has
+        // deleted every file in Clouds/Types must still be the sky it was.
+        ProcessAssetFiles<CloudTypeAsset>( Common::Constants::Path::CLOUD_TYPE_PATH,
+                                           SUPPORTED_CLOUD_TYPE_EXTENSIONS, m_AssetManager,
+                                           AssetPriority::Medium );
+
+        if ( auto manager = m_AssetManager.lock() )
+        {
+            auto* service = Runtime::ResourceRegistry::GetCloudTypeService();
+            for ( const auto& [handle, typeAsset] : manager->FindAllByType<Assets::CloudTypeAsset>() )
+            {
+                if ( const auto result = service->Register( typeAsset ); !result )
+                    LOG_ERROR( "[Clouds] Cloud type '{}' could not be registered: {}",
+                               typeAsset->GetMetadata().Filepath.string(), result.GetError() );
             }
         }
     }

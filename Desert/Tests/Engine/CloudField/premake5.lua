@@ -14,15 +14,20 @@ project(test_name)
     --     same noise functions Programs/Clouds/CloudNoiseBake.shader bakes into the volume the march
     --     samples. That is why the SHADER ROOT is on the include path: the test drives the exact text the
     --     cloud passes compile, so a passing test is a statement about the code the GPU runs.
-    -- Nothing to link — no renderer, no Vulkan.
+    -- Still no renderer and no Vulkan. The one engine source listed is the cloud TYPE's data layer, and
+    -- only for CloudTypeDefaultShape: the coverage numbers this suite measures are calibration data for
+    -- the shipped sky, so they have to be measured on the shape a scene with an empty slot actually
+    -- renders rather than on a copy of it that can drift.
     files {
         test_files,
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
     }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
         "%{wks.location}/Editor/Resources/Shaders",
+        "%{wks.location}/ThirdParty/reflect-cpp/include", -- the type's file format is rfl::json
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
@@ -43,6 +48,14 @@ project(test_name)
         defines { "DESERT_PLATFORM_MACOS" }
     filter "system:linux"
         defines { "DESERT_PLATFORM_LINUX" }
+    filter {}
+
+    -- Common: the Result/error type the type's validation is carried in.
+    -- Optick: Common's JobSystem registers its worker threads with the profiler.
+    links { "Common", "Optick" }
+
+    filter "system:not windows"
+        links { "ReflectCpp" }
     filter {}
 
     filter "configurations:Debug"

@@ -26,6 +26,9 @@ namespace Desert::Runtime
     //   .dcnv   — re-reads the cloud noise volume and re-uploads it, so a bake in the Cloud Noise Volume
     //             panel is visible in the sky the next frame without a restart. Nothing needs telling:
     //             the cloud renderer resolves its volume through the service every frame.
+    //   .decloudtype — re-parses the cloud type and re-registers it, so an edit in the Cloud Type panel
+    //             is visible in the sky the next frame. The layer's HANDLE has not changed, so the
+    //             service's generation counter is what tells the renderer to rebuild its profile table.
     //   .shader — recompiles the program (errors land in the log / Logs panel, the old
     //             pipelines keep drawing); on success the pipeline cache entries for that
     //             shader are dropped after a device-idle wait, so the next frame draws with
@@ -46,6 +49,9 @@ namespace Desert::Runtime
         // No scene argument: a volume is not referenced by any component the way a material is — the
         // renderer looks its own up by handle every frame — so there is nothing in the scene to refresh.
         void PollCloudNoiseVolumes( Assets::AssetManager& assetManager );
+        // No scene argument either, and for the same reason: a cloud type is resolved by handle through
+        // Runtime::CloudTypeService every frame, so nothing in the scene holds a copy to refresh.
+        void PollCloudTypes( Assets::AssetManager& assetManager );
 
         // Records @p path's mtime and reports whether it MOVED since the last poll. A file seen for the
         // first time returns false: the first sighting is a baseline, not an edit.

@@ -1,0 +1,19 @@
+{
+    "FormatVersion": 1,
+    "DisplayName": "Stratus",
+    "Notes": "A featureless sheet a few hundred metres thick, sitting almost on the ground. EdgeTopFraction 0.88 because a sheet does not thin into a pad at its rim, and the erosion is halved because what makes stratus stratus is that it has no edge to speak of.",
+    "Shape": {
+        "BaseAltitudeKm": 0.15,
+        "TopAltitudeKm": 0.55,
+        "EdgeTopFraction": 0.88,
+        "BaseRampFraction": 0.12,
+        "TopTaper": 0.35,
+        "AnvilAltitudeKm": 0.0,
+        "AnvilThicknessKm": 0.0,
+        "AnvilStrength": 0.0,
+        "DetailCharacter": 0.05,
+        "DetailFactor": 0.5,
+        "DensityFactor": 0.7,
+        "ExtinctionFactor": 0.75
+    }
+}

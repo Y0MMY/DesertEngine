@@ -280,6 +280,12 @@ namespace Desert::Graphic
      * Fill the GPU block from the component, the atmosphere and this frame's accumulated wind offset.
      * Pure: no GPU, no globals, no clock — the CloudPayload tests drive it directly.
      *
+     * @param shape           the twelve numbers of the cloud type in the layer's slot, already resolved by
+     *                        the caller (Runtime::CloudTypeService) — a parameter rather than something
+     *                        looked up here, because a pure function that reaches for a service is not a
+     *                        pure function and this one is driven directly by three test suites. An empty
+     *                        slot arrives as Assets::CloudTypeDefaultShape, which is the ONE place the
+     *                        "no type chosen" answer is decided.
      * @param windOffsetWorld the drift accumulated by the ECS system, world units. It is a parameter
      *                        rather than a member because the accumulator belongs to the system that
      *                        owns the timestep, and a second copy here would be state that can disagree.
@@ -305,29 +311,27 @@ namespace Desert::Graphic
      * a packer that depends on its caller having checked something is a packer that will one day be
      * called by someone who did not.
      */
-    inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const AtmosphereEnv& atmosphere,
-                                            const glm::vec3& windOffsetWorld )
+    inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const CloudTypeShape& shape,
+                                            const AtmosphereEnv& atmosphere, const glm::vec3& windOffsetWorld )
     {
         const bool physical = atmosphere.Valid && atmosphere.DistantSkyLight != nullptr;
 
         // THE ENVELOPE IS COMPUTED, NOT AUTHORED, and this is the one place it is computed. It is the
-        // union of the altitude ranges of the species this layer actually carries — one of them today,
+        // union of the altitude ranges of the cloud types this layer actually carries — one of them today,
         // two to four when T3 puts several in a sky — and nothing in the component states it.
         //
-        // The reason is the class of defect §2.3.1 of the contract names: an authored shell and a
-        // species' own altitudes are two numbers obliged to agree, each of them individually legal, and
-        // the symptom of their disagreeing is not an error but a cumulonimbus with its anvil sliced off
-        // by a ceiling nobody remembers setting. Computing it makes the agreement structural, and
-        // Desert/Tests/Engine/ComponentReflection asserts `envelope ⊇ every active species` on the packed
+        // The reason is the class of defect §2.3.1 of the contract names: an authored shell and a type's
+        // own altitudes are two numbers obliged to agree, each of them individually legal, and the symptom
+        // of their disagreeing is not an error but a cumulonimbus with its anvil sliced off by a ceiling
+        // nobody remembers setting. Computing it makes the agreement structural, and
+        // Desert/Tests/Engine/ComponentReflection asserts `envelope ⊇ every active type` on the packed
         // block rather than on the intention.
-        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( data.Species );
-
-        const float bottomKm = std::max( CloudSpeciesBaseKm( shape ), 0.0f );
+        const float bottomKm = std::max( CloudTypeBaseKm( shape ), 0.0f );
         // Floored at a metre for the same reason CloudMakeLayer floors it: a shell of zero thickness has
         // a coincident pair of roots and every grazing ray produces a segment the step schedule divides
         // by. The library cannot produce one, but the packer does not depend on its caller having
         // checked something.
-        const float thicknessKm = std::max( CloudSpeciesTopKm( shape ) - bottomKm, 0.001f );
+        const float thicknessKm = std::max( CloudTypeTopKm( shape ) - bottomKm, 0.001f );
         const float planetKm    = std::max( data.PlanetRadius, 1.0f );
 
         glm::vec3 sunDirection{ 0.0f, 1.0f, 0.0f };
@@ -347,22 +351,30 @@ namespace Desert::Graphic
         p.March   = glm::vec4( static_cast<float>( std::clamp( data.MaxSteps, 8, 512 ) ),
                                std::clamp( data.StopTransmittance, 0.0f, 1.0f ),
                                std::max( data.TracingStartDistance, 0.0f ) / kCloudWorldUnitsPerKm,
-                               std::max( data.ExtinctionScale, 0.0f ) );
-        // The species' EDGE, which is the one thing about it the profile table cannot carry: the table
-        // says where the body is, and this says whether what the erosion cuts out of that body is wispy
-        // or billowy. A stratus and a congestus differ in both, which is why the old single scalar drove
-        // both and why the species now supplies each of them separately.
+                               std::max( data.ExtinctionScale, 0.0f ) * std::max( shape.ExtinctionFactor, 0.0f ) );
+        // The type's EDGE, which is the one thing about it the profile table cannot carry: the table says
+        // where the body is, and this says whether what the erosion cuts out of that body is wispy or
+        // billowy. A stratus and a congestus differ in both, which is why the old single scalar drove both
+        // and why the type now supplies each of them separately.
         p.Weather = glm::vec4( std::max( data.WeatherTileSize, 1.0f ) / kCloudWorldUnitsPerKm,
                                std::clamp( data.Coverage, 0.0f, 1.0f ), std::max( data.CoverageContrast, 0.01f ),
                                std::clamp( shape.DetailCharacter, 0.0f, 1.0f ) );
-        // THE SPECIES' DENSITY IS FOLDED IN HERE rather than sent as a second number. A cumulonimbus is
-        // made of more water than a stratus, and that is a fact about the species; the artist's Density
-        // Scale is a multiplier ON it, so "1" keeps meaning "this species as it is" whichever species is
-        // selected. Two slots for a product would be two values that can disagree.
-        p.Detail  = glm::vec4( std::max( data.DetailTileSize, 1.0f ) / kCloudWorldUnitsPerKm,
-                               std::clamp( data.DetailStrength, 0.0f, 1.0f ),
-                               std::max( data.DensityScale, 0.0f ) * std::max( shape.DensityFactor, 0.0f ),
-                               std::clamp( data.ScatteringAlbedo, 0.0f, 1.0f ) );
+        // THE TYPE'S THREE FACTORS ARE FOLDED IN HERE rather than sent as three more numbers. A
+        // cumulonimbus is made of more water than a stratus, a cirrus is a quarter as opaque as either,
+        // and a lenticular has almost no erosion at all — those are facts about the KIND of cloud. The
+        // artist's Density Scale, Extinction Scale and Detail Strength are multipliers ON them, so "1"
+        // keeps meaning "this type as it is" whichever type is in the slot. Two slots for a product would
+        // be two values that can disagree.
+        //
+        // The erosion product is clamped here as well as in the shader: the shader's clamp is what keeps a
+        // hand-edited scene from cutting past the whole field, and doing it here too means the block a test
+        // reads carries the value the march will actually use rather than one it is about to discard.
+        p.Detail = glm::vec4(
+             std::max( data.DetailTileSize, 1.0f ) / kCloudWorldUnitsPerKm,
+             std::clamp( std::clamp( data.DetailStrength, 0.0f, 1.0f ) * std::max( shape.DetailFactor, 0.0f ),
+                         0.0f, 1.0f ),
+             std::max( data.DensityScale, 0.0f ) * std::max( shape.DensityFactor, 0.0f ),
+             std::clamp( data.ScatteringAlbedo, 0.0f, 1.0f ) );
         p.Wind    = glm::vec4( windOffsetWorld / kCloudWorldUnitsPerKm, std::clamp( data.PhaseG, -0.9f, 0.9f ) );
         p.Sun     = glm::vec4( sunDirection, std::max( data.LightMarchDistance, 0.0f ) / kCloudWorldUnitsPerKm );
         p.SunColour =

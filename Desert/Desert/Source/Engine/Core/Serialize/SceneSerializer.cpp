@@ -120,6 +120,18 @@ namespace Desert::Core
                       migration.CloudSpecies.FieldsDropped, migration.CloudSpecies.Entities,
                       migration.CloudSpecies.SpeciesSet );
         }
+        if ( migration.CloudTypeRaised && migration.CloudType.Entities > 0 )
+        {
+            LOG_INFO( "[SceneMigration] '{0}': scene schema v{1} -> v{2} - the kind of cloud a layer is made "
+                      "of is an ASSET now, so {3} entity(ies) were touched: {4} had their species turned "
+                      "into a .decloudtype handle, {5} named a noise volume the layer no longer carries "
+                      "(the cloud type carries it - see the warning above for which), and {6} had a species "
+                      "value that could not be read at all. Re-save (or run SceneMigrator) to stamp the file "
+                      "so this never runs again.",
+                      sceneData->SceneName, kSceneVersionCloudSpecies, kSceneVersionCloudType,
+                      migration.CloudType.Entities, migration.CloudType.TypesSet, migration.CloudType.VolumesLost,
+                      migration.CloudType.FieldsBroken );
+        }
         if ( migration.UnitsRaised )
         {
             LOG_INFO( "[SceneMigration] '{0}': world units v0 -> v{1} (metres -> centimetres, x{2}) - {3} "

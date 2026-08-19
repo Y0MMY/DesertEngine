@@ -22,6 +22,10 @@ project(test_name)
         "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
+        -- The volume slot this migration created now lives on the cloud TYPE, and the test follows it
+        -- there: the built-in type's own empty slot is the other half of "a scene that names nothing
+        -- still renders".
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
     }
 
     includedirs {

@@ -1,0 +1,19 @@
+{
+    "FormatVersion": 1,
+    "DisplayName": "Cumulus congestus",
+    "Notes": "The same base as mediocris, four times the height, and a rim that is a flat pad - EdgeTopFraction 0.15. This is the type an empty slot resolves to, and its numbers are the reference the layer's Density Scale, Extinction Scale and Detail Strength are relative to.",
+    "Shape": {
+        "BaseAltitudeKm": 2.2,
+        "TopAltitudeKm": 5.8,
+        "EdgeTopFraction": 0.15,
+        "BaseRampFraction": 0.04,
+        "TopTaper": 0.5,
+        "AnvilAltitudeKm": 0.0,
+        "AnvilThicknessKm": 0.0,
+        "AnvilStrength": 0.0,
+        "DetailCharacter": 1.0,
+        "DetailFactor": 1.0,
+        "DensityFactor": 1.15,
+        "ExtinctionFactor": 1.0
+    }
+}
