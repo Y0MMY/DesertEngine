@@ -549,6 +549,87 @@ TEST( CloudGeometrySteps, TheStepSizeTheMarchDerivesIsAlwaysPositiveAndBoundedBy
     }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// The two-tier schedule — the relation that keeps the march moving
+// ---------------------------------------------------------------------------------------------------
+//
+// These two constants used to be literals inside CloudRaymarch.shader, a hundred lines apart, and no test
+// could reach them because that file is never compiled as C++. They now live in CloudGeometry.glslh, which
+// this suite compiles, and what is asserted is the RELATION between them rather than either value: the
+// contract's 2.3.1 rule, and the reason is that both numbers are individually reasonable at any setting
+// and only their ORDER decides whether the march advances at all.
+
+TEST( CloudGeometryTwoTier, OneExcursionIntoTheFineTierAdvancesTheRayRatherThanReturningItWhereItWas )
+{
+    // THE INVARIANT. Dropping to the fine tier costs one coarse step BACKWARDS — the step-back that stops
+    // a coarse step of cloud from being skipped — and buys CLOUD_EMPTY_FINE_SAMPLES_BEFORE_COARSE fine
+    // steps forwards before the tier flips again. If the coarse multiplier ever reaches the sample count,
+    // the net advance is zero and the march stands exactly where it started while spending its entire
+    // step budget; past it, the march walks backwards and every ray costs its ceiling.
+    //
+    // Asserted over the whole range of fine steps the schedule can produce — a segment of a metre divided
+    // by the 256-step ceiling at one end, and a 400 km grazing segment divided by the two-step floor at
+    // the other — because a relation that holds only at one step size is not the relation.
+    for ( const float segmentKm : { 0.001f, 0.1f, 1.0f, 7.5f, 15.0f, 60.0f, 400.0f } )
+    {
+        const float count = CloudStepCount( segmentKm, 2.0f, 256.0f, 15.0f );
+        ASSERT_GT( count, 0.0f );
+
+        const float fineStepKm = segmentKm / count;
+
+        EXPECT_GT( CloudTwoTierCycleAdvanceKm( fineStepKm ), 0.0f )
+             << "segment " << segmentKm << " km (fine step " << fineStepKm
+             << " km): a fine excursion that finds nothing returns the ray to where it started or behind "
+                "it, so the march burns its whole budget standing still";
+
+        // And the coarse step is a real stride rather than a rounding of the fine one, which is the other
+        // half of what makes the tier worth having.
+        EXPECT_GT( CloudCoarseStepKm( fineStepKm ), fineStepKm ) << "segment " << segmentKm;
+    }
+}
+
+TEST( CloudGeometryTwoTier, TheAdvanceIsExactlyTheDifferenceOfTheTwoConstantsAndScalesWithTheStep )
+{
+    // Stated as the algebra rather than as a number, so that changing either constant moves this
+    // assertion's expectation with it and only the SIGN test above can fail. What must never change is
+    // that the advance is (samples - multiplier) fine steps.
+    constexpr float kSamples = static_cast<float>( CLOUD_EMPTY_FINE_SAMPLES_BEFORE_COARSE );
+
+    for ( const float fineStepKm : { 0.0005f, 0.01f, 0.25f, 3.0f } )
+    {
+        EXPECT_FLOAT_EQ( CloudTwoTierCycleAdvanceKm( fineStepKm ),
+                         ( kSamples - CLOUD_COARSE_STEP_MULTIPLIER ) * fineStepKm )
+             << "fine step " << fineStepKm;
+    }
+
+    // The relation in its bare form, so that the failure message names the two numbers rather than a
+    // distance. A reader who changes one of them sees this line first.
+    EXPECT_LT( CLOUD_COARSE_STEP_MULTIPLIER, kSamples )
+         << "the coarse step multiplier (" << CLOUD_COARSE_STEP_MULTIPLIER
+         << ") must be strictly below the number of empty fine samples before the march returns to coarse ("
+         << kSamples << ")";
+}
+
+TEST( CloudGeometryTwoTier, TheMarchRunsTheseConstantsAndNotACopyOfThem )
+{
+    // Not a tautology, and the reason this suite exists at all: the numbers are only worth asserting if
+    // the shader that consumes them reads THESE symbols. CloudRaymarch.shader is read as text — it is the
+    // one file in the chain that cannot be compiled here — and what is checked is that the two literals
+    // it used to carry are gone and the two names are in their place.
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() ) << "repository root not found - run from the workspace root";
+
+    const std::string march = ReadFile( root + "Editor/Resources/Shaders/Programs/Clouds/CloudRaymarch.shader" );
+    ASSERT_FALSE( march.empty() ) << "CloudRaymarch.shader could not be read";
+
+    EXPECT_NE( march.find( "CloudCoarseStepKm(" ), std::string::npos )
+         << "the march no longer derives its coarse step from CloudGeometry.glslh";
+    EXPECT_NE( march.find( "CLOUD_EMPTY_FINE_SAMPLES_BEFORE_COARSE" ), std::string::npos )
+         << "the march no longer takes its empty-run length from CloudGeometry.glslh";
+    EXPECT_EQ( march.find( "stepKm * 4.0f" ), std::string::npos )
+         << "the coarse multiplier is a literal in the march again, where no test can reach it";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

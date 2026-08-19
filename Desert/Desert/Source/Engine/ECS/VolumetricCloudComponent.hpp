@@ -20,11 +20,15 @@ namespace Desert::ECS
     // vertical profile multiplied by a coverage field (deck p.19), eroded by a remap rather than a
     // subtraction (p.120).
     //
-    // EVERY FIELD BELOW IS READ. The renderer packs them into Graphic::CloudGpuPayload, whose block is
-    // exactly 32 floats and 4 unsigned words with no padding, and each one has a named consumer in the
-    // march. The contract forbids a knob that moves nothing, and this component is where that is easiest
-    // to get wrong, because a cloud parameter that does nothing still LOOKS like it does when the sky is
-    // already busy.
+    // EVERY FIELD BELOW IS READ, and it reaches the GPU by one of two routes rather than one. Most of the
+    // fields are packed into Graphic::CloudGpuPayload — TWELVE vec4s, that is 48 floats and 192 bytes,
+    // with no padding and no reserved slot. The four bake settings (the two seeds and the two octave
+    // counts) are NOT in that block: they decide what the noise volume CONTAINS rather than how the march
+    // reads it, so they travel as Graphic::CloudNoiseBakeKey, four unsigned words riding a push constant,
+    // which doubles as the key that decides whether to rebake. Either way each field has a named consumer,
+    // and Desert/Tests/Engine/SettingConsumers names it. The contract forbids a knob that moves nothing,
+    // and this component is where that is easiest to get wrong, because a cloud parameter that does
+    // nothing still LOOKS like it does when the sky is already busy.
     //
     // UNITS. Distances are world units — centimetres (Length) — and are converted to kilometres exactly
     // once, in Graphic::PackCloudParams. The planet radius is the one exception and is authored in
@@ -80,7 +84,15 @@ namespace Desert::ECS
                   Tooltip( "How far along the ray the march may run, measured FROM THE POINT THE RAY "
                            "ENTERS THE LAYER. Measured from the camera instead it would cut the layer at "
                            "a fixed radius and draw a circular edge across the sky." ) )
-        float MaxViewDistance = 5000000.0f; // 50 km
+        // SIXTY KILOMETRES, and it is half of a PAIR rather than a number of its own. Divided by
+        // WeatherTileSize it gives the number of times the coverage field REPEATS between the camera and
+        // the vanishing point, and a repeating field seen end-on reads as streaks radiating from that
+        // point. Docs/Clouds/CALIBRATION.md section 4 records the failure and its cure: at 150 km against
+        // an 8 km tile the field repeated about twenty times and the moire was unmissable, and the pair
+        // that fixed it was 60 km against 12 km — five repeats. These defaults ARE that pair, and
+        // ComponentReflection asserts the ratio rather than the two numbers, because it is the ratio that
+        // was measured.
+        float MaxViewDistance = 6000000.0f; // 60 km
 
         PROPERTY( DisplayName( "Tracing Start Max Distance" ), Category( "Cloud Layer" ), Length,
                   Range( 1000000.0f, 100000000.0f ), Advanced,
@@ -105,11 +117,13 @@ namespace Desert::ECS
         // 0.25, MEASURED — and the metric is stated, which the first version of this table was not.
         //
         // "sky cover" below is the fraction of vertical COLUMNS through the layer that contain any
-        // renderable density, sampled on a 64x64 grid over two weather tiles at contrast 1 with the
-        // defaults of this component (Desert/Tests/Engine/CloudField pins it):
+        // renderable density, over one period of the coverage field at contrast 1 with the defaults of
+        // this component. Desert/Tests/Engine/CloudField measures it and prints exactly this row, so it
+        // is reproducible rather than remembered — the figures here are the ones that suite emitted after
+        // the weather tile moved onto the calibrated 12 km:
         //
         //     Coverage   0.00   0.10   0.20   0.30   0.40   0.50
-        //     sky cover     0%   1.2%    29%    76%    97%   100%
+        //     sky cover     0%     11%    48%    85%    96%   100%
         //
         // Both ends are exact by construction, which they were NOT before: the threshold spans the field's
         // whole range, so 0 is genuinely clear and 1 genuinely solid. The useful band is 0.15 to 0.35 —
@@ -144,7 +158,9 @@ namespace Desert::ECS
                            "decides whether there is any cloud overhead at all: a cell much larger than "
                            "the layer altitude cannot fit one above the camera, and the zenith comes out "
                            "empty however high the coverage is set." ) )
-        float WeatherTileSize = 800000.0f; // 8 km -> 2 km cells, a cumulus field
+        // TWELVE KILOMETRES -> 3 km cells, a cumulus field. The other half of the calibrated pair; see
+        // MaxViewDistance for what the two of them together decide and for where it was measured.
+        float WeatherTileSize = 1200000.0f; // 12 km -> 3 km cells, a cumulus field
 
         PROPERTY( DisplayName( "Weather Seed" ), Category( "Weather" ), Range( 0, 100000 ), Advanced,
                   Tooltip( "Changes which clouds the coverage field produces without changing their "
@@ -203,11 +219,17 @@ namespace Desert::ECS
                   Range( 0.0f, 2000000.0f ), Advanced,
                   Tooltip( "Where the near-camera fade begins. A camera that enters the layer otherwise "
                            "meets a wall of density at arm's length; UE fades the nearest metres out for "
-                           "the same reason. Zero disables it." ) )
+                           "the same reason. The fade is OFF unless End is strictly past Start." ) )
         float NearFadeStartDistance = 0.0f;
 
         PROPERTY( DisplayName( "Near Fade End Distance" ), Category( "Detail" ), Length, Range( 0.0f, 2000000.0f ),
-                  Advanced, Tooltip( "Where the near-camera fade is complete and the cloud is at full density." ) )
+                  Advanced,
+                  Tooltip( "Where the near-camera fade is complete and the cloud is at full density. It "
+                           "must lie strictly past Start; at or below it the pair describes no interval "
+                           "and the fade is switched OFF rather than guessed at." ) )
+        // THE TWO ARE ONE SETTING. Graphic::CloudResolveNearFade repairs them as a pair, because the march
+        // evaluates smoothstep(Start, End, t) and GLSL leaves that undefined unless End is strictly past
+        // Start — and each of the two is individually legal at any value its own slider allows.
         float NearFadeEndDistance = 0.0f;
 
         // ---- Lighting -------------------------------------------------------------------------------

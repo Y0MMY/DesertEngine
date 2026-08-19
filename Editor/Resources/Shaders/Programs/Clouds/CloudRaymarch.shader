@@ -262,15 +262,19 @@ Shader "CloudRaymarch"
             int   stepTotal = int(stepCount);
 
             // TWO STEP SIZES, and the whole point is that they are spent in different places. The fine
-            // step is the finest the march ever goes; the coarse one is four times longer and is used
-            // only while the ray is outside cloud, where the answer is exactly zero and any step size
-            // gives it correctly.
+            // step is the finest the march ever goes; the coarse one is a multiple of it and is used only
+            // while the ray is outside cloud, where the answer is exactly zero and any step size gives it
+            // correctly.
             //
             // The budget therefore stops being a resolution and becomes a resolution WHERE IT MATTERS: a
-            // ray that crosses mostly empty sky finishes in a quarter of the iterations, and a ray inside
+            // ray that crosses mostly empty sky finishes in a fraction of the iterations, and a ray inside
             // cloud gets to spend all of them on the part that has something in it.
+            //
+            // The multiplier and its partner constant live in Common/CloudGeometry.glslh, together and
+            // next to the relation they have to satisfy — they are two numbers that must agree, and here
+            // they were two literals a hundred lines apart in a file no test can compile.
             float stepKm       = length_km / stepCount;
-            float coarseStepKm = stepKm * 4.0f;
+            float coarseStepKm = CloudCoarseStepKm(stepKm);
 
             // The start offset inside the first step, so the sample planes of neighbouring pixels do not
             // line up. Without it the uniform schedule draws the layer as a set of concentric shells —
@@ -341,8 +345,9 @@ Shader "CloudRaymarch"
             // the profile is positive and the erosion has cut it to zero — which is most of a procedural
             // cloudscape — the machine would drop to fine, find nothing, walk back to coarse, and land in
             // the same place. Net advance per cycle would be zero and the march would stand still while
-            // burning its whole budget.
-            const int kEmptyFineSamplesBeforeCoarse = 6;
+            // burning its whole budget. CloudTwoTierCycleAdvanceKm is that net advance, and
+            // Desert/Tests/Engine/CloudGeometry asserts it stays positive.
+            const int kEmptyFineSamplesBeforeCoarse = CLOUD_EMPTY_FINE_SAMPLES_BEFORE_COARSE;
 
             for (int i = 0; i < stepTotal; ++i)
             {
@@ -424,17 +429,31 @@ Shader "CloudRaymarch"
 
                         // Wrenninge's multiple-scattering octaves, as Unreal implements them. Each order
                         // scatters less, is absorbed less and is less directional than the one before it,
-                        // and the three factors are SQUARED at every step rather than multiplied by a
-                        // constant — so the series falls away super-exponentially and three orders are
-                        // enough. Without this a cloud is lit by single scattering alone, which is
-                        // physically grey: what makes a real cloud white is light that has bounced inside
-                        // it many times.
+                        // so the series falls away super-exponentially and three orders are enough.
+                        // Without this a cloud is lit by single scattering alone, which is physically grey:
+                        // what makes a real cloud white is light that has bounced inside it many times.
+                        //
+                        // THE THREE FACTORS ARE NOT BUILT THE SAME WAY, and the difference is Unreal's
+                        // rather than an inconsistency of ours. Scattering and extinction ACCUMULATE —
+                        // each octave multiplies the previous octave's coefficient by the current step,
+                        // and only then is the step squared, giving 1, c, c^3 (VolumetricCloud.usf:388-393).
+                        // The phase does NOT accumulate: every octave lerps from the BASE phase toward
+                        // isotropic, and it is only the lerp factor that is squared, giving 1, p, p^2
+                        // (VolumetricCloud.usf:422-429). Carrying the accumulating scheme over to the phase
+                        // — which is what this loop used to do — gives the third octave p^3 instead of p^2,
+                        // and at the shipped eccentricity of 0.18 that is a weight of 0.0058 against
+                        // 0.0324: six times closer to isotropic than the reference, which shows up as a
+                        // cloud whose silver lining is missing from its third order.
                         float scatterFactor = 1.0f;
                         float extinctFactor = 1.0f;
-                        float phaseFactor   = 1.0f;
                         float scatterStep   = clamp(u_CloudMultiScatter.y, 0.0f, 1.0f);
                         float extinctStep   = clamp(u_CloudMultiScatter.z, 0.0f, 1.0f);
-                        float phaseStep     = clamp(u_CloudMultiScatter.w, 0.0f, 1.0f);
+
+                        // UE's MsPhaseFactor. It starts at the authored step and is squared once per
+                        // octave, and the octave USES it directly rather than a running product of it. The
+                        // first octave is the base phase itself, which a factor of 1 expresses exactly.
+                        float phaseStep   = clamp(u_CloudMultiScatter.w, 0.0f, 1.0f);
+                        float phaseFactor = 1.0f;
 
                         for (int octave = 0; octave < octaveCount; ++octave)
                         {
@@ -442,11 +461,12 @@ Shader "CloudRaymarch"
                             {
                                 scatterFactor *= scatterStep;
                                 extinctFactor *= extinctStep;
-                                phaseFactor   *= phaseStep;
 
                                 scatterStep *= scatterStep;
                                 extinctStep *= extinctStep;
-                                phaseStep   *= phaseStep;
+
+                                phaseFactor = phaseStep;
+                                phaseStep *= phaseStep;
                             }
 
                             float octavePhase   = mix(CLOUD_ISOTROPIC_PHASE, phase, phaseFactor);

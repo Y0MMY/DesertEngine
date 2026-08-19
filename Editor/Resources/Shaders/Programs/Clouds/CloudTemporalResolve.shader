@@ -23,24 +23,46 @@ Shader "CloudTemporalResolve"
         //      This frame's sample is then blended into it, by kOwnedSampleWeight for case 1 and by the
         //      much smaller kNewSampleWeight otherwise; see those constants for why the two differ.
         //
-        //   3. NO USABLE HISTORY. Take the bilinear reconstruction of the quarter-res trace, and nothing
-        //      cleverer. Unreal does not dilate or search for a valid neighbour here and neither does
-        //      this pass: a search finds a value that belongs to a different surface, which reads as a
-        //      smear that follows the camera and is far harder to attribute than a frame of extra noise.
+        //   3. NO HISTORY TO READ — the first frame after the targets were allocated, or a reprojection
+        //      that lands off screen or behind the previous eye. Take the bilinear reconstruction of the
+        //      quarter-res trace, radiance and guide together, which is exactly what Unreal does in the
+        //      same position (VolumetricRenderTarget.usf:500-507: "History is invalid so simply use this
+        //      frame low resolution render with bilinear sampling"). A history that was READ and then
+        //      REJECTED is not this case — see the validation list below.
+        //
+        // THE GUIDE IS LOADED, NEVER FILTERED, except in case 3. Unreal point-loads its depth guide for
+        // EVERY pixel, both for the reprojection (VolumetricRenderTarget.usf:286) and as the frame's own
+        // depth data (:391); the one bilinear read of it is :506, the lost-history branch above, where it
+        // rides along with a bilinear radiance because there is nothing better to offer. Filtering it
+        // anywhere else averages the distance of a cloud edge with the distance of the sky behind it and
+        // produces a number that is neither — VolumetricCloudCommon.ush:89-92 is Epic's own note on the
+        // harm, and CloudRaymarch.shader:74-75 is ours. Both of the guide's readers judge EDGES by it,
+        // so an averaged distance makes the edge filter fire along every silhouette in the frame.
         //
         // WHY THE FRONT DISTANCE AND NOT A VELOCITY BUFFER. There is no velocity buffer, and clouds do
         // not want one: Unreal reprojects the whole layer as a single front surface, because a volume has
         // no single motion vector and the front is what the eye tracks. The guide's .x channel is that
         // surface.
         //
-        // WHAT IS VALIDATED, and each rule is Unreal's:
+        // WHAT IS VALIDATED. Three rules, and each of the three is Unreal's — but Unreal has more than
+        // three, so this list is a SUBSET and not a port:
         //   * the reprojected UV must land on screen — off-screen history is not history, it is the edge
-        //     texel repeated, and this engine's samplers are REPEAT, so it would be the OPPOSITE edge;
+        //     texel repeated, and this engine's samplers are REPEAT, so it would be the OPPOSITE edge.
+        //     Unreal's bValidPreviousUVs, VolumetricRenderTarget.usf:298;
         //   * the scene distance must not have jumped between the history and this frame — that is a
-        //     DISOCCLUSION, geometry that moved in front of or out from behind the cloud;
+        //     DISOCCLUSION, geometry that moved in front of or out from behind the cloud. Unreal splits
+        //     the same test into its two directions at :416 and :423 and uses the same 2 km threshold
+        //     (:406); ours is the symmetric form of the pair;
         //   * neither the history colour nor its guide may be NaN or Inf. One such texel, blended
         //     forward, poisons an ever-growing region of the screen for the rest of the session, which is
-        //     the single most expensive failure mode a history buffer has.
+        //     the single most expensive failure mode a history buffer has. Unreal's :491.
+        //
+        // WHAT UNREAL VALIDATES AND THIS PASS DOES NOT, so that the list above is not read as complete:
+        // a minimum reprojection distance (:299), the whole min/max-depth family (:402-427, :480), the
+        // eight-neighbour DILATION toward the closest scene depth (:543-558) and the optional
+        // neighbourhood colour box (:570+). The first three of those need per-pixel depth channels this
+        // pass does not carry — a min/max cloud depth and a half-resolution scene depth — so adopting one
+        // is a change to what the march writes, not a change here.
         //
         // LINEAR HDR IN, LINEAR HDR OUT. Premultiplied radiance in .rgb, TRANSMITTANCE in .a, exactly as
         // the march produced it and the composite expects it. Blending a premultiplied pair componentwise
@@ -191,29 +213,30 @@ Shader "CloudTemporalResolve"
             vec2 traceTexel = (halfPos - vec2(u_SubPixelOffset) - vec2(0.5f, 0.5f)) * 0.5f;
             vec2 traceUv    = ClampToTexelCentres((traceTexel + vec2(0.5f, 0.5f)) / vec2(traceSize), traceSize);
 
-            vec4 traceScatter = texture(u_CloudTrace, traceUv);
-            vec4 traceGuide   = texture(u_CloudTraceGuide, traceUv);
+            // Case 1 for the RADIANCE: the pixel this frame traced gets the exact texel, fetched rather
+            // than filtered. The other three of the block have no sample of their own this frame, so the
+            // bilinear reconstruction of the quarter-res grid is all that exists for them.
+            vec4 traceScatter = owned ? texelFetch(u_CloudTrace, traceCoord, 0) : texture(u_CloudTrace, traceUv);
 
-            // Case 1. The pixel this frame traced: the exact texel, fetched rather than filtered.
-            if (owned)
-            {
-                traceScatter = texelFetch(u_CloudTrace, traceCoord, 0);
-                traceGuide   = texelFetch(u_CloudTraceGuide, traceCoord, 0);
-            }
-
-            // The guide always describes THIS frame, whichever branch the radiance comes from: it is what
-            // the composite measures edges with and what next frame's disocclusion test compares against,
-            // and both questions are about the geometry in front of the camera now. It is never blended
-            // with the history's own distances — mixing a distance from three frames ago with this one
-            // produces a number describing nothing, which the composite would then read as an edge.
-            imageStore(u_ReconstructedGuide, coord, traceGuide);
+            // THE GUIDE IS LOADED FOR EVERY PIXEL, owned or not — Unreal's :286 and :391, and see the
+            // header for why filtering it is harmful rather than merely approximate. The block's four
+            // pixels therefore share one distance, which is exactly what its readers want: a distance that
+            // agrees with its neighbours costs the composite nothing, while a bilinear blend of the two
+            // sides of a silhouette agrees with neither and fires the edge path along the whole silhouette.
+            vec4 traceGuide = texelFetch(u_CloudTraceGuide, traceCoord, 0);
 
             float newWeight = owned ? kOwnedSampleWeight : kNewSampleWeight;
 
-            // Case 3, taken by fall-through: every rejection below leaves this value in place. That is
-            // Unreal's rule and the reason there is no dilation or search here — a neighbour that passes
-            // validation belongs to a different surface, and the smear it produces follows the camera.
+            // Every rejection below leaves this value in place: a history that was read and found to
+            // describe a different surface is answered with THIS frame's sample. That is Unreal's rule
+            // too — a failed disocclusion test there sets bUseNewSample — and it is the reason there is no
+            // search here: a neighbour that passes validation belongs to a different surface, and the
+            // smear it produces follows the camera.
             vec4 resolved = traceScatter;
+
+            // Whether there was a history to read AT ALL, which is a different question from whether it
+            // was accepted. Only the first sends the pixel down case 3.
+            bool historyRead = false;
 
             if (u_HistoryValid > 0.5f)
             {
@@ -249,6 +272,8 @@ Shader "CloudTemporalResolve"
 
                     if (onScreen)
                     {
+                        historyRead = true;
+
                         vec2 fetchUv = ClampToTexelCentres(prevUv, size);
 
                         vec4 history      = texture(u_CloudHistory, fetchUv);
@@ -262,6 +287,24 @@ Shader "CloudTemporalResolve"
                     }
                 }
             }
+
+            // CASE 3, and only case 3: there was no history to reproject from — the first frame after the
+            // targets were allocated, or a point that leaves the screen or falls behind the previous eye.
+            // Unreal answers it with a bilinear read of this frame's trace, guide and radiance together
+            // (VolumetricRenderTarget.usf:500-507), and so does this: `resolved` already holds the
+            // filtered radiance for a pixel this frame did not trace, and the guide is brought alongside
+            // it so the two describe the same reconstruction. A pixel this frame DID trace keeps its
+            // exact texel in both, which is strictly better than a filter and is what Unreal's
+            // bUseNewSample branch does as well.
+            if (!historyRead && !owned)
+                traceGuide = texture(u_CloudTraceGuide, traceUv);
+
+            // The guide always describes THIS frame, whichever branch the radiance came from: it is what
+            // the composite measures edges with and what next frame's disocclusion test compares against,
+            // and both questions are about the geometry in front of the camera now. It is never blended
+            // with the history's own distances — mixing a distance from three frames ago with this one
+            // produces a number describing nothing, which the composite would then read as an edge.
+            imageStore(u_ReconstructedGuide, coord, traceGuide);
 
             // Transmittance is clamped both ways because it multiplies the scene behind the cloud: a
             // value above 1 brightens what is BEHIND it, which reads as a glowing rectangle and is very
