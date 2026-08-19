@@ -23,12 +23,23 @@
 // a one-fold one and changes no answer. It lives here rather than in the test because the macro has to be
 // defined before CloudField.glslh is included.
 
+// THE PROFILE TABLE ARRIVES THE SAME WAY THE NOISE DOES, and that is what makes the second half of this
+// header a test of the GPU's arithmetic rather than of a re-implementation. CLOUD_SAMPLE_PROFILE is
+// defined below as a BILINEAR, REPEAT-WRAPPED read of the very buffer Graphic::CloudBuildProfileTable
+// hands the device — the same filter and the same wrap mode every sampler in this engine is created with —
+// so `what the generator writes` and `what the shader reads` can be compared directly, which is the one
+// relation a table nobody can inspect on the GPU would otherwise never be checked on.
+
+#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+
 #include <glm/glm.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <vector>
 
 namespace Desert::Tests::CloudFieldRef
 {
@@ -40,6 +51,7 @@ namespace Desert::Tests::CloudFieldRef
 
         using uint = std::uint32_t;
 
+        using glm::abs;
         using glm::clamp;
         using glm::dot;
         using glm::floor;
@@ -105,6 +117,76 @@ namespace Desert::Tests::CloudFieldRef
         }
 
 #define CLOUD_SAMPLE_NOISE( p ) CloudSampleBakedVolumeCached( p )
+
+        // ------------------------------------------------------------------------------------------
+        // The profile table, exactly as the device would see it
+        // ------------------------------------------------------------------------------------------
+
+        // Which species the bound table describes. A test that wants another species calls
+        // CloudProfileTableSelect and the next read comes from the new table — the same thing the renderer
+        // does when the artist changes the combo box, and the same single source (CloudBuildProfileTable).
+        struct ProfileTableState
+        {
+            Desert::Graphic::CloudSpecies Species = Desert::Graphic::CloudSpecies::CumulusCongestus;
+            std::vector<float>            Texels;
+        };
+
+        ProfileTableState& ProfileTable()
+        {
+            static ProfileTableState state{
+                 Desert::Graphic::CloudSpecies::CumulusCongestus,
+                 Desert::Graphic::CloudBuildProfileTable( Desert::Graphic::CloudSpecies::CumulusCongestus ) };
+            return state;
+        }
+
+        void CloudProfileTableSelect( Desert::Graphic::CloudSpecies species )
+        {
+            ProfileTableState& state = ProfileTable();
+            state.Species            = species;
+            state.Texels             = Desert::Graphic::CloudBuildProfileTable( species );
+        }
+
+        // A bilinear, REPEAT-wrapped fetch — the filter and the address mode VulkanImage2D creates for
+        // every sampled image, written out here because the difference between this and a nearest fetch is
+        // exactly the half-texel error the relation test exists to catch.
+        vec4 CloudSampleProfileTexture( vec2 uv )
+        {
+            const std::vector<float>& texels = ProfileTable().Texels;
+
+            constexpr int width  = static_cast<int>( Desert::Graphic::kCloudProfileTableAltitudeTexels );
+            constexpr int height = static_cast<int>( Desert::Graphic::kCloudProfileTablePatternTexels );
+
+            const float x = uv.x * static_cast<float>( width ) - 0.5f;
+            const float y = uv.y * static_cast<float>( height ) - 0.5f;
+
+            const float fx = x - std::floor( x );
+            const float fy = y - std::floor( y );
+
+            const auto wrap = []( float coordinate, int extent )
+            {
+                const int index = static_cast<int>( std::floor( coordinate ) ) % extent;
+                return index < 0 ? index + extent : index;
+            };
+
+            const int x0 = wrap( x, width );
+            const int y0 = wrap( y, height );
+            const int x1 = ( x0 + 1 ) % width;
+            const int y1 = ( y0 + 1 ) % height;
+
+            const auto texel = [&]( int ix, int iy )
+            {
+                const size_t base =
+                     ( static_cast<size_t>( iy ) * width + ix ) * Desert::Graphic::kCloudProfileTableChannels;
+                return vec4( texels[base], texels[base + 1], texels[base + 2], texels[base + 3] );
+            };
+
+            const vec4 top    = texel( x0, y0 ) * ( 1.0f - fx ) + texel( x1, y0 ) * fx;
+            const vec4 bottom = texel( x0, y1 ) * ( 1.0f - fx ) + texel( x1, y1 ) * fx;
+
+            return top * ( 1.0f - fy ) + bottom * fy;
+        }
+
+#define CLOUD_SAMPLE_PROFILE( uv ) CloudSampleProfileTexture( uv )
 
 #include <Common/CloudField.glslh>
 

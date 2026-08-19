@@ -21,16 +21,17 @@
 // multiple-scattering volume, the ambient term, and the early-out — which is why it is worth carrying a
 // quantity that means "depth inside" rather than the density a naive implementation would store.
 //
-// HOW THE NOISE ARRIVES. Through two macros, never through a sampler declared here:
+// HOW THE DATA ARRIVES. Through two macros, never through a sampler declared here:
 //
-//     CLOUD_SAMPLE_NOISE( vec3 texturePosition )   ->  vec4, the four periodic octaves
+//     CLOUD_SAMPLE_NOISE( vec3 texturePosition )   ->  vec4, the four channels of the noise volume
+//     CLOUD_SAMPLE_PROFILE( vec2 uv )              ->  vec4, the vertical profile table (.x is the profile)
 //
-// The march defines it as a `texture()` fetch of the baked volume; the unit tests define it as a call
-// into the same CloudPerlinFbm01 that baked the volume. This is the mechanism SkyScattering.glslh already
-// uses for its LUT callbacks, and it exists because a sampler cannot appear in text that is also compiled
-// as C++ — which is the only way the maths below gets a test at all. When the macro is undefined the
-// structural half of this header still compiles, which is what lets a consumer include it for the types
-// alone.
+// The march defines them as `texture()` fetches; the unit tests define the first as a call into the same
+// CloudNoiseVolumeChannels that baked the volume and the second as a filtered read of the very table
+// Graphic::CloudBuildProfileTable produced. This is the mechanism SkyScattering.glslh already uses for its
+// LUT callbacks, and it exists because a sampler cannot appear in text that is also compiled as C++ —
+// which is the only way the maths below gets a test at all. When the macros are undefined the structural
+// half of this header still compiles, which is what lets a consumer include it for the types alone.
 //
 // Dialect rules as in Common/CloudNoise.glslh.
 
@@ -56,11 +57,10 @@ struct CloudFieldParams
     float WeatherTileKm;    // horizontal period of the coverage field
     float Coverage;         // 0 = clear, 1 = solid
     float CoverageContrast; // sharpness of the cloud/clear transition; >1 narrows the band
-    float CloudType;        // 0 = flat sheet low in the layer, 1 = tall heaped cloud
-    float CloudTypeVariance; // how far the type wanders from CloudType across the sky
+    float DetailCharacter;  // 0 = wispy erosion, 1 = billowy — the SPECIES' edge, not its silhouette
     float DetailTileKm;     // period of the erosion field
     float DetailStrength;   // how deeply the erosion cuts into the profile
-    float DensityScale;     // global density multiplier
+    float DensityScale;     // global density multiplier, with the species' own density already folded in
     vec3  WindOffsetKm;     // accumulated wind displacement, subtracted from the sample position
 };
 
@@ -69,33 +69,118 @@ struct CloudFieldParams
 // parameters that every sample copies and no sample uses. They live in the bake pass's push constant,
 // which is the only place they are read.
 
-// The vertical profile: what fraction of the layer this cloud type occupies and how it tapers at both
-// ends. Deck p.19 composes the shape as `dimensional_profile = vertical_profile * cloud_coverage` — a
-// PRODUCT, and the multiplication is the point: the coverage field owns WHERE a cloud is, the vertical
-// profile owns its silhouette, and neither has to encode the other.
+// ---------------------------------------------------------------------------------------------------
+// The anisotropy of each octave. THREE VECTORS, NOT ONE SCALAR.
+// ---------------------------------------------------------------------------------------------------
 //
-// The two ends are not symmetric, because real cloud is not. The base is a sharp ramp — a cumulus base
-// sits on the lifting condensation level and is genuinely flat — while the top tapers over nearly half
-// the cloud's height, because that is where the rising parcel is losing against the surrounding air.
-float CloudVerticalProfile( float heightFraction, float cloudType )
+// What stood here was a single number, `verticalTile = tile / 2.2`, taken from the ratio of Unreal's
+// Noise1 vertical coefficient to its horizontal one. Three things were wrong with one number, and all
+// three are visible in the graph (ShapeModel.md §11.2, coefficients at L1161 / L1087 / L1124):
+//
+//   * the two HORIZONTAL axes are not equal either — Noise1 is (4.167, 4.444), so the field is stretched
+//     6.65 % along one of them, and a cloud field with two identical horizontal periods reads as being on
+//     a square grid in a way a slightly rectangular one does not;
+//   * the vertical ratio is DIFFERENT FOR EVERY OCTAVE — 2.18 for the shape, 1.25 for the distortion,
+//     0.83 for the third;
+//   * one of them is INVERTED. Noise3's vertical coefficient is BELOW its horizontal one, so that octave
+//     is stretched UPWARD rather than flattened. A single scalar cannot express a ratio that is above one
+//     for one octave and below one for another, whatever value it takes.
+//
+// The numbers below are those coefficients, normalised so the first horizontal axis is 1, and they are
+// assigned to our octaves BY ROLE wherever a role exists: Noise1 is Unreal's base shape and ours is the
+// coverage field; Noise2 is described by Epic as the distortion of Noise1 and ours is the domain warp
+// below. Our erosion octave has no counterpart in the graph at all — UE has no Nubis-style erosion — so
+// it takes the remaining octave, and the fact that the remaining one is the INVERTED one is a small piece
+// of luck: wisps that are taller than they are wide is what a torn cloud edge looks like.
+//
+// Y IS UP HERE AND Z IS UP IN UNREAL, so the middle number of each triple is Unreal's third.
+#define CLOUD_COVERAGE_FREQ_X 1.0f
+#define CLOUD_COVERAGE_FREQ_Y 2.182f // 9.091 / 4.167
+#define CLOUD_COVERAGE_FREQ_Z 1.0665f // 4.444 / 4.167
+
+#define CLOUD_DETAIL_FREQ_X 1.0f
+#define CLOUD_DETAIL_FREQ_Y 0.833f // 25 / 30 — BELOW one: this octave is stretched upward
+#define CLOUD_DETAIL_FREQ_Z 1.333f // 40 / 30
+
+// ---------------------------------------------------------------------------------------------------
+// THE HEIGHT-DEPENDENT DOMAIN WARP IS NOT HERE, AND THAT IS A MEASURED DECISION
+// ---------------------------------------------------------------------------------------------------
+//
+// Unreal displaces the base octave's COORDINATES by a second noise, on a vector that depends on the height
+// in the layer: horizontally the shove grows from 0.05 at the base to 1 at the top, vertically it is a
+// parabola that vanishes mid-layer (ShapeModel.md §10, and Epic's own words for the parameter are
+// "controls distortion amount and scale for Noise1"). It is the mechanism by which a two-dimensional
+// pattern stops being extruded upward into a column, and it was built here, measured, and taken out again.
+//
+// WHAT WAS MEASURED. Clouds_Demo, camera 0,200,0, three elevations x two azimuths, ImageStat contrast over
+// the full width and the top 71.9% of the frame, at three settings of the warp — off, the proposed default
+// and the slider's maximum:
+//
+//     zenith away   0.483 / 0.475 / 0.467      mid away   0.491 / 0.493 / 0.477
+//     zenith sun    0.497 / 0.497 / 0.509      mid sun    0.385 / 0.385 / 0.403
+//     horizon away  0.308 / 0.304 / 0.295      horizon sun 0.367 / 0.365 / 0.369
+//
+// The largest movement across the WHOLE travel of the control is 0.018 of contrast and it has no
+// consistent sign; mean luminance moves by less than 0.004. For scale, replacing the analytic profile with
+// the table moved the same numbers by up to 0.08, and the three species differ from one another by more
+// than 0.2.
+//
+// WHY IT BUYS NOTHING HERE, and this is not a failure of the technique. Unreal reads its placement pattern
+// as a two-dimensional texture, so without the warp its silhouette genuinely IS an extrusion and the warp
+// is the only three-dimensionality it has. Our coverage field is sampled in FULL 3D (see the long note on
+// the producer below), so the field already differs at every altitude by more than the warp displaces it —
+// the warp is a correlated shear on top of a decorrelation that has already happened. Two solutions to one
+// problem, and we were already carrying the other one.
+//
+// It cost one extra fetch of the volume per field sample, in the march AND in every light-march sample.
+// Paid for a change nobody can see, that is the most expensive line in the file.
+// ---------------------------------------------------------------------------------------------------
+// The vertical profile: A TABLE, and this is the read side of it
+// ---------------------------------------------------------------------------------------------------
+//
+// Deck p.19 composes the shape as `dimensional_profile = vertical_profile * cloud_coverage` — a PRODUCT,
+// and the multiplication is the point: the coverage field owns WHERE a cloud is, the vertical profile owns
+// its silhouette, and neither has to encode the other. That has not changed. What changed is what the
+// vertical profile IS.
+//
+// It was `f(heightFraction, cloudType)` — one analytic curve with two interpolated constants — and it is
+// now a two-dimensional table, `f(height in the envelope, VALUE OF THE PLACEMENT PATTERN HERE)`, which is
+// Unreal's arrangement byte for byte (ShapeModel.md §3: `ProfileObject.SampleLevel(float2(
+// NormAltitudeInLayer, L_i))`) and decision D-13. Two things follow that no curve delivers:
+//
+//   * a species is LOW AND FLAT at the rim of a patch and a TOWER in its middle, because the second axis
+//     is how deep inside the patch this column is. Height that correlates with how much cloud is there,
+//     rather than height sprinkled by a noise that knows nothing about the patch;
+//   * a profile may have TWO humps. A cumulonimbus anvil is a lobe of cloud at the tropopause with a gap
+//     between it and the tower that fed it, and `baseRamp * topRamp` has exactly one maximum for any
+//     choice of constants.
+//
+// The table is generated, not authored — Graphic::CloudBuildProfileTable evaluates a parametric curve per
+// species into 256 x 64 texels — so a scene nobody has art-directed still has a profile. The curve did not
+// die; it moved to the other side of the texture.
+//
+// THE AXES. U is the height fraction in the envelope, which is the species' OWN [base, top] in kilometres
+// (the envelope is computed from the species by Graphic::PackCloudParams, never authored). V is the
+// pattern. Both are clamped to the texel centres because every sampler in this engine is REPEAT: without
+// the clamp a height fraction of 1 wraps to the bottom row and the top of the layer grows the cloud's own
+// base back on top of itself.
+#define CLOUD_PROFILE_TABLE_ALTITUDE_TEXELS 256.0f
+#define CLOUD_PROFILE_TABLE_PATTERN_TEXELS  64.0f
+
+#ifdef CLOUD_SAMPLE_PROFILE
+float CloudSampleProfileTable( float heightFraction, float pattern )
 {
-    float type = clamp( cloudType, 0.0f, 1.0f );
+    float halfU = 0.5f / CLOUD_PROFILE_TABLE_ALTITUDE_TEXELS;
+    float halfV = 0.5f / CLOUD_PROFILE_TABLE_PATTERN_TEXELS;
 
-    // THE CLOUD OCCUPIES A FRACTION OF THE LAYER, not the layer. With a ten-kilometre envelope a
-    // stratocumulus fills the bottom six per cent of it and a congestus a third — which is 0.6 km and
-    // 3.5 km of actual cloud, the right numbers for those species. Letting the profile fill the envelope
-    // instead, as it did when the envelope was two kilometres, makes every cloud a three-kilometre slab
-    // and the sky an overcast.
-    float topEnd  = mix( 0.06f, 0.35f, type );
-    float baseEnd = mix( 0.01f, 0.05f, type );
+    float u = clamp( heightFraction, halfU, 1.0f - halfU );
+    float v = clamp( pattern, halfV, 1.0f - halfV );
 
-    float baseRamp = CloudRemap( heightFraction, 0.0f, baseEnd, 0.0f, 1.0f );
-    float topRamp  = CloudRemap( heightFraction, topEnd * 0.55f, topEnd, 1.0f, 0.0f );
-
-    return baseRamp * topRamp;
+    return clamp( CLOUD_SAMPLE_PROFILE( vec2( u, v ) ).x, 0.0f, 1.0f );
 }
+#endif // CLOUD_SAMPLE_PROFILE
 
-#ifdef CLOUD_SAMPLE_NOISE
+#if defined( CLOUD_SAMPLE_NOISE ) && defined( CLOUD_SAMPLE_PROFILE )
 
 // The procedural producer.
 //
@@ -111,51 +196,33 @@ float CloudVerticalProfile( float heightFraction, float cloudType )
 // noise supplies the SILHOUETTE, and the weather map only decides where a cloud is allowed to be. That is
 // what this now does.
 //
-// The vertical axis is scaled four times harder than the horizontal, because a cloud is about four times
-// wider than it is tall and an isotropic sample would give it the proportions of a ball.
+// The vertical axis is sampled at a higher frequency than the horizontal, because a cloud is wider than
+// it is tall — and by a DIFFERENT factor per axis and per octave, see the frequency triples above.
 CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heightFraction, vec3 positionKm )
 {
     CloudFieldSample result;
     result.Profile      = 0.0f;
-    result.DetailType   = clamp( params.CloudType, 0.0f, 1.0f );
+    result.DetailType   = clamp( params.DetailCharacter, 0.0f, 1.0f );
     result.DensityScale = max( params.DensityScale, 0.0f );
+
+    // THE CHEAP REJECTION, and it is exact rather than conservative. The profile table's support grows
+    // monotonically with the pattern — a fuller patch is taller and its anvil is more present, never less
+    // — so a height at which the pattern's own maximum yields nothing yields nothing at any pattern. One
+    // 2D fetch, from a 64 KiB table that will be in cache, in place of the two 3D fetches below. Without
+    // it the march pays for the whole shell on every ray, which is what the old profile's early-out used
+    // to prevent.
+    if ( CloudSampleProfileTable( heightFraction, 1.0f ) <= 0.0f )
+        return result;
 
     vec3 windPos = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
                          positionKm.z - params.WindOffsetKm.z );
 
-    float tile         = max( params.WeatherTileKm, 1e-3f );
-    // The vertical axis is sampled at a higher frequency than the horizontal, because a cloud is wider
-    // than it is tall. UE's shipped instance uses roughly 2.2 to 1 (Noise1 scale 4.17/4.44 horizontal
-    // against 9.09 vertical); this follows it rather than the 4 to 1 first guessed.
-    float verticalTile = tile / 2.2f;
+    float tile = max( params.WeatherTileKm, 1e-3f );
 
-    vec3 coveragePos = vec3( windPos.x / tile, windPos.y / verticalTile, windPos.z / tile );
+    vec3 coveragePos = vec3( windPos.x * CLOUD_COVERAGE_FREQ_X / tile, windPos.y * CLOUD_COVERAGE_FREQ_Y / tile,
+                             windPos.z * CLOUD_COVERAGE_FREQ_Z / tile );
 
     vec4 noise = CLOUD_SAMPLE_NOISE( coveragePos );
-
-    // THE CLOUD TYPE IS A FIELD, NOT A CONSTANT, and this is what stops the layer having one flat top.
-    //
-    // The type drives how much of the layer a cloud fills. Held constant, every cloud in the sky reaches
-    // exactly the same altitude and the whole layer reads as a slab with a lid — the defect is
-    // geometric, not a matter of tuning, because the vertical profile is then the same function
-    // everywhere. Varying it at the scale of the finer coverage octave means one island can be a low
-    // sheet and its neighbour a tower, and a single large island can rise on one side and not the other.
-    //
-    // It costs nothing: it reads a channel of a fetch that has already happened.
-    // The driver is the WISPY coarse channel and not one of the two the coverage field is built from. It
-    // has to be a field the islands do not already carry, or the type would be a function of the coverage
-    // and every big cloud would be a tower for the same reason it is big. At period 2 against the billowy
-    // pair's 3 and 6 its cells are the coarsest in the volume, so the type wanders at a scale LARGER than
-    // one island: neighbouring clouds differ, and a single wide one still rises on one side and not the
-    // other.
-    float typeNoise = ( noise.x - 0.5f ) * 2.0f;
-    float type      = clamp( params.CloudType + params.CloudTypeVariance * typeNoise, 0.0f, 1.0f );
-
-    result.DetailType = type;
-
-    float vertical = CloudVerticalProfile( heightFraction, type );
-    if ( vertical <= 0.0f )
-        return result;
 
     // THE COVERAGE FIELD IS THE BILLOWY PAIR, AND WHICH PAIR IT IS DECIDES WHETHER THERE ARE CLOUDS.
     //
@@ -255,6 +322,24 @@ CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heig
 
     float coverage = smoothstep( threshold - halfWidth, threshold + halfWidth, field );
 
+    // THE PATTERN AXIS OF THE PROFILE TABLE: how deep inside the patch this column is, measured from the
+    // level at which cloud begins.
+    //
+    // It is NOT the raw field. The threshold sweeps the whole of [0, 1] with the slider, so at a coverage
+    // of 0.15 every column that has any cloud in it has a field between 0.79 and 1 — a fifth of the axis —
+    // and four fifths of the table would never be read. Measuring from the band's lower edge instead
+    // spends the whole axis at every setting: 0 exactly where the island begins and 1 at the field's own
+    // maximum. That is what makes "flat at the rim, a tower in the middle" a property of the island rather
+    // than a property of the slider.
+    //
+    // It is not `coverage` either. The transition band is 0.06 wide and the smoothstep across it saturates
+    // within a couple of per cent of the island's edge, so the pattern would be 1 almost everywhere and
+    // every cloud would be full height again.
+    float patternFloor = threshold - halfWidth;
+    float pattern      = clamp( ( field - patternFloor ) / max( 1.0f - patternFloor, 1e-3f ), 0.0f, 1.0f );
+
+    float vertical = CloudSampleProfileTable( heightFraction, pattern );
+
     result.Profile = clamp( vertical * coverage, 0.0f, 1.0f );
     return result;
 }
@@ -284,8 +369,14 @@ float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 
     vec3 windPos = vec3( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
                          positionKm.z - params.WindOffsetKm.z );
 
+    // ANISOTROPIC, and it was not. The erosion was the one octave here still sampled as a cube, which
+    // gives a torn cloud edge the proportions of gravel; the graph has anisotropy on all three of its
+    // octaves. This one takes the INVERTED triple — vertical period longer than horizontal — so the wisps
+    // it cuts are taller than they are wide, which is what a shred of cloud being carried upward looks
+    // like.
     float tile      = max( params.DetailTileKm, 1e-4f );
-    vec3  detailPos = vec3( windPos.x / tile, windPos.y / tile, windPos.z / tile );
+    vec3  detailPos = vec3( windPos.x * CLOUD_DETAIL_FREQ_X / tile, windPos.y * CLOUD_DETAIL_FREQ_Y / tile,
+                            windPos.z * CLOUD_DETAIL_FREQ_Z / tile );
 
     vec4 noise = CLOUD_SAMPLE_NOISE( detailPos );
 
@@ -325,6 +416,6 @@ float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 
     return clamp( density * field.DensityScale, 0.0f, 1.0f );
 }
 
-#endif // CLOUD_SAMPLE_NOISE
+#endif // CLOUD_SAMPLE_NOISE && CLOUD_SAMPLE_PROFILE
 
 #endif // CLOUD_FIELD_GLSLH

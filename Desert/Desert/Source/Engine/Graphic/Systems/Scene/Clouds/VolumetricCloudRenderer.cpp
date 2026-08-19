@@ -88,8 +88,60 @@ namespace Desert::Graphic::System
             m_HistoryImage[i].reset();
             m_HistoryGuideImage[i].reset();
         }
+        m_ProfileTable.reset();
+        m_ProfileSpecies.reset();
         m_ParamsBuffer.reset();
         m_ResolveParamsBuffer.reset();
+    }
+
+    bool VolumetricCloudRenderer::EnsureProfileTable()
+    {
+        if ( m_ProfileTable && m_ProfileSpecies.has_value() && m_ProfileSpecies.value() == m_Data.Species )
+            return true;
+
+        // A FRESH IMAGE RATHER THAN AN IN-PLACE UPLOAD, which is the same choice CloudNoiseService makes
+        // and for the same reason: SetData writes into an image that frames still in flight may be
+        // sampling, and the species changes when an artist touches a combo box — not often enough to be
+        // worth the synchronisation argument. The old image goes through Image2D's deletion queue when
+        // the last reference drops.
+        if ( m_ProfileTable )
+            Renderer::GetInstance().WaitDeviceIdle();
+
+        const std::vector<float> texels = CloudBuildProfileTable( m_Data.Species );
+
+        const Core::Formats::Image2DSpecification spec{
+             .Tag        = "CloudProfileTable",
+             .Width      = kCloudProfileTableAltitudeTexels,
+             .Height     = kCloudProfileTablePatternTexels,
+             .Format     = Core::Formats::ImageFormat::RGBA32F,
+             .Mips       = 1u,
+             .Data       = texels,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Sample,
+        };
+
+        m_ProfileTable = Image2D::Create( spec, nullptr );
+        if ( !m_ProfileTable )
+        {
+            m_ProfileSpecies.reset();
+            LOG_ERROR( "[Clouds] The {}x{} RGBA32F vertical profile table for species {} could not be "
+                       "created on the device; the clouds will not render for this view.",
+                       kCloudProfileTableAltitudeTexels, kCloudProfileTablePatternTexels,
+                       static_cast<uint32_t>( m_Data.Species ) );
+            return false;
+        }
+
+        m_ProfileSpecies = m_Data.Species;
+
+        const CloudSpeciesShape& shape = CloudSpeciesShapeOf( m_Data.Species );
+        LOG_INFO( "[Clouds] Vertical profile table rebuilt for species {} — envelope {:.2f} to {:.2f} km, "
+                  "{}x{} RGBA32F ({:.2f} MiB).",
+                  static_cast<uint32_t>( m_Data.Species ), CloudSpeciesBaseKm( shape ), CloudSpeciesTopKm( shape ),
+                  kCloudProfileTableAltitudeTexels, kCloudProfileTablePatternTexels,
+                  BytesToMiB( Core::Formats::CalculateImageSize( kCloudProfileTableAltitudeTexels,
+                                                                 kCloudProfileTablePatternTexels,
+                                                                 Core::Formats::ImageFormat::RGBA32F ) ) );
+        return true;
     }
 
     bool VolumetricCloudRenderer::CreatePipelines()
@@ -339,6 +391,9 @@ namespace Desert::Graphic::System
         if ( !EnsureNoiseVolume() )
             return;
 
+        if ( !EnsureProfileTable() )
+            return;
+
         const CloudGpuPayload payload = PackCloudParams( m_Data, atmosphere, m_WindOffset );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
@@ -360,6 +415,7 @@ namespace Desert::Graphic::System
         // verbatim.
         renderer.ComputeImageBeginRead( depthImage );
         renderer.ComputeImageBeginRead( m_NoiseVolume );
+        renderer.ComputeImageBeginRead( m_ProfileTable.get() );
         renderer.ComputeImageBeginWrite( m_TraceImage.get() );
         renderer.ComputeImageBeginWrite( m_TraceGuideImage.get() );
 
@@ -368,6 +424,7 @@ namespace Desert::Graphic::System
         m_MarchPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
         m_MarchPipeline->SetInput( kCloudSceneDepthBinding, depthImage );
         m_MarchPipeline->SetInput( kCloudNoiseBinding, m_NoiseVolume );
+        m_MarchPipeline->SetInput( kCloudProfileBinding, m_ProfileTable.get() );
 
         // ALWAYS bound, even when the payload's gate says it will not be read: a declared sampler with no
         // image is an invalid descriptor set, not an unused one, and this backend answers an invalid set
@@ -397,6 +454,7 @@ namespace Desert::Graphic::System
 
         renderer.ComputeImageEndWrite( m_TraceGuideImage.get() );
         renderer.ComputeImageEndWrite( m_TraceImage.get() );
+        renderer.ComputeImageEndRead( m_ProfileTable.get() );
         renderer.ComputeImageEndRead( m_NoiseVolume );
         renderer.ComputeImageEndRead( depthImage );
 

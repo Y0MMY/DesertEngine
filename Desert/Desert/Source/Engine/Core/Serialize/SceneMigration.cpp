@@ -1,12 +1,18 @@
 #include <Engine/Core/Serialize/SceneMigration.hpp>
 
 #include <Engine/Core/SceneSettings.hpp>
+// For Graphic::CloudSpecies only. The v3 -> v4 migration writes a species enumerator into the tree, and
+// spelling the integers here instead would be a second statement of the library's order — the exact
+// duplication that agrees with itself until somebody inserts a species. The header is dependency-free and
+// carries no renderer, so it does not bring the layer below into this one.
+#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
 
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Units.hpp>
 
 #include <glm/trigonometric.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 #include <string>
@@ -526,6 +532,100 @@ namespace Desert::Core
         return report;
     }
 
+    CloudSpeciesMigrationReport MigrateCloudSpeciesV3ToV4( std::vector<Assets::EntityData>& entities )
+    {
+        // The three keys with nowhere to go. Named as data rather than tested one at a time so the list
+        // reads in one look and the count in the report cannot drift from it.
+        static constexpr const char* kRemovedKeys[] = { "LayerBottomAltitude", "LayerThickness",
+                                                        "CloudTypeVariance" };
+        static constexpr const char* kTypeKey       = "CloudType";
+        static constexpr const char* kSpeciesKey    = "Species";
+
+        CloudSpeciesMigrationReport report;
+
+        for ( auto& entity : entities )
+        {
+            const auto clouds = entity.Components.get( "VolumetricCloud" );
+            if ( !clouds.has_value() )
+                continue;
+
+            const auto fields = clouds.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': the VolumetricCloud payload is {1}, not an object - "
+                          "its cloud type could not be turned into a species",
+                          entity.Tag.value_or( "Entity" ), Describe( clouds.value() ) );
+                continue;
+            }
+
+            // Rebuilt rather than erased in place, like the migration above it: rfl::Object is an ordered
+            // vector of pairs with no erase, and copying every key except the dropped ones states the
+            // intent more plainly than an index dance. Order is preserved.
+            rfl::Generic::Object kept;
+            int                  dropped = 0;
+            bool                 typed   = false;
+
+            for ( const auto& [key, value] : fields.value() )
+            {
+                const bool isRemoved = std::any_of( std::begin( kRemovedKeys ), std::end( kRemovedKeys ),
+                                                    [&key]( const char* removed ) { return key == removed; } );
+                if ( isRemoved )
+                {
+                    ++dropped;
+                    continue;
+                }
+
+                if ( key == kTypeKey )
+                {
+                    ++dropped;
+
+                    const auto scalar = value.to_double();
+                    if ( !scalar.has_value() )
+                    {
+                        // A CloudType that is not a number tells us nothing about what the author wanted,
+                        // and the C++ default is a species in its own right. Said out loud, because a
+                        // value we drop silently is a value nobody will ever find again.
+                        LOG_WARN( "[SceneMigration] entity '{0}': CloudType is {1}, not a number - the layer "
+                                  "keeps the default species",
+                                  entity.Tag.value_or( "Entity" ), Describe( value ) );
+                        continue;
+                    }
+
+                    // The library is ordered from the flattest species to the tallest, which is the axis
+                    // the old scalar ran along, so the quarters below are a translation rather than a
+                    // guess. 0.6 - the component's own former default - lands on CumulusCongestus, which
+                    // the new default also names.
+                    const double type = scalar.value();
+                    int          species;
+                    if ( type < 0.25 )
+                        species = static_cast<int>( Graphic::CloudSpecies::Stratus );
+                    else if ( type < 0.55 )
+                        species = static_cast<int>( Graphic::CloudSpecies::CumulusMediocris );
+                    else if ( type < 0.85 )
+                        species = static_cast<int>( Graphic::CloudSpecies::CumulusCongestus );
+                    else
+                        species = static_cast<int>( Graphic::CloudSpecies::Cumulonimbus );
+
+                    kept[kSpeciesKey] = static_cast<int64_t>( species );
+                    typed             = true;
+                    continue;
+                }
+
+                kept[key] = value;
+            }
+
+            if ( dropped == 0 )
+                continue; // already raised, or authored after the move - leave the tree byte-identical
+
+            entity.Components["VolumetricCloud"] = rfl::Generic( std::move( kept ) );
+            report.Entities += 1;
+            report.FieldsDropped += dropped;
+            report.SpeciesSet += typed ? 1 : 0;
+        }
+
+        return report;
+    }
+
     SceneMigrationReport MigrateScene( SceneSerialized& scene )
     {
         SceneMigrationReport report;
@@ -552,6 +652,12 @@ namespace Desert::Core
         {
             report.CloudNoiseRaised = true;
             report.CloudNoise       = MigrateCloudNoiseV2ToV3( scene.Entities );
+        }
+
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudSpecies )
+        {
+            report.CloudSpeciesRaised = true;
+            report.CloudSpecies       = MigrateCloudSpeciesV3ToV4( scene.Entities );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

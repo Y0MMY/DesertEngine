@@ -109,6 +109,17 @@ namespace Desert::Core
                       sceneData->SceneName, kSceneVersionTonemap, kSceneVersionCloudNoise,
                       migration.CloudNoise.FieldsDropped, migration.CloudNoise.Entities );
         }
+        if ( migration.CloudSpeciesRaised && migration.CloudSpecies.Entities > 0 )
+        {
+            LOG_INFO( "[SceneMigration] '{0}': scene schema v{1} -> v{2} - a cloud layer names a SPECIES now, "
+                      "so {3} field(s) were dropped from {4} entity(ies) and {5} of them had their scalar "
+                      "cloud type translated into one. The layer's shell is computed from the species' own "
+                      "altitudes and is no longer authored. Re-save (or run SceneMigrator) to stamp the file "
+                      "so this never runs again.",
+                      sceneData->SceneName, kSceneVersionCloudNoise, kSceneVersionCloudSpecies,
+                      migration.CloudSpecies.FieldsDropped, migration.CloudSpecies.Entities,
+                      migration.CloudSpecies.SpeciesSet );
+        }
         if ( migration.UnitsRaised )
         {
             LOG_INFO( "[SceneMigration] '{0}': world units v0 -> v{1} (metres -> centimetres, x{2}) - {3} "

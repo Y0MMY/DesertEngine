@@ -28,7 +28,7 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
 {
     vec4  u_CloudLayer;     // x planet radius (km), y layer bottom altitude (km), z thickness (km), w max view distance (km)
     vec4  u_CloudMarch;     // x max steps, y stop transmittance, z tracing start distance (km), w extinction (1/km)
-    vec4  u_CloudWeather;   // x coverage tile (km), y coverage, z coverage contrast, w cloud type
+    vec4  u_CloudWeather;   // x coverage tile (km), y coverage, z coverage contrast, w detail character
     vec4  u_CloudDetail;    // x detail tile (km), y detail strength, z density scale, w scattering albedo
     vec4  u_CloudWind;      // xyz accumulated wind offset (km), w phase g
     vec4  u_CloudSun;       // xyz TOWARD the sun (normalized), w light march distance (km)
@@ -39,11 +39,6 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     // Same arrangement as the height fog's u_FogAmbient, and for the same reason.
     vec4  u_CloudAmbient;
     vec4  u_CloudMultiScatter; // x octave count, y contribution, z occlusion, w eccentricity
-    // x = aerial-perspective volume far extent (km), y = its read-side view-distance scale,
-    // z = 1 when the volume exists and must be sampled, w = cloud type variance.
-    // The type variance shares this block rather than earning one of its own because a vec4 with three
-    // used slots is a vec4 with one slot waiting to be repurposed without a name.
-    vec4  u_CloudAerial;
     // x = second phase lobe g, y = phase blend, z = ambient occlusion strength,
     // w = the distance past which the layer is not traced at all (km).
     vec4  u_CloudPhase;
@@ -51,11 +46,21 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     // reaches full strength (km), z = distance at which the near-camera fade ends (km), w = the
     // distance at which it begins (km).
     vec4  u_CloudFade;
+    // x = aerial-perspective volume far extent (km), y = its read-side view-distance scale,
+    // z = 1 when the volume exists and must be sampled.
+    //
+    // A vec3 AND THE LAST MEMBER, which is the only shape in which three values can be three values. It
+    // used to be a vec4 whose fourth slot carried the cloud type's variance, and then the domain warp's
+    // amount; the warp was measured and taken out (see the note in Common/CloudField.glslh), so rather
+    // than leave a float nobody reads — which is where the next parameter would get stashed without a
+    // name, a range or a tooltip — the block ends in a vec3. std430 puts it at offset 176 and the block
+    // is 188 bytes; Graphic::CloudGpuPayload pins exactly that with a static_assert.
+    vec3  u_CloudAerial;
 };
 
-// The block is TWELVE vec4s and stops there. Seeds and octave counts are absent on purpose: they decide
-// what the baked noise volume CONTAINS, not how the march reads it, so they belong to the bake pass's
-// push constant and would be four values copied into every dispatch here for nothing.
+// The block is ELEVEN vec4s and a vec3, and it stops there. Seeds and octave counts are absent on purpose:
+// they decide what the baked noise volume CONTAINS, not how the march reads it, so they belong to the
+// generator and would be four values copied into every dispatch here for nothing.
 
 // The two step-schedule constants that are NOT component parameters, for the same reason they are cvars
 // in Unreal rather than fields of UVolumetricCloudComponent: they trade cost against quality identically
@@ -78,8 +83,7 @@ CloudFieldParams CloudUnpackFieldParams()
     p.WeatherTileKm    = u_CloudWeather.x;
     p.Coverage         = u_CloudWeather.y;
     p.CoverageContrast = u_CloudWeather.z;
-    p.CloudType        = u_CloudWeather.w;
-    p.CloudTypeVariance = u_CloudAerial.w;
+    p.DetailCharacter  = u_CloudWeather.w;
     p.DetailTileKm     = u_CloudDetail.x;
     p.DetailStrength   = u_CloudDetail.y;
     p.DensityScale     = u_CloudDetail.z;

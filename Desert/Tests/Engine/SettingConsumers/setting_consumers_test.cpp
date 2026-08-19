@@ -184,6 +184,12 @@ namespace
     // That pass is gone: the noise volume is an asset generated offline, its seed and lattice periods live
     // in the container's own header, and the component names the volume instead of describing how to bake
     // one. Four rows removed rather than repointed, because there is nothing left for them to point at.
+    //
+    // And four more since: LayerBottomAltitude and LayerThickness stated the shell by hand, which the
+    // species now states in kilometres and the packer computes; CloudType and CloudTypeVariance drove one
+    // analytic profile curve, which is now a per-species TABLE indexed by the placement pattern's own
+    // value. Every one of the four was removed rather than repointed, and the two fields that took their
+    // place them - Species - is a row above like everything else.
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kCloudPayload = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp";
@@ -194,9 +200,11 @@ namespace
     constexpr Row kCloudRows[] = {
          { "Enabled", kCloudRenderer }, // the zero-cost gate: off means no allocation and no dispatch
 
-         // Cloud Layer - the shell the march intersects, converted to kilometres by the packer.
-         { "LayerBottomAltitude", kCloudPayload },
-         { "LayerThickness", kCloudPayload },
+         // Cloud Layer - the shell the march intersects. The species is what the packer BUILDS it from:
+         // its altitudes become Layer.y and Layer.z, its edge character becomes Weather.w and its density
+         // is folded into Detail.z. Two fields that used to state the shell by hand are gone, because an
+         // authored shell and a species' altitudes are two numbers obliged to agree.
+         { "Species", kCloudPayload },
          { "PlanetRadius", kCloudPayload },
          { "MaxViewDistance", kCloudPayload },
          { "TracingStartDistance", kCloudPayload },
@@ -205,8 +213,6 @@ namespace
          // Weather - the coverage field.
          { "Coverage", kCloudPayload },
          { "CoverageContrast", kCloudPayload },
-         { "CloudType", kCloudPayload },
-         { "CloudTypeVariance", kCloudPayload },
          { "WeatherTileSize", kCloudPayload },
 
          // Noise - the volume itself, resolved by the renderer rather than packed by the packer.
