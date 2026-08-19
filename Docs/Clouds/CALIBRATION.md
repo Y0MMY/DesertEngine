@@ -194,6 +194,12 @@ the same optical depth and the body is shaded uniformly. That is why the clouds 
 Fixed: 15 km, six samples. The samples are on a squared distribution, so this is not thirty times the
 cost — the first few still land in the metres nearest the sample.
 
+> **That last sentence is wrong, and it is the whole of task OE.** On a squared distribution over a
+> march of length `M` with `N` samples the FIRST segment is `M / N²` long. At 500 m and six samples it
+> was 13.9 m. At 15 km and six samples it is **417 m** — the lengthening of the ray coarsened its near
+> field by exactly the factor it lengthened the ray, thirty times, and the sample count was not moved
+> with it. Measurements in "OE" below.
+
 ### 2. The clouds were DARKER than the sky they sat on
 
 The decisive measurement was a frame with the clouds switched OFF: the clear sky alone measured mean 0.740,
@@ -240,6 +246,160 @@ camera elevation, so an exact match is not the target and never was.
 That gap was the tonemapper, and T-ACES closed it without touching a single line of cloud code — see the
 T-ACES section above. It is left recorded because being wrong about WHERE a discrepancy lives is the
 expensive mistake this document exists to prevent, and this is the second time it happened.)*
+
+## OE: looking INTO the sun, 2026-08-20 — the shadow ray, and why ACES hid how big it was
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, band `0 0 1280 552`. The sun of this
+scene is at elevation 51 degrees and azimuth `+Z`, so `--look 0,Y,1` is INTO it and `--look 0,Y,-1` is
+away from it. Two independent runs of the same command produced **0 differing bytes** of the PNG, so
+every difference below is the change and nothing else.
+
+| frame | mean | p05 | p50 | p95 | contrast | sat |
+|---|---|---|---|---|---|---|
+| **UE reference** `UE_mid.png 377 169 2035 991` | 0.609 | 0.321 | 0.650 | **0.800** | 0.479 | 0.192 |
+| zenith `0,0.9,1` — INTO the sun | 0.740 | 0.499 | 0.722 | **0.996** | 0.497 | **0.022** |
+| zenith `0,0.9,-1` — away | 0.516 | 0.284 | 0.499 | 0.767 | 0.483 | 0.121 |
+| mid `0,0.45,1` | 0.578 | 0.456 | 0.547 | 0.841 | 0.385 | 0.056 |
+| mid `0,0.45,-1` | 0.568 | 0.295 | 0.574 | 0.786 | 0.491 | 0.126 |
+| horizon `0,0.12,1` | 0.674 | 0.488 | 0.672 | 0.855 | 0.367 | 0.047 |
+| horizon `0,0.12,-1` | 0.631 | 0.467 | 0.632 | 0.775 | 0.307 | 0.064 |
+
+Frames: `Shots/OE_base_{zenith,mid,horizon}_{sun,away}.png`. **Only the sunward half of the sky is
+broken**, and it is worst where the elevation is highest — the away column is within a few hundredths
+of the reference at every elevation.
+
+### The second scale this document needed: what a display number means in radiance
+
+Every figure above is 8-bit output, and above ~0.95 that scale is nearly flat: the shipped ACES fit
+plus gamma 2.2, evaluated on its own constants, maps
+
+| linear luminance after exposure | 0.42 | 0.84 | **0.97** | 1.0 | 2.5 | 4.0 | 10.0 | **16.8** | 24 |
+|---|---|---|---|---|---|---|---|---|---|
+| displayed | 0.594 | 0.767 | **0.798** | 0.804 | 0.926 | 0.958 | 0.988 | **0.996** | 0.9995 |
+
+So the reference's `p95 = 0.798` IS "linear 0.97 after exposure", and our `0.996` IS "linear 16.8" —
+**17 times the reference, 4.1 stops**, not the 25% the display numbers suggest. This is why the earlier
+finding that removing the lens flare moves `p95` by 0.008 was misleading rather than wrong: it was
+measured at a point where the curve compresses a factor of three into a third of a display level.
+Everything below is therefore reported in LINEAR scene radiance, read out of an instrumented composite
+that writes `clamp((log2(L) + 10) / 20, 0, 1)` in place of the tonemap, so ImageStat's percentiles
+decode straight back to radiance.
+
+### The knock-out table — linear scene radiance, before exposure, zenith, INTO the sun
+
+| variant | p05 | p50 | **p95** |
+|---|---|---|---|
+| **shipped, INTO the sun** | 1.283 | 1.866 | **20.53** |
+| **shipped, away** | 0.536 | 1.357 | **2.87** |
+| *target implied by the reference's 0.798* | | | *4.4* |
+| clouds off (`VolumetricCloud.Enabled=false`) | 0.633 | 0.824 | 1.15 |
+| directional light `Intensity = 0` | 0.633 | 0.737 | 0.82 |
+| phase forced isotropic (`PhaseG=0, PhaseGBackward=0, MsEccentricity=0`) | 1.149 | 1.580 | 3.20 |
+| `PhaseBlend 0.575 -> 1.0` (second lobe only) | 1.214 | 1.670 | 4.00 |
+| multi-scatter octaves 3 -> 1 | 0.669 | 0.824 | 16.45 |
+| cloud ambient scale -> 0 | 0.566 | 1.087 | 19.43 |
+| scattering albedo 0.98 -> 0.5 | 0.669 | 0.920 | 10.13 |
+| extinction scale 8 -> 16 | 1.214 | 1.580 | 22.63 |
+| **light march 6 -> 16 samples** | 1.283 | 1.495 | **6.15** |
+| light march 16 samples spread over 50 km instead of 15 | 1.283 | 1.580 | 10.13 |
+| **light march 64 samples (converged)** | 1.283 | 1.495 | **4.72** |
+| light march 64 samples, AWAY from the sun | 0.536 | 1.414 | 2.46 |
+| cloud aerial perspective off | *bit-identical to the shipped frame in all six figures* |
+
+Read it in one line: **converging the sun-visibility shadow ray takes the sunward highlight from 20.53
+to 4.72 — a factor of 4.35 — and lands within 7% of the 4.4 the reference implies. The same change
+away from the sun is 2.87 to 2.46, a factor of 1.17.** The error is 3.7 times more damaging into the
+sun than away from it, and nothing else in the table has that shape.
+
+### The instrument that names it: the optical depth itself, rendered
+
+The march's `opticalDepth` toward the sun at each pixel's FIRST cloud sample, written out in place of
+the cloud's radiance (`Shots/OE_instr_opticaldepth_n{6,64}_zenith_sun.png` — the six-sample frame has
+large BLACK regions along every cloud edge where the layer reports itself transparent to the sun; at 64
+they are gone):
+
+| shadow samples | first segment | tau p05 | tau p50 | tau p95 | sun let through at p05, `exp(-tau)` |
+|---|---|---|---|---|---|
+| **6 — shipped** | **417 m** | **0.384** | 3.39 | 13.18 | **0.681** |
+| 10 — UE's `BaseShadowRaySampleCount` | 150 m | 3.387 | 10.13 | 18.38 | 0.034 |
+| 16 — our clamp ceiling | 58.6 m | 3.784 | 7.67 | 16.45 | 0.023 |
+| 32 | 14.6 m | 3.580 | 8.11 | 14.72 | 0.028 |
+| 64 | 3.7 m | 3.784 | 8.11 | 13.93 | 0.023 |
+
+**At six samples the fifth percentile of the optical depth toward the sun is 0.384 where the converged
+answer is 3.784 — the shipped shadow ray lets THIRTY TIMES too much sunlight into the pixels that end
+up brightest**, and its median reports 3.39 against 8.11, 42% of the material that is there. Everything
+from ten samples up is on the converged plateau; six is the only value below the knee, and 32 is where
+the first segment returns to the 13.9 m it had before the ray was lengthened.
+
+Why it shows up only into the sun: the error is a multiplier on `sunVisibility`, and `sunVisibility` is
+multiplied by the phase function. At the bright pixels of the sunward frame the dual lobe is ~0.51 sr^-1
+against ~0.031 sr^-1 at the same pixels of the away frame — a factor of 16. An error the away azimuth
+divides by 16 the sunward azimuth does not.
+
+### Two mechanisms, and the second is invisible until the first is fixed
+
+Displayed `p95`, zenith, INTO the sun:
+
+| shadow samples | bloom + lens flare | p95 |
+|---|---|---|
+| 6 (shipped) | on | **0.996** |
+| 6 | off | 0.961 |
+| 64 | on | 0.926 |
+| **64** | **off** | **0.806** |
+| *UE reference* | | *0.798* |
+
+Away, for the same rows: 0.767 / — / 0.676 / 0.664.
+
+Bloom and the lens flare are worth **0.035** on the shipped frame and **0.120** once the shadow ray is
+converged, because on the shipped frame they are being added on top of a value ACES has already
+saturated. Their own azimuth asymmetry is large — they add ~6.7 units of linear radiance at the
+near-sun p95 pixels against ~0.93 away — and their cause is a relation of the kind section 2.3.1 of the
+contract lists: **`BloomThreshold` is compared against PRE-exposure radiance** (`BloomDownsample.shader`
+takes `max(brightness - u_Threshold, 0)` on the raw HDR) while the scene's `Exposure` is 0.22, so a
+threshold authored as 2.5 is 0.55 in exposure-normalised units and ordinary daylight sky is a bloom
+source. It is left as measured and NOT tuned: raising the number in one scene would hide a units
+disagreement that belongs to the bloom pass.
+
+### What was disproved
+
+* **The sun of 22 at an exposure of 0.22 is not itself the overexposure.** No single exposure can fix
+  both azimuths: bringing the shipped sunward p95 to 0.798 needs 0.047, which puts the away frame at a
+  displayed 0.27. And with the shadow ray converged the SAME 0.22 lands the sunward frame on 0.806
+  against the reference's 0.798. The exposure was right; the radiance was wrong.
+* **The sun disc and its glow are not it.** Clouds off, zenith, into the sun: displayed p95 0.594,
+  linear 1.15, saturation 0.384 — a correctly exposed blue sky with the disc and its ghosts in frame
+  (`Shots/OE_ko_cloudsoff_zenith_sun.png`).
+* **`PhaseG` 0.8 is not a defect and turning it down is the wrong repair.** The implementation is
+  equivalent to `VolumetricCloud.usf:327-335` including the sign convention (UE evaluates HG with
+  `+2g·cos` and passes `-cosTheta`; we use `-2g·cos` and `+cosTheta`), and the constants 0.8 / 0.1667 /
+  0.575 are UE's shipped instance. Forcing it isotropic gives 3.20 — BELOW the 4.4 the reference
+  implies, so a frame tuned that way would be dark for a second wrong reason
+  (`Shots/OE_ko_phase_isotropic_zenith_sun.png`).
+* **Aerial perspective contributes exactly nothing here.** `AerialPerspectiveStartDistance` is 30 km and
+  every cloud in frame is nearer, so `aerialAmount` is 0; switching it off reproduces the shipped frame
+  in all six figures.
+* **The ACES shoulder is where it should be.** Its own constants put linear 1.0 at 0.804 and the
+  reference's 0.798 at 0.97. What it did do is hide the SIZE of the defect (see the second scale above).
+* **Ambient and the multi-scatter octaves are secondary**: -5% and -20% of the sunward p95 against the
+  shadow ray's -77%.
+* **The defect is cloud-specific.** `Sky_PhysicalShowcase`, no cloud, sun in frame, same cameras:
+  zenith into the sun `p95 0.888 / sat 0.296`, zenith away `0.583 / 0.495`, mid `0.785 / 0.733`,
+  horizon `0.941 / 0.930`. Bright toward the sun, as it should be, and it keeps its colour — against
+  the cloud scene's `0.996 / sat 0.022` (`Shots/OE_skyshowcase_zenith_sun.png`).
+
+### What the repair costs, and the number that must move with it
+
+`LightMarchSamples` defaults to 6 in `Engine/ECS/VolumetricCloudComponent.hpp` and is clamped to 1..16
+in `CloudPayload.hpp` and again in `CloudRaymarch.shader`; the quadrature is
+`CloudRaymarch.shader::CloudLightOpticalDepth`. UE's own numbers are 10 by default
+(`VolumetricCloudComponent.h:236`) with a ceiling of 80
+(`r.VolumetricCloud.Shadow.ViewRaySampleMaxCount`) — ours is six with a ceiling of sixteen.
+
+**Whoever raises it must re-expose the demo scene in the same change.** The away azimuth was calibrated
+on top of the error: at 64 samples it falls from 0.767 to 0.676, and the exposure that puts it back is
+0.22 x (2.87 / 2.46) = 0.257. Measured at 64 samples and 0.257: into the sun 0.938, away 0.716. These
+are two numbers obliged to agree and today they do not.
 
 ## The instrument
 
