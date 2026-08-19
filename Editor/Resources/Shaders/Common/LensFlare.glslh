@@ -65,15 +65,47 @@ vec2 LensFlareGhostSourceUv( vec2 uv, vec2 ghostCenter, float scale, vec2 sunUv 
     return sunUv + ( uv - ghostCenter ) / max( scale, 1e-3f );
 }
 
+// How wide, in source-uv, a ghost takes to fade out as its sample walks up to the edge of the source
+// frame. The unit is the one the aperture rim is already measured in: a ghost's source offset from the
+// sun IS its normalised rim radius, because LensFlareGhostSourceUv divides screen offsets by the same
+// scale LensFlareGhostWeight does. So the two numbers are directly comparable, and this one says the
+// frame edge is HALF as gradual as the rim's own 0.25 -> 0.75 fall.
+//
+// The number is derived, not tasted. A smoothstep over a window w has steepest slope 1.5/w per source-uv
+// unit; one screen pixel is 1/(pixels*scale) of a source-uv unit; so the largest step one pixel can take
+// is 1.5/(w*scale*pixels) OF THE GHOST'S OWN LOCAL RADIANCE. At the smallest authored ghost scale (1.0)
+// on a 766-row frame that is 0.0078 for w = 0.25 — under one 8-bit code value for any ghost contributing
+// less than a quarter of the displayed range, against a brightest measured ghost contribution of 0.054
+// (the Ц9 band). Two neighbours were measured and rejected: 0.15 clears the same frames but leaves only a
+// 1.2x margin on that bound, and 0.50 — full parity with the rim — erases the ghost train outright
+// (Sky_PhysicalShowcase, sun 0.115 from the top: the four ghosts all but vanish).
+//
+// The window is symmetric in raw source-uv, which makes it aspect-many pixels wider across than down.
+// That is the right way round: the x boundary is the one with more pixels to spend, and the y boundary,
+// which is the one that draws a full-width line, gets the tighter of the two gradients.
+#define LENS_FLARE_GHOST_BOUNDS_FADE 0.25f
+
 // How much of a ghost survives at @p uv. Two things kill it: leaving the source image (the sampler is
 // REPEAT engine-wide, so a source uv outside [0,1] would wrap BRIGHT CONTENT back in from the far edge),
 // and the aperture's own soft rim. Returned as one weight so a caller cannot apply one and forget the
 // other.
 float LensFlareGhostWeight( vec2 sourceUv, vec2 uv, vec2 ghostCenter, float scale, float aspect )
 {
-    // Outside the source frame there is nothing to reflect.
-    vec2  inside = step( vec2( 0.0f, 0.0f ), sourceUv ) * step( sourceUv, vec2( 1.0f, 1.0f ) );
-    float bounds = inside.x * inside.y;
+    // Outside the source frame there is nothing to reflect, so the weight must be ZERO on the boundary —
+    // but it has to ARRIVE at zero, not jump to it. A `step` here was a hard cut, and a hard cut on this
+    // term is not a rough edge, it is a straight line across the whole screen: sourceUv.y depends only on
+    // uv.y, so the cut lands on one constant ROW, full width, one per ghost (and on one constant COLUMN
+    // for the x side). The rim below cannot cover for it and never could — the rim only reaches zero past
+    // radius 0.75, while this boundary is crossed at min(sunUv.y, 1 - sunUv.y) <= 0.5, always sooner; with
+    // the sun 0.146 from the top of the frame the rim was still at 1.000 where the step fired, i.e. the
+    // ghost switched off at full brightness. Fading over LENS_FLARE_GHOST_BOUNDS_FADE instead still hits
+    // zero exactly ON the boundary — the wrap is fenced off as hard as it ever was, and the ghost's usable
+    // area is narrowed by that window on every side, which is the price of the fence being soft.
+    const vec2 fadeWidth = vec2( LENS_FLARE_GHOST_BOUNDS_FADE, LENS_FLARE_GHOST_BOUNDS_FADE );
+    vec2       enters    = smoothstep( vec2( 0.0f, 0.0f ), fadeWidth, sourceUv );
+    vec2       leaves    = smoothstep( vec2( 0.0f, 0.0f ), fadeWidth, vec2( 1.0f, 1.0f ) - sourceUv );
+    vec2       inside    = enters * leaves;
+    float      bounds    = inside.x * inside.y;
 
     // Soft aperture rim: 1 at the ghost's centre, 0 at its edge. Without it a ghost ends on the hard
     // rectangle of the source frame, which reads as a cut-off square rather than an out-of-focus disc.
