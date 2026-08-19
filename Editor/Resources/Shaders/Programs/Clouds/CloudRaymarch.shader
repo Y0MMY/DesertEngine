@@ -295,7 +295,8 @@ Shader "CloudRaymarch"
             // The multiplier and its partner constant live in Common/CloudGeometry.glslh, together and
             // next to the relation they have to satisfy — they are two numbers that must agree, and here
             // they were two literals a hundred lines apart in a file no test can compile.
-            float stepKm       = length_km / stepCount;
+            float stepKm       = CloudFineStepKm(length_km, CLOUD_MIN_STEPS, max(u_CloudMarch.x, CLOUD_MIN_STEPS),
+                                                 CLOUD_DISTANCE_TO_MAX_STEPS_KM);
             float coarseStepKm = CloudCoarseStepKm(stepKm);
 
             // The start offset inside the first step, so the sample planes of neighbouring pixels do not

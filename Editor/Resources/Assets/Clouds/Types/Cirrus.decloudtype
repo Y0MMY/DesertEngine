@@ -1,7 +1,7 @@
 {
     "FormatVersion": 2,
     "DisplayName": "Cirrus",
-    "Notes": "Ice, eight kilometres up, a quarter of a cumulus' extinction and a wispy edge cut by the finer of the two shipped noise volumes. The only type in the library that names a volume of its own, and the proof that a type's edge travels with the type. Anisotropy 8.00 IS THE POINT OF THIS FILE. Cirrus is not a field of thin blobs, it is fibrous bands combed out downwind by the shear ice falls through - and until a type carried its own placement field no profile, however authored, could turn a round patch into a band. Scale 0.35 with it, and the pair is what makes a FIBRE rather than a sheet: at the layer's 12 km tile the across-wind cell is about 1.05 km and the along-wind one about 8.4 km. Scale 2.50 was tried first and measured away - it makes each band 7.5 km across, which fills the zenith with one flat sheet and answers a different complaint than the one this file is for.",
+    "Notes": "Ice, eight kilometres up, a quarter of a cumulus' extinction and a wispy edge cut by the finer of the two shipped noise volumes. The only type in the library that names a volume of its own, and the proof that a type's edge travels with the type. Anisotropy 8.00 IS THE POINT OF THIS FILE. Cirrus is not a field of thin blobs, it is fibrous bands combed out downwind by the shear ice falls through - and until a type carried its own placement field no profile, however authored, could turn a round patch into a band. Scale 0.60 with it, and the pair is what makes a FIBRE rather than a sheet: at the layer's 12 km tile the across-wind cell is about 1.80 km and the along-wind one about 14.4 km. Scale 2.50 was tried first and measured away - it makes each band 7.5 km across, which fills the zenith with one flat sheet and answers a different complaint than the one this file is for. SCALE 0.35 WAS ALSO MEASURED AWAY, and the reason is a coupling this file did not know it had: since the coverage field moved onto the billowy Alligator pair, the volume a type names decides its PLACEMENT CELLS as well as its edge, and CloudNoise_FineWisp halves both. At 0.35 with that volume the finest cell was 160 m, the median chord of cirrus along a view ray was 128 m against a march that searches at 234 m, and three quarters of those chords were thinner than one search step - 3.66x past Nyquist, the worst in the library, and visible as dither along every strand. 0.60 puts the finest cell at 275 m, which is what Desert/Tests/Engine/CloudType now asserts against the schedule.",
     "NoiseVolume": "Clouds/CloudNoise_FineWisp.dcnv",
     "Shape": {
         "BaseAltitudeKm": 8.0,
@@ -16,7 +16,7 @@
         "DetailFactor": 2.5,
         "DensityFactor": 0.35,
         "ExtinctionFactor": 0.25,
-        "PlacementScale": 0.35,
+        "PlacementScale": 0.6,
         "PlacementAnisotropy": 8.0
     }
 }

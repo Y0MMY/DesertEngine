@@ -16,6 +16,9 @@
 // The library is read from DISK rather than embedded, deliberately: an embedded copy would be a third
 // statement of the same numbers and would pass while the shipped files were broken.
 
+#include "CloudScheduleReference.hpp"
+
+#include <Engine/Assets/CloudNoiseVolume.hpp>
 #include <Engine/Assets/CloudTypeData.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
 
@@ -23,8 +26,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -608,6 +616,158 @@ TEST( CloudTypeLibrary, EveryShippedTypeIsOneTheLoaderWouldAccept )
         EXPECT_TRUE( data.DisplayName.has_value() ) << name << " has no display name, so a slot would show "
                                                     << "its file stem instead of what it is";
         EXPECT_TRUE( data.Notes.has_value() ) << name << " carries no note saying what weather it is for";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE LIBRARY AGAINST THE MARCH: no shipped type may place structure the march cannot find
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // Clouds_Demo's layer, which is the scene the verification protocol shoots and the one every number
+    // below was measured on. The tile is the layer's, not a type's: a type states how much coarser or
+    // finer than the layer it is, so the pair only means anything together.
+    constexpr float kLayerWeatherTileKm = 12.0f;
+
+    // The component's Max Steps default. It is a QUALITY TIER — an artist who lowers it is buying speed
+    // with resolution on purpose — so the library is calibrated against the default rather than against
+    // whatever a scene happens to carry.
+    constexpr float kComponentMaxSteps = 256.0f;
+
+    /**
+     * THE FINEST CELL A TYPE PLACES, in kilometres, over all three axes of its own placement field.
+     *
+     * Mirrors Common/CloudField.glslh: the two horizontal basis vectors come from
+     * Graphic::CloudSpeciesPlacementBasis and the VERTICAL frequency is derived from the across-wind axis
+     * exactly as the producer derives it, `CLOUD_COVERAGE_FREQ_Y * length(across) / CLOUD_COVERAGE_FREQ_Z`.
+     * The vertical is therefore always finer than the across-wind axis, and the along-wind axis is finer
+     * than either only below an anisotropy of 1 / 2.182 — in the shipped library, the Lenticular alone.
+     *
+     * @p latticeCells is how many noise cells the volume packs into one period of that field. THE HIGH
+     * frequency and not the low one: the coverage field is 0.65 of the coarse Alligator plus 0.35 of the
+     * fine one, and it is the fine component that decides how short a chord can be. Measured against the
+     * HF cell the median chord along a view ray is 0.52 to 1.22 of it across nine types and three
+     * elevations; against the LF cell the same 27 measurements scatter over 0.26 to 0.61.
+     */
+    float FinestPlacementCellKm( const CloudTypeShape& shape, float latticeCells )
+    {
+        const Desert::Graphic::CloudPlacementBasis basis =
+             Desert::Graphic::CloudSpeciesPlacementBasis( shape, 1.0f, 0.0f );
+
+        const float alongFreq  = std::sqrt( basis.AlongX * basis.AlongX + basis.AlongZ * basis.AlongZ );
+        const float acrossFreq = std::sqrt( basis.AcrossX * basis.AcrossX + basis.AcrossZ * basis.AcrossZ );
+        const float verticalFreq =
+             Desert::Graphic::kCloudCoverageFreqY * acrossFreq / Desert::Graphic::kCloudCoverageFreqZ;
+
+        const float finestFreq = std::max( { alongFreq, acrossFreq, verticalFreq } );
+
+        return kLayerWeatherTileKm / ( finestFreq * std::max( latticeCells, 1.0f ) );
+    }
+
+    /**
+     * HOW MUCH OF A CELL A CHORD IS. Measured, not derived: T2 established that a body of cloud is a fixed
+     * FRACTION of a placement cell — which is why doubling the lattice period could not cure the speckle —
+     * and this is that fraction, floored.
+     *
+     * The instrument is the one T2b used, re-pointed at the species: Common/CloudField.glslh compiled as
+     * C++, fed the shipped `.dcnv` through a trilinear REPEAT read, 2304 rays of a 45-degree frame per
+     * elevation, three elevations, nine types, the median length of the runs on which the un-eroded
+     * profile is positive. The 27 medians divided by this function's answer span 0.515 to 1.222; 0.5 is
+     * the floor of that, so a type that satisfies the relation below satisfies it for every elevation
+     * rather than on average.
+     */
+    constexpr float kMedianChordPerCell = 0.5f;
+
+    /// What the volume a type reads packs into one period of its placement field, from the volume's own
+    /// header rather than from a table here — the recipe is IN the file, which is what makes a `.dcnv` an
+    /// asset rather than a blob.
+    float VolumeLatticeCells( const std::optional<std::string>& reference )
+    {
+        // Memoized by path. The shipped decoder checks a CRC over eight mebibytes and nine types read two
+        // volumes between them; decoding each of them once is the difference between a suite that runs in
+        // a second and one that runs in eight, and it changes no answer.
+        static std::map<std::string, float> cache;
+
+        std::filesystem::path dir = LibraryDirectory();
+        EXPECT_FALSE( dir.empty() );
+        // Editor/Resources/Assets/Clouds/Types -> Editor/Resources/Assets
+        const std::filesystem::path assets = dir.parent_path().parent_path();
+
+        const std::string relative =
+             reference.has_value() ? reference.value()
+                                   : std::string( "Clouds/" ) + Desert::Assets::kCloudNoiseDefaultVolumeName;
+
+        const std::filesystem::path path = assets / relative;
+
+        const auto cached = cache.find( path.string() );
+        if ( cached != cache.end() )
+            return cached->second;
+
+        std::ifstream file( path, std::ios::binary );
+        EXPECT_TRUE( file.good() ) << "noise volume '" << path.string() << "' could not be opened";
+
+        const std::vector<unsigned char> bytes( ( std::istreambuf_iterator<char>( file ) ),
+                                                std::istreambuf_iterator<char>() );
+
+        const auto decoded = Desert::Assets::DecodeCloudNoiseVolume( bytes );
+        EXPECT_TRUE( decoded ) << "shipped noise volume '" << path.string()
+                               << "' does not decode: " << ( decoded ? std::string{} : decoded.GetError() );
+
+        const float cells = decoded ? decoded.GetValue().Params.BillowPeriodHighFrequency : 1.0f;
+        cache.emplace( path.string(), cells );
+        return cells;
+    }
+} // namespace
+
+TEST( CloudTypeLibrary, NoShippedTypePlacesStructureThinnerThanTheMarchCanFind )
+{
+    // THE RELATION THIS TEST EXISTS FOR, and the reason it is a test rather than a comment: the two sides
+    // moved three times without ever being compared. T2 measured the ratio on ONE type, brought it to
+    // 1.03x Nyquist, and wrote the number down. T0 then made the shell the species' own envelope, which
+    // moved the march's step; T3 then gave every species its own placement scale and anisotropy, which
+    // moved the structure — by different factors, in different directions, per type. Re-measured on the
+    // whole library afterwards, five of the nine were past Nyquist against the march's SEARCH step, the
+    // worst of them (Cirrus) by 3.66x with three quarters of its chords thinner than one search step.
+    //
+    // The bound is the search step and not the integration step. Outside cloud the march strides by
+    // CloudCoarseStepKm and only drops to the fine tier once a coarse sample has already found material,
+    // so a chord that fits between two coarse samples is never seen at all — and whether it fits is
+    // decided by the ray's jitter, which is the definition of speckle. CloudResolvableChordKm is that
+    // statement; CloudFinestResolvableChordKm is its value at the finest the schedule ever marches.
+    using namespace Desert::Tests::CloudScheduleRef;
+
+    const float resolvableKm = CloudFinestResolvableChordKm( kComponentMaxSteps );
+    ASSERT_GT( resolvableKm, 0.0f );
+
+    std::printf( "[CloudTypeLibrary] the march resolves chords down to %.0f m (fine step %.1f m, search "
+                 "step %.1f m at Max Steps %.0f)\n",
+                 resolvableKm * 1000.0f, CLOUD_DISTANCE_TO_MAX_STEPS_KM / kComponentMaxSteps * 1000.0f,
+                 CLOUD_COARSE_STEP_MULTIPLIER * CLOUD_DISTANCE_TO_MAX_STEPS_KM / kComponentMaxSteps * 1000.0f,
+                 kComponentMaxSteps );
+
+    for ( const char* name : { kCloudTypeStratus, kCloudTypeCumulusHumilis, kCloudTypeCumulusMediocris,
+                               kCloudTypeCumulusCongestus, kCloudTypeCumulonimbus, kCloudTypeStratocumulus,
+                               kCloudTypeAltocumulus, kCloudTypeCirrus, kCloudTypeLenticular } )
+    {
+        const CloudTypeData data = LoadShipped( name );
+
+        const float cellKm  = FinestPlacementCellKm( data.Shape, VolumeLatticeCells( data.NoiseVolume ) );
+        const float chordKm = cellKm * kMedianChordPerCell;
+
+        std::printf( "[CloudTypeLibrary] %-18s finest cell %6.0f m -> median chord %6.0f m, %.2fx the "
+                     "chord the march resolves\n",
+                     name, cellKm * 1000.0f, chordKm * 1000.0f, chordKm / resolvableKm );
+
+        EXPECT_GE( chordKm, resolvableKm )
+             << name << " places its finest structure on a cell of " << cellKm * 1000.0f
+             << " m, whose median chord along a view ray is " << chordKm * 1000.0f << " m — thinner than the "
+             << resolvableKm * 1000.0f
+             << " m the march can be relied on to find, so that fraction of this type is sampled or not "
+                "sampled by the throw of a jitter and reads as dither. Either the type places coarser "
+                "structure (its Placement Scale, its anisotropy, or the lattice of the volume it names) "
+                "or the schedule marches finer (CLOUD_DISTANCE_TO_MAX_STEPS_KM in "
+                "Common/CloudGeometry.glslh) — the two are one relation and this is where it is kept";
     }
 }
 

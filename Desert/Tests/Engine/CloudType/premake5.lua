@@ -15,14 +15,23 @@ project(test_name)
     -- The engine source is listed rather than linked because libDesert pulls in Vulkan and the whole
     -- renderer; the format needs neither, which is exactly why it was put where it could be tested without
     -- a device. The profile generator it includes is a header.
+    -- CloudNoiseVolume.cpp is listed for one reason: a type NAMES a noise volume, and since the coverage
+    -- field moved onto the billowy pair that volume's lattice decides the type's placement cells as well
+    -- as its edge. The relation test therefore reads the recipe out of the shipped `.dcnv` through the
+    -- shipped decoder rather than out of a table here — the recipe is in the file, which is the whole
+    -- claim the format makes.
     files {
         test_files,
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudNoiseVolume.cpp",
     }
 
+    -- The SHADER ROOT is here so that Common/CloudGeometry.glslh — the march's step schedule — can be
+    -- compiled as C++ beside the library it has to agree with (CloudScheduleReference.hpp).
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+        "%{wks.location}/Editor/Resources/Shaders",
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the file is rfl::json
     }
 
