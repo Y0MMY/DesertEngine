@@ -10,6 +10,17 @@ namespace Desert::Assets
     CloudNoiseVolumeAsset::CloudNoiseVolumeAsset( AssetPriority priority, const Common::Filepath& filepath )
          : AssetBase( priority, filepath, AssetTypeID::CloudNoiseVolume )
     {
+        // The base class hands out a RANDOM uuid, which is right for an asset with no source of identity
+        // and wrong for one that lives at a path. A fresh id every launch means any field that stored a
+        // HANDLE to a volume would resolve to nothing after a restart, and the symptom would be "the
+        // clouds changed when I reopened the editor" — a long way from the cause. Derived from the path,
+        // exactly as StaticMeshAsset and CloudTypeAsset do it, and in the CONSTRUCTOR so a registry shell
+        // that has not loaded yet is already keyed by the handle the loaded asset will have.
+        //
+        // Nothing references a volume by handle today (a .decloudtype names it by relative path), so this
+        // fixes no visible defect. It removes the mine: the first reflected field to take a .dcnv would
+        // otherwise have inherited the broken reference for free.
+        m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
     }
 
     Common::BoolResultStr CloudNoiseVolumeAsset::Load()

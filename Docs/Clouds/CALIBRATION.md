@@ -252,3 +252,97 @@ expensive mistake this document exists to prevent, and this is the second time i
 Several images per invocation, because the numbers only mean something side by side: a contrast of 0.333
 says nothing until the reference's 0.482 is on the line below it. Every visual claim in this programme
 that turned out to be wrong was wrong in a way this would have caught in one run.
+
+## The second instrument — `Tools/LineJump`, for the defect ImageStat cannot see
+
+`Tools/LineJump` — the same shape as ImageStat: a standalone CLI over the vendored `stb_image`, linked
+against nothing else, in `build/Bin/Debug/`.
+
+```
+./build/Bin/Debug/LineJump <png> <x0> <y0> <x1> <y1> [<png> <x0> <y0> <x1> <y1> ...]
+```
+
+Several images per invocation, for ImageStat's reason: a jump of 0.024 is a number until 0.006 from the
+repaired build is on the line below it.
+
+### What it measures
+
+The **largest step in mean luminance between two ADJACENT lines** inside the rectangle — separately
+along both axes — the **index of the line the step falls at**, and the **mean step**, which is the noise
+floor the maximum has to be read against.
+
+```
+AZ_bands_sunward_zenith.png   rows max 0.02469 @y 146   mean 0.00108   cols max 0.00280 @x 774   mean 0.00062
+```
+
+Read as: between row 146 and row 147 the mean luminance of the row moves by 0.0247, against a typical
+row-to-row move of 0.0011 across the same rectangle. Twenty-three times the noise floor at one row is a
+band. `@y` is the line BEFORE the step; the edge lies between it and the next.
+
+### What ImageStat cannot see, and why it is structural
+
+ImageStat's five figures are percentiles over the whole rectangle. **A band shifts none of them.** The
+pixels on either side of a hard horizontal edge are ordinary sky pixels that were already in the
+distribution — the edge is a fact about their ORDER, and a percentile has thrown the order away. The
+banding frame below measures `mean 0.792 / p05 0.300 / p95 0.989` on ImageStat, which is a report about
+its exposure and says nothing whatever about the stripes that are the reason the frame exists.
+
+### Both axes, always
+
+The lens-flare defect existed on rows AND on columns, and the column half went unseen for a stage and a
+half for one reason: nobody measured it. That is why the tool always prints both and is not called
+`RowJump`.
+
+### The rectangle has to be inset, and the tool will not hide it for you
+
+The same trap as the UE reference's editor chrome, one pixel wide instead of two hundred. Our shots
+carry a two-pixel border that is not part of the picture, and it is a bigger step than any band:
+
+| rectangle on `AZ_bands_sunward_zenith.png` | rows max | at |
+|---|---|---|
+| `0 0 1103 480` (no inset) | 0.04369 | **y 0** — the border |
+| `1 1 1102 480` | 0.03489 | **y 1** — still the border |
+| `2 2 1101 480` | **0.02469** | y 146 |
+| `4 4 1099 480` | 0.02477 | y 146 |
+| `8 8 1095 480` | 0.02495 | y 146 |
+
+Stable from an inset of two pixels onward, and the row it names does not move. **Every LineJump row in
+this document uses the band from `CALIBRATION.md` inset by two pixels**: `2 2 1101 480` at 1103x668 and
+`2 2 1278 552` at 1280x766. A maximum sitting at `@y 0` or at the last column means the rectangle, not
+the render.
+
+### The numbers, and what counts as normal
+
+Measured 2026-08-20 on the committed frames, `Clouds_Demo` throughout.
+
+| frame | rows max | @y | rows mean | cols max | @x |
+|---|---|---|---|---|---|
+| `AZ_bands_sunward_zenith.png` — **the known banding defect** | **0.02469** | 146 | 0.00108 | 0.00280 | 774 |
+| `AZ_clean_sunward_mid.png` — same azimuth, 24°, clean | 0.00508 | 315 | 0.00105 | 0.00459 | 437 |
+| `AZ_clean_awaysun_zenith.png` — away from the sun, clean | 0.00752 | 267 | 0.00076 | 0.00350 | 1018 |
+| `LF_before_sun_worstcase.png` | **0.02222** | 182 | 0.00130 | 0.00316 | 867 |
+| `LF_after_sun_worstcase.png` | 0.00623 | 88 | 0.00096 | 0.00297 | 867 |
+| `LF_before_sun_zenith42.png` | 0.01078 | 134 | 0.00072 | 0.00258 | 863 |
+| `LF_after_sun_zenith42.png` | 0.00610 | 141 | 0.00089 | 0.00281 | 863 |
+| `LF_before_sun_atedge.png` | **0.03456** | 435 | 0.00137 | 0.00264 | 19 |
+| `LF_after_sun_atedge.png` | 0.00594 | 12 | 0.00089 | 0.00288 | 512 |
+
+**The norm on this rectangle is a row maximum around 0.006, and the three clean frames sit at
+0.005–0.008.** Above roughly 0.010 there is something to look at; the two frames that were reported as
+visibly striped measure 0.022 and 0.035. The mean step is 0.0008–0.0015 everywhere, defect or not,
+which is what makes the maximum readable: a band is one row twenty times the noise floor, not a frame
+that is generally noisier.
+
+`LF_before_sun_atedge` is worth a line of its own. Its ImageStat figures are unremarkable, and the
+column axis says nothing (0.00264, ordinary). All of the defect is in one row, 435, at fourteen times
+the mean — precisely the shape of thing the percentiles average away.
+
+### The figures this replaces, and why they do not match
+
+The tool was first written inside task Ц9/LF, where it reported `0.05366 → 0.02485` for the lens-flare
+repair and `0.11974` on the worst frame. **Those figures cannot be reproduced, because the rectangle
+they were taken over was never recorded** — the same failure this document already opens with for
+ImageStat's own rows, now for the second time. The ratios survive and the ordering survives; the scale
+does not, and a number without its rectangle is not a measurement. The table above states its rectangle
+in the section heading above it, and the sweep three paragraphs up is the evidence that the rectangle is
+the right one. Take the 0.006 / 0.010 / 0.022 scale, not the old one.
