@@ -69,6 +69,7 @@
 #include "Editor/Panels/Stubs/BuildSettingsPanel.hpp"
 #include "Editor/Panels/History/HistoryPanel.hpp"
 #include "Editor/Panels/Validation/SceneValidationPanel.hpp"
+#include "Editor/Panels/Clouds/CloudModellingVolumePanel.hpp"
 #include "Editor/Panels/Clouds/CloudNoiseVolumePanel.hpp"
 #include "Editor/Panels/Clouds/CloudTypePanel.hpp"
 #include "Editor/Panels/Animation/AnimLayersPanel.hpp"
@@ -431,6 +432,7 @@ namespace Desert::Editor
              std::make_unique<Editor::SceneValidationPanel>( m_MainScene, m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::CloudNoiseVolumePanel>( m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::CloudTypePanel>( m_AssetManager.get() ) );
+        m_Panels.emplace_back( std::make_unique<Editor::CloudModellingVolumePanel>( m_AssetManager.get() ) );
 
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.

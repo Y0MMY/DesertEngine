@@ -1,0 +1,697 @@
+#include "CloudModellingVolumePanel.hpp"
+
+#include <Editor/Core/ImGuiUtilities.hpp>
+#include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
+
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/CloudModellingVolumeAsset.hpp>
+#include <Engine/Graphic/Image.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
+#include <Common/Core/Constants.hpp>
+#include <Common/Utilities/FileSystem.hpp>
+
+#include <ImGui/imgui.h>
+
+#include <chrono>
+#include <fstream>
+
+namespace Desert::Editor
+{
+    // The editor's ImGui lives in the global namespace; unqualified `ImGui::` inside `Desert::` would
+    // resolve to `Desert::ImGui`, which is the engine's own runtime UI. Every panel in this folder opens
+    // with the same alias for the same reason.
+    namespace ImGui = ::ImGui;
+
+    namespace
+    {
+        // The panel's own UIHelper, created on first use exactly as the noise volume panel's is: the helper
+        // caches ImGui texture ids by image view, and a panel that never opens should not build one.
+        std::unique_ptr<UI::UIHelper>& SlicePreviewHelper()
+        {
+            static std::unique_ptr<UI::UIHelper> helper;
+            if ( !helper )
+            {
+                helper = std::make_unique<UI::UIHelper>();
+                helper->Init();
+            }
+            return helper;
+        }
+
+        // A new lump lands where the body already is, not at the origin, so that adding one to a sculpted
+        // cloud produces something joined to it rather than a bead floating in the corner of the box.
+        Assets::CloudModellingBlob NewLumpNear( const Assets::CloudModellingBlob& neighbour )
+        {
+            Assets::CloudModellingBlob blob;
+            blob.CentreKm  = neighbour.CentreKm + glm::vec3( 0.0f, neighbour.RadiiKm.y * 0.8f, 0.0f );
+            blob.RadiiKm   = glm::vec3( neighbour.RadiiKm.y * 0.7f );
+            blob.Primitive = Assets::CloudModellingPrimitive::Sphere;
+            return blob;
+        }
+    } // namespace
+
+    CloudModellingVolumePanel::CloudModellingVolumePanel( Assets::AssetManager* assets )
+         : IPanel( "Cloud Modelling Volume", /*showPanel=*/false ), m_Assets( assets )
+    {
+        // STARTING FROM THE SHIPPED EXAMPLE RATHER THAN FROM AN EMPTY BOX. An empty recipe is refused by
+        // Validate (a volume with no lumps is a box, not a cloud), so a panel that opened empty would greet
+        // its first user with an error message. The precedent is CloudTypeDefaultShape: a tool that has not
+        // been given anything still has to have something to show.
+        m_Recipe     = Assets::CloudModellingDefaultRecipe();
+        m_SourceName = "(the shipped example)";
+    }
+
+    CloudModellingVolumePanel::~CloudModellingVolumePanel()
+    {
+        // CANCEL, THEN WAIT. A bake writes into a std::future this object owns, so the panel must outlive
+        // it — but a full volume is tens of seconds in a debug build, and waiting that long is an editor
+        // that appears to hang on exit. Asking the bake to stop first turns the wait into one slab.
+        m_BakeCancelled.store( true );
+        if ( m_Baking.valid() )
+            m_Baking.wait();
+    }
+
+    void CloudModellingVolumePanel::OnUIRender()
+    {
+        if ( !m_SowPanel )
+            return;
+
+        if ( ImGui::Begin( m_PanelName.c_str(), &m_SowPanel ) )
+        {
+            ImGui::TextWrapped(
+                 "The body of a hero cloud: smooth lumps fused by an exponential smooth minimum, baked into "
+                 "a 128 x 64 x 128 volume the cloud march reads directly. This is the half of the sky the "
+                 "procedural field cannot make — its lobes are separated by a zero on every bisector, so "
+                 "they never merge; these do." );
+            ImGui::Separator();
+
+            // Collected before anything is drawn, so the frame a bake ends is already the frame that says
+            // so. A future nobody polls is a thread whose result is thrown away at shutdown.
+            PollBake();
+
+            DrawRecipeSection();
+            ImGui::Separator();
+            DrawLumpListSection();
+            ImGui::Separator();
+            DrawSelectedLumpSection();
+            ImGui::Separator();
+            DrawPreviewSection();
+            ImGui::Separator();
+            DrawBakeSection();
+
+            if ( !m_Status.empty() )
+            {
+                ImGui::Separator();
+                if ( m_StatusIsError )
+                    ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", m_Status.c_str() );
+                else
+                    ImGui::TextWrapped( "%s", m_Status.c_str() );
+            }
+        }
+        ImGui::End();
+    }
+
+    void CloudModellingVolumePanel::PollBake()
+    {
+        if ( !m_BakeRunning || !m_Baking.valid() )
+            return;
+
+        if ( m_Baking.wait_for( std::chrono::seconds( 0 ) ) != std::future_status::ready )
+            return;
+
+        auto result   = m_Baking.get();
+        m_BakeRunning = false;
+
+        if ( result )
+        {
+            StoreBakedVolume( result.ExtractValue() );
+        }
+        else
+        {
+            m_Status        = "Bake failed: " + result.GetError();
+            m_StatusIsError = true;
+        }
+    }
+
+    void CloudModellingVolumePanel::StoreBakedVolume( std::vector<unsigned char>&& voxels )
+    {
+        Assets::CloudModellingVolumeData data;
+        data.Recipe = m_BakingRecipe;
+        data.Voxels = std::move( voxels );
+
+        const auto written = Assets::CloudModellingVolumeAsset::Save( m_BakeTarget, data );
+        if ( !written )
+        {
+            m_Status        = "Save failed: " + written.GetError();
+            m_StatusIsError = true;
+            return;
+        }
+
+        m_SourceName    = m_BakeTarget.filename().string();
+        m_Status        = "Saved to " + m_BakeTarget.string();
+        m_StatusIsError = false;
+
+        // Registered straight away so a hero cloud's slot lists it without a restart. A tool whose output
+        // only appears after the editor is reopened is a tool nobody iterates in.
+        if ( !m_Assets )
+            return;
+
+        auto asset = m_Assets->FindByPath<Assets::CloudModellingVolumeAsset>( m_BakeTarget );
+        if ( asset )
+            asset->Load(); // overwritten in place: re-read so the cached bytes are the new ones
+        else
+            asset = m_Assets->CreateAsset<Assets::CloudModellingVolumeAsset>( Assets::AssetPriority::Medium,
+                                                                              m_BakeTarget );
+
+        if ( !asset )
+            return;
+
+        if ( const auto uploaded = Runtime::ResourceRegistry::GetCloudModellingService()->Register( asset );
+             !uploaded )
+        {
+            m_Status        = "Saved, but the volume could not be uploaded: " + uploaded.GetError();
+            m_StatusIsError = true;
+        }
+    }
+
+    void CloudModellingVolumePanel::DrawRecipeSection()
+    {
+        Utils::ImGuiUtilities::SectionHeader( "Body" );
+
+        ImGui::BeginDisabled( m_BakeRunning );
+
+        if ( ImGui::DragFloat3( "Size (km)", &m_Recipe.SizeKm.x, 0.02f, 0.1f, 8.0f, "%.2f" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "The world box the body is sculpted in, before the entity's own scale. The "
+                               "volume is always 128 x 64 x 128 voxels, so this is what sets how big a "
+                               "voxel is — the short axis is the VERTICAL one, because a cloud is wider "
+                               "than it is tall." );
+
+        // THE KNOB THE WHOLE PHASE IS ABOUT, and it is first among the four for that reason.
+        if ( ImGui::DragFloat( "Blend Radius (km)", &m_Recipe.BlendRadiusKm, 0.002f, 0.001f, 1.0f, "%.3f" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip(
+                 "How far apart two lumps can be and still FUSE into one surface. This is the knob the "
+                 "authored producer exists for: turn it down and neighbouring lobes stay separate beads, "
+                 "which is all the procedural field can ever be; turn it up and they become one convective "
+                 "mass, which it cannot be by construction.\n\n"
+                 "It also inflates the body by BlendRadius * ln(sum of weights), which is why growing it "
+                 "can push the cloud into the wall of its own box." );
+
+        if ( ImGui::DragFloat( "Profile Depth (km)", &m_Recipe.ProfileDepthKm, 0.005f, 0.001f, 2.0f, "%.3f" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "How deep inside the body the Dimensional Profile reaches 1. The erosion is "
+                               "weighted by (1 - profile), so a small value makes a body that is solid "
+                               "almost everywhere and a large one makes a body that is edge all the way "
+                               "through." );
+
+        if ( ImGui::DragFloat( "Envelope Margin (km)", &m_Recipe.EnvelopeMarginKm, 0.005f, 0.001f, 2.0f, "%.3f" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "How far outside the body the CUTOUT still holds the procedural field away. "
+                               "Too small and procedural cloud grows through the hero cloud's own edge; too "
+                               "large and it punches a visible hole in the deck around it." );
+
+        ImGui::EndDisabled();
+
+        // The arithmetic an artist would otherwise do on paper, and the number that decides whether the
+        // silhouette can hold the shape they are sculpting.
+        ImGui::TextDisabled(
+             "Voxel: %.1f x %.1f x %.1f m   |   4.00 MiB per volume",
+             m_Recipe.SizeKm.x * 1000.0f / static_cast<float>( Assets::kCloudModellingVolumeWidth ),
+             m_Recipe.SizeKm.y * 1000.0f / static_cast<float>( Assets::kCloudModellingVolumeHeight ),
+             m_Recipe.SizeKm.z * 1000.0f / static_cast<float>( Assets::kCloudModellingVolumeDepth ) );
+    }
+
+    void CloudModellingVolumePanel::DrawLumpListSection()
+    {
+        Utils::ImGuiUtilities::SectionHeader( "Lumps" );
+
+        ImGui::BeginDisabled( m_BakeRunning );
+
+        if ( ImGui::BeginListBox( "##lumps", ImVec2( -1.0f, 120.0f ) ) )
+        {
+            for ( size_t i = 0; i < m_Recipe.Blobs.size(); ++i )
+            {
+                const Assets::CloudModellingBlob& blob = m_Recipe.Blobs[i];
+
+                char label[128];
+                std::snprintf( label, sizeof( label ), "%zu  %-9s  (%.2f, %.2f, %.2f) km##lump%zu", i,
+                               Assets::CloudModellingPrimitiveName( blob.Primitive ), blob.CentreKm.x,
+                               blob.CentreKm.y, blob.CentreKm.z, i );
+
+                if ( ImGui::Selectable( label, m_Selected == static_cast<int>( i ) ) )
+                    m_Selected = static_cast<int>( i );
+            }
+            ImGui::EndListBox();
+        }
+
+        const bool hasSelection = m_Selected >= 0 && m_Selected < static_cast<int>( m_Recipe.Blobs.size() );
+
+        if ( ImGui::Button( "Add" ) )
+        {
+            const Assets::CloudModellingBlob seed =
+                 hasSelection ? m_Recipe.Blobs[static_cast<size_t>( m_Selected )] : Assets::CloudModellingBlob{};
+
+            m_Recipe.Blobs.push_back( m_Recipe.Blobs.empty() ? Assets::CloudModellingBlob{}
+                                                             : NewLumpNear( seed ) );
+            m_Selected = static_cast<int>( m_Recipe.Blobs.size() ) - 1;
+            InvalidateSlice();
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "A new sphere, placed on top of the selected lump so that the join has "
+                               "something to fuse it to." );
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled( !hasSelection );
+        if ( ImGui::Button( "Duplicate" ) )
+        {
+            m_Recipe.Blobs.push_back( m_Recipe.Blobs[static_cast<size_t>( m_Selected )] );
+            m_Selected = static_cast<int>( m_Recipe.Blobs.size() ) - 1;
+            InvalidateSlice();
+        }
+
+        ImGui::SameLine();
+
+        // The last lump cannot be removed: a recipe with none is refused by Validate, and a panel that can
+        // put itself into an unbakeable state is one an artist has to know how to rescue.
+        ImGui::BeginDisabled( m_Recipe.Blobs.size() <= 1u );
+        if ( ImGui::Button( "Delete" ) )
+        {
+            m_Recipe.Blobs.erase( m_Recipe.Blobs.begin() + m_Selected );
+            m_Selected = m_Selected >= static_cast<int>( m_Recipe.Blobs.size() )
+                              ? static_cast<int>( m_Recipe.Blobs.size() ) - 1
+                              : m_Selected;
+            InvalidateSlice();
+        }
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        ImGui::TextDisabled( "%zu of 64", m_Recipe.Blobs.size() );
+
+        ImGui::EndDisabled();
+    }
+
+    void CloudModellingVolumePanel::ConformRadiiToPrimitive( Assets::CloudModellingBlob& blob )
+    {
+        // The panel keeps every lump legal AS IT IS EDITED. ValidateCloudModellingRecipe refuses a sphere
+        // whose radii disagree and a capsule whose cross-section is not round; those refusals exist for
+        // hand-written and machine-generated files, and an artist should never be able to reach one by
+        // dragging a slider.
+        switch ( blob.Primitive )
+        {
+            case Assets::CloudModellingPrimitive::Sphere:
+                blob.RadiiKm.y = blob.RadiiKm.x;
+                blob.RadiiKm.z = blob.RadiiKm.x;
+                break;
+
+            case Assets::CloudModellingPrimitive::Capsule:
+                blob.RadiiKm.z = blob.RadiiKm.x;
+                blob.RadiiKm.y = std::max( blob.RadiiKm.y, blob.RadiiKm.x );
+                break;
+
+            case Assets::CloudModellingPrimitive::Ellipsoid:
+                break;
+        }
+    }
+
+    void CloudModellingVolumePanel::DrawSelectedLumpSection()
+    {
+        Utils::ImGuiUtilities::SectionHeader( "Selected lump" );
+
+        if ( m_Selected < 0 || m_Selected >= static_cast<int>( m_Recipe.Blobs.size() ) )
+        {
+            ImGui::TextDisabled( "Select a lump above to edit it." );
+            return;
+        }
+
+        Assets::CloudModellingBlob& blob = m_Recipe.Blobs[static_cast<size_t>( m_Selected )];
+
+        ImGui::BeginDisabled( m_BakeRunning );
+
+        int primitive = static_cast<int>( blob.Primitive );
+        if ( ImGui::Combo( "Primitive", &primitive,
+                           "Ellipsoid  (three free semi-axes)\0"
+                           "Sphere     (one radius)\0"
+                           "Capsule    (a swept sphere along local Y)\0" ) )
+        {
+            blob.Primitive = static_cast<Assets::CloudModellingPrimitive>( primitive );
+            ConformRadiiToPrimitive( blob );
+            InvalidateSlice();
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "A capsule holds its cross-section along its length where an ellipsoid "
+                               "tapers to a point — which is what a spreading cumulus base and an "
+                               "elongated growth actually are. Rotate it to lay it down." );
+
+        if ( ImGui::DragFloat3( "Centre (km)", &blob.CentreKm.x, 0.005f, -4.0f, 4.0f, "%.3f" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Relative to the CENTRE of the box, so a recipe describes a cloud rather "
+                               "than a place. The entity's transform is what puts it in the sky." );
+
+        // The size widgets differ per primitive so that the constraint is unreachable rather than merely
+        // enforced. One number for a sphere, two for a capsule, three for an ellipsoid.
+        switch ( blob.Primitive )
+        {
+            case Assets::CloudModellingPrimitive::Sphere:
+                if ( ImGui::DragFloat( "Radius (km)", &blob.RadiiKm.x, 0.005f, 0.005f, 4.0f, "%.3f" ) )
+                {
+                    ConformRadiiToPrimitive( blob );
+                    InvalidateSlice();
+                }
+                break;
+
+            case Assets::CloudModellingPrimitive::Capsule:
+                if ( ImGui::DragFloat( "Radius (km)", &blob.RadiiKm.x, 0.005f, 0.005f, 4.0f, "%.3f" ) )
+                {
+                    ConformRadiiToPrimitive( blob );
+                    InvalidateSlice();
+                }
+                if ( ImGui::DragFloat( "Half-height (km)", &blob.RadiiKm.y, 0.005f, 0.005f, 4.0f, "%.3f" ) )
+                {
+                    ConformRadiiToPrimitive( blob );
+                    InvalidateSlice();
+                }
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "The TOTAL half-height, caps included. The straight section is this "
+                                       "less the radius, so a capsule cannot be shorter than it is wide." );
+                break;
+
+            case Assets::CloudModellingPrimitive::Ellipsoid:
+                if ( ImGui::DragFloat3( "Semi-axes (km)", &blob.RadiiKm.x, 0.005f, 0.005f, 4.0f, "%.3f" ) )
+                    InvalidateSlice();
+                break;
+        }
+
+        if ( ImGui::DragFloat3( "Rotation (deg)", &blob.RotationDeg.x, 1.0f, -180.0f, 180.0f, "%.1f" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "About the lump's own centre, in the same euler convention as an entity's "
+                               "transform. A rotation is rigid, so it moves the surface without distorting "
+                               "the distance field the Dimensional Profile is read from." );
+
+        if ( ImGui::DragFloat( "Weight", &blob.Weight, 0.01f, 0.125f, 8.0f, "%.3f" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "How hard this lump pulls in the union. It is exactly a dilation of "
+                               "BlendRadius * ln(weight) — at the current blend radius, a weight of 2 grows "
+                               "this lump by about %.0f m and a weight of 0.5 shrinks it by the same. Use "
+                               "it to move the CREASE between neighbours without moving either centre.",
+                               m_Recipe.BlendRadiusKm * 0.6931f * 1000.0f );
+
+        if ( ImGui::SliderFloat( "Detail Type", &blob.DetailType, 0.0f, 1.0f, "%.2f" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "0 wispy, 1 billowy — which erosion the up-rez noise cuts into this lump's "
+                               "part of the body. The join spreads it across the creases for free, using "
+                               "the same weights that fused the shapes." );
+
+        if ( ImGui::SliderFloat( "Density Scale", &blob.DensityScale, 0.0f, 1.0f, "%.2f" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "How much matter this lump carries, relative to the instance's own Density "
+                               "Factor. A wispy tail is thinner than the core it grew from." );
+
+        ImGui::EndDisabled();
+    }
+
+    void CloudModellingVolumePanel::RefreshSlice()
+    {
+        m_SliceDirty = false;
+
+        const uint32_t extent = Assets::CloudModellingAxisExtent( m_Axis );
+        const uint32_t index =
+             static_cast<uint32_t>( std::clamp( m_SliceIndex, 0, static_cast<int>( extent ) - 1 ) );
+
+        // ONE PLANE, NOT THE VOLUME. This is what makes the preview live: 128 x 64 voxels against 128 x 64
+        // x 128, i.e. 1/128 of the bake, from the same evaluator the bake uses.
+        const auto plane = Assets::GenerateCloudModellingSlice( m_Recipe, m_Axis, index );
+        if ( !plane )
+        {
+            // Not an error banner: an illegal recipe already has its reason printed beside the Bake button,
+            // and a second copy of it under the preview would be the same fault reported twice.
+            m_SliceImage.reset();
+            m_SliceImageWidth  = 0;
+            m_SliceImageHeight = 0;
+            return;
+        }
+
+        const Assets::CloudModellingSlice& slice = plane.GetValue();
+
+        std::vector<unsigned char> pixels( static_cast<size_t>( slice.Width ) * slice.Height * 4u, 0u );
+        for ( size_t i = 0; i < pixels.size(); i += 4u )
+        {
+            const unsigned char profile      = slice.Pixels[i + 0];
+            const unsigned char detailType   = slice.Pixels[i + 1];
+            const unsigned char densityScale = slice.Pixels[i + 2];
+            const unsigned char envelope     = slice.Pixels[i + 3];
+
+            if ( m_ChannelView == ChannelView::AllFour )
+            {
+                if ( profile > 0u )
+                {
+                    pixels[i + 0] = profile;
+                    pixels[i + 1] = detailType;
+                    pixels[i + 2] = densityScale;
+                }
+                else
+                {
+                    // The cutout shell, dimmed, so the halo that keeps the procedural field away is visible
+                    // as something distinct from the body rather than as more body.
+                    const unsigned char shell = static_cast<unsigned char>( envelope / 4u );
+                    pixels[i + 0]             = shell;
+                    pixels[i + 1]             = shell;
+                    pixels[i + 2]             = shell;
+                }
+            }
+            else
+            {
+                const size_t        channel = static_cast<size_t>( m_ChannelView ) - 1u;
+                const unsigned char value   = slice.Pixels[i + channel];
+                pixels[i + 0]               = value;
+                pixels[i + 1]               = value;
+                pixels[i + 2]               = value;
+            }
+
+            // The alpha is folded into the picture rather than left to the compositor: an image drawn with
+            // a real alpha would show the ImGui window through it, which reads as the volume being empty
+            // exactly where it is densest.
+            pixels[i + 3] = 255u;
+        }
+
+        // RE-UPLOADED RATHER THAN RE-CREATED WHENEVER THE SHAPE IS UNCHANGED, which is every frame of a
+        // slider drag. Creating a device image per frame is an allocation and a descriptor per frame for a
+        // picture whose dimensions did not move; SetData exists for exactly this and keeps the cached
+        // ImGui texture id valid.
+        if ( m_SliceImage && m_SliceImageWidth == slice.Width && m_SliceImageHeight == slice.Height )
+        {
+            if ( const auto uploaded = m_SliceImage->SetData( pixels ); uploaded )
+                return;
+
+            // Fall through to a fresh image: a failed re-upload leaves the old picture on screen, and a
+            // stale preview is the one thing this panel must never show.
+            m_SliceImage.reset();
+        }
+
+        const Core::Formats::Image2DSpecification spec{
+             .Tag        = "CloudModellingSlice",
+             .Width      = slice.Width,
+             .Height     = slice.Height,
+             .Format     = Core::Formats::ImageFormat::RGBA8F,
+             .Mips       = 1,
+             .Data       = std::move( pixels ),
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Sample,
+        };
+
+        m_SliceImage       = Graphic::Image2D::Create( spec, nullptr );
+        m_SliceImageWidth  = slice.Width;
+        m_SliceImageHeight = slice.Height;
+
+        if ( !m_SliceImage )
+        {
+            m_SliceImageWidth  = 0;
+            m_SliceImageHeight = 0;
+            m_Status           = "The slice preview image could not be created on the device.";
+            m_StatusIsError    = true;
+        }
+    }
+
+    void CloudModellingVolumePanel::DrawPreviewSection()
+    {
+        Utils::ImGuiUtilities::SectionHeader( "Preview" );
+
+        int axis = static_cast<int>( m_Axis );
+        if ( ImGui::Combo( "Axis", &axis,
+                           "X  (looking east along the body)\0"
+                           "Y  (the horizontal cut, looking down)\0"
+                           "Z  (looking north along the body)\0" ) )
+        {
+            m_Axis = static_cast<Assets::CloudModellingAxis>( axis );
+
+            // Re-centred rather than clamped: the axes have different depths (64 up, 128 across), so a
+            // slice index carried over from another axis lands somewhere arbitrary.
+            m_SliceIndex = static_cast<int>( Assets::CloudModellingAxisExtent( m_Axis ) / 2u );
+            InvalidateSlice();
+        }
+
+        const int extent = static_cast<int>( Assets::CloudModellingAxisExtent( m_Axis ) );
+        if ( ImGui::SliderInt( "Slice", &m_SliceIndex, 0, extent - 1, "%d" ) )
+            InvalidateSlice();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "A 3D body has no picture, only slices. Scrub this to check that the lumps "
+                               "fuse the whole way through — two lobes can meet in the middle slice and "
+                               "still be separate above and below it." );
+
+        int view = static_cast<int>( m_ChannelView );
+        if ( ImGui::Combo( "Channels", &view,
+                           "All four\0"
+                           "R  Dimensional Profile (depth inside the body)\0"
+                           "G  Detail Type (0 wispy, 1 billowy)\0"
+                           "B  Density Scale (per-voxel multiplier)\0"
+                           "A  Cutout Envelope (the body, dilated)\0" ) )
+        {
+            m_ChannelView = static_cast<ChannelView>( view );
+            InvalidateSlice();
+        }
+
+        ImGui::SliderInt( "Zoom", &m_PreviewZoom, 1, 6, "%dx" );
+
+        if ( m_SliceDirty )
+            RefreshSlice();
+
+        if ( m_SliceImage )
+        {
+            const float zoom = static_cast<float>( m_PreviewZoom );
+            SlicePreviewHelper()->Image( m_SliceImage, ImVec2( static_cast<float>( m_SliceImageWidth ) * zoom,
+                                                               static_cast<float>( m_SliceImageHeight ) * zoom ) );
+        }
+        else
+        {
+            ImGui::TextDisabled( "No preview: the recipe below is not bakeable yet." );
+        }
+
+        ImGui::TextDisabled( "%s — slice %d of %d", Assets::CloudModellingAxisName( m_Axis ), m_SliceIndex,
+                             extent );
+    }
+
+    void CloudModellingVolumePanel::DrawBakeSection()
+    {
+        Utils::ImGuiUtilities::SectionHeader( "Bake" );
+
+        ImGui::Text( "Editing: %s", m_SourceName.c_str() );
+
+        // THE SAME VALIDATION THE LOADER RUNS, so the button and the file agree about what is legal — and
+        // the artist is told which number is wrong rather than being handed a disabled button.
+        const auto valid = Assets::ValidateCloudModellingRecipe( m_Recipe );
+        if ( !valid )
+            ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", valid.GetError().c_str() );
+
+        ImGui::BeginDisabled( m_BakeRunning || !valid );
+        if ( ImGui::Button( "Bake & Save As...", ImVec2( 160.0f, 0.0f ) ) )
+        {
+            std::filesystem::path target =
+                 Common::Utils::FileSystem::SaveFileDialog( "Cloud Modelling Volume\0*.dcmv\0" );
+            if ( !target.empty() )
+            {
+                if ( target.extension() != Assets::kCloudModellingVolumeExtension )
+                    target.replace_extension( Assets::kCloudModellingVolumeExtension );
+
+                // THE PATH IS CHOSEN BEFORE THE BAKE STARTS, not after it finishes. A file dialog that
+                // appears at the end of a thirty-second wait is one the artist has walked away from.
+                m_BakeTarget = target;
+
+                // SNAPSHOT. Everything the worker reads is copied here, on the UI thread, so that editing
+                // while a bake runs cannot make the voxels disagree with the recipe written beside them in
+                // the same file.
+                m_BakingRecipe = m_Recipe;
+
+                m_BakeProgress.store( 0.0f );
+                m_BakeCancelled.store( false );
+                m_BakeRunning   = true;
+                m_Status        = "Baking " + target.filename().string() + "...";
+                m_StatusIsError = false;
+
+                // The two atomics are the ONLY channel between the worker and the UI thread: one number
+                // out, one flag in. Nothing else the worker touches is shared, which is what makes the
+                // bake safe to run beside a panel the artist is still typing into.
+                const Assets::CloudModellingVolumeRecipe   recipe     = m_BakingRecipe;
+                const Assets::CloudModellingBakeProgressFn onProgress = [this]( float fraction )
+                {
+                    m_BakeProgress.store( fraction );
+                    return !m_BakeCancelled.load();
+                };
+
+                m_Baking = std::async( std::launch::async, [recipe, onProgress]
+                                       { return Assets::GenerateCloudModellingVolume( recipe, onProgress ); } );
+            }
+        }
+        ImGui::EndDisabled();
+
+        if ( m_BakeRunning )
+        {
+            ImGui::SameLine();
+            ImGui::ProgressBar( m_BakeProgress.load(), ImVec2( -80.0f, 0.0f ) );
+            ImGui::SameLine();
+            if ( ImGui::Button( "Cancel" ) )
+            {
+                m_BakeCancelled.store( true );
+                m_Status        = "Cancelling the bake...";
+                m_StatusIsError = false;
+            }
+        }
+
+        // OPEN IS WHAT MAKES THE RECIPE-IN-THE-HEADER REAL. Without it a `.dcmv` is a dead end and every
+        // revision means re-sculpting from nothing; with it the file IS the document.
+        ImGui::BeginDisabled( m_BakeRunning );
+        if ( ImGui::Button( "Open...", ImVec2( 160.0f, 0.0f ) ) )
+        {
+            const std::filesystem::path source =
+                 Common::Utils::FileSystem::OpenFileDialog( "Cloud Modelling Volume\0*.dcmv\0" );
+            if ( !source.empty() )
+            {
+                std::ifstream file( source, std::ios::binary );
+                if ( !file )
+                {
+                    m_Status        = "'" + source.string() + "' could not be opened.";
+                    m_StatusIsError = true;
+                }
+                else
+                {
+                    const std::vector<unsigned char> bytes( ( std::istreambuf_iterator<char>( file ) ),
+                                                            std::istreambuf_iterator<char>() );
+
+                    // Decoded rather than fetched through the AssetManager, and deliberately: the recipe
+                    // lives in the file's own header, so reading the file is the shortest path to it and
+                    // the one that also works for a volume outside the project's asset folders.
+                    const auto decoded = Assets::DecodeCloudModellingVolume( bytes );
+                    if ( !decoded )
+                    {
+                        m_Status = "'" + source.filename().string() + "' is not usable: " + decoded.GetError();
+                        m_StatusIsError = true;
+                    }
+                    else
+                    {
+                        m_Recipe     = decoded.GetValue().Recipe;
+                        m_Selected   = m_Recipe.Blobs.empty() ? -1 : 0;
+                        m_SourceName = source.filename().string();
+                        m_SliceIndex = static_cast<int>( Assets::CloudModellingAxisExtent( m_Axis ) / 2u );
+                        m_Status = "Opened '" + m_SourceName + "' — " + std::to_string( m_Recipe.Blobs.size() ) +
+                                   " lumps, ready to revise.";
+                        m_StatusIsError = false;
+                        InvalidateSlice();
+                    }
+                }
+            }
+        }
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        ImGui::TextDisabled( "Bodies live in %s", Common::Constants::Path::CLOUD_VOLUME_PATH.string().c_str() );
+    }
+} // namespace Desert::Editor

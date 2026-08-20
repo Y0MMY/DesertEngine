@@ -2,6 +2,8 @@
 
 #include <Engine/Assets/ContainerBytes.hpp>
 
+#include <glm/gtc/quaternion.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -20,6 +22,18 @@ namespace Desert::Assets
         // will wait through rather than an expressive limit. The shipped example uses eight.
         constexpr uint32_t kMaxBlobs = 64u;
 
+        // The weight's range, and it is a statement about DISTANCE rather than a taste. A weight dilates
+        // its lump by `BlendRadiusKm * ln(Weight)` (see CloudModellingBlob::Weight), so these two bounds
+        // are +/- ln(8) = 2.08 blend radii. Past that the lump has stopped being where its centre says it
+        // is, and the honest edit is to move it.
+        constexpr float kMinWeight = 0.125f;
+        constexpr float kMaxWeight = 8.0f;
+
+        // How closely two of a lump's radii must agree before a sphere or a capsule's cross-section counts
+        // as round. One millimetre against bodies measured in hundreds of metres: loose enough that a
+        // float round-trip through the container can never trip it, tight enough that a typo cannot pass.
+        constexpr float kRadiusAgreementKm = 1e-6f;
+
         bool IsFinite( float value )
         {
             return std::isfinite( value );
@@ -28,6 +42,14 @@ namespace Desert::Assets
         bool IsFinite( const glm::vec3& value )
         {
             return IsFinite( value.x ) && IsFinite( value.y ) && IsFinite( value.z );
+        }
+
+        /// The lump's own frame. The engine's euler convention exactly — the construction
+        /// TransformComponent::GetTransform uses — so that a lump's rotation and an entity's rotation are
+        /// the same three numbers meaning the same three things.
+        glm::mat3 BlobRotation( const glm::vec3& rotationDeg )
+        {
+            return glm::mat3( glm::quat( glm::radians( rotationDeg ) ) );
         }
 
         /**
@@ -54,19 +76,307 @@ namespace Desert::Assets
             return k0 * ( k0 - 1.0f ) / k1;
         }
 
+        /**
+         * The signed distance to a sphere, in kilometres, negative inside.
+         *
+         * This is what the ellipsoid form above REDUCES TO when the three radii are equal — the header of
+         * that function says so — and it is written out separately because the compiler cannot perform
+         * that reduction: it cannot know at the call site that the radii agree. Evaluating it directly
+         * saves two vector divides, a `length` and a division per lump per voxel, and it is EXACT where
+         * the general form is a tight underestimate.
+         */
+        float SphereDistanceKm( const glm::vec3& p, float radiusKm )
+        {
+            return glm::length( p ) - radiusKm;
+        }
+
+        /**
+         * The signed distance to a capsule lying along the lump's local Y, in kilometres, negative inside.
+         *
+         * Inigo Quilez's swept-sphere form, and it is EXACT rather than a bound: clamping the point's
+         * height onto the segment gives the nearest point ON THE SEGMENT, and the distance to a
+         * sphere-swept segment is the distance to that point less the radius. Exactness matters here for
+         * the same reason it matters everywhere in this file — the joined field IS the Dimensional
+         * Profile, so an inexact distance is a mis-shaped profile and not merely a mis-shaped bound.
+         *
+         * @param halfHeightKm the TOTAL half-height, caps included, so that `RadiiKm` is the lump's
+         *        bounding half-extent for a capsule exactly as it is for the other two primitives. The
+         *        segment is therefore shorter than the lump by one radius at each end.
+         */
+        float CapsuleDistanceKm( const glm::vec3& p, float radiusKm, float halfHeightKm )
+        {
+            // Non-negative because Validate refuses a capsule shorter than its own radius; at exactly zero
+            // this is a sphere, which is the correct limit rather than a special case.
+            const float segmentHalfKm = halfHeightKm - radiusKm;
+
+            glm::vec3 q = p;
+            q.y -= std::clamp( q.y, -segmentHalfKm, segmentHalfKm );
+            return glm::length( q ) - radiusKm;
+        }
+
+        /// The signed distance to whichever solid the lump is, measured in the lump's OWN frame.
+        float PrimitiveDistanceKm( CloudModellingPrimitive primitive, const glm::vec3& local,
+                                   const glm::vec3& radiiKm )
+        {
+            switch ( primitive )
+            {
+                case CloudModellingPrimitive::Sphere:
+                    return SphereDistanceKm( local, radiiKm.x );
+                case CloudModellingPrimitive::Capsule:
+                    return CapsuleDistanceKm( local, radiiKm.x, radiiKm.y );
+                case CloudModellingPrimitive::Ellipsoid:
+                    break;
+            }
+            return EllipsoidDistanceKm( local, radiiKm );
+        }
+
         unsigned char Quantize( float unit )
         {
             const float clamped = std::clamp( unit, 0.0f, 1.0f );
             return static_cast<unsigned char>( clamped * 255.0f + 0.5f );
         }
 
-        /// The distance by which the exponential smooth minimum of @p count equal distances pushes the
-        /// zero set outward. Exact rather than a safety factor: `-r*ln(N*exp(-d/r))` is `d - r*ln(N)`.
-        float JoinInflationKm( float blendRadiusKm, size_t count )
+        /**
+         * The distance by which the exponential smooth minimum pushes the zero set outward when every
+         * lump is equidistant. Exact rather than a safety factor: `-r*ln(SUM w_k * exp(-d/r))` is
+         * `d - r*ln(SUM w_k)`.
+         *
+         * @param weightSum the sum of the lumps' weights, which is the lump COUNT when every weight is 1 —
+         *        so this is A0's `r*ln(N)` generalised rather than replaced.
+         *
+         * Floored at zero. A weight sum below one shrinks the surface inward, and the true bound would
+         * then be negative; demanding no less room than the lumps themselves occupy costs nothing and
+         * keeps the box test monotone in a quantity an artist is allowed to lower.
+         */
+        float JoinInflationKm( float blendRadiusKm, float weightSum )
         {
-            if ( count <= 1u )
+            if ( weightSum <= 1.0f )
                 return 0.0f;
-            return blendRadiusKm * std::log( static_cast<float>( count ) );
+            return blendRadiusKm * std::log( weightSum );
+        }
+
+        /**
+         * @brief The recipe, put into the form the per-voxel loop wants, ONCE.
+         *
+         * WHY THIS TYPE EXISTS AT ALL: the full bake and the panel's slice preview must agree exactly, and
+         * the reliable way to make two loops agree is to give them one body rather than two copies of a
+         * formula. Everything that does not depend on the voxel — the canonical sort, the rotations
+         * inverted, the reciprocals — is done here, and `EvaluateVoxel` is the only place a voxel's four
+         * bytes are ever decided.
+         *
+         * Not thread-safe and not meant to be: it is const after construction and its only scratch is on
+         * the stack, so it is safe to SHARE across threads and unsafe to mutate — which is the right way
+         * round for a pure bake.
+         */
+        class BakedField
+        {
+        public:
+            explicit BakedField( const CloudModellingVolumeRecipe& recipe )
+                 : m_BlendRadiusKm( recipe.BlendRadiusKm ), m_EnvelopeMarginKm( recipe.EnvelopeMarginKm ),
+                   m_InvBlend( 1.0f / recipe.BlendRadiusKm ), m_InvProfile( 1.0f / recipe.ProfileDepthKm ),
+                   m_InvEnvelope( 1.0f / recipe.EnvelopeMarginKm )
+            {
+                // THE LUMPS ARE SORTED INTO A CANONICAL ORDER BEFORE ANYTHING IS SUMMED, and this is a
+                // MEASURED correction rather than tidiness.
+                //
+                // The exponential smooth minimum is commutative and associative in REAL arithmetic, which
+                // is the first of the three properties it was chosen for (PLAN_AUTHORED_CLOUDS.md section
+                // 3) — but floating-point addition is neither, so `sum += exp(...)` over a shuffled list
+                // produces a slightly different total. Measured on the shipped recipe by phase A0:
+                // shuffling the eight lumps moved 6 bytes of 4 194 304, each by one 255th. Tiny, and still
+                // the wrong shape of answer — a bake is a build artefact, and a build artefact whose bytes
+                // depend on the order its inputs happened to be listed in cannot be compared, cached by
+                // hash, or asserted equal.
+                //
+                // Sorting once, here, makes the summation order a function of the lumps themselves and not
+                // of the sequence they arrived in. It costs one sort of at most 64 elements against 8.4
+                // million exponentials.
+                //
+                // THE KEY COVERS EVERY AUTHORED NUMBER, including the three this phase added. That is not
+                // optional bookkeeping: two lumps identical in A0's eight fields but differing in rotation
+                // are DIFFERENT lumps, and a key that could not tell them apart would leave their relative
+                // order decided by `std::sort`'s internals — which is the very non-determinism the sort is
+                // here to remove.
+                std::vector<CloudModellingBlob> sorted = recipe.Blobs;
+                std::sort( sorted.begin(), sorted.end(),
+                           []( const CloudModellingBlob& a, const CloudModellingBlob& b )
+                           {
+                               const auto key = []( const CloudModellingBlob& blob )
+                               {
+                                   return std::tie( blob.CentreKm.x, blob.CentreKm.y, blob.CentreKm.z,
+                                                    blob.RadiiKm.x, blob.RadiiKm.y, blob.RadiiKm.z,
+                                                    blob.DetailType, blob.DensityScale, blob.RotationDeg.x,
+                                                    blob.RotationDeg.y, blob.RotationDeg.z, blob.Primitive,
+                                                    blob.Weight );
+                               };
+                               return key( a ) < key( b );
+                           } );
+
+                m_Blobs.reserve( sorted.size() );
+                for ( const CloudModellingBlob& blob : sorted )
+                {
+                    Prepared prepared;
+                    prepared.CentreKm  = blob.CentreKm;
+                    prepared.RadiiKm   = blob.RadiiKm;
+                    prepared.Primitive = blob.Primitive;
+                    prepared.Weight    = blob.Weight;
+
+                    prepared.DetailType   = blob.DetailType;
+                    prepared.DensityScale = blob.DensityScale;
+
+                    // The INVERSE rotation, because the point travels into the lump's frame rather than
+                    // the lump into the world's. A rotation matrix is orthonormal, so its inverse is its
+                    // transpose — exact, and free of the numerical drift a general inverse would add.
+                    prepared.IntoLocal = glm::transpose( BlobRotation( blob.RotationDeg ) );
+
+                    m_Blobs.push_back( prepared );
+                }
+            }
+
+            size_t BlobCount() const
+            {
+                return m_Blobs.size();
+            }
+
+            /**
+             * @brief The four bytes at one point of the body. THE ONLY PLACE A VOXEL IS DECIDED.
+             *
+             * @param out four bytes, always written — including the all-zero case, so that the caller
+             *        never has to remember to clear.
+             */
+            void EvaluateVoxel( const glm::vec3& point, unsigned char* out ) const
+            {
+                // On the stack and bounded by kMaxBlobs, which Validate enforces. A heap buffer here would
+                // be one allocation per voxel or one piece of shared mutable state; a fixed 64 floats is
+                // neither.
+                float distances[kMaxBlobs];
+                float weights[kMaxBlobs];
+
+                const size_t count = m_Blobs.size();
+
+                // Each lump's distance is computed ONCE and kept. The nearest of them is then the shift
+                // below, and the same numbers feed the sum — where A0 evaluated every ellipsoid twice, for
+                // the same answer at twice the cost.
+                float nearest = 0.0f;
+                for ( size_t k = 0; k < count; ++k )
+                {
+                    const Prepared& blob = m_Blobs[k];
+                    distances[k] = PrimitiveDistanceKm( blob.Primitive, blob.IntoLocal * ( point - blob.CentreKm ),
+                                                        blob.RadiiKm );
+                    nearest      = ( k == 0 ) ? distances[0] : std::min( nearest, distances[k] );
+                }
+
+                // THE SHIFT IS WHAT KEEPS THIS FINITE. `exp(-d/r)` overflows a float once d/r passes about
+                // 88, which at the shipped 50 m blend radius is 4.4 km — nearer than the corner of a box a
+                // mile across. Subtracting the smallest distance first is algebraically the identity and
+                // moves the largest exponent to exactly 1.
+                float sum = 0.0f;
+                for ( size_t k = 0; k < count; ++k )
+                {
+                    const float weight = m_Blobs[k].Weight * std::exp( -( distances[k] - nearest ) * m_InvBlend );
+                    weights[k]         = weight;
+                    sum += weight;
+                }
+
+                // The exponential smooth minimum, shifted back. Commutative and associative in the
+                // distances, so the order of the lumps cannot reach the answer.
+                const float joined = nearest - std::log( sum ) * m_BlendRadiusKm;
+
+                // Everything outside the body is four zeroes — including the envelope, past its own margin
+                // — so the early-out in the march is a single comparison and the empty parts of a hero
+                // cloud's box cost exactly what empty sky costs.
+                if ( joined >= m_EnvelopeMarginKm )
+                {
+                    out[0] = 0u;
+                    out[1] = 0u;
+                    out[2] = 0u;
+                    out[3] = 0u;
+                    return;
+                }
+
+                // THE TWO MATERIAL CHANNELS ARE THE JOIN'S OWN WEIGHTS, not a second construction.
+                // `weights` is already the softmax of the negated distances, so dividing by its sum gives a
+                // partition of unity over the lumps: a point deep inside one lump takes that lump's
+                // numbers, and a point in the crease between two takes their blend, with the blend's width
+                // being the same blend radius that fused the shapes. That is the second of the three
+                // properties the exponential smooth-min was chosen for.
+                const float invSum       = 1.0f / sum;
+                float       detailType   = 0.0f;
+                float       densityScale = 0.0f;
+                for ( size_t k = 0; k < count; ++k )
+                {
+                    const float share = weights[k] * invSum;
+                    detailType += share * m_Blobs[k].DetailType;
+                    densityScale += share * m_Blobs[k].DensityScale;
+                }
+
+                // 0 at the surface and 1 at ProfileDepth inside, which is Guerrilla's Dimensional Profile
+                // (deck p.85) obtained analytically instead of by a distance transform.
+                const float profile = std::clamp( -joined * m_InvProfile, 0.0f, 1.0f );
+
+                // 1 throughout the body and falling to 0 at the margin outside it. Above zero wherever the
+                // profile is, and past it, which is what makes it conservative.
+                const float envelope = std::clamp( ( m_EnvelopeMarginKm - joined ) * m_InvEnvelope, 0.0f, 1.0f );
+
+                out[0] = Quantize( profile );
+                out[1] = Quantize( detailType );
+                out[2] = Quantize( densityScale );
+                out[3] = Quantize( envelope );
+            }
+
+        private:
+            struct Prepared
+            {
+                glm::vec3               CentreKm{ 0.0f };
+                glm::vec3               RadiiKm{ 0.0f };
+                glm::mat3               IntoLocal{ 1.0f };
+                CloudModellingPrimitive Primitive    = CloudModellingPrimitive::Ellipsoid;
+                float                   Weight       = 1.0f;
+                float                   DetailType   = 1.0f;
+                float                   DensityScale = 1.0f;
+            };
+
+            std::vector<Prepared> m_Blobs;
+
+            float m_BlendRadiusKm    = 0.0f;
+            float m_EnvelopeMarginKm = 0.0f;
+            float m_InvBlend         = 0.0f;
+            float m_InvProfile       = 0.0f;
+            float m_InvEnvelope      = 0.0f;
+        };
+
+        /// Where the centre of voxel (@p x, @p y, @p z) sits, kilometres, relative to the box's centre.
+        /// One function so the full bake and a single-plane preview cannot disagree about WHERE a voxel is
+        /// — the "two statements of one fact" defect class of contract §2.3.1, closed by construction.
+        glm::vec3 VoxelCentreKm( const CloudModellingVolumeRecipe& recipe, uint32_t x, uint32_t y, uint32_t z )
+        {
+            const glm::vec3 half = recipe.SizeKm * 0.5f;
+            return glm::vec3(
+                 ( ( static_cast<float>( x ) + 0.5f ) / static_cast<float>( kCloudModellingVolumeWidth ) ) *
+                           recipe.SizeKm.x -
+                      half.x,
+                 ( ( static_cast<float>( y ) + 0.5f ) / static_cast<float>( kCloudModellingVolumeHeight ) ) *
+                           recipe.SizeKm.y -
+                      half.y,
+                 ( ( static_cast<float>( z ) + 0.5f ) / static_cast<float>( kCloudModellingVolumeDepth ) ) *
+                           recipe.SizeKm.z -
+                      half.z );
+        }
+
+        /// The lump's world-axis-aligned half-extent once it is rotated. `|R| * r` is the exact AABB of a
+        /// rotated box, and every primitive is contained in its own box, so this bounds all three.
+        glm::vec3 RotatedHalfExtentKm( const CloudModellingBlob& blob )
+        {
+            const glm::mat3 rotation = BlobRotation( blob.RotationDeg );
+
+            glm::mat3 magnitude( 0.0f );
+            for ( int column = 0; column < 3; ++column )
+            {
+                for ( int row = 0; row < 3; ++row )
+                    magnitude[column][row] = std::abs( rotation[column][row] );
+            }
+
+            return magnitude * blob.RadiiKm;
         }
     } // namespace
 
@@ -84,6 +394,48 @@ namespace Desert::Assets
                 return "Cutout Envelope (the body, dilated)";
         }
         return "unknown";
+    }
+
+    const char* CloudModellingPrimitiveName( CloudModellingPrimitive primitive )
+    {
+        switch ( primitive )
+        {
+            case CloudModellingPrimitive::Ellipsoid:
+                return "Ellipsoid";
+            case CloudModellingPrimitive::Sphere:
+                return "Sphere";
+            case CloudModellingPrimitive::Capsule:
+                return "Capsule";
+        }
+        return "unknown";
+    }
+
+    const char* CloudModellingAxisName( CloudModellingAxis axis )
+    {
+        switch ( axis )
+        {
+            case CloudModellingAxis::X:
+                return "X (looking east along the body)";
+            case CloudModellingAxis::Y:
+                return "Y (the horizontal cut, looking down)";
+            case CloudModellingAxis::Z:
+                return "Z (looking north along the body)";
+        }
+        return "unknown";
+    }
+
+    uint32_t CloudModellingAxisExtent( CloudModellingAxis axis )
+    {
+        switch ( axis )
+        {
+            case CloudModellingAxis::X:
+                return kCloudModellingVolumeWidth;
+            case CloudModellingAxis::Y:
+                return kCloudModellingVolumeHeight;
+            case CloudModellingAxis::Z:
+                return kCloudModellingVolumeDepth;
+        }
+        return 0u;
     }
 
     Common::BoolResultStr ValidateCloudModellingRecipe( const CloudModellingVolumeRecipe& recipe )
@@ -136,21 +488,86 @@ namespace Desert::Assets
             if ( !IsFinite( blob.DensityScale ) || blob.DensityScale < 0.0f || blob.DensityScale > 1.0f )
                 return Common::MakeFormattedError<bool>( "lump {} has Density Scale {}, outside [0, 1]", i,
                                                          blob.DensityScale );
+
+            if ( !IsFinite( blob.RotationDeg ) )
+                return Common::MakeFormattedError<bool>( "lump {} has a rotation that is not a finite number", i );
+
+            if ( !IsFinite( blob.Weight ) || blob.Weight < kMinWeight || blob.Weight > kMaxWeight )
+                return Common::MakeFormattedError<bool>(
+                     "lump {} has weight {}, outside [{}, {}]. The weight dilates the lump by "
+                     "BlendRadius * ln(weight); past these bounds that is more than two blend radii and "
+                     "moving the lump is the honest edit",
+                     i, blob.Weight, kMinWeight, kMaxWeight );
+
+            // THE PRIMITIVE'S CONSTRAINT ON ITS OWN RADII. `RadiiKm` is the lump's bounding half-extent for
+            // every primitive (CloudModellingBlob), which is what keeps the box arithmetic below one
+            // formula instead of three — but a sphere and a capsule do not USE all three numbers freely,
+            // and a stored number that the maths ignores is exactly the dead data the contract forbids.
+            // Refusing here makes every component of every lump's radii load-bearing.
+            switch ( blob.Primitive )
+            {
+                case CloudModellingPrimitive::Ellipsoid:
+                    break;
+
+                case CloudModellingPrimitive::Sphere:
+                    if ( std::abs( blob.RadiiKm.x - blob.RadiiKm.y ) > kRadiusAgreementKm ||
+                         std::abs( blob.RadiiKm.x - blob.RadiiKm.z ) > kRadiusAgreementKm )
+                        return Common::MakeFormattedError<bool>(
+                             "lump {} is a Sphere but its radii are {} x {} x {} km; a sphere has one "
+                             "radius. Make them equal, or make the lump an Ellipsoid",
+                             i, blob.RadiiKm.x, blob.RadiiKm.y, blob.RadiiKm.z );
+                    break;
+
+                case CloudModellingPrimitive::Capsule:
+                    if ( std::abs( blob.RadiiKm.x - blob.RadiiKm.z ) > kRadiusAgreementKm )
+                        return Common::MakeFormattedError<bool>(
+                             "lump {} is a Capsule but its cross-section is {} x {} km; a capsule is a "
+                             "swept SPHERE, so the two axes across its length must agree",
+                             i, blob.RadiiKm.x, blob.RadiiKm.z );
+
+                    if ( blob.RadiiKm.y < blob.RadiiKm.x )
+                        return Common::MakeFormattedError<bool>(
+                             "lump {} is a Capsule of half-height {} km and radius {} km. The half-height "
+                             "is the TOTAL one, caps included, so it cannot be less than the radius — a "
+                             "capsule that short is a sphere, and saying so is the honest edit",
+                             i, blob.RadiiKm.y, blob.RadiiKm.x );
+                    break;
+
+                default:
+                    return Common::MakeFormattedError<bool>(
+                         "lump {} declares primitive {}, which this build does not know", i,
+                         static_cast<uint32_t>( blob.Primitive ) );
+            }
         }
 
         // THE BODY MUST NOT REACH ITS OWN BOX, and the slack is the join's inflation plus the envelope's
         // dilation. Both are real distances the bake adds to the lumps' own extents, so checking the
         // lumps alone would pass a recipe whose cloud is cut flat by the volume's face — and, every
         // sampler in this engine being REPEAT, whose top would then blend with its own bottom.
-        const float slackKm =
-             JoinInflationKm( recipe.BlendRadiusKm, recipe.Blobs.size() ) + recipe.EnvelopeMarginKm;
+        //
+        // THE INFLATION IS DRIVEN BY THE SUM OF THE WEIGHTS AND NOT BY THE COUNT. They are the same number
+        // whenever every weight is 1, which is A0's case; they part company the moment an artist turns a
+        // weight up, and it is exactly then that the surface moves outward. Counting lumps instead would
+        // under-reserve by `BlendRadius * ln(weightSum / N)` — and the failure that hides behind an
+        // under-reserved box is a cloud with a flat face, which reads as a modelling mistake rather than
+        // as a bound that was computed from the wrong quantity.
+        float weightSum = 0.0f;
+        for ( const CloudModellingBlob& blob : recipe.Blobs )
+            weightSum += blob.Weight;
+
+        const float inflationKm = JoinInflationKm( recipe.BlendRadiusKm, weightSum );
+        const float slackKm     = inflationKm + recipe.EnvelopeMarginKm;
 
         glm::vec3 reach{ 0.0f };
         for ( const CloudModellingBlob& blob : recipe.Blobs )
         {
-            reach.x = std::max( reach.x, std::abs( blob.CentreKm.x ) + blob.RadiiKm.x );
-            reach.y = std::max( reach.y, std::abs( blob.CentreKm.y ) + blob.RadiiKm.y );
-            reach.z = std::max( reach.z, std::abs( blob.CentreKm.z ) + blob.RadiiKm.z );
+            // The ROTATED half-extent, so a capsule laid on its side is measured along the axis it
+            // actually occupies. For an unrotated lump this is its radii unchanged.
+            const glm::vec3 extent = RotatedHalfExtentKm( blob );
+
+            reach.x = std::max( reach.x, std::abs( blob.CentreKm.x ) + extent.x );
+            reach.y = std::max( reach.y, std::abs( blob.CentreKm.y ) + extent.y );
+            reach.z = std::max( reach.z, std::abs( blob.CentreKm.z ) + extent.z );
         }
 
         const glm::vec3 needed = reach + glm::vec3( slackKm );
@@ -159,10 +576,11 @@ namespace Desert::Assets
         if ( needed.x > half.x || needed.y > half.y || needed.z > half.z )
             return Common::MakeFormattedError<bool>(
                  "the body reaches {:.3f} x {:.3f} x {:.3f} km from the centre once the join's inflation "
-                 "({:.3f} km over {} lumps) and the envelope's margin ({:.3f} km) are added, which does not fit "
-                 "inside the half-size {:.3f} x {:.3f} x {:.3f} km. Either grow Size or move the lumps in.",
-                 needed.x, needed.y, needed.z, JoinInflationKm( recipe.BlendRadiusKm, recipe.Blobs.size() ),
-                 recipe.Blobs.size(), recipe.EnvelopeMarginKm, half.x, half.y, half.z );
+                 "({:.3f} km over {} lumps of total weight {:.2f}) and the envelope's margin ({:.3f} km) are "
+                 "added, which does not fit inside the half-size {:.3f} x {:.3f} x {:.3f} km. Either grow Size "
+                 "or move the lumps in.",
+                 needed.x, needed.y, needed.z, inflationKm, recipe.Blobs.size(), weightSum,
+                 recipe.EnvelopeMarginKm, half.x, half.y, half.z );
 
         return Common::MakeSuccess( true );
     }
@@ -170,134 +588,47 @@ namespace Desert::Assets
     Common::ResultStr<std::vector<unsigned char>>
     GenerateCloudModellingVolume( const CloudModellingVolumeRecipe& recipe )
     {
+        return GenerateCloudModellingVolume( recipe, {} );
+    }
+
+    Common::ResultStr<std::vector<unsigned char>>
+    GenerateCloudModellingVolume( const CloudModellingVolumeRecipe&   recipe,
+                                  const CloudModellingBakeProgressFn& onProgress )
+    {
         if ( auto valid = ValidateCloudModellingRecipe( recipe ); !valid )
             return Common::MakeFormattedError<std::vector<unsigned char>>( "recipe is not usable: {}",
                                                                            valid.GetError() );
-
-        // THE LUMPS ARE SORTED INTO A CANONICAL ORDER BEFORE ANYTHING IS SUMMED, and this is a MEASURED
-        // correction rather than tidiness.
-        //
-        // The exponential smooth minimum is commutative and associative in REAL arithmetic, which is the
-        // first of the three properties it was chosen for (PLAN_AUTHORED_CLOUDS.md section 3) — but
-        // floating-point addition is neither, so `sum += exp(...)` over a shuffled list produces a
-        // slightly different total. Measured on the shipped recipe: shuffling the eight lumps moved
-        // 6 bytes of 4 194 304, each by one 255th. Tiny, and still the wrong shape of answer — a bake is
-        // a build artefact, and a build artefact whose bytes depend on the order its inputs happened to be
-        // listed in cannot be compared, cached by hash, or asserted equal.
-        //
-        // Sorting once, here, makes the summation order a function of the lumps themselves and not of the
-        // sequence they arrived in, so the property the plan claims is exactly true rather than nearly
-        // true. It costs one sort of at most 64 elements against 8.4 million exponentials.
-        //
-        // The key is lexicographic on every authored number, so two lumps that differ in any way have a
-        // defined order and two that are identical are interchangeable by construction.
-        std::vector<CloudModellingBlob> blobs = recipe.Blobs;
-        std::sort( blobs.begin(), blobs.end(),
-                   []( const CloudModellingBlob& a, const CloudModellingBlob& b )
-                   {
-                       const auto key = []( const CloudModellingBlob& blob )
-                       {
-                           return std::tie( blob.CentreKm.x, blob.CentreKm.y, blob.CentreKm.z, blob.RadiiKm.x,
-                                            blob.RadiiKm.y, blob.RadiiKm.z, blob.DetailType, blob.DensityScale );
-                       };
-                       return key( a ) < key( b );
-                   } );
 
         const uint32_t width  = kCloudModellingVolumeWidth;
         const uint32_t height = kCloudModellingVolumeHeight;
         const uint32_t depth  = kCloudModellingVolumeDepth;
 
-        const glm::vec3 half = recipe.SizeKm * 0.5f;
         const glm::vec3 voxelSizeKm =
              recipe.SizeKm /
              glm::vec3( static_cast<float>( width ), static_cast<float>( height ), static_cast<float>( depth ) );
-        const float  invBlend    = 1.0f / recipe.BlendRadiusKm;
-        const float  invProfile  = 1.0f / recipe.ProfileDepthKm;
-        const float  invEnvelope = 1.0f / recipe.EnvelopeMarginKm;
-        const size_t blobCount   = blobs.size();
+
+        // The canonical sort, the inverted rotations and the reciprocals all happen here, once.
+        const BakedField field( recipe );
 
         std::vector<unsigned char> voxels( static_cast<size_t>( kCloudModellingVoxelBytes ), 0u );
-        std::vector<float>         weights( blobCount, 0.0f );
 
         for ( uint32_t z = 0; z < depth; ++z )
         {
-            const float pz =
-                 ( ( static_cast<float>( z ) + 0.5f ) / static_cast<float>( depth ) ) * recipe.SizeKm.z - half.z;
+            // BETWEEN SLABS AND NOT INSIDE THEM. 128 calls over a bake of tens of seconds is a progress
+            // bar that moves smoothly and costs nothing measurable; per voxel it would be a million
+            // indirect calls through a std::function and would dominate the arithmetic it is reporting on.
+            if ( onProgress && !onProgress( static_cast<float>( z ) / static_cast<float>( depth ) ) )
+                return Common::MakeError<std::vector<unsigned char>>(
+                     "the bake was cancelled before it finished" );
 
             for ( uint32_t y = 0; y < height; ++y )
             {
-                const float py =
-                     ( ( static_cast<float>( y ) + 0.5f ) / static_cast<float>( height ) ) * recipe.SizeKm.y -
-                     half.y;
-
                 for ( uint32_t x = 0; x < width; ++x )
                 {
-                    const float px =
-                         ( ( static_cast<float>( x ) + 0.5f ) / static_cast<float>( width ) ) * recipe.SizeKm.x -
-                         half.x;
-
-                    const glm::vec3 point{ px, py, pz };
-
-                    // THE SHIFT IS WHAT KEEPS THIS FINITE. `exp(-d/r)` overflows a float once d/r passes
-                    // about 88, which at the shipped 50 m blend radius is 4.4 km — nearer than the corner
-                    // of a box a mile across. Subtracting the smallest distance first is algebraically the
-                    // identity and moves the largest exponent to exactly 1.
-                    float nearest = EllipsoidDistanceKm( point - blobs[0].CentreKm, blobs[0].RadiiKm );
-                    for ( size_t k = 1; k < blobCount; ++k )
-                        nearest = std::min( nearest,
-                                            EllipsoidDistanceKm( point - blobs[k].CentreKm, blobs[k].RadiiKm ) );
-
-                    float sum = 0.0f;
-                    for ( size_t k = 0; k < blobCount; ++k )
-                    {
-                        const float distance = EllipsoidDistanceKm( point - blobs[k].CentreKm, blobs[k].RadiiKm );
-                        const float weight   = std::exp( -( distance - nearest ) * invBlend );
-                        weights[k]           = weight;
-                        sum += weight;
-                    }
-
-                    // The exponential smooth minimum, shifted back. Commutative and associative in the
-                    // distances, so the order of the lumps cannot reach the answer.
-                    const float joined = nearest - std::log( sum ) * recipe.BlendRadiusKm;
-
                     const size_t index =
                          ( ( static_cast<size_t>( z ) * height + y ) * width + x ) * kCloudModellingBytesPerVoxel;
 
-                    // Everything outside the body is four zeroes — including the envelope, past its own
-                    // margin — so the early-out in the march is a single comparison and the empty parts of
-                    // a hero cloud's box cost exactly what empty sky costs.
-                    if ( joined >= recipe.EnvelopeMarginKm )
-                        continue;
-
-                    // THE TWO MATERIAL CHANNELS ARE THE JOIN'S OWN WEIGHTS, not a second construction.
-                    // `weights` is already the softmax of the negated distances, so dividing by its sum
-                    // gives a partition of unity over the lumps: a point deep inside one lump takes that
-                    // lump's numbers, and a point in the crease between two takes their blend, with the
-                    // blend's width being the same blend radius that fused the shapes. That is the second
-                    // of the three properties the exponential smooth-min was chosen for.
-                    const float invSum       = 1.0f / sum;
-                    float       detailType   = 0.0f;
-                    float       densityScale = 0.0f;
-                    for ( size_t k = 0; k < blobCount; ++k )
-                    {
-                        const float share = weights[k] * invSum;
-                        detailType += share * blobs[k].DetailType;
-                        densityScale += share * blobs[k].DensityScale;
-                    }
-
-                    // 0 at the surface and 1 at ProfileDepth inside, which is Guerrilla's Dimensional
-                    // Profile (deck p.85) obtained analytically instead of by a distance transform.
-                    const float profile = std::clamp( -joined * invProfile, 0.0f, 1.0f );
-
-                    // 1 throughout the body and falling to 0 at the margin outside it. Above zero
-                    // wherever the profile is, and past it, which is what makes it conservative.
-                    const float envelope =
-                         std::clamp( ( recipe.EnvelopeMarginKm - joined ) * invEnvelope, 0.0f, 1.0f );
-
-                    voxels[index + 0] = Quantize( profile );
-                    voxels[index + 1] = Quantize( detailType );
-                    voxels[index + 2] = Quantize( densityScale );
-                    voxels[index + 3] = Quantize( envelope );
+                    field.EvaluateVoxel( VoxelCentreKm( recipe, x, y, z ), voxels.data() + index );
                 }
             }
         }
@@ -333,7 +664,88 @@ namespace Desert::Assets
             }
         }
 
+        // Reported only once the boundary check has passed, so "100 %" and "there is a volume" are the same
+        // event rather than two the caller has to reconcile.
+        if ( onProgress )
+            onProgress( 1.0f );
+
         return Common::MakeSuccess( std::move( voxels ) );
+    }
+
+    Common::ResultStr<CloudModellingSlice> GenerateCloudModellingSlice( const CloudModellingVolumeRecipe& recipe,
+                                                                        CloudModellingAxis axis, uint32_t index )
+    {
+        if ( auto valid = ValidateCloudModellingRecipe( recipe ); !valid )
+            return Common::MakeFormattedError<CloudModellingSlice>( "recipe is not usable: {}", valid.GetError() );
+
+        const uint32_t extent = CloudModellingAxisExtent( axis );
+        if ( extent == 0u )
+            return Common::MakeFormattedError<CloudModellingSlice>( "axis {} is not one this build knows",
+                                                                    static_cast<uint32_t>( axis ) );
+
+        if ( index >= extent )
+            return Common::MakeFormattedError<CloudModellingSlice>(
+                 "slice {} is outside the volume: axis {} is {} voxels deep", index,
+                 CloudModellingAxisName( axis ), extent );
+
+        CloudModellingSlice slice;
+        switch ( axis )
+        {
+            case CloudModellingAxis::X:
+                slice.Width  = kCloudModellingVolumeDepth;
+                slice.Height = kCloudModellingVolumeHeight;
+                break;
+            case CloudModellingAxis::Y:
+                slice.Width  = kCloudModellingVolumeWidth;
+                slice.Height = kCloudModellingVolumeDepth;
+                break;
+            case CloudModellingAxis::Z:
+                slice.Width  = kCloudModellingVolumeWidth;
+                slice.Height = kCloudModellingVolumeHeight;
+                break;
+        }
+
+        slice.Pixels.assign( static_cast<size_t>( slice.Width ) * slice.Height * kCloudModellingBytesPerVoxel,
+                             0u );
+
+        const BakedField field( recipe );
+
+        for ( uint32_t v = 0; v < slice.Height; ++v )
+        {
+            for ( uint32_t u = 0; u < slice.Width; ++u )
+            {
+                // The one place the plane's two axes are named. Deliberately a mapping into (x, y, z)
+                // rather than a second addressing scheme, so the voxel a pixel shows is found by the same
+                // VoxelCentreKm the full bake uses.
+                uint32_t x = 0;
+                uint32_t y = 0;
+                uint32_t z = 0;
+                switch ( axis )
+                {
+                    case CloudModellingAxis::X:
+                        x = index;
+                        z = u;
+                        y = v;
+                        break;
+                    case CloudModellingAxis::Y:
+                        y = index;
+                        x = u;
+                        z = v;
+                        break;
+                    case CloudModellingAxis::Z:
+                        z = index;
+                        x = u;
+                        y = v;
+                        break;
+                }
+
+                const size_t at = ( static_cast<size_t>( v ) * slice.Width + u ) * kCloudModellingBytesPerVoxel;
+
+                field.EvaluateVoxel( VoxelCentreKm( recipe, x, y, z ), slice.Pixels.data() + at );
+            }
+        }
+
+        return Common::MakeSuccess( std::move( slice ) );
     }
 
     std::vector<unsigned char> EncodeCloudModellingVolume( const CloudModellingVolumeData& data )
@@ -350,6 +762,11 @@ namespace Desert::Assets
             WriteF32( blobBytes, blob.RadiiKm.z );
             WriteF32( blobBytes, blob.DetailType );
             WriteF32( blobBytes, blob.DensityScale );
+            WriteF32( blobBytes, blob.RotationDeg.x );
+            WriteF32( blobBytes, blob.RotationDeg.y );
+            WriteF32( blobBytes, blob.RotationDeg.z );
+            WriteU32( blobBytes, static_cast<uint32_t>( blob.Primitive ) );
+            WriteF32( blobBytes, blob.Weight );
         }
 
         std::vector<unsigned char> out;
@@ -486,6 +903,23 @@ namespace Desert::Assets
             data.Recipe.Blobs[i].RadiiKm    = glm::vec3( ReadF32( b + 12 ), ReadF32( b + 16 ), ReadF32( b + 20 ) );
             data.Recipe.Blobs[i].DetailType = ReadF32( b + 24 );
             data.Recipe.Blobs[i].DensityScale = ReadF32( b + 28 );
+            data.Recipe.Blobs[i].RotationDeg =
+                 glm::vec3( ReadF32( b + 32 ), ReadF32( b + 36 ), ReadF32( b + 40 ) );
+
+            // The primitive is the one field in a lump that is an ENUM and not a magnitude, so an unknown
+            // value cannot be clamped into sense the way a radius could — it is refused by number here
+            // rather than falling through to whatever the switch's default happens to do.
+            const uint32_t primitive = ReadU32( b + 44 );
+            if ( primitive > static_cast<uint32_t>( CloudModellingPrimitive::Capsule ) )
+                return Common::MakeFormattedError<CloudModellingVolumeData>(
+                     "lump {} declares primitive {}; this build knows Ellipsoid ({}), Sphere ({}) and Capsule "
+                     "({})",
+                     i, primitive, static_cast<uint32_t>( CloudModellingPrimitive::Ellipsoid ),
+                     static_cast<uint32_t>( CloudModellingPrimitive::Sphere ),
+                     static_cast<uint32_t>( CloudModellingPrimitive::Capsule ) );
+
+            data.Recipe.Blobs[i].Primitive = static_cast<CloudModellingPrimitive>( primitive );
+            data.Recipe.Blobs[i].Weight    = ReadF32( b + 48 );
         }
 
         const unsigned char* voxelAt = blobAt + static_cast<size_t>( blobCount ) * kCloudModellingBlobBytes;
@@ -526,34 +960,60 @@ namespace Desert::Assets
             r.BlendRadiusKm    = 0.05f;
             r.ProfileDepthKm   = 0.18f;
             r.EnvelopeMarginKm = 0.09f;
-            r.Blobs            = {
+            // WRITTEN FIELD BY FIELD AND NOT POSITIONALLY. A lump grew three members in this phase, and
+            // the positional form this recipe used at A0 did not fail to compile at every site — it failed
+            // at some and silently re-pointed at others, which is precisely how a "content" edit becomes a
+            // shape change nobody ordered. Naming the fields makes the record's order a private matter of
+            // the format again.
+            //
+            // THE NUMBERS ARE A0'S, UNCHANGED, AND DELIBERATELY SO. Every lump here is an unrotated
+            // unit-weight ellipsoid, which is the identity case of everything this phase added, so the
+            // shipped cloud is the same body it was — the re-bake this format bump forces moves the
+            // container version and not one voxel. Desert/Tests/Engine/CloudModellingRecipe pins that.
+            r.Blobs = {
                  // base pad — flat and wide, the underside a cumulus has because it sits on the
                  // condensation level
-                 CloudModellingBlob{ glm::vec3( 0.00f, -0.17f, 0.00f ), glm::vec3( 0.60f, 0.11f, 0.54f ), 0.90f,
-                                     0.85f },
+                 CloudModellingBlob{ .CentreKm     = glm::vec3( 0.00f, -0.17f, 0.00f ),
+                                     .RadiiKm      = glm::vec3( 0.60f, 0.11f, 0.54f ),
+                                     .DetailType   = 0.90f,
+                                     .DensityScale = 0.85f },
                  // west lobe
-                 CloudModellingBlob{ glm::vec3( -0.30f, -0.06f, 0.08f ), glm::vec3( 0.36f, 0.17f, 0.32f ), 0.95f,
-                                     1.00f },
+                 CloudModellingBlob{ .CentreKm     = glm::vec3( -0.30f, -0.06f, 0.08f ),
+                                     .RadiiKm      = glm::vec3( 0.36f, 0.17f, 0.32f ),
+                                     .DetailType   = 0.95f,
+                                     .DensityScale = 1.00f },
                  // east lobe
-                 CloudModellingBlob{ glm::vec3( 0.32f, -0.08f, -0.12f ), glm::vec3( 0.34f, 0.16f, 0.30f ), 0.95f,
-                                     1.00f },
+                 CloudModellingBlob{ .CentreKm     = glm::vec3( 0.32f, -0.08f, -0.12f ),
+                                     .RadiiKm      = glm::vec3( 0.34f, 0.16f, 0.30f ),
+                                     .DetailType   = 0.95f,
+                                     .DensityScale = 1.00f },
                  // the body the tower rises out of
-                 CloudModellingBlob{ glm::vec3( 0.02f, 0.02f, -0.02f ), glm::vec3( 0.40f, 0.20f, 0.36f ), 1.00f,
-                                     1.00f },
+                 CloudModellingBlob{ .CentreKm     = glm::vec3( 0.02f, 0.02f, -0.02f ),
+                                     .RadiiKm      = glm::vec3( 0.40f, 0.20f, 0.36f ),
+                                     .DetailType   = 1.00f,
+                                     .DensityScale = 1.00f },
                  // tower
-                 CloudModellingBlob{ glm::vec3( -0.06f, 0.11f, 0.04f ), glm::vec3( 0.25f, 0.17f, 0.23f ), 1.00f,
-                                     0.95f },
+                 CloudModellingBlob{ .CentreKm     = glm::vec3( -0.06f, 0.11f, 0.04f ),
+                                     .RadiiKm      = glm::vec3( 0.25f, 0.17f, 0.23f ),
+                                     .DetailType   = 1.00f,
+                                     .DensityScale = 0.95f },
                  // crown
-                 CloudModellingBlob{ glm::vec3( -0.03f, 0.20f, 0.02f ), glm::vec3( 0.15f, 0.085f, 0.14f ), 1.00f,
-                                     0.80f },
+                 CloudModellingBlob{ .CentreKm     = glm::vec3( -0.03f, 0.20f, 0.02f ),
+                                     .RadiiKm      = glm::vec3( 0.15f, 0.085f, 0.14f ),
+                                     .DetailType   = 1.00f,
+                                     .DensityScale = 0.80f },
                  // shoulder puff
-                 CloudModellingBlob{ glm::vec3( 0.30f, 0.08f, 0.22f ), glm::vec3( 0.19f, 0.12f, 0.17f ), 0.85f,
-                                     0.75f },
+                 CloudModellingBlob{ .CentreKm     = glm::vec3( 0.30f, 0.08f, 0.22f ),
+                                     .RadiiKm      = glm::vec3( 0.19f, 0.12f, 0.17f ),
+                                     .DetailType   = 0.85f,
+                                     .DensityScale = 0.75f },
                  // the wispy tail: the one lump whose Detail Type is near zero, so the join hands the
                  // up-rez a WISPY erosion there and a billowy one everywhere else — two channels of the
                  // volume written by the same weights that fused the shapes
-                 CloudModellingBlob{ glm::vec3( -0.52f, -0.02f, -0.30f ), glm::vec3( 0.24f, 0.09f, 0.19f ), 0.30f,
-                                     0.50f },
+                 CloudModellingBlob{ .CentreKm     = glm::vec3( -0.52f, -0.02f, -0.30f ),
+                                     .RadiiKm      = glm::vec3( 0.24f, 0.09f, 0.19f ),
+                                     .DetailType   = 0.30f,
+                                     .DensityScale = 0.50f },
             };
             return r;
         }();

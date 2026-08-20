@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace Desert::Assets
@@ -76,11 +77,53 @@ namespace Desert::Assets
     const char* CloudModellingChannelName( CloudModellingChannel channel );
 
     /**
+     * @brief WHICH SOLID a lump is. Three, and the set is closed until something measures a fourth.
+     *
+     * A0 shipped one — the ellipsoid — on the reasoning that three radii buy the whole vocabulary for two
+     * floats. That reasoning is still right about SHAPE and turned out to be incomplete about two other
+     * things, which is why this enum exists rather than a fourth radius:
+     *
+     *   * A CAPSULE IS NOT AN ELLIPSOID AND CANNOT BE APPROXIMATED BY ONE. Its surface is a swept sphere,
+     *     so its cross-section is CONSTANT along the segment; an ellipsoid's tapers from the middle to a
+     *     point at both ends. The catalogue of ANALYSIS_APPROACH.md section 6 asks for the flat spreading
+     *     BASE of a cumulus and for the elongated growths off its shoulders, and both are the constant
+     *     cross-section case — sculpted from ellipsoids they come out lens-shaped and pinched, and the
+     *     only fix is a row of overlapping ellipsoids, which costs one lump per unit of length.
+     *   * A SPHERE IS AN ELLIPSOID, AND IT IS A CHEAPER ONE. Substituting equal radii into the ellipsoid's
+     *     bounded form reduces it algebraically to `|p| - R` — but only after two vector divides, a second
+     *     `length` and a division that the compiler cannot elide because it cannot know the radii are
+     *     equal. Evaluating the reduced form directly is the same answer for less work, and it is EXACT
+     *     rather than the ellipsoid form's tight underestimate. It earns its branch by measurement, not by
+     *     vocabulary; the number is in Docs/Clouds/CALIBRATION.md section A1.
+     *
+     * The set is CLOSED here deliberately. Every entry is a branch in a loop that runs 8.4 million times
+     * and a case in the format's validator, so a fourth is a cost that has to be argued for by naming a
+     * shape in the catalogue that these three cannot express.
+     */
+    enum class CloudModellingPrimitive : uint32_t
+    {
+        /// Three independent semi-axes. The general case: a flattened disc, a prolate lobe, a lens.
+        Ellipsoid = 0,
+        /// One radius. `RadiiKm` must be equal on all three axes.
+        Sphere = 1,
+        /// A segment of the lump's local Y swept by a sphere. `RadiiKm.x` and `RadiiKm.z` are the
+        /// cross-section radius and must be equal; `RadiiKm.y` is the TOTAL half-height, caps included,
+        /// and must be at least the radius — a capsule shorter than its own diameter is a sphere, and is
+        /// refused as one rather than silently degenerating into one.
+        Capsule = 2,
+    };
+
+    const char* CloudModellingPrimitiveName( CloudModellingPrimitive primitive );
+
+    /**
      * @brief One smooth lump the body is made of.
      *
-     * An ELLIPSOID and not a sphere, because the difference is the whole vocabulary: a cumulus base is a
-     * flattened disc, a congestus tower is a prolate lobe, and a lenticular is a lens. Three radii cost
-     * two floats over one and remove the need for a second primitive type.
+     * `RadiiKm` MEANS THE SAME THING FOR EVERY PRIMITIVE: the half-extent of the lump's local bounding
+     * box. Each primitive then constrains it — an ellipsoid not at all, a sphere to three equal numbers, a
+     * capsule to a round cross-section — and ValidateCloudModellingRecipe enforces the constraint. That
+     * uniformity is what lets the recipe's "the body must not reach its own box" arithmetic stay one
+     * formula instead of three, and it is why no component of `RadiiKm` is ever ignored: a stored field
+     * that nothing reads is the shape of dead data this contract forbids.
      *
      * The two material numbers are per-blob and NOT per-voxel-authored: the union below turns them into a
      * smooth per-voxel field for free (see GenerateCloudModellingVolume), which is the second of the three
@@ -93,9 +136,50 @@ namespace Desert::Assets
         /// what puts it in the sky.
         glm::vec3 CentreKm{ 0.0f };
 
-        /// Semi-axes, kilometres. All three strictly positive; a zero axis is a degenerate ellipsoid whose
-        /// distance function divides by zero, so it is refused rather than clamped.
+        /// Half-extent of the lump's local bounding box, kilometres — read as semi-axes by an ellipsoid, as
+        /// one radius by a sphere, as radius-and-half-height by a capsule. All three strictly positive; a
+        /// zero axis is a degenerate solid whose distance function divides by zero, so it is refused rather
+        /// than clamped.
         glm::vec3 RadiiKm{ 0.25f };
+
+        /// The lump's orientation, DEGREES, applied about its own centre before the distance is measured.
+        /// Euler angles in the engine's own convention — `glm::quat( glm::radians( RotationDeg ) )`, the
+        /// same construction TransformComponent::GetTransform uses — so a lump's rotation reads the way
+        /// every other rotation in the editor reads.
+        ///
+        /// DEGREES AND NOT RADIANS, and the unit is in the NAME: this is a number an artist types and a
+        /// baker prints, not one that feeds a quaternion every frame, and a field whose unit is only
+        /// stated in a comment is how two halves of a subsystem come to disagree.
+        ///
+        /// It is what makes the capsule useful rather than decorative. A capsule's axis is its local Y, so
+        /// without a rotation every capsule is vertical — and the shape the catalogue actually asks a
+        /// capsule for, the spreading base of a cumulus, is horizontal.
+        ///
+        /// A rotation is RIGID, so it moves the surface without distorting the distance to it: the field
+        /// stays a true normalised distance field, which is the third of the three properties the join was
+        /// chosen for and the one the Dimensional Profile is derived from.
+        glm::vec3 RotationDeg{ 0.0f };
+
+        /// WHICH SOLID. See CloudModellingPrimitive.
+        CloudModellingPrimitive Primitive = CloudModellingPrimitive::Ellipsoid;
+
+        /// How hard this lump pulls in the union, > 0. It multiplies the lump's term in the smooth
+        /// minimum's sum, and the algebra of what that does is exact and worth stating, because it is what
+        /// makes the knob predictable instead of a feel:
+        ///
+        ///   `-r * ln( SUM w_k exp(-d_k/r) )` is the same function as the unweighted join over distances
+        ///   `d_k - r*ln(w_k)`.
+        ///
+        /// So A WEIGHT IS A DILATION OF THE LUMP, and its size is `BlendRadiusKm * ln(Weight)` — at the
+        /// shipped 50 m blend radius, a weight of 2 grows the lump by 35 m and a weight of 0.5 shrinks it
+        /// by the same. It moves the CREASE between neighbours without moving either centre, which is the
+        /// thing an artist reaches for when one lobe should read as growing out of another rather than
+        /// meeting it.
+        ///
+        /// 1 is the identity and reduces the sum to A0's exactly. The range is [1/8, 8], which is
+        /// +/- 2.08 blend radii of dilation — past that the lump has stopped being where its centre says
+        /// it is, and moving it is the honest edit.
+        float Weight = 1.0f;
 
         /// 0 = wispy, 1 = billowy. The character of the erosion the up-rez cuts into this lump's part of
         /// the body — the same axis Graphic::CloudTypeShape::DetailCharacter is on, so a hero cloud and a
@@ -159,10 +243,21 @@ namespace Desert::Assets
     ///
     /// 1 — ellipsoid signed distance joined by exponential smooth-min, with the union's softmax weights
     ///     carrying Detail Type and Density Scale (ANALYSIS_APPROACH.md §3, PLAN_AUTHORED_CLOUDS.md §3).
-    inline constexpr uint32_t kCloudModellingGeneratorVersion = 1u;
+    /// 2 — three primitives instead of one, each lump rigidly rotated about its own centre, and a
+    ///     per-lump weight in the sum. A recipe whose lumps are all unrotated unit-weight ellipsoids is
+    ///     the same arithmetic in the same order as 1 and bakes the same bytes; Desert/Tests/Engine/
+    ///     CloudAuthored asserts that rather than asserting it in a comment.
+    inline constexpr uint32_t kCloudModellingGeneratorVersion = 2u;
 
     /// The container layout's own version, independent of the maths. Bumped when a FIELD moves.
-    inline constexpr uint32_t kCloudModellingContainerVersion = 1u;
+    ///
+    /// 2 — a lump grew a primitive, a rotation and a weight, so the blob record is 52 bytes and not 32.
+    ///     There is NO reader for version 1 and that is deliberate (contract §4): the old path is deleted
+    ///     by the change that replaces it, and the one v1 file that ever existed —
+    ///     kCloudModellingDefaultVolumeName — is re-baked by this same change. `Tools/CloudVolumeBaker
+    ///     --in old.dcmv --out new.dcmv` is what a re-bake is FOR, and it cannot help across this bump,
+    ///     which is why the recipe also lives in code as CloudModellingDefaultRecipe().
+    inline constexpr uint32_t kCloudModellingContainerVersion = 2u;
 
     /// The volume's shape, FIXED BY THE FORMAT. Mirrored by CLOUD_MODELLING_VOLUME_WIDTH and its two
     /// siblings in Editor/Resources/Shaders/Common/CloudAuthored.glslh, which needs them as compile-time
@@ -241,6 +336,82 @@ namespace Desert::Assets
     GenerateCloudModellingVolume( const CloudModellingVolumeRecipe& recipe );
 
     /**
+     * @brief Told how far the bake has got, and asked whether to carry on.
+     *
+     * @param  fraction 0 at the start, 1 at the end, monotonically increasing.
+     * @return false to abandon the bake, which then returns an error rather than a partial volume.
+     *
+     * THE RETURN IS NOT A CONVENIENCE. A debug bake of 1 048 576 voxels takes tens of seconds, and the
+     * panel runs it on a worker; without a way to stop it, closing the panel or quitting the editor has to
+     * block on a thread that has no reason to finish. Cancellation is what makes the panel's destructor
+     * bounded, so it is part of the contract of the function rather than a feature of the caller.
+     */
+    using CloudModellingBakeProgressFn = std::function<bool( float fraction )>;
+
+    /**
+     * @brief The same bake, reporting progress and able to be abandoned.
+     *
+     * PURITY IS UNCHANGED and this is the point worth being careful about. @p onProgress may not influence
+     * the result: it is called between slabs, it is handed a number, and nothing it does is read back into
+     * the arithmetic. Baking with a callback and baking without one produce identical bytes, and
+     * Desert/Tests/Engine/CloudModellingRecipe asserts exactly that — a "pure function with a progress
+     * hook" is otherwise a claim that nobody has checked.
+     *
+     * The single-argument overload above is this one with an empty callback, so there is ONE bake and not
+     * two that must be kept in step.
+     */
+    Common::ResultStr<std::vector<unsigned char>>
+    GenerateCloudModellingVolume( const CloudModellingVolumeRecipe&   recipe,
+                                  const CloudModellingBakeProgressFn& onProgress );
+
+    /// Which axis a preview slice is taken ACROSS — the axis whose coordinate the slice holds fixed.
+    enum class CloudModellingAxis : uint32_t
+    {
+        X = 0, ///< a slice at constant x; the image is depth (z) across by height (y) down
+        Y = 1, ///< a slice at constant y, the horizontal cut through the body; width (x) by depth (z)
+        Z = 2, ///< a slice at constant z; width (x) across by height (y) down
+    };
+
+    const char* CloudModellingAxisName( CloudModellingAxis axis );
+
+    /// How many voxels deep the volume is along @p axis — the exclusive upper bound on a slice index.
+    uint32_t CloudModellingAxisExtent( CloudModellingAxis axis );
+
+    /// One plane of the volume, RGBA8, tightly packed, row 0 first.
+    struct CloudModellingSlice
+    {
+        uint32_t                   Width  = 0;
+        uint32_t                   Height = 0;
+        std::vector<unsigned char> Pixels;
+    };
+
+    /**
+     * @brief Bakes ONE plane of the volume, for a preview that keeps up with a slider.
+     *
+     * WHY THIS EXISTS AND IS NOT A CROP OF THE FULL BAKE. A three-dimensional field cannot be shown
+     * directly, so the panel shows slices — the same answer Editor/.../CloudNoiseVolumePanel reached for
+     * `.dcnv`. But the full bake is tens of seconds in a debug build, and a preview that costs a full bake
+     * is a preview nobody looks at while sculpting. A plane is 1/64 or 1/128 of the volume, which is the
+     * difference between a slider that responds and one that does not.
+     *
+     * IT IS THE SAME CODE, NOT THE SAME FORMULA WRITTEN TWICE. The per-voxel evaluation is one function
+     * that both loops call, so "the preview shows what will be baked" is true by construction rather than
+     * by vigilance. Desert/Tests/Engine/CloudModellingRecipe still asserts it on the bytes, because the
+     * two-statements-of-one-fact defect class (contract §2.3.1) is precisely the one that survives good
+     * intentions.
+     *
+     * NOTE that the boundary check the full bake ends with is NOT performed here: a single plane cannot
+     * observe the six faces, and a preview that refused to draw because some OTHER plane touches the box
+     * would hide the very picture the artist needs in order to fix it. Save is where that refusal belongs,
+     * and Save is where it happens.
+     *
+     * @param index which plane, 0 .. CloudModellingAxisExtent(axis) - 1.
+     * @return the plane, or an error — a recipe Validate rejects, or an index outside the volume.
+     */
+    Common::ResultStr<CloudModellingSlice> GenerateCloudModellingSlice( const CloudModellingVolumeRecipe& recipe,
+                                                                        CloudModellingAxis axis, uint32_t index );
+
+    /**
      * @brief Serialises a volume into the container.
      *
      * Total: any @p data whose recipe Validate accepts encodes. The result is exactly
@@ -265,8 +436,8 @@ namespace Desert::Assets
     /// would pass a test that meant nothing.
     inline constexpr size_t kCloudModellingHeaderSize = 88u;
 
-    /// Bytes per blob in the file: eight floats, in the order the encoder writes them.
-    inline constexpr size_t kCloudModellingBlobBytes = 32u;
+    /// Bytes per blob in the file: twelve floats and one `uint32`, in the order the encoder writes them.
+    inline constexpr size_t kCloudModellingBlobBytes = 52u;
 
     /// The four bytes every container starts with. `DCMV` — Desert Cloud Modelling Volume, beside `DCNV`,
     /// Desert Cloud Noise Volume.
