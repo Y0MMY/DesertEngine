@@ -427,7 +427,7 @@ TEST( HeightFogReflection, DistancesAreLengthsAndEveryFieldIsAnnotatedWellEnough
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 36 fields in six groups. The layer geometry and the tracing limits are
+// VolumetricCloudData — 38 fields in seven groups. The layer geometry and the tracing limits are
 // UVolumetricCloudComponent's name for name, so a UE-calibrated sky transplants number for number; the
 // shape group is ours, because UE has no cloud-shape parameter on the component at all (its density is a
 // material graph). Every scalar is packed into Graphic::CloudGpuPayload and the one asset field names the
@@ -471,6 +471,8 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "AerialPerspectiveStartDistance",
          "AerialPerspectiveFadeDistance",
          "AmbientScale",
+         "CastShadows",
+         "ShadowStrength",
          "MaxSteps",
          "StopTransmittance",
          "WindDirection",
@@ -478,7 +480,7 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 36u );
+    EXPECT_EQ( cloud.Fields.size(), 38u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
     EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 9u );
@@ -488,6 +490,12 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     EXPECT_EQ( CountInCategory( cloud, "Noise" ), 0u );
     EXPECT_EQ( CountInCategory( cloud, "Detail" ), 6u );
     EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 14u );
+    // THE SHADOWS GROUP IS TWO ROWS AND NOT FOUR. The map's extent and resolution are engine constants
+    // like the step schedule (they trade cost against quality identically in every scene, and the extent
+    // is DERIVED from the march's own resolvable chord), and the sky-light occlusion under a deck is a
+    // different quantity with a different geometry that Unreal answers with a second volume. Both are
+    // named as out of scope in the component rather than half-exposed here.
+    EXPECT_EQ( CountInCategory( cloud, "Shadows" ), 2u );
     EXPECT_EQ( CountInCategory( cloud, "Quality" ), 2u );
     EXPECT_EQ( CountInCategory( cloud, "Animation" ), 2u );
 

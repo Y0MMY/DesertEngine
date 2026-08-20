@@ -254,6 +254,16 @@ namespace
          { "MultiScatterEccentricity", kCloudPayload },
          { "AmbientScale", kCloudPayload },
 
+         // Shadows on the world. NEITHER GOES THROUGH THE PACKER, and that is the one thing worth
+         // knowing about this pair: the shadow map is not part of CloudGpuPayload at all. `CastShadows`
+         // is the zero-cost gate the renderer tests before it allocates or dispatches anything, and
+         // `ShadowStrength` reaches the GPU through the CONSUMER — CloudShadowUniforms::Params.w in
+         // MaterialDeferredLighting — because the map holds the medium's own physical numbers and the
+         // artist's dial is applied where the transmittance is reconstructed. Both are read by
+         // VolumetricCloudRenderer::GetShadowStrength(), which is the one place the two are combined.
+         { "CastShadows", kCloudRenderer },
+         { "ShadowStrength", kCloudRenderer },
+
          // Quality.
          { "MaxSteps", kCloudPayload },
          { "StopTransmittance", kCloudPayload },

@@ -460,6 +460,42 @@ namespace Desert::ECS
                            "sides black." ) )
         glm::vec3 AmbientScale = { 1.0f, 1.0f, 1.0f };
 
+        // ---- Shadows --------------------------------------------------------------------------------
+        //
+        // THE LAYER SHADING THE WORLD UNDER IT, through the map described in
+        // Editor/Resources/Shaders/Common/CloudShadowMap.glslh. Two fields and no more, and the two that
+        // are absent are absent for a stated reason:
+        //
+        //   * THE MAP'S EXTENT AND RESOLUTION are engine constants, like the step schedule and for the
+        //     same reason (Common/CloudGeometry.glslh): they trade cost against quality identically in
+        //     every scene, which is why Unreal carries them as cvars. They are also not free to choose —
+        //     the texel is derived from the finest cloud chord the march can resolve, so an artist moving
+        //     one of them would be moving a number the producer's own step schedule fixes.
+        //   * THE SKY-LIGHT OCCLUSION under a deck is a DIFFERENT quantity with a different geometry (a
+        //     hemisphere rather than a direction) and Unreal builds a second, separate volume for it. It
+        //     is not approximated here with this map, because a directional occlusion applied to an
+        //     omnidirectional term is wrong in a way that looks tuned rather than broken. Named as out of
+        //     scope rather than half-done.
+
+        PROPERTY( DisplayName( "Cast Shadows" ), Category( "Shadows" ), Summary,
+                  Tooltip( "Whether the layer shades the world beneath it. Off dispatches nothing and "
+                           "allocates nothing: a scene with this off pays exactly what a scene with no "
+                           "clouds pays for the shadow map, which is zero." ) )
+        bool CastShadows = true;
+
+        PROPERTY( DisplayName( "Shadow Strength" ), Category( "Shadows" ), Range( 0.0f, 1.0f ),
+                  Tooltip( "How strongly the cloud shadow darkens the sun on the world beneath it. It "
+                           "scales the OPTICAL DEPTH, not the resulting light, so 0.5 is half as much "
+                           "cloud in the way rather than half the darkness — which is what keeps a thin "
+                           "cloud thin and a thick one thick as the dial moves. At 0 the pass is skipped "
+                           "entirely, exactly as if Cast Shadows were off." ) )
+        // ONE, WHICH IS UNREAL'S DEFAULT (CloudShadowStrength on the directional light) and is also the
+        // only value that is physics rather than art: the map holds the medium's own extinction, so 1 is
+        // the shadow the cloud that is drawn in the sky actually casts. It is a dial at all because the
+        // approximation the layer is lit BY is not energy-exact either, and a sky that wants its ground
+        // back should be able to say so with a number rather than by turning the feature off.
+        float ShadowStrength = 1.0f;
+
         // ---- Quality --------------------------------------------------------------------------------
 
         PROPERTY( DisplayName( "Max Steps" ), Category( "Quality" ), Range( 8, 512 ),

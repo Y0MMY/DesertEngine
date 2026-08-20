@@ -25,6 +25,7 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
+#include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 
 #include <Common/Core/Constants.hpp>
 
@@ -158,6 +159,25 @@ namespace
 
         ShaderResource::ReflectionData data;
         const auto diagnostics = ShaderReflection::ReflectStage( spirv, ShaderStage::Compute, data );
+        EXPECT_TRUE( diagnostics.empty() ) << ( diagnostics.empty() ? "" : diagnostics.front() );
+
+        const auto it = data.ShaderDescriptorSets.find( 0 );
+        return it == data.ShaderDescriptorSets.end() ? std::vector<VkDescriptorSetLayoutBinding>{}
+                                                     : ShaderReflection::BuildLayoutBindings( it->second );
+    }
+
+    // The same reflection for a FRAGMENT stage. A separate function rather than a stage parameter on the
+    // one above, because the two shaderc kinds are the only difference and a bool argument at the call
+    // site reads as nothing at all.
+    std::vector<VkDescriptorSetLayoutBinding> FragmentSetZero( const std::filesystem::path& shaderFile )
+    {
+        const std::string source = StageSource( shaderFile, ShaderStage::Fragment );
+        const auto        spirv  = CompileStage( source, shaderFile, shaderc_fragment_shader );
+        if ( spirv.empty() )
+            return {};
+
+        ShaderResource::ReflectionData data;
+        const auto diagnostics = ShaderReflection::ReflectStage( spirv, ShaderStage::Fragment, data );
         EXPECT_TRUE( diagnostics.empty() ) << ( diagnostics.empty() ? "" : diagnostics.front() );
 
         const auto it = data.ShaderDescriptorSets.find( 0 );
@@ -349,6 +369,57 @@ TEST_F( ShaderRootFixture, TheDistantSkyLightDeclaresFourDescriptorsInSetZero )
     EXPECT_TRUE( HasBinding( bindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // sky params
     EXPECT_TRUE( HasBinding( bindings, 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // transmittance LUT
     EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // multi-scatter LUT
+}
+
+TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresFourDescriptorsInSetZero )
+{
+    // THE PRODUCER OF THE CLOUD SHADOW MAP, and the reason it is pinned here rather than trusted: its
+    // three inputs are bound by NUMBER and not by reflection (ComputePipeline::SetInput takes the binding
+    // as an argument), so the C++ constants in Engine/Graphic/Clouds/CloudShadowPayload.hpp and the
+    // numbers in the shader are two statements of one fact. The assertions below are that fact, checked
+    // against the compiled SPIR-V rather than against the file's text.
+    //
+    // The three inputs are DELIBERATELY the march's own slot numbers — one vocabulary for one field —
+    // which is why 3 and 7 are occupied and 1, 2, 4, 5, 6 are not.
+    const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudShadowMap.shader" ) );
+
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 4u );
+
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowOutputBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) ); // the triple it writes
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowParamsBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the cloud parameter block
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowNoiseBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the noise volume
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowProfileBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the vertical profile table
+}
+
+TEST_F( ShaderRootFixture, TheDeferredLightingPassDeclaresSeventeenDescriptorsInSetZero )
+{
+    // THE CONSUMER, and the pass this repository shares most widely — every deferred scene draws it, and
+    // it is the one file the cloud work was told to touch as little as possible. Pinning its descriptor
+    // set is how "as little as possible" becomes checkable: the count moves the day somebody adds a
+    // binding to it, whether or not they meant to.
+    //
+    // Seventeen, and they are every slot from 0 to 16 with none free in between: six G-buffer and scene
+    // samplers (1, 2, 3, 8, 9, 10), four cascade maps (5, 13, 14, 15), four uniform blocks (0, 4, 7, 12),
+    // two light SSBOs (6, 16) and the cloud shadow map (11). Two of those — 11 and 12 — are this task's,
+    // and they are the only two it added.
+    const auto bindings = FragmentSetZero( ShaderPath( "Deferred/DeferredLighting.shader" ) );
+
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 17u );
+
+    EXPECT_TRUE( HasBinding( bindings, 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_CloudShadowMap
+    EXPECT_TRUE( HasBinding( bindings, 12, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );         // CloudShadowUB
+
+    // And the cascade block it must NOT have disturbed: the same four maps at the same four slots, with
+    // ShadowUB where PBR.glsl.frag mirrors it.
+    EXPECT_TRUE( HasBinding( bindings, 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, 14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, 7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );
 }
 
 TEST_F( ShaderRootFixture, TheBindingsComeOutSortedAndCountedTheWayTheLayerCounts )
