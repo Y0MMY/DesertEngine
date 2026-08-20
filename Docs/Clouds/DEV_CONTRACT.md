@@ -214,7 +214,7 @@ cd Editor && ../build/Bin/Debug/Editor --project Desert.deproj \
    (без `CI` тестовые проекты не генерируются вовсе). Одной строкой:
 
    ```
-   for f in *.make; do t="${f%.make}"; case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|MeshSimplifier|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|DShaderParser|PakTool|FontBaker|CloudVolumeBaker|ImageStat|LineJump|SceneMigrator|BuildAllTests|RunAllTests) continue;; esac; make -f "$f" config=debug -j8 >/dev/null 2>&1; [ -x "build/Bin/Tests/Debug/$t" ] && ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"; done
+   for f in *.make; do t="${f%.make}"; case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|PakTool|CloudVolumeBaker|ImageStat|LineJump|SceneMigrator|BuildAllTests|RunAllTests) continue;; esac; make -f "$f" config=debug -j8 >/dev/null 2>&1; [ -x "build/Bin/Tests/Debug/$t" ] && ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"; done
    ```
 5b. **Если задача трогала рендер — в отчёте есть кадры** (см. 2.3), и они показывают то, что
    задача чинила, И то, что она могла сломать.

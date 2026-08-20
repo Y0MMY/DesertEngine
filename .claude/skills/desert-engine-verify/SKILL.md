@@ -131,7 +131,7 @@ projects are only generated then:
 ```bash
 CI=true premake5 gmake
 for f in *.make; do t="${f%.make}"
-  case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|MeshSimplifier|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|DShaderParser|PakTool|FontBaker|CloudVolumeBaker|BuildAllTests|RunAllTests) continue;; esac
+  case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|PakTool|CloudVolumeBaker|ImageStat|LineJump|SceneMigrator|BuildAllTests|RunAllTests) continue;; esac
   make -f "$f" config=debug -j8 >/dev/null 2>&1
   [ -x "build/Bin/Tests/Debug/$t" ] && ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"
 done
@@ -265,3 +265,25 @@ wait for the run. **A cancelled job is not a pass and not a failure — it is no
   This skill is about proving a change works; that one is about writing it.
 - The `desert-engine-contract` skill — what may not ship at all (TODOs, stubs, dead settings,
   legacy paths), and the definition of done this verification is one clause of.
+
+## 7. Two ways the verification itself has been wrong
+
+Both were found by developers doing the verification honestly, not by anyone auditing it.
+
+**The skip-list hid three real suites.** `DShaderParser`, `FontBaker` and `MeshSimplifier` build
+binaries into `build/Bin/Tests/Debug` and were listed here as libraries. Every sweep the integrator
+ran for a whole programme skipped them — 35 tests that never once executed. They passed when finally
+run, so nothing was lost, but a failure in them would have been invisible for weeks.
+
+The check that catches this class costs one line, and it is worth running whenever the list changes:
+
+```bash
+for b in $(ls build/Bin/Tests/Debug); do case "$b" in <your skip list>) echo "SKIPPED BUT IS A TEST: $b";; esac; done
+```
+
+**Never trust the first render in a fresh worktree.** A task's baseline differed from its result by
+110 pixels of 980 480, and four experiments eliminated every plausible cause — shader recompilation,
+a changed asset header, an unrelated translation unit — before rebuilding the previous binary settled
+it: the BASELINE was wrong, because it was the first ever run of the editor in that worktree. Discard
+it and shoot again. The same signature had been attributed to shader recompilation by an earlier
+task, and that attribution was wrong.
