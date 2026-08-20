@@ -674,3 +674,33 @@ ImageStat's own rows, now for the second time. The ratios survive and the orderi
 does not, and a number without its rectangle is not a measurement. The table above states its rectangle
 in the section heading above it, and the sweep three paragraphs up is the evidence that the rectangle is
 the right one. Take the 0.006 / 0.010 / 0.022 scale, not the old one.
+
+## The teamlead's own baseline at `2804b096`, and the caveat that comes with it
+
+Shot and measured by the integrator rather than quoted from a task report, on
+`Clouds_Demo`, camera `0,200,0`, 90 frames, over full width × the top 71.9%
+(`0 0 1103 480` at this frame size).
+
+| point | mean | p05 | p50 | p95 | contrast | sat |
+|---|---|---|---|---|---|---|
+| zenith away | 0.525 | 0.293 | 0.534 | 0.703 | 0.410 | 0.133 |
+| zenith sunward | 0.598 | 0.507 | 0.550 | 0.883 | 0.376 | 0.050 |
+| mid away | 0.581 | 0.327 | 0.582 | 0.723 | 0.396 | 0.088 |
+| mid sunward | 0.570 | 0.487 | 0.546 | 0.735 | 0.248 | 0.064 |
+| horizon away | 0.625 | 0.510 | 0.625 | 0.739 | 0.229 | 0.066 |
+| horizon sunward | 0.639 | 0.503 | 0.635 | 0.782 | 0.279 | 0.060 |
+
+**THE CAVEAT IS THE POINT.** Saturation at the zenith reads 0.133 where the same
+camera measured 0.258 two phases ago, and the blue did NOT wash out — the frame
+looks it, and the gaps between clouds are as deep as they ever were. What changed
+is how much of the frame is cloud. `Clouds_Demo` was authored as a partly-cloudy
+sky and now reads as a dense low deck, because the coverage default, the species
+envelope and the per-species placement scales each moved under it across T0, T2b,
+T1, T3 and SP.
+
+So the six contrasts in this table are **not comparable with the six in the
+tables above them**. They describe a different sky through the same camera. Every
+cross-phase comparison this document invites has been quietly measuring
+composition as well as lighting.
+
+The instrument was never wrong. The subject moved.
