@@ -1425,3 +1425,112 @@ measured 1.3 %, a clean run of 30 happens 68 % of the time. Measuring absence ne
 in this programme has spent on it, which is exactly why the mechanism — not the frequency — is what
 closes it.
 
+
+## A1: the sculpting tool — what the three primitives cost and what the blend radius buys, 2026-08-20
+
+Phase Э4 A1 (`Docs/Clouds/PLAN_AUTHORED_CLOUDS.md` §5). A0 proved a fused cloud body could exist by
+writing one in C++; A1 makes the capability belong to an artist. The panel is
+`Editor/Source/Editor/Panels/Clouds/CloudModellingVolumePanel.{hpp,cpp}`, and it is an editor for
+`CloudModellingVolumeRecipe` and nothing else — which is exactly what A0 put the recipe in the file's
+header for.
+
+### The accepting claim, measured before it was photographed
+
+The same five lumps, the same box, the same everything except the join's blend radius. Six-connected
+components of the body voxels, counted:
+
+| blend radius | body voxels | components | sizes |
+|---|---|---|---|
+| **4 m** | 6 223 | **4** | 2167, 1504, 1276, 1276 |
+| **75 m** | 16 434 | **1** | 16434 |
+
+**That is the phase's thesis as a number.** The procedural producer's coverage is `best - second`, which
+is exactly zero on the bisector between every pair of feature points, so its lobes are ALWAYS separate
+components and no threshold can join them — three tasks measured that independently before Э4 was
+approved. A smooth-min union can be either, and which one it is is a knob an artist turns.
+
+The 2.6x growth in body voxels is not a side effect to be tuned away: the join inflates the surface by
+`BlendRadius * ln(sum of weights)`, which at 75 m over five lumps of total weight 5.2 is 124 m. It is why
+`ValidateCloudModellingRecipe` reserves that much room before it will accept a recipe.
+
+### The format grew and the shipped cloud did not move
+
+The container is version 2: a lump carries a primitive, a rotation and a weight, so its record is 52
+bytes rather than 32. There is no version 1 reader — contract §4 — and the one v1 file that ever existed
+was re-baked by `Tools/CloudVolumeBaker` in the same change.
+
+**Its voxel payload is byte for byte what it was: 0 of 4 194 304 bytes differ.** Eight unrotated
+unit-weight ellipsoids are the identity case of everything this phase added, so the re-bake moved the
+container version and not one voxel. That is asserted in
+`Desert/Tests/Engine/CloudModellingRecipe` rather than left as a claim in a commit message.
+
+### The three primitives, and why the set is closed at three
+
+**The capsule is the one an ellipsoid cannot stand in for.** Both shapes below are 0.12 km across and
+0.40 km tall; the measurement is the body's half-width at two heights on the axis:
+
+| | at the middle | at 60 % of the height | ratio |
+|---|---|---|---|
+| capsule | 0.1250 km | 0.1250 km | **1.000 — no taper at all, it is a swept sphere** |
+| ellipsoid | 0.1250 km | 0.0938 km | **0.750 — a quarter of its width gone** |
+
+The ellipsoid's predicted ratio is `sqrt(1 - 0.6^2) = 0.800`, which is 0.100 km, which is 12.8 voxels;
+counting whole voxels gives 12 and therefore 0.0938. The gap between 0.750 and 0.800 is that
+quantisation and not a disagreement with the maths — the point stands either way, and the capsule's
+1.000 has no quantisation to hide in.
+
+The constant cross-section is the spreading cumulus base and the elongated growths of
+`ANALYSIS_APPROACH.md` §6; built from ellipsoids they come out lens-shaped, and the only fix is a row of
+overlapping lumps at one lump per unit of length.
+
+**The sphere is an ellipsoid, and a cheaper one.** Equal radii reduce Quilez's bounded form to `|p| - R`
+algebraically, but the compiler cannot perform that reduction because it cannot know at the call site
+that the radii agree — so the reduced form saves two vector divides, a `length` and a division per lump
+per voxel, and is EXACT where the general form is a tight underestimate. The suite asserts the two agree
+on the BYTES, so switching a lump between Ellipsoid and Sphere cannot twitch the body.
+
+**Bake times, debug build, the shipped eight-lump recipe:** 1 570 ms, against A0's ~1 000 ms claim for an
+optimised build. The per-voxel work also went DOWN this phase — each lump's distance is now computed once
+and kept, where A0 evaluated every ellipsoid twice (once to find the nearest, once to sum). Both halves
+of that are in the same evaluator, so the preview and the bake cannot drift apart.
+
+### The weight is a dilation, and its size is algebra rather than feel
+
+Weighting a lump's term in the sum is the same function as the unweighted join over distances
+`d - r*ln(w)`. So a weight grows its lump by exactly `BlendRadius * ln(Weight)`:
+
+A 0.25 km sphere at a 50 m blend radius, its surface found by walking out along +x until the profile
+falls to zero:
+
+| weight | surface reach | |
+|---|---|---|
+| 1 | 0.2422 km | |
+| 4 | 0.3047 km | |
+| | **measured dilation 62.5 m** | **predicted `0.05 * ln 4` = 69.3 m** |
+
+The 6.8 m between them is under half a voxel (15.6 m), which is the resolution of measuring a surface by
+counting voxels.
+
+The bound therefore counts the SUM OF THE WEIGHTS and not the lumps. The two agree while every weight is
+1 — which is A0's case, and is why a bound left counting lumps would have passed every test A0 wrote —
+and they part company exactly when the surface starts moving outward.
+
+### The six-point protocol: five of six byte for byte, and the repeat floor is zero
+
+`Clouds_HeroCloud` through the protocol's six points, the pre-change binary against this branch's.
+Camera `0,200,0`, `--shot-frames 90`, 1280x766.
+
+**The repeat floor was measured, not assumed**: the same command run twice on the post-change binary
+gives identical FILES, and a cold shader cache gives the same file again. Every number below is exact.
+
+| point | file bytes differing | pixels changed | max delta |
+|---|---|---|---|
+| zenith away `0,0.9,-1` | 1 149 582 of 1 160 396 | **110 / 980 480 (0.011 %)** | **1/255** |
+| mid away `0,0.45,-1` | **0** | 0 | 0 |
+| horizon away `0,0.12,-1` | **0** | 0 | 0 |
+| zenith sunward `0,0.9,1` | **0** | 0 | 0 |
+| mid sunward `0,0.45,1` | **0** | 0 | 0 |
+| horizon sunward `0,0.12,1` | **0** | 0 | 0 |
+
+As in A0, a PNG file-byte count is only meaningful when it is ZERO — deflate is not a per-pixel
+encoding — so the pixel counts are decoded rather than inferred from file size.
