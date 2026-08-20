@@ -199,6 +199,12 @@ namespace Desert::Core
 
         void SetupRegistryCallbacks();
 
+        // Creates every component pool a system may touch, serially, before any parallel group opens.
+        // EnTT creates a pool on FIRST touch and that creation writes to the registry even through a
+        // const reference, so two collectors first-touching a type on two threads race on a std::vector.
+        // See the definition for the mechanism and the test that keeps the list honest.
+        void PrepareComponentPools();
+
         // Runs the ECS systems: sequential by default, but maximal runs of CanRunParallel() systems
         // execute concurrently on the JobSystem — each system writes its OWN command buffer, so no
         // system ever contends on the (single-threaded) arena allocator.

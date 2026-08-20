@@ -1203,6 +1203,12 @@ where "zero" is provable, and there it is proven.
 
 ### THE ONE THING THIS PHASE DID NOT CLOSE: a rare abort on start-up
 
+> **CLOSED by task AB — see §AB below.** It was not a cloud defect and not this phase's: EnTT creates a
+> component pool on the FIRST touch of a type, that creation writes to the registry through a `const`
+> reference, and `Scene::ExecuteSystems` runs collectors on several threads at once. The section below is
+> left exactly as it was written, because its attribution table is what made the mechanism findable — and
+> because two of its conclusions turned out to be wrong, which is worth being able to read back.
+
 **Say it first.** With a hero cloud in the scene, roughly one headless run in twenty dies before it writes
 its PNG:
 
@@ -1263,3 +1269,159 @@ Two instruments would settle it and neither was affordable in the time this phas
 
 Until then this is the phase's one open defect, and it is named here rather than in a commit message so
 that it is found by whoever picks up A1.
+
+## AB: the abort, named — it was the ECS scheduler, and it was never ours, 2026-08-20
+
+### The mechanism, in one paragraph and then in numbers
+
+EnTT creates a component pool on the **first touch** of a type. Every path that touches one —
+`view<T...>()`, `has<T>()`, `get<T>()`, `try_get<T>()` — goes through `basic_registry::assure<T>()`, and
+`assure` **mutates**, through its `const` overload as well, because `pools` is `mutable`
+(`ThirdParty/entt/include/entt/entt.hpp`). One first touch performs three unsynchronised writes:
+
+1. `type_index<T>::value()` takes an index from **one global counter**, and that counter is
+   `ENTT_MAYBE_ATOMIC(id_type) value{}` incremented with `value++`. `ENTT_USE_ATOMIC` **was not defined
+   anywhere in this workspace**, so it was a plain read-modify-write on a global: two threads could be
+   handed the SAME index for two DIFFERENT types;
+2. `pools.resize( index + 1 )` — a `std::vector` grow;
+3. `pools[index].pool.reset( new ... )`.
+
+`Scene::ExecuteSystems` runs maximal runs of `CanRunParallel()` systems concurrently. Any two collectors
+that first-touch a type in the same frame therefore race on all three. **`std::length_error: vector` is
+exactly what libc++ throws from `vector::__recommend` / `__vallocate` when it reads a size that a torn
+resize left beyond `max_size()`** — which is why the exception names `vector` and no cloud symbol.
+
+It also explains the timing the A0 report could not: pools are created **only in the first frame**, so
+after that `assure` is a bounds check and a pointer test and there is nothing left to race on. "In the
+first frame or two, never later" is not a hint about clouds; it is the shape of lazy initialisation.
+
+### The window, measured deterministically rather than waited for
+
+The instrument was one lambda: count the registry's pools with `registry.visit` before and after each
+parallel group, and print when the count moves. **It fires on every run**, so a defect that needed fifty
+runs to appear once became a per-run observable.
+
+`Clouds_HeroCloud`, camera `0,200,0`, `--shot-frames 3`, on the branch as `06887fcc` left it:
+
+| parallel group | systems | threads | pools created INSIDE the group |
+|---|---|---|---|
+| `[0,2)` | MeshECSSystem, TextECSSystem | 2 | **5** |
+| `[6,9)` | TerrainECSSystem, PointLightECSSystem, SpotLightECSSystem | 3 | **1–2** |
+
+**Six to seven component pools were being created concurrently on every single run.** The count varies
+run to run by one, which is itself a sighting of the timing dependence.
+
+After `Scene::PrepareComponentPools`: **zero, on every run.** That is the knock-out.
+
+### The same race, in isolation, with no engine around it
+
+A 90-line program — nothing but EnTT, as this workspace builds it — races 64 component types across
+threads on a fresh registry, one trial per process so each outcome is attributable:
+
+| 200 trials x 4 threads | count |
+|---|---|
+| clean | **3** |
+| hard crash | **196** |
+| two types sharing one pool index | **1** |
+
+Crash signals: 119 SIGSEGV, 64 SIGTRAP, 7 SIGABRT, 4 SIGBUS, 2 SIGKILL. At two threads the dominant
+outcome was instead a **hang** — a corrupted registry that never returns.
+
+The one "two types sharing a pool index" is the `value++` race caught directly: after it, each type reads
+the other's storage, and every `std::vector` inside that storage has a garbage size.
+
+### Two of the A0 report's conclusions were wrong, and they cost the phase its answer
+
+* **"`RelationshipComponent` — a type NO scene in this repository instantiates, so its pool is always
+  created on the fly."** It is not: `Scene::CreateEntityWithUUID` adds a `RelationshipComponent` to
+  **every** entity it makes, so that pool exists before any system runs. Making
+  `VolumetricCloudECSSystem` serial removed one racer from a race it was not in, which is why it changed
+  nothing — and the report says so honestly.
+* **"The signal is with the scenes whose component carries a `.dcmv` handle."** With the mechanism in
+  hand the handle is irrelevant: what decides whether the window opens is which component types the
+  scene leaves ABSENT, because those are the pools nobody creates during load. Regrouping the report's
+  own table by SCENE rather than by handle gives `Clouds_Demo` 0/60 against the `Clouds_HeroCloud`
+  family 6/158 — a cleaner split than the handle gave, and one with a mechanism behind it.
+
+Neither was carelessness. Both are what a correlation table says when the variable that actually matters
+is not one of its columns.
+
+### The fix
+
+* **`Scene::PrepareComponentPools`** creates every pool a system may touch, serially, before any group
+  opens. After it, `assure<T>()` does not write, so there is nothing to race on. Cost: one bounds check
+  per type per frame, against an 18 ms frame.
+* **`ENTT_USE_ATOMIC`, at workspace scope** (`BuildScripts/Workspace.lua`), so the type-index counter is
+  an atomic increment. Preparing the pools already means the engine's own collectors never reach that
+  counter concurrently; this is what covers every OTHER first touch — preview scenes, thumbnail scenes,
+  scripts. It is workspace-wide because the macro changes the TYPE of a shared static: all projects or
+  none, or two objects disagree about that static's layout.
+* **`Desert/Tests/Engine/ComponentPools`** reads the system headers and `Scene.cpp` as text and requires
+  every touched type to be prepared, because an omission compiles and only shows up one run in fifty.
+* **`Engine/EntryPoint.hpp`** installs a `std::terminate` handler that prints the exception and the
+  throwing stack. For an UNCAUGHT exception libc++abi calls terminate **without unwinding**, so
+  `backtrace()` sees the frames that threw. Thirty lines that would have named this in one run instead of
+  a phase.
+
+### What was tried and did NOT work — recorded so it is not tried again
+
+| amplifier | result |
+|---|---|
+| 16 CPU spinners on 10 cores, 30 runs | **0 crashes** — pure CPU contention does not widen it |
+| a 0.3 ms sleep inserted in `assure` before `pools.resize`, 20 runs | **0 crashes** |
+| the same, with the fix on, 20 runs | 0 crashes |
+
+**And the honest limit of this report: the abort was never observed on this machine at all** — 0 in
+roughly 80 pre-fix runs, against the teamlead's 1/80 and A0's 6/116. A "zero after" series therefore
+proves very little on its own, and is not what the case rests on. The case rests on the deterministic
+instrument (6–7 racing pool creations per run, then 0), on the isolated demonstration (196 crashes in 200
+trials), and on the exception type matching the throw site exactly.
+
+### The picture did not move, on all six points
+
+The A0 branch committed its six-point protocol as files, which makes this the cheapest regression in the
+programme: shoot the same six points on the fixed binary and compare the bytes. `Clouds_HeroCloud`,
+camera `0,200,0`, `--shot-frames 90`, against `Docs/Clouds/Shots/A0_hero_*.png` as taken on the PRE-fix
+binary.
+
+| point | bytes | differing |
+|---|---|---|
+| zenith away `0,0.9,-1` | 1 160 396 | **0** |
+| mid away `0,0.45,-1` | 1 239 541 | **0** |
+| horizon away `0,0.12,-1` | 1 293 977 | **0** |
+| zenith sunward `0,0.9,1` | 1 197 316 | **0** |
+| mid sunward `0,0.45,1` | 1 271 909 | **0** |
+| horizon sunward `0,0.12,1` | 1 310 949 | **0** |
+
+**Six of six identical files**, three elevations and both azimuths. Expected, and worth measuring anyway:
+the change moves WHEN a pool is created, never what is in it, and the diff touches no rendering code at
+all.
+
+### The acceptance series
+
+`Clouds_HeroCloud`, `--shot-frames 3`, the binary built from the committed source: **0 aborts in 215
+runs** (175 + a 40-run top-up after the harness capped the first run's lifetime).
+
+### Did it live before Э4? Yes, and Э4 made it LESS likely rather than more
+
+`git diff a5cfa2ab 06887fcc` over `Core/Scene.cpp`, `Core/Scene.hpp`, `ThirdParty/entt` and the five
+systems that make up the two racing groups — `MeshECSSystem`, `TextECSSystem`, `TerrainECSSystem`,
+`PointLightSystem`, `SpotLightSystem` — is **empty**. Every line that races is byte-identical to the
+commit Э4 branched from.
+
+The one scheduling change Э4 did make points the other way. `Scene::ExecuteSystems` groups a maximal RUN
+of `CanRunParallel()` systems, and Э4 flipped `VolumetricCloudECSSystem` from `true` to `false`:
+
+| | groups, in EditorLayer registration order |
+|---|---|
+| before Э4 | `[0,2)` Mesh+Text · TimeOfDay serial · **`[3,9)` Skybox+HeightFog+VolumetricCloud+Terrain+Point+Spot — SIX threads** |
+| after Э4 | `[0,2)` Mesh+Text · TimeOfDay serial · `[3,5)` Skybox+HeightFog · VolumetricCloud serial · `[6,9)` Terrain+Point+Spot |
+
+**Э4 split a six-wide parallel group into a two-wide and a three-wide**, which can only reduce the number
+of pairs able to race. The defect was strictly more exposed before the phase that got blamed for it.
+
+A0's "0 aborts in 30 runs on the pre-change binary" is not evidence against this: at the teamlead's own
+measured 1.3 %, a clean run of 30 happens 68 % of the time. Measuring absence needs a sample size nobody
+in this programme has spent on it, which is exactly why the mechanism — not the frequency — is what
+closes it.
+

@@ -397,8 +397,83 @@ namespace Desert::Core
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
     }
 
+    void Scene::PrepareComponentPools()
+    {
+        // WHY THIS EXISTS, AND WHY IT IS NOT OPTIONAL.
+        //
+        // EnTT creates a component pool on the FIRST touch of a type, and every path that touches one --
+        // `view<T...>()`, `has<T>()`, `get<T>()`, `try_get<T>()` -- goes through `basic_registry::assure<T>()`.
+        // assure MUTATES, and it does so through the CONST overload too, because `pools` is `mutable`
+        // (ThirdParty/entt/include/entt/entt.hpp). One first touch does three unsynchronised writes:
+        //
+        //   1. `type_index<T>::value()` calls `internal::type_index::next()`, whose counter is
+        //      `ENTT_MAYBE_ATOMIC(id_type) value{}` -- and ENTT_USE_ATOMIC is defined for this workspace
+        //      in BuildScripts/Workspace.lua precisely so that `value++` is not a plain read-modify-write
+        //      on a global. Without it two types can be handed the SAME index and then read each other's
+        //      storage;
+        //   2. `pools.resize( index + 1 )` -- a std::vector grow;
+        //   3. `pools[index].pool.reset( ... )`.
+        //
+        // ExecuteSystems below runs maximal runs of CanRunParallel() systems on several threads at once,
+        // so two collectors that first-touch any type in the same frame race on all three. The observed
+        // symptom is `std::length_error: vector` thrown out of a vector grow that read a torn size --
+        // roughly one headless run in fifty, always in the first frame, because that is the only frame in
+        // which pools are created at all.
+        //
+        // THE FIX IS TO CREATE EVERY POOL SERIALLY, HERE, BEFORE ANY GROUP OPENS. After this runs,
+        // assure<T>() is a bounds check and a pointer test for every type below -- it does not write, so
+        // there is nothing left to race on.
+        //
+        // THE LIST MUST COVER EVERY TYPE ANY SYSTEM TOUCHES. Desert/Tests/Engine/ComponentPools asserts
+        // exactly that against the system headers, so a `has<NewComponent>` added to a collector without
+        // a line here turns that suite red rather than reopening the race.
+        auto& r = m_Registry;
+
+        // Hierarchy and identity -- touched by every collector that composes a world transform.
+        r.prepare<ECS::RelationshipComponent>();
+        r.prepare<ECS::TransformComponent>();
+        r.prepare<ECS::TagComponent>();
+        r.prepare<ECS::UUIDComponent>();
+        r.prepare<ECS::VisibilityComponent>();
+
+        // Renderables.
+        r.prepare<ECS::StaticMeshComponent>();
+        r.prepare<ECS::SkinnedMeshComponent>();
+        r.prepare<ECS::InstancedStaticMeshComponent>();
+        r.prepare<ECS::MaterialComponent>();
+        r.prepare<ECS::AnimationComponent>();
+        r.prepare<ECS::TextComponent>();
+        r.prepare<ECS::TerrainComponent>();
+
+        // Lights and sky.
+        r.prepare<ECS::DirectionLightComponent>();
+        r.prepare<ECS::PointLightComponent>();
+        r.prepare<ECS::SpotLightComponent>();
+        r.prepare<ECS::SkyboxComponent>();
+        r.prepare<ECS::SkyAtmosphereComponent>();
+        r.prepare<ECS::ExponentialHeightFogComponent>();
+        r.prepare<ECS::VolumetricCloudComponent>();
+        r.prepare<ECS::HeroCloudComponent>();
+
+        // Gameplay -- serial systems today, and prepared all the same: what makes a type safe is that its
+        // pool exists before the first parallel group, not which system happens to be serial this week.
+        r.prepare<ECS::ColliderComponent>();
+        r.prepare<ECS::RigidBodyComponent>();
+        r.prepare<ECS::CharacterControllerComponent>();
+        r.prepare<ECS::LocomotionComponent>();
+        r.prepare<ECS::ScriptComponent>();
+        r.prepare<ECS::AudioSourceComponent>();
+        r.prepare<ECS::SocketAttachmentComponent>();
+    }
+
     void Scene::ExecuteSystems( const Common::Timestep& gameplayTs )
     {
+        // BEFORE ANY PARALLEL GROUP OPENS. See PrepareComponentPools for the race this closes; it is
+        // called per frame rather than once because a pool that already exists costs a bounds check, and
+        // a flag that has to be reset correctly on every path that rebuilds a scene is the more expensive
+        // of the two mistakes.
+        PrepareComponentPools();
+
         // One command buffer per system, created on first use (AddSystem is a header template — the
         // buffers are built here where the type is complete).
         while ( m_SystemCommandBuffers.size() < m_Systems.size() )
