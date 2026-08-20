@@ -284,6 +284,12 @@ namespace Desert::Graphic
         // final and this frame's atmosphere LUTs have been filled. The composite itself is a graph pass in
         // Transparency at RenderPassOrder::FarField, ABOVE the fog and BELOW the particles.
         void ExecuteVolumetricClouds();
+        // The cloud layer's shadow on the WORLD, which is a different pass at a different point in the
+        // frame from the march above and belongs to a different consumer. Issued BEFORE the render graph
+        // records, because the deferred lighting pass reads it and runs immediately after the graph. It
+        // depends on nothing the frame produces — no scene depth, no G-buffer, no atmosphere LUT — so
+        // nothing forces it later, and its consumer forces it earlier.
+        void ExecuteCloudShadowMap();
         // UI-phase passes (the Render2D canvas) drawn as a LOAD overlay AFTER the deferred lighting
         // composite — same reason as ExecuteTransparency/ExecuteDebugOverlay: recorded inside the graph
         // they land on the target BEFORE the composite (painted over) AND a CLEAR begin would wipe the

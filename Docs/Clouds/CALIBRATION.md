@@ -569,6 +569,139 @@ norm and the 0.010 threshold — no banding introduced. The two horizon frames r
 539 both before and after; that row is the ground/sky edge, which the band's bottom includes at this
 elevation, and it is geometry rather than a step in the sky.
 
+## CS: the cloud shadow map on the world — what it costs and what proves it works, 2026-08-20
+
+The clouds now shade the ground. The pass is an orthographic march down the sun's own direction,
+`512 x 512 RGBA32F`, one texel per ray, storing `(frontDepthKm, meanExtinctionPerKm, maxOpticalDepth)` —
+Unreal's encoding (`VolumetricCloud.usf:2168-2215` writes it, `VolumetricCloudCommon.ush:54-68` reads it),
+transplanted rather than re-derived, with our own units and our own read-time strength. The shared text is
+`Common/CloudShadowMap.glslh`; the projection is `Graphic::CloudBuildShadowMapView`.
+
+### The price, measured, on a machine that was shared
+
+Frame-count slope, `(t900 - t300) / 600`, `Clouds_Demo`, camera `0,200,0`, `--look 0,0.45,1` — the same
+framing the shadow-ray price list above uses, so the two are directly comparable. **A and B interleaved in
+one session, four passes, minimum of four**, where B is the identical binary with `CastShadows` off in the
+scene — one field, no rebuild, no second set of shaders:
+
+| | slope | vs no map | delta |
+|---|---|---|---|
+| **cloud pass without the map** (`CastShadows` false) | **12.92 ms/frame** | 1.00x | — |
+| **cloud pass with the map, 32 base samples** | **17.84 ms/frame** | **1.38x** | **+4.92 ms** |
+
+*(The 12.92 ms baseline is the same quantity the OE-FIX table calls 12.98 ms at 32 shadow-ray samples,
+measured two hours later on the same tree. The half per cent between them is the machine.)*
+
+**The spread: 0.6–1.2 % run to run** on three of the four (flag, frame-count) pairs; the fourth, `A300`,
+carried one 5.2 % outlier in pass 2, which is why the slope is taken from the minima. Taking it from the
+maxima instead gives +3.31 ms and 1.26x — the outlier is in the 300-frame leg, so it flatters the maxima
+slope rather than the minima one. The machine is shared with other agents.
+
+**A second price point, so the tier knob is a curve and not an assertion.** Two binaries differing by one
+constant — `kCloudShadowBaseSamples` 32 against 16 — interleaved in one session, three passes, minimum of
+three:
+
+| base samples | effective at this sun (49°) | slope | map costs | per effective sample |
+|---|---|---|---|---|
+| 16 | 19.2 | 15.26 ms/frame | **+2.34 ms** | 122 µs |
+| **32 (shipped)** | **38.4** | **18.01 ms/frame** | **+5.09 ms** | 133 µs |
+
+The cost is **linear in the sample count** and quadratic in the resolution by construction — the pass
+marches `resolution² × count` field samples and nothing amortises. The eleven per cent between the two
+per-sample figures is the fixed per-texel work (ray reconstruction and the shell intersection), about
+0.25 ms of the total.
+
+**"Effective" is not the base count**, and the difference is twenty per cent of this pass's whole price.
+Unreal's horizon factor is `clamp(0.2 / sin(elevation), 0, 1)`, which is **0.2 and not 0** with the sun
+straight overhead, so the count never falls below 1.2x the base and reaches 2x below 11.5° of elevation.
+`Desert/Tests/Engine/CloudShadow` asserts both ends, because a reading of the constant alone predicts 32
+where the pass actually takes 38.4.
+
+**What 16 samples costs in the picture, since it saves 2.75 ms.** On the ground frame the two are
+indistinguishable to ImageStat — `mean 0.377 / p95 0.615 / contrast 0.398` against
+`0.378 / 0.615 / 0.396` — and that is exactly the reading percentiles are bad at. The pixel diff says
+**38.6 % of pixels changed, max delta 44/255**: the shadow EDGES move, and the whole-frame distribution
+does not notice because a shadow that moves takes as many pixels dark as it gives back. Sixteen is a tier,
+not a free saving, and the principled reason is beside the measurement: 16 samples over the shipped
+congestus envelope is 225 m of spacing against the 125 m chord the view march can resolve, so the map's
+two axes would stop agreeing about what a cloud is.
+
+**This is a big number and it is the entry to the quality-tier decision, said as one.** The map adds
+39 % to a cloud pass that already costs 12.9 ms in this build; it is the largest single addition since the
+shadow ray's own 1.87x. The whole curve is above: cost `∝ resolution² × samples`, 133 µs per effective
+sample at 512², so a 256² / 16-sample tier is `1/8` of it — about 0.6 ms — at 234 m per texel.
+
+**Debug build, and the ratio is a lower bound on the shipping one** for the reason the OE-FIX table gives:
+the baseline carries CPU work a release build shrinks and this dispatch does not.
+
+### The sky did not move, and six points say so with a zero
+
+Same six points as the azimuth protocol — three elevations x sunward and away — `Clouds_Demo`, camera
+`0,200,0`, `--shot-frames 90`. The comparison is `CastShadows` on against off, one binary:
+
+| point | changed pixels | max delta |
+|---|---|---|
+| zenith `0,0.9,-1` / `0,0.9,1` | **0 / 980 480** | 0 |
+| mid `0,0.45,-1` / `0,0.45,1` | **0 / 980 480** | 0 |
+| horizon `0,0.12,-1` / `0,0.12,1` | 29.5 % | 175 |
+
+The four upper points are **byte for byte identical**, which is the strongest statement available that this
+change touched the ground and nothing else: the deferred pass discards every texel with no geometry in it,
+so the sky is drawn by a path this work never entered. The horizon points are 30 % changed because 30 % of
+those frames is the checker FLOOR, and splitting the rectangle says so:
+
+| band | changed | max delta |
+|---|---|---|
+| sky, rows 0–519 | 0.17 % | 37 |
+| ground, rows 520–765 | 91.6 % | 176 |
+
+The 0.17 % of sky pixels that do move are the bloom halo immediately above the horizon line picking up a
+darker ground — a post-process consequence, not a sky change. `ImageStat` over the sky band reads
+`mean 0.635 / p05 0.503 / p95 0.780 / contrast 0.276` before and after, identical to three decimals.
+
+LineJump over `2 2 1278 552` on the zenith and mid frames reads `rows max 0.00160 @y 285` and
+`0.00551 @y 519` — the same numbers before and after, and both under the 0.006 norm this document records.
+No band was introduced.
+
+### The snap, which no still frame can show, measured on a flyover
+
+The map is rebuilt every frame from a world-space function, so if its projection drifts with the camera the
+same piece of ground lands in a different texel every frame and the shadow **boils in place**. That is
+invisible in a still frame by construction — a still frame has exactly one projection — so it is measured
+on a sequence.
+
+**The instrument.** Camera looking straight DOWN at 1.5 km, translating 600 m over 300 frames, ten shots
+(`--shot-sequence`, `--shot-every 30`). The ground plane is parallel to the image plane, so consecutive
+frames are an EXACT translation of one another unless the shading of a given piece of ground changes. Find
+the integer shift that best aligns each frame onto the one before it and report the mean absolute luminance
+difference that remains. Wind, SSAO, screen-space GI, bloom and lens flare are switched off in the probe
+scene: all five are screen-locked or time-varying and would be measured as boiling.
+
+| build | best shift | mean residual | max |
+|---|---|---|---|
+| **shipped (both snaps)** | +52 px, every pair | **0.545 / 255** | 0.569 |
+| both snaps knocked out | +52 px, every pair | **2.291 / 255** | 2.556 |
+
+**4.2x the floor**, and the floor is what it should be: 0.545 is the sub-pixel resampling residual of a
+high-contrast checkerboard shifted by a non-integer number of pixels, which no snap can remove. The
+knock-out build differs from the shipped one by two functions returning their argument.
+
+Frames: `Shots/CS_flyover_snap_on_f150.png` and `Shots/CS_flyover_snap_off_f150.png`.
+
+### The frames
+
+| file | what it shows |
+|---|---|
+| `Shots/CS_before_ground_plain.png` | 40 km of ground under a cumulus deck, uniformly lit — the state this task found |
+| `Shots/CS_after_ground_plain.png` | the same frame with cloud shadows crawling across it |
+| `Shots/CS_after_ground_steep.png` | the same, looking further down, shadows over the whole plain |
+| `Shots/CS_after_ground_plain_16samples.png` | the tier point: 2.75 ms cheaper, 38.6 % of pixels moved |
+| `Shots/CS_after_sky_{zenith,mid,horizon}_{sun,away}.png` | the six points; the four upper ones are byte-identical to their "before" |
+
+The scene is `Clouds_ShadowsOnGround.desce`, authored for this: `Clouds_Demo`'s checker floor scaled to
+40 km so that several cloud cells fit in one frame. `Clouds_Demo`'s own floor is about 4 km across, which
+is one cloud shadow and cannot show the effect at all.
+
 ## The instrument
 
 `Tools/ImageStat` — a standalone CLI over the vendored `stb_image`, linked against nothing else.

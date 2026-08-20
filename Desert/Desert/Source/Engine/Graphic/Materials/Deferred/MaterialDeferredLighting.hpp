@@ -4,6 +4,8 @@
 #include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
 
+#include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
+
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/Metadata.hpp>
@@ -25,6 +27,25 @@ namespace Desert::Graphic
         glm::vec4        CascadeWorldPerTexel = glm::vec4( 1.0f );
     };
 
+    // THE CLOUD LAYER'S SHADOW ON THE WORLD — a SECOND, independent occluder of the same sun, and a
+    // separate struct from DeferredShadowInput on purpose. The cascades are a depth comparison against
+    // opaque geometry; this is a volumetric transmittance reconstructed from one texel of one map. They
+    // share nothing but the light they attenuate, and folding them into one block would have put a cloud
+    // parameter inside the layout PBR.glsl.frag mirrors for its cascades.
+    //
+    // `Map` null, or `Enabled` false, is the ordinary state: no cloud component, clouds off, casting off,
+    // strength zero, or a renderer whose scene has no sky at all. The material then leaves the sampler on
+    // its dummy image and the shader is told not to read it.
+    struct CloudShadowInput
+    {
+        Image2D*  Map = nullptr;
+        glm::mat4 WorldToMap{ 1.0f };
+        float     FarDepthKm   = 0.0f;
+        float     Strength     = 0.0f;
+        float     BorderFadeUv = kCloudShadowBorderFadeUv;
+        bool      Enabled      = false;
+    };
+
     // Fullscreen deferred-lighting material: binds the scene renderer's G-buffer color targets (albedo/metallic,
     // normal/roughness, world-position) + the sun (+ its CSM shadow maps) + ALL point & spot lights (uploaded
     // into the shared SSBO layout the mesh PBR shader also uses) + a debug-mode selector, driving
@@ -40,6 +61,7 @@ namespace Desert::Graphic
             m_GBufferEmissive = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferEmissive" ).get();
             m_SSAO            = m_MaterialExecutor->GetTexture2DProperty( "u_SSAO" ).get();
             m_GI              = m_MaterialExecutor->GetTexture2DProperty( "u_GI" ).get();
+            m_CloudShadowMap  = m_MaterialExecutor->GetTexture2DProperty( "u_CloudShadowMap" ).get();
         }
 
         // gA = Albedo+Metallic, gB = Normal+Roughness, gC = WorldPosition; lightDir.xyz = direction the sun
@@ -51,7 +73,7 @@ namespace Desert::Graphic
                    int debugMode, const ShaderProtocols::PointLight& pointLights,
                    const ShaderProtocols::SpotLight& spotLights, const DeferredShadowInput& shadow,
                    const std::shared_ptr<Image2D>& aoImage, float giIntensity, bool ssaoEnabled, int giMode,
-                   const std::shared_ptr<Image2D>& giImage )
+                   const std::shared_ptr<Image2D>& giImage, const CloudShadowInput& cloudShadow )
         {
             if ( m_GBufferA && gA )
                 m_GBufferA->SetImage( gA.get() );
@@ -78,6 +100,7 @@ namespace Desert::Graphic
                                   static_cast<float>( giMode ) ) );
 
             UploadShadow( shadow );
+            UploadCloudShadow( cloudShadow );
 
             // Upload the dynamic lights into the same SSBO/UB layout the mesh PBR shader uses (bindings 6/16/4).
             // Empty is fine — the shader loops 0..count, so an untouched buffer is simply never read; but the
@@ -144,6 +167,26 @@ namespace Desert::Graphic
             }
         }
 
+        // Uploads the cloud layer's shadow into CloudShadowUB + binds the map. Nothing is bound when the
+        // layer is not casting: the sampler keeps its dummy image and `Params.y` is 0, which is the one
+        // number the shader tests before it fetches — so a scene with no clouds costs one uniform upload
+        // of eighty bytes and not a texture read per pixel.
+        void UploadCloudShadow( const CloudShadowInput& cloudShadow )
+        {
+            const bool live = cloudShadow.Enabled && cloudShadow.Map != nullptr && cloudShadow.Strength > 0.0f;
+
+            CloudShadowUniforms data;
+            data.WorldToMap = live ? cloudShadow.WorldToMap : glm::mat4( 1.0f );
+            data.Params     = glm::vec4( cloudShadow.FarDepthKm, live ? 1.0f : 0.0f, cloudShadow.BorderFadeUv,
+                                         cloudShadow.Strength );
+
+            if ( auto* ub = Get<UniformBufferProperty>( "CloudShadowUB" ) )
+                ub->SetRawData( reinterpret_cast<const std::byte*>( &data ), sizeof( data ) );
+
+            if ( live && m_CloudShadowMap )
+                m_CloudShadowMap->SetImage( cloudShadow.Map );
+        }
+
         MPROPERTY( glm::vec4, LightDir,   "u_LightDir",   ( glm::vec4( 0.0f, -1.0f, 0.0f, 0.0f ) ) )
         MPROPERTY( glm::vec4, LightColor, "u_LightColor", ( glm::vec4( 1.0f, 1.0f, 1.0f, 3.0f ) ) )
         MPROPERTY( glm::vec4, Params,     "u_Params",     ( glm::vec4( 0.0f ) ) )
@@ -156,5 +199,6 @@ namespace Desert::Graphic
         Texture2DProperty* m_GBufferEmissive = nullptr;
         Texture2DProperty* m_SSAO            = nullptr;
         Texture2DProperty* m_GI              = nullptr;
+        Texture2DProperty* m_CloudShadowMap  = nullptr;
     };
 } // namespace Desert::Graphic

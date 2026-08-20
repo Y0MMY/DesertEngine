@@ -5,6 +5,7 @@
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/Materials/Clouds/MaterialCloudComposite.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/Renderer.hpp>
@@ -39,6 +40,13 @@ namespace Desert::Graphic::System
      *                  not is reprojected from the previous frame's reconstruction through the guide's
      *                  cloud front distance, validated, and blended. Ping-ponged between two history
      *                  targets because it reads last frame's result while writing this frame's.
+     *   SM  SHADOW MAP compute, RGBA32F 512x512, marched down the SUN's direction rather than the eye's,
+     *                  and issued EARLY — before the render graph, because the deferred lighting pass
+     *                  reads it. Each texel holds (frontDepthKm, meanExtinctionPerKm, maxOpticalDepth),
+     *                  the triple that reconstructs a correct transmittance for a receiver at any depth
+     *                  inside or below the layer with one fetch. See Common/CloudShadowMap.glslh for the
+     *                  encoding and Engine/Graphic/Clouds/CloudShadowPayload.hpp for the projection.
+     *                  Independent of S1 and S2: it needs no scene depth and no view.
      *   S3  COMPOSITE  a fullscreen quad registered in RenderPhase::Transparency at
      *                  RenderPassOrder::FarField — ABOVE the height fog and BELOW everything else the
      *                  phase composites, so particles land over the clouds rather than under them. It
@@ -89,6 +97,44 @@ namespace Desert::Graphic::System
          */
         void ExecuteInFrame();
 
+        /**
+         * @brief Stage SM — the cloud shadow map. Must be called outside any render pass, and EARLY:
+         *        before the render graph records and before the deferred lighting pass, both of which
+         *        read the result. It depends on nothing that the frame produces — no scene depth, no
+         *        atmosphere LUT — only on the field, the sun and the camera position, so nothing forces
+         *        it later and the one thing that forces it earlier is its consumer.
+         *
+         * Costs exactly nothing when the layer is absent, disabled, not casting or at zero strength: the
+         * image is not even allocated until all four are true.
+         */
+        void ExecuteShadowMapInFrame();
+
+        /// True when a shadow map was produced for THIS frame and may be sampled. False makes every
+        /// consumer fall back to "no cloud shadow" rather than to a map from a frame the sun has since
+        /// left.
+        bool HasShadowMap() const
+        {
+            return m_ShadowMapValid;
+        }
+
+        /// The map itself. Null unless HasShadowMap(). Borrowed — this renderer owns it.
+        Image2D* GetShadowMapImage() const
+        {
+            return m_ShadowMapImage.get();
+        }
+
+        /// This frame's projection and its far depth, for a consumer that has to transform a world
+        /// position into the map. Meaningless unless HasShadowMap().
+        const CloudShadowMapView& GetShadowMapView() const
+        {
+            return m_ShadowMapView;
+        }
+
+        /// The artist's shadow strength, applied by the CONSUMER rather than baked into the map — see
+        /// Common/CloudShadowMap.glslh. Zero when the layer is not casting at all, so a consumer that
+        /// only reads this number still gets the right answer.
+        float GetShadowStrength() const;
+
     private:
         bool CreatePipelines();
         // Allocates (or reallocates) all SIX images the pass owns: the quarter-resolution scatter and
@@ -103,6 +149,12 @@ namespace Desert::Graphic::System
         // Runtime::CloudTypeService and then Runtime::CloudNoiseService. Returns false having logged the
         // reason when there is not even a default to fall back on.
         bool EnsureNoiseVolume();
+        // Allocates the shadow map, once, the first frame the layer actually casts. Separate from
+        // EnsureTraceTargets because it is not a property of the view: its size is fixed
+        // (kCloudShadowMapResolution) and a viewport resize must not throw it away, where every one of the
+        // six trace targets IS the view's size and must. Returns false having logged the reason and
+        // latched the failure.
+        bool EnsureShadowMap();
 
         /**
          * The types in this layer's four slots, packed down to a prefix, with the empty ones removed and
@@ -131,6 +183,7 @@ namespace Desert::Graphic::System
 
         std::shared_ptr<ComputePipeline>  m_MarchPipeline;
         std::shared_ptr<ComputePipeline>  m_ResolvePipeline;
+        std::shared_ptr<ComputePipeline>  m_ShadowMapPipeline;
         std::shared_ptr<GraphicsPipeline> m_CompositePipeline;
 
         std::unique_ptr<MaterialCloudComposite> m_CompositeMaterial;
@@ -151,6 +204,23 @@ namespace Desert::Graphic::System
         // by the same dispatch at different coordinates, which is a race with no defined answer.
         std::shared_ptr<Image2D> m_HistoryImage[2];
         std::shared_ptr<Image2D> m_HistoryGuideImage[2];
+
+        // THE CLOUD SHADOW MAP and the parameter copy its dispatch reads.
+        //
+        // A SECOND PARAMETER BUFFER FOR THE SAME BYTES, and it is not duplicated state: both buffers are
+        // filled from one call of the pure Graphic::PackCloudParams, on the same m_Data, in the same
+        // frame. What forces two of them is the frame, not the data — this pass is issued before the
+        // render graph and the march after it, and writing one non-persistent buffer twice between two
+        // dispatches is a hazard whose only defence today is that the bytes happen to be equal.
+        std::shared_ptr<Image2D>                        m_ShadowMapImage;
+        std::shared_ptr<ShaderResources::StorageBuffer> m_ShadowParamsBuffer;
+
+        // This frame's projection, and whether it describes anything. Rebuilt every frame rather than
+        // cached: it is a pure function of the camera, the sun and the snap, and a cached matrix is the
+        // shape of state that survives a scene reload it should not have.
+        CloudShadowMapView m_ShadowMapView{};
+        bool               m_ShadowMapValid  = false;
+        bool               m_ShadowMapFailed = false;
 
         // BORROWED, not owned: Runtime::CloudNoiseService owns every noise volume and shares one upload
         // across all views. A raw pointer says that plainly, where a shared_ptr here would suggest this

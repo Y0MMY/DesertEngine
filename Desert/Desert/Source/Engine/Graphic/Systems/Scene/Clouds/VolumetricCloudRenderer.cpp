@@ -10,6 +10,8 @@
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Profiler.hpp>
 
+#include <algorithm>
+
 namespace Desert::Graphic::System
 {
     namespace
@@ -22,6 +24,7 @@ namespace Desert::Graphic::System
         constexpr const char* kMarchShaderName     = "CloudRaymarch";
         constexpr const char* kResolveShaderName   = "CloudTemporalResolve";
         constexpr const char* kCompositeShaderName = "CloudComposite";
+        constexpr const char* kShadowMapShaderName = "CloudShadowMap";
 
         constexpr uint32_t GroupCount( uint32_t extent, uint32_t groupSize )
         {
@@ -71,6 +74,15 @@ namespace Desert::Graphic::System
             return Common::MakeError(
                  "VolumetricCloudRenderer: could not create the cloud reconstruction parameter buffer" );
 
+        // The shadow map's own copy of the same block, on the same non-persistent terms. Two buffers
+        // because two dispatches on opposite sides of the render graph read them, not because there are
+        // two sets of numbers — see the member's comment.
+        m_ShadowParamsBuffer = ShaderResources::StorageBuffer::Create(
+             "CloudShadowParams", kCloudPayloadBytes, kCloudShadowParamsBinding, /*persistent=*/false );
+        if ( !m_ShadowParamsBuffer )
+            return Common::MakeError(
+                 "VolumetricCloudRenderer: could not create the cloud shadow parameter buffer" );
+
         m_CompositeMaterial = std::make_unique<MaterialCloudComposite>();
         return BOOLSUCCESS;
     }
@@ -79,10 +91,13 @@ namespace Desert::Graphic::System
     {
         m_MarchPipeline.reset();
         m_ResolvePipeline.reset();
+        m_ShadowMapPipeline.reset();
         m_CompositePipeline.reset();
         m_CompositeMaterial.reset();
         m_TraceImage.reset();
         m_TraceGuideImage.reset();
+        m_ShadowMapImage.reset();
+        m_ShadowMapValid = false;
         for ( uint32_t i = 0; i < 2u; ++i )
         {
             m_HistoryImage[i].reset();
@@ -95,6 +110,7 @@ namespace Desert::Graphic::System
         m_ProfileGeneration   = 0;
         m_ParamsBuffer.reset();
         m_ResolveParamsBuffer.reset();
+        m_ShadowParamsBuffer.reset();
     }
 
     uint32_t VolumetricCloudRenderer::ResolveSpecies( CloudTypeShape ( &shapes )[kCloudSpeciesSlots],
@@ -261,6 +277,20 @@ namespace Desert::Graphic::System
             return false;
         m_ResolvePipeline->Invalidate();
 
+        const auto shadowShader = shaderService->GetByName( kShadowMapShaderName );
+        if ( !shadowShader )
+        {
+            LOG_ERROR( "[Clouds] Compute shader '{}' is not registered. Expected "
+                       "Editor/Resources/Shaders/Programs/Clouds/{}.shader.",
+                       kShadowMapShaderName, kShadowMapShaderName );
+            return false;
+        }
+        m_ShadowMapPipeline =
+             ComputePipeline::Create( { .Shader = shadowShader, .DebugName = kShadowMapShaderName } );
+        if ( !m_ShadowMapPipeline )
+            return false;
+        m_ShadowMapPipeline->Invalidate();
+
         const auto target = m_TargetFramebuffer.lock();
         if ( !target )
             return false;
@@ -298,7 +328,134 @@ namespace Desert::Graphic::System
         if ( m_CompositePipeline )
             m_CompositePipeline->Invalidate();
 
-        return m_MarchPipeline && m_ResolvePipeline && m_CompositePipeline;
+        return m_MarchPipeline && m_ResolvePipeline && m_ShadowMapPipeline && m_CompositePipeline;
+    }
+
+    bool VolumetricCloudRenderer::EnsureShadowMap()
+    {
+        if ( m_ShadowMapFailed )
+            return false;
+        if ( m_ShadowMapImage )
+            return true;
+
+        // ALLOCATED ONCE, ON THE FIRST FRAME THE LAYER ACTUALLY CASTS, and never reallocated: the size is
+        // a constant of the subsystem rather than a property of the view, so a resized viewport — which
+        // throws away all six trace targets — leaves this one standing.
+        const Core::Formats::Image2DSpecification spec{
+             .Tag        = "CloudShadowMap",
+             .Width      = kCloudShadowMapResolution,
+             .Height     = kCloudShadowMapResolution,
+             .Format     = Core::Formats::ImageFormat::RGBA32F,
+             .Mips       = 1u,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
+        };
+
+        m_ShadowMapImage = Image2D::Create( spec, nullptr );
+        if ( !m_ShadowMapImage )
+        {
+            LOG_ERROR( "[Clouds] The {}x{} RGBA32F cloud shadow map could not be created on the device; "
+                       "the clouds will not shade the world for this view.",
+                       kCloudShadowMapResolution, kCloudShadowMapResolution );
+            m_ShadowMapFailed = true;
+            return false;
+        }
+
+        LOG_INFO(
+             "[Clouds] Cloud shadow map {}x{} RGBA32F ({:.2f} MiB) — {:.0f} km across the world, "
+             "{:.1f} m per texel, snapped to a {:.0f} km grid.",
+             kCloudShadowMapResolution, kCloudShadowMapResolution,
+             BytesToMiB( Core::Formats::CalculateImageSize( kCloudShadowMapResolution, kCloudShadowMapResolution,
+                                                            Core::Formats::ImageFormat::RGBA32F ) ),
+             2.0f * kCloudShadowExtentKm,
+             2.0f * kCloudShadowExtentKm * 1000.0f / static_cast<float>( kCloudShadowMapResolution ),
+             kCloudShadowSnapKm );
+        return true;
+    }
+
+    float VolumetricCloudRenderer::GetShadowStrength() const
+    {
+        // ZERO WHEN THE LAYER IS NOT CASTING, so a consumer that reads only this number cannot light the
+        // world through a map that was never written. It is the same gate ExecuteShadowMapInFrame uses,
+        // stated once here rather than repeated at every call site.
+        if ( !m_Present || !m_Data.Enabled || !m_Data.CastShadows )
+            return 0.0f;
+        return std::clamp( m_Data.ShadowStrength, 0.0f, 1.0f );
+    }
+
+    void VolumetricCloudRenderer::ExecuteShadowMapInFrame()
+    {
+        DESERT_PROFILE_SCOPE( "Clouds: ShadowMap" );
+
+        // Cleared FIRST and set only at the end, so every early return below leaves consumers with "no
+        // cloud shadow this frame" rather than with the projection of a frame the sun has since left.
+        m_ShadowMapValid = false;
+
+        if ( !m_ShadowMapPipeline || !m_ShadowParamsBuffer )
+            return;
+
+        // THE ZERO-COST LADDER, and it is the same one the march has, plus the two fields this task
+        // added. A scene with no cloud component, with the clouds off, with casting off or with the
+        // strength at zero dispatches nothing and — because the allocation is below this line and not
+        // above it — allocates nothing either. The editor builds a SceneRenderer for every asset
+        // thumbnail and every mesh preview, and none of them has a sky.
+        if ( GetShadowStrength() <= 0.0f )
+            return;
+
+        const AtmosphereEnv& atmosphere = m_SceneRenderer->GetAtmosphere();
+        if ( !atmosphere.Valid )
+            return;
+
+        const auto* camera = m_SceneRenderer->GetMainCamera();
+        if ( !camera )
+            return;
+
+        if ( !EnsureShadowMap() )
+            return;
+        if ( !EnsureNoiseVolume() )
+            return;
+        if ( !EnsureProfileTable() )
+            return;
+
+        CloudTypeShape      shapes[kCloudSpeciesSlots]{};
+        Assets::AssetHandle handles[kCloudSpeciesSlots]{};
+        const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
+
+        const CloudGpuPayload payload = PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset );
+        m_ShadowParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
+
+        // THE PLANET RADIUS IS TAKEN FROM THE PACKED BLOCK, not from the component, because the packer is
+        // where it is floored — and a map centred on a different sphere than the one the march intersects
+        // is a shadow displaced by the curvature.
+        m_ShadowMapView = CloudBuildShadowMapView( camera->GetPosition(), atmosphere.SunDirection, payload.Layer.x,
+                                                   kCloudShadowExtentKm, kCloudShadowSnapKm,
+                                                   static_cast<float>( kCloudShadowMapResolution ) );
+
+        CloudShadowPush push{};
+        push.MapToWorld = m_ShadowMapView.MapToWorld;
+        push.Trace      = glm::vec4( m_ShadowMapView.LightDirection, m_ShadowMapView.SampleCount );
+
+        auto& renderer = Renderer::GetInstance();
+
+        renderer.ComputeImageBeginRead( m_NoiseVolume );
+        renderer.ComputeImageBeginRead( m_ProfileTable.get() );
+        renderer.ComputeImageBeginWrite( m_ShadowMapImage.get() );
+
+        m_ShadowMapPipeline->SetOutput( kCloudShadowOutputBinding, m_ShadowMapImage.get(), 0 );
+        m_ShadowMapPipeline->SetStorageBuffer( kCloudShadowParamsBinding, m_ShadowParamsBuffer.get() );
+        m_ShadowMapPipeline->SetInput( kCloudShadowNoiseBinding, m_NoiseVolume );
+        m_ShadowMapPipeline->SetInput( kCloudShadowProfileBinding, m_ProfileTable.get() );
+        m_ShadowMapPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
+
+        renderer.DispatchComputeInFrame( m_ShadowMapPipeline.get(),
+                                         GroupCount( kCloudShadowMapResolution, kMarchWorkGroupSize ),
+                                         GroupCount( kCloudShadowMapResolution, kMarchWorkGroupSize ), 1 );
+
+        renderer.ComputeImageEndWrite( m_ShadowMapImage.get() );
+        renderer.ComputeImageEndRead( m_ProfileTable.get() );
+        renderer.ComputeImageEndRead( m_NoiseVolume );
+
+        m_ShadowMapValid = true;
     }
 
     void VolumetricCloudRenderer::SetCloudSettings( bool present, const ECS::VolumetricCloudData& data,

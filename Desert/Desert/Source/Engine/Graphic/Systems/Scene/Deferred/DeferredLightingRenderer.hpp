@@ -62,7 +62,8 @@ namespace Desert::Graphic::System
                       const glm::vec4& lightColor, const glm::vec4& cameraPos, int debugMode,
                       const ShaderProtocols::PointLight& pointLights, const ShaderProtocols::SpotLight& spotLights,
                       const DeferredShadowInput& shadow, const std::shared_ptr<Image2D>& aoImage,
-                      float giIntensity, bool ssaoEnabled, int giMode, const std::shared_ptr<Image2D>& giImage )
+                      float giIntensity, bool ssaoEnabled, int giMode, const std::shared_ptr<Image2D>& giImage,
+                      const CloudShadowInput& cloudShadow )
         {
             const auto& target = m_TargetFramebuffer.lock();
             if ( !target || !gbuffer || !m_Pipeline || !m_Material )
@@ -81,7 +82,7 @@ namespace Desert::Graphic::System
             m_Material->Bind( gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
                               gbuffer->GetColorAttachmentImage( 2 ), gbuffer->GetColorAttachmentImage( 3 ),
                               lightDir, lightColor, cameraPos, debugMode, pointLights, spotLights, shadow, aoImage,
-                              giIntensity, ssaoEnabled, giMode, giImage );
+                              giIntensity, ssaoEnabled, giMode, giImage, cloudShadow );
             renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_Material->GetMaterialExecutor() );
             renderer.EndRenderPass();
         }

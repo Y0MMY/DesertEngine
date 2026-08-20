@@ -1,0 +1,366 @@
+// The cloud shadow map: what one texel of it MEANS, how it is produced, and how a point anywhere in the
+// world reads a correct transmittance back out of it with a single fetch.
+//
+// THE ONE IDEA THIS FILE EXISTS FOR. A texel does not store "shadowed / not shadowed", and it does not
+// store a depth to compare against. It stores a TRIPLE:
+//
+//     R  FrontDepthKm          how far along the light ray the first material was found
+//     G  MeanExtinctionPerKm   the mean extinction of the samples that found material
+//     B  MaxOpticalDepth       the optical depth of the WHOLE ray through the shell
+//
+// From those three, the transmittance at an ARBITRARY depth d along that same ray is
+//
+//     tau(d) = min( MaxOpticalDepth, MeanExtinction * max(0, d - FrontDepth) )      T = exp(-tau)
+//
+// which is correct for a point BELOW the layer, for a point INSIDE it, and for a point ABOVE it — one
+// fetch, no second pass, no cascade. That is what an ordinary depth-compare shadow map cannot do at all:
+// a medium has no surface to compare a depth against, and "is the receiver behind the front of the
+// cloud" answers the wrong question for everything that is in the cloud or above its base. The far term
+// is the clamp: past the far side of the layer the ray has met all the material there is, so the optical
+// depth stops growing instead of extrapolating a mean extinction through clear air.
+//
+// This is Unreal's encoding, and it is transplanted rather than re-derived. The producer is
+// VolumetricCloud.usf:2168-2215 (`MainPS` under SHADER_SHADOW_PS) and the consumer is
+// VolumetricCloudCommon.ush:54-68 (`GetCloudVolumetricShadow`). Licence position:
+// Docs/Clouds/LICENCE_RECORD.md, ticket #UE-2026-0842-WAIVER.
+//
+// UNITS: KILOMETRES and per-kilometre, throughout, which is this subsystem's convention
+// (Common/CloudGeometry.glslh). Unreal stores metres and 1/m; converting would buy nothing and would put
+// one more factor of a thousand into a subsystem that has already paid for one.
+//
+// DIALECT: the rules of Common/CloudNoise.glslh — no swizzles past .x/.y/.z, no `out` parameters, no
+// arrays, no `inline`, no namespaces, `f`-suffixed literals, structs returned through a named local, every
+// function defined before it is used. This file is compiled AS C++ by Desert/Tests/Engine/CloudShadow, and
+// it is included by BOTH the producer (Programs/Clouds/CloudShadowMap.shader) and the consumer
+// (Programs/Deferred/DeferredLighting.shader) — which is the point: the encode and the decode are two
+// halves of one relation and they are written once.
+
+#ifndef CLOUD_SHADOW_MAP_GLSLH
+#define CLOUD_SHADOW_MAP_GLSLH
+
+// ---------------------------------------------------------------------------------------------------
+// THE FOUR NUMBERS THAT SIZE THE MAP, and the chain that fixes them
+// ---------------------------------------------------------------------------------------------------
+//
+// They are engine constants rather than component fields for the reason the step schedule is
+// (Common/CloudGeometry.glslh): they trade cost against quality identically in every scene, which is why
+// Unreal carries them as cvars and not as properties of UVolumetricCloudComponent. What IS authorable is
+// whether the layer casts at all and how strong the shade is — VolumetricCloudData::CastShadows and
+// ::ShadowStrength.
+//
+// THE DERIVATION RUNS RESOLUTION -> TEXEL -> EXTENT, not the other way round, and the middle term is not
+// free to choose. A texel finer than the finest cloud chord the march can FIND stores detail the producer
+// cannot make; a texel coarser than it throws away detail the sky visibly has. That chord is
+// CloudResolvableChordKm(CLOUD_DISTANCE_TO_MAX_STEPS_KM / MaxSteps) = 0.125 km at the component's default
+// ceiling of 256 steps. So:
+//
+//     512 texels x 0.125 km = 64 km across  ->  an extent (RADIUS) of 32 km, rounded to 30.
+//
+// and the texel lands at 0.1172 km, just inside the chord. Desert/Tests/Engine/CloudShadow asserts that
+// relation rather than the two numbers, because it is the relation that was reasoned about.
+//
+// 512 IS UNREAL'S OWN DEFAULT (`512 * CloudShadowMapResolutionScale`, VolumetricCloudRendering.cpp:429)
+// and it is also where the cost sits: the pass marches every texel through the shell, so the cost is
+// quadratic in this number and 1024 would be four times the price for detail the march cannot produce.
+#define CLOUD_SHADOWMAP_RESOLUTION 512.0f
+
+// The RADIUS of the square the map covers, in kilometres — half its side. Follows from the line above.
+//
+// WHAT IT COSTS: world geometry further than this from the camera receives no cloud shadow at all. That
+// is a real limit and it is stated rather than hidden; CLOUD_SHADOWMAP_BORDER_FADE_UV below is what keeps
+// it from being a visible square edge on a large terrain. Unreal's answer to the same limit is a 150 km
+// default extent, which at 512 texels is 586 m per texel — five times coarser than a cloud chord, and a
+// deliberately different trade for a renderer whose clouds are visible at 150 km. Ours are not: the
+// component's MaxViewDistance is 60 km.
+#define CLOUD_SHADOWMAP_EXTENT_KM 30.0f
+
+// The world grid the map's centre is snapped to. Unreal's r.VolumetricCloud.ShadowMap.SnapLength, same
+// twenty kilometres.
+//
+// WHY IT IS HERE AT ALL, and it is the whole reason this file has a snap function. The map is rebuilt
+// every frame from a WORLD-SPACE function. If its projection drifts with the camera, the same piece of
+// world lands in a different texel every frame, the bilinear fetch under it moves, and the shadow BOILS
+// in place — a defect that is invisible in a still frame by construction and unmissable the moment the
+// camera translates. Snapping the centre to a coarse grid means the projection is bit-for-bit identical
+// over long stretches of camera motion, so the shadow is nailed to the world.
+//
+// The centre lands within half a snap of the camera, so the guaranteed coverage around the camera is
+// EXTENT - SNAP/2 = 20 km rather than the full 30.
+#define CLOUD_SHADOWMAP_SNAP_KM 20.0f
+
+// Samples taken across the shell by one texel's ray, and the multiplier applied as the sun reaches the
+// horizon — Unreal's RaySampleMaxCount / RaySampleHorizonMultiplier pair
+// (VolumetricCloudRendering.cpp:1890-1895), whose reason is stated there and is worth repeating: at a low
+// sun each ray has far further to travel through the layer, and fewer texels have any layer over them at
+// all, so raising the count keeps the cost and the quality both roughly where they were.
+//
+// THIRTY-TWO because that is what puts the sample spacing at the resolvable chord as well: the shipped
+// congestus envelope is 3.6 km thick, and 3.6 / 32 = 0.1125 km. A count that resolves the map's texel
+// horizontally and steps past a cloud vertically would be a map whose two axes disagree about what a
+// cloud is.
+#define CLOUD_SHADOWMAP_BASE_SAMPLES 32.0f
+#define CLOUD_SHADOWMAP_HORIZON_MULTIPLIER 2.0f
+
+// The width, in UV, of the band at the map's border over which the shadow is faded out to fully lit.
+// Two per cent of 60 km is 1.2 km — ten texels — which is a gradient rather than an edge at every
+// elevation a camera can look along the ground at.
+//
+// Unreal does NOT do this and does not need to: at a 150 km extent the border is past its own fog. Ours
+// is at 30 km, which is inside the far plane of every scene in this repository, so without the fade the
+// map's boundary is a straight line of light across the ground — a defect that looks like a bug in the
+// terrain rather than like a limit of the shadow.
+#define CLOUD_SHADOWMAP_BORDER_FADE_UV 0.02f
+
+// ---------------------------------------------------------------------------------------------------
+// The sizes that follow from the four above. Functions rather than more #defines, so the test drives the
+// arithmetic the renderer performs instead of restating it.
+// ---------------------------------------------------------------------------------------------------
+
+// The world size of one texel, in kilometres. The quantity that has to stay inside the march's
+// resolvable chord.
+float CloudShadowTexelKm( float extentKm, float resolution )
+{
+    return 2.0f * extentKm / max( resolution, 1.0f );
+}
+
+// How far up the light ray the map's near plane is placed above the anchor point. Unreal's
+// `LightDistance = SphereRadius * 2` (VolumetricCloudRendering.cpp:1819). It has to clear the top of the
+// layer for every texel including the corners, and twice the extent does so by a wide margin at every
+// sun elevation: 60 km against a shell that tops out below 15 km.
+float CloudShadowLightDistanceKm( float extentKm )
+{
+    return 2.0f * extentKm;
+}
+
+// The depth the map's clip-space z spans, in kilometres — Unreal's `FarPlane = LightDistance * 2`. It is
+// the scale that turns a sampled z back into a distance along the light ray, so it is the ONE number the
+// consumer needs besides the matrix.
+float CloudShadowFarDepthKm( float extentKm )
+{
+    return 4.0f * extentKm;
+}
+
+// One component of the map centre, snapped to the world grid. Unreal's
+// `floor((v + 0.5 * snap) / snap) * snap` (VolumetricCloudRendering.cpp:1843-1845) — the half-snap offset
+// is there so the lattice does not have a cell boundary sitting exactly on the world origin, which is
+// where scenes put things.
+float CloudShadowSnapToGrid( float value, float snapKm )
+{
+    float snap = max( snapKm, 1e-4f );
+    return floor( ( value + 0.5f * snap ) / snap ) * snap;
+}
+
+// One clip-space component of a fixed world point, snapped to the map's own pixel lattice.
+//
+// WHY BOTH SNAPS AND NOT JUST THE GRID ONE. The grid snap freezes the map's CENTRE; it does not freeze
+// its ORIENTATION, and the light direction rotates the whole basis whenever the sun moves. This is the
+// residual: it moves the finished projection by up to half a texel so that the world origin lands on the
+// lattice exactly, which pins every other world point to the lattice with it. Unreal's
+// SnapComponentToPixelGrid (VolumetricCloudRendering.cpp:1862-1867).
+//
+// ONE TEXEL AND NOT TWO. Unreal halves its own half-resolution again with the comment "perhaps RT isn't
+// traced at 1:1 ratio?", which is exactly what its own temporal path does — it traces the shadow map at
+// half resolution and reconstructs (CloudShadowmapTracingSizeInvSize, :1790-1803). We do not take that
+// path (§2.1: Epic's own temporal filter is "experimental and needs more work"), so our trace IS 1:1 and
+// the lattice spacing is one texel: clip spans [-1,1] over `resolution` texels, so a texel is
+// 2 / resolution and the snap quantum is its reciprocal.
+float CloudShadowSnapToPixelGrid( float clipComponent, float resolution )
+{
+    float halfResolution = max( resolution, 1.0f ) * 0.5f;
+    return floor( clipComponent * halfResolution + 0.5f ) / halfResolution;
+}
+
+// How many samples this frame's ray takes. `sunUpDot` is the cosine between the planet's up at the map
+// centre and the direction TOWARD the sun — i.e. the sine of the sun's elevation.
+float CloudShadowSampleCount( float sunUpDot )
+{
+    float horizon = clamp( 0.2f / max( abs( sunUpDot ), 1e-4f ), 0.0f, 1.0f );
+    float extra   = max( CLOUD_SHADOWMAP_HORIZON_MULTIPLIER - 1.0f, 0.0f );
+    return CLOUD_SHADOWMAP_BASE_SAMPLES + extra * CLOUD_SHADOWMAP_BASE_SAMPLES * horizon;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The texel
+// ---------------------------------------------------------------------------------------------------
+
+struct CloudShadowTexel
+{
+    float FrontDepthKm;        // along the light ray, from the map's near plane
+    float MeanExtinctionPerKm; // averaged over the samples that found material, and over those only
+    float MaxOpticalDepth;     // of the whole ray across the shell
+};
+
+vec3 CloudShadowEncode( CloudShadowTexel texel )
+{
+    vec3 encoded;
+    encoded.x = max( texel.FrontDepthKm, 0.0f );
+    encoded.y = max( texel.MeanExtinctionPerKm, 0.0f );
+    encoded.z = max( texel.MaxOpticalDepth, 0.0f );
+    return encoded;
+}
+
+CloudShadowTexel CloudShadowDecode( vec3 encoded )
+{
+    CloudShadowTexel texel;
+    texel.FrontDepthKm        = encoded.x;
+    texel.MeanExtinctionPerKm = encoded.y;
+    texel.MaxOpticalDepth     = encoded.z;
+    return texel;
+}
+
+// A texel that says "nothing here". Written by every ray that misses the shell, so that a fetch outside
+// the cloud is a real answer rather than uninitialised device memory: the front depth is the far plane,
+// which no receiver can be past, so the reconstruction below returns zero optical depth by its own
+// arithmetic rather than by a special case.
+CloudShadowTexel CloudShadowClearTexel( float farDepthKm )
+{
+    CloudShadowTexel texel;
+    texel.FrontDepthKm        = farDepthKm;
+    texel.MeanExtinctionPerKm = 0.0f;
+    texel.MaxOpticalDepth     = 0.0f;
+    return texel;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE RECONSTRUCTION — the half of this file that the deferred lighting pass compiles
+// ---------------------------------------------------------------------------------------------------
+
+// Where a point sits along the light ray, in kilometres, given its clip-space z in the map.
+//
+// The map's projection is a PLAIN orthographic one with z running 0 at the near plane to 1 at the far
+// plane (glm::orthoRH_ZO in Graphic::CloudBuildShadowMapView), so the distance is a straight product. It
+// is NOT the engine's reversed-Z convention, and that is deliberate: reversed-Z buys float precision
+// against a depth BUFFER, and this map has no depth buffer — its z is a number this file multiplies. The
+// reference is reversed (`FReversedZOrthoMatrix`, hence its `1 - z`), and copying that here would have
+// been one inversion carried through two shaders for no precision at all.
+float CloudShadowDepthKm( float clipZ, float farDepthKm )
+{
+    return clamp( clipZ, 0.0f, 1.0f ) * farDepthKm;
+}
+
+// Clip xy to the map's UV. Written once because the producer stores through it and the consumer fetches
+// through it, and a disagreement between the two is a shadow offset by a constant that reads as a bias
+// problem.
+vec2 CloudShadowClipToUv( vec2 clipXy )
+{
+    return clipXy * 0.5f + vec2( 0.5f, 0.5f );
+}
+
+// 1 well inside the map, falling to 0 at and outside its border. See CLOUD_SHADOWMAP_BORDER_FADE_UV.
+float CloudShadowBorderFade( vec2 uv, float fadeUv )
+{
+    float edge = min( min( uv.x, 1.0f - uv.x ), min( uv.y, 1.0f - uv.y ) );
+    return clamp( edge / max( fadeUv, 1e-5f ), 0.0f, 1.0f );
+}
+
+// THE RECONSTRUCTION ITSELF. Optical depth from the map at a point `sampleDepthKm` along the ray.
+//
+// Three cases fall out of the two terms without a branch, which is why the encoding is worth the trouble:
+//   * a receiver ABOVE the front of the cloud   -> the max() is 0, no shade;
+//   * a receiver INSIDE the layer               -> the mean extinction over the depth it has actually
+//                                                  travelled through, which is the case an occluder-depth
+//                                                  shadow map cannot express at all;
+//   * a receiver BELOW the layer (the ground)   -> the min() clamps to the whole ray's optical depth, so
+//                                                  the mean extinction is not extrapolated through the
+//                                                  clear air under the cloud.
+float CloudShadowOpticalDepth( CloudShadowTexel texel, float sampleDepthKm )
+{
+    float insideKm = max( 0.0f, sampleDepthKm - texel.FrontDepthKm );
+    return min( texel.MaxOpticalDepth, texel.MeanExtinctionPerKm * insideKm );
+}
+
+// The transmittance a receiver sees, with the artist's strength applied.
+//
+// STRENGTH IS APPLIED HERE AND NOT BAKED INTO THE MAP, which is where this parts company with the
+// reference (Unreal scales both stored channels by CloudShadowStrength at write time,
+// VolumetricCloud.usf:2211-2212). Applied at read time the map holds the medium's own physical numbers,
+// the knob is one multiply in one place, and moving it does not invalidate a map that is otherwise a pure
+// function of the weather. The rendered result is identical — the scale commutes with everything between
+// the two points, including the min() above, because both of its arguments are scaled by the same factor.
+float CloudShadowTransmittance( vec3 encoded, float sampleDepthKm, float strength )
+{
+    CloudShadowTexel texel = CloudShadowDecode( encoded );
+    float            tau   = CloudShadowOpticalDepth( texel, sampleDepthKm ) * max( strength, 0.0f );
+    return clamp( exp( -tau ), 0.0f, 1.0f );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE PRODUCER — compiled only where a density is available
+// ---------------------------------------------------------------------------------------------------
+//
+// Guarded because this header has two very different readers. Programs/Clouds/CloudShadowMap.shader
+// defines the callback and gets the march; Programs/Deferred/DeferredLighting.shader does not define it
+// and gets only the reconstruction above, with no cloud field, no noise volume and no profile table
+// anywhere near the deferred pass. Same arrangement as Common/SkyScattering.glslh, whose integrator stays
+// inert in a pass that defines neither LUT callback.
+//
+// CLOUD_SHADOW_SAMPLE_EXTINCTION(posKm) must return the medium's extinction, per kilometre, at a
+// PLANET-CENTRE-RELATIVE position in kilometres — zero outside the shell.
+
+#ifdef CLOUD_SHADOW_SAMPLE_EXTINCTION
+
+// Marches one texel's ray across the shell and produces its triple.
+//
+// UNIFORM SPACING, unlike the light march inside the cloud pass, which puts its samples on a squared
+// distribution. The reason the two differ is what they are for: the light march integrates outward from a
+// point where nearly all of the material is, so it needs its resolution at the near end; this ray is a
+// slice through the whole layer with no privileged end, and a squared distribution here would resolve the
+// top of the deck and step over its base. It is Unreal's arrangement too (`Linear shadow samples
+// (reference)`, VolumetricCloud.usf:2181-2182).
+//
+// @param originKm  the ray's start, planet-centre-relative kilometres — the map's near plane.
+// @param lightDir  the direction the light TRAVELS, normalized.
+// @param tEnterKm  entry into the shell along @p lightDir, from CloudLayerIntersect.
+// @param tExitKm   exit from it. A segment with tExitKm <= tEnterKm is a miss and yields the clear texel.
+CloudShadowTexel CloudShadowTraceRay( vec3 originKm, vec3 lightDir, float tEnterKm, float tExitKm,
+                                      int sampleCount, float farDepthKm )
+{
+    CloudShadowTexel texel = CloudShadowClearTexel( farDepthKm );
+
+    if ( tExitKm <= tEnterKm || sampleCount < 1 )
+        return texel;
+
+    float lengthKm = tExitKm - tEnterKm;
+    float stepKm   = lengthKm / float( sampleCount );
+
+    float extinctionSum = 0.0f;
+    float hitCount      = 0.0f;
+    float opticalDepth  = 0.0f;
+    // NEGATIVE IS THE "not found yet" SENTINEL, and it cannot collide with an answer because a distance
+    // along the ray from its own entry point is never negative. A sentinel of `farDepthKm` would collide
+    // with a genuine hit at the far plane.
+    float frontKm = -1.0f;
+
+    for ( int i = 0; i < sampleCount; ++i )
+    {
+        float offsetKm = lengthKm * ( ( float( i ) + 0.5f ) / float( sampleCount ) );
+        vec3  posKm    = originKm + lightDir * ( tEnterKm + offsetKm );
+
+        float sigma = CLOUD_SHADOW_SAMPLE_EXTINCTION( posKm );
+
+        if ( sigma > 0.0f )
+        {
+            if ( frontKm < 0.0f )
+                frontKm = offsetKm;
+
+            extinctionSum = extinctionSum + sigma;
+            hitCount      = hitCount + 1.0f;
+        }
+
+        opticalDepth = opticalDepth + sigma * stepKm;
+    }
+
+    // THE MEAN IS OVER THE SAMPLES THAT FOUND MATERIAL, not over all of them, and that is the pairing
+    // that makes the reconstruction correct rather than merely plausible: it is multiplied by the depth
+    // travelled PAST THE FRONT of the cloud, so it has to be the extinction of the cloud and not the
+    // extinction of the whole chord including the clear air above it. Averaging over every sample would
+    // make a thin cloud in a tall shell arbitrarily transparent as the shell grew.
+    texel.FrontDepthKm        = frontKm < 0.0f ? tExitKm : ( tEnterKm + frontKm );
+    texel.MeanExtinctionPerKm = extinctionSum / max( 1.0f, hitCount );
+    texel.MaxOpticalDepth     = opticalDepth;
+    return texel;
+}
+
+#endif // CLOUD_SHADOW_SAMPLE_EXTINCTION
+
+#endif // CLOUD_SHADOW_MAP_GLSLH

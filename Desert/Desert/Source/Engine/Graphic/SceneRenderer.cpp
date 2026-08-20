@@ -533,6 +533,21 @@ namespace Desert::Graphic
             UNIQUE_GET_AS( System::ParticleRenderer, m_RenderSystems["ParticleSystem"] )->SimulateInFrame();
         }
 
+        // The cloud layer's shadow on the world. HERE, and not beside the cloud march at the other end of
+        // the frame, because its consumer is the DEFERRED LIGHTING pass — which runs immediately after
+        // the graph, long before ExecuteVolumetricClouds(). Sampling a map written after it was read
+        // would shade the world with the sun's position of one frame ago, and under a moving sun that is
+        // a shadow that lags its cloud.
+        //
+        // Nothing forces it later: it reads no scene depth, no G-buffer and no atmosphere LUT — only the
+        // cloud field, the sun direction and the camera position, all of which are final before the graph
+        // records. It is an in-frame compute dispatch and so must be outside any open render pass, which
+        // this point is.
+        {
+            DESERT_PROFILE_SCOPE( "CloudShadowMap" );
+            ExecuteCloudShadowMap();
+        }
+
         {
             DESERT_PROFILE_SCOPE( "ExecuteRenderGraph" );
             ExecuteRenderGraph();
@@ -627,13 +642,32 @@ namespace Desert::Graphic
                 }
             }
 
+            // The cloud layer's shadow on the world — a SECOND occluder of the same sun, filled by
+            // ExecuteCloudShadowMap() before the graph recorded. Left at its default (disabled, no map)
+            // whenever the layer is absent, off, not casting or at zero strength, which is what the
+            // renderer's own gate answers; the material then binds nothing and the shader never fetches.
+            CloudShadowInput cloudShadow;
+            if ( auto* clouds =
+                      UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] );
+                 clouds && clouds->HasShadowMap() )
+            {
+                const CloudShadowMapView& view = clouds->GetShadowMapView();
+
+                cloudShadow.Map          = clouds->GetShadowMapImage();
+                cloudShadow.WorldToMap   = view.WorldToMap;
+                cloudShadow.FarDepthKm   = view.FarDepthKm;
+                cloudShadow.Strength     = clouds->GetShadowStrength();
+                cloudShadow.BorderFadeUv = kCloudShadowBorderFadeUv;
+                cloudShadow.Enabled      = true;
+            }
+
             // The RSM path pre-applies its intensity in GIResolve, so pass 0 there to avoid scaling twice;
             // the screen-space gather is scaled inside the lighting shader.
             const float giIntensity = ( m_GIMode == Core::GIMode::ScreenSpace ) ? m_GIIntensity : 0.0f;
             UNIQUE_GET_AS( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
                  ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
                             GetPointLights(), GetSpotLights(), shadow, aoImage, giIntensity, m_EnableSSAO,
-                            static_cast<int>( m_GIMode ), giImage );
+                            static_cast<int>( m_GIMode ), giImage, cloudShadow );
 
             // Custom-shader (generic) meshes have no G-buffer variant — draw them forward OVER
             // the deferred composite (before the glass snapshot so glass refracts them too).
@@ -1428,6 +1462,12 @@ namespace Desert::Graphic
     {
         UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
              ->ExecuteInFrame();
+    }
+
+    void SceneRenderer::ExecuteCloudShadowMap()
+    {
+        UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
+             ->ExecuteShadowMapInFrame();
     }
 
     void SceneRenderer::ExecuteTransparency()
