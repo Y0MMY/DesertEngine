@@ -22,9 +22,11 @@ Shader "CloudShadowMap"
         //
         // WHAT IT SAMPLES, AND WHAT THAT COSTS. The same field the view march samples, through the same
         // three resources bound at the same three slots: the parameter block, the noise volume and the
-        // vertical profile table. `CLOUD_SHADOWMAP_RESOLUTION` squared rays, each of
-        // `CloudShadowSampleCount` samples, every frame. That is the entire price of this feature and it
-        // is stated in Docs/Clouds/CALIBRATION.md beside the measurement.
+        // vertical profile table. `resolution` squared rays, each of `CloudShadowSampleCount` samples,
+        // every frame — which is why the resolution is the quality tier's lever on this pass and why the
+        // tier scales the extent with it rather than the resolution alone (Graphic::CloudQualityScale).
+        // That is the entire price of this feature and it is stated in Docs/Clouds/CALIBRATION.md beside
+        // the measurement.
 
         #include <Common/CloudNoise.glslh>
         #include <Common/CloudGeometry.glslh>
@@ -58,6 +60,11 @@ Shader "CloudShadowMap"
             mat4 u_CloudShadowMapToWorld;
             // xyz = the direction the light TRAVELS, normalized; w = samples this ray takes.
             vec4 u_CloudShadowTrace;
+            // x = the kilometres the map's clip z spans. PUSHED rather than compiled from
+            // CLOUD_SHADOWMAP_EXTENT_KM, because the quality tier scales the extent and this shader would
+            // otherwise encode every front depth against a far plane the projection it was handed does
+            // not have. y/z/w are unwritten — a push constant is laid out in vec4s.
+            vec4 u_CloudShadowDepth;
         };
 
         LocalSize(8, 8, 1);
@@ -109,7 +116,7 @@ Shader "CloudShadowMap"
             if (coord.x >= size.x || coord.y >= size.y)
                 return;
 
-            float farDepthKm = CloudShadowFarDepthKm(CLOUD_SHADOWMAP_EXTENT_KM);
+            float farDepthKm = max(u_CloudShadowDepth.x, 1e-3f);
 
             // The texel's ray origin: its own centre on the map's NEAR plane. Through the texel centre and
             // not its corner, because the consumer fetches this map bilinearly and a half-texel

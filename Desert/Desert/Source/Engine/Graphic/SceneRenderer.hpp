@@ -351,6 +351,10 @@ namespace Desert::Graphic
         std::shared_ptr<Framebuffer> m_GIBuffer;                   // RSM-GI resolve target (blur-read by lighting)
         std::shared_ptr<Framebuffer> m_RSMBuffer;                  // reflective shadow map (G-buffer from the sun)
         Core::RenderPath m_RenderPath = Core::RenderPath::Forward; // refreshed from SceneSettings each BeginScene
+        // The volumetric cloud layer's cost ceiling, refreshed from SceneSettings each BeginScene and
+        // handed to the cloud renderer with the layer itself. HIGH is the calibrated reference, so a
+        // renderer that is never given a scene renders correctly rather than cheaply.
+        Core::CloudQuality      m_CloudQuality   = Core::CloudQuality::High;
         Core::DeferredDebugMode m_DeferredDebug = Core::DeferredDebugMode::Off; // G-buffer debug view (deferred)
         bool                    m_EnableSSAO    = true; // deferred SSAO pass on/off (refreshed from SceneSettings)
         Core::GIMode            m_GIMode        = Core::GIMode::ScreenSpace; // indirect-light source

@@ -336,6 +336,10 @@ namespace Desert::Graphic
         m_RenderPath    = sceneSettings.WireframeMode ? Core::RenderPath::Forward : sceneSettings.RenderingPath;
         m_DeferredDebug = sceneSettings.DeferredDebug;
         m_EnableSSAO     = sceneSettings.EnableSSAO;
+        // The cloud layer's cost ceiling, refreshed here with every other cost-versus-quality choice
+        // rather than read from a global at the point of use: several SceneRenderers are live at once
+        // (Docs/RENDERER_FRAME_STATE.md) and each one renders the scene it was given.
+        m_CloudQuality   = sceneSettings.CloudQualityTier;
         m_GIMode         = sceneSettings.GlobalIllumination;
         m_GIIntensity    = sceneSettings.GIIntensity;
         m_EnableSSR      = sceneSettings.EnableSSR;
@@ -657,7 +661,10 @@ namespace Desert::Graphic
                 cloudShadow.WorldToMap   = view.WorldToMap;
                 cloudShadow.FarDepthKm   = view.FarDepthKm;
                 cloudShadow.Strength     = clouds->GetShadowStrength();
-                cloudShadow.BorderFadeUv = kCloudShadowBorderFadeUv;
+                // FROM THE VIEW AND NOT FROM THE CONSTANT, because the quality tier scales the map's
+                // extent and the fade is a fixed WORLD width across it — a consumer reading a fixed UV
+                // would put the gradient in the wrong place on every tier but one.
+                cloudShadow.BorderFadeUv = view.BorderFadeUv;
                 cloudShadow.Enabled      = true;
             }
 
@@ -1455,7 +1462,7 @@ namespace Desert::Graphic
                                              const glm::vec3& windOffset )
     {
         UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
-             ->SetCloudSettings( present, data, windOffset );
+             ->SetCloudSettings( present, data, windOffset, m_CloudQuality );
     }
 
     void SceneRenderer::ExecuteVolumetricClouds()

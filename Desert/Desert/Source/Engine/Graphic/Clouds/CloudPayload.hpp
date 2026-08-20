@@ -336,6 +336,19 @@ namespace Desert::Graphic
      * @param windOffsetWorld the drift accumulated by the ECS system, world units. It is a parameter
      *                        rather than a member because the accumulator belongs to the system that
      *                        owns the timestep, and a second copy here would be state that can disagree.
+     * @param lightMarchSampleCeiling
+     *                        the quality tier's ceiling on the shadow ray's sample count
+     *                        (Graphic::CloudQualityScale::LightMarchSampleCeiling). It DEFAULTS TO THE
+     *                        IDENTITY — ECS::kCloudLightMarchMaxSamples caps nothing the component's own
+     *                        Range does not — so "no tier stated" means "the component's own number",
+     *                        which is the only answer that is not a guess. It is not a fallback for a
+     *                        failure: the renderer always states a tier, and the suites that drive this
+     *                        packer directly are asserting the component's behaviour rather than a
+     *                        machine's budget.
+     * @param stopTransmittanceFloor
+     *                        the tier's floor under the transmittance the march stops at
+     *                        (Graphic::CloudQualityScale::StopTransmittanceFloor). Its identity is ZERO,
+     *                        which floors nothing, for the reason given on that field.
      *
      * THE TWO ATMOSPHERE COUPLINGS follow the sky model, gated on the same handle the height fog uses —
      * a non-null AtmosphereEnv::DistantSkyLight, published in SkyModel::PhysicalAtmosphere and nowhere
@@ -360,7 +373,9 @@ namespace Desert::Graphic
      */
     inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const CloudTypeShape* shapes,
                                             uint32_t speciesCount, const AtmosphereEnv& atmosphere,
-                                            const glm::vec3& windOffsetWorld )
+                                            const glm::vec3& windOffsetWorld,
+                                            int32_t lightMarchSampleCeiling = ECS::kCloudLightMarchMaxSamples,
+                                            float   stopTransmittanceFloor  = 0.0f )
     {
         const bool     physical = atmosphere.Valid && atmosphere.DistantSkyLight != nullptr;
         const uint32_t species  = std::min( speciesCount, kCloudSpeciesSlots );
@@ -401,8 +416,14 @@ namespace Desert::Graphic
         CloudGpuPayload p{};
         p.Layer   = glm::vec4( planetKm, bottomKm, thicknessKm,
                                std::max( data.MaxViewDistance, 0.0f ) / kCloudWorldUnitsPerKm );
-        p.March   = glm::vec4( static_cast<float>( std::clamp( data.MaxSteps, 8, 512 ) ),
-                               std::clamp( data.StopTransmittance, 0.0f, 1.0f ),
+        // THE TIER RAISES THE STOP THRESHOLD RATHER THAN REPLACING IT — max(), the mirror image of the
+        // min() the shadow-ray ceiling gets below, so the tier can only ever end the march EARLIER than
+        // the artist asked and never later. Both compositions have to point the same way (cheaper) or a
+        // tier stops being a budget and becomes a second opinion about the sky.
+        const float stopTransmittance =
+             std::clamp( std::max( data.StopTransmittance, stopTransmittanceFloor ), 0.0f, 1.0f );
+
+        p.March   = glm::vec4( static_cast<float>( std::clamp( data.MaxSteps, 8, 512 ) ), stopTransmittance,
                                std::max( data.TracingStartDistance, 0.0f ) / kCloudWorldUnitsPerKm,
                                std::max( data.ExtinctionScale, 0.0f ) );
         p.Weather = glm::vec4( std::max( data.WeatherTileSize, 1.0f ) / kCloudWorldUnitsPerKm,
@@ -446,9 +467,17 @@ namespace Desert::Graphic
         // slider's Range and the clamp inside CloudRaymarch.shader are three copies of one number. While
         // all three were literals they could disagree, and the disagreement is silent: the slider offers
         // a value, this line accepts it, and the shader throws it away.
+        //
+        // AND THE QUALITY TIER LOWERS THAT CEILING RATHER THAN REPLACING THE VALUE. min(), so the artist's
+        // number is what a machine that can afford it renders and the tier can only ever make the frame
+        // cheaper — a scene authored at 16 gets 16 on every tier, because asking for the cheap answer is
+        // an authored intention and not a budget the tier is entitled to overrule. That is also what keeps
+        // this from being a second source of truth for a field the component owns (contract §2.1): there
+        // is one authored value and one ceiling, and the GPU gets their minimum.
+        const int32_t lightSampleCeiling =
+             std::clamp( lightMarchSampleCeiling, 1, ECS::kCloudLightMarchMaxSamples );
         p.SunColour = glm::vec4(
-             sunIrradiance,
-             static_cast<float>( std::clamp( data.LightMarchSamples, 1, ECS::kCloudLightMarchMaxSamples ) ) );
+             sunIrradiance, static_cast<float>( std::clamp( data.LightMarchSamples, 1, lightSampleCeiling ) ) );
         p.Ambient      = glm::vec4( ambient, physical ? 1.0f : 0.0f );
         p.MultiScatter = glm::vec4( static_cast<float>( std::clamp( data.MultiScatterOctaves, 1, 3 ) ),
                                     std::clamp( data.MultiScatterContribution, 0.0f, 1.0f ),

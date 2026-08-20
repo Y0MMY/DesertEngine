@@ -13,6 +13,7 @@
 // story, and the half that can be undefined behaviour is the one on the GPU side of PackCloudParams.
 #include <Engine/Assets/CloudTypeData.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
+#include <Engine/Graphic/Clouds/CloudQuality.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionTypes.hpp>
 
@@ -1157,6 +1158,111 @@ TEST( ReflectionMetadata, EveryEditConditionNamesABoolOfItsOwnBlock )
             EXPECT_EQ( gate->Type, FieldType::Bool )
                  << name << "::" << f.Name << " is gated by non-bool " << target;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE QUALITY TIER, WHERE IT BECOMES A NUMBER THE SHADER RUNS
+// ---------------------------------------------------------------------------------------------------
+//
+// The tier's own relations — the map's texel against the chord the march can find, the border fade, the
+// coverage ladder — live in Desert/Tests/Engine/CloudShadow, which owns those. This is the other half:
+// the packer is the ONE place an authored field becomes a GPU number, so this is where a tier that is
+// only a comment would be caught.
+
+namespace
+{
+    // Every enumerator, listed once. A tier missing from here is a tier nothing checks.
+    constexpr Desert::Core::CloudQuality kAllQualityTiers[] = {
+         Desert::Core::CloudQuality::Low,
+         Desert::Core::CloudQuality::Medium,
+         Desert::Core::CloudQuality::High,
+    };
+
+    const char* QualityTierName( Desert::Core::CloudQuality tier )
+    {
+        switch ( tier )
+        {
+            case Desert::Core::CloudQuality::Low:
+                return "Low";
+            case Desert::Core::CloudQuality::Medium:
+                return "Medium";
+            case Desert::Core::CloudQuality::High:
+                return "High";
+        }
+        return "?";
+    }
+
+    // The component's default Max Steps, which no tier lowers.
+    constexpr float kTierMaxSteps = 256.0f;
+} // namespace
+
+// THE TIER REACHING THE GPU BLOCK, which is where a tier that is only a comment would be caught. The
+// packer is the one place the component's authored numbers become the numbers the shader runs, so this is
+// the assertion that the ceiling is APPLIED and that nothing else moved with it.
+TEST( CloudQualityTier, TheTierCapsTheShadowRayAndLeavesTheMarchAlone )
+{
+    Desert::ECS::VolumetricCloudData data;
+    data.LightMarchSamples = 32; // the shipped default, and above Low's ceiling
+    data.MaxSteps          = static_cast<int32_t>( kTierMaxSteps );
+
+    Desert::Graphic::AtmosphereEnv atmosphere;
+    atmosphere.Valid         = true;
+    atmosphere.SunDirection  = glm::normalize( glm::vec3( 0.3f, 0.75f, 0.55f ) );
+    atmosphere.SunIrradiance = glm::vec3( 20.0f );
+
+    // The envelope this suite already works in, as a shape rather than a layer. Only the two altitudes
+    // matter to the two fields asserted below, and stating them keeps this test off the asset loader.
+    Desert::Graphic::CloudTypeShape shape{};
+    shape.BaseAltitudeKm   = 2.2f;
+    shape.TopAltitudeKm    = 5.8f;
+    shape.PlacementScale   = 1.0f;
+    shape.DensityFactor    = 1.0f;
+    shape.ExtinctionFactor = 1.0f;
+
+    for ( const Desert::Core::CloudQuality tier : kAllQualityTiers )
+    {
+        const Desert::Graphic::CloudQualityScale scale = Desert::Graphic::CloudQualityFor( tier );
+        const Desert::Graphic::CloudGpuPayload   payload =
+             Desert::Graphic::PackCloudParams( data, &shape, 1u, atmosphere, glm::vec3( 0.0f ),
+                                               scale.LightMarchSampleCeiling, scale.StopTransmittanceFloor );
+
+        // The shadow ray is min(authored, ceiling) — the tier lowers it and never raises it.
+        EXPECT_FLOAT_EQ( payload.SunColour.w,
+                         static_cast<float>( std::min( data.LightMarchSamples, scale.LightMarchSampleCeiling ) ) )
+             << QualityTierName( tier ) << " did not apply its shadow-ray ceiling to the packed block";
+        EXPECT_LE( payload.SunColour.w, static_cast<float>( data.LightMarchSamples ) )
+             << QualityTierName( tier ) << " made the frame MORE expensive than the artist asked for";
+
+        // AND MAX STEPS IS UNTOUCHED ON EVERY TIER. This is the executable half of the refusal:
+        // Desert/Tests/Engine/CloudType measures that the shipped library tolerates Max Steps down to 233
+        // against the component's 256, nine per cent, so there is nothing for a tier to spend here — and
+        // if one ever tries, this line is what says so.
+        EXPECT_FLOAT_EQ( payload.March.x, kTierMaxSteps )
+             << QualityTierName( tier ) << " lowered Max Steps, which the shipped cloud library cannot afford";
+
+        // The march's stop threshold composes the OTHER way — max(), because ending the march earlier is
+        // what makes it cheaper — and the two compositions have to point the same way or a tier stops
+        // being a budget and becomes a second opinion about the sky.
+        EXPECT_FLOAT_EQ( payload.March.y, std::max( data.StopTransmittance, scale.StopTransmittanceFloor ) )
+             << QualityTierName( tier ) << " did not apply its stop-transmittance floor";
+        EXPECT_GE( payload.March.y, data.StopTransmittance )
+             << QualityTierName( tier ) << " made the march run LONGER than the artist asked for";
+    }
+
+    // An artist who has already asked for the cheap answer keeps it on every tier — a ceiling is a
+    // ceiling and a floor is a floor, so neither can pull an authored number back toward the expensive
+    // side.
+    data.LightMarchSamples = 8;
+    data.StopTransmittance = 0.2f;
+    for ( const Desert::Core::CloudQuality tier : kAllQualityTiers )
+    {
+        const Desert::Graphic::CloudQualityScale scale = Desert::Graphic::CloudQualityFor( tier );
+        const Desert::Graphic::CloudGpuPayload   payload =
+             Desert::Graphic::PackCloudParams( data, &shape, 1u, atmosphere, glm::vec3( 0.0f ),
+                                               scale.LightMarchSampleCeiling, scale.StopTransmittanceFloor );
+        EXPECT_FLOAT_EQ( payload.SunColour.w, 8.0f ) << QualityTierName( tier ) << " overruled an authored 8";
+        EXPECT_FLOAT_EQ( payload.March.y, 0.2f ) << QualityTierName( tier ) << " overruled an authored 0.2";
     }
 }
 

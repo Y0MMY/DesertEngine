@@ -771,6 +771,68 @@ TEST( CloudTypeLibrary, NoShippedTypePlacesStructureThinnerThanTheMarchCanFind )
     }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// THE SAME RELATION, READ BACKWARDS: how far Max Steps may fall before the library stops working
+// ---------------------------------------------------------------------------------------------------
+
+// The test above asks "does the shipped library clear the march the component ships with". This one asks
+// the question a QUALITY TIER asks — "how much of that march could a cheaper tier give back" — and the
+// answer is the reason Core::CloudQuality does not touch Max Steps at all.
+//
+// WHY IT IS A TEST AND NOT A PARAGRAPH IN A DOC. The bound moves whenever either side moves: a retuned
+// placement scale, a new type with a finer cell, a change to CLOUD_DISTANCE_TO_MAX_STEPS_KM. Written
+// down it would be a number somebody trusted six months after it stopped being true. Asserted, it is the
+// line that fails the day a tier is added that lowers the march, and it fails with both figures printed.
+TEST( CloudTypeLibrary, TheLibraryPinsTheLowestMaxStepsAnyQualityTierMayMarchWith )
+{
+    using namespace Desert::Tests::CloudScheduleRef;
+
+    // CloudFinestResolvableChordKm(n) is CLOUD_COARSE_STEP_MULTIPLIER x 2 x
+    // CLOUD_DISTANCE_TO_MAX_STEPS_KM / n, so the lowest count a given chord tolerates is that constant
+    // over the chord. Derived from the function rather than from the algebra, so the two cannot drift.
+    const float chordAtOne = CloudFinestResolvableChordKm( 1.0f );
+
+    float       bound = 0.0f;
+    const char* binds = "";
+
+    for ( const char* name : { kCloudTypeStratus, kCloudTypeCumulusHumilis, kCloudTypeCumulusMediocris,
+                               kCloudTypeCumulusCongestus, kCloudTypeCumulonimbus, kCloudTypeStratocumulus,
+                               kCloudTypeAltocumulus, kCloudTypeCirrus, kCloudTypeLenticular } )
+    {
+        const CloudTypeData data    = LoadShipped( name );
+        const float         cellKm  = FinestPlacementCellKm( data.Shape, VolumeLatticeCells( data.NoiseVolume ) );
+        const float         chordKm = cellKm * kMedianChordPerCell;
+
+        // The lowest Max Steps at which THIS type is still findable.
+        const float lowest = chordAtOne / chordKm;
+        if ( lowest > bound )
+        {
+            bound = lowest;
+            binds = name;
+        }
+    }
+
+    std::printf( "[CloudTypeLibrary] the shipped library tolerates Max Steps down to %.0f — %s is what "
+                 "binds it — against the component's %.0f, a margin of %.0f steps (%.0f%%)\n",
+                 std::ceil( bound ), binds, kComponentMaxSteps, kComponentMaxSteps - std::ceil( bound ),
+                 100.0f * ( kComponentMaxSteps - std::ceil( bound ) ) / kComponentMaxSteps );
+
+    EXPECT_GE( kComponentMaxSteps, bound ) << "the component's default Max Steps no longer resolves " << binds
+                                           << ", which needs at least " << std::ceil( bound );
+
+    // AND THE MARGIN IS THE POINT. Under ten per cent of the step budget separates the shipped default
+    // from the value at which four of the nine types start dithering in and out with the ray's jitter, so
+    // there is nothing here for a tier to spend: halving Max Steps would put five of the nine past
+    // Nyquist, the worst at 0.55x. That measurement is why Graphic::CloudQualityScale has no Max Steps
+    // field — a knob whose whole legal range is 9% is not a tier, and one that reaches past it is a
+    // defect wearing a tier's name. If a future change gives the library real headroom here, THIS
+    // assertion is what will say so by starting to fail.
+    EXPECT_LT( kComponentMaxSteps - bound, 0.25f * kComponentMaxSteps )
+         << "the library now has real headroom below the shipped Max Steps (" << bound
+         << "), so the refusal recorded in Graphic::CloudQualityScale should be re-measured rather than "
+            "trusted";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

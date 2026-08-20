@@ -48,6 +48,13 @@
 // whether the layer casts at all and how strong the shade is — VolumetricCloudData::CastShadows and
 // ::ShadowStrength.
 //
+// THEY ARE THE REFERENCE TIER'S VALUES, and a quality tier scales the first three of them TOGETHER by one
+// factor (Core::CloudQuality, Graphic::CloudQualityScale). Together, because the texel is
+// 2 x extent / resolution and the whole derivation below turns on that texel: scale them independently
+// and the map stops resolving what the march can find, which is the one thing about this file that is not
+// free to choose. The producer is therefore handed its extent-derived numbers on the push constant rather
+// than compiling them from here — see Graphic::CloudShadowPush.
+//
 // THE DERIVATION RUNS RESOLUTION -> TEXEL -> EXTENT, not the other way round, and the middle term is not
 // free to choose. A texel finer than the finest cloud chord the march can FIND stores detail the producer
 // cannot make; a texel coarser than it throws away detail the sky visibly has. That chord is
@@ -67,7 +74,7 @@
 // The RADIUS of the square the map covers, in kilometres — half its side. Follows from the line above.
 //
 // WHAT IT COSTS: world geometry further than this from the camera receives no cloud shadow at all. That
-// is a real limit and it is stated rather than hidden; CLOUD_SHADOWMAP_BORDER_FADE_UV below is what keeps
+// is a real limit and it is stated rather than hidden; CLOUD_SHADOWMAP_BORDER_FADE_KM below is what keeps
 // it from being a visible square edge on a large terrain. Unreal's answer to the same limit is a 150 km
 // default extent, which at 512 texels is 586 m per texel — five times coarser than a cloud chord, and a
 // deliberately different trade for a renderer whose clouds are visible at 150 km. Ours are not: the
@@ -101,15 +108,23 @@
 #define CLOUD_SHADOWMAP_BASE_SAMPLES 32.0f
 #define CLOUD_SHADOWMAP_HORIZON_MULTIPLIER 2.0f
 
-// The width, in UV, of the band at the map's border over which the shadow is faded out to fully lit.
-// Two per cent of 60 km is 1.2 km — ten texels — which is a gradient rather than an edge at every
+// The WORLD width of the band at the map's border over which the shadow is faded out to fully lit,
+// kilometres. 1.2 km is ten texels at the reference tier — a gradient rather than an edge at every
 // elevation a camera can look along the ground at.
+//
+// KILOMETRES RATHER THAN UV, which is what the quality tier made necessary and what the number always
+// meant. 1.2 km over the reference tier's 60 km side is 0.02 in UV, which is what this used to be
+// written as, so the shipped picture does not move by a digit. But the quantities that decide whether a
+// fade READS as a fade are world quantities — how wide the gradient is on the ground, and how many texels
+// it spans so it does not band — and a fixed UV keeps neither when the map covers half as much world: it
+// would halve the band to five texels and put a visible ring exactly where the gradient was meant to hide
+// one. Desert/Tests/Engine/CloudShadow asserts the ten-texel span on EVERY tier.
 //
 // Unreal does NOT do this and does not need to: at a 150 km extent the border is past its own fog. Ours
 // is at 30 km, which is inside the far plane of every scene in this repository, so without the fade the
 // map's boundary is a straight line of light across the ground — a defect that looks like a bug in the
 // terrain rather than like a limit of the shadow.
-#define CLOUD_SHADOWMAP_BORDER_FADE_UV 0.02f
+#define CLOUD_SHADOWMAP_BORDER_FADE_KM 1.2f
 
 // ---------------------------------------------------------------------------------------------------
 // The sizes that follow from the four above. Functions rather than more #defines, so the test drives the
@@ -121,6 +136,14 @@
 float CloudShadowTexelKm( float extentKm, float resolution )
 {
     return 2.0f * extentKm / max( resolution, 1.0f );
+}
+
+// The border fade as the shader wants it — a fraction of the map's UV range — from the world width above
+// and the map's actual side. ONE expression for a quantity two sides need, so a tier that changes the
+// extent cannot leave the two disagreeing about how wide the gradient is.
+float CloudShadowBorderFadeUv( float extentKm )
+{
+    return CLOUD_SHADOWMAP_BORDER_FADE_KM / max( 2.0f * extentKm, 1e-3f );
 }
 
 // How far up the light ray the map's near plane is placed above the anchor point. Unreal's
@@ -246,7 +269,8 @@ vec2 CloudShadowClipToUv( vec2 clipXy )
     return clipXy * 0.5f + vec2( 0.5f, 0.5f );
 }
 
-// 1 well inside the map, falling to 0 at and outside its border. See CLOUD_SHADOWMAP_BORDER_FADE_UV.
+// 1 well inside the map, falling to 0 at and outside its border. See CLOUD_SHADOWMAP_BORDER_FADE_KM and
+// CloudShadowBorderFadeUv above, which is where the @p fadeUv this takes comes from.
 float CloudShadowBorderFade( vec2 uv, float fadeUv )
 {
     float edge = min( min( uv.x, 1.0f - uv.x ), min( uv.y, 1.0f - uv.y ) );

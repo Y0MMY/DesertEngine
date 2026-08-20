@@ -28,12 +28,15 @@
 
 #include "CloudShadowReference.hpp"
 
+#include <Engine/Graphic/Clouds/CloudQuality.hpp>
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 
 using namespace Desert::Tests::CloudShadowRef;
@@ -339,7 +342,7 @@ TEST( CloudShadowMap, TheCppMirrorAgreesWithTheShaderConstants )
                      CLOUD_SHADOWMAP_RESOLUTION );
     EXPECT_FLOAT_EQ( Desert::Graphic::kCloudShadowExtentKm, CLOUD_SHADOWMAP_EXTENT_KM );
     EXPECT_FLOAT_EQ( Desert::Graphic::kCloudShadowSnapKm, CLOUD_SHADOWMAP_SNAP_KM );
-    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudShadowBorderFadeUv, CLOUD_SHADOWMAP_BORDER_FADE_UV );
+    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudShadowBorderFadeKm, CLOUD_SHADOWMAP_BORDER_FADE_KM );
     EXPECT_FLOAT_EQ( Desert::Graphic::kCloudShadowBaseSamples, CLOUD_SHADOWMAP_BASE_SAMPLES );
     EXPECT_FLOAT_EQ( Desert::Graphic::kCloudShadowHorizonMultiplier, CLOUD_SHADOWMAP_HORIZON_MULTIPLIER );
 }
@@ -366,6 +369,16 @@ TEST( CloudShadowMap, TheCppMirrorAgreesWithTheShaderFunctions )
         EXPECT_FLOAT_EQ( Desert::Graphic::CloudShadowSampleCount( sunUpDot, CLOUD_SHADOWMAP_BASE_SAMPLES,
                                                                   CLOUD_SHADOWMAP_HORIZON_MULTIPLIER ),
                          CloudShadowSampleCount( sunUpDot ) );
+    }
+
+    // The border fade is a DERIVED quantity on both sides now — a fixed world width over whatever side
+    // the tier gave the map — so the two expressions are compared over the extents a tier can produce
+    // rather than at the one value they used to be written as.
+    for ( int i = 1; i <= 60; ++i )
+    {
+        const float extentKm = static_cast<float>( i );
+        EXPECT_FLOAT_EQ( Desert::Graphic::CloudShadowBorderFadeUv( extentKm ),
+                         CloudShadowBorderFadeUv( extentKm ) );
     }
 }
 
@@ -428,6 +441,176 @@ TEST( CloudShadowMap, TheTexelResolvesWhatTheMarchCanFind )
     const float envelopeKm      = kTopKm - kBaseKm;
     const float sampleSpacingKm = envelopeKm / CLOUD_SHADOWMAP_BASE_SAMPLES;
     EXPECT_LE( sampleSpacingKm, chordKm );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 3a. THE SAME RELATIONS, ON EVERY QUALITY TIER AND NOT ONLY ON THE DEFAULT
+// ---------------------------------------------------------------------------------------------------
+//
+// A tier that breaks an invariant is worse than a tier that does not exist, so the three assertions above
+// are re-run against the numbers Graphic::CloudQualityFor produces for every enumerator rather than
+// against the constants that happen to be compiled in. That is what makes the tier a mechanism instead of
+// three sets of magic numbers: adding a fourth tier cannot silently coarsen the map past what the march
+// can find, because this loop will say so with the two figures side by side.
+
+namespace
+{
+    // Every enumerator, listed once. A new tier that is not added here is a tier nothing checks, which is
+    // why the count is asserted below rather than left to the reader.
+    constexpr Desert::Core::CloudQuality kAllTiers[] = {
+         Desert::Core::CloudQuality::Low,
+         Desert::Core::CloudQuality::Medium,
+         Desert::Core::CloudQuality::High,
+    };
+
+    const char* TierName( Desert::Core::CloudQuality tier )
+    {
+        switch ( tier )
+        {
+            case Desert::Core::CloudQuality::Low:
+                return "Low";
+            case Desert::Core::CloudQuality::Medium:
+                return "Medium";
+            case Desert::Core::CloudQuality::High:
+                return "High";
+        }
+        return "?";
+    }
+
+    // The component's default Max Steps, which no tier lowers and which
+    // Desert/Tests/Engine/CloudType explains at length that no tier MAY lower: the shipped library's
+    // tightest types sit 1.10x above the chord this number buys, so there is nothing to spend.
+    constexpr float kDefaultMaxStepsAllTiers = 256.0f;
+} // namespace
+
+TEST( CloudShadowMapTiers, EveryTierKeepsTheTexelInsideTheChordTheMarchCanFind )
+{
+    using namespace Desert::Graphic;
+
+    const float chordKm = CloudFinestResolvableChordKm( kDefaultMaxStepsAllTiers );
+
+    for ( const Desert::Core::CloudQuality tier : kAllTiers )
+    {
+        const CloudQualityScale scale      = CloudQualityFor( tier );
+        const float             extentKm   = CloudShadowExtentKmForScale( scale.ShadowMapScale );
+        const uint32_t          resolution = CloudShadowResolutionForScale( scale.ShadowMapScale );
+        const float             texelKm    = CloudShadowTexelKm( extentKm, static_cast<float>( resolution ) );
+
+        std::printf( "[CloudShadowMapTiers] %-6s  map %ux%u over %.1f km radius -> texel %.1f m, chord "
+                     "%.1f m (%.2fx), samples <= %d\n",
+                     TierName( tier ), resolution, resolution, extentKm, texelKm * 1000.0f, chordKm * 1000.0f,
+                     texelKm / chordKm, scale.LightMarchSampleCeiling );
+
+        EXPECT_LE( texelKm, chordKm )
+             << TierName( tier ) << " gives the shadow map a texel of " << texelKm * 1000.0f << " m against the "
+             << chordKm * 1000.0f
+             << " m chord the view march can be relied on to find, so the map would be quantizing cloud "
+                "the sky visibly has. Scale the extent WITH the resolution — that is what "
+                "CloudQualityScale::ShadowMapScale is a single number for — rather than dropping the "
+                "resolution alone";
+
+        EXPECT_GE( texelKm, chordKm * 0.5f )
+             << TierName( tier )
+             << " is storing detail the march cannot produce — resolution spent on "
+                "nothing, which is the opposite failure and just as much a defect";
+    }
+}
+
+TEST( CloudShadowMapTiers, EveryTierResolvesTheEnvelopeVerticallyToo )
+{
+    // The map's OTHER axis, on every tier. The base sample count is not scaled by the tier at all, and
+    // this is the assertion that says why it cannot be: 3.6 km of shipped congestus over 32 samples is
+    // 112 m against a 125 m chord, so sixteen — the count the shadow-map task priced at 2.75 ms — would
+    // be 225 m and the map's two axes would stop agreeing about what a cloud is.
+    const float chordKm         = CloudFinestResolvableChordKm( kDefaultMaxStepsAllTiers );
+    const float envelopeKm      = kTopKm - kBaseKm;
+    const float sampleSpacingKm = envelopeKm / CLOUD_SHADOWMAP_BASE_SAMPLES;
+
+    EXPECT_LE( sampleSpacingKm, chordKm );
+
+    // And the number that says how little room there is: the lowest count that still resolves the
+    // envelope. Printed rather than asserted as a literal, so the next person reads it instead of
+    // rediscovering it.
+    const float lowestLegalCount = envelopeKm / chordKm;
+    std::printf( "[CloudShadowMapTiers] the envelope is %.2f km; the lowest base sample count that still "
+                 "resolves the %.1f m chord is %.1f, and the shipped count is %.0f\n",
+                 envelopeKm, chordKm * 1000.0f, lowestLegalCount, CLOUD_SHADOWMAP_BASE_SAMPLES );
+    EXPECT_GE( CLOUD_SHADOWMAP_BASE_SAMPLES, lowestLegalCount );
+}
+
+TEST( CloudShadowMapTiers, EveryTierFadesItsBorderOverAtLeastTenTexels )
+{
+    using namespace Desert::Graphic;
+
+    for ( const Desert::Core::CloudQuality tier : kAllTiers )
+    {
+        const CloudQualityScale scale      = CloudQualityFor( tier );
+        const float             extentKm   = CloudShadowExtentKmForScale( scale.ShadowMapScale );
+        const uint32_t          resolution = CloudShadowResolutionForScale( scale.ShadowMapScale );
+        const float             texelKm    = CloudShadowTexelKm( extentKm, static_cast<float>( resolution ) );
+        const float             bandKm = 2.0f * extentKm * Desert::Graphic::CloudShadowBorderFadeUv( extentKm );
+
+        // The world width is the same on every tier BY CONSTRUCTION — that is the whole reason the fade
+        // stopped being a UV constant — so the ten-texel span survives a tier that halves the map.
+        EXPECT_NEAR( bandKm, CLOUD_SHADOWMAP_BORDER_FADE_KM, 1e-4f );
+        EXPECT_GT( bandKm, 10.0f * texelKm )
+             << TierName( tier )
+             << " fades its border over fewer than ten texels, which bands instead of blending";
+    }
+}
+
+TEST( CloudShadowMapTiers, EveryTierGuaranteesCoverageAroundTheCameraAndTheLadderIsMonotone )
+{
+    using namespace Desert::Graphic;
+
+    // The centre lands within half a snap of the camera, so what a tier actually PROMISES is
+    // extent - snap/2. The snap scales with the extent precisely so this stays positive and stays the
+    // same FRACTION of the map; a snap left at its reference value would eat a halved extent from the
+    // inside and could take the guarantee to zero.
+    float previousCoverageKm = 0.0f;
+    float previousCostShare  = 0.0f;
+
+    for ( const Desert::Core::CloudQuality tier : kAllTiers ) // Low -> Medium -> High
+    {
+        const CloudQualityScale scale      = CloudQualityFor( tier );
+        const float             extentKm   = CloudShadowExtentKmForScale( scale.ShadowMapScale );
+        const float             snapKm     = CloudShadowSnapKmForScale( scale.ShadowMapScale );
+        const uint32_t          resolution = CloudShadowResolutionForScale( scale.ShadowMapScale );
+
+        const float coverageKm = extentKm - 0.5f * snapKm;
+        EXPECT_GT( coverageKm, 0.0f ) << TierName( tier ) << " guarantees no cloud shadow anywhere at all";
+        EXPECT_NEAR( coverageKm / extentKm, 2.0f / 3.0f, 1e-5f )
+             << TierName( tier ) << " does not keep the snap in proportion to the extent";
+
+        // MONOTONE IN BOTH DIRECTIONS, which is the property that makes this a ladder rather than three
+        // opinions: a more expensive tier must never cover less world, and must never cost less.
+        EXPECT_GE( coverageKm, previousCoverageKm );
+        previousCoverageKm = coverageKm;
+
+        // The pass marches resolution^2 rays, so this is its cost in the only unit that matters here.
+        const float costShare = static_cast<float>( resolution ) * static_cast<float>( resolution );
+        EXPECT_GE( costShare, previousCostShare );
+        previousCostShare = costShare;
+
+        std::printf( "[CloudShadowMapTiers] %-6s  guaranteed coverage %.1f km, %u^2 texel-rays\n",
+                     TierName( tier ), coverageKm, resolution );
+    }
+}
+
+TEST( CloudShadowMapTiers, TheReferenceTierIsExactlyWhatWasShippedBeforeTheTierExisted )
+{
+    using namespace Desert::Graphic;
+
+    // The one assertion that says this task changed no picture at High: the reference tier reproduces the
+    // three constants the map was shipped with, to the digit.
+    const CloudQualityScale high = CloudQualityFor( Desert::Core::CloudQuality::High );
+
+    EXPECT_FLOAT_EQ( high.ShadowMapScale, 1.0f );
+    EXPECT_EQ( CloudShadowResolutionForScale( high.ShadowMapScale ), kCloudShadowMapResolution );
+    EXPECT_FLOAT_EQ( CloudShadowExtentKmForScale( high.ShadowMapScale ), kCloudShadowExtentKm );
+    EXPECT_FLOAT_EQ( CloudShadowSnapKmForScale( high.ShadowMapScale ), kCloudShadowSnapKm );
+    // And it caps nothing the component's own Range does not, so an authored 32 reaches the GPU as 32.
+    EXPECT_EQ( high.LightMarchSampleCeiling, Desert::ECS::kCloudLightMarchMaxSamples );
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -504,6 +687,73 @@ TEST( CloudShadowMap, LeavingTheCellMovesTheMapByExactlyOneGridStep )
     EXPECT_NEAR( centreB.z - centreA.z, 0.0f, texelWorld );
 }
 
+// BOTH SNAPS, ON EVERY TIER. The anti-boil property is the one thing a smaller map could plausibly have
+// broken, because the tier scales the SNAP along with the extent: a cheaper tier re-anchors its map twice
+// as often as the camera travels. Twice as often is not the same as less stable, and this is the
+// assertion of that distinction — inside a cell the projection is still bit-for-bit constant, and leaving
+// one still moves the map by exactly one step of that tier's own grid. Neither statement was true of the
+// coarse snap alone; both survive being scaled.
+//
+// It matters because no still frame can show it. A still frame has exactly one projection, so a tier that
+// boiled would render identically to one that did not until the camera moved.
+TEST( CloudShadowMapTiers, EveryTierKeepsBothSnapsUnderAMovingCamera )
+{
+    using namespace Desert::Graphic;
+
+    for ( const Desert::Core::CloudQuality tier : kAllTiers )
+    {
+        const CloudQualityScale scale      = CloudQualityFor( tier );
+        const float             extentKm   = CloudShadowExtentKmForScale( scale.ShadowMapScale );
+        const float             snapKm     = CloudShadowSnapKmForScale( scale.ShadowMapScale );
+        const uint32_t          resolution = CloudShadowResolutionForScale( scale.ShadowMapScale );
+        const float             snapWorld  = snapKm * kCloudWorldUnitsPerKm;
+
+        auto build = [&]( const glm::vec3& cameraWorld )
+        {
+            return CloudBuildShadowMapView( cameraWorld, kSun, kPlanetKm, extentKm, snapKm,
+                                            static_cast<float>( resolution ) );
+        };
+
+        // 1. Inside one cell the matrix does not move at all. The walk is a fifth of this tier's own
+        //    grid, so it scales with the tier instead of being a distance that happens to fit the
+        //    reference one.
+        const CloudShadowMapView reference = build( glm::vec3( 0.0f, 150000.0f, 0.0f ) );
+        for ( int i = 0; i <= 40; ++i )
+        {
+            const float              t = static_cast<float>( i ) / 40.0f * 0.2f * snapWorld;
+            const glm::vec3          camera( t, 150000.0f + t * 0.2f, t * 0.7f );
+            const CloudShadowMapView view = build( camera );
+
+            for ( int c = 0; c < 4; ++c )
+                for ( int r = 0; r < 4; ++r )
+                    EXPECT_FLOAT_EQ( view.WorldToMap[c][r], reference.WorldToMap[c][r] )
+                         << TierName( tier ) << ", camera step " << i << ", element (" << c << ", " << r
+                         << ") — this tier's shadow boils under a moving camera";
+        }
+
+        // 2. Leaving the cell moves the map by exactly one step of THIS tier's grid, to within one of
+        //    THIS tier's texels — the residual being the pixel-lattice snap, which is the point of it.
+        const CloudShadowMapView b       = build( glm::vec3( snapWorld, 150000.0f, 0.0f ) );
+        const glm::vec4          centreA = reference.MapToWorld * glm::vec4( 0.0f, 0.0f, 0.5f, 1.0f );
+        const glm::vec4          centreB = b.MapToWorld * glm::vec4( 0.0f, 0.0f, 0.5f, 1.0f );
+        const float              texelWorld =
+             CloudShadowTexelKm( extentKm, static_cast<float>( resolution ) ) * kCloudWorldUnitsPerKm;
+
+        EXPECT_NEAR( centreB.x - centreA.x, snapWorld, texelWorld ) << TierName( tier );
+        EXPECT_NEAR( centreB.z - centreA.z, 0.0f, texelWorld ) << TierName( tier );
+
+        // 3. And the sub-texel residual the second snap removes is the SAME SIZE on every tier, because
+        //    the texel is. That is the number that decides whether a shadow shimmers, and it is why
+        //    halving the snap costs nothing in stability: re-anchoring more often is not re-anchoring
+        //    less accurately.
+        EXPECT_NEAR( texelWorld,
+                     CloudShadowTexelKm( kCloudShadowExtentKm, static_cast<float>( kCloudShadowMapResolution ) ) *
+                          kCloudWorldUnitsPerKm,
+                     1.0f )
+             << TierName( tier ) << " changed the size of the lattice the second snap works on";
+    }
+}
+
 // The pixel-grid snap, stated as what it achieves rather than as what it does: a FIXED world point — the
 // origin — lands on the map's lattice exactly. It is the residual the coarse snap cannot remove, because
 // the coarse snap freezes where the map is and not which way it points.
@@ -534,6 +784,29 @@ TEST( CloudShadowMap, TheWorldOriginLandsOnThePixelLattice )
 // The map's bounds and its depth axis — the arithmetic the consumer performs on every lit pixel
 // ---------------------------------------------------------------------------------------------------
 
+// THE FAR DEPTH THE PROJECTION SPANS AND THE FAR DEPTH THE ENCODING ASSUMES ARE ONE NUMBER, and since
+// this task they are written in two places: CloudShadowFarDepthKm in the shared header, and the
+// `4 x extent` the orthographic matrix is built from in CloudBuildShadowMapView. They used to be one
+// place because the producer compiled the header's constant; now the producer is HANDED the projection's
+// own answer on a push constant, which is what lets a quality tier scale the extent at all. This is the
+// assertion that keeps the two honest — over every extent a tier can produce, not at the one value that
+// happens to be compiled in. Get it wrong and every front depth in the map is off by the ratio, which
+// reads as a shadow of the wrong strength rather than as a scale.
+TEST( CloudShadowMap, TheProjectionsFarDepthIsTheOneTheEncodingAssumes )
+{
+    for ( int i = 5; i <= 60; ++i )
+    {
+        const float                               extentKm = static_cast<float>( i );
+        const Desert::Graphic::CloudShadowMapView view =
+             Desert::Graphic::CloudBuildShadowMapView( glm::vec3( 1234.0f, 500.0f, -987.0f ), kSun, kPlanetKm,
+                                                       extentKm, Desert::Graphic::kCloudShadowSnapKm, 512.0f );
+
+        EXPECT_NEAR( view.FarDepthKm, CloudShadowFarDepthKm( extentKm ), 1e-3f * extentKm )
+             << "at an extent of " << extentKm
+             << " km the matrix spans a different depth from the one the texel encoding assumes";
+    }
+}
+
 TEST( CloudShadowMap, TheProjectionCoversExactlyTheExtentAndInvertsExactly )
 {
     const CloudShadowMapView view = BuildView( glm::vec3( 0.0f, 20000.0f, 0.0f ), kSun );
@@ -561,25 +834,27 @@ TEST( CloudShadowMap, TheProjectionCoversExactlyTheExtentAndInvertsExactly )
 // The border, and the fade that keeps it from being a straight line of light across a terrain.
 TEST( CloudShadowMap, TheBorderFadeReachesBothEndsAndOnlyAtTheBorder )
 {
-    EXPECT_FLOAT_EQ( CloudShadowBorderFade( vec2( 0.5f, 0.5f ), CLOUD_SHADOWMAP_BORDER_FADE_UV ), 1.0f );
-    EXPECT_FLOAT_EQ( CloudShadowBorderFade( vec2( 0.0f, 0.5f ), CLOUD_SHADOWMAP_BORDER_FADE_UV ), 0.0f );
-    EXPECT_FLOAT_EQ( CloudShadowBorderFade( vec2( 1.0f, 0.5f ), CLOUD_SHADOWMAP_BORDER_FADE_UV ), 0.0f );
-    EXPECT_FLOAT_EQ( CloudShadowBorderFade( vec2( 0.5f, -0.3f ), CLOUD_SHADOWMAP_BORDER_FADE_UV ), 0.0f );
+    const float fadeUv = CloudShadowBorderFadeUv( CLOUD_SHADOWMAP_EXTENT_KM );
+
+    EXPECT_FLOAT_EQ( CloudShadowBorderFade( vec2( 0.5f, 0.5f ), fadeUv ), 1.0f );
+    EXPECT_FLOAT_EQ( CloudShadowBorderFade( vec2( 0.0f, 0.5f ), fadeUv ), 0.0f );
+    EXPECT_FLOAT_EQ( CloudShadowBorderFade( vec2( 1.0f, 0.5f ), fadeUv ), 0.0f );
+    EXPECT_FLOAT_EQ( CloudShadowBorderFade( vec2( 0.5f, -0.3f ), fadeUv ), 0.0f );
 
     // Monotone across the band, so the fade is a gradient rather than a second edge.
     float previous = -1.0f;
     for ( int i = 0; i <= 40; ++i )
     {
-        const float u    = CLOUD_SHADOWMAP_BORDER_FADE_UV * ( i / 40.0f );
-        const float fade = CloudShadowBorderFade( vec2( u, 0.5f ), CLOUD_SHADOWMAP_BORDER_FADE_UV );
+        const float u    = fadeUv * ( i / 40.0f );
+        const float fade = CloudShadowBorderFade( vec2( u, 0.5f ), fadeUv );
         EXPECT_GE( fade, previous );
         previous = fade;
     }
 
-    // The band is a real width on the ground rather than a rounding error: two per cent of the covered
-    // square is over a kilometre, which is ten texels.
-    const float bandKm = 2.0f * CLOUD_SHADOWMAP_EXTENT_KM * CLOUD_SHADOWMAP_BORDER_FADE_UV;
-    EXPECT_GT( bandKm, 10.0f * CloudShadowTexelKm( CLOUD_SHADOWMAP_EXTENT_KM, CLOUD_SHADOWMAP_RESOLUTION ) );
+    // AND THE FADE IS STILL 0.02 OF UV AT THE REFERENCE TIER, to the digit it was written as before it
+    // became a world width. This is the assertion that says the change of statement was not a change of
+    // picture: 1.2 km over a 60 km side is exactly the constant this used to be.
+    EXPECT_FLOAT_EQ( fadeUv, 0.02f );
 }
 
 // The map's clip space and the UV the producer stores through are one mapping, written once. A texel

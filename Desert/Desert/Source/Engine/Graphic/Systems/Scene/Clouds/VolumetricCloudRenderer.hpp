@@ -5,6 +5,7 @@
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudQuality.hpp>
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/Materials/Clouds/MaterialCloudComposite.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
@@ -40,7 +41,8 @@ namespace Desert::Graphic::System
      *                  not is reprojected from the previous frame's reconstruction through the guide's
      *                  cloud front distance, validated, and blended. Ping-ponged between two history
      *                  targets because it reads last frame's result while writing this frame's.
-     *   SM  SHADOW MAP compute, RGBA32F 512x512, marched down the SUN's direction rather than the eye's,
+     *   SM  SHADOW MAP compute, RGBA32F, 512x512 at the reference quality tier and scaled with it,
+     *                  marched down the SUN's direction rather than the eye's,
      *                  and issued EARLY — before the render graph, because the deferred lighting pass
      *                  reads it. Each texel holds (frontDepthKm, meanExtinctionPerKm, maxOpticalDepth),
      *                  the triple that reconstructs a correct transmittance for a receiver at any depth
@@ -89,8 +91,14 @@ namespace Desert::Graphic::System
          *                   deleted mid-session must take its clouds with it.
          * @param windOffset the drift the ECS accumulated, world units. Owned there because that is where
          *                   the timestep is.
+         * @param quality    the scene's cloud quality tier, refreshed from Core::SceneSettings each
+         *                   BeginScene like every other cost-versus-quality choice. It arrives HERE rather
+         *                   than being read from a global because this renderer is one of several live at
+         *                   once (Docs/RENDERER_FRAME_STATE.md) and a tier is per-view state like any
+         *                   other.
          */
-        void SetCloudSettings( bool present, const ECS::VolumetricCloudData& data, const glm::vec3& windOffset );
+        void SetCloudSettings( bool present, const ECS::VolumetricCloudData& data, const glm::vec3& windOffset,
+                               Core::CloudQuality quality );
 
         /**
          * @brief Stages S0 and S1. Must be called outside any render pass, after the scene depth is final.
@@ -149,12 +157,14 @@ namespace Desert::Graphic::System
         // Runtime::CloudTypeService and then Runtime::CloudNoiseService. Returns false having logged the
         // reason when there is not even a default to fall back on.
         bool EnsureNoiseVolume();
-        // Allocates the shadow map, once, the first frame the layer actually casts. Separate from
-        // EnsureTraceTargets because it is not a property of the view: its size is fixed
-        // (kCloudShadowMapResolution) and a viewport resize must not throw it away, where every one of the
-        // six trace targets IS the view's size and must. Returns false having logged the reason and
-        // latched the failure.
-        bool EnsureShadowMap();
+        // Allocates the shadow map the first frame the layer actually casts, and REALLOCATES it when the
+        // quality tier changes its size. Separate from EnsureTraceTargets because its size is not a
+        // property of the view: a viewport resize must not throw it away, where every one of the six trace
+        // targets IS the view's size and must. Returns false having logged the reason and latched the
+        // failure.
+        //
+        // @param resolution texels per side for THIS tier, from Graphic::CloudShadowResolutionForScale.
+        bool EnsureShadowMap( uint32_t resolution );
 
         /**
          * The types in this layer's four slots, packed down to a prefix, with the empty ones removed and
@@ -251,6 +261,13 @@ namespace Desert::Graphic::System
         ECS::VolumetricCloudData m_Data{};
         glm::vec3                m_WindOffset{ 0.0f };
         bool                     m_Present = false;
+
+        // This view's quality tier and the numbers it derives. The scale is held rather than re-derived at
+        // every use because EnsureShadowMap has to notice when it CHANGES — the map's size is a property
+        // of the tier, so switching tiers mid-session reallocates it, which is the one thing the old
+        // "allocated once and never again" comment on that function stopped being true about.
+        Core::CloudQuality m_Quality             = Core::CloudQuality::High;
+        float              m_ShadowMapScaleInUse = 0.0f;
 
         // The HALF-resolution grid, which is what the sub-pixel jitter and the reconstruction are both
         // expressed in. The trace's own extents are this rounded up again and are derived where needed

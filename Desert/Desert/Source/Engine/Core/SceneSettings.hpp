@@ -75,6 +75,44 @@ namespace Desert::Core
         RSM         = 2,
     };
 
+    // How much the volumetric cloud layer is allowed to spend on OCCLUSION — the shadow ray each lit
+    // sample traces toward the sun, and the map the layer casts onto the world under it. Those two are
+    // the tier's whole content, and the reason is measured rather than chosen: every other cost in the
+    // subsystem is pinned by a relation that a cheaper setting breaks. See Graphic::CloudQualityScale for
+    // what each tier changes, and Docs/Clouds/CALIBRATION.md section QT for what each one costs, what it
+    // degrades in the picture, and which candidate knobs were measured and refused.
+    //
+    // THE LADDER CHANGES ONE THING PER STEP, which is what makes a tier readable rather than a mood:
+    //
+    //  High   — the reference. Everything at the value the calibration converged on.
+    //  Medium — the cloud shadow map at HALF its linear footprint. The SKY IS UNCHANGED (the deferred
+    //           pass discards texels with no geometry, so the map is a ground-only quantity); what is
+    //           lost is cloud shadow on world geometry beyond ~15 km of the camera.
+    //  Low    — the above, plus the shadow ray capped at 16 samples. That one is visible in the sky:
+    //           the sunward highlights run about a third brighter than the converged answer, because a
+    //           coarse shadow ray under-reports how much cloud stands between a sample and the sun.
+    //
+    // AND WHY THERE IS NO SCENE MIGRATION FOR IT, which is a deliberate answer and not an omission. The
+    // default is High, and High reproduces the shipped constants to the digit
+    // (Desert/Tests/Engine/CloudShadow asserts exactly that), so a scene saved before this field existed
+    // has no key, deserializes to High, and renders the frame it always rendered. Compare
+    // SceneSettings::Tonemapper, which DID need one: there the new default meant something different from
+    // what old scenes were authored against, so the old value had to be written down. Here the absent key
+    // and the correct value are the same thing, and a migration would be ceremony over a no-op.
+    //
+    // WHY IT IS A SCENE PROPERTY. It is not, ideally — a quality tier is a property of the MACHINE, and
+    // the right home for it is a user-level scalability store this engine does not have. It lives here
+    // because every sibling cost-versus-quality choice already does (RenderingPath, GlobalIllumination,
+    // EnableSSAO, EnableSSR, AA, Anisotropy), and adding a second settings system for the ninth such knob
+    // is the duplication §2.1 of the contract forbids. When a machine-level store arrives, this field is
+    // one of nine that move into it together, not one that has to be un-invented first.
+    enum class CloudQuality : int
+    {
+        Low    = 0,
+        Medium = 1,
+        High   = 2,
+    };
+
     // The curve that maps HDR scene luminance onto the 0..1 the display can show. Not a compatibility
     // switch: both branches are authored features, and which one a scene is graded through is a property
     // of the scene, the way film stock was a property of the shoot.
@@ -116,6 +154,13 @@ namespace Desert::Core
         // turn off for maximum FPS.
         PROPERTY( DisplayName( "Enable SSAO" ), Category( "Rendering" ) )
         bool EnableSSAO = true;
+
+        // The volumetric cloud layer's cost ceiling. HIGH is the calibrated reference and is what every
+        // number in Docs/Clouds/CALIBRATION.md was measured at; the two cheaper tiers each name exactly
+        // one thing they give up. Measured on this machine, Clouds_Demo at 1280x766, debug:
+        // 17.80 / 14.06 / 10.34 ms of frame time.
+        PROPERTY( DisplayName( "Cloud Quality" ), Category( "Rendering" ) )
+        CloudQuality CloudQualityTier = CloudQuality::High;
 
         PROPERTY( DisplayName( "Global Illumination" ), Category( "Rendering" ) )
         GIMode GlobalIllumination = GIMode::ScreenSpace;
