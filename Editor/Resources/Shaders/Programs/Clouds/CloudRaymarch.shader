@@ -117,7 +117,7 @@ Shader "CloudRaymarch"
         // unused one, and this backend answers an invalid set by silently skipping the dispatch — the
         // clouds would vanish with nothing in the log. When the scene has no hero cloud the renderer
         // binds the engine's fallback volume and the instance count is zero, so nothing reads it.
-        Uniform(9) sampler3D u_CloudAuthoredVolume;
+        Uniform(9) sampler3D u_CloudAuthoredAtlas;
 
         // The seam's three callbacks. Declared here, next to the samplers, because Common/CloudField.glslh
         // must stay free of samplers to remain compilable as C++ by its tests.
@@ -126,7 +126,7 @@ Shader "CloudRaymarch"
         // textureLod AND NOT texture: a compute shader has no derivatives, so the implicit level of
         // detail is undefined. The volume has one level, so every implementation happens to pick it — but
         // "happens to" is the state three other sites in this engine were found in.
-        #define CLOUD_SAMPLE_AUTHORED(p) textureLod(u_CloudAuthoredVolume, (p), 0.0f)
+        #define CLOUD_SAMPLE_AUTHORED(p) textureLod(u_CloudAuthoredAtlas, (p), 0.0f)
 
         // Slot A's instance list. Included BEFORE the seam, because the seam's authored producer reads
         // the block this declares and GLSL has no forward declarations.

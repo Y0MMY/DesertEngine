@@ -11,12 +11,15 @@
 // a stall on every launch of every scene with a hero cloud in it, for an answer that never changes. The
 // same decision `.dcnv` records on kCloudNoiseDefaultVolumeName, for the same reason.
 //
-//   CloudVolumeBaker --out <path.dcmv> [--in <path.dcmv>]
+//   CloudVolumeBaker --out <path.dcmv> [--in <path.dcmv>] [--catalogue <genus>]
 //
 // With `--in` the recipe is read out of an existing volume's header and re-baked — which is what makes a
-// generator version bump a mechanical operation over a directory rather than a re-authoring. Without it
-// the shipped example recipe is baked, which is the file the demo scene names.
+// generator version bump a mechanical operation over a directory rather than a re-authoring. With
+// `--catalogue` one of the ten genera of Engine/Assets/CloudModellingCatalogue.hpp is baked, which is how
+// a shape phase A3 measured becomes a file without forty megabytes of them living in the repository.
+// Without either the shipped example recipe is baked, which is the file the demo scene names.
 
+#include <Engine/Assets/CloudModellingCatalogue.hpp>
 #include <Engine/Assets/CloudModellingVolume.hpp>
 #include <Engine/Assets/CloudModellingVolumeAsset.hpp>
 
@@ -31,10 +34,20 @@ namespace
 {
     int Usage()
     {
-        std::fprintf( stderr, "usage: CloudVolumeBaker --out <path.dcmv> [--in <path.dcmv>]\n"
-                              "  --out  where to write the baked volume\n"
-                              "  --in   re-bake the recipe stored in an existing volume instead of the\n"
-                              "         engine's shipped example\n" );
+        std::fprintf( stderr,
+                      "usage: CloudVolumeBaker --out <path.dcmv> [--in <path.dcmv>] [--catalogue <genus>]\n"
+                      "  --out        where to write the baked volume\n"
+                      "  --in         re-bake the recipe stored in an existing volume instead of the\n"
+                      "               engine's shipped example\n"
+                      "  --catalogue  bake one of the ten genera of the form catalogue instead:\n"
+                      "               " );
+        for ( uint32_t i = 0; i < Desert::Assets::kCloudModellingSpeciesCount; ++i )
+        {
+            std::fprintf( stderr, "%s%s",
+                          Desert::Assets::CloudModellingSpeciesKey(
+                               static_cast<Desert::Assets::CloudModellingSpecies>( i ) ),
+                          i + 1 == Desert::Assets::kCloudModellingSpeciesCount ? "\n" : " " );
+        }
         return 2;
     }
 } // namespace
@@ -43,6 +56,7 @@ int main( int argc, char** argv )
 {
     std::string outPath;
     std::string inPath;
+    std::string genus;
 
     for ( int i = 1; i < argc; ++i )
     {
@@ -51,6 +65,8 @@ int main( int argc, char** argv )
             outPath = argv[++i];
         else if ( arg == "--in" && i + 1 < argc )
             inPath = argv[++i];
+        else if ( arg == "--catalogue" && i + 1 < argc )
+            genus = argv[++i];
         else
             return Usage();
     }
@@ -58,7 +74,39 @@ int main( int argc, char** argv )
     if ( outPath.empty() )
         return Usage();
 
+    // REFUSED RATHER THAN RESOLVED IN SOME ORDER. Two sources for one recipe is a question the caller has
+    // to answer, and picking one silently is how a re-bake quietly becomes an overwrite with a different
+    // cloud in it.
+    if ( !inPath.empty() && !genus.empty() )
+    {
+        std::fprintf( stderr, "CloudVolumeBaker: --in and --catalogue are two different recipes; pick one\n" );
+        return 2;
+    }
+
     Desert::Assets::CloudModellingVolumeRecipe recipe = Desert::Assets::CloudModellingDefaultRecipe();
+
+    if ( !genus.empty() )
+    {
+        bool found = false;
+        for ( uint32_t i = 0; i < Desert::Assets::kCloudModellingSpeciesCount && !found; ++i )
+        {
+            const auto species = static_cast<Desert::Assets::CloudModellingSpecies>( i );
+            if ( genus == Desert::Assets::CloudModellingSpeciesKey( species ) )
+            {
+                recipe = Desert::Assets::CloudModellingCatalogueRecipe( species );
+                found  = true;
+                std::printf( "Baking catalogue genus '%s': %zu lumps, %.2f x %.2f x %.2f km.\n",
+                             Desert::Assets::CloudModellingSpeciesName( species ), recipe.Blobs.size(),
+                             recipe.SizeKm.x, recipe.SizeKm.y, recipe.SizeKm.z );
+            }
+        }
+
+        if ( !found )
+        {
+            std::fprintf( stderr, "CloudVolumeBaker: '%s' is not a genus of the catalogue\n", genus.c_str() );
+            return Usage();
+        }
+    }
 
     if ( !inPath.empty() )
     {

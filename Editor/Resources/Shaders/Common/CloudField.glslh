@@ -29,10 +29,10 @@
 //     CLOUD_SAMPLE_NOISE( vec3 texturePosition )   ->  vec4, the four channels of the noise volume
 //     CLOUD_SAMPLE_PROFILE( vec2 uv )              ->  vec4, the vertical profile table — ONE CHANNEL PER
 //                                                      SPECIES, in the order of the layer's slots
-//     CLOUD_SAMPLE_AUTHORED( vec3 uvw )            ->  vec4, the four channels of a sculpted body
+//     CLOUD_SAMPLE_AUTHORED( vec3 uvw )            ->  vec4, four channels of the sculpted-body ATLAS
 //
-// The third arrives on the same terms as the first two, and the instance list it is addressed with comes
-// from Common/CloudAuthored.glslh, which must have been included before this file.
+// The third arrives on the same terms as the first two, and the instance list it is addressed with — plus
+// the atlas's slab count — comes from Common/CloudAuthored.glslh, which must have been included first.
 //
 // The march defines them as `texture()` fetches; the unit tests define the first as a call into the same
 // CloudNoiseVolumeChannels that baked the volume and the second as a filtered read of the very table
@@ -543,6 +543,16 @@ CloudAuthoredResult CloudSampleAuthoredField( CloudFieldParams params, vec3 posi
 
     int count = CLOUD_AUTHORED_COUNT;
 
+    // THE ABSENT CASE COSTS WHAT IT COST AT A0 AND NOT ONE INSTRUCTION MORE: one integer load and one
+    // compare, per field sample, of which a frame takes on the order of 95 million. The slab count is
+    // read AFTER this line and not beside the count above, so a sky with no hero clouds in it does not
+    // load it — which is the difference between "zero when absent" holding and drifting by a load per
+    // sample every time this producer gains a global (ANALYSIS_APPROACH.md §4.4).
+    if ( count == 0 )
+        return result;
+
+    int slabCount = CLOUD_AUTHORED_SLAB_COUNT;
+
     for ( int i = 0; i < count; ++i )
     {
         CloudAuthoredInstance instance = CLOUD_AUTHORED_INSTANCE( i );
@@ -554,9 +564,13 @@ CloudAuthoredResult CloudSampleAuthoredField( CloudFieldParams params, vec3 posi
         if ( !CloudAuthoredInVolume( uvw ) )
             continue;
 
-        vec4 voxel = CLOUD_SAMPLE_AUTHORED( CloudAuthoredClampUvw( uvw ) );
+        // THE FETCH IS INTO THE ATLAS, and which body it lands in is the instance's own slab origin. That
+        // is the whole of what phase A2 added to this loop: one multiply-add on the depth coordinate, so
+        // eight DIFFERENT sculpted bodies cost the march exactly what one did.
+        vec4 voxel =
+             CLOUD_SAMPLE_AUTHORED( CloudAuthoredAtlasUvw( uvw, instance.BoundsMax.w, slabCount ) );
 
-        float strength = instance.BoundsMin.w;
+        float strength = CloudAuthoredStrength( instance );
 
         // THE CUTOUT UNIONS ACROSS INSTANCES AND IS NOT TIED TO THE WINNER. Two hero clouds standing in
         // each other's boxes each suppress the procedural field over their own body, and the procedural
@@ -568,7 +582,7 @@ CloudAuthoredResult CloudSampleAuthoredField( CloudFieldParams params, vec3 posi
         // sky around itself. The envelope is the body dilated by the bake's margin, so it is above zero
         // wherever the profile is and extends past it: a tunnel through the body narrower than that
         // margin is inside the envelope and shows sky, which is what a tunnel is for.
-        result.Cutout = max( result.Cutout, voxel.w * instance.BoundsMax.w );
+        result.Cutout = max( result.Cutout, voxel.w * CloudAuthoredCutout( instance ) );
 
         float profile = voxel.x * strength;
         if ( profile <= result.Field.Profile )
@@ -587,7 +601,7 @@ CloudAuthoredResult CloudSampleAuthoredField( CloudFieldParams params, vec3 posi
     return result;
 }
 
-// THE SEAM ITSELF. One producer that unions up to four species, one that unions up to four sculpted
+// THE SEAM ITSELF. One producer that unions up to four species, one that unions up to eight sculpted
 // bodies, and the max of the two — the same `max`, one level up, which is what both unions below it were
 // written to make obvious.
 //

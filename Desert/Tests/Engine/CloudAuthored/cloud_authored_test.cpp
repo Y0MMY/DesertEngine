@@ -26,6 +26,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <bit>
+#include <cstring>
 #include <numeric>
 #include <random>
 #include <string>
@@ -46,7 +48,8 @@ namespace
     /// packer.
     Graphic::CloudAuthoredInstanceGpu MakeInstance( glm::vec3 centreFieldKm, float scale = 1.0f,
                                                     float yawRadians = 0.0f, float strength = 1.0f,
-                                                    bool cutout = false )
+                                                    bool cutout = false, uint32_t slot = 0u,
+                                                    uint32_t slabCount = 1u )
     {
         Desert::ECS::HeroCloudData data;
         data.Strength                = strength;
@@ -69,7 +72,35 @@ namespace
         transform[3] = glm::vec4( worldCm, 1.0f );
 
         const auto packed =
-             Graphic::PackCloudAuthoredInstance( transform, Body().Recipe.SizeKm, kLayerBottomKm, data );
+             Graphic::PackCloudAuthoredInstance( transform, Body().Recipe.SizeKm, kLayerBottomKm, data,
+                                                 Graphic::CloudAuthoredAtlasSlabBaseW( slot, slabCount ) );
+        EXPECT_TRUE( packed.Valid );
+        return packed.Instance;
+    }
+
+    /// An instance of a CATALOGUE body, which is what the atlas tests need: the shipped example alone
+    /// cannot tell "read slab 1" from "read slab 0", because both slabs would hold the same cloud.
+    Graphic::CloudAuthoredInstanceGpu MakeCatalogueInstance( Assets::CloudModellingSpecies species,
+                                                             glm::vec3 centreFieldKm, float scale, uint32_t slot,
+                                                             uint32_t slabCount )
+    {
+        Desert::ECS::HeroCloudData data;
+        data.Strength                = 1.0f;
+        data.SuppressProceduralField = false;
+
+        const glm::vec3 worldCm{ centreFieldKm.x * Graphic::kCloudWorldUnitsPerKm,
+                                 ( centreFieldKm.y + kLayerBottomKm ) * Graphic::kCloudWorldUnitsPerKm,
+                                 centreFieldKm.z * Graphic::kCloudWorldUnitsPerKm };
+
+        glm::mat4 transform( 1.0f );
+        transform[0] = glm::vec4( scale, 0.0f, 0.0f, 0.0f );
+        transform[1] = glm::vec4( 0.0f, scale, 0.0f, 0.0f );
+        transform[2] = glm::vec4( 0.0f, 0.0f, scale, 0.0f );
+        transform[3] = glm::vec4( worldCm, 1.0f );
+
+        const auto packed = Graphic::PackCloudAuthoredInstance(
+             transform, Assets::CloudModellingCatalogueRecipe( species ).SizeKm, kLayerBottomKm, data,
+             Graphic::CloudAuthoredAtlasSlabBaseW( slot, slabCount ) );
         EXPECT_TRUE( packed.Valid );
         return packed.Instance;
     }
@@ -125,8 +156,8 @@ namespace
                 if ( !CloudAuthoredInVolume( CloudAuthoredLocalUvw( instance, point ) ) )
                     continue;
 
-                const vec4 voxel =
-                     CLOUD_SAMPLE_AUTHORED( CloudAuthoredClampUvw( CloudAuthoredLocalUvw( instance, point ) ) );
+                const vec4 voxel = CLOUD_SAMPLE_AUTHORED( CloudAuthoredAtlasUvw(
+                     CloudAuthoredLocalUvw( instance, point ), instance.BoundsMax.w, CLOUD_AUTHORED_SLAB_COUNT ) );
 
                 if ( voxel.w < 0.98f || voxel.x <= 0.0f || voxel.x > 0.35f )
                     continue;
@@ -453,7 +484,7 @@ TEST( CloudAuthored, VolumeAndItsReadingAgree )
                                      ( static_cast<float>( z ) + 0.5f ) /
                                           static_cast<float>( Assets::kCloudModellingVolumeDepth ) );
 
-                const vec4   read  = CLOUD_SAMPLE_AUTHORED( CloudAuthoredClampUvw( uvw ) );
+                const vec4   read  = CLOUD_SAMPLE_AUTHORED( CloudAuthoredAtlasUvw( uvw, 0.0f, 1 ) );
                 const size_t index = VoxelIndex( x, y, z );
 
                 ASSERT_NEAR( read.x, static_cast<float>( body.Voxels[index + 0] ) / 255.0f, 1e-5f )
@@ -486,7 +517,7 @@ TEST( CloudAuthored, TheGeneratorAndTheShaderAgreeAboutWhereNotOnlyAboutWhat )
     for ( size_t k = 0; k < recipe.Blobs.size(); ++k )
     {
         const glm::vec3 local = recipe.Blobs[k].CentreKm / recipe.SizeKm + glm::vec3( 0.5f );
-        const vec4      voxel = CLOUD_SAMPLE_AUTHORED( CloudAuthoredClampUvw( local ) );
+        const vec4      voxel = CLOUD_SAMPLE_AUTHORED( CloudAuthoredAtlasUvw( local, 0.0f, 1 ) );
 
         EXPECT_GT( voxel.x, 0.0f ) << "lump " << k << " has no body at its own centre";
         EXPECT_GT( voxel.w, 0.0f ) << "lump " << k << " is not inside its own envelope";
@@ -573,7 +604,7 @@ TEST( CloudAuthored, TheBoundaryOfTheVolumeIsEmptyAndReadsAsItself )
                                      ( static_cast<float>( z ) + 0.5f ) /
                                           static_cast<float>( Assets::kCloudModellingVolumeDepth ) );
 
-                const vec4   read  = CLOUD_SAMPLE_AUTHORED( CloudAuthoredClampUvw( uvw ) );
+                const vec4   read  = CLOUD_SAMPLE_AUTHORED( CloudAuthoredAtlasUvw( uvw, 0.0f, 1 ) );
                 const size_t index = VoxelIndex( x, y, z );
 
                 EXPECT_NEAR( read.x, static_cast<float>( body.Voxels[index + 0] ) / 255.0f, 1e-5f )
@@ -712,8 +743,8 @@ TEST( CloudAuthored, ADegenerateTransformIsRefusedRatherThanInverted )
     glm::mat4 flattened( 1.0f );
     flattened[1] = glm::vec4( 0.0f ); // scale 0 on Y
 
-    const auto packed =
-         Graphic::PackCloudAuthoredInstance( flattened, Body().Recipe.SizeKm, kLayerBottomKm, data );
+    const auto packed = Graphic::PackCloudAuthoredInstance( flattened, Body().Recipe.SizeKm, kLayerBottomKm, data,
+                                                            Graphic::CloudAuthoredAtlasSlabBaseW( 0u, 1u ) );
     EXPECT_FALSE( packed.Valid );
 }
 
@@ -834,7 +865,8 @@ TEST( CloudAuthored, TheAuthoredWinnerTakesAllItsOwnMaterialNumbers )
     // The density is the LAYER's, the instance's factor and the volume's own per-voxel scale, in that
     // order — the same three-level composition the procedural producer performs.
     const CloudAuthoredInstance instance = CloudAuthoredInstanceAt( 0 );
-    const vec4 voxel = CLOUD_SAMPLE_AUTHORED( CloudAuthoredClampUvw( CloudAuthoredLocalUvw( instance, centre ) ) );
+    const vec4                  voxel    = CLOUD_SAMPLE_AUTHORED( CloudAuthoredAtlasUvw(
+         CloudAuthoredLocalUvw( instance, centre ), instance.BoundsMax.w, CLOUD_AUTHORED_SLAB_COUNT ) );
     EXPECT_FLOAT_EQ( sample.DensityScale, params.DensityScale * 0.5f * voxel.z );
 }
 
@@ -994,8 +1026,413 @@ TEST( CloudAuthored, FitsLayerIsTheRelationBetweenTheBodyAndTheShell )
     EXPECT_FALSE( Graphic::CloudAuthoredInstanceFitsLayer( high, kLayerThicknessKm ) );
 }
 
+// ======================================================================================================
+// PHASE A2 — SEVERAL BODIES IN ONE SKY: the atlas, its addressing, and what keeps two clouds apart
+// ======================================================================================================
+
+TEST( CloudAtlas, TheAtlasIsTheBodiesConcatenatedAndNothingElse )
+{
+    // WHY THE DEPTH AXIS WAS CHOSEN, as an assertion rather than as a comment. The volume's layout has x
+    // fastest and z slowest, so stacking on z makes the atlas a CONCATENATION — which is what lets the
+    // assembler be a run of memcpy and lets this test state the whole result in one comparison. Stacking
+    // on y would be a 1 024-piece interleave for an identical picture, and this test is where that
+    // decision stops being a claim.
+    const std::vector<unsigned char>& first  = CatalogueBody( Assets::CloudModellingSpecies::Cumulonimbus );
+    const std::vector<unsigned char>& second = CatalogueBody( Assets::CloudModellingSpecies::Freeform );
+
+    const auto assembled = Assets::AssembleCloudModellingAtlas( { &first, &second } );
+    ASSERT_TRUE( assembled ) << assembled.GetError();
+
+    std::vector<unsigned char> expected;
+    expected.insert( expected.end(), first.begin(), first.end() );
+    expected.insert( expected.end(), second.begin(), second.end() );
+
+    EXPECT_EQ( assembled.GetValue(), expected );
+    EXPECT_EQ( assembled.GetValue().size(), 2u * Assets::kCloudModellingVoxelBytes );
+}
+
+TEST( CloudAtlas, AnEmptyListAndAWrongSizedBodyAreRefusedRatherThanPacked )
+{
+    // AN ATLAS OF NOTHING IS NOT AN EMPTY ATLAS. A volume of zero depth is not a thing a device will
+    // create, and the caller's answer to "no hero clouds" is the FALLBACK image — the rake this
+    // subsystem has already stood on, where an invalid descriptor set makes the compute dispatch vanish
+    // with nothing in the log. So the assembler refuses and says so.
+    const auto empty = Assets::AssembleCloudModellingAtlas( {} );
+    EXPECT_FALSE( empty );
+
+    const std::vector<unsigned char> truncated( 16u, 0u );
+    const auto                       wrong = Assets::AssembleCloudModellingAtlas( { &truncated } );
+    EXPECT_FALSE( wrong );
+    EXPECT_NE( wrong.GetError().find( "16" ), std::string::npos ) << wrong.GetError();
+
+    const std::vector<unsigned char>* nothing = nullptr;
+    EXPECT_FALSE( Assets::AssembleCloudModellingAtlas( { nothing } ) );
+}
+
+TEST( CloudAtlas, TheShaderAndTheEngineAgreeOnWhereEverySlabBegins )
+{
+    // The two sides of the atlas's geometry: CloudAuthoredAtlasSlabBaseW in the dialect, which the march
+    // calls, and Graphic::CloudAuthoredAtlasSlabBaseW in C++, which the renderer packs with. A divergence
+    // here is a hero cloud reading a fraction of the wrong body — and NOT an error, because both numbers
+    // are legal coordinates.
+    for ( uint32_t count = 1u; count <= Graphic::kCloudModellingAtlasMaxSlabs; ++count )
+    {
+        for ( uint32_t slot = 0u; slot < count; ++slot )
+        {
+            EXPECT_FLOAT_EQ( CloudAuthoredAtlasSlabBaseW( static_cast<int>( slot ), static_cast<int>( count ) ),
+                             Graphic::CloudAuthoredAtlasSlabBaseW( slot, count ) )
+                 << "slot " << slot << " of " << count;
+        }
+    }
+}
+
+TEST( CloudAtlas, OneSlabIsBitForBitTheAddressingA0Shipped )
+{
+    // THE REGRESSION THE SIX-POINT PROTOCOL IS THE PICTURE OF. A scene with one hero cloud must render
+    // exactly the frame it rendered before the atlas existed, and the reason it does is arithmetic rather
+    // than luck: with one slab the base is 0 and the divisor is 1, and adding zero and dividing by one
+    // are both exact in IEEE754. Asserted on the BITS, not with a tolerance, because a tolerance is what
+    // a byte-identical claim cannot be built on.
+    const float halfU = 0.5f / static_cast<float>( Assets::kCloudModellingVolumeWidth );
+    const float halfV = 0.5f / static_cast<float>( Assets::kCloudModellingVolumeHeight );
+    const float halfW = 0.5f / static_cast<float>( Assets::kCloudModellingVolumeDepth );
+
+    for ( int i = 0; i <= 64; ++i )
+    {
+        const float     t = static_cast<float>( i ) / 64.0f;
+        const glm::vec3 uvw( t, 1.0f - t, ( t * 7.0f ) - std::floor( t * 7.0f ) );
+
+        const glm::vec3 mapped = CloudAuthoredAtlasUvw( uvw, 0.0f, 1 );
+
+        // A0's own clamp, written out here so the two can be compared rather than described.
+        const glm::vec3 a0( std::clamp( uvw.x, halfU, 1.0f - halfU ), std::clamp( uvw.y, halfV, 1.0f - halfV ),
+                            std::clamp( uvw.z, halfW, 1.0f - halfW ) );
+
+        EXPECT_EQ( std::bit_cast<uint32_t>( mapped.x ), std::bit_cast<uint32_t>( a0.x ) );
+        EXPECT_EQ( std::bit_cast<uint32_t>( mapped.y ), std::bit_cast<uint32_t>( a0.y ) );
+        EXPECT_EQ( std::bit_cast<uint32_t>( mapped.z ), std::bit_cast<uint32_t>( a0.z ) );
+    }
+}
+
+TEST( CloudAtlas, NoCoordinateOfOneSlabCanReachItsNeighbour )
+{
+    // THE DEFECT THIS FORBIDS, and it is the one an atlas is exposed to and a single volume is not: the
+    // trilinear filter takes TWO texels along the depth axis, and if the second of them belongs to the
+    // next body then a cumulonimbus grows a slice of somebody else's arch along its face. Every sampler
+    // in this engine is REPEAT, so there is no address mode to hide behind.
+    //
+    // Stated as the property rather than as a spot check: for EVERY coordinate the exact bounds test lets
+    // through, BOTH depth taps are texels of this instance's own slab.
+    for ( uint32_t count = 1u; count <= Graphic::kCloudModellingAtlasMaxSlabs; ++count )
+    {
+        const float atlasDepth = static_cast<float>( Assets::kCloudModellingVolumeDepth * count );
+
+        for ( uint32_t slot = 0u; slot < count; ++slot )
+        {
+            const float base = Graphic::CloudAuthoredAtlasSlabBaseW( slot, count );
+
+            for ( int i = 0; i <= 256; ++i )
+            {
+                const float     z = static_cast<float>( i ) / 256.0f;
+                const glm::vec3 mapped =
+                     CloudAuthoredAtlasUvw( glm::vec3( 0.5f, 0.5f, z ), base, static_cast<int>( count ) );
+
+                // The texels a trilinear fetch blends between, exactly as the hardware finds them.
+                const float coordinate = mapped.z * atlasDepth - 0.5f;
+                const int   lower      = static_cast<int>( std::floor( coordinate ) );
+                const float fraction   = coordinate - std::floor( coordinate );
+
+                const int firstOfSlab = static_cast<int>( slot * Assets::kCloudModellingVolumeDepth );
+                const int lastOfSlab  = firstOfSlab + static_cast<int>( Assets::kCloudModellingVolumeDepth ) - 1;
+
+                ASSERT_GE( lower, firstOfSlab ) << "slot " << slot << " of " << count << " at z " << z;
+                ASSERT_LE( lower, lastOfSlab ) << "slot " << slot << " of " << count << " at z " << z;
+
+                // THE SECOND TAP AND THE ONE PLACE THIS IS NOT EXACT. In real arithmetic the clamp puts
+                // z = 1 exactly on the slab's last texel centre, the filter's weight on the next texel is
+                // exactly zero, and the neighbour is unreachable. In FLOAT, dividing by a slab count that
+                // is not a power of two leaves the coordinate a few parts in a hundred thousand past that
+                // centre — measured at 3e-5 on slot 1 of 3 — so the hardware would blend that much of the
+                // NEXT BODY's outermost texel.
+                //
+                // It is harmless and the reason is the bake's, not the addressing's: Assets::
+                // GenerateCloudModellingVolume refuses a volume whose body touches its own boundary, so
+                // that texel is four zeroes and 3e-5 of nothing is nothing. `CloudAuthored.
+                // TheBoundaryOfTheVolumeIsEmptyAndReadsAsItself` is the assertion that keeps it that way.
+                //
+                // So what is asserted here is the honest version: either the second tap is inside the
+                // slab, or its WEIGHT is below a thousandth.
+                if ( fraction >= 1e-3f )
+                    ASSERT_LE( lower + 1, lastOfSlab ) << "slot " << slot << " of " << count << " at z " << z;
+            }
+        }
+    }
+}
+
+TEST( CloudAtlas, EachInstanceReadsItsOwnBodyAndReadingTheNeighboursIsVisible )
+{
+    // THE CLAIM PHASE A2 IS FOR: several hero clouds in one sky, each of them ITS OWN sculpted body.
+    //
+    // The two bodies are the cumulonimbus and the arch, chosen because they disagree everywhere — what
+    // this test needs from a second slab is that reading the wrong one CHANGES the answer, and two
+    // similar clouds would hide exactly that. The second half of the test proves the first half can see
+    // the defect it is written against, which is the house rule about a sabotage that changes nothing.
+    const auto storm = Assets::CloudModellingSpecies::Cumulonimbus;
+    const auto arch  = Assets::CloudModellingSpecies::Freeform;
+
+    const CloudFieldParams params = DefaultParams();
+
+    const glm::vec3 stormAt( -6.0f, 1.6f, 0.0f );
+    const glm::vec3 archAt( 6.0f, 1.0f, 0.0f );
+
+    std::vector<float> aloneStorm;
+    std::vector<float> aloneArch;
+
+    const auto sweep =
+         [&]( const Graphic::CloudAuthoredInstanceGpu& instance, const glm::vec3& centre, std::vector<float>& out )
+    {
+        out.clear();
+        for ( int i = -6; i <= 6; ++i )
+        {
+            for ( int k = -6; k <= 6; ++k )
+            {
+                const glm::vec3 p =
+                     centre + glm::vec3( static_cast<float>( i ) * 0.25f, 0.0f, static_cast<float>( k ) * 0.25f );
+                ClearInstanceList();
+                AddInstance( instance );
+                out.push_back( CloudSampleAuthoredField( params, p ).Field.Profile );
+            }
+        }
+    };
+
+    // What each body answers ON ITS OWN, one slab, which is A0's case and therefore the ground truth.
+    ClearInstances();
+    SetAtlas( { &CatalogueBody( storm ) } );
+    sweep( MakeCatalogueInstance( storm, stormAt, 1.0f, 0u, 1u ), stormAt, aloneStorm );
+
+    ClearInstances();
+    SetAtlas( { &CatalogueBody( arch ) } );
+    sweep( MakeCatalogueInstance( arch, archAt, 1.0f, 0u, 1u ), archAt, aloneArch );
+
+    // Both bodies are actually there, so the comparison below is not two rows of zeroes agreeing.
+    EXPECT_GT( *std::max_element( aloneStorm.begin(), aloneStorm.end() ), 0.2f );
+    EXPECT_GT( *std::max_element( aloneArch.begin(), aloneArch.end() ), 0.2f );
+
+    // ... and now BOTH of them, in one atlas, in one sky.
+    const std::vector<const std::vector<unsigned char>*> both{ &CatalogueBody( storm ), &CatalogueBody( arch ) };
+
+    const Graphic::CloudAuthoredInstanceGpu stormInstance = MakeCatalogueInstance( storm, stormAt, 1.0f, 0u, 2u );
+    const Graphic::CloudAuthoredInstanceGpu archInstance  = MakeCatalogueInstance( arch, archAt, 1.0f, 1u, 2u );
+
+    ClearInstances();
+    SetAtlas( both );
+
+    size_t index = 0;
+    for ( int i = -6; i <= 6; ++i )
+    {
+        for ( int k = -6; k <= 6; ++k )
+        {
+            const glm::vec3 offset( static_cast<float>( i ) * 0.25f, 0.0f, static_cast<float>( k ) * 0.25f );
+
+            ClearInstanceList();
+            AddInstance( stormInstance );
+            AddInstance( archInstance );
+
+            ASSERT_NEAR( CloudSampleAuthoredField( params, stormAt + offset ).Field.Profile, aloneStorm[index],
+                         1e-6f )
+                 << "the storm at " << i << ", " << k;
+            ASSERT_NEAR( CloudSampleAuthoredField( params, archAt + offset ).Field.Profile, aloneArch[index],
+                         1e-6f )
+                 << "the arch at " << i << ", " << k;
+            ++index;
+        }
+    }
+
+    // THE SABOTAGE, PERFORMED HERE RATHER THAN LEFT TO A REVIEWER: give the storm the arch's slab. If the
+    // assertions above could not see that, they would not be measuring the slab at all.
+    const Graphic::CloudAuthoredInstanceGpu swapped = MakeCatalogueInstance( storm, stormAt, 1.0f, 1u, 2u );
+
+    size_t moved = 0;
+    index        = 0;
+    SetAtlas( both );
+    for ( int i = -6; i <= 6; ++i )
+    {
+        for ( int k = -6; k <= 6; ++k )
+        {
+            const glm::vec3 offset( static_cast<float>( i ) * 0.25f, 0.0f, static_cast<float>( k ) * 0.25f );
+
+            ClearInstanceList();
+            AddInstance( swapped );
+
+            if ( std::abs( CloudSampleAuthoredField( params, stormAt + offset ).Field.Profile -
+                           aloneStorm[index] ) > 1e-4f )
+                ++moved;
+            ++index;
+        }
+    }
+
+    EXPECT_GT( moved, 20u ) << "reading the neighbouring slab changed almost nothing, so this test cannot "
+                               "see the defect it is written against";
+}
+
+TEST( CloudAtlas, TheUnionOverDifferentBodiesDoesNotDependOnTheOrder )
+{
+    // A0 asserted this over instances of ONE body, where the two orders read the same texels. Over an
+    // atlas the instances read DIFFERENT texels, so the property has to be re-established rather than
+    // inherited: max is still commutative, but only if each instance keeps its own slab when the list is
+    // permuted.
+    const auto storm = Assets::CloudModellingSpecies::Cumulonimbus;
+    const auto arch  = Assets::CloudModellingSpecies::Freeform;
+    const auto lens  = Assets::CloudModellingSpecies::Lenticular;
+
+    const std::vector<const std::vector<unsigned char>*> three{ &CatalogueBody( storm ), &CatalogueBody( arch ),
+                                                                &CatalogueBody( lens ) };
+
+    // Overlapping on purpose: three bodies that never meet would make this test true for the wrong reason.
+    const Graphic::CloudAuthoredInstanceGpu instances[3] = {
+         MakeCatalogueInstance( storm, glm::vec3( 0.0f, 1.6f, 0.0f ), 1.0f, 0u, 3u ),
+         MakeCatalogueInstance( arch, glm::vec3( 0.6f, 1.2f, 0.3f ), 1.0f, 1u, 3u ),
+         MakeCatalogueInstance( lens, glm::vec3( -0.4f, 1.4f, -0.2f ), 1.0f, 2u, 3u ),
+    };
+
+    const CloudFieldParams params = DefaultParams();
+
+    int order[3] = { 0, 1, 2 };
+
+    std::vector<float> reference;
+    size_t             nonZero = 0;
+
+    ClearInstances();
+    SetAtlas( three );
+
+    do
+    {
+        std::vector<float> readings;
+        for ( int i = -8; i <= 8; ++i )
+        {
+            for ( int k = -8; k <= 8; ++k )
+            {
+                const glm::vec3 p( static_cast<float>( i ) * 0.2f, 1.4f, static_cast<float>( k ) * 0.2f );
+
+                ClearInstanceList();
+                for ( int slot : order )
+                    AddInstance( instances[slot] );
+
+                const CloudAuthoredResult result = CloudSampleAuthoredField( params, p );
+                readings.push_back( result.Field.Profile );
+                readings.push_back( result.Field.DetailType );
+                readings.push_back( result.Cutout );
+            }
+        }
+
+        if ( reference.empty() )
+        {
+            reference = readings;
+            nonZero   = static_cast<size_t>(
+                 std::count_if( readings.begin(), readings.end(), []( float v ) { return v > 0.0f; } ) );
+        }
+        else
+        {
+            ASSERT_EQ( readings.size(), reference.size() );
+            for ( size_t i = 0; i < readings.size(); ++i )
+                ASSERT_FLOAT_EQ( readings[i], reference[i] ) << "reading " << i;
+        }
+    } while ( std::next_permutation( order, order + 3 ) );
+
+    EXPECT_GT( nonZero, 40u ) << "the sweep found almost nothing, so permuting it proves almost nothing";
+}
+
+TEST( CloudAtlas, TheSignedStrengthCarriesBothTheStrengthAndTheCutout )
+{
+    // The float A2 freed to hold the slab. Strength and cutout were two numbers where the second was
+    // suppress times the first; they are one signed number now, and this is the assertion that the two
+    // readers recover exactly what the packer meant.
+    for ( const bool suppress : { false, true } )
+    {
+        for ( const float strength : { 0.0f, 0.25f, 1.0f } )
+        {
+            const Graphic::CloudAuthoredInstanceGpu gpu =
+                 MakeInstance( glm::vec3( 0.0f, 1.5f, 0.0f ), 1.0f, 0.0f, strength, suppress );
+
+            CloudAuthoredInstance instance;
+            std::memcpy( &instance, &gpu, sizeof( instance ) );
+
+            EXPECT_FLOAT_EQ( CloudAuthoredStrength( instance ), strength ) << "suppress " << suppress;
+            EXPECT_FLOAT_EQ( CloudAuthoredCutout( instance ), suppress ? strength : 0.0f );
+        }
+    }
+}
+
+TEST( CloudAtlas, OnlyAnEmptyPayloadIsBindableAgainstTheFallback )
+{
+    // THE RELATION BETWEEN THE PAYLOAD AND THE IMAGE. An instance packed for a three-slab atlas and
+    // dispatched against a one-slab one reads a third of the wrong body — legally, silently, and looking
+    // like a sculpting mistake. Worst of all is the FALLBACK, one texel across, which is what gets bound
+    // when no atlas was built: against it the only coherent payload is an empty one.
+    Graphic::CloudAuthoredPayload payload;
+
+    EXPECT_TRUE( Graphic::CloudAuthoredPayloadIsBindable( payload, 0u ) );
+    EXPECT_FALSE( Graphic::CloudAuthoredPayloadIsBindable( payload, 1u ) );
+
+    // THE CASE THIS TEST DID NOT HAVE, and a sabotage found it: an instance list with the FALLBACK bound.
+    // Deleting the clause that forbids it left every assertion above green, because every one of them had
+    // a count of zero — the two conditions were never varied independently. It is the exact arrangement
+    // the subsystem's oldest rake produces: no atlas was built, the one-texel fallback goes in to keep the
+    // descriptor set valid, and an instance that still believes in a body reads it.
+    payload.Count        = 1;
+    payload.Instances[0] = MakeInstance( glm::vec3( 0.0f, 1.5f, 0.0f ), 1.0f, 0.0f, 1.0f, false, 0u, 1u );
+    EXPECT_FALSE( Graphic::CloudAuthoredPayloadIsBindable( payload, 0u ) );
+    payload = Graphic::CloudAuthoredPayload{};
+
+    payload.SlabCount    = 2;
+    payload.Count        = 2;
+    payload.Instances[0] = MakeInstance( glm::vec3( 0.0f, 1.5f, 0.0f ), 1.0f, 0.0f, 1.0f, false, 0u, 2u );
+    payload.Instances[1] = MakeInstance( glm::vec3( 4.0f, 1.5f, 0.0f ), 1.0f, 0.0f, 1.0f, false, 1u, 2u );
+
+    EXPECT_TRUE( Graphic::CloudAuthoredPayloadIsBindable( payload, 2u ) );
+    EXPECT_FALSE( Graphic::CloudAuthoredPayloadIsBindable( payload, 1u ) );
+    EXPECT_FALSE( Graphic::CloudAuthoredPayloadIsBindable( payload, 3u ) );
+
+    // An instance packed for a THREE-slab atlas among two-slab ones: the count agrees, the coordinate
+    // does not, and it is the coordinate that decides which cloud is drawn.
+    payload.Instances[1] = MakeInstance( glm::vec3( 4.0f, 1.5f, 0.0f ), 1.0f, 0.0f, 1.0f, false, 1u, 3u );
+    EXPECT_FALSE( Graphic::CloudAuthoredPayloadIsBindable( payload, 2u ) );
+
+    // ... and a count past the slots, which is the other way a payload can be incoherent.
+    payload.Instances[1] = MakeInstance( glm::vec3( 4.0f, 1.5f, 0.0f ), 1.0f, 0.0f, 1.0f, false, 1u, 2u );
+    payload.Count        = static_cast<int32_t>( Graphic::kCloudAuthoredSlots ) + 1;
+    EXPECT_FALSE( Graphic::CloudAuthoredPayloadIsBindable( payload, 2u ) );
+}
+
+TEST( CloudAtlas, EightBodiesFitTheBudgetAndNineDoNot )
+{
+    // THE NUMBER BEHIND CLOUD_AUTHORED_SLOTS, as arithmetic rather than as a comment. Decision D-9 gives
+    // the subsystem 64 MiB; A0 measured 20.67 MiB occupied at 1280x766, and the trace and history targets
+    // grow with the frame — 8.42 MiB of them at that size becomes 17.8 MiB at 1920x1080, so 9.4 MiB more.
+    constexpr double kBudgetMiB           = 64.0;
+    constexpr double kOccupiedMiB         = 20.67;
+    constexpr double kTargetGrowth1080MiB = 9.4;
+    constexpr double kBodyMiB             = 4.0;
+
+    const double free1080 = kBudgetMiB - kOccupiedMiB - kTargetGrowth1080MiB;
+
+    EXPECT_GE( free1080, kBodyMiB * Graphic::kCloudModellingAtlasMaxSlabs );
+    EXPECT_LT( free1080, kBodyMiB * ( Graphic::kCloudModellingAtlasMaxSlabs + 1u ) );
+
+    // ... and the body really is 4.00 MiB, measured rather than quoted.
+    EXPECT_EQ( static_cast<double>( Assets::kCloudModellingVoxelBytes ) / ( 1024.0 * 1024.0 ), kBodyMiB );
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
+
+    // THE ATLAS IS BOUND BEFORE ANY TEST RUNS, and it is the same rule the renderer works by: a sampler
+    // with no image behind it is not an unused descriptor, it is an invalid one. Here it is an empty
+    // vector and the fetch walks off the end of it, which is the C++ shape of exactly that defect —
+    // found by this suite crashing rather than failing, which is why it is set HERE and not inside the
+    // fetch, where an empty atlas would have been quietly papered over.
+    SetSingleBodyAtlas();
+
     return RUN_ALL_TESTS();
 }

@@ -4,6 +4,7 @@
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/CloudModellingCatalogue.hpp>
 #include <Engine/Assets/CloudModellingVolumeAsset.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -180,7 +181,39 @@ namespace Desert::Editor
 
         ImGui::BeginDisabled( m_BakeRunning );
 
-        if ( ImGui::DragFloat3( "Size (km)", &m_Recipe.SizeKm.x, 0.02f, 0.1f, 8.0f, "%.2f" ) )
+        // THE CATALOGUE, AS A STARTING POINT AND NOT AS A LIBRARY. The ten genera of
+        // Engine/Assets/CloudModellingCatalogue.hpp land in the lump list where they can be edited, which
+        // is the difference between shipping ten finished clouds and shipping ten shapes an artist begins
+        // from. Choosing one REPLACES the recipe, so it is behind a combo that commits on selection rather
+        // than a button that could be leant on.
+        if ( ImGui::BeginCombo( "Catalogue", "Load a genus..." ) )
+        {
+            for ( uint32_t i = 0; i < Assets::kCloudModellingSpeciesCount; ++i )
+            {
+                const auto species = static_cast<Assets::CloudModellingSpecies>( i );
+                if ( ImGui::Selectable( Assets::CloudModellingSpeciesName( species ) ) )
+                {
+                    m_Recipe     = Assets::CloudModellingCatalogueRecipe( species );
+                    m_Selected   = m_Recipe.Blobs.empty() ? -1 : 0;
+                    m_SourceName = Assets::CloudModellingSpeciesName( species );
+                    m_Status     = std::string( "Loaded the catalogue's " ) +
+                               Assets::CloudModellingSpeciesName( species ) + " — " +
+                               std::to_string( m_Recipe.Blobs.size() ) + " lumps. Bake & Save As... to keep it.";
+                    InvalidateSlice();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "The ten genera phase A3 measured the sculpting tool against: humilis, "
+                               "mediocris, congestus, cumulonimbus with an anvil, stratocumulus, stratus, "
+                               "altocumulus, cirrus, lenticular and a freeform arch. Loading one REPLACES "
+                               "everything in this panel." );
+
+        // 16 km and not 8: the catalogue's cirrus is 12 km across, because a fibrous streak is a long thin
+        // thing and 128 voxels of it at 8 km would be a rod rather than a sky. A slider whose range cannot
+        // reach a shape the engine ships is a slider that is wrong.
+        if ( ImGui::DragFloat3( "Size (km)", &m_Recipe.SizeKm.x, 0.02f, 0.1f, 16.0f, "%.2f" ) )
             InvalidateSlice();
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "The world box the body is sculpted in, before the entity's own scale. The "

@@ -197,7 +197,7 @@ namespace Desert::Tests::CloudFieldRef
         // SLOT A, DECLARED EMPTY — this suite drives producer P
         // ------------------------------------------------------------------------------------------
         //
-        // The seam calls both producers now, so the authored one's three callbacks have to exist for this
+        // The seam calls both producers now, so the authored one's four callbacks have to exist for this
         // file to compile at all. They are bound to an EMPTY list here, deliberately: what this suite
         // measures is the procedural field's own statistics — its quantiles, its coverage, its erosion —
         // and every one of them is a number about a sky with no hero cloud in it.
@@ -207,6 +207,7 @@ namespace Desert::Tests::CloudFieldRef
         // early-out had altered the procedural answer by so much as a quantisation step, these numbers
         // would have moved. Producer A has its own suite, Desert/Tests/Engine/CloudAuthored.
 #define CLOUD_AUTHORED_COUNT 0
+#define CLOUD_AUTHORED_SLAB_COUNT 0
 #define CLOUD_AUTHORED_INSTANCE( i ) CloudAuthoredNoInstance()
 #define CLOUD_SAMPLE_AUTHORED( uvw ) vec4( 0.0f, 0.0f, 0.0f, 0.0f )
 

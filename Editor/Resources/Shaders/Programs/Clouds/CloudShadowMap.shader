@@ -49,13 +49,13 @@ Shader "CloudShadowMap"
         // the reason the shadow map needs it at all is that a hero cloud is a cloud: it shades the ground
         // under it because it is the same field, not because anything was added to the deferred pass.
         // ALWAYS BOUND, fallback included, on the terms the two above are bound on.
-        Uniform(9) sampler3D u_CloudAuthoredVolume;
+        Uniform(9) sampler3D u_CloudAuthoredAtlas;
 
         // The seam's three callbacks, exactly as CloudRaymarch.shader declares them: Common/CloudField.glslh
         // must stay free of samplers to remain compilable as C++ by its tests.
         #define CLOUD_SAMPLE_NOISE(p) texture(u_CloudNoise, (p))
         #define CLOUD_SAMPLE_PROFILE(uv) texture(u_CloudProfile, (uv))
-        #define CLOUD_SAMPLE_AUTHORED(p) textureLod(u_CloudAuthoredVolume, (p), 0.0f)
+        #define CLOUD_SAMPLE_AUTHORED(p) textureLod(u_CloudAuthoredAtlas, (p), 0.0f)
 
         #define CLOUD_AUTHORED_BUFFER_BINDING 8
         #include <Common/CloudAuthored.glslh>

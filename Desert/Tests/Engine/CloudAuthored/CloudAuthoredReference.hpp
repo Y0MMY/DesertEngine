@@ -15,14 +15,16 @@
 // THE THREE CALLBACKS, and they are the same mechanism CloudFieldReference.hpp uses for the noise and
 // the profile table:
 //
-//     CLOUD_SAMPLE_AUTHORED( uvw )   -> a trilinear, REPEAT-wrapped read of the baked voxels
+//     CLOUD_SAMPLE_AUTHORED( uvw )   -> a trilinear, REPEAT-wrapped read of the baked ATLAS
 //     CLOUD_AUTHORED_COUNT           -> the instance list this test set up
+//     CLOUD_AUTHORED_SLAB_COUNT      -> how many bodies that atlas holds
 //     CLOUD_AUTHORED_INSTANCE( i )   -> one of them
 //
 // The instance list is a mutable global rather than a parameter because the macro's expansion has to be
 // an expression and the seam takes no argument for it — which is exactly the shape the storage block
 // has on the GPU, so the test drives the same code path with the same indirection.
 
+#include <Engine/Assets/CloudModellingCatalogue.hpp>
 #include <Engine/Assets/CloudModellingVolume.hpp>
 #include <Engine/Assets/CloudTypeData.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
@@ -34,6 +36,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <algorithm>
 #include <map>
 #include <vector>
 
@@ -175,6 +178,54 @@ namespace Desert::Tests::CloudAuthoredRef
             return body;
         }
 
+        /// A second and a third body, so this suite can drive the atlas with bodies that are DIFFERENT
+        /// and not merely repeated. Two of the catalogue's genera, chosen because the arch and the
+        /// cumulonimbus disagree everywhere: what a test wants from a second slab is that reading the
+        /// wrong one is visible, and two similar clouds would hide exactly that.
+        const std::vector<unsigned char>& CatalogueBody( Desert::Assets::CloudModellingSpecies species )
+        {
+            static std::map<uint32_t, std::vector<unsigned char>> baked;
+
+            const uint32_t key = static_cast<uint32_t>( species );
+            const auto     it  = baked.find( key );
+            if ( it != baked.end() )
+                return it->second;
+
+            auto voxels = Desert::Assets::GenerateCloudModellingVolume(
+                 Desert::Assets::CloudModellingCatalogueRecipe( species ) );
+            return baked.emplace( key, voxels ? voxels.ExtractValue() : std::vector<unsigned char>{} )
+                 .first->second;
+        }
+
+        // THE ATLAS THE SEAM READS, in the shape the device has it: one byte array holding N bodies end to
+        // end along the depth axis, assembled by the engine's own Assets::AssembleCloudModellingAtlas
+        // rather than by a copy written here — a test that re-implemented the packing would be a test of
+        // itself, which is the same rule the generator is driven by above.
+        std::vector<unsigned char> g_Atlas;
+        int                        g_AuthoredSlabCount = 0;
+
+        /// What g_Atlas was last built from, so that resetting to the ordinary one-body case between two
+        /// thousand probes does not re-assemble four megabytes two thousand times.
+        std::vector<const std::vector<unsigned char>*> g_AtlasSources;
+
+        void SetAtlas( const std::vector<const std::vector<unsigned char>*>& bodies )
+        {
+            if ( bodies == g_AtlasSources )
+                return;
+
+            const auto assembled = Desert::Assets::AssembleCloudModellingAtlas( bodies );
+            g_Atlas              = assembled ? assembled.GetValue() : std::vector<unsigned char>{};
+            g_AuthoredSlabCount  = assembled ? static_cast<int>( bodies.size() ) : 0;
+            g_AtlasSources       = assembled ? bodies : std::vector<const std::vector<unsigned char>*>{};
+        }
+
+        /// The ordinary case: one body, one slab — which is what A0 and A1 shipped and what the six-point
+        /// protocol renders.
+        void SetSingleBodyAtlas()
+        {
+            SetAtlas( { &Body().Voxels } );
+        }
+
         /**
          * A trilinear, REPEAT-wrapped fetch of the baked voxels — the filter and the address mode
          * VulkanImage3D creates for every volume this engine uploads.
@@ -186,11 +237,12 @@ namespace Desert::Tests::CloudAuthoredRef
          */
         vec4 CloudSampleAuthoredVolume( vec3 uvw )
         {
-            const Desert::Assets::CloudModellingVolumeData& body = Body();
+            const std::vector<unsigned char>& body = g_Atlas;
 
             constexpr int width  = static_cast<int>( Desert::Assets::kCloudModellingVolumeWidth );
             constexpr int height = static_cast<int>( Desert::Assets::kCloudModellingVolumeHeight );
-            constexpr int depth  = static_cast<int>( Desert::Assets::kCloudModellingVolumeDepth );
+            const int     depth  = static_cast<int>( Desert::Assets::kCloudModellingVolumeDepth ) *
+                              std::max( g_AuthoredSlabCount, 1 );
 
             const float x = uvw.x * static_cast<float>( width ) - 0.5f;
             const float y = uvw.y * static_cast<float>( height ) - 0.5f;
@@ -217,10 +269,10 @@ namespace Desert::Tests::CloudAuthoredRef
             {
                 const size_t base = ( ( static_cast<size_t>( iz ) * height + iy ) * width + ix ) *
                                     Desert::Assets::kCloudModellingBytesPerVoxel;
-                return vec4( static_cast<float>( body.Voxels[base + 0] ) / 255.0f,
-                             static_cast<float>( body.Voxels[base + 1] ) / 255.0f,
-                             static_cast<float>( body.Voxels[base + 2] ) / 255.0f,
-                             static_cast<float>( body.Voxels[base + 3] ) / 255.0f );
+                return vec4( static_cast<float>( body[base + 0] ) / 255.0f,
+                             static_cast<float>( body[base + 1] ) / 255.0f,
+                             static_cast<float>( body[base + 2] ) / 255.0f,
+                             static_cast<float>( body[base + 3] ) / 255.0f );
             };
 
             const auto lerp3 = []( const vec4& a, const vec4& b, float t ) { return a * ( 1.0f - t ) + b * t; };
@@ -241,6 +293,7 @@ namespace Desert::Tests::CloudAuthoredRef
         Desert::Graphic::CloudAuthoredInstanceGpu g_AuthoredInstances[Desert::Graphic::kCloudAuthoredSlots]{};
 
 #define CLOUD_AUTHORED_COUNT g_AuthoredCount
+#define CLOUD_AUTHORED_SLAB_COUNT g_AuthoredSlabCount
 #define CLOUD_AUTHORED_INSTANCE( i ) CloudAuthoredInstanceAt( i )
 
 #include <Common/CloudAuthored.glslh>
@@ -271,11 +324,24 @@ namespace Desert::Tests::CloudAuthoredRef
         // Setting the scene
         // ------------------------------------------------------------------------------------------
 
-        void ClearInstances()
+        /// Empties the instance list and NOTHING else. The atlas stays bound, which is what a sweep over
+        /// thousands of positions needs: re-assembling a three-body atlas per probe is twelve megabytes of
+        /// memcpy per probe, and a suite that took eight minutes to say something true is a suite nobody
+        /// runs.
+        void ClearInstanceList()
         {
             g_AuthoredCount = 0;
             for ( auto& instance : g_AuthoredInstances )
                 instance = Desert::Graphic::CloudAuthoredInstanceGpu{};
+        }
+
+        /// Empties the instance list AND puts the atlas back to the one-body case, because a test that
+        /// left three slabs bound would hand the next one a body it never asked for — and the whole point
+        /// of the slab index is that reading the wrong one is silent.
+        void ClearInstances()
+        {
+            ClearInstanceList();
+            SetSingleBodyAtlas();
         }
 
         void AddInstance( const Desert::Graphic::CloudAuthoredInstanceGpu& instance )

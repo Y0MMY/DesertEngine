@@ -247,7 +247,7 @@ namespace Desert::Assets
         //
         // NO DEFAULT IS NOMINATED, unlike the noise volumes, and the absence is the decision: an empty
         // hero-cloud slot means the artist has not chosen a body, and the right answer is no cloud rather
-        // than a cloud they did not put there. Runtime::CloudModellingService::Get says the same thing.
+        // than a cloud they did not put there. Runtime::CloudModellingService::HasBody says the same thing.
         ProcessAssetFiles<CloudModellingVolumeAsset>( Common::Constants::Path::CLOUD_VOLUME_PATH,
                                                       SUPPORTED_CLOUD_BODY_EXTENSIONS, m_AssetManager,
                                                       AssetPriority::Medium );
@@ -258,7 +258,7 @@ namespace Desert::Assets
             for ( const auto& [handle, bodyAsset] : manager->FindAllByType<Assets::CloudModellingVolumeAsset>() )
             {
                 if ( const auto result = service->Register( bodyAsset ); !result )
-                    LOG_ERROR( "[Clouds] Modelling volume '{}' could not be uploaded: {}",
+                    LOG_ERROR( "[Clouds] Modelling volume '{}' could not be registered: {}",
                                bodyAsset->GetMetadata().Filepath.string(), result.GetError() );
             }
         }

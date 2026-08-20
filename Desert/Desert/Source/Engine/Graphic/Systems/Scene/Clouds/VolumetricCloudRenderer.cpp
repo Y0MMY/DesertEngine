@@ -87,7 +87,7 @@ namespace Desert::Graphic::System
         // opposite sides of the render graph read it. Non-persistent, so the backend keeps one copy per
         // (frame x recording renderer slot) — the Docs/RENDERER_FRAME_STATE.md rule.
         //
-        // ALLOCATED UNCONDITIONALLY, 336 bytes each, and that is the one place this feature costs a scene
+        // ALLOCATED UNCONDITIONALLY, 656 bytes each, and that is the one place this feature costs a scene
         // that does not use it. A buffer created lazily would have to be created inside the dispatch path,
         // where a failure has nowhere to go but a silent skip — and the descriptor has to exist anyway,
         // because a declared storage block with no buffer is the same invalid descriptor set a missing
@@ -136,7 +136,7 @@ namespace Desert::Graphic::System
         m_ShadowAuthoredBuffer.reset();
         m_HeroClouds.clear();
         m_AuthoredPayload = CloudAuthoredPayload{};
-        m_AuthoredVolume  = nullptr;
+        m_AuthoredAtlas   = nullptr;
     }
 
     uint32_t VolumetricCloudRenderer::ResolveSpecies( CloudTypeShape ( &shapes )[kCloudSpeciesSlots],
@@ -495,8 +495,8 @@ namespace Desert::Graphic::System
 
         renderer.ComputeImageBeginRead( m_NoiseVolume );
         renderer.ComputeImageBeginRead( m_ProfileTable.get() );
-        if ( m_AuthoredVolume )
-            renderer.ComputeImageBeginRead( m_AuthoredVolume );
+        if ( m_AuthoredAtlas )
+            renderer.ComputeImageBeginRead( m_AuthoredAtlas );
         renderer.ComputeImageBeginWrite( m_ShadowMapImage.get() );
 
         m_ShadowMapPipeline->SetOutput( kCloudShadowOutputBinding, m_ShadowMapImage.get(), 0 );
@@ -506,9 +506,9 @@ namespace Desert::Graphic::System
         m_ShadowMapPipeline->SetStorageBuffer( kCloudShadowAuthoredBinding, m_ShadowAuthoredBuffer.get() );
         // ALWAYS bound, fallback included — see the note at the march's own binding of it.
         m_ShadowMapPipeline->SetInput(
-             kCloudShadowAuthoredVolumeBinding,
-             m_AuthoredVolume
-                  ? m_AuthoredVolume
+             kCloudShadowAuthoredAtlasBinding,
+             m_AuthoredAtlas
+                  ? m_AuthoredAtlas
                   : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
         m_ShadowMapPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
@@ -516,8 +516,8 @@ namespace Desert::Graphic::System
                                          GroupCount( resolution, kMarchWorkGroupSize ), 1 );
 
         renderer.ComputeImageEndWrite( m_ShadowMapImage.get() );
-        if ( m_AuthoredVolume )
-            renderer.ComputeImageEndRead( m_AuthoredVolume );
+        if ( m_AuthoredAtlas )
+            renderer.ComputeImageEndRead( m_AuthoredAtlas );
         renderer.ComputeImageEndRead( m_ProfileTable.get() );
         renderer.ComputeImageEndRead( m_NoiseVolume );
 
@@ -541,7 +541,7 @@ namespace Desert::Graphic::System
         if ( heroClouds.size() != m_HeroClouds.size() )
         {
             m_AuthoredFitWarned = false;
-            m_AuthoredMixWarned = false;
+            m_AuthoredCrowdWarned = false;
         }
 
         m_HeroClouds = heroClouds;
@@ -550,46 +550,78 @@ namespace Desert::Graphic::System
     void VolumetricCloudRenderer::BuildAuthoredPayload( const CloudGpuPayload& payload )
     {
         m_AuthoredPayload = CloudAuthoredPayload{};
-        m_AuthoredVolume  = nullptr;
+        m_AuthoredAtlas   = nullptr;
 
         if ( m_HeroClouds.empty() )
             return;
 
         auto* service = Runtime::ResourceRegistry::GetCloudModellingService();
 
-        Assets::AssetHandle bound = Assets::AssetHandle::Null();
+        // WHICH BODIES THIS FRAME NEEDS, before a single instance is packed. The atlas has to exist before
+        // an instance can say where in it to look, and TWO ENTITIES NAMING ONE `.dcmv` SHARE A SLAB —
+        // which is what makes a scene of forty copies of one sculpted body cost 4.00 MiB and not 160.
+        std::vector<Assets::AssetHandle> bodies;
+        bodies.reserve( kCloudModellingAtlasMaxSlabs );
 
         for ( const HeroCloudInstance& hero : m_HeroClouds )
         {
-            Image3D* volume = service->Get( hero.Data.Volume );
-            if ( !volume )
+            if ( !service->HasBody( hero.Data.Volume ) )
                 continue; // already logged by the service, with the handle in the message
 
-            if ( m_AuthoredVolume == nullptr )
+            if ( std::find( bodies.begin(), bodies.end(), hero.Data.Volume ) != bodies.end() )
+                continue;
+
+            if ( bodies.size() >= kCloudModellingAtlasMaxSlabs )
             {
-                m_AuthoredVolume = volume;
-                bound            = hero.Data.Volume;
-            }
-            else if ( hero.Data.Volume != bound )
-            {
-                // NOT a silent drop. The march has one sampler for the authored producer, so a second
-                // body cannot be read this frame — and drawing this entity with the FIRST body's shape
-                // would be the worse answer by far: a cloud in the artist's scene that is not the cloud
-                // they chose.
-                if ( !m_AuthoredMixWarned )
+                // NOT a silent drop, and the number that ran out is named: it is the ATLAS and not the
+                // instance list, so the fix is fewer DIFFERENT bodies rather than fewer entities.
+                if ( !m_AuthoredBodiesWarned )
                 {
-                    LOG_WARN( "[Clouds] Hero cloud '{}' names a different modelling volume from the one "
-                              "already bound this frame, and the march carries one body at a time; it is "
-                              "not drawn. Several instances of the SAME .dcmv are free — several different "
-                              "ones need the volume atlas.",
-                              hero.Name );
-                    m_AuthoredMixWarned = true;
+                    LOG_WARN( "[Clouds] Hero cloud '{}' names the {}th different modelling volume in this "
+                              "scene and the atlas holds {}; it is not drawn. Instances that SHARE a .dcmv "
+                              "are free — it is the number of DIFFERENT bodies that is capped, by the "
+                              "4.00 MiB each of them costs.",
+                              hero.Name, bodies.size() + 1, kCloudModellingAtlasMaxSlabs );
+                    m_AuthoredBodiesWarned = true;
                 }
                 continue;
             }
 
+            bodies.push_back( hero.Data.Volume );
+        }
+
+        if ( bodies.empty() )
+            return;
+
+        // A CANONICAL SLAB ORDER, so that the atlas is a function of WHICH bodies are live and not of the
+        // order the ECS happened to hand them over in. The service rebuilds when the list changes, and a
+        // list that reorders itself would rebuild — twelve megabytes of upload — on a frame where nothing
+        // about the sky moved.
+        //
+        // MEASURED RATHER THAN FEARED: without this sort the engine's own log line already appeared
+        // exactly ONCE in a 900-frame render, so EnTT's view order is stable in practice. Sorting makes
+        // it stable by construction, which is a cheaper guarantee than the observation — at most eight
+        // handles, once a frame.
+        std::sort( bodies.begin(), bodies.end() );
+
+        const Runtime::CloudModellingAtlasBinding atlas = service->EnsureAtlas( bodies );
+        if ( !atlas.Volume )
+            return; // already logged by the service
+
+        m_AuthoredAtlas             = atlas.Volume;
+        m_AuthoredPayload.SlabCount = static_cast<int32_t>( atlas.SlabCount );
+
+        for ( const HeroCloudInstance& hero : m_HeroClouds )
+        {
+            const auto slab = std::find( bodies.begin(), bodies.end(), hero.Data.Volume );
+            if ( slab == bodies.end() )
+                continue; // unregistered, or past the atlas — both already said above
+
+            const uint32_t slot = static_cast<uint32_t>( std::distance( bodies.begin(), slab ) );
+
             const CloudAuthoredPackResult packed = PackCloudAuthoredInstance(
-                 hero.WorldTransform, service->GetSizeKm( hero.Data.Volume ), payload.Layer.y, hero.Data );
+                 hero.WorldTransform, service->GetSizeKm( hero.Data.Volume ), payload.Layer.y, hero.Data,
+                 CloudAuthoredAtlasSlabBaseW( slot, atlas.SlabCount ) );
 
             if ( !packed.Valid )
             {
@@ -619,7 +651,31 @@ namespace Desert::Graphic::System
             ++m_AuthoredPayload.Count;
 
             if ( static_cast<uint32_t>( m_AuthoredPayload.Count ) >= kCloudAuthoredSlots )
+            {
+                // The OTHER limit, and it is worth telling them apart: this one is the march's, paid at
+                // every field sample by every instance, where the atlas's is memory.
+                if ( m_HeroClouds.size() > kCloudAuthoredSlots && !m_AuthoredCrowdWarned )
+                {
+                    LOG_WARN( "[Clouds] {} hero clouds are live and the march carries {}; the rest are not "
+                              "drawn. Each instance costs a bounds test at every sample of every view ray "
+                              "AND of every shadow ray, which is what the limit is for.",
+                              m_HeroClouds.size(), kCloudAuthoredSlots );
+                    m_AuthoredCrowdWarned = true;
+                }
                 break;
+            }
+        }
+
+        // THE RELATION BETWEEN THE PAYLOAD AND THE IMAGE, asserted where both are in hand. An instance
+        // packed for one atlas and dispatched against another reads a body at the wrong depth and draws a
+        // cloud nobody sculpted, silently — see Graphic::CloudAuthoredPayloadIsBindable.
+        if ( !CloudAuthoredPayloadIsBindable( m_AuthoredPayload, atlas.SlabCount ) )
+        {
+            LOG_ERROR( "[Clouds] The authored payload ({} instances over {} slabs) does not address the "
+                       "atlas that is about to be bound ({} slabs); no hero cloud is drawn this frame.",
+                       m_AuthoredPayload.Count, m_AuthoredPayload.SlabCount, atlas.SlabCount );
+            m_AuthoredPayload = CloudAuthoredPayload{};
+            m_AuthoredAtlas   = nullptr;
         }
     }
 
@@ -858,8 +914,8 @@ namespace Desert::Graphic::System
         renderer.ComputeImageBeginRead( depthImage );
         renderer.ComputeImageBeginRead( m_NoiseVolume );
         renderer.ComputeImageBeginRead( m_ProfileTable.get() );
-        if ( m_AuthoredVolume )
-            renderer.ComputeImageBeginRead( m_AuthoredVolume );
+        if ( m_AuthoredAtlas )
+            renderer.ComputeImageBeginRead( m_AuthoredAtlas );
         renderer.ComputeImageBeginWrite( m_TraceImage.get() );
         renderer.ComputeImageBeginWrite( m_TraceGuideImage.get() );
 
@@ -888,16 +944,16 @@ namespace Desert::Graphic::System
                   ? atmosphere.AerialPerspectiveVolume
                   : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
 
-        // Slot A's instance list and the sculpted body it addresses. The volume is ALWAYS bound, even
+        // Slot A's instance list and the atlas of sculpted bodies it addresses. The image is ALWAYS bound, even
         // when the count is zero and nothing will read it, on exactly the terms the two samplers above
         // are bound on: a declared sampler with no image is an invalid descriptor set, and this backend
         // answers an invalid set by skipping the dispatch — every cloud in the frame would disappear with
         // nothing in the log, which is a rake this subsystem has already stood on.
         m_MarchPipeline->SetStorageBuffer( kCloudAuthoredBinding, m_AuthoredBuffer.get() );
         m_MarchPipeline->SetInput(
-             kCloudAuthoredVolumeBinding,
-             m_AuthoredVolume
-                  ? m_AuthoredVolume
+             kCloudAuthoredAtlasBinding,
+             m_AuthoredAtlas
+                  ? m_AuthoredAtlas
                   : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
 
         m_MarchPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
@@ -910,8 +966,8 @@ namespace Desert::Graphic::System
 
         renderer.ComputeImageEndWrite( m_TraceGuideImage.get() );
         renderer.ComputeImageEndWrite( m_TraceImage.get() );
-        if ( m_AuthoredVolume )
-            renderer.ComputeImageEndRead( m_AuthoredVolume );
+        if ( m_AuthoredAtlas )
+            renderer.ComputeImageEndRead( m_AuthoredAtlas );
         renderer.ComputeImageEndRead( m_ProfileTable.get() );
         renderer.ComputeImageEndRead( m_NoiseVolume );
         renderer.ComputeImageEndRead( depthImage );
