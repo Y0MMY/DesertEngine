@@ -442,8 +442,13 @@ namespace Desert::Graphic
 
         p.Wind    = glm::vec4( windOffsetWorld / kCloudWorldUnitsPerKm, std::clamp( data.PhaseG, -0.9f, 0.9f ) );
         p.Sun     = glm::vec4( sunDirection, std::max( data.LightMarchDistance, 0.0f ) / kCloudWorldUnitsPerKm );
-        p.SunColour =
-             glm::vec4( sunIrradiance, static_cast<float>( std::clamp( data.LightMarchSamples, 1, 16 ) ) );
+        // The ceiling is ECS::kCloudLightMarchMaxSamples and NOT a literal, because this clamp, the
+        // slider's Range and the clamp inside CloudRaymarch.shader are three copies of one number. While
+        // all three were literals they could disagree, and the disagreement is silent: the slider offers
+        // a value, this line accepts it, and the shader throws it away.
+        p.SunColour = glm::vec4(
+             sunIrradiance,
+             static_cast<float>( std::clamp( data.LightMarchSamples, 1, ECS::kCloudLightMarchMaxSamples ) ) );
         p.Ambient      = glm::vec4( ambient, physical ? 1.0f : 0.0f );
         p.MultiScatter = glm::vec4( static_cast<float>( std::clamp( data.MultiScatterOctaves, 1, 3 ) ),
                                     std::clamp( data.MultiScatterContribution, 0.0f, 1.0f ),

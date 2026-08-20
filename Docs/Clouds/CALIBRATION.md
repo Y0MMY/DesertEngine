@@ -390,6 +390,9 @@ disagreement that belongs to the bloom pass.
 
 ### What the repair costs, and the number that must move with it
 
+*(The state described in this subsection is the state BEFORE the repair. It defaults to 32 with a
+ceiling of 64 today, and the three ceilings are now one constant — see OE-FIX below.)*
+
 `LightMarchSamples` defaults to 6 in `Engine/ECS/VolumetricCloudComponent.hpp` and is clamped to 1..16
 in `CloudPayload.hpp` and again in `CloudRaymarch.shader`; the quadrature is
 `CloudRaymarch.shader::CloudLightOpticalDepth`. UE's own numbers are 10 by default
@@ -400,6 +403,171 @@ in `CloudPayload.hpp` and again in `CloudRaymarch.shader`; the quadrature is
 on top of the error: at 64 samples it falls from 0.767 to 0.676, and the exposure that puts it back is
 0.22 x (2.87 / 2.46) = 0.257. Measured at 64 samples and 0.257: into the sun 0.938, away 0.716. These
 are two numbers obliged to agree and today they do not.
+
+## OE-FIX: the ray converged, the scenes re-exposed, the bright pass moved into the right space, 2026-08-20
+
+The section above found the mechanism and stopped. This one closes it. Everything below is
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, **1280x766, band `0 0 1280 552`** — and the
+LineJump rows use that band inset by two, `2 2 1278 552`. Two runs of the same command produced **0
+differing bytes** of 1 240 045 on this tree as well, so every difference reported here is the change.
+
+### The rendered convergence, which disagrees with the tau instrument above
+
+The knock-out table above measured `opticalDepth` at each pixel's FIRST cloud sample and concluded that
+"everything from ten samples up is on the converged plateau". **On the rendered frame it is not.** The
+p95 pixel of the sunward zenith is not anybody's first sample, and measured through the frame — bloom
+and lens flare switched off so the ACES shoulder does not flatten the scale — the plateau starts around
+thirty:
+
+| shadow samples | first segment | displayed p95 | **linear after exposure** | x converged |
+|---|---|---|---|---|
+| **6 — was shipped** | 417 m | 0.961 | **4.286** | 4.42x |
+| 10 — UE's `BaseShadowRaySampleCount` | 150 m | 0.918 | 2.274 | 2.35x |
+| 16 — the old clamp ceiling | 58.6 m | 0.849 | 1.294 | 1.34x |
+| 24 | 26.0 m | 0.813 | 1.048 | 1.08x |
+| **32 — now the default** | 14.6 m | 0.802 | **0.989** | 1.02x |
+| 48 | 6.5 m | 0.798 | 0.969 | 1.00x |
+| 64 — now the clamp ceiling | 3.7 m | 0.798 | 0.969 | 1.00x |
+| *implied by the UE reference's p95 0.800* | | *0.800* | *0.979* | *1.01x* |
+
+Read it in one line: **the converged sunward zenith lands on the UE reference's own p95 to one per
+cent, and sixteen — the ceiling the component used to carry — could not have got there, because it is
+still 34% too bright.** Ten, which is Unreal's default, is 2.35x on OUR quadrature; that is not a
+contradiction of Unreal, it is what the same count buys on a different sample placement, and it is why
+the number here was measured rather than copied.
+
+The AWAY azimuth converges by ten (0.657 against 0.653) and is what hid the whole defect: the error is
+a multiplier on `sunVisibility`, and the sunward dual lobe is ~16x the away one at the same pixels.
+
+The display scale is why this needed the linear column. Between six samples and thirty-two the frame
+moves 0.961 -> 0.802, which reads as 16% — in radiance it is 4.29 -> 0.99, a factor of **4.3**.
+
+### What it costs, measured, on a machine that was shared
+
+Frame-count slope, `(t900 - t300) / 600`, `--look 0,0.45,1` (cloud across the whole frame), **four
+passes with all four sample counts interleaved in one session, minimum of four, never the mean**:
+
+| samples | slope | vs 6 | delta |
+|---|---|---|---|
+| 6 | 6.95 ms/frame | 1.00x | — |
+| 16 | 9.20 ms/frame | 1.32x | +2.25 ms |
+| **32** | **12.98 ms/frame** | **1.87x** | **+6.03 ms** |
+| 64 | 20.28 ms/frame | 2.92x | +13.33 ms |
+
+**The spread: 0.3–0.8% run to run** on all eight (count, frame-count) pairs across the four passes, and
+taking the slope from the maxima instead of the minima moves it 1.5%. The machine is shared with other
+agents and one earlier programme's series drifted 40% with no code change; this window happened to be
+quiet, and the interleaving is what makes that checkable rather than hoped for.
+
+The cost is **linear in the sample count at 0.230 ms per sample** (0.225 / 0.232 / 0.230 measured over
+the three intervals), which is the shape to expect: the shadow ray is traced once at every view sample
+that finds material, so nothing amortises.
+
+**This is a debug build, and the ratio is a lower bound on the shipping one** — the 6.95 ms baseline
+carries CPU work that a release build shrinks and the cloud dispatch does not, so the cloud pass is a
+LARGER share of a release frame than of this one.
+
+**Read as the statement of the quality-tier task, which does not exist yet:** the table above is a price
+list. `LightMarchSamples` is the first knob a tier should reach for, it is linear, and the quality it
+buys is known to the per cent — 16 saves 3.8 ms and costs 34% of highlight radiance, 24 saves 1.9 ms and
+costs 8%. Nothing was hidden behind a tier here because there is no tier to hide it behind; the default
+is the value that makes the frame correct.
+
+### The bloom threshold: fixed, not tuned, and one authored number re-authored because of it
+
+`BloomDownsample.shader` and `LensFlareBrightPass.shader` both threshold the RAW HDR image, while
+`SceneComposite` applies `Exposure` afterwards to the sum of scene and both effects. So an authored
+threshold of 2.5 meant 2.5 in a scene at `Exposure 1.0` and **0.55** in one at 0.22 — one knob with two
+meanings, decided by an unrelated field, which is §2.3.1's disagreement exactly. At 0.55 of a normalised
+unit ordinary daylight sky is a bloom source, and that is what the previous section measured as worth
+0.035 of displayed p95 on the shipped frame and **0.120** once the shadow ray converged.
+
+Fixed in `SceneRenderer.cpp` by dividing both thresholds by the scene's exposure, so the comparison
+happens in the space the number was written in. **Neither authored number was retuned to make a frame
+look right** — but the fix then showed that 2.5 in the corrected space blooms *nothing at all* in
+`Clouds_Demo`, and a knob that moves nothing is what §2.3.1 forbids in the other direction. Measured, at
+the converged ray, sunward zenith:
+
+| `BloomThreshold`, normalised | displayed p95, sunward | displayed p95, away |
+|---|---|---|
+| 2.5 (as authored) — bloom entirely inert | 0.802 | 0.653 |
+| 2.0 | 0.805 | 0.653 |
+| 1.5 | 0.809 | 0.653 |
+| **1.0 — now the authored value** | **0.837** | **0.653** |
+
+**One is the principled value, not a tuned one:** in exposure-normalised units 1.0 is where ACES puts
+0.804 on the display, so "above one unit" is "brighter than white", which is what a bright pass is for.
+It restores the effect at *the same strength it used to have* — 0.035 of displayed p95, the number the
+previous section measured on the shipped frame — while removing the reason it was firing: the away
+column does not move at all, because ordinary blue sky no longer reaches the cutoff.
+
+**Auto-exposure is NOT fixed by this and is not pretended to be.** There the exposure is
+`key / adaptedLuminance`, evaluated in the composite from a 1x1 image the CPU never reads, so
+`SceneRenderer` has nothing to divide by and leaves the threshold in raw radiance. No repository scene
+enables auto-exposure. Closing it means giving the bloom pass the adapted-luminance image and doing the
+comparison on the GPU — one new descriptor on `BloomDownsample`, which `ShaderCacheKey` pins — and it is
+written here rather than left to be rediscovered.
+
+### The exposure, checked independently and agreeing with the previous measurement
+
+The section above derived 0.22 x (2.87 / 2.46) = **0.2567** from an instrumented linear composite on the
+old tree. Measured again here by a different route — displayed p95 of the away zenith with bloom and
+flare off, inverted through the shipped ACES fit evaluated on its own constants — the shadow ray takes
+the away axis from linear 0.628 to 0.525, a ratio of 1.1963, giving **0.2632**. The two disagree by
+2.5%, which is smaller than either claims, so the scenes ship at **0.26** between them.
+
+`Clouds_Demo` and `Clouds_TwoSpecies` are the two scenes that carry it. **Which scenes needed it was
+measured, not assumed:** every other repository scene was shot before and after, and
+`Sky_PhysicalShowcase`, `Fog_Showcase` and `CornellDemo` come back **byte-identical** — the threshold
+change is exactly inert at `Exposure 1.0` and the ray change cannot touch a scene with no cloud in it.
+`Clouds_Showcase` and `Clouds_Sunset` move by 0.001–0.002 of mean and were left alone: their
+directional light is 1 against a sky sun of 22, so they are still in the two-suns state section 2 above
+describes, and re-exposing them is scene authoring with no reference behind it.
+
+### The six points, before and after
+
+`LightMarchSamples` 6 -> 32, `Exposure` 0.22 -> 0.26, `BloomThreshold` 2.5 -> 1.0, all in one change.
+
+| frame | mean | p05 | p50 | p95 | contrast | sat |
+|---|---|---|---|---|---|---|
+| **UE reference** `UE_mid.png 377 169 2035 991` | 0.609 | 0.321 | 0.650 | 0.800 | 0.479 | 0.192 |
+| zenith `0,0.9,1` INTO the sun — before | 0.731 | 0.483 | 0.713 | **0.996** | 0.513 | **0.025** |
+| zenith into the sun — **after** | 0.601 | 0.503 | 0.550 | **0.887** | 0.384 | 0.050 |
+| zenith `0,0.9,-1` away — before | 0.503 | 0.281 | 0.490 | 0.747 | 0.467 | 0.128 |
+| zenith away — **after** | 0.528 | 0.297 | 0.534 | 0.696 | 0.400 | 0.128 |
+| mid `0,0.45,1` — before | 0.569 | 0.444 | 0.538 | 0.837 | 0.393 | 0.061 |
+| mid into the sun — **after** | 0.569 | 0.483 | 0.543 | 0.747 | 0.264 | 0.070 |
+| mid `0,0.45,-1` — before | 0.558 | 0.293 | 0.562 | 0.770 | 0.477 | 0.130 |
+| mid away — **after** | 0.556 | 0.313 | 0.574 | 0.723 | 0.410 | 0.136 |
+| horizon `0,0.12,1` — before | 0.672 | 0.483 | 0.672 | 0.852 | 0.369 | 0.047 |
+| horizon into the sun — **after** | 0.637 | 0.506 | 0.633 | 0.778 | 0.272 | 0.062 |
+| horizon `0,0.12,-1` — before | 0.629 | 0.463 | 0.629 | 0.775 | 0.311 | 0.064 |
+| horizon away — **after** | 0.621 | 0.506 | 0.621 | 0.739 | 0.233 | 0.072 |
+
+In linear scene radiance the sunward zenith p95 goes **16.81 -> 1.70, a factor of ten**, while the three
+away frames move only x0.81–0.85 — the asymmetry the defect had, removed along the axis it lived on.
+
+**And the frames say what the numbers cannot.** Before, the sunward zenith is a white wash across the
+whole upper half with no cloud structure left in it; after, the clouds have lit tops and shaded
+undersides, the sun is a small hard disc with a tight glow instead of a smear that ate a third of the
+screen, and blue sky is visible between the clouds again. The mid frame gains the same blue back
+(saturation 0.061 -> 0.070 sunward) because the veil over it was bloom firing on the sky, not haze.
+
+**One number moved the wrong way and is not hidden:** contrast on the away axis falls (zenith
+0.467 -> 0.400), and the reference's is 0.479, so the BEFORE frame was closer on that one figure. It was
+closer for the wrong reason — the shadow ray was inflating the cloud tops, and p95 fell further than p05
+when that stopped. Chasing the contrast back would mean restoring the error under another name, which is
+the mistake the T-ACES section above records this document existing to prevent.
+
+Frames: `Shots/OEFIX_after_{zenith,mid,horizon}_{sun,away}.png`, the two that carry the visual argument
+as `Shots/OEFIX_before_{zenith,mid}_sun.png`, and the no-cloud guard as
+`Shots/OEFIX_guard_nocloud_sky_identical.png` — which is byte-identical to the same frame taken before
+the change and is in the repository so that the claim can be re-checked rather than believed.
+
+LineJump over `2 2 1278 552`, after: rows max 0.0016–0.0072 on the four sky frames, against the 0.006
+norm and the 0.010 threshold — no banding introduced. The two horizon frames read 0.046–0.059 at row
+539 both before and after; that row is the ground/sky edge, which the band's bottom includes at this
+elevation, and it is geometry rather than a step in the sky.
 
 ## The instrument
 

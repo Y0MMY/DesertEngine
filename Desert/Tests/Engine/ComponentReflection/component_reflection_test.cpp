@@ -601,11 +601,22 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     // and the body shades flat. Docs/Clouds/CALIBRATION.md holds the frame it was found in; Unreal's
     // own ShadowTracingDistance is the same 15 km.
     //
-    // Six samples rather than four is not six times the cost of a longer ray either — they are placed
-    // on a squared distribution, so the first few still land in the metres nearest the sample and the
-    // extra length is covered by the tail.
+    // AND THE SAMPLE COUNT HAD TO MOVE WITH THE LENGTH, which is what the paragraph that used to stand
+    // here got wrong. It said a longer ray costs almost nothing because the squared distribution keeps
+    // the first samples near the shaded point. It does not: on a squared distribution the FIRST segment
+    // is the march length over the SQUARE of the count, so lengthening the ray from 500 m to 15 km at a
+    // fixed six samples coarsened the near field from 13.9 m to 417 m — by exactly the factor it
+    // lengthened the ray. Thirty-two is where the rendered sunward highlight stops moving; see
+    // Docs/Clouds/CALIBRATION.md section OE-FIX for the convergence table and the price.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "LightMarchDistance" ), 1500000.0f );
-    EXPECT_EQ( DefaultOf<int32_t>( cloud, "LightMarchSamples" ), 6 );
+    EXPECT_EQ( DefaultOf<int32_t>( cloud, "LightMarchSamples" ), 32 );
+    // The slider must be able to REACH the value that converges, and the old ceiling of sixteen could
+    // not — sixteen renders the sunward zenith 34% too bright in linear radiance. The top is the shared
+    // constant, so this assertion is about the relation and not about the number: if somebody lowers the
+    // ceiling below the default, the range test further down catches it too.
+    EXPECT_FLOAT_EQ( Find( cloud, "LightMarchSamples" )->Meta.RangeMax,
+                     static_cast<float>( Desert::ECS::kCloudLightMarchMaxSamples ) );
+    EXPECT_GE( Desert::ECS::kCloudLightMarchMaxSamples, DefaultOf<int32_t>( cloud, "LightMarchSamples" ) );
     // THREE, not one. A cloud lit by single scattering alone is physically grey; what makes a real one
     // white is light that has bounced inside it many times.
     EXPECT_EQ( DefaultOf<int32_t>( cloud, "MultiScatterOctaves" ), 3 );
