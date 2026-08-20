@@ -1515,22 +1515,72 @@ The bound therefore counts the SUM OF THE WEIGHTS and not the lumps. The two agr
 1 — which is A0's case, and is why a bound left counting lumps would have passed every test A0 wrote —
 and they part company exactly when the surface starts moving outward.
 
-### The six-point protocol: five of six byte for byte, and the repeat floor is zero
+### The six-point protocol: SIX of six byte for byte
 
-`Clouds_HeroCloud` through the protocol's six points, the pre-change binary against this branch's.
-Camera `0,200,0`, `--shot-frames 90`, 1280x766.
-
-**The repeat floor was measured, not assumed**: the same command run twice on the post-change binary
-gives identical FILES, and a cold shader cache gives the same file again. Every number below is exact.
+`Clouds_HeroCloud` through the protocol's six points, the A0 binary against this branch's. Camera
+`0,200,0`, `--shot-frames 90`, 1280x766.
 
 | point | file bytes differing | pixels changed | max delta |
 |---|---|---|---|
-| zenith away `0,0.9,-1` | 1 149 582 of 1 160 396 | **110 / 980 480 (0.011 %)** | **1/255** |
+| zenith away `0,0.9,-1` | **0** | 0 | 0 |
 | mid away `0,0.45,-1` | **0** | 0 | 0 |
 | horizon away `0,0.12,-1` | **0** | 0 | 0 |
 | zenith sunward `0,0.9,1` | **0** | 0 | 0 |
 | mid sunward `0,0.45,1` | **0** | 0 | 0 |
 | horizon sunward `0,0.12,1` | **0** | 0 | 0 |
 
-As in A0, a PNG file-byte count is only meaningful when it is ZERO — deflate is not a per-pixel
-encoding — so the pixel counts are decoded rather than inferred from file size.
+Six identical FILES, which is the strongest form the protocol has. A PNG file-byte count is only
+meaningful when it is zero — deflate is not a per-pixel encoding — so the pixel columns are decoded
+rather than inferred from file size.
+
+### THE FIRST RUN IN A FRESH WORKTREE IS NOT A BASELINE, and this is a correction to A0's method
+
+Getting that table took an investigation, and the finding is worth more than the table.
+
+The first baseline taken here — shot before a line of A1 was written — disagreed with this branch on
+**zenith away, and only there: 110 pixels of 980 480, each by one 8-bit level, scattered across the whole
+frame.** That is very nearly the shape A0 reported (199 pixels, one level, zenith away, five other points
+byte-identical), and A0 attributed it to `Common/CloudField.glslh` becoming a different FILE and its
+SPIR-V being recompiled with different floating-point scheduling.
+
+**That attribution is wrong, and A1 did not change a shader at all.** Four experiments, each ruling out
+one candidate:
+
+| experiment | result |
+|---|---|
+| same binary, same point, run twice | identical files — **the repeat floor is zero** |
+| same binary, shader cache deleted between runs | identical files — **not shader compilation** |
+| a `.dcmv` with the SAME voxels but a header declaring 1 lump instead of 8 and a 123 m blend radius instead of 50 m | identical file — **the recipe is inert at render time; only `SizeKm` is read** |
+| the new panel un-registered from `EditorLayer`, and separately an inert function added to an unrelated engine translation unit to move the binary's layout | identical files — **not the panel, not code layout** |
+
+Every input to the renderer was byte-identical and the frames still differed, so the last suspect was the
+baseline itself. **The A0 binary was rebuilt from `f130f2de`, with the v1 volume restored, and shot
+again**: it reproduces THIS BRANCH byte for byte and does NOT reproduce the original baseline PNG. Run
+twice more, it is stable.
+
+So the outlier was the baseline shot, and what was special about it is that it was **the first time the
+Editor had ever run in a freshly created worktree**. Whatever that first run initialises, it initialises
+differently from every run after it — and it is not the shader cache, because deleting that changes
+nothing.
+
+The practical rule, and it is cheap: **discard the first render in a new worktree, or take the baseline
+twice and keep the second.** A baseline that has not been shown to reproduce itself is not a baseline,
+and the cost of not knowing that here was four experiments chasing a change that had moved nothing.
+
+### Every test verified by breaking it — 14 of 14, and the three that did not break first time
+
+`Desert/Tests/Engine/CloudModellingRecipe` is 16 tests. Each claim was checked by sabotaging the thing it
+measures, rebuilding, and confirming the suite went red. **Three sabotages passed on the first attempt,
+and the A0 report's rule is that such a break is a hole in the suite rather than luck.** All three are
+worth recording, because two of them were the TEST's fault and one of them was the BREAK's:
+
+| sabotage | first result | what it actually meant |
+|---|---|---|
+| the canonical sort forgets the three fields this phase added | passed | **a real hole.** Dropping the new fields changes nothing semantic — only the order the sum accumulates in — so the only observable is rounding, and at the fixture's 50 m blend radius the terms decay so fast that the sum is dominated by its nearest one or two. Reordering a negligible tail cannot move a byte. Fixed with a fixture built for sensitivity: a 250 m blend radius so no term dominates, twelve mutually-equivalent lumps, and rotations with no shared symmetry (a regular 36-degree family leaves the lumps congruent under the very rotations that separate them, so their distances are exactly equal at a great many points and reordering exactly equal numbers changes nothing). It now moves 1–3 bytes of 4 194 304 across three shuffle seeds — the same order as A0's six — and all three seeds catch it. |
+| the decoder stops refusing a primitive from the future | passed | **a real hole, of a gentler kind.** `ValidateCloudModellingRecipe` refuses an unknown primitive from its switch's default and runs at the end of `Decode`, so the file was still rejected — by the other guard, with the other message. Defence in depth is right; a test that cannot tell which layer caught it is not. The assertion now names a string only the decoder produces. |
+| the progress callback is allowed to reach the arithmetic | passed | **the BREAK was wrong, not the test.** The sabotage skipped slab `z = 3`, which is empty air in that fixture, so it changed no voxel. Retargeted at `z = depth/2` it turns the suite red immediately. |
+
+The remaining eleven went red first time. The most informative is the last: making the box check ignore a
+lump's rotation reddens **five** tests at once, because a rotated capsule then reaches further than its
+reserved room and the fixture stops validating at all.
+

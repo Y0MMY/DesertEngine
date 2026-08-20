@@ -208,7 +208,12 @@ TEST( CloudModellingRecipe, AnUnknownPrimitiveIsRefusedByNumberRatherThanGuessed
 
     const auto decoded = Assets::DecodeCloudModellingVolume( encoded );
     ASSERT_FALSE( decoded );
-    EXPECT_NE( decoded.GetError().find( "primitive" ), std::string::npos ) << decoded.GetError();
+
+    // ASSERTED ON THE DECODER'S OWN MESSAGE, not merely on the word "primitive". `Validate` refuses an
+    // unknown primitive too, from its switch's default, and it runs at the end of `Decode` — so a test
+    // that only checked the file was rejected would stay green with the decoder's check deleted. Verified
+    // by breaking it: that is exactly what happened. Only the decoder names the three it knows.
+    EXPECT_NE( decoded.GetError().find( "this build knows Ellipsoid" ), std::string::npos ) << decoded.GetError();
 
     // And bit-rot in the same field is reported as bit-rot, because the checksum is checked before the
     // record is parsed. Two different faults, two different messages, neither wearing the other's name.
@@ -231,27 +236,57 @@ TEST( CloudModellingRecipe, TheJoinIsStillOrderIndependentWithPrimitivesRotation
     // lumps moved six bytes of four million until a canonical sort was put in front of the sum.
     //
     // This phase added three fields to a lump, and the sort's key had to grow with them. It is exactly the
-    // kind of change that quietly re-opens a closed defect: two lumps identical in A0's eight numbers but
-    // different in rotation would have compared EQUAL under the old key, and their order would then have
-    // been left to std::sort's internals. Asserted on a recipe where that case is real.
-    Assets::CloudModellingVolumeRecipe recipe = SculptedRecipe();
+    // kind of change that quietly re-opens a closed defect: lumps identical in A0's eight numbers but
+    // different in rotation compare EQUAL under the old key, and their order is then left to `std::sort`'s
+    // internals — which at this size is insertion sort, is stable, and so faithfully preserves whatever
+    // order the shuffle handed it.
+    //
+    // THE FIXTURE IS BUILT FOR SENSITIVITY, and this took two attempts to get right. Dropping the new
+    // fields from the key changes NOTHING SEMANTIC — the set of lumps is the same and only the order the
+    // sum is accumulated in moves — so the only observable is floating-point rounding, and how much of
+    // that survives quantisation to 8 bits depends entirely on the recipe.
+    //
+    // A first attempt reused the sculpted fixture's 50 m blend radius and did not bite: at 50 m the terms
+    // decay as `exp(-d/r)` so fast that the sum is dominated by its nearest one or two, and reordering a
+    // negligible tail cannot move a byte. **The sabotage passed, which made the test a hole rather than a
+    // guard.** The three numbers below are what fix it:
+    //
+    //   * A LARGE BLEND RADIUS (250 m), so every term is within an order of magnitude of every other and
+    //     the sum has no dominant member to hide the reordering behind.
+    //   * TWELVE mutually-equivalent lumps, so the shuffle has 12! orderings to draw from.
+    //   * ROTATIONS THAT SHARE NO SYMMETRY. A regular family — 36 degrees apart about one axis — leaves
+    //     the lumps congruent under the very rotations that separate them, so at a great many points
+    //     their distances are EXACTLY equal and reordering exactly equal numbers changes nothing. Three
+    //     coprime-ish rates about three axes has no such orbit.
+    Assets::CloudModellingVolumeRecipe recipe;
+    recipe.SizeKm           = glm::vec3( 4.0f, 3.0f, 4.0f );
+    recipe.BlendRadiusKm    = 0.25f;
+    recipe.ProfileDepthKm   = 0.18f;
+    recipe.EnvelopeMarginKm = 0.10f;
 
-    // Two lumps that A0's key could not have told apart: same centre, radii, detail and density; different
-    // rotation and weight.
-    recipe.Blobs.push_back( Assets::CloudModellingBlob{ .CentreKm     = glm::vec3( 0.10f, 0.0f, 0.10f ),
-                                                        .RadiiKm      = glm::vec3( 0.12f, 0.20f, 0.12f ),
-                                                        .RotationDeg  = glm::vec3( 0.0f, 0.0f, 40.0f ),
-                                                        .Primitive    = Assets::CloudModellingPrimitive::Capsule,
-                                                        .Weight       = 1.3f,
-                                                        .DetailType   = 0.5f,
-                                                        .DensityScale = 0.5f } );
-    recipe.Blobs.push_back( Assets::CloudModellingBlob{ .CentreKm     = glm::vec3( 0.10f, 0.0f, 0.10f ),
-                                                        .RadiiKm      = glm::vec3( 0.12f, 0.20f, 0.12f ),
-                                                        .RotationDeg  = glm::vec3( 0.0f, 0.0f, -40.0f ),
-                                                        .Primitive    = Assets::CloudModellingPrimitive::Capsule,
-                                                        .Weight       = 0.8f,
-                                                        .DetailType   = 0.5f,
-                                                        .DensityScale = 0.5f } );
+    for ( int i = 0; i < 12; ++i )
+    {
+        const float turn = static_cast<float>( i );
+
+        recipe.Blobs.push_back(
+             Assets::CloudModellingBlob{ .CentreKm     = glm::vec3( 0.10f, 0.0f, 0.10f ),
+                                         .RadiiKm      = glm::vec3( 0.12f, 0.20f, 0.12f ),
+                                         .RotationDeg  = glm::vec3( 13.7f * turn, 29.3f * turn, 47.1f * turn ),
+                                         .Primitive    = Assets::CloudModellingPrimitive::Capsule,
+                                         .Weight       = 0.8f + 0.05f * turn,
+                                         .DetailType   = 0.5f,
+                                         .DensityScale = 0.5f } );
+    }
+
+    // Two lumps the old key CAN separate, so the fixture is not degenerate: if the sort ever stopped
+    // working at all rather than merely losing the new fields, these would move too.
+    recipe.Blobs.push_back( Assets::CloudModellingBlob{ .CentreKm  = glm::vec3( -0.30f, 0.05f, 0.0f ),
+                                                        .RadiiKm   = glm::vec3( 0.22f, 0.22f, 0.22f ),
+                                                        .Primitive = Assets::CloudModellingPrimitive::Sphere } );
+    recipe.Blobs.push_back(
+         Assets::CloudModellingBlob{ .CentreKm  = glm::vec3( 0.34f, -0.04f, 0.06f ),
+                                     .RadiiKm   = glm::vec3( 0.19f, 0.26f, 0.21f ),
+                                     .Primitive = Assets::CloudModellingPrimitive::Ellipsoid } );
 
     auto reference = Assets::GenerateCloudModellingVolume( recipe );
     ASSERT_TRUE( reference ) << reference.GetError();
