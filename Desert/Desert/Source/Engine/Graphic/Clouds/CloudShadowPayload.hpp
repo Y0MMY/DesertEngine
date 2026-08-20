@@ -32,24 +32,63 @@ namespace Desert::Graphic
      * reads as a bias problem rather than as a constant.
      */
 
-    // Texels per side. Unreal's own default (`512 * CloudShadowMapResolutionScale`,
+    // Texels per side AT THE REFERENCE TIER. Unreal's own default (`512 * CloudShadowMapResolutionScale`,
     // VolumetricCloudRendering.cpp:429), and the number the extent is derived FROM rather than fitted to.
     inline constexpr uint32_t kCloudShadowMapResolution = 512u;
 
-    // Half the side of the world square the map covers, kilometres. Follows from the resolution and from
-    // the finest cloud chord the view march can find (0.125 km at the component's default 256 steps):
-    // 512 x 0.125 km = 64 km across, a radius of 32, rounded down to 30 so the texel sits just inside the
-    // chord at 0.1172 km. The derivation and its consequences are in CloudShadowMap.glslh.
+    // Half the side of the world square the map covers at the reference tier, kilometres. Follows from the
+    // resolution and from the finest cloud chord the view march can find (0.125 km at the component's
+    // default 256 steps): 512 x 0.125 km = 64 km across, a radius of 32, rounded down to 30 so the texel
+    // sits just inside the chord at 0.1172 km. The derivation and its consequences are in
+    // CloudShadowMap.glslh.
     inline constexpr float kCloudShadowExtentKm = 30.0f;
 
-    // The world grid the map's centre snaps to, kilometres. Unreal's
+    // The world grid the map's centre snaps to at the reference tier, kilometres. Unreal's
     // r.VolumetricCloud.ShadowMap.SnapLength, same twenty kilometres, and the whole reason the shadow does
     // not boil under a moving camera.
     inline constexpr float kCloudShadowSnapKm = 20.0f;
 
-    // The UV band at the border over which the shadow fades to fully lit, so the map's edge is a gradient
-    // rather than a straight line of light across a terrain.
-    inline constexpr float kCloudShadowBorderFadeUv = 0.02f;
+    // The WORLD width of the band at the border over which the shadow fades to fully lit, kilometres, so
+    // the map's edge is a gradient rather than a straight line of light across a terrain.
+    //
+    // KILOMETRES AND NOT UV, and the change is what makes the fade survive a quality tier. The number the
+    // shader wants is a UV width and the number that MEANS something is a world width: the fade has to be
+    // wide enough to read as a gradient and to span enough texels not to band, and both of those are world
+    // quantities. At the reference tier 1.2 km over a 60 km side IS the 0.02 this constant used to be
+    // written as, to the digit — so nothing about the shipped picture moves — but on a tier whose map
+    // covers half as much world, a fixed 0.02 would have halved the band to five texels and put a visible
+    // ring where a gradient belongs. Desert/Tests/Engine/CloudShadow asserts the band spans at least ten
+    // texels ON EVERY TIER, which is the assertion this expression exists to keep true.
+    inline constexpr float kCloudShadowBorderFadeKm = 1.2f;
+
+    /// The map's texels per side at a tier's scale. Floored at 64 so a scale small enough to round to
+    /// nothing still produces a dispatchable image rather than a zero-sized one.
+    inline uint32_t CloudShadowResolutionForScale( float scale )
+    {
+        const float scaled = static_cast<float>( kCloudShadowMapResolution ) * std::max( scale, 0.0f );
+        return std::max( 64u, static_cast<uint32_t>( scaled + 0.5f ) );
+    }
+
+    /// Half the side of the covered square at a tier's scale, kilometres.
+    inline float CloudShadowExtentKmForScale( float scale )
+    {
+        return kCloudShadowExtentKm * std::max( scale, 1e-3f );
+    }
+
+    /// The world grid the centre snaps to at a tier's scale, kilometres. It scales WITH the extent because
+    /// the coverage guaranteed around the camera is `extent - snap/2`; a snap left at its reference value
+    /// on a smaller map would eat that guarantee from the inside.
+    inline float CloudShadowSnapKmForScale( float scale )
+    {
+        return kCloudShadowSnapKm * std::max( scale, 1e-3f );
+    }
+
+    /// The border fade as the shader wants it — a UV width — derived from the world width above and the
+    /// map's actual side. One expression, so the two cannot drift.
+    inline float CloudShadowBorderFadeUv( float extentKm )
+    {
+        return kCloudShadowBorderFadeKm / std::max( 2.0f * extentKm, 1e-3f );
+    }
 
     // Samples a texel's ray takes with the sun high, and how much that count is allowed to grow as the sun
     // reaches the horizon and every ray's path through the shell lengthens. Unreal's
@@ -94,26 +133,46 @@ namespace Desert::Graphic
         // Samples this frame's rays take. Rises toward the horizon, where each ray has much further to
         // travel through the shell — Unreal's RaySampleHorizonMultiplier.
         float SampleCount = 0.0f;
+        // The UV width of the border fade — a property of THIS frame's map rather than a constant, since
+        // the quality tier scales the extent the fixed world width is a fraction of. It travels on the
+        // view for the same reason FarDepthKm does: the consumer is on the far side of the render graph
+        // and must be TOLD what it was handed rather than re-deriving it from a constant that no longer
+        // describes this frame.
+        //
+        // The resolution is NOT here, and the omission is deliberate: the producer already has it (it is
+        // what it dispatches over) and nothing downstream reads it, so a copy on the view would be a
+        // field that exists to look complete.
+        float BorderFadeUv = 0.0f;
     };
 
     /**
      * The producer's push constant: everything that changes with the sun and the camera rather than with
      * the weather.
      *
-     * Eighty bytes, inside the 128 Vulkan guarantees. The far depth is NOT here because the shader derives
-     * it from the same `CLOUD_SHADOWMAP_EXTENT_KM` it already compiles; the consumer is a different matter
-     * and is handed it explicitly (see CloudShadowUniforms).
+     * Ninety-six bytes, inside the 128 Vulkan guarantees.
+     *
+     * THE FAR DEPTH IS HERE NOW, and it used to be derived in the shader from the same
+     * `CLOUD_SHADOWMAP_EXTENT_KM` the shader compiles. That worked while the extent was one constant for
+     * every frame ever rendered; it stops working the moment a quality tier scales it, and the failure
+     * mode is the quiet kind — the producer would encode depths against a 120 km far plane while the
+     * projection it was handed spans 60, so every front depth in the map would be right by construction
+     * and wrong by a factor of two the moment it was read. The consumer was already handed this number
+     * explicitly (see CloudShadowUniforms) for exactly this reason; now both sides are.
      */
     struct CloudShadowPush
     {
         glm::mat4 MapToWorld;
         // xyz = the direction the light travels, normalized; w = how many samples this ray takes.
         glm::vec4 Trace;
+        // x = the kilometres the map's clip z spans. The remaining three are unwritten: a push constant is
+        // laid out in vec4s and this is the only scalar the producer still needs.
+        glm::vec4 Depth;
     };
 
     static_assert( offsetof( CloudShadowPush, MapToWorld ) == 0 );
     static_assert( offsetof( CloudShadowPush, Trace ) == 64 );
-    static_assert( sizeof( CloudShadowPush ) == 80 );
+    static_assert( offsetof( CloudShadowPush, Depth ) == 80 );
+    static_assert( sizeof( CloudShadowPush ) == 96 );
 
     /**
      * The consumer's uniform block — the CloudShadowUB of Programs/Deferred/DeferredLighting.shader,
@@ -254,6 +313,7 @@ namespace Desert::Graphic
         view.FarDepthKm     = farPlaneWorld / kCloudWorldUnitsPerKm;
         view.SampleCount    = CloudShadowSampleCount( glm::dot( planetUp, toSun ), kCloudShadowBaseSamples,
                                                       kCloudShadowHorizonMultiplier );
+        view.BorderFadeUv   = CloudShadowBorderFadeUv( extentKm );
         return view;
     }
 } // namespace Desert::Graphic

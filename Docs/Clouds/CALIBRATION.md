@@ -702,6 +702,187 @@ The scene is `Clouds_ShadowsOnGround.desce`, authored for this: `Clouds_Demo`'s 
 40 km so that several cloud cells fit in one frame. `Clouds_Demo`'s own floor is about 4 km across, which
 is one cloud shadow and cannot show the effect at all.
 
+## QT: the quality tiers — what each one costs, what each one gives up, and the four knobs that were refused, 2026-08-20
+
+The two tasks before this one each doubled a price and each said, in the same words, that its price list
+was the ENTRY to a tier decision rather than a tier: the shadow ray at 0.230 ms per sample (OE-FIX above)
+and the shadow map on the world at 133 µs per effective sample (CS above). This section spends those two
+price lists — and records that one of the two things they proposed spending them on **cannot be built**.
+
+**Everything below is `Clouds_Demo` at 1280x766, camera `0,200,0`, debug build, on a machine shared with
+other agents.** Slopes are `(t900 - t300) / 600` with every configuration interleaved in ONE session and
+the minimum taken over the passes. The ImageStat band is `0 0 1280 552` — the OE-FIX band — and pixel
+diffs are over the whole 1280x766 frame. The noise floor of the headless `--shot` path was
+**re-measured, not quoted**: the same command run twice at the reference tier gives **0 differing pixels
+of 980 480**, so every diff below is the change and nothing else.
+
+*(Sanity check, because it is cheap and it was worth having: all six azimuth/elevation points at the
+reference tier reproduce the OE-FIX table above to three decimals — sunward zenith p95 0.887, away 0.696,
+mid 0.747 / 0.723, horizon 0.778 / 0.739 — and LineJump reads `0.00160 @y 285`, the same figure the CS
+section recorded. This tree is the tree those numbers were taken on.)*
+
+### The finding that decided the shape of the tier: three of the brief's six candidates cannot move
+
+The brief listed six candidate knobs. Three are pinned, and the pinning is ONE relation seen from three
+sides. Each link was measured rather than assumed:
+
+1. **The march's SEARCH step is `32 km / MaxSteps`** — `CloudFinestResolvableChordKm` in
+   `Common/CloudGeometry.glslh` — which is **125 m** at the component's 256.
+2. **The shipped library clears that by 1.10x and no more.** Over all nine `.decloudtype` files,
+   Altocumulus and Cirrus both place a median chord of **137 m**. `Desert/Tests/Engine/CloudType` now
+   computes and prints the bound rather than leaving it to be rediscovered: **the library tolerates Max
+   Steps down to 233**, against the component's 256 — a margin of **9 %**.
+3. **So Max Steps cannot be a tier knob.** Not "should not": at 192 four of the nine shipped types fall
+   past Nyquist, at 128 five do, the worst (Altocumulus, Cirrus) at **0.55x**. Those types do not get
+   softer — they dither in and out with the ray's jitter, which is the definition of speckle. The knob
+   that cannot be used is worth **4.48 ms**, the second-largest saving in the subsystem. The frame agrees
+   with the arithmetic: Max Steps 128 moves **97.5 % of pixels at max 62/255**, a larger amplitude than
+   any knob that IS in the tier.
+4. **So the shadow map's texel cannot grow either**, because the map is required to resolve that same
+   125 m chord. 256² over the shipped 30 km radius is a **234 m** texel — 1.9x past it — and the only way
+   to legalise 234 m is to raise the chord by lowering Max Steps, which step 3 forbids.
+   **The `256² / 16-sample` tier the CS section sketched at "⅛, about 0.6 ms" is therefore not available
+   at all.** This is the one place the brief's own arithmetic and the repository's own tests disagree, and
+   the tests are right.
+5. **And the map's sample count cannot fall**, for the third face of it: 3.6 km of shipped congestus over
+   32 samples is 112 m against the same chord, so the floor is **28.8 samples**. Sixteen is 225 m. The CS
+   section said exactly this beside its own price; it is confirmed here and is now asserted per tier.
+
+**What the map's cost is bought back with instead: its FOOTPRINT.** Resolution, extent and snap scale by
+ONE number together, which leaves the texel at **117.2 m on every tier** — the relation does not move at
+all — and moves only the radius of world around the camera that receives cloud shadow. That is a limit the
+map already had and already stated; the tier moves it rather than inventing it.
+
+### The knob price list, measured
+
+Frame-count slope, `--look 0,0.45,1` (cloud across the whole frame), eight configurations interleaved in
+one session, three passes, **minimum of three**. Every row differs from the first by ONE authored field,
+so none of them needed a rebuild.
+
+| configuration | slope | vs default | what it does to the frame | verdict |
+|---|---|---|---|---|
+| **default** — 32 shadow samples, 3 octaves, 256 steps, stop 0.005, map on | **18.04 ms** | — | — | — |
+| shadow ray 24 samples | 15.92 ms | −2.12 ms | 8 % of converged highlight radiance | in the tier |
+| shadow ray 16 samples | 14.36 ms | **−3.68 ms** | 34 % of it; sunward zenith p95 0.887 → 0.927 | **in Low** |
+| shadow ray 8 samples | 12.47 ms | −5.56 ms | back past the defect OE-FIX removed | refused |
+| multiple-scattering octaves 3 → 1 | 17.72 ms | **−0.32 ms** | grey clouds | **refused** |
+| Max Steps 256 → 128 | 13.56 ms | −4.48 ms | 97.5 % of pixels, **max 62/255** | **refused — breaks the library** |
+| Stop Transmittance 0.005 → 0.05 | 15.21 ms | **−2.83 ms** | 90 % of pixels, **max 10/255** | **in Low** |
+| cloud shadow map off entirely | 12.97 ms | −5.07 ms | no shadow on the world at all | the map's whole price |
+
+**The spread: 0.3–1.3 % run to run on the four shadow-ray rows and on `stop05`, and 5–16 % on `mso1`,
+`steps128` and `noshadow`** — the wide rows were measured while a compile of my own was running on the
+same machine. That is exactly the contamination the minimum-of-N exists for, and it is named here rather
+than hidden. The shadow ray is **linear at 0.232 ms per sample** over the three intervals
+(0.230 / 0.236 / 0.236), reproducing OE-FIX's 0.230 to under one per cent on a different day.
+
+**Two refusals worth recording, because both are cheap to re-derive wrongly:**
+
+- **The multiple-scattering octaves are already free.** Three orders cost 0.32 ms more than one — under
+  two per cent, inside that row's own spread — while turning the clouds grey. The reason is structural
+  and is written above the loop in `CloudRaymarch.shader`: the octaves **re-use ONE shadow march**, so
+  the expensive part is paid once however many orders are summed. A knob that changes the picture and not
+  the cost is the wrong half of a tier.
+- **Shortening the shadow ray's DISTANCE saves nothing at all.** The cost is the sample COUNT; the
+  distance only decides how far apart those samples are. It is a way to make the clouds flat for free,
+  not fast.
+
+### The tiers
+
+`Core::CloudQuality` on `SceneSettings`, three enumerators, and each step down the ladder adds **exactly
+one** new degradation. The numbers come from `Graphic::CloudQualityScale`, a pure function of the
+enumerator, which is what `Desert/Tests/Engine/CloudShadow` drives to assert the relations **tier by
+tier** instead of on the constants that happen to be compiled in.
+
+| tier | shadow ray | shadow map | march stops at | slope | vs High |
+|---|---|---|---|---|---|
+| **High** (default) | authored, 32 | 512² over 30 km, snap 20 km | 0.005 | **17.99 ms** | 1.00x |
+| **Medium** | authored, 32 | **256² over 15 km, snap 10 km** | 0.005 | **14.24 ms** | **0.79x** |
+| **Low** | **capped at 16** | 256² over 15 km, snap 10 km | **0.05** | **8.61 ms** | **0.48x** |
+
+Four passes interleaved in one session, minimum of four; the spread was 0.3–2.7 % on five of the six
+(tier, frame-count) pairs and 7.6 % on `high@300`, which is why the slope is taken from the minima. The
+17.99 ms reference agrees with two other sessions on this tree (18.04 and 18.14), so **the tier costs
+nothing at High** — which is the first thing a tier has to prove.
+
+**The tier composes with the artist's numbers, it does not replace them** — `min()` on the sample count,
+`max()` on the stop threshold, both pointing at "cheaper". A scene authored at 16 samples renders at 16 on
+every tier, because asking for the cheap answer is an authored intention and not a budget a tier is
+entitled to overrule. `Desert/Tests/Engine/ComponentReflection` asserts both directions.
+
+### Tier x cost x what exactly got worse
+
+The third column is the point of the table, and it is filled with frames and numbers rather than words.
+
+**High → Medium, −3.76 ms (21 %).**
+
+| | measured |
+|---|---|
+| the sky | **Does not change.** Zenith and mid, sunward and away: **0 of 980 480 pixels**. The two horizon points move 553 and 547 pixels — 0.06 %, **max 1/255** — and that is the sliver of `Clouds_Demo`'s own 4 km checker floor at the bottom of the frame, not sky. The deferred pass discards texels with no geometry, so the map is a ground-only quantity, and this is the strongest available statement that the tier touched only what it claims. |
+| the sky's banding | LineJump on all four sky frames reads **exactly the same numbers as High**, to five decimals. |
+| the ground | **Cloud shadow stops at ~15 km instead of ~30 km.** 4.22 % of the frame, **max 26/255** — and a row-band split says exactly where: rows 40–221 (the far ground) carry the whole of it at max 26, while every band below row 221 reads **max 1**, which is dither. The change is where the theory puts it and nowhere else. |
+
+**Medium → Low, −5.63 ms (a further 40 %).**
+
+| | measured |
+|---|---|
+| the sunward sky | **Brightens, and only sunward.** Zenith into the sun p95 **0.887 → 0.927**, mid 0.747 → 0.755, horizon 0.778 → 0.782. The AWAY axis barely moves: zenith 0.696 → 0.699, mid 0.723 → 0.722, horizon 0.739 → 0.739. That asymmetry is the OE-FIX signature exactly — the error is a multiplier on sun visibility and the sunward lobe is ~16x the away one. Pixel diff against High: sunward zenith **98.8 %, max 66/255**; away zenith 79.6 %, **max 21**. |
+| what it looks like | On the frame the lit rim of the near cloud goes from a graded silver lining to a blown streak, and the body of the deck reads flatter. This is a difference a person sees, which is the test a tier has to pass in the other direction. |
+| the whole frame | The earlier stop adds an everywhere-but-tiny change of its own: 90 % of pixels at **max 10/255** when measured alone. |
+| the ground | 7.40 % at max 26 — the Medium change plus the brighter unshadowed ground. |
+| banding | LineJump 0.0027–0.0073 across the four sky frames, against High's 0.0016–0.0072 and the 0.010 threshold. No band introduced. |
+
+**ImageStat cannot see the Medium step at all, and that is the expected reading rather than a failure of
+the tier.** The three ground frames are identical on every percentile to three decimals
+(`mean 0.412 / p95 0.681 / contrast 0.450`) while the pixel diff finds 4.22 % of pixels moved by up to
+26/255. It is the same lesson the CS section recorded about 16 vs 32 map samples: a shadow that MOVES
+takes as many pixels dark as it gives back, so the distribution does not notice. The percentile is the
+wrong instrument for a shadow boundary; the diff and the frame are the right ones.
+
+### The temporal stage, which no still frame can speak for
+
+The tier does not touch the trace or reconstruction resolution — those are the checkerboard's own 2x2
+invariant, and moving them is a different reconstruction rather than a tier. It does halve the shadow
+map's SNAP (20 → 10 km), and the snap is the entire anti-boil mechanism, so that had to be checked rather
+than assumed. Two ways:
+
+- **Asserted.** `CloudShadowMapTiers.EveryTierKeepsBothSnapsUnderAMovingCamera` walks a camera a fifth of
+  each tier's own grid and requires the projection to be bit-for-bit constant, then steps it exactly one
+  grid step and requires the map to move by exactly that. It also asserts the thing that makes halving
+  the snap safe: **the sub-texel lattice the second snap works on is the same size on every tier**,
+  because the texel is. Re-anchoring more often is not re-anchoring less accurately.
+- **Rendered.** A 1.2 km translation under the deck, six shots, at High and at Low. Low shows no
+  ghosting, no smear and no disocclusion trail, and LineJump on the moving frame reads **0.00525 at Low
+  against 0.00530 at High** — indistinguishable.
+
+### Where the setting lives, said plainly
+
+A quality tier is a property of the MACHINE, and the right home for it is a user-level scalability store
+this engine does not have. It is on `SceneSettings` because every sibling cost-versus-quality choice
+already is — `RenderingPath`, `GlobalIllumination`, `EnableSSAO`, `EnableSSR`, `AA`, `Anisotropy` — and
+adding a second settings system for the ninth such knob is the duplication the contract forbids. When a
+machine-level store arrives, this field is one of nine that move into it together, not one that has to be
+un-invented first.
+
+**No scene migration, deliberately.** The default is High, High reproduces the shipped constants to the
+digit (`CloudShadowMapTiers.TheReferenceTierIsExactlyWhatWasShippedBeforeTheTierExisted`), so a scene
+saved before this field existed has no key, deserializes to High, and renders the frame it always
+rendered. **Rendered rather than reasoned about:** the shipped `Clouds_Demo.desce`, which carries no such
+key, was shot against the explicitly-High variant at two points and comes back **0 differing pixels of
+980 480** at both. Compare `Tonemapper`, which needed a migration because there the new default meant
+something different from what old scenes were authored against.
+
+### The frames
+
+| file | what it shows |
+|---|---|
+| `Shots/QT_high_zenith_sun.png` / `QT_low_zenith_sun.png` | the sky difference Low makes — a graded silver lining against a blown one |
+| `Shots/QT_high_mid_sun.png` / `QT_low_mid_sun.png` | the same at the elevation a player actually looks |
+| `Shots/QT_high_ground.png` / `QT_med_ground.png` / `QT_low_ground.png` | 40 km of ground under the deck; the tier's cost is the far band |
+| `Shots/QT_refused_maxsteps128.png` | the knob that would have saved 4.48 ms and breaks five of nine shipped types |
+| `Shots/QT_knob_stop05.png` | the knob that saves 2.83 ms for max 10/255, which is why it IS in Low |
+| `Shots/QT_high_flyover_f120.png` / `QT_low_flyover_f120.png` | the moving camera; the temporal stage is untouched by the tier |
+
 ## The instrument
 
 `Tools/ImageStat` — a standalone CLI over the vendored `stb_image`, linked against nothing else.

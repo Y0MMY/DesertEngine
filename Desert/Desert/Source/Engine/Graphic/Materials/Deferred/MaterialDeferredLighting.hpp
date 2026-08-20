@@ -40,10 +40,13 @@ namespace Desert::Graphic
     {
         Image2D*  Map = nullptr;
         glm::mat4 WorldToMap{ 1.0f };
-        float     FarDepthKm   = 0.0f;
-        float     Strength     = 0.0f;
-        float     BorderFadeUv = kCloudShadowBorderFadeUv;
-        bool      Enabled      = false;
+        float     FarDepthKm = 0.0f;
+        float     Strength   = 0.0f;
+        // A PROPERTY OF THE MAP THAT WAS BUILT, not a constant, since the quality tier scales the extent
+        // the fade's fixed world width is a fraction of. Zero is the right default for the same reason
+        // Strength's is: the fields only mean anything once Enabled is true.
+        float BorderFadeUv = 0.0f;
+        bool  Enabled      = false;
     };
 
     // Fullscreen deferred-lighting material: binds the scene renderer's G-buffer color targets (albedo/metallic,

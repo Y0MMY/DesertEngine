@@ -267,6 +267,17 @@ namespace Desert::Editor
             if ( ImGui::Combo( "Render Path", &cur, paths, IM_ARRAYSIZE( paths ) ) )
                 s.RenderingPath = static_cast<Core::RenderPath>( cur );
 
+            // The volumetric cloud layer's cost ceiling. OUTSIDE the deferred-only block below, because
+            // the clouds are marched and composited on both paths — only the shadow they cast on the
+            // world is deferred-only, and that is a part of what this tier scales rather than the whole.
+            const char* cloudQuality[] = { "Low", "Medium", "High" };
+            int         cloudCur       = static_cast<int>( s.CloudQualityTier );
+            if ( ImGui::Combo( "Cloud Quality", &cloudCur, cloudQuality, IM_ARRAYSIZE( cloudQuality ) ) )
+                s.CloudQualityTier = static_cast<Core::CloudQuality>( cloudCur );
+            ImGui::TextDisabled( "High is the calibrated reference. Medium halves the cloud shadow map's\n"
+                                 "reach on the ground (~15 km); Low also caps the sun-ray at 16 samples,\n"
+                                 "which runs the sunward highlights bright." );
+
             // Deferred G-buffer debug view (UE-style buffer visualization) — only meaningful in Deferred.
             ImGui::BeginDisabled( s.RenderingPath != Core::RenderPath::Deferred );
             // Contiguous 0..6, so the index maps straight onto the enum. The heat-map modes (7/8/9) are

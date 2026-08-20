@@ -331,20 +331,30 @@ namespace Desert::Graphic::System
         return m_MarchPipeline && m_ResolvePipeline && m_ShadowMapPipeline && m_CompositePipeline;
     }
 
-    bool VolumetricCloudRenderer::EnsureShadowMap()
+    bool VolumetricCloudRenderer::EnsureShadowMap( uint32_t resolution )
     {
         if ( m_ShadowMapFailed )
             return false;
-        if ( m_ShadowMapImage )
+
+        const float scale = CloudQualityFor( m_Quality ).ShadowMapScale;
+        if ( m_ShadowMapImage && m_ShadowMapScaleInUse == scale )
             return true;
 
-        // ALLOCATED ONCE, ON THE FIRST FRAME THE LAYER ACTUALLY CASTS, and never reallocated: the size is
-        // a constant of the subsystem rather than a property of the view, so a resized viewport — which
-        // throws away all six trace targets — leaves this one standing.
+        // ALLOCATED ON THE FIRST FRAME THE LAYER ACTUALLY CASTS, and reallocated only when the QUALITY
+        // TIER changes its size — never when the viewport does. That distinction is the whole reason this
+        // is not part of EnsureTraceTargets: the six trace targets ARE the view's size and a resize must
+        // throw them away, while this map is a world-space quantity and a resize must leave it standing.
+        //
+        // The old image may still be referenced by descriptors of frames in flight, exactly as in
+        // EnsureTraceTargets, so the device is idled before it is dropped. A tier switch is a rare,
+        // human-initiated event; paying a full idle for it is the cheap answer and the safe one.
+        if ( m_ShadowMapImage )
+            Renderer::GetInstance().WaitDeviceIdle();
+
         const Core::Formats::Image2DSpecification spec{
              .Tag        = "CloudShadowMap",
-             .Width      = kCloudShadowMapResolution,
-             .Height     = kCloudShadowMapResolution,
+             .Width      = resolution,
+             .Height     = resolution,
              .Format     = Core::Formats::ImageFormat::RGBA32F,
              .Mips       = 1u,
              .Usage      = Core::Formats::Image2DUsage::Image2D,
@@ -356,20 +366,21 @@ namespace Desert::Graphic::System
         {
             LOG_ERROR( "[Clouds] The {}x{} RGBA32F cloud shadow map could not be created on the device; "
                        "the clouds will not shade the world for this view.",
-                       kCloudShadowMapResolution, kCloudShadowMapResolution );
+                       resolution, resolution );
             m_ShadowMapFailed = true;
             return false;
         }
 
-        LOG_INFO(
-             "[Clouds] Cloud shadow map {}x{} RGBA32F ({:.2f} MiB) — {:.0f} km across the world, "
-             "{:.1f} m per texel, snapped to a {:.0f} km grid.",
-             kCloudShadowMapResolution, kCloudShadowMapResolution,
-             BytesToMiB( Core::Formats::CalculateImageSize( kCloudShadowMapResolution, kCloudShadowMapResolution,
-                                                            Core::Formats::ImageFormat::RGBA32F ) ),
-             2.0f * kCloudShadowExtentKm,
-             2.0f * kCloudShadowExtentKm * 1000.0f / static_cast<float>( kCloudShadowMapResolution ),
-             kCloudShadowSnapKm );
+        m_ShadowMapScaleInUse = scale;
+
+        const float extentKm = CloudShadowExtentKmForScale( scale );
+        LOG_INFO( "[Clouds] Cloud shadow map {}x{} RGBA32F ({:.2f} MiB) — {:.0f} km across the world, "
+                  "{:.1f} m per texel, snapped to a {:.0f} km grid, quality scale {:.2f}.",
+                  resolution, resolution,
+                  BytesToMiB( Core::Formats::CalculateImageSize( resolution, resolution,
+                                                                 Core::Formats::ImageFormat::RGBA32F ) ),
+                  2.0f * extentKm, 2.0f * extentKm * 1000.0f / static_cast<float>( resolution ),
+                  CloudShadowSnapKmForScale( scale ), scale );
         return true;
     }
 
@@ -410,7 +421,16 @@ namespace Desert::Graphic::System
         if ( !camera )
             return;
 
-        if ( !EnsureShadowMap() )
+        // THE TIER'S THREE NUMBERS, DERIVED FROM ONE SCALE. Resolution, extent and snap move together so
+        // that the texel — and therefore the relation against the chord the view march can find, which
+        // Desert/Tests/Engine/CloudShadow asserts for every tier — does not move at all. What the cheaper
+        // tier buys is a smaller square of world, not a coarser one.
+        const CloudQualityScale quality    = CloudQualityFor( m_Quality );
+        const uint32_t          resolution = CloudShadowResolutionForScale( quality.ShadowMapScale );
+        const float             extentKm   = CloudShadowExtentKmForScale( quality.ShadowMapScale );
+        const float             snapKm     = CloudShadowSnapKmForScale( quality.ShadowMapScale );
+
+        if ( !EnsureShadowMap( resolution ) )
             return;
         if ( !EnsureNoiseVolume() )
             return;
@@ -421,19 +441,23 @@ namespace Desert::Graphic::System
         Assets::AssetHandle handles[kCloudSpeciesSlots]{};
         const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
 
-        const CloudGpuPayload payload = PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset );
+        const CloudGpuPayload payload =
+             PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
+                              quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor );
         m_ShadowParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         // THE PLANET RADIUS IS TAKEN FROM THE PACKED BLOCK, not from the component, because the packer is
         // where it is floored — and a map centred on a different sphere than the one the march intersects
         // is a shadow displaced by the curvature.
         m_ShadowMapView = CloudBuildShadowMapView( camera->GetPosition(), atmosphere.SunDirection, payload.Layer.x,
-                                                   kCloudShadowExtentKm, kCloudShadowSnapKm,
-                                                   static_cast<float>( kCloudShadowMapResolution ) );
+                                                   extentKm, snapKm, static_cast<float>( resolution ) );
 
         CloudShadowPush push{};
         push.MapToWorld = m_ShadowMapView.MapToWorld;
         push.Trace      = glm::vec4( m_ShadowMapView.LightDirection, m_ShadowMapView.SampleCount );
+        // The far plane the producer encodes its depths against, taken from the projection it is handed
+        // rather than compiled from a constant — see Graphic::CloudShadowPush.
+        push.Depth = glm::vec4( m_ShadowMapView.FarDepthKm, 0.0f, 0.0f, 0.0f );
 
         auto& renderer = Renderer::GetInstance();
 
@@ -447,9 +471,8 @@ namespace Desert::Graphic::System
         m_ShadowMapPipeline->SetInput( kCloudShadowProfileBinding, m_ProfileTable.get() );
         m_ShadowMapPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
-        renderer.DispatchComputeInFrame( m_ShadowMapPipeline.get(),
-                                         GroupCount( kCloudShadowMapResolution, kMarchWorkGroupSize ),
-                                         GroupCount( kCloudShadowMapResolution, kMarchWorkGroupSize ), 1 );
+        renderer.DispatchComputeInFrame( m_ShadowMapPipeline.get(), GroupCount( resolution, kMarchWorkGroupSize ),
+                                         GroupCount( resolution, kMarchWorkGroupSize ), 1 );
 
         renderer.ComputeImageEndWrite( m_ShadowMapImage.get() );
         renderer.ComputeImageEndRead( m_ProfileTable.get() );
@@ -459,11 +482,12 @@ namespace Desert::Graphic::System
     }
 
     void VolumetricCloudRenderer::SetCloudSettings( bool present, const ECS::VolumetricCloudData& data,
-                                                    const glm::vec3& windOffset )
+                                                    const glm::vec3& windOffset, Core::CloudQuality quality )
     {
         m_Present    = present;
         m_Data       = data;
         m_WindOffset = windOffset;
+        m_Quality    = quality;
     }
 
     bool VolumetricCloudRenderer::EnsureTraceTargets( uint32_t halfWidth, uint32_t halfHeight )
@@ -666,7 +690,13 @@ namespace Desert::Graphic::System
         Assets::AssetHandle handles[kCloudSpeciesSlots]{};
         const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
 
-        const CloudGpuPayload payload = PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset );
+        // THE SAME CEILING THE SHADOW MAP'S BLOCK GOT, from the same one call, because the two passes march
+        // the same field and a shadow ray of two different lengths in one frame is the class of
+        // disagreement §2.3.1 of the contract is about.
+        const CloudQualityScale quality = CloudQualityFor( m_Quality );
+        const CloudGpuPayload   payload =
+             PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
+                              quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         const glm::mat4     viewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
