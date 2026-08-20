@@ -9,6 +9,7 @@
 #include "TextureAsset.hpp"
 #include "CloudNoiseVolumeAsset.hpp"
 #include "CloudTypeAsset.hpp"
+#include "CloudModellingVolumeAsset.hpp"
 
 namespace Desert::Assets
 {
@@ -23,6 +24,7 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS      = { ".shader" };
     constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_NOISE_EXTENSIONS  = { ".dcnv" };
     constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_TYPE_EXTENSIONS   = { ".decloudtype" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_BODY_EXTENSIONS   = { ".dcmv" };
 
     AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager )
          : m_AssetManager( assetManager )
@@ -36,6 +38,7 @@ namespace Desert::Assets
         PreloadSkyboxes();
         PreloadCloudNoiseVolumes();
         PreloadCloudTypes();
+        PreloadCloudModellingVolumes();
     }
 
     namespace
@@ -233,6 +236,30 @@ namespace Desert::Assets
                 if ( const auto result = service->Register( typeAsset ); !result )
                     LOG_ERROR( "[Clouds] Cloud type '{}' could not be registered: {}",
                                typeAsset->GetMetadata().Filepath.string(), result.GetError() );
+            }
+        }
+    }
+
+    void AssetPreloader::PreloadCloudModellingVolumes()
+    {
+        // Loaded eagerly like the noise volumes and for the same reason: 4 MiB of bytes with no parse to
+        // speak of, and the renderer needs the contents on the first frame a hero cloud asks for them.
+        //
+        // NO DEFAULT IS NOMINATED, unlike the noise volumes, and the absence is the decision: an empty
+        // hero-cloud slot means the artist has not chosen a body, and the right answer is no cloud rather
+        // than a cloud they did not put there. Runtime::CloudModellingService::Get says the same thing.
+        ProcessAssetFiles<CloudModellingVolumeAsset>( Common::Constants::Path::CLOUD_VOLUME_PATH,
+                                                      SUPPORTED_CLOUD_BODY_EXTENSIONS, m_AssetManager,
+                                                      AssetPriority::Medium );
+
+        if ( auto manager = m_AssetManager.lock() )
+        {
+            auto* service = Runtime::ResourceRegistry::GetCloudModellingService();
+            for ( const auto& [handle, bodyAsset] : manager->FindAllByType<Assets::CloudModellingVolumeAsset>() )
+            {
+                if ( const auto result = service->Register( bodyAsset ); !result )
+                    LOG_ERROR( "[Clouds] Modelling volume '{}' could not be uploaded: {}",
+                               bodyAsset->GetMetadata().Filepath.string(), result.GetError() );
             }
         }
     }

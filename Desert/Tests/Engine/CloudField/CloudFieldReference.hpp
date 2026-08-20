@@ -193,6 +193,39 @@ namespace Desert::Tests::CloudFieldRef
 
 #define CLOUD_SAMPLE_PROFILE( uv ) CloudSampleProfileTexture( uv )
 
+        // ------------------------------------------------------------------------------------------
+        // SLOT A, DECLARED EMPTY — this suite drives producer P
+        // ------------------------------------------------------------------------------------------
+        //
+        // The seam calls both producers now, so the authored one's three callbacks have to exist for this
+        // file to compile at all. They are bound to an EMPTY list here, deliberately: what this suite
+        // measures is the procedural field's own statistics — its quantiles, its coverage, its erosion —
+        // and every one of them is a number about a sky with no hero cloud in it.
+        //
+        // THAT MAKES THIS SUITE THE REGRESSION TEST FOR "P DID NOT CHANGE". Every assertion in it was
+        // written before slot A existed and none of them was touched; if the union, the cutout or the
+        // early-out had altered the procedural answer by so much as a quantisation step, these numbers
+        // would have moved. Producer A has its own suite, Desert/Tests/Engine/CloudAuthored.
+#define CLOUD_AUTHORED_COUNT 0
+#define CLOUD_AUTHORED_INSTANCE( i ) CloudAuthoredNoInstance()
+#define CLOUD_SAMPLE_AUTHORED( uvw ) vec4( 0.0f, 0.0f, 0.0f, 0.0f )
+
+#include <Common/CloudAuthored.glslh>
+
+        // Never called: the loop that would call it runs zero times. It exists because a macro has to
+        // expand to something that compiles, and returning a zeroed instance is the only expansion that
+        // cannot be mistaken for a real one if the count ever stops being zero by accident.
+        CloudAuthoredInstance CloudAuthoredNoInstance()
+        {
+            CloudAuthoredInstance instance;
+            instance.Row0      = vec4( 0.0f );
+            instance.Row1      = vec4( 0.0f );
+            instance.Row2      = vec4( 0.0f );
+            instance.BoundsMin = vec4( 0.0f );
+            instance.BoundsMax = vec4( 0.0f );
+            return instance;
+        }
+
 #include <Common/CloudField.glslh>
 
         // ------------------------------------------------------------------------------------------

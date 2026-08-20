@@ -83,6 +83,27 @@ namespace Desert::Graphic::System
             return Common::MakeError(
                  "VolumetricCloudRenderer: could not create the cloud shadow parameter buffer" );
 
+        // Slot A's instance list, doubled for the same reason the parameter block is: two dispatches on
+        // opposite sides of the render graph read it. Non-persistent, so the backend keeps one copy per
+        // (frame x recording renderer slot) — the Docs/RENDERER_FRAME_STATE.md rule.
+        //
+        // ALLOCATED UNCONDITIONALLY, 336 bytes each, and that is the one place this feature costs a scene
+        // that does not use it. A buffer created lazily would have to be created inside the dispatch path,
+        // where a failure has nowhere to go but a silent skip — and the descriptor has to exist anyway,
+        // because a declared storage block with no buffer is the same invalid descriptor set a missing
+        // sampler is.
+        m_AuthoredBuffer = ShaderResources::StorageBuffer::Create( "CloudAuthored", kCloudAuthoredPayloadBytes,
+                                                                   kCloudAuthoredBinding, /*persistent=*/false );
+        if ( !m_AuthoredBuffer )
+            return Common::MakeError( "VolumetricCloudRenderer: could not create the hero cloud instance buffer" );
+
+        m_ShadowAuthoredBuffer =
+             ShaderResources::StorageBuffer::Create( "CloudShadowAuthored", kCloudAuthoredPayloadBytes,
+                                                     kCloudShadowAuthoredBinding, /*persistent=*/false );
+        if ( !m_ShadowAuthoredBuffer )
+            return Common::MakeError(
+                 "VolumetricCloudRenderer: could not create the hero cloud instance buffer for the shadow map" );
+
         m_CompositeMaterial = std::make_unique<MaterialCloudComposite>();
         return BOOLSUCCESS;
     }
@@ -111,6 +132,11 @@ namespace Desert::Graphic::System
         m_ParamsBuffer.reset();
         m_ResolveParamsBuffer.reset();
         m_ShadowParamsBuffer.reset();
+        m_AuthoredBuffer.reset();
+        m_ShadowAuthoredBuffer.reset();
+        m_HeroClouds.clear();
+        m_AuthoredPayload = CloudAuthoredPayload{};
+        m_AuthoredVolume  = nullptr;
     }
 
     uint32_t VolumetricCloudRenderer::ResolveSpecies( CloudTypeShape ( &shapes )[kCloudSpeciesSlots],
@@ -446,6 +472,12 @@ namespace Desert::Graphic::System
                               quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor );
         m_ShadowParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
+        // Slot A, for the shadow map as well as for the eye: a hero cloud shades the ground under it
+        // because it IS the cloud field, not because anything was added to the deferred pass.
+        BuildAuthoredPayload( payload );
+        m_ShadowAuthoredBuffer->SetData( &m_AuthoredPayload,
+                                         static_cast<uint32_t>( sizeof( m_AuthoredPayload ) ) );
+
         // THE PLANET RADIUS IS TAKEN FROM THE PACKED BLOCK, not from the component, because the packer is
         // where it is floored — and a map centred on a different sphere than the one the march intersects
         // is a shadow displaced by the curvature.
@@ -463,18 +495,29 @@ namespace Desert::Graphic::System
 
         renderer.ComputeImageBeginRead( m_NoiseVolume );
         renderer.ComputeImageBeginRead( m_ProfileTable.get() );
+        if ( m_AuthoredVolume )
+            renderer.ComputeImageBeginRead( m_AuthoredVolume );
         renderer.ComputeImageBeginWrite( m_ShadowMapImage.get() );
 
         m_ShadowMapPipeline->SetOutput( kCloudShadowOutputBinding, m_ShadowMapImage.get(), 0 );
         m_ShadowMapPipeline->SetStorageBuffer( kCloudShadowParamsBinding, m_ShadowParamsBuffer.get() );
         m_ShadowMapPipeline->SetInput( kCloudShadowNoiseBinding, m_NoiseVolume );
         m_ShadowMapPipeline->SetInput( kCloudShadowProfileBinding, m_ProfileTable.get() );
+        m_ShadowMapPipeline->SetStorageBuffer( kCloudShadowAuthoredBinding, m_ShadowAuthoredBuffer.get() );
+        // ALWAYS bound, fallback included — see the note at the march's own binding of it.
+        m_ShadowMapPipeline->SetInput(
+             kCloudShadowAuthoredVolumeBinding,
+             m_AuthoredVolume
+                  ? m_AuthoredVolume
+                  : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
         m_ShadowMapPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         renderer.DispatchComputeInFrame( m_ShadowMapPipeline.get(), GroupCount( resolution, kMarchWorkGroupSize ),
                                          GroupCount( resolution, kMarchWorkGroupSize ), 1 );
 
         renderer.ComputeImageEndWrite( m_ShadowMapImage.get() );
+        if ( m_AuthoredVolume )
+            renderer.ComputeImageEndRead( m_AuthoredVolume );
         renderer.ComputeImageEndRead( m_ProfileTable.get() );
         renderer.ComputeImageEndRead( m_NoiseVolume );
 
@@ -482,12 +525,102 @@ namespace Desert::Graphic::System
     }
 
     void VolumetricCloudRenderer::SetCloudSettings( bool present, const ECS::VolumetricCloudData& data,
-                                                    const glm::vec3& windOffset, Core::CloudQuality quality )
+                                                    const glm::vec3& windOffset, Core::CloudQuality quality,
+                                                    const std::vector<HeroCloudInstance>& heroClouds )
     {
         m_Present    = present;
         m_Data       = data;
         m_WindOffset = windOffset;
         m_Quality    = quality;
+
+        // RE-ARM THE WARNINGS WHEN THE ARRANGEMENT CHANGES. A latch that is never released says a thing
+        // once and then lies for the rest of the session: an artist who moves a body back inside the
+        // layer and out again would hear nothing the second time. Comparing the count is the cheap half
+        // of "the arrangement changed" and it is the half that matters — adding or removing a hero cloud
+        // is what re-opens both questions.
+        if ( heroClouds.size() != m_HeroClouds.size() )
+        {
+            m_AuthoredFitWarned = false;
+            m_AuthoredMixWarned = false;
+        }
+
+        m_HeroClouds = heroClouds;
+    }
+
+    void VolumetricCloudRenderer::BuildAuthoredPayload( const CloudGpuPayload& payload )
+    {
+        m_AuthoredPayload = CloudAuthoredPayload{};
+        m_AuthoredVolume  = nullptr;
+
+        if ( m_HeroClouds.empty() )
+            return;
+
+        auto* service = Runtime::ResourceRegistry::GetCloudModellingService();
+
+        Assets::AssetHandle bound = Assets::AssetHandle::Null();
+
+        for ( const HeroCloudInstance& hero : m_HeroClouds )
+        {
+            Image3D* volume = service->Get( hero.Data.Volume );
+            if ( !volume )
+                continue; // already logged by the service, with the handle in the message
+
+            if ( m_AuthoredVolume == nullptr )
+            {
+                m_AuthoredVolume = volume;
+                bound            = hero.Data.Volume;
+            }
+            else if ( hero.Data.Volume != bound )
+            {
+                // NOT a silent drop. The march has one sampler for the authored producer, so a second
+                // body cannot be read this frame — and drawing this entity with the FIRST body's shape
+                // would be the worse answer by far: a cloud in the artist's scene that is not the cloud
+                // they chose.
+                if ( !m_AuthoredMixWarned )
+                {
+                    LOG_WARN( "[Clouds] Hero cloud '{}' names a different modelling volume from the one "
+                              "already bound this frame, and the march carries one body at a time; it is "
+                              "not drawn. Several instances of the SAME .dcmv are free — several different "
+                              "ones need the volume atlas.",
+                              hero.Name );
+                    m_AuthoredMixWarned = true;
+                }
+                continue;
+            }
+
+            const CloudAuthoredPackResult packed = PackCloudAuthoredInstance(
+                 hero.WorldTransform, service->GetSizeKm( hero.Data.Volume ), payload.Layer.y, hero.Data );
+
+            if ( !packed.Valid )
+            {
+                LOG_ERROR( "[Clouds] Hero cloud '{}' has a degenerate transform — a scale of zero on some "
+                           "axis leaves no way back from the world into the body — so it is not drawn.",
+                           hero.Name );
+                continue;
+            }
+
+            // THE RELATION, STATED RATHER THAN HOPED FOR. The march only samples between the two shells,
+            // so a body whose top is above the layer's top is not clipped by anything the artist can see
+            // — it is simply never sampled there, and the symptom is a cumulus with its crown sliced flat
+            // by an altitude nobody set. Both numbers are in the message, which is the house pattern for
+            // two values obliged to agree (desert-engine-verify section 4).
+            if ( !CloudAuthoredInstanceFitsLayer( packed.Instance, payload.Layer.z ) && !m_AuthoredFitWarned )
+            {
+                LOG_WARN( "[Clouds] Hero cloud '{}' spans {:.2f} to {:.2f} km above the layer's base, and the "
+                          "layer is {:.2f} km thick starting at {:.2f} km. The part outside the shell is "
+                          "never marched, so the body will look cut off there. Move the entity, or give the "
+                          "layer a cloud type whose altitudes contain it.",
+                          hero.Name, packed.Instance.BoundsMin.y, packed.Instance.BoundsMax.y, payload.Layer.z,
+                          payload.Layer.y );
+                m_AuthoredFitWarned = true;
+            }
+
+            m_AuthoredPayload.Instances[m_AuthoredPayload.Count] = packed.Instance;
+            ++m_AuthoredPayload.Count;
+
+            if ( static_cast<uint32_t>( m_AuthoredPayload.Count ) >= kCloudAuthoredSlots )
+                break;
+        }
     }
 
     bool VolumetricCloudRenderer::EnsureTraceTargets( uint32_t halfWidth, uint32_t halfHeight )
@@ -699,6 +832,13 @@ namespace Desert::Graphic::System
                               quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
+        // Slot A. Rebuilt here rather than reused from the shadow map's call: the two dispatches sit on
+        // opposite sides of the render graph and the shadow map may not have run at all this frame (no
+        // casting, no strength, a failed allocation), so a payload built there is a payload that might
+        // not exist. It is a handful of matrix inversions for at most four entities.
+        BuildAuthoredPayload( payload );
+        m_AuthoredBuffer->SetData( &m_AuthoredPayload, static_cast<uint32_t>( sizeof( m_AuthoredPayload ) ) );
+
         const glm::mat4     viewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
         const CloudSubPixel subPixel       = CloudTraceSubPixel( m_FrameIndex );
 
@@ -718,6 +858,8 @@ namespace Desert::Graphic::System
         renderer.ComputeImageBeginRead( depthImage );
         renderer.ComputeImageBeginRead( m_NoiseVolume );
         renderer.ComputeImageBeginRead( m_ProfileTable.get() );
+        if ( m_AuthoredVolume )
+            renderer.ComputeImageBeginRead( m_AuthoredVolume );
         renderer.ComputeImageBeginWrite( m_TraceImage.get() );
         renderer.ComputeImageBeginWrite( m_TraceGuideImage.get() );
 
@@ -746,6 +888,18 @@ namespace Desert::Graphic::System
                   ? atmosphere.AerialPerspectiveVolume
                   : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
 
+        // Slot A's instance list and the sculpted body it addresses. The volume is ALWAYS bound, even
+        // when the count is zero and nothing will read it, on exactly the terms the two samplers above
+        // are bound on: a declared sampler with no image is an invalid descriptor set, and this backend
+        // answers an invalid set by skipping the dispatch — every cloud in the frame would disappear with
+        // nothing in the log, which is a rake this subsystem has already stood on.
+        m_MarchPipeline->SetStorageBuffer( kCloudAuthoredBinding, m_AuthoredBuffer.get() );
+        m_MarchPipeline->SetInput(
+             kCloudAuthoredVolumeBinding,
+             m_AuthoredVolume
+                  ? m_AuthoredVolume
+                  : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
+
         m_MarchPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         const uint32_t traceWidth  = HalfExtent( m_HalfWidth );
@@ -756,6 +910,8 @@ namespace Desert::Graphic::System
 
         renderer.ComputeImageEndWrite( m_TraceGuideImage.get() );
         renderer.ComputeImageEndWrite( m_TraceImage.get() );
+        if ( m_AuthoredVolume )
+            renderer.ComputeImageEndRead( m_AuthoredVolume );
         renderer.ComputeImageEndRead( m_ProfileTable.get() );
         renderer.ComputeImageEndRead( m_NoiseVolume );
         renderer.ComputeImageEndRead( depthImage );

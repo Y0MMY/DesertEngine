@@ -29,6 +29,9 @@ namespace Desert::Runtime
     //   .decloudtype — re-parses the cloud type and re-registers it, so an edit in the Cloud Type panel
     //             is visible in the sky the next frame. The layer's HANDLE has not changed, so the
     //             service's generation counter is what tells the renderer to rebuild its profile table.
+    //   .dcmv   — re-reads a sculpted hero-cloud body and re-uploads it, so a re-bake is visible in the
+    //             sky the next frame. Nothing needs telling here either: the cloud renderer resolves the
+    //             body through the service every frame.
     //   .shader — recompiles the program (errors land in the log / Logs panel, the old
     //             pipelines keep drawing); on success the pipeline cache entries for that
     //             shader are dropped after a device-idle wait, so the next frame draws with
@@ -52,6 +55,9 @@ namespace Desert::Runtime
         // No scene argument either, and for the same reason: a cloud type is resolved by handle through
         // Runtime::CloudTypeService every frame, so nothing in the scene holds a copy to refresh.
         void PollCloudTypes( Assets::AssetManager& assetManager );
+        // And the same again for a sculpted body: the renderer resolves it by handle every frame, so a
+        // re-upload is the whole of the reload.
+        void PollCloudModellingVolumes( Assets::AssetManager& assetManager );
 
         // Records @p path's mtime and reports whether it MOVED since the last poll. A file seen for the
         // first time returns false: the first sighting is a baseline, not an edit.

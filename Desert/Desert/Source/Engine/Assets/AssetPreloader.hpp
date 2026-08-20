@@ -34,6 +34,10 @@ namespace Desert::Assets
         // type is created — a volume that is not in the manager yet resolves to nothing and the type
         // renders with the default edge instead of its own.
         void PreloadCloudTypes();
+        // Sculpted hero-cloud bodies (`.dcmv`). Independent of the two above — a body names no other
+        // asset and no other asset names it — so its position in the order is free; it is last because
+        // a scene without one still has a sky and this is the stage a project may have nothing in.
+        void PreloadCloudModellingVolumes();
 
     private:
         std::weak_ptr<AssetManager> m_AssetManager;

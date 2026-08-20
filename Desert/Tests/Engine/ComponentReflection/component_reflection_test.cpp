@@ -1266,6 +1266,110 @@ TEST( CloudQualityTier, TheTierCapsTheShadowRayAndLeavesTheMarchAlone )
     }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// The HERO CLOUD - slot A of the cloud field's seam
+// ---------------------------------------------------------------------------------------------------
+//
+// A CENSUS AND NOT A SAMPLE, on the same terms as the layer's above: the roster, its order, the per-
+// category counts and every default. What it prevents is the field that appears in the Details panel and
+// reaches nothing, which is the defect this whole suite is about and which a component with SEVEN fields
+// is exactly small enough for nobody to bother checking by hand.
+
+TEST( HeroCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
+{
+    const std::vector<std::string> expected = {
+         "Enabled",      "Volume",        "Strength",         "SuppressProceduralField",
+         "DetailFactor", "DensityFactor", "ExtinctionFactor",
+    };
+
+    const TypeInfo& hero = Type( "HeroCloudData" );
+    EXPECT_EQ( hero.Fields.size(), 7u );
+    EXPECT_EQ( FieldNames( hero ), expected );
+
+    EXPECT_EQ( CountInCategory( hero, "Hero Cloud" ), 4u );
+    EXPECT_EQ( CountInCategory( hero, "Material" ), 3u );
+
+    // THE THREE MATERIAL NUMBERS ARE THE CLOUD TYPE'S, NAME FOR NAME, and that is a relation rather than
+    // a coincidence: what a cloud is MADE OF is a property of the cloud and not of which producer drew
+    // it, so 1 has to mean the same thing on both sides of the seam. The FOURTH of that set, Detail
+    // Character, is deliberately absent - the volume carries it per voxel, which is what lets a body's
+    // wispy tail erode differently from its billowy core.
+    EXPECT_NE( Find( hero, "DetailFactor" ), nullptr );
+    EXPECT_NE( Find( hero, "DensityFactor" ), nullptr );
+    EXPECT_NE( Find( hero, "ExtinctionFactor" ), nullptr );
+    EXPECT_EQ( Find( hero, "DetailCharacter" ), nullptr );
+
+    // AND THERE IS NO AUTHORED POSITION, SIZE OR ROTATION. Where a hero cloud is comes from the entity's
+    // TransformComponent and its own size comes from the `.dcmv`; a field here would be a second
+    // statement of one of them, which is the class of defect this programme has paid for most often.
+    EXPECT_EQ( Find( hero, "Position" ), nullptr );
+    EXPECT_EQ( Find( hero, "Altitude" ), nullptr );
+    EXPECT_EQ( Find( hero, "SizeKm" ), nullptr );
+    EXPECT_EQ( Find( hero, "Rotation" ), nullptr );
+}
+
+TEST( HeroCloudReflection, TheVolumeSlotIsAnAssetOfTheRightType )
+{
+    const FieldInfo* volume = Find( Type( "HeroCloudData" ), "Volume" );
+    ASSERT_NE( volume, nullptr );
+
+    EXPECT_EQ( volume->Type, FieldType::AssetHandle );
+    EXPECT_TRUE( volume->Meta.IsAsset );
+    // The string the Details panel dispatches on, and the one ComponentRegistry's resolver matches to
+    // turn the handle into a relative path. Three sites, one spelling.
+    EXPECT_EQ( volume->Meta.AssetType, "CloudModellingVolumeAsset" );
+}
+
+TEST( HeroCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
+{
+    const TypeInfo& hero = Type( "HeroCloudData" );
+
+    // On by default, because a component somebody added is a component they want.
+    EXPECT_TRUE( DefaultOf<bool>( hero, "Enabled" ) );
+
+    // AND THE CUTOUT IS ON BY DEFAULT, which is the one default here that is an argument rather than an
+    // obvious choice: without it a procedural blob grows through the sculpted body the moment it is
+    // placed, and an artist meeting that on their first hero cloud would conclude the feature does not
+    // work (ANALYSIS_APPROACH.md section 4.3).
+    EXPECT_TRUE( DefaultOf<bool>( hero, "SuppressProceduralField" ) );
+
+    // Full strength, and the three material factors at the identity - so a body dropped into a scene
+    // renders as it was sculpted and as the layer was tuned, with nothing to discover.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( hero, "Strength" ), 1.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( hero, "DetailFactor" ), 1.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( hero, "DensityFactor" ), 1.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( hero, "ExtinctionFactor" ), 1.0f );
+}
+
+TEST( HeroCloudReflection, EveryFieldIsAnnotatedWellEnoughToDraw )
+{
+    const TypeInfo& hero = Type( "HeroCloudData" );
+
+    for ( const auto& f : hero.Fields )
+    {
+        EXPECT_FALSE( f.Meta.Tooltip.empty() ) << f.Name << " has no tooltip";
+        EXPECT_FALSE( f.Meta.DisplayName.empty() ) << f.Name << " has no display name";
+        EXPECT_FALSE( f.Meta.Category.empty() ) << f.Name << " has no category";
+        if ( f.Type == FieldType::Float || f.Type == FieldType::Int )
+            EXPECT_TRUE( f.Meta.HasRange ) << f.Name << " has no Range, so it draws as a bare drag field";
+    }
+}
+
+TEST( HeroCloudReflection, EveryRangedDefaultLiesInsideItsOwnRange )
+{
+    const TypeInfo& hero = Type( "HeroCloudData" );
+
+    for ( const auto& f : hero.Fields )
+    {
+        if ( !f.Meta.HasRange || f.Type != FieldType::Float )
+            continue;
+
+        const float value = DefaultOf<float>( hero, f.Name.c_str() );
+        EXPECT_GE( value, f.Meta.RangeMin ) << f.Name << " defaults below its own slider";
+        EXPECT_LE( value, f.Meta.RangeMax ) << f.Name << " defaults above its own slider";
+    }
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

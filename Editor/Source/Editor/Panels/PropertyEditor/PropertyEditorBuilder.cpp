@@ -7,6 +7,7 @@
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/CloudTypeAsset.hpp>
+#include <Engine/Assets/CloudModellingVolumeAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Font/FontService.hpp>
 #include <Engine/Graphic/Texture.hpp>
@@ -881,6 +882,103 @@ namespace Desert::Editor
                                            "the engine's built-in cumulus congestus, so a scene nobody has "
                                            "authored a type for still has a sky. Author your own in "
                                            "Window > Cloud Type." );
+                    break;
+                }
+
+                // Cloud modelling volume slot: the sculpted body a hero cloud IS. Its own branch rather
+                // than the texture one below for two reasons — there is nothing to thumbnail, and "None"
+                // means NO CLOUD here rather than "fall back to a default", which is the opposite of what
+                // the cloud type slot above means by an empty entry and would be actively misleading if
+                // the two were drawn the same way.
+                //
+                // Shown by FILE NAME, unlike the type above: a `.dcmv` has no display-name field, because
+                // it is a shape rather than a named kind of weather, and the file name is what the artist
+                // gave it in the Content Browser.
+                if ( field.Meta.AssetType == "CloudModellingVolumeAsset" )
+                {
+                    uint64_t* volumeHandle = static_cast<uint64_t*>( p );
+
+                    std::string preview = "None (no hero cloud)";
+                    if ( *volumeHandle != 0 )
+                    {
+                        preview = "(missing)";
+                        if ( assetMgr )
+                        {
+                            if ( auto body = assetMgr->FindByHandle<Assets::CloudModellingVolumeAsset>(
+                                      Common::UUID( *volumeHandle ) ) )
+                                preview = body->GetMetadata().Filepath.filename().string();
+                        }
+                    }
+
+                    ImGui::SetNextItemWidth( -1.0f );
+                    if ( ImGui::BeginCombo( "##cloudbody", preview.c_str() ) )
+                    {
+                        if ( ImGui::Selectable( "None (no hero cloud)", *volumeHandle == 0 ) )
+                        {
+                            *volumeHandle = 0;
+                            changed       = true;
+                        }
+                        if ( assetMgr )
+                        {
+                            for ( const auto& [h, body] :
+                                  assetMgr->FindAllByType<Assets::CloudModellingVolumeAsset>() )
+                            {
+                                const bool selected = ( static_cast<uint64_t>( h ) == *volumeHandle );
+                                if ( ImGui::Selectable( body->GetMetadata().Filepath.filename().string().c_str(),
+                                                        selected ) )
+                                {
+                                    *volumeHandle = static_cast<uint64_t>( h );
+                                    changed       = true;
+                                }
+                                if ( selected )
+                                    ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+
+                    if ( ImGui::BeginDragDropTarget() )
+                    {
+                        if ( const ImGuiPayload* pl =
+                                  ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::AssetFile ) )
+                        {
+                            const std::string path( static_cast<const char*>( pl->Data ),
+                                                    pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                            // The extension is checked HERE because the Content Browser emits one generic
+                            // AssetFile payload for every type it has no icon for. Without the check this
+                            // slot would accept a dropped .dcnv and bind a handle to a file that can never
+                            // parse as a sculpted body.
+                            if ( assetMgr && !path.empty() &&
+                                 std::filesystem::path( path ).extension() ==
+                                      Assets::kCloudModellingVolumeExtension )
+                            {
+                                auto& mutableManager = const_cast<Assets::AssetManager&>( *assetMgr );
+                                auto  body = mutableManager.FindByPath<Assets::CloudModellingVolumeAsset>( path );
+                                if ( !body )
+                                    body = mutableManager.CreateAsset<Assets::CloudModellingVolumeAsset>(
+                                         Assets::AssetPriority::Medium, path );
+                                if ( body && body->IsReadyForUse() )
+                                {
+                                    if ( const auto uploaded =
+                                              Runtime::ResourceRegistry::GetCloudModellingService()->Register(
+                                                   body );
+                                         !uploaded )
+                                        LOG_ERROR( "[Clouds] Dropped modelling volume '{}' could not be "
+                                                   "uploaded: {}",
+                                                   path, uploaded.GetError() );
+
+                                    *volumeHandle = static_cast<uint64_t>( body->GetMetadata().Handle );
+                                    changed       = true;
+                                }
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Pick a sculpted body or drag a .dcmv here. \"None\" means this "
+                                           "entity draws no cloud at all — there is no built-in hero cloud, "
+                                           "because a body nobody sculpted appearing in a scene is a cloud "
+                                           "nobody can explain." );
                     break;
                 }
 

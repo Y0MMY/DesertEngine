@@ -25,6 +25,7 @@
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
+#include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 
 #include <Common/Core/Constants.hpp>
@@ -371,19 +372,24 @@ TEST_F( ShaderRootFixture, TheDistantSkyLightDeclaresFourDescriptorsInSetZero )
     EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // multi-scatter LUT
 }
 
-TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresFourDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresSixDescriptorsInSetZero )
 {
     // THE PRODUCER OF THE CLOUD SHADOW MAP, and the reason it is pinned here rather than trusted: its
-    // three inputs are bound by NUMBER and not by reflection (ComputePipeline::SetInput takes the binding
+    // inputs are bound by NUMBER and not by reflection (ComputePipeline::SetInput takes the binding
     // as an argument), so the C++ constants in Engine/Graphic/Clouds/CloudShadowPayload.hpp and the
     // numbers in the shader are two statements of one fact. The assertions below are that fact, checked
     // against the compiled SPIR-V rather than against the file's text.
     //
-    // The three inputs are DELIBERATELY the march's own slot numbers — one vocabulary for one field —
-    // which is why 3 and 7 are occupied and 1, 2, 4, 5, 6 are not.
+    // The inputs are DELIBERATELY the march's own slot numbers — one vocabulary for one field — which is
+    // why 3, 7, 8 and 9 are occupied and 1, 2, 4, 5, 6 are not.
+    //
+    // SIX SINCE SLOT A, and the last two are the ones a reader would not expect on a SHADOW pass: a hero
+    // cloud shades the ground under it because it IS the cloud field, so the shadow march samples the
+    // sculpted body through the same instance buffer and the same volume the view march does. Nothing was
+    // added to the deferred pass to make that happen.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudShadowMap.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 4u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 6u );
 
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowOutputBinding,
                              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) ); // the triple it writes
@@ -393,6 +399,43 @@ TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresFourDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the noise volume
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowProfileBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the vertical profile table
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowAuthoredBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the hero cloud instances
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowAuthoredVolumeBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
+}
+
+TEST_F( ShaderRootFixture, TheCloudMarchDeclaresTenDescriptorsInSetZero )
+{
+    // THE VIEW MARCH, pinned on the same terms and for the same reason, and it was NOT pinned before slot
+    // A landed — which is precisely why it is worth doing now: two of its ten descriptors are new, both
+    // are bound by number, and one of them is a `sampler3D` that MUST be bound even when nothing reads
+    // it. An unbound sampler is an invalid descriptor set, and this backend answers an invalid set by
+    // silently skipping the dispatch: every cloud in the frame would vanish with nothing in the log.
+    // That failure has happened in this subsystem before, which is what makes a count a useful assertion.
+    const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
+
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 10u );
+
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudOutputBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) ); // the scatter target
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudGuideOutputBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) ); // the depth guide beside it
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudParamsBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudSceneDepthBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE(
+         HasBinding( bindings, Desert::Graphic::kCloudNoiseBinding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudDistantSkyLightBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAerialPerspectiveBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudProfileBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAuthoredBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the hero cloud instances
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAuthoredVolumeBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
 }
 
 TEST_F( ShaderRootFixture, TheDeferredLightingPassDeclaresSeventeenDescriptorsInSetZero )

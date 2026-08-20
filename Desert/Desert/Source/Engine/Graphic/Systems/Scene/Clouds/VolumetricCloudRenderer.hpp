@@ -3,6 +3,7 @@
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
 #include <Engine/Graphic/Clouds/CloudQuality.hpp>
@@ -17,6 +18,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace Desert::Graphic::System
 {
@@ -91,6 +93,8 @@ namespace Desert::Graphic::System
          *                   deleted mid-session must take its clouds with it.
          * @param windOffset the drift the ECS accumulated, world units. Owned there because that is where
          *                   the timestep is.
+         * @param heroClouds this frame's sculpted bodies — slot A of the seam. Empty is the ordinary case
+         *                   and means the march's authored loop does not run at all.
          * @param quality    the scene's cloud quality tier, refreshed from Core::SceneSettings each
          *                   BeginScene like every other cost-versus-quality choice. It arrives HERE rather
          *                   than being read from a global because this renderer is one of several live at
@@ -98,7 +102,7 @@ namespace Desert::Graphic::System
          *                   other.
          */
         void SetCloudSettings( bool present, const ECS::VolumetricCloudData& data, const glm::vec3& windOffset,
-                               Core::CloudQuality quality );
+                               Core::CloudQuality quality, const std::vector<HeroCloudInstance>& heroClouds );
 
         /**
          * @brief Stages S0 and S1. Must be called outside any render pass, after the scene depth is final.
@@ -191,6 +195,23 @@ namespace Desert::Graphic::System
         // having logged the reason when the image could not be created.
         bool EnsureProfileTable();
 
+        /**
+         * Turns this frame's hero clouds into the instance buffer the two cloud passes read, and points
+         * m_AuthoredVolume at the body they share.
+         *
+         * ONE VOLUME PER FRAME, and the limit is the shader's single `sampler3D` rather than a decision
+         * taken here: several instances of the SAME body are free and are the ordinary case, several
+         * DIFFERENT bodies need the atlas that phase A2 builds. An entity naming a second body is
+         * DROPPED AND NAMED in the log rather than drawn with somebody else's shape, which would be a
+         * cloud the artist cannot account for.
+         *
+         * @param payload the layer, already packed. Read for two numbers and neither is recomputed here:
+         *                Layer.y, the shell's base altitude, which is what puts an instance into the
+         *                field's own frame, and Layer.z, its thickness, which the fit warning is stated
+         *                against.
+         */
+        void BuildAuthoredPayload( const CloudGpuPayload& payload );
+
         std::shared_ptr<ComputePipeline>  m_MarchPipeline;
         std::shared_ptr<ComputePipeline>  m_ResolvePipeline;
         std::shared_ptr<ComputePipeline>  m_ShadowMapPipeline;
@@ -238,6 +259,25 @@ namespace Desert::Graphic::System
         // Refreshed from the service every frame, so a hot reload swaps the image under it with no state of
         // its own to go stale.
         Image3D* m_NoiseVolume = nullptr;
+
+        // SLOT A. The instance buffer is doubled for the same reason the parameter buffer is — the shadow
+        // map dispatches before the render graph and the march after it, and one non-persistent buffer
+        // written twice between two dispatches is a hazard whose only defence would be that the bytes
+        // happen to be equal. The volume itself is BORROWED from Runtime::CloudModellingService, like the
+        // noise volume beside it, and is null in every scene that has no hero cloud in it — in which case
+        // the fallback volume is bound instead and the count is zero.
+        std::shared_ptr<ShaderResources::StorageBuffer> m_AuthoredBuffer;
+        std::shared_ptr<ShaderResources::StorageBuffer> m_ShadowAuthoredBuffer;
+
+        std::vector<HeroCloudInstance> m_HeroClouds;
+        CloudAuthoredPayload           m_AuthoredPayload{};
+        Image3D*                       m_AuthoredVolume = nullptr;
+
+        // Latched so that a body standing outside its layer is said ONCE per scene rather than sixty
+        // times a second, and re-armed the moment the arrangement changes so that fixing it and breaking
+        // it again both speak.
+        bool m_AuthoredFitWarned = false;
+        bool m_AuthoredMixWarned = false;
 
         // The vertical profile table this view marches against — OWNED, unlike the noise volume, because
         // it is GENERATED here rather than resolved from an asset: the type ships twelve numbers, not

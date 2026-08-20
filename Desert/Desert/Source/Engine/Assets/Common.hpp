@@ -38,5 +38,10 @@ namespace Desert::Assets
         // exactly that an artist be able to make one and load it into a slot — see
         // Engine/Assets/CloudTypeData.hpp.
         CloudType,
+        // A sculpted cloud BODY (`.dcmv`): 128 x 64 x 128 voxels of dimensional profile, detail type,
+        // density scale and cutout envelope, placed in the sky by an entity's transform. The seam's
+        // authored producer — the half of the cloud field that can be a shape the procedural one cannot
+        // make — see Engine/Assets/CloudModellingVolume.hpp.
+        CloudModellingVolume,
     };
 } // namespace Desert::Assets

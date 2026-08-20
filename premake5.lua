@@ -28,5 +28,13 @@ include "Tools/LineJump/"
 group ""
 
 include "Desert/"
+
+-- AFTER Desert/, which is where the `deps` table is defined. Every tool above it is dependency-free or
+-- vendors its own single header; this one compiles an engine source that uses glm and the Result type,
+-- so it needs the same include paths the engine has.
+group "Tools"
+include "Tools/CloudVolumeBaker/"
+group ""
+
 include "Editor/"
 include "Runtime/"

@@ -1459,10 +1459,11 @@ namespace Desert::Graphic
     }
 
     void SceneRenderer::SetVolumetricClouds( bool present, const ECS::VolumetricCloudData& data,
-                                             const glm::vec3& windOffset )
+                                             const glm::vec3&                      windOffset,
+                                             const std::vector<HeroCloudInstance>& heroClouds )
     {
         UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
-             ->SetCloudSettings( present, data, windOffset, m_CloudQuality );
+             ->SetCloudSettings( present, data, windOffset, m_CloudQuality, heroClouds );
     }
 
     void SceneRenderer::ExecuteVolumetricClouds()
