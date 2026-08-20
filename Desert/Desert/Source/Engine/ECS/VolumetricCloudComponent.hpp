@@ -56,6 +56,20 @@ namespace Desert::ECS
     // in it, and any rule whose weights sum to one forbids exactly that (decision D-14). The v5 -> v6
     // migration renames the single `CloudType` key to `CloudType1`; nothing else about a scene changes,
     // and a scene that went in with one kind of cloud comes out rendering the same sky.
+
+    // The top of the shadow ray's sample count, in ONE place because THREE of them disagreed. The slider's
+    // Range, the clamp in Graphic::PackCloudParams and the clamp in Programs/Clouds/CloudRaymarch.shader
+    // are three copies of one number, and while they were three literals an artist could drag the slider
+    // to a value the shader silently threw away. The first two now read this constant; the shader cannot,
+    // so Desert/Tests/Engine/SettingConsumers reads the shader's text and asserts the literal matches —
+    // §2.3.1's "two values obliged to agree", asserted rather than remembered.
+    //
+    // SIXTY-FOUR because that is where the measurement stops moving: 48 and 64 render the sunward zenith
+    // p95 identically to three decimals (0.798), so nothing above it is buying anything. Unreal's own
+    // ceiling is 80 (r.VolumetricCloud.Shadow.ViewRaySampleMaxCount); the difference is not a shortfall,
+    // it is the plateau measured on OUR quadrature instead of copied from theirs.
+    inline constexpr int32_t kCloudLightMarchMaxSamples = 64;
+
     struct VolumetricCloudData
     {
         REFLECT()
@@ -351,15 +365,45 @@ namespace Desert::ECS
         // into clear air almost at once and is bright, while one near the base has the whole cloud above
         // it and is dark — and that difference IS the shape.
         //
-        // It is not thirty times the cost: the samples are placed on a squared distribution, so the first
-        // few still land in the metres nearest the sample and the far ones are cheap corrections.
+        // LENGTHENING THIS RAY COARSENS ITS NEAR FIELD BY THE SAME FACTOR, and the sample count has to
+        // move with it. The samples are on a SQUARED distribution, so over a march of length M with N
+        // samples the FIRST segment is M / N^2 — the resolution nearest the shaded point, which is where
+        // almost all of the material is. At the old 500 m and six samples that was 13.9 m; at fifteen
+        // kilometres and the same six it is 417 m, thirty times coarser, and a shadow ray whose first
+        // step steps straight over the cloud it starts inside reports the cloud transparent to the sun.
+        // See LightMarchSamples below and Docs/Clouds/CALIBRATION.md section OE-FIX for the frames.
         float LightMarchDistance = 1500000.0f; // 15 km
 
-        PROPERTY( DisplayName( "Light March Samples" ), Category( "Lighting" ), Range( 1, 16 ),
-                  Tooltip( "Samples along the shadow ray. They are placed on a squared distribution, so "
-                           "the first few carry most of the answer and adding more has sharply "
-                           "diminishing returns." ) )
-        int32_t LightMarchSamples = 6;
+        PROPERTY( DisplayName( "Light March Samples" ), Category( "Lighting" ),
+                  Range( 1, ::Desert::ECS::kCloudLightMarchMaxSamples ),
+                  Tooltip( "Samples along the shadow ray toward the sun. They are placed on a squared "
+                           "distribution, so the first segment is the march length over the SQUARE of "
+                           "this number — which is why a long ray needs many more of them than a short "
+                           "one. Below about 24 the sunward highlights blow out; above 48 nothing "
+                           "measurable changes. This is the hottest loop in the subsystem: the ray is "
+                           "traced at every sample inside every cloud, and the cost is linear in this "
+                           "number." ) )
+        // THIRTY-TWO, and the number is a measurement rather than a preference. Rendered p95 of the
+        // zenith frame looking INTO the sun, Clouds_Demo, in linear scene radiance after exposure (the
+        // 8-bit scale is nearly flat above 0.95 and hides the size of this entirely):
+        //
+        //     N          6      10      16      24      32      48      64
+        //     linear   4.29    2.27    1.29    1.05    0.99    0.97    0.97
+        //     x conv   4.42    2.35    1.34    1.08    1.02    1.00    1.00
+        //
+        // Thirty-two is the first value on the plateau — 2% from converged, and 1% from the 0.979 the UE
+        // reference frame's own p95 implies. Sixteen, the ceiling this component used to carry, is still
+        // 34% too bright; ten, which is Unreal's BaseShadowRaySampleCount, is still 135% too bright on
+        // OUR quadrature. The away-from-sun azimuth converges by ten and hides the whole defect, which is
+        // why it went unseen: the error is a multiplier on sun visibility and the sunward phase function
+        // is ~16x the away one.
+        //
+        // THE COST IS REAL AND IS THE ENTRY TO A QUALITY TIER. Measured by the frame-count slope on a
+        // debug build at 1280x766 (machine shared): 0.23 ms of frame time per shadow sample, so 6 -> 32
+        // is 7.1 -> 12.9 ms/frame, +81%. A tier that wants the speed back should lower THIS number first
+        // — 24 costs 4.0 ms less than 32 and is 7% from converged — and it is the reason the range now
+        // reaches 64 rather than stopping where the defect lived.
+        int32_t LightMarchSamples = 32;
 
         PROPERTY( DisplayName( "Multiple Scattering Octaves" ), Category( "Lighting" ), Range( 1, 3 ),
                   Tooltip( "How many scattering orders are approximated. ONE IS SINGLE SCATTERING, and a "

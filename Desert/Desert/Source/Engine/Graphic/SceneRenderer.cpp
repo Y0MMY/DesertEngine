@@ -11,6 +11,7 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -402,9 +403,36 @@ namespace Desert::Graphic
         if ( filterChanged || anisoChanged )
             Renderer::GetInstance().RecreateImageSamplers();
 
+        // THE TWO BRIGHT-PASS THRESHOLDS ARE AUTHORED IN THE EXPOSED IMAGE AND COMPARED IN THE RAW ONE,
+        // and until this line they were simply handed across that boundary unchanged.
+        //
+        // SceneComposite computes `(scene + bloom + shafts + flare) * exposure`, so `exposure` is the only
+        // thing standing between scene radiance and what the tonemapper sees. Both bright passes run
+        // UPSTREAM of it and threshold the raw HDR: BloomDownsample takes `max(brightness - threshold, 0)`
+        // on the scene image, LensFlareBrightPass does the same. An authored 2.5 therefore means "2.5" in
+        // a scene at Exposure 1.0 and "0.55" in one at Exposure 0.22 — one knob with two meanings, decided
+        // by an unrelated field, which is the disagreement §2.3.1 of the contract is about.
+        //
+        // Measured, Clouds_Demo (Exposure 0.22), zenith looking into the sun, with the shadow ray
+        // converged: bloom and the flare added 1.389 of linear scene radiance on top of 0.989 — they MORE
+        // THAN DOUBLED the highlight, and took a frame that landed on the UE reference's p95 (0.802
+        // against 0.800) up to 0.922. At the authored 2.5 the effective cutoff was 0.55 of a normalised
+        // unit, so ordinary daylight sky was a bloom source. Dividing here puts the comparison back in the
+        // space the number was written in; neither authored number was retuned.
+        //
+        // AUTO-EXPOSURE IS NOT FIXED BY THIS AND IS NOT PRETENDED TO BE. There the exposure is
+        // `key / adaptedLuminance` evaluated in the composite from a 1x1 image the CPU never reads, so
+        // this function has nothing to divide by and leaves the threshold in raw radiance — the behaviour
+        // it has always had. No repository scene enables auto-exposure. Closing it means giving the bloom
+        // pass the adapted-luminance image and doing the comparison on the GPU, which is a binding this
+        // pass does not have; it is written down in Docs/Clouds/CALIBRATION.md rather than left to be
+        // rediscovered.
+        const float exposureNormalisation =
+             sceneSettings.AutoExposure ? 1.0f : std::max( sceneSettings.Exposure, 1e-4f );
+
         m_BloomEnabled = sceneSettings.EnableBloom;
         UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )
-             ->SetThreshold( sceneSettings.BloomThreshold );
+             ->SetThreshold( sceneSettings.BloomThreshold / exposureNormalisation );
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
              ->SetBloomIntensity( sceneSettings.EnableBloom ? sceneSettings.BloomIntensity : 0.0f );
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
@@ -415,7 +443,10 @@ namespace Desert::Graphic
         // whose sun has left the screen fades through ONE number instead of two that could disagree.
         m_LensFlare.Enabled         = sceneSettings.EnableLensFlare;
         m_LensFlare.Intensity       = sceneSettings.LensFlareIntensity;
-        m_LensFlare.Threshold       = sceneSettings.LensFlareThreshold;
+        // Normalised for the reason given at the bloom threshold above, and by the same number: this pass
+        // thresholds the same raw HDR image, so leaving one of the two in raw radiance would only move the
+        // defect from one bright pass to the other.
+        m_LensFlare.Threshold       = sceneSettings.LensFlareThreshold / exposureNormalisation;
         m_LensFlare.GhostCount      = sceneSettings.LensFlareGhostCount;
         m_LensFlare.GhostSpacing    = sceneSettings.LensFlareGhostSpacing;
         m_LensFlare.GhostSizeNear   = sceneSettings.LensFlareGhostSizeNear;

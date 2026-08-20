@@ -138,6 +138,16 @@ Shader "CloudRaymarch"
         // the sample, so uniform spacing spends most of its samples where the answer has already
         // converged. Each segment's contribution is weighted by its own length, so the sum is a genuine
         // integral and not a biased average.
+        //
+        // WHAT THAT DISTRIBUTION COSTS, and the defect it hid for a phase: the FIRST segment is
+        // @p marchKm / sampleCount^2 — quadratic in the count, not linear. The near field is therefore the
+        // one thing that does NOT survive lengthening the ray. At 500 m and six samples the first step was
+        // 13.9 m; the ray was then taken to 15 km for parity with Unreal's ShadowTracingDistance and the
+        // count was left at six, making it 417 m — a first step that walks straight out of the cloud the
+        // sample sits in and reports it transparent to the sun. Rendered, that was a sunward zenith
+        // highlight 4.4x the converged answer in linear radiance. Convergence needs about thirty samples on
+        // THIS quadrature; see ECS::kCloudLightMarchMaxSamples and Docs/Clouds/CALIBRATION.md section
+        // OE-FIX. Anyone shortening @p marchKm again may lower the count with it, and by the square.
         float CloudLightOpticalDepth(CloudLayer layer, CloudFieldParams params, vec3 positionKm,
                                      vec3 toSun, float marchKm, int sampleCount, float extinctionPerKm)
         {
@@ -322,7 +332,11 @@ Shader "CloudRaymarch"
             float extinction   = max(u_CloudMarch.w, 0.0f);
             float albedo       = clamp(u_CloudDetail.z, 0.0f, 1.0f);
             float lightMarchKm = max(u_CloudSun.w, 0.0f);
-            int   lightSamples = int(clamp(u_CloudSunColour.w, 1.0f, 16.0f));
+            // SIXTY-FOUR, and it must equal ECS::kCloudLightMarchMaxSamples. This clamp cannot include the
+            // C++ constant, so Desert/Tests/Engine/SettingConsumers reads this line's text and fails if the
+            // two ever part company — while both were the literal 16 an artist could raise the slider past
+            // a ceiling the march quietly reimposed.
+            int   lightSamples = int(clamp(u_CloudSunColour.w, 1.0f, 64.0f));
             float stopT        = clamp(u_CloudMarch.y, 0.0f, 1.0f);
             int   octaveCount  = int(clamp(u_CloudMultiScatter.x, 1.0f, 3.0f));
 

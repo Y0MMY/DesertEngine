@@ -426,6 +426,37 @@ TEST( SettingConsumers, TheCloudComponentOwesNothing )
     EXPECT_EQ( pending, 0 );
 }
 
+// A slider can name its consumer and STILL not reach it, and this is the case that proves it.
+//
+// Light March Samples travels to the GPU through three separate ceilings: the Range on the PROPERTY, the
+// std::clamp in Graphic::PackCloudParams, and a clamp written again inside the compute shader. All three
+// were the literal 16. Raise the first two to 64 and forget the third and the artist drags the slider to
+// 64, the payload carries 64, and the march silently uses 16 — a setting that reaches its consumer and is
+// thrown away there, which no reflection test and no build can see.
+//
+// The first two ceilings are now one constant. The shader cannot include a C++ header, so its copy is
+// checked the only way it can be: by reading the shader's own text. That is what makes this an assertion
+// about the RELATION (contract 2.3.1) rather than three assertions about the number 64.
+TEST( SettingConsumers, TheShaderClampsTheShadowRayAtTheSameCeilingTheSliderOffers )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() ) << "repository root not found from the test's working directory";
+
+    const std::string path   = root + "Editor/Resources/Shaders/Programs/Clouds/CloudRaymarch.shader";
+    const std::string source = ReadFile( path );
+    ASSERT_FALSE( source.empty() ) << path << " is missing or empty";
+
+    // The exact line the march clamps on. Written out in full rather than matched loosely, because a
+    // regex that still matched after somebody rewrote the clamp would pass while testing nothing.
+    const std::string expected = "int   lightSamples = int(clamp(u_CloudSunColour.w, 1.0f, " +
+                                 std::to_string( Desert::ECS::kCloudLightMarchMaxSamples ) + ".0f));";
+
+    EXPECT_NE( source.find( expected ), std::string::npos )
+         << "CloudRaymarch.shader does not clamp the shadow ray's sample count at "
+         << Desert::ECS::kCloudLightMarchMaxSamples << ", which is the ceiling the slider offers and the "
+         << "payload packs. Expected to find:\n  " << expected;
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
