@@ -95,6 +95,11 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::ExponentialHeightFogComponen
 
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::VolumetricCloudComponent, Data, "VolumetricCloudData",
                                      "Volumetric Cloud" )
+
+// The seam's AUTHORED producer: one sculpted body, placed by this entity's transform. It is a per-entity
+// component rather than another field of the layer, because there may be several of them and each has a
+// place in the world; the layer is one shell and has none.
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::HeroCloudComponent, Data, "HeroCloudData", "Hero Cloud" )
 // Sky Atmosphere is a CUSTOM entry: the reflected fields PLUS the sky-colour ramp (which needs the scene's
 // sun elevation, and that is not a field) and the IBL bake button. See
 // ComponentWidgets/SkyAtmosphereComponent.cpp.

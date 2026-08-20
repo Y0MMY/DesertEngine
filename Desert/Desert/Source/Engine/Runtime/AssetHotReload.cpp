@@ -5,6 +5,7 @@
 #include <Engine/Assets/Shader/ShaderAsset.hpp>
 #include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
 #include <Engine/Assets/CloudTypeAsset.hpp>
+#include <Engine/Assets/CloudModellingVolumeAsset.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
@@ -68,7 +69,45 @@ namespace Desert::Runtime
         PollShaders( assetManager, scene );
         PollCloudNoiseVolumes( assetManager );
         PollCloudTypes( assetManager );
+        PollCloudModellingVolumes( assetManager );
         m_FirstScan = false;
+    }
+
+    void AssetHotReload::PollCloudModellingVolumes( Assets::AssetManager& assetManager )
+    {
+        auto* service = ResourceRegistry::GetCloudModellingService();
+
+        for ( const auto& [handle, asset] : assetManager.FindAllByType<Assets::CloudModellingVolumeAsset>() )
+        {
+            if ( !asset )
+                continue;
+
+            const auto& path = asset->GetMetadata().Filepath;
+            if ( !TouchWatched( path ) )
+                continue;
+
+            const std::string key = path.generic_string();
+
+            // A FAILED RE-READ LEAVES THE OLD VOXELS UPLOADED, deliberately. A half-written file caught
+            // mid-bake would otherwise take the hero cloud out of the sky, and the artist would be
+            // debugging a disappearance instead of reading the error that is already in the log.
+            if ( const auto reloaded = asset->Load(); !reloaded )
+            {
+                LOG_ERROR( "[HotReload] Cloud modelling volume '{}' could not be re-read: {}", key,
+                           reloaded.GetError() );
+                continue;
+            }
+
+            if ( const auto uploaded = service->Register( asset ); !uploaded )
+            {
+                LOG_ERROR( "[HotReload] Cloud modelling volume '{}' was re-read but not uploaded: {}", key,
+                           uploaded.GetError() );
+                continue;
+            }
+
+            LOG_INFO( "[HotReload] Cloud modelling volume '{}' reloaded — the next frame marches the new body.",
+                      key );
+        }
     }
 
     void AssetHotReload::PollCloudNoiseVolumes( Assets::AssetManager& assetManager )

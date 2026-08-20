@@ -1018,3 +1018,248 @@ cross-phase comparison this document invites has been quietly measuring
 composition as well as lighting.
 
 The instrument was never wrong. The subject moved.
+
+---
+
+## A0: the authored producer — slot A of the seam, 2026-08-20
+
+Phase Э4 A0 (`Docs/Clouds/PLAN_AUTHORED_CLOUDS.md`). The cloud field's second producer exists: a sculpted
+body in a `.dcmv`, placed in the sky by an entity's transform, joined to the procedural field by the `max`
+the seam was written for in Э0, with a cutout that keeps the procedural field out of it.
+
+### The memory arithmetic, recomputed rather than quoted
+
+Measured from the engine's own allocation log on `Clouds_Demo` at 1280x766, High tier — every line below
+is a number the renderer printed, not an estimate:
+
+| | MiB |
+|---|---|
+| noise volume `.dcnv`, 128³ RGBA8 | 8.00 |
+| cloud shadow map, 512² RGBA32F | 4.00 |
+| vertical profile table, 256x64 RGBA32F | 0.25 |
+| trace + reconstruction targets (two quarter-res, four half-res, RGBA16F) | 8.42 |
+| **occupied before slot A** | **20.67** |
+| one sculpted body, 128 x 64 x 128 RGBA8 | **4.00** |
+| **occupied with one hero cloud** | **24.67** |
+
+**Against the 64 MiB of decision D-9 that leaves 43.33 MiB, which is TEN more bodies and not eight.** The
+plan's "eight" and its "~21.5 occupied" are the same quantities in MB rather than MiB (20.67 MiB is
+21.68 MB); the arithmetic behind them is sound and the count of volumes that fit is 10.
+
+**The shadow map does not grow with the tier**, which is what makes this budget stable: `ShadowMapScale`
+is 1.0 at High AND at Ultra and 0.5 below, so 4.00 MiB is a ceiling rather than a High-tier figure.
+
+**The voxel is 15.6 m on every axis** at the shipped body's authored 2 x 1 x 2 km, which is the plan's §2
+exactly. Guerrilla store 8 m and the same deck says 8 m of data yields 0.5 m of visible detail, because
+the detail is carried by the up-rez noise and not by the voxel — the volume carries the silhouette and
+`Common/CloudField.glslh`'s erosion carries the edge.
+
+### The procedural sky did not move, and five points of six say so with a zero
+
+`Clouds_Demo` — no hero cloud in it at all — through the protocol's six points, the baseline binary built
+from `a5cfa2ab` against this branch's binary. Camera `0,200,0`, `--shot-frames 90`, 1280x766.
+
+**The repeat floor is zero, measured rather than assumed**: the same command run twice on the zenith-away
+point gives **0 differing pixels of 980 480, max delta 0**. Every number below is therefore exact.
+
+| point | file bytes differing | pixels changed | max delta |
+|---|---|---|---|
+| zenith away `0,0.9,-1` | 1 113 396 of 1 165 438 | **199 / 980 480 (0.020 %)** | **1/255** |
+| mid away `0,0.45,-1` | **0** | 0 | 0 |
+| horizon away `0,0.12,-1` | **0** | 0 | 0 |
+| zenith sunward `0,0.9,1` | **0** | 0 | 0 |
+| mid sunward `0,0.45,1` | **0** | 0 | 0 |
+| horizon sunward `0,0.12,1` | **0** | 0 | 0 |
+
+**Five of six are byte for byte identical files.** The sixth moved 199 pixels by one 8-bit level, and the
+cause is named rather than shrugged at: with no hero cloud the seam reduces to `Profile * (1 - 0)` and a
+loop that runs zero times, which is the exact arithmetic identity — but `Common/CloudField.glslh` is a
+different FILE now, so its SPIR-V is recompiled and the compiler is free to schedule and contract the
+PROCEDURAL producer's floating point differently. One 8-bit level on 0.02 % of one frame is what that
+costs.
+
+Note also that the PNG file bytes differ wholesale on that point while only 199 pixels do: a deflate
+stream is not a per-pixel encoding, so a file-byte count is only meaningful when it is ZERO.
+
+### The join is order-independent to the BYTE, and it was not
+
+The exponential smooth-min is commutative and associative in real arithmetic — the first of the three
+properties it was chosen for — but floating-point addition is neither. Measured on the shipped recipe:
+**shuffling the eight lumps moved 6 bytes of 4 194 304, each by one 255th.**
+
+Tiny, and still the wrong shape of answer: a bake is a build artefact, and a build artefact whose bytes
+depend on the order its inputs happened to be listed in cannot be compared, cached by hash or asserted
+equal. `GenerateCloudModellingVolume` now sorts the lumps into a canonical order before it sums anything,
+which costs one sort of at most 64 elements against 8.4 million exponentials and makes the property
+exactly true. `Desert/Tests/Engine/CloudAuthored` asserts it on the bytes.
+
+### Two guards that turned out not to be guards
+
+Every test in the new suite was verified by breaking the thing it claims to measure. Fifteen of seventeen
+breaks turned the suite red. **The two that did not are the finding**, and both say the same thing:
+
+* deleting the seam's EXACT bounds test (the one that rejects the corner of a rotated instance's hull),
+  and
+* clamping the fetch against the wrong axis extent (128 where the vertical axis is 64)
+
+leave every assertion green. The reason is the same for both: the bake REFUSES a body that reaches its own
+box, so the volume's outermost shell is four zeroes, and any coordinate that lands on the boundary — by a
+clamp, by a REPEAT wrap, or by a bounds test that was skipped — reads nothing and contributes nothing.
+
+So the empty-shell guarantee is what keeps the picture right, and the two gates are a COST bound: the
+exact test saves a 3D fetch for every point in the difference between a rotated box and its hull, which is
+up to 3.4x the body's own volume. Both are worth having; only one of them is worth calling a correctness
+test, and the suite now says which is which.
+
+### The accepting frame, and the two differences that prove what is in it
+
+`Clouds_HeroCloud.desce`, camera `0,200,0`, `--look 0,0.45,-1`, `--shot-frames 90`. The A and B of each
+row below differ by ONE FIELD of the scene and no rebuild, which is this document's own method.
+
+| comparison | pixels changed | max delta | what it is |
+|---|---|---|---|
+| hero cloud on vs `Enabled` off | **17.31 %** | **126/255** | the body itself: a sixth of the frame |
+| cutout on vs `Suppress Procedural Field` off | **5.90 %** | **27/255** | the procedural cloud that was growing through it |
+
+**The instrument's floor is zero** — the same command twice gives 0 changed pixels — so both numbers are
+the change and nothing else. A third check, taken by accident and worth keeping: the showcase frame shot
+in one session and again in another is **0 / 980 480 different**, which is the headless path's own
+determinism measured a second time.
+
+| file | what it shows |
+|---|---|
+| `Shots/A0_hero_mid_away.png` | **⬛ the accepting frame**: one fused convective mass — merged lobes, a shared surface — standing in a field of the procedural producer's separate cushions |
+| `Shots/A0_hero_off_mid.png` | the same scene with the hero cloud disabled; the difference IS the cloud |
+| `Shots/A0_hero_nocutout_mid.png` | the cutout switched off: procedural cloud growing through the sculpted body |
+| `Shots/A0_hero_{zenith,mid,horizon}_{away,sun}.png` | the six-point protocol on the showcase scene |
+
+**Why the frame answers the measured limit of §0 of the plan.** The procedural producer's coverage field
+is an Alligator, `best - second`, which is exactly zero on the bisector between every pair of feature
+points — so its lobes CANNOT merge and the sky reads as a deck of separate cushions.
+`Desert/Tests/Engine/CloudAuthored` measures the sculpted body as **one six-connected component** by flood
+fill, and the frame shows the difference directly: the hero cloud has one silhouette where its neighbours
+have many.
+
+**The composition of the showcase scene is its own choice and is stated rather than left to be
+discovered**: `Coverage` is 0.08 where `Clouds_Demo` ships 0.24. At the shipped coverage the procedural
+deck fills the frame from a two-metre camera and a hero cloud is one cushion among fifty — which is §4.4
+of the analysis, "P as background and A in the near field", not honoured. The showcase scene is the
+composition that phase is about; `Clouds_Demo` is untouched and is what the six-point regression above is
+measured on.
+
+### The price, measured, on a machine that was shared
+
+Frame-count slope, `(t900 - t300) / 600`, which cancels the ~20 s fixed start-up. `Clouds_HeroCloud`,
+camera `0,200,0`, `--look 0,0.45,-1`. **A and B interleaved in one session, four passes, minimum of four**,
+where A is the identical scene with the hero cloud's `Enabled` off — one field, no rebuild.
+
+| | min t300 | min t900 | slope | vs no hero cloud |
+|---|---|---|---|---|
+| **A — hero cloud disabled** (instance count 0) | 25.629 s | 35.255 s | **16.04 ms/frame** | 1.00x |
+| **B — one hero cloud, cutout on** | 26.357 s | 38.205 s | **19.75 ms/frame** | **1.23x, +3.71 ms** |
+
+**The spread, and one leg thrown away.** The four per-pass slopes are A 14.17 / 16.24 / 16.30 and
+B 19.24 / 19.85 / 19.52 / 19.43 — B holds to 3.1 %, A to 15 %, the width of A being the first pass's cold
+start. A's FOURTH 300-frame leg finished in 18.943 s against 25.6 s and is excluded because it did not
+finish at all: it is one more sighting of the abort described below. Read conservatively — fastest A
+against fastest B — the cost is **+5.07 ms**; read as the house method reads it, minimum leg against
+minimum leg, it is **+3.71 ms**. Both are quoted because the honest answer is the range: **+3.7 to
++5.1 ms for one hero cloud covering a sixth of the frame**.
+
+For scale, the cloud shadow map cost +4.92 ms when it landed and the shadow ray's own convergence cost
+1.87x. This is the same order, and it buys the phase's whole reason for existing.
+
+**Debug build, and the ratio is a lower bound on the shipping one**, for the reason the OE-FIX table
+gives: the baseline carries CPU work a release build shrinks and this dispatch does not.
+
+### "Zero when absent" is NOT zero, and here is how much it is
+
+§4.4 of the analysis asks that a producer which is switched off cost **zero, not almost zero**. That is
+the one requirement of this phase the implementation does not meet exactly, so it is measured rather than
+claimed.
+
+`Clouds_Demo` — a scene with no hero cloud component in it at all — on the binary built from `a5cfa2ab`
+against this branch's binary, **the two binaries interleaved in one session, three passes**:
+
+| | slope, per pass | min-of-legs slope |
+|---|---|---|
+| before this task | 18.67 / 17.88 / 18.83 ms | **18.02 ms/frame** |
+| after | 18.78 / 18.87 / 19.13 ms | **18.97 ms/frame** |
+| difference | **+0.11 / +0.99 / +0.30 ms** | +0.95 ms |
+
+**Between +0.1 and +1.0 ms on an 18 ms frame, and the run-to-run spread of the BEFORE side alone is
+0.95 ms.** The difference is therefore not separable from the noise, and the best-matched pass puts it at
++0.11 ms, or 0.6 %.
+
+**What it physically is, so nobody looks for it in the wrong place.** With no hero clouds the authored
+loop does not execute — but reaching that decision still costs ONE integer load and ONE compare, per
+field sample, and a frame takes on the order of 95 million field samples (a quarter-resolution trace, a
+two-tier march, and about thirty shadow-ray samples for every view sample that finds material). A tenth
+of a millisecond is what that arithmetic predicts and what the best pair measures.
+
+**The PICTURE, unlike the price, is exactly unchanged**: five of the protocol's six points are byte for
+byte identical files and the sixth moves 199 pixels by one 8-bit level — see the table above. A frame is
+where "zero" is provable, and there it is proven.
+
+### THE ONE THING THIS PHASE DID NOT CLOSE: a rare abort on start-up
+
+**Say it first.** With a hero cloud in the scene, roughly one headless run in twenty dies before it writes
+its PNG:
+
+```
+libc++abi: terminating due to uncaught exception of type std::length_error: vector
+```
+
+always at the same point — after the render graph has been built and before the sky's first LUT is
+allocated, i.e. in the first frame or two, never later. It is not a rendering defect: a run that survives
+those two frames renders correctly and deterministically, and every frame in this document was taken from
+a surviving run.
+
+**What was measured.** All rows are the same headless command differing only in the scene, and all but
+the last row are the same binary. `std::length_error` counted as a death; the known teardown segfault
+(which happens on EVERY run, after the PNG is written) is not.
+
+| configuration | aborts | runs |
+|---|---|---|
+| `Clouds_Demo` — engine-written file, no hero component | **0** | 30 |
+| `ZZ_Probe_DemoCov08` — the same file with ONE byte pair changed (coverage 0.24 → 0.08) | **0** | 30 |
+| `ZZ_Probe_NoComp` — this task's scene file, hero component removed | **0** | 22 |
+| `ZZ_Probe_NoVolume` — the component present, disabled, and its `Volume` slot EMPTY | **0** | 20 |
+| `Clouds_HeroCloud_Off` — the component present, disabled, `Volume` set | **3** | ~26 |
+| `Clouds_HeroCloud` — one hero cloud drawing | **3** | ~90 |
+| the same probe scene on the binary built from `a5cfa2ab`, i.e. before this task | **0** | 30 |
+
+*(The `ZZ_Probe_*` and `Clouds_HeroCloud_Off` scenes were instruments for one afternoon and are not in the
+tree: each is `Clouds_HeroCloud.desce` with the one field named in its row changed. `ZZ_Probe_DemoCov08`
+is `Clouds_Demo.desce` with two bytes changed, which is why that row can say "one byte pair".)*
+
+**What that rules in and out.** It is not the coverage and not this task's scene file (rows 2 and 3), and
+it is not the authored producer's per-frame path — row 5 has the instance count at ZERO and still dies. It
+did not happen on the pre-change binary. The signal is with the scenes whose component carries a `.dcmv`
+handle; aggregated, 6 aborts in ~116 such runs against 0 in ~102 without, which is Fisher p ≈ 0.03 —
+suggestive, and NOT a proof, and it is quoted as what it is.
+
+**What was tried and did not work.** ~70 runs under `lldb` never reproduced it, so there is no stack. The
+macOS crash reporter wrote no report for the abort (only the known teardown segfault, whose signature it
+had already recorded). Two real hazards were found by reading and were removed, and NEITHER stopped it:
+
+* the cloud collector was `CanRunParallel() == true` while touching `RelationshipComponent`, a type no
+  scene in this repository instantiates, so its pool is created on the fly — and EnTT's `assure<T>()`
+  MUTATES (`pools.resize`) even through a const registry, which races with any other parallel system
+  doing the same. It is serial now, and the note on the class says why;
+* the frame's cloud command was emplaced with `clouds.Data` — a reference INTO the registry — in the same
+  argument list as `CollectHeroClouds( registry )`, which touches the registry. Argument evaluation order
+  is unspecified. Both are hoisted into locals now.
+
+**What to do next, so this is not re-derived.** The exception type is the whole clue: libc++ throws
+`length_error("vector")` from exactly one place, `vector::__vallocate` when the requested count exceeds
+`max_size()` — i.e. a `size_t` that is corrupt or has underflowed, not a legitimately large allocation.
+Two instruments would settle it and neither was affordable in the time this phase had:
+
+1. a run loop under `MallocGuardEdges=1 MallocScribble=1`, which turns a heap overrun into a fault AT the
+   overrun rather than at the next allocation;
+2. a build with `-fsanitize=thread` for the first two frames, which is the only tool that will name a race
+   this rare.
+
+Until then this is the phase's one open defect, and it is named here rather than in a commit message so
+that it is found by whoever picks up A1.

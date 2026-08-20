@@ -64,6 +64,7 @@ namespace Desert::Scripting
              MakeEntry<ECS::SkyAtmosphereComponent>( "SkyAtmosphere", "SkyAtmosphereData" ),
              MakeEntry<ECS::ExponentialHeightFogComponent>( "ExponentialHeightFog", "ExponentialHeightFogData" ),
              MakeEntry<ECS::VolumetricCloudComponent>( "VolumetricCloud", "VolumetricCloudData" ),
+             MakeEntry<ECS::HeroCloudComponent>( "HeroCloud", "HeroCloudData" ),
         };
 
         const ReflectedComponentEntry* FindEntry( const std::string& name )

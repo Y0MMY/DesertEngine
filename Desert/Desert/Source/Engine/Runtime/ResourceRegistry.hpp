@@ -15,6 +15,7 @@
 #include "Services/Video/VideoService.hpp"
 #include "Services/CloudNoise/CloudNoiseService.hpp"
 #include "Services/CloudType/CloudTypeService.hpp"
+#include "Services/CloudModelling/CloudModellingService.hpp"
 
 namespace Desert::Runtime
 {
@@ -39,5 +40,7 @@ namespace Desert::Runtime
         static VideoService*         GetVideoService();
         static CloudNoiseService*    GetCloudNoiseService();
         static CloudTypeService*     GetCloudTypeService();
+        // The sculpted hero-cloud bodies (`.dcmv`), slot A of the cloud field's seam.
+        static CloudModellingService* GetCloudModellingService();
     };
 } // namespace Desert::Runtime

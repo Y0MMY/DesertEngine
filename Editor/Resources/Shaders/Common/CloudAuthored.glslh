@@ -1,0 +1,194 @@
+// THE AUTHORED PRODUCER'S ADDRESSING — slot A of the seam, everything except the union itself.
+//
+// Docs/Clouds/ANALYSIS_APPROACH.md §4 gives the programme two producers behind one seam. P, the
+// procedural one, lives in Common/CloudField.glslh and answers everywhere. A, this one, answers only
+// inside the bounds of an INSTANCE: a sculpted volume placed in the sky by an entity's transform, which
+// is where a silhouette the procedural field cannot make comes from. This file is what an instance IS
+// and how a point in the sky becomes a point in its volume; Common/CloudField.glslh is where the two
+// answers meet.
+//
+// WHY THE ADDRESSING IS SPLIT OUT OF THE SEAM AT ALL, since it is only forty lines: the instance array
+// is a storage block, a storage block cannot be compiled as C++, and Common/CloudField.glslh has to be —
+// it is the file the CloudField suite drives. Declaring the block here, before the seam includes it,
+// is the same arrangement CLOUD_SAMPLE_NOISE already has: the data arrives through a macro that the
+// march defines as a fetch and a test defines as a call into the very generator that wrote the file.
+//
+// HOW THE DATA ARRIVES, and the caller owns every one of these:
+//
+//     CLOUD_AUTHORED_COUNT                      -> int, how many instances are live this frame, 0..4
+//     CLOUD_AUTHORED_INSTANCE( int i )          -> CloudAuthoredInstance
+//     CLOUD_SAMPLE_AUTHORED( vec3 uvw )         -> vec4, the four channels of the modelling volume
+//
+// A shader gets the first two for free by defining CLOUD_AUTHORED_BUFFER_BINDING before including this
+// file; a test defines them itself over a C++ array. The third is a sampler and therefore always the
+// caller's, exactly like CLOUD_SAMPLE_NOISE.
+//
+// Dialect rules as in Common/CloudNoise.glslh. Distances are KILOMETRES.
+
+#ifndef CLOUD_AUTHORED_GLSLH
+#define CLOUD_AUTHORED_GLSLH
+
+// HOW MANY HERO CLOUDS ONE SKY HOLDS AT ONCE. Four, and — unlike CLOUD_SPECIES_SLOTS, which is the width
+// of a texel — this one is a BUDGET rather than a structural limit: every instance costs the march the
+// bounds test below at every field sample, and that test runs once per light-march sample as well, so it
+// is multiplied by about thirty. The number is the one measured to stay inside the pass's millisecond
+// budget; Docs/Clouds/CALIBRATION.md §A0 carries the slope it was chosen from.
+#define CLOUD_AUTHORED_SLOTS 4
+
+// THE VOLUME'S SHAPE, FIXED BY THE FORMAT. Every `.dcmv` is exactly this size — 128 x 64 x 128 voxels,
+// two horizontal axes at 128 and the vertical one at 64, because a cloud is wider than it is tall and a
+// cubic volume would spend half its bytes on air. In RGBA8 that is 4.00 MiB.
+//
+// FIXED RATHER THAN CARRIED IN THE FILE, and the reason is the clamp below: a coordinate has to be
+// pulled in by half a texel and half a texel of WHAT has to be a compile-time number here, because this
+// header is also the C++ the tests drive. Assets::kCloudModellingVolumeWidth and its two siblings are
+// the same three numbers on the C++ side and Desert/Tests/Engine/CloudAuthored asserts they agree — two
+// statements of one fact, so the pair is a test rather than a hope.
+#define CLOUD_MODELLING_VOLUME_WIDTH  128
+#define CLOUD_MODELLING_VOLUME_HEIGHT 64
+#define CLOUD_MODELLING_VOLUME_DEPTH  128
+
+// The four channels of the modelling volume, in the order Engine/Assets/CloudModellingVolume.hpp writes
+// them. Named here because the shader reads them by swizzle and a comment three files away is not where
+// the next person looks.
+//
+//   x  DIMENSIONAL PROFILE  how deep inside the body, 0 at the surface and 1 in the core. The same
+//                           quantity the procedural producer returns, which is what makes the union a
+//                           plain `max` rather than a negotiation (deck p.85).
+//   y  DETAIL TYPE          0 wispy, 1 billowy — which erosion the up-rez applies here.
+//   z  DENSITY SCALE        per-voxel multiplier on how much matter is in this part of the body.
+//   w  CUTOUT ENVELOPE      the body dilated by the bake's margin: 1 throughout the body and falling to
+//                           0 a stated distance outside it. It is the conservative shell — it is 1
+//                           wherever the profile is above 0 and extends past it, never the other way
+//                           round — and the cutout is what reads it.
+
+/**
+ * One hero cloud in the sky, as the march sees it.
+ *
+ * TWENTY FLOATS, ALL READ. The instance is a transform, a box and four material numbers, and it is laid
+ * out so those nineteen values plus the strength fill five vec4s exactly rather than leaving a slot for
+ * the next parameter to be stashed in without a name or a tooltip.
+ *
+ * THE TRANSFORM IS THE LINEAR PART ONLY, and the translation is NOT stored, because it is already here:
+ * an axis-aligned box around a rotated box is centred on the same point, so the centre of the bounds
+ * below IS the centre of the instance whatever its rotation. Three floats saved and, more usefully, two
+ * statements of one position reduced to one — the class of defect this programme has paid for most
+ * often.
+ *
+ * THE FRAME IS THE FIELD'S, not the world's: x and z are world kilometres, y is the ALTITUDE ABOVE THE
+ * LAYER'S BASE in kilometres, which is the vector CloudRaymarch.shader hands SampleCloudField and the
+ * only frame in which the noise's period means anything (see the note at that call site). The conversion
+ * happens once, on the CPU, in Graphic::PackCloudAuthoredInstance.
+ */
+struct CloudAuthoredInstance
+{
+    // Rows of the linear map from a field-space DISPLACEMENT in kilometres to the volume's local cube,
+    // whose corners are -0.5 and +0.5. It is the inverse of rotation x scale x the volume's own authored
+    // size, so a uniformly scaled instance has rows of length 1/sizeKm.
+    vec4 Row0; // xyz = row 0, w = DetailFactor      — this cloud's multiplier on the layer's erosion depth
+    vec4 Row1; // xyz = row 1, w = DensityFactor     — its multiplier on the layer's density
+    vec4 Row2; // xyz = row 2, w = ExtinctionFactor  — its multiplier on the layer's extinction
+
+    // The instance's axis-aligned bounds in field space, kilometres. THE CHEAP REJECTION IS THIS BOX AND
+    // NOT THE EXACT ONE, and the ratio is the reason: six compares against twenty-one multiply-adds, run
+    // at every field sample of every ray AND at every sample of every shadow ray, which is about thirty
+    // times more often again. The exact test follows, but only for the points this one lets through.
+    vec4 BoundsMin; // xyz = minimum corner, w = Strength — how strongly this instance asserts itself, 0..1
+    vec4 BoundsMax; // xyz = maximum corner, w = Cutout   — how much of the procedural field it suppresses
+};
+
+/// True when @p positionKm is inside the instance's axis-aligned bounds. The first and cheapest of the
+/// two tests, and the one that makes an authored instance cost almost nothing in the sky around it.
+bool CloudAuthoredInBounds( CloudAuthoredInstance instance, vec3 positionKm )
+{
+    if ( positionKm.x < instance.BoundsMin.x || positionKm.x > instance.BoundsMax.x )
+        return false;
+    if ( positionKm.y < instance.BoundsMin.y || positionKm.y > instance.BoundsMax.y )
+        return false;
+    if ( positionKm.z < instance.BoundsMin.z || positionKm.z > instance.BoundsMax.z )
+        return false;
+    return true;
+}
+
+/**
+ * Where @p positionKm lands in the instance's volume, as a texture coordinate in [0, 1].
+ *
+ * A point outside the instance's own box maps outside that range, and the caller MUST reject it —
+ * every sampler this engine creates is REPEAT, so a coordinate of 1.2 fetches the far side of the volume
+ * and a hero cloud would grow a mirror image of its own flank beside it.
+ */
+vec3 CloudAuthoredLocalUvw( CloudAuthoredInstance instance, vec3 positionKm )
+{
+    vec3 centre = ( vec3( instance.BoundsMin.x, instance.BoundsMin.y, instance.BoundsMin.z ) +
+                    vec3( instance.BoundsMax.x, instance.BoundsMax.y, instance.BoundsMax.z ) ) *
+                  0.5f;
+
+    vec3 offset = positionKm - centre;
+
+    vec3 local = vec3( dot( vec3( instance.Row0.x, instance.Row0.y, instance.Row0.z ), offset ),
+                       dot( vec3( instance.Row1.x, instance.Row1.y, instance.Row1.z ), offset ),
+                       dot( vec3( instance.Row2.x, instance.Row2.y, instance.Row2.z ), offset ) );
+
+    return local + vec3( 0.5f, 0.5f, 0.5f );
+}
+
+/// True when a coordinate produced by CloudAuthoredLocalUvw is inside the volume. This is the EXACT
+/// bounds of a rotated instance, where CloudAuthoredInBounds is only a box around it.
+bool CloudAuthoredInVolume( vec3 uvw )
+{
+    if ( uvw.x < 0.0f || uvw.x > 1.0f )
+        return false;
+    if ( uvw.y < 0.0f || uvw.y > 1.0f )
+        return false;
+    if ( uvw.z < 0.0f || uvw.z > 1.0f )
+        return false;
+    return true;
+}
+
+/**
+ * The coordinate the fetch actually uses: clamped to the texel centres of the volume.
+ *
+ * EVERY SAMPLER IN THIS ENGINE IS REPEAT, so a coordinate of exactly 1 wraps to the first texel and the
+ * trilinear filter blends the top face of the cloud with its own bottom face. The same clamp
+ * CloudSampleProfileTableAll performs on its two axes, for the same reason and with the same
+ * consequence if it is left out.
+ *
+ * It costs nothing in accuracy because the bake guarantees the outermost shell of voxels is empty —
+ * Assets::GenerateCloudModellingVolume refuses to produce a volume whose body touches its own boundary.
+ */
+vec3 CloudAuthoredClampUvw( vec3 uvw )
+{
+    float halfU = 0.5f / float( CLOUD_MODELLING_VOLUME_WIDTH );
+    float halfV = 0.5f / float( CLOUD_MODELLING_VOLUME_HEIGHT );
+    float halfW = 0.5f / float( CLOUD_MODELLING_VOLUME_DEPTH );
+
+    return vec3( clamp( uvw.x, halfU, 1.0f - halfU ), clamp( uvw.y, halfV, 1.0f - halfV ),
+                 clamp( uvw.z, halfW, 1.0f - halfW ) );
+}
+
+#ifdef CLOUD_AUTHORED_BUFFER_BINDING
+// The instance array as the GPU receives it. The C++ half of this layout is
+// Graphic::CloudAuthoredPayload (Engine/Graphic/Clouds/CloudAuthoredPayload.hpp), where a static_assert
+// pins every offset — a layout declared twice diverges the first time somebody inserts a member into one
+// of them, and the failure mode is a hero cloud read from the wrong bytes rather than an error.
+//
+// A SECOND STORAGE BLOCK RATHER THAN MORE OF THE FIRST. The cloud parameter block is the LAYER, one copy
+// of it, and it is repacked only when the artist moves a slider; this is a per-frame list whose length
+// changes when an entity is added to the scene. Appending an array of instances to CloudParams.glslh
+// would have made the layer's block grow by 320 bytes for the scenes that have no hero cloud at all,
+// which is the one thing §4.4 of the analysis forbids.
+//
+// `int` FIRST AND THE ARRAY AFTER IT. std430 aligns an array of structs to 16, so the count leaves
+// twelve bytes of ALIGNMENT — not a reserved slot: there is no member there to read, and the C++ side
+// pins the array's offset at 16 so the two cannot disagree about it.
+layout( std430, binding = CLOUD_AUTHORED_BUFFER_BINDING ) readonly buffer CloudAuthoredBuffer
+{
+    int                   u_CloudAuthoredCount;
+    CloudAuthoredInstance u_CloudAuthoredInstances[CLOUD_AUTHORED_SLOTS];
+};
+
+#define CLOUD_AUTHORED_COUNT         u_CloudAuthoredCount
+#define CLOUD_AUTHORED_INSTANCE( i ) u_CloudAuthoredInstances[i]
+#endif // CLOUD_AUTHORED_BUFFER_BINDING
+
+#endif // CLOUD_AUTHORED_GLSLH

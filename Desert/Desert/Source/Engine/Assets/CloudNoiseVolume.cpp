@@ -1,5 +1,7 @@
 #include "CloudNoiseVolume.hpp"
 
+#include <Engine/Assets/ContainerBytes.hpp>
+
 #include <cstring>
 
 namespace Desert::Assets
@@ -27,71 +29,10 @@ namespace Desert::Assets
         // it is what bounds the periods against the resolution rather than against taste.
         constexpr float kMinVoxelsPerCell = 8.0f;
 
-        // ---------------------------------------------------------------------------------------------
-        // Byte-level primitives. Everything is written LITTLE-ENDIAN explicitly rather than by memcpy of a
-        // struct: a container is a file that outlives the machine that wrote it, and struct layout is a
-        // property of the compiler, not of the format.
-        // ---------------------------------------------------------------------------------------------
-
-        void WriteU32( std::vector<unsigned char>& out, uint32_t value )
-        {
-            out.push_back( static_cast<unsigned char>( value & 0xFFu ) );
-            out.push_back( static_cast<unsigned char>( ( value >> 8 ) & 0xFFu ) );
-            out.push_back( static_cast<unsigned char>( ( value >> 16 ) & 0xFFu ) );
-            out.push_back( static_cast<unsigned char>( ( value >> 24 ) & 0xFFu ) );
-        }
-
-        void WriteU64( std::vector<unsigned char>& out, uint64_t value )
-        {
-            WriteU32( out, static_cast<uint32_t>( value & 0xFFFFFFFFu ) );
-            WriteU32( out, static_cast<uint32_t>( ( value >> 32 ) & 0xFFFFFFFFu ) );
-        }
-
-        // A float travels as its IEEE-754 bit pattern. `memcpy` rather than a union or a reinterpret_cast
-        // because it is the one spelling that is not a strict-aliasing violation.
-        void WriteF32( std::vector<unsigned char>& out, float value )
-        {
-            uint32_t bits = 0u;
-            std::memcpy( &bits, &value, sizeof( bits ) );
-            WriteU32( out, bits );
-        }
-
-        uint32_t ReadU32( const unsigned char* at )
-        {
-            return static_cast<uint32_t>( at[0] ) | ( static_cast<uint32_t>( at[1] ) << 8 ) |
-                   ( static_cast<uint32_t>( at[2] ) << 16 ) | ( static_cast<uint32_t>( at[3] ) << 24 );
-        }
-
-        uint64_t ReadU64( const unsigned char* at )
-        {
-            return static_cast<uint64_t>( ReadU32( at ) ) | ( static_cast<uint64_t>( ReadU32( at + 4 ) ) << 32 );
-        }
-
-        float ReadF32( const unsigned char* at )
-        {
-            const uint32_t bits  = ReadU32( at );
-            float          value = 0.0f;
-            std::memcpy( &value, &bits, sizeof( value ) );
-            return value;
-        }
-
-        // CRC-32 (IEEE 802.3, reflected, polynomial 0xEDB88320), table-free.
-        //
-        // WHY A CHECKSUM AT ALL, when the length is already checked. Length catches a truncated file, which
-        // is the failure a half-finished write produces; it does not catch a file whose middle was
-        // corrupted, and THAT failure renders as clouds with a wrong edge rather than as an error — the
-        // most expensive shape of defect this programme has, because it looks like a tuning problem.
-        uint32_t Crc32( const unsigned char* data, size_t length )
-        {
-            uint32_t crc = 0xFFFFFFFFu;
-            for ( size_t i = 0; i < length; ++i )
-            {
-                crc ^= static_cast<uint32_t>( data[i] );
-                for ( int bit = 0; bit < 8; ++bit )
-                    crc = ( crc >> 1 ) ^ ( 0xEDB88320u & ( 0u - ( crc & 1u ) ) );
-            }
-            return ~crc;
-        }
+        // The byte-level primitives moved to Engine/Assets/ContainerBytes.hpp when the modelling volume
+        // (`.dcmv`) needed the same six functions and the same CRC. A checksum that exists twice is a
+        // checksum that can disagree with itself, and the failure it produces — one container refusing a
+        // file the other accepts — is the class of defect this programme keeps paying for.
 
         bool IsPowerOfTwo( uint32_t value )
         {

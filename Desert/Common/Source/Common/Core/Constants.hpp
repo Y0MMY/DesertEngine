@@ -43,6 +43,11 @@ namespace Common::Constants
         // artist who opens Clouds/ should see both halves of what makes a sky. Scanned separately all the
         // same, so a `.dcnv` can never be offered in a type slot.
         inline std::filesystem::path CLOUD_TYPE_PATH = "Resources/Assets/Clouds/Types/";
+        // Sculpted cloud bodies (`.dcmv`) — the hero clouds an artist places in the sky by hand. A second
+        // subfolder of Clouds/ for exactly the reason Types/ is the first: one body of content, scanned
+        // separately so a `.dcmv` can never be offered in a noise slot and a `.dcnv` can never be offered
+        // in a hero cloud's.
+        inline std::filesystem::path CLOUD_VOLUME_PATH = "Resources/Assets/Clouds/Volumes/";
 
         // --- Cooked / intermediate (generated; PROJECT-owned) ---
         inline std::filesystem::path COOKED_PATH         = "Cooked/";
@@ -70,6 +75,7 @@ namespace Common::Constants
             COLLECTIONS_PATH   = assets / "Collections/";
             CLOUD_NOISE_PATH   = assets / "Clouds/";
             CLOUD_TYPE_PATH    = assets / "Clouds/Types/";
+            CLOUD_VOLUME_PATH  = assets / "Clouds/Volumes/";
 
             const std::filesystem::path cooked = ( projectDir / "Cooked" ).lexically_normal();
             COOKED_PATH                        = cooked / "";

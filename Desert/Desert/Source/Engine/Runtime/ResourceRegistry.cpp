@@ -74,4 +74,10 @@ namespace Desert::Runtime
         return &cloudTypeService;
     }
 
+    CloudModellingService* ResourceRegistry::GetCloudModellingService()
+    {
+        static CloudModellingService cloudModellingService;
+        return &cloudModellingService;
+    }
+
 } // namespace Desert::Runtime

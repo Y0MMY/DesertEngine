@@ -10,9 +10,12 @@
 //   A  AUTHORED    sampled from voxel volumes an artist sculpted. Arbitrary silhouettes, tunnels, a cloud
 //                  shaped like anything at all — the near field and the hero clouds.
 //
-// Only P exists today. A joins here, as a `max` of the two profiles with the winner's detail type and
-// density scale, and nothing above this file changes when it does. The seam is written first precisely so
-// that the second producer is a plug rather than a rewrite.
+// BOTH EXIST NOW. A joins at the bottom of this file as a `max` of the two profiles with the winner's
+// detail type and density scale — one function, one level up from the `max` the four species already
+// take — and NOTHING above this file changed when it landed: the march, the shadow map, the lighting,
+// the temporal resolve and the composite are the text they were, because they were written against
+// `CloudFieldSample` and never against a producer. The seam was written first in Э0 precisely so that
+// the second producer would be a plug rather than a rewrite, and that is what it turned out to be.
 //
 // THE MEANING OF `Profile` IS LOAD-BEARING and is Nubis's, not a density: it is how deep inside the body
 // of the cloud a point is, 0 at the surface and 1 in the core (deck p.85, where it is generated from a
@@ -26,6 +29,10 @@
 //     CLOUD_SAMPLE_NOISE( vec3 texturePosition )   ->  vec4, the four channels of the noise volume
 //     CLOUD_SAMPLE_PROFILE( vec2 uv )              ->  vec4, the vertical profile table — ONE CHANNEL PER
 //                                                      SPECIES, in the order of the layer's slots
+//     CLOUD_SAMPLE_AUTHORED( vec3 uvw )            ->  vec4, the four channels of a sculpted body
+//
+// The third arrives on the same terms as the first two, and the instance list it is addressed with comes
+// from Common/CloudAuthored.glslh, which must have been included before this file.
 //
 // The march defines them as `texture()` fetches; the unit tests define the first as a call into the same
 // CloudNoiseVolumeChannels that baked the volume and the second as a filtered read of the very table
@@ -39,9 +46,9 @@
 #ifndef CLOUD_FIELD_GLSLH
 #define CLOUD_FIELD_GLSLH
 
-// Requires Common/CloudNoise.glslh and Common/CloudGeometry.glslh to have been included first. GLSL has
-// no forward declarations, so include order is the caller's responsibility and is stated here rather than
-// discovered as a compile error.
+// Requires Common/CloudNoise.glslh, Common/CloudGeometry.glslh and Common/CloudAuthored.glslh to have
+// been included first. GLSL has no forward declarations, so include order is the caller's responsibility
+// and is stated here rather than discovered as a compile error.
 
 // HOW MANY KINDS OF CLOUD ONE SKY HOLDS AT ONCE. Four, and the number is the width of a texel rather than
 // a preference: a species owns one CHANNEL of the profile table, which is Unreal's arrangement exactly
@@ -240,7 +247,7 @@ float CloudSampleProfileTable( float heightFraction, float pattern, int slot )
 }
 #endif // CLOUD_SAMPLE_PROFILE
 
-#if defined( CLOUD_SAMPLE_NOISE ) && defined( CLOUD_SAMPLE_PROFILE )
+#if defined( CLOUD_SAMPLE_NOISE ) && defined( CLOUD_SAMPLE_PROFILE ) && defined( CLOUD_SAMPLE_AUTHORED )
 
 // The procedural producer.
 //
@@ -490,11 +497,132 @@ CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heig
     return result;
 }
 
-// The seam itself. One producer that already unions up to four species; tomorrow the max of that and the
-// authored one — the same `max`, one level up, which is what the union above was written to make obvious.
+// ---------------------------------------------------------------------------------------------------
+// SLOT A — THE AUTHORED PRODUCER
+// ---------------------------------------------------------------------------------------------------
+
+// What slot A answers with: a field sample AND how much of the procedural field this point's instances
+// are suppressing. Two values because the cutout is not a property of the sample — it decides what the
+// OTHER producer is allowed to contribute — and this dialect has no `out` parameters, deliberately.
+struct CloudAuthoredResult
+{
+    CloudFieldSample Field;
+    float            Cutout; // 0 = the procedural field stands, 1 = it is entirely suppressed here
+};
+
+// Sample every hero cloud whose bounds contain this point, and union them.
+//
+// THE COST IS THE WHOLE DESIGN OF THIS FUNCTION, because it is called once per march step AND once per
+// SHADOW-RAY step, which is about thirty times more often again. Three gates in order of price:
+//
+//   1. THE COUNT. A scene with no hero clouds does not enter the loop at all. That is what makes the
+//      producer cost zero when it is absent rather than almost zero (ANALYSIS_APPROACH.md §4.4). The
+//      frames measure it: five of the protocol's six points render BYTE FOR BYTE the file they rendered
+//      before this producer existed, and the sixth moves 199 pixels of 980 480 by one 8-bit level —
+//      which is not this loop but the recompiled SPIR-V scheduling the PROCEDURAL producer's floating
+//      point differently, because the file it lives in changed. Docs/Clouds/CALIBRATION.md §A0.
+//   2. THE AXIS-ALIGNED BOX, six compares. It is a superset of the instance's real bounds and it is here
+//      because it is four times cheaper than the map that follows.
+//   3. THE EXACT BOX, after the map. A rotated instance's AABB contains up to 3.4x its volume, and a
+//      point in that difference must not fetch: every sampler in this engine is REPEAT, so a coordinate
+//      outside [0, 1] would fetch the far side of the body and grow a mirror of its own flank beside it.
+//
+// The union rule is the SPECIES' RULE, one level up (§4.3): profile means "how deep inside a body", so
+// the deeper answer is the answer, and the winner's material numbers travel with it rather than being
+// blended — a blend of two bodies' detail character is a third character that is neither, and the seam
+// between them is exactly where a floating average shows as a smear.
+CloudAuthoredResult CloudSampleAuthoredField( CloudFieldParams params, vec3 positionKm )
+{
+    CloudAuthoredResult result;
+    result.Field.Profile          = 0.0f;
+    result.Field.DetailType       = 0.0f;
+    result.Field.DensityScale     = 0.0f;
+    result.Field.DetailFactor     = 0.0f;
+    result.Field.ExtinctionFactor = 0.0f;
+    result.Cutout                 = 0.0f;
+
+    int count = CLOUD_AUTHORED_COUNT;
+
+    for ( int i = 0; i < count; ++i )
+    {
+        CloudAuthoredInstance instance = CLOUD_AUTHORED_INSTANCE( i );
+
+        if ( !CloudAuthoredInBounds( instance, positionKm ) )
+            continue;
+
+        vec3 uvw = CloudAuthoredLocalUvw( instance, positionKm );
+        if ( !CloudAuthoredInVolume( uvw ) )
+            continue;
+
+        vec4 voxel = CLOUD_SAMPLE_AUTHORED( CloudAuthoredClampUvw( uvw ) );
+
+        float strength = instance.BoundsMin.w;
+
+        // THE CUTOUT UNIONS ACROSS INSTANCES AND IS NOT TIED TO THE WINNER. Two hero clouds standing in
+        // each other's boxes each suppress the procedural field over their own body, and the procedural
+        // field has to be gone from BOTH — taking only the winner's would let a blob grow through the
+        // one that lost by a hair.
+        //
+        // It is the volume's ENVELOPE channel and not the box, which is the difference between a hero
+        // cloud that pushes the deck away from its own skin and one that cuts a rectangular hole in the
+        // sky around itself. The envelope is the body dilated by the bake's margin, so it is above zero
+        // wherever the profile is and extends past it: a tunnel through the body narrower than that
+        // margin is inside the envelope and shows sky, which is what a tunnel is for.
+        result.Cutout = max( result.Cutout, voxel.w * instance.BoundsMax.w );
+
+        float profile = voxel.x * strength;
+        if ( profile <= result.Field.Profile )
+            continue;
+
+        result.Field.Profile      = profile;
+        result.Field.DetailType   = clamp( voxel.y, 0.0f, 1.0f );
+        result.Field.DetailFactor = instance.Row0.w;
+        // The layer's density, this body's factor and the volume's own per-voxel scale, in that order —
+        // the same three-level composition the procedural producer performs, so a Density Scale of 1
+        // means the same thing on both sides of the seam.
+        result.Field.DensityScale     = max( params.DensityScale, 0.0f ) * instance.Row1.w * voxel.z;
+        result.Field.ExtinctionFactor = instance.Row2.w;
+    }
+
+    return result;
+}
+
+// THE SEAM ITSELF. One producer that unions up to four species, one that unions up to four sculpted
+// bodies, and the max of the two — the same `max`, one level up, which is what both unions below it were
+// written to make obvious.
+//
+// THE AUTHORED SIDE GOES FIRST, and not because either order changes the union: `max` is commutative and
+// Desert/Tests/Engine/CloudAuthored asserts it on the whole sample. It goes first because it decides
+// whether the procedural side is computed AT ALL. Inside a hero cloud the cutout is 1, the procedural
+// field is entirely suppressed there, and computing it would be a 3D fetch, a profile fetch and a
+// quantile map thrown away — so the branch below is a saving in exactly the place a hero cloud makes the
+// frame most expensive.
 CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction, vec3 positionKm )
 {
-    return CloudSampleProceduralField( params, heightFraction, positionKm );
+    CloudAuthoredResult authored = CloudSampleAuthoredField( params, positionKm );
+
+    CloudFieldSample result;
+    result.Profile          = 0.0f;
+    result.DetailType       = 0.0f;
+    result.DensityScale     = 0.0f;
+    result.DetailFactor     = 0.0f;
+    result.ExtinctionFactor = 0.0f;
+
+    if ( authored.Cutout < 1.0f )
+    {
+        result = CloudSampleProceduralField( params, heightFraction, positionKm );
+
+        // THE CUTOUT SCALES THE PROFILE RATHER THAN THRESHOLDING IT, so the procedural field fades out
+        // over the envelope's own margin instead of ending at a surface. A hard test would put a visible
+        // edge in the deck at the exact distance the envelope reaches, and that edge would be a shape
+        // nobody authored — the bake's margin — drawn in somebody else's cloud.
+        result.Profile = result.Profile * ( 1.0f - authored.Cutout );
+    }
+
+    if ( authored.Field.Profile > result.Profile )
+        result = authored.Field;
+
+    return result;
 }
 
 // The up-rez: turn the low-frequency profile into something with a cloud's edge.

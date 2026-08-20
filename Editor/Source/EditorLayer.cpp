@@ -256,6 +256,8 @@ namespace Desert::Editor
         // one created first would find nothing to bind and render with the default edge.
         m_StartupStages.push_back(
              { "Preloading cloud types...", [this] { m_AssetPreloader->PreloadCloudTypes(); } } );
+        m_StartupStages.push_back(
+             { "Preloading hero clouds...", [this] { m_AssetPreloader->PreloadCloudModellingVolumes(); } } );
 
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );

@@ -14,6 +14,7 @@
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Assets/CloudTypeAsset.hpp>
+#include <Engine/Assets/CloudModellingVolumeAsset.hpp>
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -248,6 +249,22 @@ namespace Desert::Core::Serialize
                         return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
                     return rel.generic_string();
                 }
+                if ( type == "CloudModellingVolumeAsset" )
+                {
+                    auto a = mgr.FindByHandle<Assets::CloudModellingVolumeAsset>( Common::UUID( handle ) );
+                    if ( !a )
+                        return "";
+
+                    // RELATIVE, on exactly the terms the cloud type above is relative: a sculpted body is
+                    // content that ships WITH the project, and an absolute path would carry one
+                    // developer's home directory into every scene that uses one.
+                    std::error_code ec;
+                    const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
+                                                                     Common::Constants::Path::ASSETS_PATH, ec );
+                    if ( ec || rel.empty() || rel.native().rfind( "..", 0 ) == 0 )
+                        return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
+                    return rel.generic_string();
+                }
                 if ( type == "FontAsset" )
                 {
                     // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
@@ -343,6 +360,30 @@ namespace Desert::Core::Serialize
                     if ( const auto registered = Runtime::ResourceRegistry::GetCloudTypeService()->Register( a );
                          !registered )
                         LOG_ERROR( "[Clouds] Cloud type '{}' named by the scene could not be registered: {}",
+                                   full.string(), registered.GetError() );
+                    return static_cast<uint64_t>( a->GetMetadata().Handle );
+                }
+                if ( type == "CloudModellingVolumeAsset" )
+                {
+                    // Both forms accepted, for the reason the cloud type's branch gives above.
+                    const std::filesystem::path named( path );
+                    const std::filesystem::path full =
+                         named.is_absolute() ? named
+                                             : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+
+                    auto a = mgr.FindByPath<Assets::CloudModellingVolumeAsset>( full );
+                    if ( !a )
+                        a = m.CreateAsset<Assets::CloudModellingVolumeAsset>( Assets::AssetPriority::Medium,
+                                                                              full );
+                    if ( !a )
+                        return 0;
+                    if ( !a->IsReadyForUse() && !a->Load() )
+                        return 0;
+                    if ( const auto registered =
+                              Runtime::ResourceRegistry::GetCloudModellingService()->Register( a );
+                         !registered )
+                        LOG_ERROR( "[Clouds] Cloud modelling volume '{}' named by the scene could not be "
+                                   "uploaded: {}",
                                    full.string(), registered.GetError() );
                     return static_cast<uint64_t>( a->GetMetadata().Handle );
                 }
@@ -1089,6 +1130,8 @@ namespace Desert::Core::Serialize
              "ExponentialHeightFog", "ExponentialHeightFogData", &ECS::ExponentialHeightFogComponent::Data ) );
         Register( MakeReflected<ECS::VolumetricCloudComponent, ECS::VolumetricCloudData>(
              "VolumetricCloud", "VolumetricCloudData", &ECS::VolumetricCloudComponent::Data ) );
+        Register( MakeReflected<ECS::HeroCloudComponent, ECS::HeroCloudData>( "HeroCloud", "HeroCloudData",
+                                                                              &ECS::HeroCloudComponent::Data ) );
 
         // ---- Script (manual: .lua path + exposed-property values) ----
         Register( MakeScript() );

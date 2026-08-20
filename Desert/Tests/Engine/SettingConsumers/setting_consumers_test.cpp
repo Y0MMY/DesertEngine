@@ -274,6 +274,30 @@ namespace
          { "WindSpeed", kCloudSystem },
     };
 
+    // ------------------------------------------------------------------------------------------------
+    // The HERO CLOUD - slot A of the seam, one sculpted body placed by an entity's own transform.
+    //
+    // ITS FIELDS SPLIT THREE WAYS AND EACH WAY MEANS SOMETHING. `Enabled` and `Volume` are the ECS
+    // system's and the renderer's: the first decides whether the instance is COLLECTED at all (which is
+    // what makes a disabled hero cloud cost nothing rather than nearly nothing), the second is a handle
+    // the renderer resolves through Runtime::CloudModellingService. Everything else is packed, and the
+    // packer is its own file rather than CloudPayload.hpp because a hero cloud is a per-frame LIST and
+    // the layer is one block.
+    //
+    // There is no row for a transform here, and that is the point of the component's shape: WHERE the
+    // cloud is comes from the entity, so there is no authored position to leave unread.
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr const char* kHeroPayload = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudAuthoredPayload.hpp";
+
+    constexpr Row kHeroCloudRows[] = {
+         { "Enabled", kCloudSystem },  // the zero-cost gate: not collected, so the march's loop is empty
+         { "Volume", kCloudRenderer }, // resolved through the modelling service, never packed as a number
+         { "Strength", kHeroPayload },         { "SuppressProceduralField", kHeroPayload },
+         { "DetailFactor", kHeroPayload },     { "DensityFactor", kHeroPayload },
+         { "ExtinctionFactor", kHeroPayload },
+    };
+
     // The repository root, found by walking up from wherever the test binary was started - the same
     // approach the font-baker test uses, so neither has to be run from one exact directory.
     std::string RepoRoot()
@@ -382,6 +406,11 @@ TEST( SettingConsumers, EveryCloudFieldNamesItsConsumer )
     CheckTableCoversTypeExactly( Type( "VolumetricCloudData" ), kCloudRows, std::size( kCloudRows ) );
 }
 
+TEST( SettingConsumers, EveryHeroCloudFieldNamesItsConsumer )
+{
+    CheckTableCoversTypeExactly( Type( "HeroCloudData" ), kHeroCloudRows, std::size( kHeroCloudRows ) );
+}
+
 TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
 {
     const std::string root = RepoRoot();
@@ -390,6 +419,17 @@ TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
     CheckWiredRowsReadTheirField( root, kSkyRows, std::size( kSkyRows ) );
     CheckWiredRowsReadTheirField( root, kFogRows, std::size( kFogRows ) );
     CheckWiredRowsReadTheirField( root, kCloudRows, std::size( kCloudRows ) );
+    CheckWiredRowsReadTheirField( root, kHeroCloudRows, std::size( kHeroCloudRows ) );
+}
+
+// Slot A shipped WHOLE - format, loader, service, component, collector, packer, seam and cutout in one
+// task - so it owes nothing either. The pin is what keeps that true.
+TEST( SettingConsumers, TheHeroCloudComponentOwesNothing )
+{
+    const std::ptrdiff_t pending = std::count_if( std::begin( kHeroCloudRows ), std::end( kHeroCloudRows ),
+                                                  []( const Row& r ) { return r.Task != nullptr; } );
+
+    EXPECT_EQ( pending, 0 );
 }
 
 // The fog shipped WHOLE - component, pass and couplings in one task (Sky plan Phase 5) - so it owes
