@@ -1584,3 +1584,312 @@ The remaining eleven went red first time. The most informative is the last: maki
 lump's rotation reddens **five** tests at once, because a rotated capsule then reaches further than its
 reserved room and the fixture stops validating at all.
 
+
+## A2 + A3: several bodies in one sky, and the catalogue the phase is measured by, 2026-08-20
+
+Phase Э4 A2 and A3 (`Docs/Clouds/PLAN_AUTHORED_CLOUDS.md` §5), taken together because A3 is what A2 is
+for: A0 proved a sculpted body could exist, A1 gave it to an artist, A2 lets a sky hold several DIFFERENT
+ones, and A3 asks whether the ten genera of `ANALYSIS_APPROACH.md` §6 come out distinguishable.
+
+### How the volumes reach the march, and why it is an atlas
+
+A0 bound one `sampler3D` and could draw one body per frame; a second, different one was named in the log
+and not drawn. There are exactly two ways to reach several volumes from one dispatch, and the tree decides
+between them rather than taste:
+
+| | descriptors | fetch sites | per-hit cost | memory for N bodies |
+|---|---|---|---|---|
+| an ARRAY of `sampler3D` | — | — | — | — |
+| **eight SEPARATE bindings** (what compiles) | **8, in each of TWO pipelines** | **8** | an eight-way compare chain around the fetch | N x 4.00 MiB + 8 fallbacks |
+| **one atlas image** | **1** | **1** | **one clamp and one multiply-add** | N x 4.00 MiB + 1 fallback |
+
+**The array row is empty because this engine refuses it in so many words.**
+`Graphic::API::Vulkan::VulkanShaderReflection.cpp` rejects an arrayed sampled image with
+*"arrays of descriptors are not supported — declare separate bindings"*, because every descriptor set
+layout it builds hardcodes `descriptorCount = 1`. Making it work is a change to the descriptor machinery
+of the whole renderer, which is not this task's zone and would be paid for by every shader in the tree.
+
+So the version of "an array" that compiles today is eight separate bindings — and the fetch cannot then be
+indexed at all, because a sampler is not a value: selecting one means comparing the loop counter against
+eight constants and having eight `texture()` sites, on divergent paths, inside the function the march calls
+once per march step AND about thirty times more often again per shadow-ray step.
+
+**The atlas is one image holding the bodies end to end along the DEPTH axis.** The volume's layout has x
+varying fastest and z slowest, so stacking on z makes the atlas the bodies' bytes CONCATENATED —
+`Assets::AssembleCloudModellingAtlas` is a run of `memcpy` and `CloudAtlas.TheAtlasIsTheBodiesConcatenated`
+asserts the whole result with one `==`. Stacking on the vertical axis instead would interleave the bodies
+1 024 pieces deep for a picture that is identical.
+
+**Nothing bleeds across a slab boundary, and it takes TWO guarantees rather than one.**
+`CloudAuthoredAtlasUvw` clamps the depth coordinate to the body's own texel centres before folding it into
+the slab, so in real arithmetic the filter's two depth taps are two texels of the same cloud.
+`CloudAtlas.NoCoordinateOfOneSlabCanReachItsNeighbour` drives that over every slot of every slab count and
+257 coordinates each — and it is where the second guarantee turned up. In FLOAT, dividing by a slab count
+that is not a power of two leaves the last coordinate a few parts in a hundred thousand past the centre —
+**measured at 3e-5 of weight on slot 1 of 3** — so the hardware would blend that much of the NEXT body's
+outermost texel. It is nothing because the BAKE refuses a volume whose body touches its own boundary: that
+texel is four zeroes. The claim in the first draft of this section — "by construction rather than by the
+bake's empty shell" — was too strong by 3e-5, and the test is what said so.
+
+### The atlas is built on demand, and a fixed one would have broken the budget
+
+A fixed eight-slab atlas is simpler: the slab count is then a compile-time constant and an instance needs
+only a slot index. It was refused by arithmetic:
+
+| | 1280x766 | 1920x1080 |
+|---|---|---|
+| occupied before slot A (A0's measurement) | 20.67 MiB | ~30.1 MiB (the trace and history targets scale with the frame) |
+| **fixed** 8-slab atlas | 32.00 | 32.00 |
+| **total** | 52.67 | **62.1 of 64** |
+| **demand-sized**, one hero cloud in the scene | 4.00 | 4.00 |
+| **total** | **24.67** | **34.1** |
+
+At 1080p a fixed atlas leaves 1.9 MiB of decision D-9's budget, which is not a margin. The service
+therefore builds an atlas holding exactly the bodies the live hero clouds name, and rebuilds it only when
+that set — or one of their revisions — changes. A project may carry fifty `.dcmv` files; a frame pays for
+the ones an entity actually names, and that is measured rather than asserted: the six protocol frames were
+taken twice, once with two extra `.dcmv` in the volumes directory and once without, and `mid_away` is the
+same 1 239 541 bytes both times.
+
+### Eight instances and eight bodies are two different limits
+
+`kCloudAuthoredSlots` caps the INSTANCES, because each one costs the march a bounds test at every field
+sample. `kCloudModellingAtlasMaxSlabs` caps the BODIES, because each one costs 4.00 MiB. They are the same
+number today and the renderer warns about them separately, with the number that ran out in the message —
+a wood of forty copies of one sculpted tree is one slab and eight instances, and the fix for each of those
+two complaints is a different edit.
+
+### The instance did not grow, because the cutout was a derived number
+
+Adding a slab to the instance needed a float, and the struct was full: twenty floats, all read. The float
+came from removing a duplicate rather than from padding. A0 carried `Strength` and `Cutout` separately,
+where `Cutout` was `SuppressProceduralField ? Strength : 0` — one value derived from the other and a flag.
+Signed, it is one number:
+
+```
+Strength = abs( BoundsMin.w )        Cutout = max( BoundsMin.w, 0 )
+```
+
+exact at every input including a strength of zero, where both must be zero whatever the flag says. So the
+instance is still 80 bytes and still twenty floats with nothing spare, and `BoundsMax.w` carries where the
+body's slab begins. The buffer's header gained the slab count — a property of the ATLAS and therefore of
+the buffer, not of an instance, because eight copies of one number are eight chances to disagree.
+
+### The picture did not move: SIX of six byte for byte, against the frames the owner accepted
+
+`Clouds_HeroCloud` through the protocol's six points, this branch's binary against **the committed A0
+accepting frames** rather than against a baseline shot here. Camera `0,200,0`, `--shot-frames 90`, 1280x766.
+
+| point | file bytes differing | pixels changed | max delta |
+|---|---|---|---|
+| zenith away `0,0.9,-1` | **0** | 0 | 0 |
+| mid away `0,0.45,-1` | **0** | 0 | 0 |
+| horizon away `0,0.12,-1` | **0** | 0 | 0 |
+| zenith sunward `0,0.9,1` | **0** | 0 | 0 |
+| mid sunward `0,0.45,1` | **0** | 0 | 0 |
+| horizon sunward `0,0.12,1` | **0** | 0 | 0 |
+
+The reduction is arithmetic and asserted as such: with one slab the base is 0 and the divisor is 1, and
+adding zero and dividing by one are exact in IEEE754, so `CloudAuthoredAtlasUvw` is bit for bit A0's clamp.
+`CloudAtlas.OneSlabIsBitForBitTheAddressingA0Shipped` compares the BITS rather than using a tolerance.
+
+### AND THE BASELINE I SHOT MYSELF WAS WRONG, which is worth more than the table above
+
+The first comparison this task ran said **17.3 % of pixels changed at mid away, max delta 126/255** — which
+is, to the pixel, the number A0 measured for *the hero cloud switched off*. It was not a defect in the
+atlas. It was the baseline:
+
+| step | what it showed |
+|---|---|
+| the two new `.dcmv` files removed from the assets directory and the frame retaken | identical to the suspect frame — **not the added assets** |
+| this branch's frame against the COMMITTED `A0_hero_mid_away.png` | **0 differing pixels of 980 480** |
+| the "baseline" against the committed `A0_hero_off_mid.png` | **0 differing pixels of 980 480** |
+
+The baseline binary had rendered the scene with the hero cloud missing entirely, and the reason is a trap
+this programme has not recorded before: **the shaders are cooked at runtime, so an old binary run after a
+`.glslh` edit is a mismatched pair.** The baseline was taken after `Common/CloudAuthored.glslh` had already
+grown `u_CloudAuthoredSlabCount`, so the A1 binary uploaded a payload whose byte 4 was alignment and the
+new shader read it as a slab count of zero — a division by zero in the addressing, a NaN coordinate, and no
+hero cloud, silently.
+
+**The rule that follows is cheap and this document did not have it:** take the baseline BEFORE touching a
+shader, or rebuild the baseline binary from its own commit with its own shader tree. A1's rule — discard
+the first render in a fresh worktree — is necessary and was not sufficient. The committed accepting frames
+turned out to be the better reference anyway, because they are what the owner signed off and they cannot be
+contaminated by anything this worktree does.
+
+### "Zero when absent" is proven where A0 said it could be — on the frame
+
+`Clouds_HeroCloud` with its one hero cloud's `Enabled` switched off, so the component is present, the
+handle is set and the instance count is zero. Against the committed `A0_hero_off_mid.png`: **0 differing
+pixels of 980 480**, the same file to the byte.
+
+The instruction count in that path is A0's exactly, and it is arranged that way on purpose:
+`CloudSampleAuthoredField` reads the count, compares it to zero and RETURNS — the slab count is read
+after that line and not beside it, so a sky with no hero clouds does not load it. A0 measured the cost of
+that one load and one compare at +0.1 to +1.0 ms and could not separate it from a run-to-run spread of
+0.95 ms; A2 adds nothing to it, and the frame is where the claim is provable rather than arguable.
+
+**What was NOT measured, and why:** a slope for the absent case against the PREVIOUS binary. Building
+A1's Editor would have meant restoring A1's shader tree with it — the shaders are cooked at runtime, and
+mixing an old binary with a new `.glslh` is exactly the trap that produced the false baseline above. The
+instruction-level argument plus a byte-identical frame is what is offered instead, and it is offered as
+that rather than as a measurement.
+
+### The price, measured on a machine that was shared
+
+Frame-count slope, `(t900 - t300) / 600`, which cancels the ~20 s fixed start-up. Scene `ZZ_Perf<n>`:
+eight hero-cloud entities over THREE distinct bodies, of which the first `n` are enabled — one field per
+entity, one scene generator, no rebuild between configurations. Camera `0,200,0`, `--look 0,0.18,-1`,
+1280x766, High tier, **debug build**. The four configurations were **interleaved inside every pass** and
+the pass repeated, so each minimum is taken against neighbours that were equally busy.
+
+| live instances | slabs in the atlas | min t300 | min t900 | **slope** | vs no hero cloud | per instance |
+|---|---|---|---|---|---|---|
+| **0** — components present, all disabled | 0 (the fallback is bound) | 30.774 s | 42.160 s | **18.65 ms/frame** | 1.00x | — |
+| **1** | 1 | 31.364 s | 43.103 s | **19.40 ms/frame** | 1.04x, **+0.74 ms** | +0.74 |
+| **3** | 3 | 32.001 s | 45.143 s | **21.75 ms/frame** | 1.17x, **+3.10 ms** | +1.03 |
+| **8** | 3 | 33.250 s | 48.842 s | **25.98 ms/frame** | 1.39x, **+7.33 ms** | +0.92 |
+
+Three passes, twelve legs, **no aborted run**. Per-pass slopes:
+0 — 18.74 / 19.08 / 18.65 · 1 — 19.57 / 19.40 / 19.48 · 3 — 21.75 / 21.86 / 22.01 · 8 — 26.03 / 25.98 / 25.99.
+
+**The atlas is uploaded ONCE per run and not once per frame**, which is the thing a demand-built atlas has
+to prove: the engine's own log line appears exactly once in a 900-frame render —
+`Modelling atlas built: 3 bodies, 128x64x384 RGBA8, 12.00 MiB on the device`.
+
+**The machine is shared with other agents and the spread is quoted rather than hidden.** The per-pass spread is **0.2 % at eight instances, 0.9 % at one, 1.2 % at three and 2.3 % at none** — the
+widest of the four is the configuration that does the LEAST work, which is what a shared machine looks
+like when the signal is real: the noise is a constant number of milliseconds and it is a larger fraction
+of a smaller number. Every difference in the table is many times its own spread. For contrast, A0 had to
+throw a leg away and quote a range because one of its four passes did not finish; none of these twelve
+aborted.
+
+**One number is NOT comparable with A0's**, and it is the important one to say out loud: A0 measured
+**+3.7 to +5.1 ms for one hero cloud**, and this table says +0.74 ms. Both are right about different
+pictures. A0's body filled a sixth of the frame from two metres; these stand 13 to 46 km away and the
+whole trio covers perhaps a twentieth of it. **What an instance costs is dominated by how much of the
+frame its body covers**, because the bounds test is cheap and the march through real material is not —
+which is also why eight instances cost 1.39x and not 8x.
+
+**What the shape of it says.** The cost is not linear in the instance count and should not be: an
+instance costs six compares at every field sample whether or not the ray is anywhere near it, and only
+the ones a ray actually enters cost a fetch and a march through real material. Three instances of three
+DIFFERENT bodies cost the same per instance as eight instances of three bodies — the atlas is one
+descriptor and one fetch site either way, which is the whole point of choosing it.
+
+**Debug, and the ratio is a lower bound on a shipping build**, for the reason the OE-FIX table gives: the
+baseline carries CPU work a release build shrinks and this dispatch does not.
+
+### The catalogue: ten genera, measured on the voxels
+
+Every column below is read off the BAKED body by `Desert/Tests/Engine/CloudCatalogue`, which prints this
+table itself so a reader can regenerate it rather than trust it. Aspect is the widest horizontal extent
+over the vertical one; top/bot is the widest slice in the top fifth of the body over the widest in the
+bottom fifth — the anvil measure; comps is six-connected components; detail is the mean of the volume's
+Detail Type channel over the body, 0 wispy and 1 billowy; pocket is the largest air pocket a SLICE of the
+body encloses, in voxels.
+
+| genus | aspect | top/bot | occupancy | components | detail | air pocket |
+|---|---|---|---|---|---|---|
+| cumulus humilis | 3.78 | 0.49 | 8.15 % | 1 | 0.90 | 0 |
+| cumulus mediocris | 1.24 | 0.39 | 8.50 % | 1 | 0.95 | 0 |
+| cumulus congestus | **0.44** | 0.72 | 8.84 % | 1 | 0.97 | 0 |
+| cumulonimbus | 1.19 | **2.67** | 4.78 % | 1 | 0.48 | 0 |
+| stratocumulus | 6.91 | 1.00 | 11.93 % | **1** | 0.76 | 0 |
+| stratus | 11.26 | 1.02 | 7.59 % | 1 | **0.16** | 0 |
+| altocumulus | **20.42** | 1.00 | 1.85 % | **25** | 0.70 | 0 |
+| cirrus | 6.92 | 0.49 | 2.27 % | 6 | **0.04** | 0 |
+| lenticular | 2.90 | 0.85 | 12.19 % | **3** | 1.00 | 0 |
+| freeform (arch) | 1.39 | 0.84 | 8.70 % | **1** | 0.95 | **1 368** |
+
+**The cumulus ladder is monotone by a margin and not by a hair**: 3.78, 1.24, 0.44 — each step is a factor
+of three where the test demands 1.5. **The anvil is 2.67**, and nine of ten genera measure 1.0 or below on
+that column. **The arch is the only body that is one component AND encloses air**, which is the pair
+`best - second` cannot hold at any coverage.
+
+### Form by form, and what each one is missing
+
+| genus | did it come out? | what is missing, and why |
+|---|---|---|
+| **cumulus humilis** | **yes** | Nothing of the genus. It is 1.2 km across and 0.2 km thick, so at 9.4 m per voxel the silhouette is finely resolved and the up-rez does the rest. `A3_genus_humilis.png` |
+| **cumulus mediocris** | **yes** | The cauliflower. The crown is one smooth dome where a real one is a cluster of turrets at three scales — the solver's absence, and the entry where it is cheapest to live with. `A3_genus_mediocris.png` |
+| **cumulus congestus** | **yes, after a retune** | Its first bake read as a STRING OF BEADS: consecutive lumps overlapped by 80 m where they are 400 m across, and the up-rez ate the necks. The fix is a rule the catalogue now follows everywhere — overlap by about half a lump's own height — and the residue is ring creases at 53 m per vertical voxel plus, again, no boil. `A3_genus_congestus.png` |
+| **cumulonimbus with an anvil** | **yes, and it is the one that answers the procedural producer** | The canopy is 2.67x wider than the base, measured, and no vertical profile curve can do that. What is missing is texture rather than shape: the tower is a smooth column (no boil) and the canopy has no fibrous fallstreaks under it, so it reads closer to a mushroom than to a storm. `A3_genus_cumulonimbus.png` |
+| **stratocumulus** | **partly** | It is ONE connected deck with rolls in it — which is the pair the Alligator cannot hold — but the rolls DO NOT READ from a level camera, because a deck seen edge-on is a bar. The structure is in the volume and the measurement finds it; showing it needs a camera above or below the sheet, and a hero cloud 8 km across is a thing a player flies over rather than looks at. `A3_genus_stratocumulus.png` |
+| **stratus** | **yes, and it should not be a hero cloud at all** | Nothing is missing; the genus is the absence of features. This is the entry the PROCEDURAL producer does better and this report says so: a formless overcast is what a flattened profile and a high coverage give for free, over the whole sky rather than over one 10 km box, at no memory cost. `A3_genus_stratus.png` |
+| **altocumulus** | **yes, and it is the genus Э4 was least needed for** | Nothing. Twenty-five separate elements on a lattice is a description of the Alligator's own output — separate lobes with a zero on every bisector. It is in the catalogue because §6 lists it and because a sculpted one can be placed exactly where a shot wants it, not because the procedural producer could not make one. `A3_genus_altocumulus.png` |
+| **cirrus** | **partly** | The character is right — mean Detail Type 0.04, the only genus that is wispy everywhere — but the BODY contributes almost nothing: 2.3 % occupancy of a 9 km box, six thin rods that the up-rez turns into fibres. It is the clearest case of the volume carrying the silhouette and the noise carrying the cloud, and at this size the silhouette is nearly all noise. A cirrus deck is a job for the procedural producer with a wispy type; a sculpted one is for a specific streak in a specific shot. `A3_genus_cirrus.png` |
+| **orographic (lenticular)** | **yes** | Nothing. Three smooth stacked lenses, separate by design, and the smoothness is finished on the component side with Detail Factor 0.15 — which is the knob `ECS::HeroCloudData` carries and the one place in the catalogue where turning the erosion DOWN is the right answer. `A3_genus_lenticular.png` |
+| **freeform (arch)** | **yes, and it is the proof of the phase** | Nothing of the shape. One six-connected body with an enclosed air pocket of 1 368 voxels in a slice, where the other nine measure zero — connected AND holed, which `best - second` cannot be at any coverage. What is missing is that it does not look like WEATHER: it is architecture, and the up-rez softens its corners without making it a cloud. That is the correct outcome for the Tallneck class, which is the class §6 named it for. `A3_genus_freeform.png` |
+
+### The one limit that is not a defect
+
+The cauliflower surface of p. 69 of the deck comes out of a fluid solver, and §6 of the analysis records
+that there will be no solver. It shows in exactly the two places it should: the congestus's crown and the
+cumulonimbus's tower are SMOOTH where a real convective turret is recursively lumpy at every scale down
+to metres. Lumps give the silhouette and the up-rez noise gives the edge; neither gives boil. That is the
+refusal as it was written down before this phase started, and it is what the catalogue looks like when it
+is honoured.
+
+### The other limit, and this one IS the format
+
+The vertical axis is 64 voxels for the whole box, so a tall body has a coarse one: the cumulonimbus at
+5.60 km spends 87.5 m per voxel vertically, and the ring creases visible on its tower are that number
+rather than anything about the join. The horizontal axes are 128 and are three to five times finer. Raising
+the resolution is refused by §2 of the plan — the detail is the up-rez's job — and the honest workaround is
+the one the recipes now use: overlap consecutive lumps by about half their own height, so the join has no
+thin waist for the erosion to eat.
+
+### Every test verified by breaking it
+
+`Desert/Tests/Engine/CloudAuthored` gained 10 tests (`CloudAtlas`) and `Desert/Tests/Engine/CloudCatalogue`
+is 10 more. Each claim was checked by sabotaging the thing it measures, forcing a rebuild and confirming
+the suite went red.
+
+| sabotage | result |
+|---|---|
+| the atlas is assembled in reverse slab order | RED |
+| the assembler stops checking a body's length | RED |
+| the slab base gains half a slab | RED |
+| the depth clamp is removed from `CloudAuthoredAtlasUvw` | RED (two tests) |
+| the seam passes slab base 0 for every instance | RED |
+| the union keeps the FIRST instance instead of the deepest | RED |
+| the cutout reads `abs` where it should read `max( w, 0 )` | RED |
+| `IsBindable` stops requiring an empty payload against the fallback | **GREEN — a real hole, closed** |
+| `kCloudAuthoredSlots` is raised to 12 | RED (the budget assert fails to build) |
+| the humilis box is halved | RED |
+| two genera share a key | RED |
+| humilis returns the mediocris recipe | RED |
+| the cumulonimbus canopy is pulled in over its tower | RED (three weaker versions first) |
+| the stratocumulus rolls are spread apart | RED |
+| the cirrus streaks turn billowy | RED |
+| the lenticular plates are pushed together | RED |
+| the arch loses its base bar and becomes a "П" | RED (two tests) |
+
+**Three findings came out of this rather than one clean table.**
+
+1. **One real hole.** `OnlyAnEmptyPayloadIsBindable` varied the slab count and the instance count TOGETHER
+   and never independently, so deleting the clause that forbids a live instance against the FALLBACK image
+   left every assertion green — and that is the subsystem's oldest rake in test form. The case is in the
+   suite now.
+2. **Three breaks that were the BREAK's fault, all on the same test.** Narrowing one disc of a four-lump
+   canopy leaves the other three spreading, so the anvil is still an anvil and `TheCumulonimbusIsWider`
+   was right to stay green. It went red the moment the whole canopy was pulled in over the tower. A1's
+   report records the same shape of mistake, and this is the second sighting.
+3. **A defect in the harness itself, and it is worth more than either.** Run in a batch, `make` twice
+   reported success having compiled NOTHING — the sabotage was then measured against the PREVIOUS binary,
+   which reads as green. The driver deletes the suite's objects before every build now. The lesson is the
+   one this whole task kept re-learning from a different direction: **a measurement that cannot see what
+   it claims to measure looks exactly like a measurement that found nothing.**
+
+### The frames
+
+| file | what it shows |
+|---|---|
+| `Shots/A2_trio_three_bodies.png` | **⬛ THREE DIFFERENT HERO CLOUDS IN ONE SKY** — a cumulonimbus with its anvil, a fused cumulus mass, and an arch with sky through it. Three bodies, three slabs, one atlas, one dispatch |
+| `Shots/A2_fused_mass_among_cushions.png` | **⬛ THE FUSED MASS BESIDE THE PROCEDURAL FIELD** — the sculpted cumulonimbus, one continuous surface from base to canopy, standing in a sky of the Alligator's separate cushions. The contrast IS the phase |
+| `Shots/A3_genus_*.png` | the ten genera, one frame each, every one framed for its own size |
+
+**The far field is still cushions and that is not a defect of this phase** (§1 of the plan): Э4 gives the
+artist the near field and leaves the procedural producer the rest. Both frames show it, deliberately.

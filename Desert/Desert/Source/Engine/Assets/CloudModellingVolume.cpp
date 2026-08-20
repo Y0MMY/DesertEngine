@@ -586,6 +586,36 @@ namespace Desert::Assets
     }
 
     Common::ResultStr<std::vector<unsigned char>>
+    AssembleCloudModellingAtlas( const std::vector<const std::vector<unsigned char>*>& bodies )
+    {
+        if ( bodies.empty() )
+            return Common::MakeError<std::vector<unsigned char>>(
+                 "an atlas of no bodies is a volume of zero depth, which no device will create — bind the "
+                 "fallback image instead" );
+
+        std::vector<unsigned char> atlas;
+        atlas.reserve( bodies.size() * static_cast<size_t>( kCloudModellingVoxelBytes ) );
+
+        for ( size_t slot = 0; slot < bodies.size(); ++slot )
+        {
+            const std::vector<unsigned char>* body = bodies[slot];
+
+            if ( body == nullptr )
+                return Common::MakeFormattedError<std::vector<unsigned char>>( "slab {} has no body", slot );
+
+            if ( body->size() != static_cast<size_t>( kCloudModellingVoxelBytes ) )
+                return Common::MakeFormattedError<std::vector<unsigned char>>(
+                     "slab {} is {} bytes where a modelling volume is {}", slot, body->size(),
+                     kCloudModellingVoxelBytes );
+
+            // The concatenation IS the stacking, because z varies slowest in the layout above.
+            atlas.insert( atlas.end(), body->begin(), body->end() );
+        }
+
+        return Common::MakeSuccess( std::move( atlas ) );
+    }
+
+    Common::ResultStr<std::vector<unsigned char>>
     GenerateCloudModellingVolume( const CloudModellingVolumeRecipe& recipe )
     {
         return GenerateCloudModellingVolume( recipe, {} );

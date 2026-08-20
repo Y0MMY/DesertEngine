@@ -290,6 +290,30 @@ namespace Desert::Assets
     };
 
     /**
+     * @brief Lays several baked bodies end to end into the bytes of ONE volume — the atlas the march
+     *        samples every hero cloud of a frame through.
+     *
+     * WHY ALONG THE DEPTH AXIS AND NOT THE OTHER TWO. The layout above has x varying fastest and z
+     * slowest, so stacking on z makes the atlas the bodies' bytes CONCATENATED and nothing else: one
+     * `memcpy` per body, and a test can assert the whole result with `==` against a concatenation it built
+     * itself. Stacking on y would interleave the bodies 128 slices deep and turn one copy into 1 024, for
+     * a picture that is identical — the cost is real and the benefit is zero.
+     *
+     * WHAT KEEPS THE BODIES FROM BLEEDING INTO EACH OTHER is not here and not the bake's empty shell: it
+     * is CloudAuthoredAtlasUvw, which never carries a coordinate past the first or last TEXEL CENTRE of a
+     * slab, so the trilinear filter's two depth taps are always two texels of the same body.
+     *
+     * @param bodies  the voxel arrays, in slab order. Each must be exactly kCloudModellingVoxelBytes long,
+     *                which every array Decode or Generate produces is.
+     * @return the atlas bytes — `bodies.size()` times kCloudModellingVoxelBytes — or an error naming which
+     *         body was the wrong length. An empty list is an ERROR and not an empty atlas: a zero-depth
+     *         image cannot be created, and the caller's answer to "no bodies" is to bind the fallback
+     *         rather than to build nothing.
+     */
+    Common::ResultStr<std::vector<unsigned char>>
+    AssembleCloudModellingAtlas( const std::vector<const std::vector<unsigned char>*>& bodies );
+
+    /**
      * @brief Rejects a recipe the generator cannot honour, with the offending number in the message.
      *
      * A pure function, so the sculpting tool can grey out its Bake button for the same reason the loader

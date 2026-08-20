@@ -17,6 +17,7 @@ project "CloudVolumeBaker"
     files {
         "Source/**.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingCatalogue.cpp",
     }
 
     includedirs {

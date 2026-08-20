@@ -15,12 +15,13 @@
 //
 // HOW THE DATA ARRIVES, and the caller owns every one of these:
 //
-//     CLOUD_AUTHORED_COUNT                      -> int, how many instances are live this frame, 0..4
+//     CLOUD_AUTHORED_COUNT                      -> int, how many instances are live this frame, 0..8
+//     CLOUD_AUTHORED_SLAB_COUNT                 -> int, how many BODIES the atlas holds, 0..8
 //     CLOUD_AUTHORED_INSTANCE( int i )          -> CloudAuthoredInstance
-//     CLOUD_SAMPLE_AUTHORED( vec3 uvw )         -> vec4, the four channels of the modelling volume
+//     CLOUD_SAMPLE_AUTHORED( vec3 uvw )         -> vec4, four channels of the modelling volume ATLAS
 //
-// A shader gets the first two for free by defining CLOUD_AUTHORED_BUFFER_BINDING before including this
-// file; a test defines them itself over a C++ array. The third is a sampler and therefore always the
+// A shader gets the first three for free by defining CLOUD_AUTHORED_BUFFER_BINDING before including this
+// file; a test defines them itself over a C++ array. The last is a sampler and therefore always the
 // caller's, exactly like CLOUD_SAMPLE_NOISE.
 //
 // Dialect rules as in Common/CloudNoise.glslh. Distances are KILOMETRES.
@@ -28,12 +29,18 @@
 #ifndef CLOUD_AUTHORED_GLSLH
 #define CLOUD_AUTHORED_GLSLH
 
-// HOW MANY HERO CLOUDS ONE SKY HOLDS AT ONCE. Four, and — unlike CLOUD_SPECIES_SLOTS, which is the width
+// HOW MANY HERO CLOUDS ONE SKY HOLDS AT ONCE. Eight, and — unlike CLOUD_SPECIES_SLOTS, which is the width
 // of a texel — this one is a BUDGET rather than a structural limit: every instance costs the march the
 // bounds test below at every field sample, and that test runs once per light-march sample as well, so it
-// is multiplied by about thirty. The number is the one measured to stay inside the pass's millisecond
-// budget; Docs/Clouds/CALIBRATION.md §A0 carries the slope it was chosen from.
-#define CLOUD_AUTHORED_SLOTS 4
+// is multiplied by about thirty. Docs/Clouds/CALIBRATION.md §A2 carries the slope at one, three and eight.
+//
+// EIGHT AND NOT TEN, AND THE BOUND IS MEMORY RATHER THAN THE MARCH. Eight DISTINCT bodies are eight slabs
+// of the atlas below, 4.00 MiB each; against decision D-9's 64 MiB and the 20.67 MiB the subsystem already
+// occupies at 1280x766 that leaves 11.33 MiB of headroom, and the trace and history targets grow with the
+// frame — at 1920x1080 they take 9.4 MiB more, which spends almost all of it. Ten would not fit that
+// frame. Instances that SHARE a body cost no memory at all, so eight is a limit on bodies and only
+// incidentally on entities.
+#define CLOUD_AUTHORED_SLOTS 8
 
 // THE VOLUME'S SHAPE, FIXED BY THE FORMAT. Every `.dcmv` is exactly this size — 128 x 64 x 128 voxels,
 // two horizontal axes at 128 and the vertical one at 64, because a cloud is wider than it is tall and a
@@ -47,6 +54,32 @@
 #define CLOUD_MODELLING_VOLUME_WIDTH  128
 #define CLOUD_MODELLING_VOLUME_HEIGHT 64
 #define CLOUD_MODELLING_VOLUME_DEPTH  128
+
+// THE ATLAS, AND WHY IT IS AN ATLAS. Several DIFFERENT bodies in one sky need several volumes reachable
+// from one dispatch, and there are exactly two ways to do that:
+//
+//   * an ARRAY of `sampler3D`, indexed by the instance. This engine's reflection REFUSES it in so many
+//     words — VulkanShaderReflection.cpp: "arrays of descriptors are not supported — declare separate
+//     bindings" — because every layout it builds hardcodes descriptorCount = 1. Eight separate bindings
+//     is the version that compiles, and it costs eight descriptors in each of TWO pipelines, eight
+//     fallback images to keep the set valid, and an eight-way branch around the fetch: the index is a
+//     loop variable, and a non-indexable sampler can only be selected by comparing it against eight
+//     constants.
+//   * ONE volume holding the bodies end to end, addressed by arithmetic. One descriptor, one fallback,
+//     one fetch site, and the addressing is a single multiply-add.
+//
+// The second, therefore, and the arithmetic is the whole of it: bodies are stacked along the DEPTH axis,
+// which is the slowest-varying one, so the atlas's bytes are the bodies' bytes concatenated in slab order
+// and Assets::AssembleCloudModellingAtlas is a run of memcpy rather than a re-interleave.
+//
+// THE SLAB BOUNDARY DOES NOT BLEED, and it takes two guarantees rather than one. An instance's own w
+// never leaves [first texel centre, last texel centre] OF ITS SLAB — see CloudAuthoredAtlasUvw — so in
+// real arithmetic the trilinear filter's two depth taps are two texels of the SAME body. In FLOAT, a
+// division by a slab count that is not a power of two leaves up to about 3e-5 of weight on the
+// neighbour's outermost texel, and the second guarantee is what makes that nothing: the bake refuses a
+// volume whose body touches its own boundary, so that texel is four zeroes.
+// Desert/Tests/Engine/CloudAuthored asserts both.
+#define CLOUD_MODELLING_ATLAS_MAX_SLABS CLOUD_AUTHORED_SLOTS
 
 // The four channels of the modelling volume, in the order Engine/Assets/CloudModellingVolume.hpp writes
 // them. Named here because the shader reads them by swizzle and a comment three files away is not where
@@ -93,9 +126,36 @@ struct CloudAuthoredInstance
     // NOT THE EXACT ONE, and the ratio is the reason: six compares against twenty-one multiply-adds, run
     // at every field sample of every ray AND at every sample of every shadow ray, which is about thirty
     // times more often again. The exact test follows, but only for the points this one lets through.
-    vec4 BoundsMin; // xyz = minimum corner, w = Strength — how strongly this instance asserts itself, 0..1
-    vec4 BoundsMax; // xyz = maximum corner, w = Cutout   — how much of the procedural field it suppresses
+    //
+    // THE STRENGTH IS SIGNED AND THE CUTOUT IS ITS POSITIVE PART. A0 spent one float on each and the
+    // cutout was `suppress ? strength : 0` — one number derived from the other and a flag, which is the
+    // duplicated state this very struct refuses for the translation. Signed, it is one number:
+    //
+    //     Strength = abs( BoundsMin.w )        Cutout = max( BoundsMin.w, 0 )
+    //
+    // and a body wound down to nothing gives the procedural sky back either way, because both are zero
+    // there whatever the sign. Graphic::PackCloudAuthoredInstance writes it; the two readers are
+    // CloudAuthoredStrength and CloudAuthoredCutout below, so nothing else has to know.
+    //
+    // The float that frees is BoundsMax.w, and it holds the ATLAS SLAB — the depth coordinate at which
+    // this instance's body begins. That, and CLOUD_AUTHORED_SLAB_COUNT, is all the addressing an atlas
+    // needs.
+    vec4 BoundsMin; // xyz = minimum corner, w = signed Strength (negative = does not suppress)
+    vec4 BoundsMax; // xyz = maximum corner, w = AtlasSlabBaseW — where the body's slab begins
 };
+
+/// How strongly this instance asserts itself, 0..1. See the note on BoundsMin.w.
+float CloudAuthoredStrength( CloudAuthoredInstance instance )
+{
+    return abs( instance.BoundsMin.w );
+}
+
+/// How much of the procedural field it suppresses, 0..1 — zero when the artist switched the cutout off,
+/// and equal to the strength otherwise, which is what makes Strength a fade rather than a hole-punch.
+float CloudAuthoredCutout( CloudAuthoredInstance instance )
+{
+    return max( instance.BoundsMin.w, 0.0f );
+}
 
 /// True when @p positionKm is inside the instance's axis-aligned bounds. The first and cheapest of the
 /// two tests, and the one that makes an authored instance cost almost nothing in the sky around it.
@@ -145,25 +205,40 @@ bool CloudAuthoredInVolume( vec3 uvw )
     return true;
 }
 
+/// Where slab @p slot begins, as a depth coordinate of an atlas of @p slabCount bodies. The one place the
+/// atlas's geometry is written down; Graphic::CloudAuthoredAtlasSlabBaseW is the same line in C++ and
+/// Desert/Tests/Engine/CloudAuthored drives both over every slot of every count rather than trusting them.
+float CloudAuthoredAtlasSlabBaseW( int slot, int slabCount )
+{
+    return float( slot ) / float( slabCount );
+}
+
 /**
- * The coordinate the fetch actually uses: clamped to the texel centres of the volume.
+ * The coordinate the fetch actually uses: @p uvw, which is in the BODY's own cube, placed in the atlas.
  *
- * EVERY SAMPLER IN THIS ENGINE IS REPEAT, so a coordinate of exactly 1 wraps to the first texel and the
- * trilinear filter blends the top face of the cloud with its own bottom face. The same clamp
- * CloudSampleProfileTableAll performs on its two axes, for the same reason and with the same
- * consequence if it is left out.
+ * ALL THREE AXES ARE CLAMPED TO TEXEL CENTRES, and it is one statement about one hazard. Every sampler in
+ * this engine is REPEAT, so a coordinate of exactly 1 wraps to the first texel and the trilinear filter
+ * blends one face of the cloud with the opposite one; on the depth axis that opposite face now belongs to
+ * a DIFFERENT BODY, which is worse than a mirror of itself. The clamp is what makes that unreachable: the
+ * depth coordinate is pulled inside the body's own texel centres BEFORE it is folded into the slab, so the
+ * filter's two depth taps are always two texels of the same cloud.
  *
- * It costs nothing in accuracy because the bake guarantees the outermost shell of voxels is empty —
- * Assets::GenerateCloudModellingVolume refuses to produce a volume whose body touches its own boundary.
+ * IT REDUCES TO A0's SINGLE-VOLUME ADDRESSING EXACTLY when the atlas holds one body — base 0, divisor 1 —
+ * which is why a scene with one hero cloud renders the frame it rendered before the atlas existed, byte
+ * for byte. Desert/Tests/Engine/CloudAuthored asserts the reduction on the arithmetic and the six-point
+ * protocol asserts it on the pixels.
+ *
+ * The clamps cost nothing in accuracy because the bake guarantees the outermost shell of voxels is empty —
+ * Assets::GenerateCloudModellingVolume refuses a volume whose body touches its own box.
  */
-vec3 CloudAuthoredClampUvw( vec3 uvw )
+vec3 CloudAuthoredAtlasUvw( vec3 uvw, float slabBaseW, int slabCount )
 {
     float halfU = 0.5f / float( CLOUD_MODELLING_VOLUME_WIDTH );
     float halfV = 0.5f / float( CLOUD_MODELLING_VOLUME_HEIGHT );
     float halfW = 0.5f / float( CLOUD_MODELLING_VOLUME_DEPTH );
 
     return vec3( clamp( uvw.x, halfU, 1.0f - halfU ), clamp( uvw.y, halfV, 1.0f - halfV ),
-                 clamp( uvw.z, halfW, 1.0f - halfW ) );
+                 slabBaseW + clamp( uvw.z, halfW, 1.0f - halfW ) / float( slabCount ) );
 }
 
 #ifdef CLOUD_AUTHORED_BUFFER_BINDING
@@ -178,16 +253,22 @@ vec3 CloudAuthoredClampUvw( vec3 uvw )
 // would have made the layer's block grow by 320 bytes for the scenes that have no hero cloud at all,
 // which is the one thing §4.4 of the analysis forbids.
 //
-// `int` FIRST AND THE ARRAY AFTER IT. std430 aligns an array of structs to 16, so the count leaves
-// twelve bytes of ALIGNMENT — not a reserved slot: there is no member there to read, and the C++ side
+// THE TWO ints FIRST AND THE ARRAY AFTER THEM. std430 aligns an array of structs to 16, so the two counts
+// leave eight bytes of ALIGNMENT — not a reserved slot: there is no member there to read, and the C++ side
 // pins the array's offset at 16 so the two cannot disagree about it.
+//
+// THE SLAB COUNT IS A PROPERTY OF THE ATLAS AND THEREFORE OF THE BUFFER, not of an instance: every
+// instance in a frame reads the same atlas, and a per-instance copy of one number is eight chances for
+// eight copies to disagree.
 layout( std430, binding = CLOUD_AUTHORED_BUFFER_BINDING ) readonly buffer CloudAuthoredBuffer
 {
     int                   u_CloudAuthoredCount;
+    int                   u_CloudAuthoredSlabCount;
     CloudAuthoredInstance u_CloudAuthoredInstances[CLOUD_AUTHORED_SLOTS];
 };
 
 #define CLOUD_AUTHORED_COUNT         u_CloudAuthoredCount
+#define CLOUD_AUTHORED_SLAB_COUNT    u_CloudAuthoredSlabCount
 #define CLOUD_AUTHORED_INSTANCE( i ) u_CloudAuthoredInstances[i]
 #endif // CLOUD_AUTHORED_BUFFER_BINDING
 

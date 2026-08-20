@@ -401,7 +401,7 @@ TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresSixDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the vertical profile table
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowAuthoredBinding,
                              VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the hero cloud instances
-    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowAuthoredVolumeBinding,
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowAuthoredAtlasBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
 }
 
@@ -434,7 +434,7 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresTenDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAuthoredBinding,
                              VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the hero cloud instances
-    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAuthoredVolumeBinding,
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAuthoredAtlasBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
 }
 

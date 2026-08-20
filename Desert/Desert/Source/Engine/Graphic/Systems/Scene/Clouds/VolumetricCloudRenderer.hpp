@@ -197,13 +197,12 @@ namespace Desert::Graphic::System
 
         /**
          * Turns this frame's hero clouds into the instance buffer the two cloud passes read, and points
-         * m_AuthoredVolume at the body they share.
+         * m_AuthoredAtlas at the image holding their bodies.
          *
-         * ONE VOLUME PER FRAME, and the limit is the shader's single `sampler3D` rather than a decision
-         * taken here: several instances of the SAME body are free and are the ordinary case, several
-         * DIFFERENT bodies need the atlas that phase A2 builds. An entity naming a second body is
-         * DROPPED AND NAMED in the log rather than drawn with somebody else's shape, which would be a
-         * cloud the artist cannot account for.
+         * DISTINCT BODIES GET A SLAB EACH AND REPEATED ONES SHARE, which is where the two limits of this
+         * producer part company: kCloudAuthoredSlots caps the INSTANCES, because each costs the march a
+         * bounds test at every field sample, and kCloudModellingAtlasMaxSlabs caps the BODIES, because
+         * each costs 4.00 MiB. A wood of forty copies of one sculpted tree is one slab.
          *
          * @param payload the layer, already packed. Read for two numbers and neither is recomputed here:
          *                Layer.y, the shell's base altitude, which is what puts an instance into the
@@ -263,7 +262,7 @@ namespace Desert::Graphic::System
         // SLOT A. The instance buffer is doubled for the same reason the parameter buffer is — the shadow
         // map dispatches before the render graph and the march after it, and one non-persistent buffer
         // written twice between two dispatches is a hazard whose only defence would be that the bytes
-        // happen to be equal. The volume itself is BORROWED from Runtime::CloudModellingService, like the
+        // happen to be equal. The ATLAS itself is BORROWED from Runtime::CloudModellingService, like the
         // noise volume beside it, and is null in every scene that has no hero cloud in it — in which case
         // the fallback volume is bound instead and the count is zero.
         std::shared_ptr<ShaderResources::StorageBuffer> m_AuthoredBuffer;
@@ -271,13 +270,14 @@ namespace Desert::Graphic::System
 
         std::vector<HeroCloudInstance> m_HeroClouds;
         CloudAuthoredPayload           m_AuthoredPayload{};
-        Image3D*                       m_AuthoredVolume = nullptr;
+        Image3D*                       m_AuthoredAtlas = nullptr;
 
         // Latched so that a body standing outside its layer is said ONCE per scene rather than sixty
         // times a second, and re-armed the moment the arrangement changes so that fixing it and breaking
         // it again both speak.
-        bool m_AuthoredFitWarned = false;
-        bool m_AuthoredMixWarned = false;
+        bool m_AuthoredFitWarned    = false;
+        bool m_AuthoredCrowdWarned  = false;
+        bool m_AuthoredBodiesWarned = false;
 
         // The vertical profile table this view marches against — OWNED, unlike the noise volume, because
         // it is GENERATED here rather than resolved from an asset: the type ships twelve numbers, not
