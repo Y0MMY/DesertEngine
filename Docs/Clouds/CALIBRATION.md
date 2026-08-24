@@ -2012,3 +2012,11 @@ quantisation argument that used `N ~ 100` lumps in range. `N` is not a constant 
 many lumps reach a voxel — and widening the clusters to make the coverage slider mean the sky took it to
 about six hundred. The suite went red at 1.24 of a 255th, which is the assertion failing exactly where it
 was written to.
+
+### The frames
+
+| file | what it shows |
+|---|---|
+| `Shots/E5a_before_mid_away.png` / `E5a_after_mid_away.png` | **⬛ THE SHOW.** The same camera, before and after. Before: a deck of separate cushions, each one an Alligator cell, with a dark crease between every pair — because `best - second` is zero there and no slider can close it. After: fused convective masses, a wide flat base with turrets growing out of it, one connected surface per cloud and blue sky between clouds |
+| `Shots/E5a_before_zenith_away.png` / `E5a_after_zenith_away.png` | the same pair straight up, which is the angle the extrusion defect hides at and the angle the empty-zenith defect shows at |
+| `Shots/E5a_fly_frame080.png` / `E5a_fly_frame240.png` | frames 80 and 240 of a camera crossing **12 km — four snaps of the shipped 3 km lattice**. Two rebakes happened during it, at 3936 and 4010 ms, and neither is visible: no seam at the region's boundary, no pop when the volume is swapped, because the field inside the region is invariant under the scroll and the volume is periodic outside it |

@@ -711,8 +711,7 @@ TEST( CloudAuthored, APointInsideTheHullButOutsideTheRotatedBodyIsExactlyProcedu
     // fetch for every point in the difference between a rotated box and its hull, which is up to 3.4x the
     // body's own volume — and not the thing that keeps the picture right. Both are worth having and only
     // one of them is worth calling a correctness test.
-    CloudFieldParams params = DefaultParams();
-    params.Coverage         = 0.85f;
+    CloudFieldParams params = ParamsAtCoverage( 0.85f );
 
     const float                             yaw = 0.7853981634f;
     const Graphic::CloudAuthoredInstanceGpu gpu = MakeInstance( glm::vec3( 0.0f, 1.4f, 0.0f ), 1.0f, yaw );
@@ -911,8 +910,9 @@ TEST( CloudAuthored, TheCutoutRemovesTheProceduralFieldInsideTheEnvelopeAndLeave
     // the envelope the procedural field must be gone, the authored body must survive, and OUTSIDE the
     // instance nothing may move — a cutout that took the whole box would cut a rectangular hole in the
     // deck around the cloud.
-    CloudFieldParams params = DefaultParams();
-    params.Coverage         = 0.85f; // an overcast sky, so there is procedural field everywhere to remove
+    // An overcast sky, so there is procedural field everywhere to remove. It is a BAKE now: coverage
+    // decides what is in the modelling volume rather than what threshold the march applies.
+    CloudFieldParams params = ParamsAtCoverage( 0.85f );
 
     constexpr float fraction = 0.45f;
     glm::vec3       centre;
@@ -966,8 +966,7 @@ TEST( CloudAuthored, TheCutoutUnionsAcrossInstancesRatherThanFollowingTheWinner 
     // The arrangement is chosen so that the instance which CUTS is the one that LOSES: `deep` is the
     // same body scaled up, so at the test point it is further inside itself and wins the union, and it is
     // the one with the cutout switched OFF.
-    CloudFieldParams params = DefaultParams();
-    params.Coverage         = 0.85f;
+    CloudFieldParams params = ParamsAtCoverage( 0.85f );
 
     constexpr float fraction = 0.45f;
     glm::vec3       centre;
@@ -979,16 +978,54 @@ TEST( CloudAuthored, TheCutoutUnionsAcrossInstancesRatherThanFollowingTheWinner 
     float     authored = 0.0f;
     ASSERT_TRUE( FindCutoutPoint( params, cutting, fraction, point, authored ) );
 
-    const Graphic::CloudAuthoredInstanceGpu deep = MakeInstance( centre, 1.35f, 0.0f, 1.0f, /*cutout=*/false );
-
     ClearInstances();
     const float bare = SampleCloudField( params, fraction, point ).Profile;
+
+    // THE SECOND BODY'S STRENGTH IS SEARCHED FOR AND NOT CHOSEN, and the search is the whole precondition
+    // of this test rather than tidiness.
+    //
+    // The arrangement needs `deep` to beat `cutting` and to LOSE to the procedural field, so that the
+    // union's winner is a body with its cutout switched OFF and the thing the cutout has to remove is
+    // still the thing on top. A fixed strength of 1 gave that against the old producer, whose profile
+    // sat low almost everywhere; the profile is a normalised DISTANCE FIELD now — near 1 inside a body
+    // and 0 at its surface — so at a point in the outer shell of one body the scaled-up copy of it is
+    // deeper than the procedural field is, and the union took the authored answer. `onlyDeep` was 0.483
+    // where `bare` was lower, and the test failed on its own precondition rather than on its claim.
+    //
+    // Searching for the strength states the precondition instead of assuming it, and fails loudly if no
+    // strength satisfies it — which is what the ASSERT below is for.
+    float                             deepStrength = 0.0f;
+    Graphic::CloudAuthoredInstanceGpu deep{};
+
+    for ( int step = 1; step <= 40; ++step )
+    {
+        const float strength = static_cast<float>( step ) / 40.0f;
+
+        const Graphic::CloudAuthoredInstanceGpu candidate =
+             MakeInstance( centre, 1.35f, 0.0f, strength, /*cutout=*/false );
+
+        ClearInstances();
+        AddInstance( candidate );
+
+        const float profile = SampleCloudField( params, fraction, point ).Profile;
+
+        // Beats the cutting body, loses to the procedural field. `<=` on the upper side because the union
+        // reports the procedural value exactly once the authored one is under it.
+        if ( profile > authored && profile <= bare )
+        {
+            deepStrength = strength;
+            deep         = candidate;
+            break;
+        }
+    }
+
+    ASSERT_GT( deepStrength, 0.0f ) << "no strength of the second body both beats the cutting one (" << authored
+                                    << ") and loses to the procedural field (" << bare
+                                    << "), so this arrangement cannot measure what it claims";
 
     ClearInstances();
     AddInstance( deep );
     const float onlyDeep = SampleCloudField( params, fraction, point ).Profile;
-    ASSERT_GT( onlyDeep, authored ) << "the scaled body does not win the union here, so the test is not "
-                                       "measuring what it says";
     ASSERT_FLOAT_EQ( onlyDeep, bare ) << "the procedural field was supposed to win against the pair alone";
 
     ClearInstances();
