@@ -199,6 +199,30 @@ namespace Desert::Tests::CloudFieldRef
             state.Voxels     = baked ? baked.GetValue() : std::vector<unsigned char>{};
         }
 
+        /// The same bake over a layer WIDER than the species' own band, which is what makes the vertical
+        /// clamp observable: the volume's top rows are then empty air and its bottom rows are cloud, so a
+        /// read at a height fraction of 1 that wrapped onto the floor would come back with cloud in it.
+        ///
+        /// A layer is normally the union of its types' bands exactly (Graphic::CloudTypeSetEnvelopeKm), so
+        /// this arrangement does not arise by itself — which is precisely why the property needs a fixture
+        /// that produces it rather than a sample of an ordinary sky.
+        void CloudModellingVolumeSelectOverLayer( const Desert::Graphic::CloudTypeShape* shapes,
+                                                  std::uint32_t count, float coverage, float bottomKm,
+                                                  float thicknessKm )
+        {
+            ModellingVolumeState& state = ModellingVolume();
+
+            state.Params = CloudModellingParams( shapes, count, coverage, 1.0f, vec3( 1.0f, 0.0f, 0.0f ) );
+
+            state.Params.LayerBottomKm    = bottomKm;
+            state.Params.LayerThicknessKm = thicknessKm;
+
+            state.OriginKm = Desert::Assets::CloudProceduralRegionOriginKm( state.Params, 0.0f, 0.0f );
+
+            const auto baked = Desert::Assets::BakeCloudProceduralVolume( state.Params, state.OriginKm );
+            state.Voxels     = baked ? baked.GetValue() : std::vector<unsigned char>{};
+        }
+
         // A TRILINEAR, REPEAT-wrapped fetch — the filter and the address mode VulkanImage3D creates for
         // every sampled volume, written out here because the difference between this and a nearest fetch
         // is exactly the half-texel error the relation test exists to catch.

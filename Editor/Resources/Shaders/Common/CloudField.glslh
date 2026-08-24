@@ -161,17 +161,23 @@ struct CloudFieldParams
 // contrast by at most 0.018 with no consistent sign. Our field is three-dimensional by construction and is
 // now MORE so, not less: a lump has three radii and an altitude.
 
-// The procedural modelling volume's shape, which the march needs as compile-time numbers to pull a fetch
-// in by half a texel. Assets::kCloudProceduralVolumeWidth and its two siblings are the same three numbers
-// on the C++ side, and Desert/Tests/Engine/CloudProceduralField asserts the two statements agree.
+// The procedural modelling volume's HEIGHT, which the march needs as a compile-time number to pull the
+// vertical fetch in by half a texel. Assets::kCloudProceduralVolumeHeight is the same number on the C++
+// side, and Desert/Tests/Engine/CloudField asserts the two statements agree — that suite compiles this
+// header as C++, which is the only place the comparison can be made at all.
+//
+// ONE EXTENT AND NOT THREE. The first draft declared the width and the depth beside it "for symmetry",
+// and neither was ever read: the horizontal mapping is `(world - origin) * invRegionSize`, which is in
+// texture units already and never needs to know how many texels there are. A sabotage run caught it —
+// setting the height to 64 left both suites GREEN, and looking at why turned up two dead macros as well
+// as the missing assertion. A constant nobody reads is a setting nobody reads with extra steps
+// (contract §1.3).
 //
 // PROCEDURAL AND NOT MODELLING IN THE NAME, because Common/CloudAuthored.glslh already spends
 // CLOUD_MODELLING_VOLUME_* on the SCULPTED body's 128 x 64 x 128. Two volumes, two producers, two sets of
 // extents — and the first draft of this file called both of them the same thing, which the shader compiler
 // caught as a macro redefinition rather than as a silently wrong fetch.
-#define CLOUD_PROCEDURAL_VOLUME_WIDTH  256.0f
 #define CLOUD_PROCEDURAL_VOLUME_HEIGHT 32.0f
-#define CLOUD_PROCEDURAL_VOLUME_DEPTH  256.0f
 
 // WHERE A WORLD POSITION LANDS IN THE VOLUME.
 //

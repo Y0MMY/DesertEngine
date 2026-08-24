@@ -211,6 +211,116 @@ namespace
 // ---------------------------------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------------------------------
+// THE VOLUME'S ADDRESSING — the two relations a sabotage run found nobody was keeping
+// ---------------------------------------------------------------------------------------------------
+//
+// BOTH OF THESE WERE HOLES, and they were found the way the contract says holes are found: by breaking
+// the thing a test claims to measure and watching the suite stay green. Nine sabotages, nine reds, two
+// greens — and the two greens are these.
+
+TEST( CloudFieldVolume, TheShaderAndTheGeneratorAgreeAboutHowTallTheVolumeIs )
+{
+    // THE RELATION: the shader pulls its vertical fetch in by half a texel, and "half a texel" is a
+    // number only the volume's height defines. Stated in two places — a macro here, a constant in
+    // Engine/Assets/CloudProceduralVolume.hpp — and until this line nothing compared them.
+    //
+    // WHAT IT COSTS TO GET WRONG is exactly what makes it hard to notice: at 64 instead of 32 the clamp
+    // pulls in by half of the wrong texel, so the top and bottom rows of every cloud are read a sixty-
+    // fourth of a layer out of place. On a 3.6 km shell that is 28 m of cloud base, which is invisible in
+    // a frame and wrong in the field — the shape of defect the double compilation exists for.
+    //
+    // SETTING THE MACRO TO 64 LEFT BOTH SUITES GREEN. This is the assertion that was missing, and the
+    // header that claimed a different suite was making it has been corrected.
+    EXPECT_FLOAT_EQ( CLOUD_PROCEDURAL_VOLUME_HEIGHT,
+                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeHeight ) )
+         << "Common/CloudField.glslh and Engine/Assets/CloudProceduralVolume.hpp disagree about how many "
+            "rows the volume has, so the march's half-texel clamp is half of the wrong texel";
+}
+
+TEST( CloudFieldVolume, TheLayersCeilingDoesNotWrapOntoItsFloor )
+{
+    // THE PROPERTY THE PROFILE TABLE'S OWN TEST USED TO KEEP, and it was deleted with the table instead of
+    // being carried across. Every sampler in this engine is REPEAT, so a vertical texture coordinate of
+    // exactly 1 wraps to the bottom row: without the clamp, the TOP of the layer blends with its own FLOOR
+    // and grows the bases of its clouds on top of itself. That is a defect with a name in this programme —
+    // "the sky was a ceiling" — and removing the clamp left the suite green.
+    //
+    // MEASURED ON A LAYER WIDER THAN THE SPECIES' BAND, because that is the only arrangement in which the
+    // two ends of the volume differ: an ordinary layer IS the union of its types' bands, so both ends are
+    // empty and a wrap would be invisible. Here the cloud sits in the bottom quarter and the top rows are
+    // air.
+    const CloudTypeShape shape = kHeap; // a fair-weather cumulus, 0.90 to 1.90 km
+
+    CloudModellingVolumeSelectOverLayer( &shape, 1u, /*coverage=*/0.85f, /*bottomKm=*/0.80f,
+                                         /*thicknessKm=*/8.00f );
+
+    CloudFieldParams params;
+    params.DetailTileKm   = 4.0f;
+    params.DetailStrength = 0.0f;
+    params.DensityScale   = 1.0f;
+    params.SpeciesCount   = 1;
+    params.WindOffsetKm   = vec3( 0.0f );
+
+    for ( int slot = 0; slot < CLOUD_SPECIES_SLOTS; ++slot )
+        params.SpeciesEdge[slot] = vec4( 0.0f );
+    params.SpeciesEdge[0] =
+         vec4( shape.DetailCharacter, shape.DetailFactor, shape.DensityFactor, shape.ExtinctionFactor );
+
+    params.RegionOriginKm  = ModellingVolume().OriginKm;
+    params.InvRegionSizeKm = 1.0f / ModellingVolume().Params.RegionSizeKm;
+
+    // FIRST: the coordinate itself never reaches either face.
+    const vec3 atTop    = CloudProceduralVolumeUvw( params, 1.0f, vec3( 0.0f ) );
+    const vec3 atBottom = CloudProceduralVolumeUvw( params, 0.0f, vec3( 0.0f ) );
+
+    const float halfTexel = 0.5f / CLOUD_PROCEDURAL_VOLUME_HEIGHT;
+
+    EXPECT_FLOAT_EQ( atTop.y, 1.0f - halfTexel )
+         << "a height fraction of 1 addresses the volume's very edge, where a REPEAT sampler wraps";
+    EXPECT_FLOAT_EQ( atBottom.y, halfTexel )
+         << "a height fraction of 0 addresses the volume's very edge, where a REPEAT sampler wraps";
+
+    // SECOND, AND THIS IS THE ONE THAT MATTERS: the consequence. At the top of this layer there is no
+    // cloud, and there must be none however the coordinate is addressed. Without the clamp the fetch
+    // blends the empty top row with the cloudy bottom one and half of the sky's ceiling fills in.
+    int cloudyBelow = 0;
+    int cloudyAtTop = 0;
+
+    constexpr int kColumns = 48;
+
+    for ( int iz = 0; iz < kColumns; ++iz )
+    {
+        for ( int ix = 0; ix < kColumns; ++ix )
+        {
+            const vec3 at( OriginKm().x + PeriodKm() * ( ix + 0.5f ) / kColumns, 0.0f,
+                           OriginKm().y + PeriodKm() * ( iz + 0.5f ) / kColumns );
+
+            // Where the cumulus actually is: 0.90 to 1.90 km in a layer that starts at 0.80 and is 8 km
+            // thick, so a height fraction of about 0.08 is inside it.
+            if ( SampleCloudField( params, 0.08f, at ).Profile > 0.0f )
+                ++cloudyBelow;
+
+            if ( SampleCloudField( params, 1.0f, at ).Profile > 0.0f )
+                ++cloudyAtTop;
+        }
+    }
+
+    std::printf( "[CloudFieldVolume] %d of %d columns carry cloud low in the layer; %d carry any at the "
+                 "very top\n",
+                 cloudyBelow, kColumns * kColumns, cloudyAtTop );
+
+    // NOT VACUOUS: if the low band were empty too, "the top is empty" would be a statement about a volume
+    // with nothing in it.
+    ASSERT_GT( cloudyBelow, kColumns * kColumns / 8 )
+         << "the fixture put almost no cloud in the layer, so the ceiling being empty means nothing";
+
+    EXPECT_EQ( cloudyAtTop, 0 )
+         << cloudyAtTop
+         << " columns have cloud at the very top of a layer whose cloud is all in the bottom eighth — the "
+            "vertical read wrapped onto the floor and the sky grew its own cloud bases on its ceiling";
+}
+
+// ---------------------------------------------------------------------------------------------------
 // The coverage mapping — what the slider actually means, measured
 // ---------------------------------------------------------------------------------------------------
 

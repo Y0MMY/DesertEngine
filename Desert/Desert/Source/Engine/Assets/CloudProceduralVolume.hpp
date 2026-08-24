@@ -58,10 +58,18 @@ namespace Desert::Assets
      */
 
     /// The volume's shape, FIXED like the sculpted volume's is, and for the same reason: the shader needs
-    /// it as compile-time numbers, and two statements of one extent is the defect class §2.3.1 names.
-    /// Mirrored by CLOUD_PROCEDURAL_VOLUME_WIDTH and its two siblings in
-    /// Editor/Resources/Shaders/Common/CloudField.glslh; Desert/Tests/Engine/CloudProceduralField asserts
-    /// the two agree.
+    /// the height as a compile-time number, and two statements of one extent is the defect class §2.3.1
+    /// names.
+    ///
+    /// ONLY THE HEIGHT IS MIRRORED, by CLOUD_PROCEDURAL_VOLUME_HEIGHT in
+    /// Editor/Resources/Shaders/Common/CloudField.glslh, and Desert/Tests/Engine/CloudField asserts the two
+    /// agree — that suite compiles the header as C++, which is where the comparison can be made. The width
+    /// and the depth are NOT mirrored and must not be: the horizontal mapping is
+    /// `(world - origin) * invRegionSize`, which is already in texture units.
+    ///
+    /// THIS COMMENT USED TO NAME THE WRONG SUITE, and a sabotage run is what found it: setting the shader's
+    /// height to 64 left both suites green, because neither of them included this header beside that one.
+    /// A claim about which test protects a relation is itself a thing that has to be true.
     ///
     /// 256 x 32 x 256 RGBA8 is 8.00 MiB, and the number is chosen by TWO bounds rather than by ambition:
     ///
