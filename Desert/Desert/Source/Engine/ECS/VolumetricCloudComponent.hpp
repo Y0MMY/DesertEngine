@@ -172,51 +172,55 @@ namespace Desert::ECS
         // ---- Weather --------------------------------------------------------------------------------
 
         PROPERTY( DisplayName( "Coverage" ), Category( "Weather" ), Range( 0.0f, 1.0f ), Summary,
-                  Tooltip( "How much of the sky has cloud in it. Applied as a THRESHOLD on the coverage "
-                           "field, so lowering it opens clear gaps rather than thinning everything." ) )
-        // 0.10, MEASURED — and the metric is stated, which the first version of this table was not.
+                  Tooltip( "What fraction of the sky has cloud in it. It decides how many cells of the "
+                           "cloud lattice carry a cloud, so lowering it opens clear gaps rather than "
+                           "thinning everything." ) )
+        // 0.45, MEASURED — and the metric is stated, which the first version of this table was not.
         //
         // "sky cover" below is the fraction of vertical COLUMNS through the layer whose cloud hides at
-        // least half the sky behind it, over one period of the coverage field at contrast 1 with the
-        // defaults of this component. Desert/Tests/Engine/CloudField measures it and prints exactly this
-        // row, so it is reproducible rather than remembered:
+        // least half the sky behind it, over one period of the field at contrast 1 with the defaults of
+        // this component. Desert/Tests/Engine/CloudField measures it and prints exactly this row, so it is
+        // reproducible rather than remembered:
         //
-        //     Coverage   0.05   0.10   0.15   0.20   0.30   0.50
-        //     sky cover    17%    36%    49%    60%    75%    95%
+        //     Coverage   0.10   0.20   0.30   0.40   0.50   0.60   0.70   0.80   0.90   1.00
+        //     touched     13%    23%    34%    44%    56%    67%    76%    85%    92%    96%
+        //     sky cover    7%    13%    20%    30%    42%    52%    60%    69%    80%    86%
         //
-        // THE ROW MOVED WITH THE ENVELOPE, and the default moved with the row. The envelope used to be an
-        // authored ten kilometres of which a cloud filled a fraction; it is now the SPECIES' OWN [base,
-        // top] and the shipped congestus fills all 3.6 km of it, so a column that carries cloud carries
-        // three times as much of it. 0.10 is the setting that reproduces the ~40 % sky cover the previous
-        // default of 0.15 produced — the slider means something different and the sky looks the same,
-        // which is the same kind of move, for the same kind of reason, as the one recorded below.
+        // THE SLIDER STOPPED BEING A THRESHOLD AND BECAME A COUNT, and the default moved by exactly the
+        // amount needed to leave the sky where it was — which is the third time this has happened and the
+        // third time it is recorded here. There is no coverage FIELD any more to threshold: a lattice cell
+        // carries a cluster of lumps when its own hash falls below `pow(Coverage, 0.68)`, and the 0.68 is
+        // measured on the top-down projection of the baked volume so that the slider and what a person
+        // looking up would count are the same number to within 0.03 of the sky
+        // (Desert/Tests/Engine/CloudProceduralField re-measures it on every run). 0.45 is the setting that
+        // reproduces the ~36 % sky cover the previous default of 0.10 produced.
         //
-        // THE SLIDER STOPPED BEING A LEVEL AND BECAME A QUANTILE, and the default moved once, by exactly
-        // the amount needed to leave the sky where it was. Common/CloudField.glslh now maps the coverage
-        // field through its own cumulative distribution before thresholding it, so a setting selects a
-        // FRACTION OF THE FIELD rather than a value of it — which is what makes the slider mean the same
-        // thing whatever volume is in the Noise Volume slot, the property this component needs now that
-        // the slot takes an artist's asset. The consequence here is arithmetic: the same setting selects
-        // about three times as much field as before, so the useful band moved down and the default with
-        // it. 0.15 is the point that produces the 40% sky cover the old 0.25 produced against the old
-        // Perlin-Worley field (its row read 20% at 0.20 and 58% at 0.30) — the default is unchanged in
-        // what it LOOKS like and changed in what it reads.
+        // Both ends are exact BY CONSTRUCTION rather than by arithmetic that cancels: a power is zero at
+        // zero and one at one, so 0 is genuinely clear and 1 genuinely solid whatever the seed, the cell
+        // size or the type. The whole travel is useful now — the old row had spent a third of its band
+        // before 0.10 — because the count is linear in the sky where a threshold on a bounded field was
+        // not.
         //
-        // Both ends are still exact by construction: the mapped field reaches 0 and 1, and the threshold
-        // is pushed past both, so 0 is genuinely clear and 1 genuinely solid. The useful band is now 0.03
-        // to 0.25 — the curve is steep because a slanted ray crosses many columns, and that steepness is a
-        // property of the geometry rather than of the slider.
-        //
-        // THE THREE SHIPPED CLOUD SCENES WERE NOT RE-AUTHORED. Their Coverage is an authored value and all
-        // three still read as cloud; Clouds_Showcase and Clouds_Sunset simply read fuller than they did.
-        // Migrating an authored number to preserve an appearance is a guess about intent, and this
-        // component is not the place to make it.
-        float Coverage = 0.10f;
+        // THE SHIPPED CLOUD SCENES WERE RE-AUTHORED THIS TIME, and the difference from the two previous
+        // recalibrations is the condition they were justified by: "all three still read as cloud". At the
+        // new mapping they did not. Clouds_Demo's authored 0.24 fell from ~66 % sky cover to ~15 %, and
+        // the frame it produced had cloud on the horizon and an EMPTY ZENITH — which is the defect
+        // Docs/Clouds/REVIEW_622a01a6.md names and the one the owner found by looking up. Each scene's
+        // Coverage was mapped through the two measured rows at EQUAL SKY COVER (0.24 -> 0.762,
+        // 0.25 -> 0.779, 0.30 -> 0.855, 0.08 -> 0.384, 0.07 -> 0.347, 0.04 -> 0.209, 0.015 -> 0.075), so
+        // what was preserved is the appearance the scene was authored for rather than the number.
+        float Coverage = 0.45f;
 
         PROPERTY( DisplayName( "Coverage Contrast" ), Category( "Weather" ), Range( 0.1f, 4.0f ),
-                  Tooltip( "Sharpness of the transition from clear to cloudy, as the WIDTH of the band "
-                           "over which the coverage field turns into cloud. Above 1 the band narrows and "
-                           "the islands get hard edges; below 1 it widens and they melt into haze." ) )
+                  Tooltip( "Sharpness of the transition from clear to cloudy, as the WIDTH of the ramp "
+                           "from an empty cell to a full one. Above 1 the ramp narrows and the sky is "
+                           "decisively cloud or decisively clear; below 1 it widens and the cloud sizes "
+                           "spread out, which is what a broken deck looks like." ) )
+        // IT RAMPS THE SIZE OF A CLUSTER NOW, not the width of a threshold's smoothstep, and the two are
+        // the same statement about the same picture: a cell whose hash only just cleared the coverage
+        // grows a small, low cloud, and one well inside it grows a full one. Read by the BAKE
+        // (Engine/Assets/CloudProceduralVolume.cpp) rather than by the march, because it decides what is
+        // in the volume.
         float CoverageContrast = 1.0f;
 
         // THE TWO FIELDS THAT USED TO STAND HERE ARE GONE, and neither has moved anywhere. `Cloud Type`

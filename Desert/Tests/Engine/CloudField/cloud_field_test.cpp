@@ -228,7 +228,7 @@ TEST( CloudFieldCoverage, TheFractionOfSkyWithCloudInItRisesMonotonicallyWithThe
     std::printf( "[CloudField] coverage  touched  opaque\n" );
     for ( int step = 0; step <= 10; ++step )
     {
-        const float    coverage = 0.05f * static_cast<float>( step );
+        const float    coverage = 0.10f * static_cast<float>( step );
         const SkyCover cover    = MeasureSkyCover( coverage, kColumns, kHeights );
 
         std::printf( "[CloudField]     %.2f    %5.1f%%  %5.1f%%\n", coverage, cover.Touched * 100.0f,
@@ -246,20 +246,18 @@ TEST( CloudFieldCoverage, TheFractionOfSkyWithCloudInItRisesMonotonicallyWithThe
     }
 }
 
-// THIS TEST FAILS TODAY, AND THE FAILURE IS THE POINT.
+// THE END THAT HAS TO BE EXACT, AND WAS NOT, TWICE.
 //
-// CloudFieldParams documents Coverage as "0 = clear, 1 = solid", and the component's tooltip says
-// lowering it "opens clear gaps rather than thinning everything". At 0 it does not open all of them: the
-// threshold becomes 1.0 and the transition band is a smoothstep of half-width 0.18/contrast AROUND it, so
-// every column whose coverage field exceeds 0.82 still produces cloud — forty per cent of the sky touched
-// and a fifth of a per cent of it genuinely hidden, at the shipped contrast of 1. The band is symmetric
-// about a threshold that has run out of room.
+// This test was written failing: the threshold's transition band was symmetric about a threshold that had
+// run out of room, so at Coverage 0 every column whose coverage field exceeded 0.82 still produced cloud —
+// forty per cent of the sky touched at a setting documented as clear. It was then fixed by pushing the
+// threshold clear of the band rather than up to it, and it has been green since.
 //
-// It is not only a documentation defect. It costs the slider its bottom end: the measured table in the
-// test below shows the sky already sixty per cent touched at Coverage 0.05, so a third of the useful band
-// has been spent before the artist touches the control. The fix is a threshold that accounts for the
-// half-width — the field has to be pushed clear of the band's upper edge, not merely up to it — and it
-// belongs to whoever owns Common/CloudField.glslh.
+// IT IS EXACT BY CONSTRUCTION NOW and not by arithmetic that happens to cancel. A cell carries a cluster
+// when its own hash falls below the alive fraction, and the alive fraction is `pow(Coverage, 0.68)`, which
+// is zero at zero — there is no band to run out of room. That is a stronger guarantee than the one this
+// test was written to check, and the test is kept because the guarantee is what matters and not the
+// mechanism that provides it.
 TEST( CloudFieldCoverage, AtZeroTheSkyIsGenuinelyClear )
 {
     constexpr int kColumns = 32;

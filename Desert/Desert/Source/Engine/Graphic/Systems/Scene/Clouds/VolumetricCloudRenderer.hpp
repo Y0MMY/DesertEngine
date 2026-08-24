@@ -16,6 +16,7 @@
 
 #include <glm/glm.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <future>
 #include <memory>
@@ -337,6 +338,10 @@ namespace Desert::Graphic::System
         // the region that was actually baked rather than at wherever the camera is by then.
         Assets::CloudProceduralFieldParams m_PendingParams{};
         glm::vec2                          m_PendingOriginKm{ 0.0f };
+
+        // When the bake in flight was started, so the log line that collects it can print what it cost.
+        // Wall time and not CPU time: what this number bounds is how far the sky lags the camera.
+        std::chrono::steady_clock::time_point m_ModellingBakeStarted{};
 
         // Latched so a bake that cannot be started, or an image that cannot be created, is said once per
         // scene rather than sixty times a second.

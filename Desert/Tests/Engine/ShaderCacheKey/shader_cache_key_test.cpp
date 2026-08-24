@@ -397,8 +397,8 @@ TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresSixDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the cloud parameter block
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowNoiseBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the noise volume
-    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowProfileBinding,
-                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the vertical profile table
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowModellingBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the procedural modelling volume
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowAuthoredBinding,
                              VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the hero cloud instances
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowAuthoredAtlasBinding,
@@ -430,7 +430,7 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresTenDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAerialPerspectiveBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
-    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudProfileBinding,
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudModellingBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAuthoredBinding,
                              VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the hero cloud instances

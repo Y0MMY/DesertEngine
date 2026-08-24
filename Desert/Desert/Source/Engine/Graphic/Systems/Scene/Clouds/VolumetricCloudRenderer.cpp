@@ -339,6 +339,8 @@ namespace Desert::Graphic::System
                 // ON A WORKER, and the frame does not wait for it. See the note on the declaration: the
                 // bake is measured at hundreds of milliseconds to seconds in a Debug build, and a region
                 // shift happens once per lattice cell of camera travel.
+                m_ModellingBakeStarted = std::chrono::steady_clock::now();
+
                 m_ModellingBake = std::async( std::launch::async, [params = wanted, origin = wantedOrigin]()
                                               { return Assets::BakeCloudProceduralVolume( params, origin ); } );
             }
@@ -414,11 +416,19 @@ namespace Desert::Graphic::System
             m_ProfileSpeciesCount = speciesCount;
             m_ProfileGeneration   = generation;
 
-            LOG_INFO( "[Clouds] Modelling volume baked for {} cloud type(s) — region {:.0f} km at "
-                      "({:.1f}, {:.1f}), envelope {:.2f} to {:.2f} km, {}x{}x{} RGBA8 ({:.2f} MiB), "
+            // THE COST OF A REBAKE IS PRINTED, NOT ASSUMED, and that is the exit criterion this phase was
+            // given (ANALYSIS_APPROACH.md §3). It is wall time from starting the worker to collecting it,
+            // so it includes whatever else the machine was doing — which is the number that matters,
+            // because what it bounds is how far the sky lags the camera.
+            const double bakeMs = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() -
+                                                                             m_ModellingBakeStarted )
+                                       .count();
+
+            LOG_INFO( "[Clouds] Modelling volume baked for {} cloud type(s) in {:.0f} ms — region {:.0f} km "
+                      "at ({:.1f}, {:.1f}), envelope {:.2f} to {:.2f} km, {}x{}x{} RGBA8 ({:.2f} MiB), "
                       "{} lumps, {:.0f} m per voxel.",
-                      speciesCount, m_ModellingParams.RegionSizeKm, m_ModellingOriginKm.x, m_ModellingOriginKm.y,
-                      m_ModellingParams.LayerBottomKm,
+                      speciesCount, bakeMs, m_ModellingParams.RegionSizeKm, m_ModellingOriginKm.x,
+                      m_ModellingOriginKm.y, m_ModellingParams.LayerBottomKm,
                       m_ModellingParams.LayerBottomKm + m_ModellingParams.LayerThicknessKm,
                       Assets::kCloudProceduralVolumeWidth, Assets::kCloudProceduralVolumeHeight,
                       Assets::kCloudProceduralVolumeDepth,

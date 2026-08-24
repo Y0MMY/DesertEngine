@@ -12,13 +12,19 @@ namespace Desert::Assets
     {
         /// How many blend radii past the nearest lump a lump may be before it is dropped from the join.
         ///
-        /// TEN, AND THE NUMBER IS A QUANTISATION ARGUMENT rather than a feel. A dropped lump's term is
-        /// `exp(-10) = 4.5e-5` of the nearest one's, so the error in the joined distance is at most
-        /// `BlendRadiusKm * N * 4.5e-5`; at the shipped 60 m radius with a hundred lumps in range that is
-        /// 2.7e-4 km, and divided by the 0.35 km profile depth it is 7.7e-4 of a unit profile — a fifth of
-        /// the 1/255 the volume is quantised to. The cut is therefore invisible in the bytes, which is the
-        /// only place it could ever be seen.
-        constexpr float kJoinCutoffRadii = 10.0f;
+        /// FOURTEEN, AND THE NUMBER IS A QUANTISATION ARGUMENT rather than a feel. A dropped lump's term
+        /// is `exp(-14) = 8.3e-7` of the nearest one's, so the error in the joined distance is at most
+        /// `BlendRadiusKm * N * 8.3e-7`; at the shipped 60 m radius with six hundred lumps in range that
+        /// is 3.0e-5 km, and divided by the 0.36 km profile depth it is 8.3e-5 of a unit profile — a
+        /// fiftieth of the 1/255 the volume is quantised to. The cut is therefore invisible in the bytes,
+        /// which is the only place it could ever be seen.
+        ///
+        /// IT WAS TEN AND THE SUITE CAUGHT IT. `N` is not a constant of the design — it is how many lumps
+        /// reach a voxel — and when the clusters were widened to make the coverage slider mean the sky, it
+        /// went from about a hundred to about six hundred. At ten radii the agreement with a gather over
+        /// every lump went from 0.5 of a 255th to 1.24 of one, which is the assertion in
+        /// Desert/Tests/Engine/CloudProceduralField failing exactly where it was written to.
+        constexpr float kJoinCutoffRadii = 14.0f;
 
         /// The lattice is walked in this many blobs per cluster at most. A ceiling rather than a count: the
         /// stack is shortened whenever the band is too thin to hold that many lumps that the march can

@@ -1893,3 +1893,122 @@ the suite went red.
 
 **The far field is still cushions and that is not a defect of this phase** (§1 of the plan): Э4 gives the
 artist the near field and leaves the procedural producer the rest. Both frames show it, deliberately.
+
+---
+
+## Э5 — the procedural modelling volume: the wall of zeros is gone
+
+Phase Э5 (`Docs/Clouds/ANALYSIS_APPROACH.md` §3, variant C, points 1–3). The procedural producer's shape
+field is a sum of smoothed volumetric lumps joined by an exponential smooth minimum, baked into a
+camera-centric periodic volume; the coverage threshold on the Alligator, the vertical profile table and the
+per-species placement basis are gone.
+
+### The defect this phase existed to remove, stated once more
+
+`Alligator = best - second` is **zero wherever two feature points contribute equally**. There is a wall of
+zeros between every pair of cells, so no setting of any slider could fuse two lobes and the sky was a deck
+of separate cushions. Three tasks measured it independently and all three worked around it. The exponential
+smooth minimum has no such wall: merging is its defining property, not a setting.
+
+### The four numbers this phase decided, and what decided them
+
+| decision | value | what fixed it |
+|---|---|---|
+| volume shape | **256 x 32 x 256 RGBA8 = 8.00 MiB** | BELOW by Nyquist — a voxel finer than 62.5 m is structure the march provably cannot find (`CloudFinestResolvableChordKm` is 125 m at Max Steps 256, and trilinear filtering cannot express a feature under two voxels). ABOVE by decision D-9: §A0 measured 20.67 MiB occupied, so 8.00 leaves 35.33 MiB — still the **eight** hero slabs A2 shipped. Variant C's 512 x 512 x 32 would have been 32.00 MiB and cut that to six |
+| region | **48 km, 187.5 m per voxel** | Max View Distance over the region is how many times the sky repeats to the vanishing point: 60/48 = **1.25** against the five repeats §4 measured as the cure for moire at twenty |
+| where it is baked | **CPU, on a worker, except the first** | measured, below. A compute bake was not built: the cost is a LATENCY and not a frame time, and a rebake happens once per lattice cell of camera travel |
+| join cutoff | **14 blend radii** | `exp(-14) = 8.3e-7` of the nearest lump's term, so the error in the joined distance is `r * N * 8.3e-7` — 8.3e-5 of a unit profile at 600 lumps in range, a fiftieth of the 1/255 the volume is stored in |
+
+### The cost of a rebake, which is the phase's own exit criterion
+
+`Desert/Tests/Engine/CloudProceduralField` measures it on every run, best of three on a shared machine,
+**DEBUG build**:
+
+| species | lumps | ms per rebake |
+|---|---|---|
+| 1 | 714 | **1746** |
+| 2 | 1254 | **3263** |
+| 4 | 1674 | **5168** |
+
+Far past a frame, which is what the worker is for. **The first bake of a scene BLOCKS**, and that is a
+measured correction rather than a preference: with the pass skipped the frames cost almost nothing, so a
+headless shot of ninety frames finished BEFORE an 800 ms bake did and wrote an empty sky. A rebake does not
+block — it has a previous volume, at most one snap step away, and the volume is periodic, so the frame reads
+the neighbouring tile.
+
+### The coverage slider did not mean the sky, and now does
+
+Alive cells are not sky cover: a cluster does not fill its cell, and how full it is depends on how deep
+inside the threshold its own hash fell. Measured on the top-down projection of the baked volume:
+
+| Coverage | 0.15 | 0.24 | 0.35 | 0.50 | 0.75 |
+|---|---|---|---|---|---|
+| taken directly as the alive fraction | 0.059 | 0.090 | 0.145 | 0.221 | 0.358 |
+| after the three corrections | **0.120** | **0.219** | **0.324** | **0.506** | **0.754** |
+
+The three corrections, each measured:
+
+1. **The stack is bottom-heavy** (`t^1.7`). Spread evenly, six lobes put one or two at the wide base and
+   four up the narrow tower, so the base was a rosette with holes in it and a full cell measured 48 per cent
+   covered where the geometry says it should be full.
+2. **The fill ramp is `(1 - Coverage)/Contrast`** rather than `Coverage/Contrast`, so at Coverage 1 every
+   cell is full. It was uniform on [0,1] at every setting, which capped the sky at about 60 per cent however
+   high the slider went.
+3. **The alive fraction is `Coverage^0.68`**, measured. A power keeps both ends exact, which is the property
+   the ends were built to have.
+
+Worst deviation over the five settings: **0.030 of the sky.** The suite re-measures it and fails past 0.10.
+
+### The lobes have to OVERLAP, and fusion is not free because the join can express it
+
+The first written cluster displaced each lobe by a third of its OWN radius. The join of six concentric
+ellipsoids is one ellipsoid, and the top-down projection came out as **a scatter of round dots — the same
+defect as the Alligator's, arrived at from the other side.** Two lobes one golden angle apart on a circle of
+radius `spread` are `1.86 * spread` apart; at (spread 0.52 R, radius 0.50 R) that is 0.97 R against a sum of
+radii of 1.00 R — they only TOUCHED. At (0.48 R, 0.62 R) it is 0.89 R against 1.24 R, so they
+interpenetrate by more than a quarter of a lobe.
+
+### The six points, before and against
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, ImageStat over the full width and the top
+71.9 % of the frame. **Two things changed at once and both are named**: the producer, and the scene's
+authored Coverage — 0.24 meant ~66 % sky cover under the old threshold and means ~15 % under the new count,
+so the shipped scenes were re-authored at EQUAL SKY COVER (0.24 -> 0.762). See the note on
+`VolumetricCloudData::Coverage`.
+
+| point | mean before / after | contrast before / after | saturation before / after |
+|---|---|---|---|
+| zenith away `0,0.9,-1` | 0.528 / **0.570** | 0.400 / **0.449** | 0.128 / **0.135** |
+| mid away `0,0.45,-1` | 0.556 / **0.596** | 0.410 / **0.308** | 0.136 / **0.077** |
+| horizon away `0,0.12,-1` | 0.617 / **0.628** | 0.244 / **0.240** | 0.076 / **0.071** |
+| zenith sunward `0,0.9,1` | 0.601 / **0.662** | 0.384 / **0.407** | 0.050 / **0.037** |
+| mid sunward `0,0.45,1` | 0.569 / **0.614** | 0.264 / **0.320** | 0.070 / **0.089** |
+| horizon sunward `0,0.12,1` | 0.633 / **0.638** | 0.283 / **0.287** | 0.066 / **0.086** |
+
+Every point is brighter, by between 0.005 and 0.061 of mean luminance, and **the two horizon points barely
+move at all** (0.011 and 0.005) while the two zenith points move most (0.042 and 0.061). That is the answer
+a re-authored coverage predicts and not a coincidence: a grazing ray was already crossing enough cells to
+saturate under either producer, and a ray straight up was not.
+
+**The numbers are not the finding here and the frames are.** What a contrast measures is the spread of a
+histogram, and a deck of separate cushions with dark creases between them has a wide one; so does a sky of
+fused masses with blue between them. The two are told apart by looking, which is what `Shots/E5_*` are for.
+
+### The relations this phase added, and the breaks that verified them
+
+| break | result |
+|---|---|
+| the generator ignores its seed | RED |
+| the bake's bin lists lose the lumps' canonical order | RED |
+| the lump size clamp is removed | RED (two suites) |
+| the lumps are not splatted at their wrapped positions | RED (the seam step goes from 0.5/255 to an order of magnitude above the neighbour step) |
+| a cell's hash is taken on its position in the REGION instead of its absolute index | RED |
+| the join cutoff is lowered from 14 radii to 10 | **RED — and this is how the 14 was found** |
+| the coverage exponent is set back to 1.0 | RED |
+| the volume's extents in the shader disagree with the C++ constants | RED |
+
+**One of them is a finding rather than a confirmation.** The cutoff at ten radii was written with a
+quantisation argument that used `N ~ 100` lumps in range. `N` is not a constant of the design — it is how
+many lumps reach a voxel — and widening the clusters to make the coverage slider mean the sky took it to
+about six hundred. The suite went red at 1.24 of a 255th, which is the assertion failing exactly where it
+was written to.

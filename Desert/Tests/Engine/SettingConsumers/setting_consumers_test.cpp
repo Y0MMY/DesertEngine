@@ -225,10 +225,17 @@ namespace
          { "TracingStartDistance", kCloudPayload },
          { "TracingStartMaxDistance", kCloudPayload },
 
-         // Weather - the coverage field.
-         { "Coverage", kCloudPayload },
-         { "CoverageContrast", kCloudPayload },
-         { "WeatherTileSize", kCloudPayload },
+         // Weather - THE BAKE, and not the payload. Phase E5 moved the four numbers that decide WHERE
+         // cloud is out of the parameter block: the lumps of the modelling volume are placed on a lattice
+         // on the CPU, once, when the settings change or the region shifts, so what reads them is
+         // VolumetricCloudRenderer::BuildProceduralParams and what the march is handed instead is where
+         // the volume is. A row still pointing at CloudPayload.hpp would have been this suite failing for
+         // the right reason - the read WAS removed - and it did.
+         { "Coverage", kCloudRenderer },
+         { "CoverageContrast", kCloudRenderer },
+         { "WeatherTileSize", kCloudRenderer },
+         { "RegionSize", kCloudRenderer },
+         { "Seed", kCloudRenderer },
 
          // Detail - the erosion field.
          { "DetailTileSize", kCloudPayload },

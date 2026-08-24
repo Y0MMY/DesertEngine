@@ -452,6 +452,8 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "Coverage",
          "CoverageContrast",
          "WeatherTileSize",
+         "RegionSize",
+         "Seed",
          "DetailTileSize",
          "DetailStrength",
          "DensityScale",
@@ -481,11 +483,11 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 38u );
+    EXPECT_EQ( cloud.Fields.size(), 40u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
     EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 9u );
-    EXPECT_EQ( CountInCategory( cloud, "Weather" ), 3u );
+    EXPECT_EQ( CountInCategory( cloud, "Weather" ), 5u );
     // NO "Noise" GROUP ANY MORE: it held one row, the noise volume slot, and that moved onto the cloud
     // type. A group with nothing in it is a heading an artist opens and finds empty.
     EXPECT_EQ( CountInCategory( cloud, "Noise" ), 0u );
@@ -579,7 +581,7 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     // the coverage field became a quantile rather than a level, and to 0.10 when the envelope stopped
     // being an authored ten kilometres and became the species' own three-and-a-half. Both numbers come
     // from the table Desert/Tests/Engine/CloudField prints.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "Coverage" ), 0.10f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "Coverage" ), 0.45f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CoverageContrast" ), 1.0f );
     // AND NOTHING ELSE ABOUT THE SHAPE IS AUTHORED HERE. The species decides the altitudes and the profile
     // table decides the silhouette at each of them. The domain warp that briefly stood between the two was
@@ -933,7 +935,6 @@ TEST( VolumetricCloudPayload, TheTypesMatterAndEdgeReachTheGpuAsProductsOfTheLay
         for ( uint32_t slot = 1; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
         {
             EXPECT_FLOAT_EQ( payload.SpeciesEdge[slot].z, 0.0f ) << slot;
-            EXPECT_FLOAT_EQ( payload.SpeciesPlacement[slot].x, 0.0f ) << slot;
         }
     }
 
@@ -948,72 +949,19 @@ TEST( VolumetricCloudPayload, TheTypesMatterAndEdgeReachTheGpuAsProductsOfTheLay
     EXPECT_LT( icePayload.SpeciesEdge[0].w, stormPayload.SpeciesEdge[0].w );
 }
 
-TEST( VolumetricCloudPayload, EachSpeciesGetsItsOwnPlacementFieldAndTheWindIsItsAxis )
-{
-    // THE OTHER HALF OF D-14, on the block the shader reads: a species' placement field is its OWN, so
-    // two types in one layer must not arrive with the same basis vectors. If they did, the two would read
-    // the identical field at the identical scale and the "independent field per type" claim would be a
-    // comment rather than a fact.
-    const Desert::Graphic::AtmosphereEnv atmosphere{};
-
-    const Desert::Graphic::CloudTypeShape deck{ 0.60f, 1.60f, 0.80f, 0.10f, 0.35f, 0.0f,  0.0f,
-                                                0.0f,  0.95f, 0.70f, 0.95f, 1.00f, 0.35f, 1.60f };
-    const Desert::Graphic::CloudTypeShape tower = Desert::Assets::CloudTypeDefaultShape();
-
-    const Desert::Graphic::CloudTypeShape pair[2] = { deck, tower };
-
-    Desert::ECS::VolumetricCloudData data;
-    data.WindDirection = glm::vec3( 1.0f, 0.0f, 0.0f );
-
-    const Desert::Graphic::CloudGpuPayload payload =
-         Desert::Graphic::PackCloudParams( data, pair, 2u, atmosphere, glm::vec3( 0.0f ) );
-
-    EXPECT_FLOAT_EQ( payload.Detail.w, 2.0f );
-
-    // The deck's scale is 0.35 of the layer's, so its frequency is 1/0.35 = 2.857 times higher ACROSS the
-    // wind. The tower's is the identity.
-    const float deckAcross  = std::sqrt( payload.SpeciesPlacement[0].z * payload.SpeciesPlacement[0].z +
-                                         payload.SpeciesPlacement[0].w * payload.SpeciesPlacement[0].w );
-    const float towerAcross = std::sqrt( payload.SpeciesPlacement[1].z * payload.SpeciesPlacement[1].z +
-                                         payload.SpeciesPlacement[1].w * payload.SpeciesPlacement[1].w );
-
-    EXPECT_NEAR( deckAcross / towerAcross, 1.0f / 0.35f, 1e-3f )
-         << "the two species' placement fields are at the same scale, so a per-type scale does nothing";
-
-    // AND THE STRETCH IS ALONG THE WIND. The deck is 1.6 times longer downwind, so its along-wind
-    // frequency is 1.6 times lower than its across-wind one; the round tower's two are equal up to the
-    // 6.65 % Unreal's own coefficients carry between the two horizontal axes.
-    const float deckAlong = std::sqrt( payload.SpeciesPlacement[0].x * payload.SpeciesPlacement[0].x +
-                                       payload.SpeciesPlacement[0].y * payload.SpeciesPlacement[0].y );
-
-    EXPECT_NEAR( deckAcross / deckAlong,
-                 1.6f * Desert::Graphic::kCloudCoverageFreqZ / Desert::Graphic::kCloudCoverageFreqX, 1e-3f );
-
-    // The axis itself is the wind's: with the wind along +X the along-wind vector has no Z part and the
-    // across-wind one has no X part.
-    EXPECT_NEAR( payload.SpeciesPlacement[0].y, 0.0f, 1e-6f );
-    EXPECT_NEAR( payload.SpeciesPlacement[0].z, 0.0f, 1e-6f );
-
-    // Turn the wind a quarter and the whole field turns with it, which is what makes a cirrus lie along
-    // the flow without a second authored angle to disagree with the one the layer already has.
-    data.WindDirection = glm::vec3( 0.0f, 0.0f, 1.0f );
-
-    const Desert::Graphic::CloudGpuPayload turned =
-         Desert::Graphic::PackCloudParams( data, pair, 2u, atmosphere, glm::vec3( 0.0f ) );
-
-    EXPECT_NEAR( turned.SpeciesPlacement[0].x, 0.0f, 1e-6f );
-    EXPECT_NEAR( turned.SpeciesPlacement[0].y, deckAlong, 1e-4f );
-
-    // A wind with no horizontal part names no axis, so the field falls back to +X rather than to whatever
-    // a normalize of a zero vector produces.
-    data.WindDirection = glm::vec3( 0.0f, 1.0f, 0.0f );
-
-    const Desert::Graphic::CloudGpuPayload still =
-         Desert::Graphic::PackCloudParams( data, pair, 2u, atmosphere, glm::vec3( 0.0f ) );
-
-    EXPECT_NEAR( still.SpeciesPlacement[0].x, deckAlong, 1e-4f );
-    EXPECT_NEAR( still.SpeciesPlacement[0].y, 0.0f, 1e-6f );
-}
+// THE TEST THAT STOOD HERE WENT WITH THE THING IT MEASURED.
+//
+// `EachSpeciesGetsItsOwnPlacementFieldAndTheWindIsItsAxis` asserted the other half of D-14 on the block
+// the shader reads: two types in one layer arriving with different basis vectors, the deck's field
+// 1/0.35 times finer across the wind, stretched 1.6 times along it, and the whole frame turning when the
+// wind did. There is no basis in the block any more — the lumps are laid out on a lattice in the wind's
+// frame on the CPU at bake time (Engine/Assets/CloudProceduralVolume.cpp), so a basis the march does not
+// read would be four dead vec4s.
+//
+// THE PROPERTY DID NOT GO WITH IT. It is asserted on the generator that now owns it, in
+// Desert/Tests/Engine/CloudProceduralField — `EachSpeciesGetsItsOwnLatticeAndTheWindIsItsAxis` — where it
+// is stronger: it measures the lumps' actual positions rather than the frequencies they would have been
+// read at.
 
 TEST( VolumetricCloudReflection, EveryDefaultLiesInsideItsOwnRange )
 {
@@ -1223,9 +1171,9 @@ TEST( CloudQualityTier, TheTierCapsTheShadowRayAndLeavesTheMarchAlone )
     for ( const Desert::Core::CloudQuality tier : kAllQualityTiers )
     {
         const Desert::Graphic::CloudQualityScale scale = Desert::Graphic::CloudQualityFor( tier );
-        const Desert::Graphic::CloudGpuPayload   payload =
-             Desert::Graphic::PackCloudParams( data, &shape, 1u, atmosphere, glm::vec3( 0.0f ),
-                                               scale.LightMarchSampleCeiling, scale.StopTransmittanceFloor );
+        const Desert::Graphic::CloudGpuPayload   payload = Desert::Graphic::PackCloudParams(
+             data, &shape, 1u, atmosphere, glm::vec3( 0.0f ), Desert::Graphic::CloudRegionBinding{},
+             scale.LightMarchSampleCeiling, scale.StopTransmittanceFloor );
 
         // The shadow ray is min(authored, ceiling) — the tier lowers it and never raises it.
         EXPECT_FLOAT_EQ( payload.SunColour.w,
@@ -1258,9 +1206,9 @@ TEST( CloudQualityTier, TheTierCapsTheShadowRayAndLeavesTheMarchAlone )
     for ( const Desert::Core::CloudQuality tier : kAllQualityTiers )
     {
         const Desert::Graphic::CloudQualityScale scale = Desert::Graphic::CloudQualityFor( tier );
-        const Desert::Graphic::CloudGpuPayload   payload =
-             Desert::Graphic::PackCloudParams( data, &shape, 1u, atmosphere, glm::vec3( 0.0f ),
-                                               scale.LightMarchSampleCeiling, scale.StopTransmittanceFloor );
+        const Desert::Graphic::CloudGpuPayload   payload = Desert::Graphic::PackCloudParams(
+             data, &shape, 1u, atmosphere, glm::vec3( 0.0f ), Desert::Graphic::CloudRegionBinding{},
+             scale.LightMarchSampleCeiling, scale.StopTransmittanceFloor );
         EXPECT_FLOAT_EQ( payload.SunColour.w, 8.0f ) << QualityTierName( tier ) << " overruled an authored 8";
         EXPECT_FLOAT_EQ( payload.March.y, 0.2f ) << QualityTierName( tier ) << " overruled an authored 0.2";
     }

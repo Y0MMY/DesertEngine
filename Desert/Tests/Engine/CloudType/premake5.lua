@@ -24,6 +24,11 @@ project(test_name)
         test_files,
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudNoiseVolume.cpp",
+        -- The PRODUCER, because "what this type puts in the sky" is what it places and no longer what a
+        -- curve in a header said it would. The anchor is the shipped library either way; what moved is
+        -- the instrument it is measured with.
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
     }
 
     -- The SHADER ROOT is here so that Common/CloudGeometry.glslh — the march's step schedule — can be

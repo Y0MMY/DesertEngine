@@ -487,7 +487,12 @@ TEST( CloudShadowMapTiers, EveryTierKeepsTheTexelInsideTheChordTheMarchCanFind )
 {
     using namespace Desert::Graphic;
 
-    const float chordKm = CloudFinestResolvableChordKm( kDefaultMaxStepsAllTiers );
+    // QUALIFIED, because there are two of it now and neither is wrong. This suite compiles
+    // Common/CloudGeometry.glslh as C++ — that is the whole point of it — and phase Э5 also gave
+    // Engine/Graphic/Clouds/CloudPayload.hpp a C++ mirror of the same function, because the procedural
+    // generator places its lumps on the CPU and has to size them against what the march can find. The
+    // shader's own text is the one this test wants: it is the thing being held to a relation.
+    const float chordKm = Desert::Tests::CloudShadowRef::CloudFinestResolvableChordKm( kDefaultMaxStepsAllTiers );
 
     for ( const Desert::Core::CloudQuality tier : kAllTiers )
     {
