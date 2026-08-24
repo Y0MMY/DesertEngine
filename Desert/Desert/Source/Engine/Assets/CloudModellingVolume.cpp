@@ -198,39 +198,11 @@ namespace Desert::Assets
                 // order decided by `std::sort`'s internals — which is the very non-determinism the sort is
                 // here to remove.
                 std::vector<CloudModellingBlob> sorted = recipe.Blobs;
-                std::sort( sorted.begin(), sorted.end(),
-                           []( const CloudModellingBlob& a, const CloudModellingBlob& b )
-                           {
-                               const auto key = []( const CloudModellingBlob& blob )
-                               {
-                                   return std::tie( blob.CentreKm.x, blob.CentreKm.y, blob.CentreKm.z,
-                                                    blob.RadiiKm.x, blob.RadiiKm.y, blob.RadiiKm.z,
-                                                    blob.DetailType, blob.DensityScale, blob.RotationDeg.x,
-                                                    blob.RotationDeg.y, blob.RotationDeg.z, blob.Primitive,
-                                                    blob.Weight );
-                               };
-                               return key( a ) < key( b );
-                           } );
+                SortCloudModellingBlobs( sorted );
 
                 m_Blobs.reserve( sorted.size() );
                 for ( const CloudModellingBlob& blob : sorted )
-                {
-                    Prepared prepared;
-                    prepared.CentreKm  = blob.CentreKm;
-                    prepared.RadiiKm   = blob.RadiiKm;
-                    prepared.Primitive = blob.Primitive;
-                    prepared.Weight    = blob.Weight;
-
-                    prepared.DetailType   = blob.DetailType;
-                    prepared.DensityScale = blob.DensityScale;
-
-                    // The INVERSE rotation, because the point travels into the lump's frame rather than
-                    // the lump into the world's. A rotation matrix is orthonormal, so its inverse is its
-                    // transpose — exact, and free of the numerical drift a general inverse would add.
-                    prepared.IntoLocal = glm::transpose( BlobRotation( blob.RotationDeg ) );
-
-                    m_Blobs.push_back( prepared );
-                }
+                    m_Blobs.push_back( PrepareCloudModellingBlob( blob ) );
             }
 
             size_t BlobCount() const
@@ -260,27 +232,24 @@ namespace Desert::Assets
                 float nearest = 0.0f;
                 for ( size_t k = 0; k < count; ++k )
                 {
-                    const Prepared& blob = m_Blobs[k];
-                    distances[k] = PrimitiveDistanceKm( blob.Primitive, blob.IntoLocal * ( point - blob.CentreKm ),
-                                                        blob.RadiiKm );
+                    distances[k] = CloudModellingBlobDistanceKm( m_Blobs[k], point );
                     nearest      = ( k == 0 ) ? distances[0] : std::min( nearest, distances[k] );
                 }
 
-                // THE SHIFT IS WHAT KEEPS THIS FINITE. `exp(-d/r)` overflows a float once d/r passes about
-                // 88, which at the shipped 50 m blend radius is 4.4 km — nearer than the corner of a box a
-                // mile across. Subtracting the smallest distance first is algebraically the identity and
-                // moves the largest exponent to exactly 1.
+                // THE SHIFT IS WHAT KEEPS THIS FINITE, and it lives in CloudModellingJoinTerm now because
+                // the procedural producer's bake performs the same arithmetic in a different loop order.
                 float sum = 0.0f;
                 for ( size_t k = 0; k < count; ++k )
                 {
-                    const float weight = m_Blobs[k].Weight * std::exp( -( distances[k] - nearest ) * m_InvBlend );
-                    weights[k]         = weight;
+                    const float weight =
+                         CloudModellingJoinTerm( m_Blobs[k].Weight, distances[k], nearest, m_InvBlend );
+                    weights[k] = weight;
                     sum += weight;
                 }
 
                 // The exponential smooth minimum, shifted back. Commutative and associative in the
                 // distances, so the order of the lumps cannot reach the answer.
-                const float joined = nearest - std::log( sum ) * m_BlendRadiusKm;
+                const float joined = CloudModellingJoinKm( nearest, sum, m_BlendRadiusKm );
 
                 // Everything outside the body is four zeroes — including the envelope, past its own margin
                 // — so the early-out in the march is a single comparison and the empty parts of a hero
@@ -325,18 +294,7 @@ namespace Desert::Assets
             }
 
         private:
-            struct Prepared
-            {
-                glm::vec3               CentreKm{ 0.0f };
-                glm::vec3               RadiiKm{ 0.0f };
-                glm::mat3               IntoLocal{ 1.0f };
-                CloudModellingPrimitive Primitive    = CloudModellingPrimitive::Ellipsoid;
-                float                   Weight       = 1.0f;
-                float                   DetailType   = 1.0f;
-                float                   DensityScale = 1.0f;
-            };
-
-            std::vector<Prepared> m_Blobs;
+            std::vector<CloudModellingPreparedBlob> m_Blobs;
 
             float m_BlendRadiusKm    = 0.0f;
             float m_EnvelopeMarginKm = 0.0f;
@@ -363,22 +321,59 @@ namespace Desert::Assets
                       half.z );
         }
 
-        /// The lump's world-axis-aligned half-extent once it is rotated. `|R| * r` is the exact AABB of a
-        /// rotated box, and every primitive is contained in its own box, so this bounds all three.
-        glm::vec3 RotatedHalfExtentKm( const CloudModellingBlob& blob )
-        {
-            const glm::mat3 rotation = BlobRotation( blob.RotationDeg );
-
-            glm::mat3 magnitude( 0.0f );
-            for ( int column = 0; column < 3; ++column )
-            {
-                for ( int row = 0; row < 3; ++row )
-                    magnitude[column][row] = std::abs( rotation[column][row] );
-            }
-
-            return magnitude * blob.RadiiKm;
-        }
     } // namespace
+
+    CloudModellingPreparedBlob PrepareCloudModellingBlob( const CloudModellingBlob& blob )
+    {
+        CloudModellingPreparedBlob prepared;
+        prepared.CentreKm     = blob.CentreKm;
+        prepared.RadiiKm      = blob.RadiiKm;
+        prepared.Primitive    = blob.Primitive;
+        prepared.Weight       = blob.Weight;
+        prepared.DetailType   = blob.DetailType;
+        prepared.DensityScale = blob.DensityScale;
+
+        // The INVERSE rotation, because the point travels into the lump's frame rather than the lump into
+        // the world's. A rotation matrix is orthonormal, so its inverse is its transpose — exact, and free
+        // of the numerical drift a general inverse would add.
+        prepared.IntoLocal = glm::transpose( BlobRotation( blob.RotationDeg ) );
+        return prepared;
+    }
+
+    float CloudModellingBlobDistanceKm( const CloudModellingPreparedBlob& blob, const glm::vec3& pointKm )
+    {
+        return PrimitiveDistanceKm( blob.Primitive, blob.IntoLocal * ( pointKm - blob.CentreKm ), blob.RadiiKm );
+    }
+
+    glm::vec3 CloudModellingBlobHalfExtentKm( const CloudModellingBlob& blob )
+    {
+        const glm::mat3 rotation = BlobRotation( blob.RotationDeg );
+
+        glm::mat3 magnitude( 0.0f );
+        for ( int column = 0; column < 3; ++column )
+        {
+            for ( int row = 0; row < 3; ++row )
+                magnitude[column][row] = std::abs( rotation[column][row] );
+        }
+
+        return magnitude * blob.RadiiKm;
+    }
+
+    void SortCloudModellingBlobs( std::vector<CloudModellingBlob>& blobs )
+    {
+        std::sort( blobs.begin(), blobs.end(),
+                   []( const CloudModellingBlob& a, const CloudModellingBlob& b )
+                   {
+                       const auto key = []( const CloudModellingBlob& blob )
+                       {
+                           return std::tie( blob.CentreKm.x, blob.CentreKm.y, blob.CentreKm.z, blob.RadiiKm.x,
+                                            blob.RadiiKm.y, blob.RadiiKm.z, blob.DetailType, blob.DensityScale,
+                                            blob.RotationDeg.x, blob.RotationDeg.y, blob.RotationDeg.z,
+                                            blob.Primitive, blob.Weight );
+                       };
+                       return key( a ) < key( b );
+                   } );
+    }
 
     const char* CloudModellingChannelName( CloudModellingChannel channel )
     {
@@ -563,7 +558,7 @@ namespace Desert::Assets
         {
             // The ROTATED half-extent, so a capsule laid on its side is measured along the axis it
             // actually occupies. For an unrotated lump this is its radii unchanged.
-            const glm::vec3 extent = RotatedHalfExtentKm( blob );
+            const glm::vec3 extent = CloudModellingBlobHalfExtentKm( blob );
 
             reach.x = std::max( reach.x, std::abs( blob.CentreKm.x ) + extent.x );
             reach.y = std::max( reach.y, std::abs( blob.CentreKm.y ) + extent.y );
