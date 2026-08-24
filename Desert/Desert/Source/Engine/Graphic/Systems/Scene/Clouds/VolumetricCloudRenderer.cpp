@@ -11,11 +11,49 @@
 #include <Common/Core/Profiler.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <cstring>
 
 namespace Desert::Graphic::System
 {
     namespace
     {
+        // WHETHER TWO SETS OF BAKE PARAMETERS DESCRIBE THE SAME VOLUME, field by field.
+        //
+        // WRITTEN OUT RATHER THAN DEFAULTED, and that is the safe direction here: `operator==` on the
+        // struct would silently start comparing any field somebody adds, which sounds right until the
+        // added field is one that does not change the bytes — and then every frame re-bakes. Comparing
+        // the fields the bake actually reads means a new one has to be considered rather than inherited.
+        bool SameProceduralParams( const Assets::CloudProceduralFieldParams& a,
+                                   const Assets::CloudProceduralFieldParams& b )
+        {
+            if ( a.RegionSizeKm != b.RegionSizeKm || a.LayerBottomKm != b.LayerBottomKm ||
+                 a.LayerThicknessKm != b.LayerThicknessKm || a.BlendRadiusKm != b.BlendRadiusKm ||
+                 a.ProfileDepthKm != b.ProfileDepthKm || a.Coverage != b.Coverage ||
+                 a.CoverageContrast != b.CoverageContrast || a.Seed != b.Seed || a.WindAxis != b.WindAxis ||
+                 a.ResolvableChordKm != b.ResolvableChordKm )
+                return false;
+
+            if ( a.Species.size() != b.Species.size() )
+                return false;
+
+            for ( size_t i = 0; i < a.Species.size(); ++i )
+            {
+                if ( a.Species[i].CellKm != b.Species[i].CellKm ||
+                     a.Species[i].Anisotropy != b.Species[i].Anisotropy )
+                    return false;
+
+                // The SHAPE decides where the lumps go and how tall they are, so a type edited in place —
+                // which the generation counter already catches — and a type whose numbers were reached
+                // some other way both have to re-bake. Compared as bytes because CloudTypeShape is a
+                // flat aggregate of floats with no padding to be uninitialised.
+                if ( std::memcmp( &a.Species[i].Shape, &b.Species[i].Shape, sizeof( CloudTypeShape ) ) != 0 )
+                    return false;
+            }
+
+            return true;
+        }
+
         // 8x8 for the screen-space march, matching the LocalSize the shader declares. 64 invocations is
         // inside every implementation's guaranteed maximum and the dispatch bounds-checks, so any target
         // size is fine.
@@ -124,7 +162,8 @@ namespace Desert::Graphic::System
             m_HistoryImage[i].reset();
             m_HistoryGuideImage[i].reset();
         }
-        m_ProfileTable.reset();
+        m_ModellingVolume.reset();
+        m_ModellingValid = false;
         for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
             m_ProfileTypes[slot] = Assets::AssetHandle::Null();
         m_ProfileSpeciesCount = 0;
@@ -184,7 +223,67 @@ namespace Desert::Graphic::System
         return count;
     }
 
-    bool VolumetricCloudRenderer::EnsureProfileTable()
+    Assets::CloudProceduralFieldParams
+    VolumetricCloudRenderer::BuildProceduralParams( const CloudTypeShape* shapes, uint32_t speciesCount ) const
+    {
+        Assets::CloudProceduralFieldParams params;
+
+        params.RegionSizeKm = std::max( m_Data.RegionSize, 1.0f ) / kCloudWorldUnitsPerKm;
+
+        // THE SHELL, TAKEN FROM THE SPECIES AND NOT FROM THE COMPONENT, because that is where the packer
+        // takes it from too: the layer's geometry is the UNION of its types' altitude ranges (decision
+        // D-13's envelope), and a volume spread over a different shell than the one the march intersects
+        // would put every cloud at the wrong altitude — the "sky was a ceiling" defect in a new costume.
+        const CloudEnvelopeKm envelope = CloudTypeSetEnvelopeKm( shapes, speciesCount );
+
+        params.LayerBottomKm    = std::max( envelope.BottomKm, 0.0f );
+        params.LayerThicknessKm = std::max( envelope.TopKm - params.LayerBottomKm, 0.001f );
+
+        params.Coverage         = std::clamp( m_Data.Coverage, 0.0f, 1.0f );
+        params.CoverageContrast = std::max( m_Data.CoverageContrast, 0.01f );
+        params.Seed             = static_cast<uint32_t>( m_Data.Seed );
+
+        // THE BLEND RADIUS AND THE PROFILE DEPTH ARE DERIVED FROM THE LATTICE rather than exposed, and
+        // that is a decision with a number behind it. The join inflates its own surface by
+        // `BlendRadius * ln(sum of weights in range)`, so with hundreds of overlapping lumps a generous
+        // radius does not soften a crease, it floods the sky — at a 3 km cell and 24 lumps in range, a
+        // radius of a fifth of the cell would dilate every body by 1.9 km. Two per cent of the cell keeps
+        // that dilation under 200 m while still fusing lobes that already overlap, which is where the
+        // fusion comes from. An artist who wants softer clouds has Detail Strength, which is the knob that
+        // means it.
+        const float latticeKm = std::max( m_Data.WeatherTileSize, 1.0f ) / kCloudWorldUnitsPerKm / 4.0f;
+
+        params.BlendRadiusKm  = std::max( 0.02f * latticeKm, 1e-3f );
+        params.ProfileDepthKm = std::max( 0.12f * latticeKm, 1e-3f );
+
+        // THE MARCH'S OWN SEARCH STEP, handed in rather than assumed by the generator. It is one half of
+        // the relation this programme has been bitten by twice — what the field places against what the
+        // ray can find — and taking it from the component's Max Steps is what makes an artist who lowers
+        // that number get coarser lumps rather than speckle.
+        params.ResolvableChordKm =
+             CloudFinestResolvableChordKm( static_cast<float>( std::clamp( m_Data.MaxSteps, 8, 512 ) ) );
+
+        const glm::vec3 wind = m_Data.WindDirection;
+        params.WindAxis      = glm::vec2( wind.x, wind.z );
+
+        params.Species.reserve( speciesCount );
+        for ( uint32_t slot = 0; slot < speciesCount; ++slot )
+        {
+            Assets::CloudProceduralSpecies species;
+            species.Shape = shapes[slot];
+            // A TYPE STATES HOW MUCH COARSER OR FINER THAN THE LAYER IT IS, which is what Placement Scale
+            // has always meant, and the layer's own tile is the pair Max View Distance is calibrated
+            // against (CALIBRATION.md §4). Four cells to a tile, which is the ratio the component's own
+            // tooltip has stated since T1: "12 km -> 3 km cells, a cumulus field".
+            species.CellKm     = latticeKm * std::max( shapes[slot].PlacementScale, 1e-3f );
+            species.Anisotropy = std::max( shapes[slot].PlacementAnisotropy, 1e-3f );
+            params.Species.push_back( species );
+        }
+
+        return params;
+    }
+
+    bool VolumetricCloudRenderer::EnsureModellingVolume()
     {
         auto* types = Runtime::ResourceRegistry::GetCloudTypeService();
 
@@ -192,82 +291,144 @@ namespace Desert::Graphic::System
         Assets::AssetHandle handles[kCloudSpeciesSlots]{};
         const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
 
-        // TWO REASONS TO REBUILD, AND BOTH ARE ASKED ABOUT. The SET of handles changes when the artist
-        // drops a different type into any slot, adds one or clears one; the SERVICE GENERATION changes
-        // when a file behind a handle they already chose is edited and hot-reloaded. A cache keyed on the
-        // handle alone would show the old numbers forever after a save, which is the difference between a
-        // tool an artist iterates in and one they restart.
         const uint32_t generation = types->GetGeneration();
 
-        bool sameSet =
-             m_ProfileTable && m_ProfileSpeciesCount == speciesCount && m_ProfileGeneration == generation;
-        for ( uint32_t slot = 0; sameSet && slot < speciesCount; ++slot )
-            sameSet = m_ProfileTypes[slot] == handles[slot];
-
-        if ( sameSet )
-            return true;
-
-        // A FRESH IMAGE RATHER THAN AN IN-PLACE UPLOAD, which is the same choice CloudNoiseService makes
-        // and for the same reason: SetData writes into an image that frames still in flight may be
-        // sampling, and the type changes when an artist touches a combo box — not often enough to be
-        // worth the synchronisation argument. The old image goes through Image2D's deletion queue when
-        // the last reference drops.
-        if ( m_ProfileTable )
-            Renderer::GetInstance().WaitDeviceIdle();
-
-        const std::vector<float> texels = CloudBuildProfileTable( shapes, speciesCount );
-
-        const Core::Formats::Image2DSpecification spec{
-             .Tag        = "CloudProfileTable",
-             .Width      = kCloudProfileTableAltitudeTexels,
-             .Height     = kCloudProfileTablePatternTexels,
-             .Format     = Core::Formats::ImageFormat::RGBA32F,
-             .Mips       = 1u,
-             .Data       = texels,
-             .Usage      = Core::Formats::Image2DUsage::Image2D,
-             .Properties = Core::Formats::Sample,
-        };
-
-        m_ProfileTable = Image2D::Create( spec, nullptr );
-        if ( !m_ProfileTable )
-        {
-            m_ProfileSpeciesCount = 0;
-            m_ProfileGeneration   = 0;
-            LOG_ERROR( "[Clouds] The {}x{} RGBA32F vertical profile table for this layer's {} cloud type(s) "
-                       "could not be created on the device; the clouds will not render for this view.",
-                       kCloudProfileTableAltitudeTexels, kCloudProfileTablePatternTexels, speciesCount );
+        const auto* camera = m_SceneRenderer->GetMainCamera();
+        if ( !camera )
             return false;
-        }
 
-        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
-            m_ProfileTypes[slot] = slot < speciesCount ? handles[slot] : Assets::AssetHandle::Null();
-        m_ProfileSpeciesCount = speciesCount;
-        m_ProfileGeneration   = generation;
+        const Assets::CloudProceduralFieldParams wanted = BuildProceduralParams( shapes, speciesCount );
 
-        // EVERY SPECIES' OWN BAND IS PRINTED BESIDE THE ENVELOPE, not just the envelope. The containment
-        // relation is the one this subsystem gets wrong silently — a type whose top is above the shell has
-        // its anvil sliced off and nothing says so — and a log line that only prints the union cannot be
-        // read against anything.
-        const CloudEnvelopeKm envelope = CloudTypeSetEnvelopeKm( shapes, speciesCount );
+        // WHERE THE REGION WANTS TO BE. The camera MINUS the accumulated wind, because the march asks the
+        // volume about `position - wind`: the sky drifting downwind for an hour must not carry the region
+        // away from the camera that is looking at it.
+        const glm::vec3 cameraKm = camera->GetPosition() / kCloudWorldUnitsPerKm;
+        const glm::vec3 windKm   = m_WindOffset / kCloudWorldUnitsPerKm;
 
-        LOG_INFO( "[Clouds] Vertical profile table rebuilt for {} cloud type(s) — envelope {:.2f} to {:.2f} km, "
-                  "{}x{} RGBA32F ({:.2f} MiB).",
-                  speciesCount, envelope.BottomKm, envelope.TopKm, kCloudProfileTableAltitudeTexels,
-                  kCloudProfileTablePatternTexels,
-                  BytesToMiB( Core::Formats::CalculateImageSize( kCloudProfileTableAltitudeTexels,
-                                                                 kCloudProfileTablePatternTexels,
-                                                                 Core::Formats::ImageFormat::RGBA32F ) ) );
+        const glm::vec2 wantedOrigin =
+             Assets::CloudProceduralRegionOriginKm( wanted, cameraKm.x - windKm.x, cameraKm.z - windKm.z );
 
-        for ( uint32_t slot = 0; slot < speciesCount; ++slot )
+        // ---------------------------------------------------------------------------------------------
+        // START ONE IF WHAT IS ON THE DEVICE IS NOT WHAT IS WANTED
+        // ---------------------------------------------------------------------------------------------
+        if ( !m_ModellingBake.valid() && !m_ModellingFailed )
         {
-            LOG_INFO( "[Clouds]   channel {} — type {}, {:.2f} to {:.2f} km, placement x{:.2f} stretched "
-                      "x{:.2f} along the wind.",
-                      slot, static_cast<uint64_t>( handles[slot] ), CloudTypeBaseKm( shapes[slot] ),
-                      CloudTypeTopKm( shapes[slot] ), shapes[slot].PlacementScale,
-                      shapes[slot].PlacementAnisotropy );
+            const bool sameSet =
+                 m_ModellingValid && m_ProfileSpeciesCount == speciesCount && m_ProfileGeneration == generation;
+
+            bool sameTypes = sameSet;
+            for ( uint32_t slot = 0; sameTypes && slot < speciesCount; ++slot )
+                sameTypes = m_ProfileTypes[slot] == handles[slot];
+
+            const bool sameRegion = m_ModellingValid && m_ModellingOriginKm == wantedOrigin;
+            const bool sameParams = m_ModellingValid && SameProceduralParams( m_ModellingParams, wanted );
+
+            if ( !( sameTypes && sameRegion && sameParams ) )
+            {
+                if ( auto valid = Assets::ValidateCloudProceduralParams( wanted ); !valid )
+                {
+                    m_ModellingFailed = true;
+                    LOG_ERROR( "[Clouds] The cloud layer cannot be turned into a modelling volume: {}",
+                               valid.GetError() );
+                    return m_ModellingValid;
+                }
+
+                m_PendingParams   = wanted;
+                m_PendingOriginKm = wantedOrigin;
+
+                // ON A WORKER, and the frame does not wait for it. See the note on the declaration: the
+                // bake is measured at hundreds of milliseconds to seconds in a Debug build, and a region
+                // shift happens once per lattice cell of camera travel.
+                m_ModellingBake = std::async( std::launch::async, [params = wanted, origin = wantedOrigin]()
+                                              { return Assets::BakeCloudProceduralVolume( params, origin ); } );
+            }
         }
 
-        return true;
+        // ---------------------------------------------------------------------------------------------
+        // COLLECT A FINISHED BAKE
+        // ---------------------------------------------------------------------------------------------
+        // THE FIRST BAKE OF A SCENE BLOCKS, AND EVERY LATER ONE DOES NOT. The difference is whether there
+        // is anything to march meanwhile.
+        //
+        // A REBAKE has a previous volume: the camera has left the region it was baked for by at most one
+        // snap step, the volume is periodic, so the frame reads the neighbouring tile — the same
+        // degenerate far path the sky past the region already uses — and waiting for a better answer would
+        // be a hitch in exchange for nothing anybody can see.
+        //
+        // THE FIRST BAKE has none, and the consequence of not waiting was measured rather than reasoned
+        // about: with the pass skipped the frames cost almost nothing, so a headless shot of ninety frames
+        // finished BEFORE an 800 ms bake did and wrote an empty sky. In an editor it is the same defect
+        // with a friendlier face — the sky appears a second after the scene does, and the temporal resolve
+        // then takes ten more frames to converge it.
+        if ( m_ModellingBake.valid() && !m_ModellingValid )
+            m_ModellingBake.wait();
+
+        if ( m_ModellingBake.valid() &&
+             m_ModellingBake.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready )
+        {
+            const auto baked = m_ModellingBake.get();
+
+            if ( !baked )
+            {
+                m_ModellingFailed = true;
+                LOG_ERROR( "[Clouds] The procedural modelling volume could not be baked: {}", baked.GetError() );
+                return m_ModellingValid;
+            }
+
+            // A FRESH IMAGE RATHER THAN AN IN-PLACE UPLOAD, which is the choice CloudNoiseService makes
+            // and for the same reason: SetData writes into an image that frames still in flight may be
+            // sampling. A rebake happens once per lattice cell of camera travel, so the allocation is not
+            // worth the synchronisation argument. The old image goes through Image3D's deletion queue
+            // when the last reference drops.
+            if ( m_ModellingVolume )
+                Renderer::GetInstance().WaitDeviceIdle();
+
+            const Core::Formats::Image3DSpecification spec{
+                 .Tag        = "CloudModellingVolume",
+                 .Width      = Assets::kCloudProceduralVolumeWidth,
+                 .Height     = Assets::kCloudProceduralVolumeHeight,
+                 .Depth      = Assets::kCloudProceduralVolumeDepth,
+                 .Format     = Core::Formats::ImageFormat::RGBA8F,
+                 .Data       = baked.GetValue(),
+                 .Properties = Core::Formats::Sample,
+            };
+
+            m_ModellingVolume = Image3D::Create( spec );
+            if ( !m_ModellingVolume )
+            {
+                m_ModellingFailed = true;
+                LOG_ERROR( "[Clouds] The {}x{}x{} RGBA8 procedural modelling volume could not be created on "
+                           "the device; the clouds will not render for this view.",
+                           Assets::kCloudProceduralVolumeWidth, Assets::kCloudProceduralVolumeHeight,
+                           Assets::kCloudProceduralVolumeDepth );
+                m_ModellingValid = false;
+                return false;
+            }
+
+            m_ModellingParams   = m_PendingParams;
+            m_ModellingOriginKm = m_PendingOriginKm;
+            m_ModellingValid    = true;
+
+            for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+                m_ProfileTypes[slot] = slot < speciesCount ? handles[slot] : Assets::AssetHandle::Null();
+            m_ProfileSpeciesCount = speciesCount;
+            m_ProfileGeneration   = generation;
+
+            LOG_INFO( "[Clouds] Modelling volume baked for {} cloud type(s) — region {:.0f} km at "
+                      "({:.1f}, {:.1f}), envelope {:.2f} to {:.2f} km, {}x{}x{} RGBA8 ({:.2f} MiB), "
+                      "{} lumps, {:.0f} m per voxel.",
+                      speciesCount, m_ModellingParams.RegionSizeKm, m_ModellingOriginKm.x, m_ModellingOriginKm.y,
+                      m_ModellingParams.LayerBottomKm,
+                      m_ModellingParams.LayerBottomKm + m_ModellingParams.LayerThicknessKm,
+                      Assets::kCloudProceduralVolumeWidth, Assets::kCloudProceduralVolumeHeight,
+                      Assets::kCloudProceduralVolumeDepth,
+                      BytesToMiB( static_cast<size_t>( Assets::kCloudProceduralVoxelBytes ) ),
+                      Assets::CountCloudProceduralBlobs( m_ModellingParams, m_ModellingOriginKm ),
+                      m_ModellingParams.RegionSizeKm / static_cast<float>( Assets::kCloudProceduralVolumeWidth ) *
+                           1000.0f );
+        }
+
+        return m_ModellingValid;
     }
 
     bool VolumetricCloudRenderer::CreatePipelines()
@@ -460,7 +621,7 @@ namespace Desert::Graphic::System
             return;
         if ( !EnsureNoiseVolume() )
             return;
-        if ( !EnsureProfileTable() )
+        if ( !EnsureModellingVolume() )
             return;
 
         CloudTypeShape      shapes[kCloudSpeciesSlots]{};
@@ -469,6 +630,7 @@ namespace Desert::Graphic::System
 
         const CloudGpuPayload payload =
              PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
+                              CloudRegionBinding{ m_ModellingOriginKm, m_ModellingParams.RegionSizeKm },
                               quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor );
         m_ShadowParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
@@ -494,7 +656,7 @@ namespace Desert::Graphic::System
         auto& renderer = Renderer::GetInstance();
 
         renderer.ComputeImageBeginRead( m_NoiseVolume );
-        renderer.ComputeImageBeginRead( m_ProfileTable.get() );
+        renderer.ComputeImageBeginRead( m_ModellingVolume.get() );
         if ( m_AuthoredAtlas )
             renderer.ComputeImageBeginRead( m_AuthoredAtlas );
         renderer.ComputeImageBeginWrite( m_ShadowMapImage.get() );
@@ -502,7 +664,7 @@ namespace Desert::Graphic::System
         m_ShadowMapPipeline->SetOutput( kCloudShadowOutputBinding, m_ShadowMapImage.get(), 0 );
         m_ShadowMapPipeline->SetStorageBuffer( kCloudShadowParamsBinding, m_ShadowParamsBuffer.get() );
         m_ShadowMapPipeline->SetInput( kCloudShadowNoiseBinding, m_NoiseVolume );
-        m_ShadowMapPipeline->SetInput( kCloudShadowProfileBinding, m_ProfileTable.get() );
+        m_ShadowMapPipeline->SetInput( kCloudShadowModellingBinding, m_ModellingVolume.get() );
         m_ShadowMapPipeline->SetStorageBuffer( kCloudShadowAuthoredBinding, m_ShadowAuthoredBuffer.get() );
         // ALWAYS bound, fallback included — see the note at the march's own binding of it.
         m_ShadowMapPipeline->SetInput(
@@ -518,7 +680,7 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndWrite( m_ShadowMapImage.get() );
         if ( m_AuthoredAtlas )
             renderer.ComputeImageEndRead( m_AuthoredAtlas );
-        renderer.ComputeImageEndRead( m_ProfileTable.get() );
+        renderer.ComputeImageEndRead( m_ModellingVolume.get() );
         renderer.ComputeImageEndRead( m_NoiseVolume );
 
         m_ShadowMapValid = true;
@@ -869,12 +1031,13 @@ namespace Desert::Graphic::System
         if ( !EnsureNoiseVolume() )
             return;
 
-        if ( !EnsureProfileTable() )
+        if ( !EnsureModellingVolume() )
             return;
 
-        // RESOLVED AGAIN RATHER THAN CACHED FROM EnsureProfileTable. Two hash-map probes per slot against
-        // handles that have not moved is not worth a member that can disagree with the table it was built
-        // beside — and the one thing that must not diverge is exactly the set the table's channels are in.
+        // RESOLVED AGAIN RATHER THAN CACHED FROM EnsureModellingVolume. Two hash-map probes per slot
+        // against handles that have not moved is not worth a member that can disagree with the volume it
+        // was built beside — and the one thing that must not diverge is exactly the set whose channels the
+        // volume carries.
         CloudTypeShape      shapes[kCloudSpeciesSlots]{};
         Assets::AssetHandle handles[kCloudSpeciesSlots]{};
         const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
@@ -885,6 +1048,7 @@ namespace Desert::Graphic::System
         const CloudQualityScale quality = CloudQualityFor( m_Quality );
         const CloudGpuPayload   payload =
              PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
+                              CloudRegionBinding{ m_ModellingOriginKm, m_ModellingParams.RegionSizeKm },
                               quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
@@ -913,7 +1077,7 @@ namespace Desert::Graphic::System
         // verbatim.
         renderer.ComputeImageBeginRead( depthImage );
         renderer.ComputeImageBeginRead( m_NoiseVolume );
-        renderer.ComputeImageBeginRead( m_ProfileTable.get() );
+        renderer.ComputeImageBeginRead( m_ModellingVolume.get() );
         if ( m_AuthoredAtlas )
             renderer.ComputeImageBeginRead( m_AuthoredAtlas );
         renderer.ComputeImageBeginWrite( m_TraceImage.get() );
@@ -924,7 +1088,7 @@ namespace Desert::Graphic::System
         m_MarchPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
         m_MarchPipeline->SetInput( kCloudSceneDepthBinding, depthImage );
         m_MarchPipeline->SetInput( kCloudNoiseBinding, m_NoiseVolume );
-        m_MarchPipeline->SetInput( kCloudProfileBinding, m_ProfileTable.get() );
+        m_MarchPipeline->SetInput( kCloudModellingBinding, m_ModellingVolume.get() );
 
         // ALWAYS bound, even when the payload's gate says it will not be read: a declared sampler with no
         // image is an invalid descriptor set, not an unused one, and this backend answers an invalid set
@@ -968,7 +1132,7 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndWrite( m_TraceImage.get() );
         if ( m_AuthoredAtlas )
             renderer.ComputeImageEndRead( m_AuthoredAtlas );
-        renderer.ComputeImageEndRead( m_ProfileTable.get() );
+        renderer.ComputeImageEndRead( m_ModellingVolume.get() );
         renderer.ComputeImageEndRead( m_NoiseVolume );
         renderer.ComputeImageEndRead( depthImage );
 

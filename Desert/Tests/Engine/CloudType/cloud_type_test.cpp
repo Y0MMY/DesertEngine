@@ -20,7 +20,7 @@
 
 #include <Engine/Assets/CloudNoiseVolume.hpp>
 #include <Engine/Assets/CloudTypeData.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 
 #include <Common/Core/Constants.hpp>
 

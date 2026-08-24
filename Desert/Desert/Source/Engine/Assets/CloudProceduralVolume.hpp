@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Assets/CloudModellingVolume.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 
 #include <Common/Core/ResultStr.hpp>
 
@@ -253,6 +253,26 @@ namespace Desert::Assets
      */
     Common::ResultStr<std::vector<unsigned char>>
     BakeCloudProceduralVolume( const CloudProceduralFieldParams& params, const glm::vec2& regionOriginKm );
+
+    /**
+     * @brief The Dimensional Profile at one point, gathered over @p blobs — 0 outside the body, 1 at
+     *        ProfileDepth inside it.
+     *
+     * THE SAME THREE FUNCTIONS THE BAKE CALLS, in the same order: the distance, the join's shifted term,
+     * the join. What differs is the SET — this gathers every lump it is handed where the bake gathers the
+     * ones a spatial bin says can reach the voxel — and Desert/Tests/Engine/CloudProceduralField measures
+     * the two against each other at four hundred probes and asserts they agree to within one 255th.
+     *
+     * It exists because the Cloud Type panel has to draw the silhouette a type produces, and a preview
+     * computed from a formula written a second time is a preview that agrees with a picture nobody
+     * renders. It is NOT what the bake uses: gathering every lump of a region at every one of two million
+     * voxels is quadratic in the region, which is what the bin is for.
+     *
+     * @param blobs may be in any order; the join is commutative in real arithmetic and the list a caller
+     *        gets from GenerateCloudProceduralBlobs is canonically sorted already.
+     */
+    float EvaluateCloudProceduralProfile( const CloudProceduralFieldParams&      params,
+                                          const std::vector<CloudModellingBlob>& blobs, const glm::vec3& pointKm );
 
     /// How many lumps the whole region holds, summed over the species — the quantity the bake's cost is
     /// linear in, exposed so the renderer can log it beside the milliseconds rather than guessing.

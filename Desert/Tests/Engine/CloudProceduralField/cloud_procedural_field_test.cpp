@@ -622,6 +622,64 @@ TEST( CloudProceduralField, TheCostOfRebakingTheRegionIsMeasured )
     }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// 6b. COVERAGE MEANS THE FRACTION OF SKY WITH CLOUD IN IT, SEEN FROM BELOW
+// ---------------------------------------------------------------------------------------------------
+//
+// THE ENDS BEING EXACT IS NOT ENOUGH, and finding that out cost a frame. The test above proves 0 is empty
+// and 1 is full and that the middle is monotone — and the first sky built on it, at the shipped scene's
+// coverage of 0.24, rendered a horizon with clouds on it and a ZENITH WITH NOTHING. A slider whose two
+// ends are right and whose middle is off by a factor is still a slider that does not mean what it says.
+//
+// What it has to mean is the thing a person looking up would measure: the fraction of the sky that has
+// cloud somewhere in the column. That is the TOP-DOWN PROJECTION of the volume, and it is what this
+// measures — against the slider, at five settings, with the deviation printed so a recalibration is a
+// number rather than an opinion.
+TEST( CloudProceduralField, CoverageIsTheFractionOfSkyThatHasCloudInTheColumn )
+{
+    double worst = 0.0;
+
+    for ( const float wanted : { 0.15f, 0.24f, 0.35f, 0.50f, 0.75f } )
+    {
+        CloudProceduralFieldParams params = MakeParams();
+        params.Coverage                   = wanted;
+
+        const glm::vec2 origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const auto      baked  = BakeCloudProceduralVolume( params, origin );
+        ASSERT_TRUE( baked ) << ( baked ? std::string{} : baked.GetError() );
+
+        size_t columns = 0;
+        for ( uint32_t z = 0; z < kCloudProceduralVolumeDepth; ++z )
+            for ( uint32_t x = 0; x < kCloudProceduralVolumeWidth; ++x )
+            {
+                for ( uint32_t y = 0; y < kCloudProceduralVolumeHeight; ++y )
+                {
+                    if ( baked.GetValue()[VoxelIndex( x, y, z )] != 0u )
+                    {
+                        ++columns;
+                        break;
+                    }
+                }
+            }
+
+        const double measured = static_cast<double>( columns ) /
+                                static_cast<double>( kCloudProceduralVolumeWidth * kCloudProceduralVolumeDepth );
+
+        std::printf( "[CloudProceduralField] coverage %.2f -> %.3f of the sky has cloud in the column "
+                     "(%+.3f)\n",
+                     wanted, measured, measured - wanted );
+
+        worst = std::max( worst, std::abs( measured - wanted ) );
+    }
+
+    // A TENTH OF THE SLIDER'S TRAVEL. Tighter than that is asking a lattice of jittered clusters to hit a
+    // continuous fraction exactly, which it cannot; looser than that is the gap between "a quarter of the
+    // sky" and "an empty zenith" that this test was written after.
+    EXPECT_LT( worst, 0.10 ) << "the coverage slider is out by " << worst
+                             << " of the sky at its worst setting, so what it says and what a person "
+                                "looking up would measure are different numbers";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

@@ -107,7 +107,7 @@ namespace Desert::Graphic
     inline constexpr uint32_t kCloudShadowOutputBinding  = 0; // the RGBA32F triple this pass writes
     inline constexpr uint32_t kCloudShadowParamsBinding  = kCloudParamsBinding;
     inline constexpr uint32_t kCloudShadowNoiseBinding   = kCloudNoiseBinding;
-    inline constexpr uint32_t kCloudShadowProfileBinding = kCloudProfileBinding;
+    inline constexpr uint32_t kCloudShadowModellingBinding = kCloudModellingBinding;
 
     /**
      * The shadow map's projection for this frame.

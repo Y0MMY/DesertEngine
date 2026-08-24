@@ -21,6 +21,11 @@ project(test_name)
     files {
         test_files,
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
+        -- The PRODUCER, because the seam's field is a fetch of the volume this bakes. A suite that
+        -- stubbed the volume would be measuring the sampler and nothing else; what makes the double
+        -- compilation worth anything is that the bytes under the mirror are the bytes the device gets.
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
     }
 
     includedirs {

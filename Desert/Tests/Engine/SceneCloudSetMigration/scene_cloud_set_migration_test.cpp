@@ -26,7 +26,7 @@
 #include <Engine/Assets/CloudTypeData.hpp>
 #include <Engine/Core/Serialize/SceneMigration.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
 #include <rflcpp/rfl/json.hpp>

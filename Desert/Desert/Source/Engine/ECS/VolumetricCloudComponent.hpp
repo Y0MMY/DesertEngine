@@ -241,14 +241,49 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Weather Tile Size" ), Category( "Weather" ), Length,
                   Range( 200000.0f, 8000000.0f ),
-                  Tooltip( "World size over which the coverage field repeats. Its coarsest cell is a "
-                           "QUARTER of it, and that cell is the size of one cloud — which is also what "
-                           "decides whether there is any cloud overhead at all: a cell much larger than "
-                           "the layer altitude cannot fit one above the camera, and the zenith comes out "
-                           "empty however high the coverage is set." ) )
+                  Tooltip( "World size the cloud lattice is measured against. One cell is a QUARTER of it, "
+                           "and a cell holds one cloud — which is also what decides whether there is any "
+                           "cloud overhead at all: a cell much larger than the layer altitude cannot fit "
+                           "one above the camera, and the zenith comes out empty however high the "
+                           "coverage is set." ) )
         // TWELVE KILOMETRES -> 3 km cells, a cumulus field. The other half of the calibrated pair; see
         // MaxViewDistance for what the two of them together decide and for where it was measured.
+        //
+        // IT IS A LATTICE AND NOT A NOISE PERIOD NOW. The number and its quarter are unchanged and so is
+        // everything the calibration of §4 says about the pair — what changed is what sits in a cell. It
+        // was one cell of an Alligator field thresholded into a cushion; it is a CLUSTER OF OVERLAPPING
+        // LUMPS fused by the modelling volume's smooth minimum (Engine/Assets/CloudProceduralVolume.hpp).
         float WeatherTileSize = 1200000.0f; // 12 km -> 3 km cells, a cumulus field
+
+        PROPERTY( DisplayName( "Region Size" ), Category( "Weather" ), Length, Range( 1600000.0f, 12000000.0f ),
+                  Advanced,
+                  Tooltip( "How much world the camera-centric modelling volume covers, and the distance "
+                           "over which the sky repeats beyond it. Larger is more sky before the "
+                           "repetition shows and a coarser voxel; the volume's 256 voxels are spread over "
+                           "exactly this." ) )
+        // FORTY-EIGHT KILOMETRES, and it is half of a relation rather than a taste.
+        //
+        // BELOW, by what the march can find: the volume is 256 voxels across, trilinear filtering cannot
+        // express a feature narrower than two of them, and the march SEARCHES at
+        // CloudFinestResolvableChordKm — 125 m at the default Max Steps. A region under 16 km would put
+        // structure in the volume that no ray can be relied on to sample, and
+        // Assets::ValidateCloudProceduralParams refuses it by name. The slider's floor is that bound.
+        //
+        // ABOVE, by the repetition: the volume is periodic, so past the region the sky is the region
+        // again. Max View Distance over this number is how many times it repeats between the camera and
+        // the vanishing point — 60 over 48 is 1.25, against the five repeats CALIBRATION.md §4 measured
+        // as the cure for the moire at twenty. At the shipped pair the voxel is 187.5 m.
+        float RegionSize = 4800000.0f; // 48 km -> 187.5 m per voxel, 1.25 repeats to the vanishing point
+
+        PROPERTY( DisplayName( "Seed" ), Category( "Weather" ), Range( 0, 65535 ),
+                  Tooltip( "Which sky. Two layers with different seeds have unrelated clouds; the same "
+                           "seed always gives the same sky, in the same places, for the same settings." ) )
+        // WHICH REALIZATION OF THE FIELD, and it exists because the lumps are placed by a HASH of their
+        // lattice cell rather than read out of a texture. Before this phase the realization was a property
+        // of the noise volume ASSET — its own baked seed — and a scene that wanted a different sky had to
+        // bake a different volume. The placement is procedural now, so the choice is a number, and a
+        // number an artist can turn is worth one slider.
+        int32_t Seed = 1;
 
         // ---- Detail ---------------------------------------------------------------------------------
         //

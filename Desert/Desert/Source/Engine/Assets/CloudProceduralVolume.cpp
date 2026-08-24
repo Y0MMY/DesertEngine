@@ -287,9 +287,27 @@ namespace Desert::Assets
         // alive cell is mostly full. Above a half the clusters of two adjacent alive cells OVERLAP, which
         // is the whole point — that is where a bank of cloud comes from rather than a row of cushions.
         const float baseRadiusKm =
-             std::max( 0.62f * std::min( extent.x, extent.y ), 0.5f * params.ResolvableChordKm );
+             std::max( 0.72f * std::min( extent.x, extent.y ), 0.5f * params.ResolvableChordKm );
 
         const uint32_t speciesSeed = HashCombine( params.Seed, slot + 0x51ed270bu );
+
+        // ---------------------------------------------------------------------------------------------
+        // WHAT FRACTION OF THE CELLS IS ALIVE, WHICH IS NOT THE SLIDER
+        // ---------------------------------------------------------------------------------------------
+        //
+        // The slider means what a person looking up would measure: the fraction of the SKY with cloud
+        // somewhere in the column. A cell being alive is not that — a cluster does not fill its cell, two
+        // neighbouring clusters overlap, and how full a cluster is depends on how deep inside the
+        // threshold its own hash fell. Taken as the alive fraction directly, the slider under-delivered
+        // by a factor that grew with the setting: 0.24 gave 0.105 of the sky and 0.75 gave 0.450 — and
+        // the frame that came out of it had clouds on the horizon and an EMPTY ZENITH, which is the
+        // defect Docs/Clouds/REVIEW_622a01a6.md names and the one the owner found by looking up.
+        //
+        // 0.68 IS MEASURED, on the top-down projection of the baked volume at five settings, and
+        // Desert/Tests/Engine/CloudProceduralField re-measures it on every run and fails if the slider
+        // and the sky part company by more than a tenth. Being a power it keeps both ends EXACT, which is
+        // the property the ends were built to have: 0 stays empty and 1 stays full.
+        const float aliveFraction = std::pow( std::clamp( params.Coverage, 0.0f, 1.0f ), 0.68f );
 
         for ( int32_t iv = firstV; iv <= lastV; ++iv )
         {
@@ -316,17 +334,18 @@ namespace Desert::Assets
                 // size and any species, with no distribution to calibrate. That is the property the
                 // quantile map this replaces was built to fake on a field whose spread it had to measure.
                 const float draw = HashUnit( cellSeed );
-                if ( draw >= params.Coverage )
+                if ( draw >= aliveFraction )
                     continue;
 
                 // AND CONTRAST IS THE WIDTH OF THE RAMP INTO IT. A cell that only just qualified grows a
                 // small cluster; one well inside the threshold grows a full one. Above 1 the sky is
                 // decisively cloud or decisively clear; below 1 the sizes spread out, which is what a
                 // broken deck looks like.
-                const float softness =
-                     std::max( params.Coverage, 1e-4f ) / std::max( params.CoverageContrast, 1e-2f );
+                const float softness = ( 1.0f - std::clamp( params.Coverage, 0.0f, 1.0f ) ) /
+                                            std::max( params.CoverageContrast, 1e-2f ) +
+                                       0.02f;
                 const float fill =
-                     std::clamp( ( params.Coverage - draw ) / std::max( softness, 1e-4f ), 0.0f, 1.0f );
+                     std::clamp( ( aliveFraction - draw ) / std::max( softness, 1e-4f ), 0.0f, 1.0f );
 
                 // EDGE TOP FRACTION IS WHAT A SHALLOW CLUSTER LOSES. The type says how tall it is where the
                 // patch has only just begun, and `fill` is how far inside the patch this cell is — so a
@@ -365,7 +384,14 @@ namespace Desert::Assets
                     // Where up the stack this lump sits, 0 at the base and approaching 1 at the top. The
                     // band it spans is `bandKm * fullness`, so a short cluster is a whole short cloud
                     // rather than the bottom slice of a tall one — which is what a low cumulus humilis is.
-                    const float t = ( static_cast<float>( step ) + 0.5f ) / static_cast<float>( stackCount );
+                    // BOTTOM-HEAVY, and the exponent is measured rather than chosen. Spread evenly, six
+                    // lobes put one or two at the wide base and four up the narrow tower, so the base was
+                    // a rosette with holes in it: a full cell measured 48 per cent covered from below when
+                    // the geometry says a full cluster should cover it. A cumulus is a WIDE FLOOR with a
+                    // turret or two on top, which is the same thing said about the picture and about the
+                    // number.
+                    const float u = ( static_cast<float>( step ) + 0.5f ) / static_cast<float>( stackCount );
+                    const float t = std::pow( u, 1.7f );
 
                     // TOP TAPER IS HOW FAST THE STACK NARROWS. A cumulus is a pile whose lobes shrink as
                     // they rise; a stratus, whose taper is near zero, is a slab of equal lobes.
@@ -385,7 +411,7 @@ namespace Desert::Assets
                     // pile is a dome rather than a column: at the base the lobes sit half a cluster-radius
                     // out, at the top they close over the middle.
                     const float angle  = phase + 2.39996323f * static_cast<float>( step );
-                    const float spread = clusterRadiusKm * 0.42f * ( 1.0f - 0.55f * t );
+                    const float spread = clusterRadiusKm * 0.48f * ( 1.0f - 0.55f * t );
 
                     // HOW FAR THE LOBES OVERLAP IS THE WHOLE ARGUMENT OF THE PHASE, so it is arithmetic and
                     // not a feel. Two lobes one golden angle apart on a circle of radius `spread` are
@@ -395,7 +421,7 @@ namespace Desert::Assets
                     // against 1.00 R, the lobes only TOUCHED, and the top-down projection came out as
                     // clusters of separate dots: fusion is not free just because the join can express it,
                     // the bodies have to be inside one another.
-                    const float radius = clusterRadiusKm * ( 0.60f - 0.14f * t ) * ( 1.0f - taper * t * 0.5f );
+                    const float radius = clusterRadiusKm * ( 0.62f - 0.16f * t ) * ( 1.0f - taper * t * 0.5f );
 
                     // BASE RAMP FRACTION IS THE THICKNESS OF THE LOWEST LOBE against the ones above it: a
                     // type whose base fills in slowly has a thin, spreading floor and a fat body over it.
@@ -474,6 +500,32 @@ namespace Desert::Assets
         SortCloudModellingBlobs( blobs );
 
         return blobs;
+    }
+
+    float EvaluateCloudProceduralProfile( const CloudProceduralFieldParams&      params,
+                                          const std::vector<CloudModellingBlob>& blobs, const glm::vec3& pointKm )
+    {
+        if ( blobs.empty() )
+            return 0.0f;
+
+        const float invBlend = 1.0f / std::max( params.BlendRadiusKm, 1e-6f );
+
+        float nearest = 0.0f;
+        for ( size_t k = 0; k < blobs.size(); ++k )
+        {
+            const float distance = CloudModellingBlobDistanceKm( PrepareCloudModellingBlob( blobs[k] ), pointKm );
+            nearest              = ( k == 0 ) ? distance : std::min( nearest, distance );
+        }
+
+        float sum = 0.0f;
+        for ( const CloudModellingBlob& blob : blobs )
+        {
+            const float distance = CloudModellingBlobDistanceKm( PrepareCloudModellingBlob( blob ), pointKm );
+            sum += CloudModellingJoinTerm( blob.Weight, distance, nearest, invBlend );
+        }
+
+        const float joined = CloudModellingJoinKm( nearest, sum, params.BlendRadiusKm );
+        return std::clamp( -joined / std::max( params.ProfileDepthKm, 1e-6f ), 0.0f, 1.0f );
     }
 
     size_t CountCloudProceduralBlobs( const CloudProceduralFieldParams& params, const glm::vec2& regionOriginKm )

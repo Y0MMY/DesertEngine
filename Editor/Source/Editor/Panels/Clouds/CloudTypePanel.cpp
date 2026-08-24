@@ -4,8 +4,10 @@
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
+#include <Engine/Assets/CloudProceduralVolume.hpp>
 #include <Engine/Assets/CloudTypeAsset.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudPayload.hpp>
+#include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Common/Core/Constants.hpp>
@@ -288,30 +290,93 @@ namespace Desert::Editor
             return;
         }
 
+        // THE PREVIEW IS THE FIELD ITSELF, NOT A CURVE THAT DESCRIBES IT. It used to plot
+        // Graphic::CloudProfileCurve, which was the generator of a table the march sampled; there is no
+        // table now — the profile is the normalised distance field of a joined pile of lumps
+        // (Engine/Assets/CloudProceduralVolume.hpp). So the panel places the lumps this type would place,
+        // with the SAME function the bake calls, and reads the field down two vertical lines. "The preview
+        // shows what will be baked" is then true by construction rather than by vigilance, which is the
+        // property the sculpting panel's slice preview was built for too.
+        Assets::CloudProceduralFieldParams params;
+        params.LayerBottomKm    = bottomKm;
+        params.LayerThicknessKm = spanKm;
+        params.Seed             = 1u;
+        params.CoverageContrast = 1.0f;
+        params.WindAxis         = glm::vec2( 1.0f, 0.0f );
+
+        // A CELL, and the region is a handful of them. The lattice is the component's shipped default —
+        // 12 km over four cells — scaled by this type's own Placement Scale, so the preview is the type at
+        // the settings a scene gets before anybody touches a slider.
+        const float latticeKm = 3.0f * std::max( s.PlacementScale, 1e-3f );
+
+        params.RegionSizeKm      = std::max( latticeKm * 6.0f, 16.1f );
+        params.BlendRadiusKm     = std::max( 0.02f * latticeKm, 1e-3f );
+        params.ProfileDepthKm    = std::max( 0.12f * latticeKm, 1e-3f );
+        params.ResolvableChordKm = Graphic::CloudFinestResolvableChordKm( 256.0f );
+
+        // EVERY CELL ALIVE, because the preview is about the SHAPE of one cloud and not about how many
+        // there are. Coverage is a layer setting and it has its own slider in the Details panel.
+        params.Coverage = 1.0f;
+
+        Assets::CloudProceduralSpecies species;
+        species.Shape      = s;
+        species.CellKm     = latticeKm;
+        species.Anisotropy = std::max( s.PlacementAnisotropy, 1e-3f );
+        params.Species.push_back( species );
+
+        const glm::vec2 origin( 0.0f, 0.0f );
+
+        const std::vector<Assets::CloudModellingBlob> blobs =
+             Assets::GenerateCloudProceduralBlobs( params, 0u, origin );
+
+        if ( blobs.empty() )
+        {
+            ImGui::TextDisabled( "This type places no lumps at all, so there is nothing to draw." );
+            return;
+        }
+
+        // THE FULLEST CLUSTER IN THE PREVIEW REGION, found by its own lumps rather than chosen: a cell's
+        // fullness is a hash, so there is no "the core one" to ask for. The tallest stack is the one an
+        // artist means when they ask what this type looks like.
+        glm::vec3 tallest = blobs.front().CentreKm;
+        for ( const Assets::CloudModellingBlob& blob : blobs )
+        {
+            if ( blob.CentreKm.y > tallest.y )
+                tallest = blob.CentreKm;
+        }
+
+        // How far to step sideways for the second curve: past the lumps of this cluster, into the skirt.
+        float widest = 0.0f;
+        for ( const Assets::CloudModellingBlob& blob : blobs )
+        {
+            if ( std::abs( blob.CentreKm.y - tallest.y ) < spanKm )
+                widest = std::max( widest, blob.RadiiKm.x );
+        }
+
         m_ProfileEdge.resize( kPreviewSamples );
         m_ProfileCore.resize( kPreviewSamples );
 
         for ( int i = 0; i < kPreviewSamples; ++i )
         {
-            // The same half-texel convention the table itself is generated with, so the curve on screen is
-            // the row that will be uploaded rather than a differently sampled version of it.
             const float fraction   = ( static_cast<float>( i ) + 0.5f ) / static_cast<float>( kPreviewSamples );
             const float altitudeKm = bottomKm + fraction * spanKm;
 
-            m_ProfileEdge[i] = Graphic::CloudProfileCurve( s, altitudeKm, 0.0f );
-            m_ProfileCore[i] = Graphic::CloudProfileCurve( s, altitudeKm, 1.0f );
+            m_ProfileCore[i] = Assets::EvaluateCloudProceduralProfile(
+                 params, blobs, glm::vec3( tallest.x, altitudeKm, tallest.z ) );
+            m_ProfileEdge[i] = Assets::EvaluateCloudProceduralProfile(
+                 params, blobs, glm::vec3( tallest.x + widest, altitudeKm, tallest.z ) );
         }
 
-        ImGui::PlotLines( "##profileCore", m_ProfileCore.data(), kPreviewSamples, 0, "core of a patch (pattern 1)",
-                          0.0f, 1.0f, ImVec2( -1.0f, 90.0f ) );
-        ImGui::PlotLines( "##profileEdge", m_ProfileEdge.data(), kPreviewSamples, 0, "rim of a patch (pattern 0)",
-                          0.0f, 1.0f, ImVec2( -1.0f, 90.0f ) );
+        ImGui::PlotLines( "##profileCore", m_ProfileCore.data(), kPreviewSamples, 0, "through the core", 0.0f,
+                          1.0f, ImVec2( -1.0f, 90.0f ) );
+        ImGui::PlotLines( "##profileEdge", m_ProfileEdge.data(), kPreviewSamples, 0, "through the flank", 0.0f,
+                          1.0f, ImVec2( -1.0f, 90.0f ) );
 
         ImGui::TextDisabled( "Left is the base at %.2f km, right is the top of the shell at %.2f km "
-                             "(%.2f km thick).",
-                             bottomKm, topKm, spanKm );
-        ImGui::TextDisabled( "TWO CURVES BECAUSE THE PROFILE IS A TABLE: if they look the same, this type "
-                             "is the same shape everywhere in the sky." );
+                             "(%.2f km thick), on a %.2f km lattice.",
+                             bottomKm, topKm, spanKm, latticeKm );
+        ImGui::TextDisabled( "TWO LINES THROUGH ONE CLOUD: the profile is a distance field now, so the "
+                             "core reaches 1 and the flank is whatever the lumps out there leave." );
     }
 
     void CloudTypePanel::DrawSaveSection()
