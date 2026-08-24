@@ -97,18 +97,24 @@ Shader "CloudRaymarch"
         // read only when u_CloudAerial.z says the volume exists.
         Uniform(5) sampler3D u_CloudAerialPerspective;
 
-        // THE VERTICAL PROFILE TABLE, 256 x 64 RGBA32F, built on the CPU by
-        // Graphic::CloudBuildProfileTable from the layer's species and uploaded by
-        // VolumetricCloudRenderer whenever that species changes. U is the height fraction in the
-        // envelope, V is how deep inside a placement patch the column is, .r is the profile — the same
-        // arrangement as Unreal's Layout_CloudHeightProfile, whose axes are (NormAltitudeInLayer,
-        // layout value).
+        // THE PROCEDURAL MODELLING VOLUME, 256 x 32 x 256 RGBA8, baked on the CPU by
+        // Assets::BakeCloudProceduralVolume and uploaded by Runtime::CloudProceduralVolumeService
+        // whenever the layer's settings change or the camera crosses a snap of the lump lattice —
+        // NEVER per frame. Channel k is species k's Dimensional Profile: 0 at the surface of the body
+        // and 1 in its core, already three-dimensional and already fused, because the bake joined the
+        // lumps with an exponential smooth minimum.
         //
-        // LINEAR AND REPEAT, like every sampler this engine creates. The wrap is why
-        // CloudSampleProfileTable clamps both coordinates to the texel centres rather than to [0, 1]: a
-        // height fraction of exactly 1 would otherwise wrap to the bottom row and grow the cloud's base
-        // back on top of its own top.
-        Uniform(7) sampler2D u_CloudProfile;
+        // IT TOOK THE PROFILE TABLE'S BINDING, and that is the whole shape of phase Э5 in one line. The
+        // table was `f(height in the envelope, how deep inside the patch)` multiplied by a threshold on
+        // the Alligator noise — and the Alligator is `best - second`, which is ZERO wherever two feature
+        // points contribute equally, so no setting of any slider could ever fuse two lobes. One 3D fetch
+        // now answers for all four species where that arrangement cost a 2D fetch plus a 3D fetch per
+        // live species.
+        //
+        // LINEAR AND REPEAT, like every sampler this engine creates, and here the REPEAT is load-bearing
+        // rather than tolerated: the bake splats every lump at its wrapped positions, so the volume is
+        // exactly periodic and sampling past the region is the degenerate far path rather than a seam.
+        Uniform(7) sampler3D u_CloudModelling;
 
         // THE SCULPTED HERO-CLOUD BODY — slot A of the seam. 128 x 64 x 128 RGBA8 of dimensional
         // profile, detail type, density scale and cutout envelope, loaded from a `.dcmv` and uploaded by
@@ -122,7 +128,8 @@ Shader "CloudRaymarch"
         // The seam's three callbacks. Declared here, next to the samplers, because Common/CloudField.glslh
         // must stay free of samplers to remain compilable as C++ by its tests.
         #define CLOUD_SAMPLE_NOISE(p) texture(u_CloudNoise, (p))
-        #define CLOUD_SAMPLE_PROFILE(uv) texture(u_CloudProfile, (uv))
+        // textureLod for the reason the authored atlas gives below, and for the same reason.
+        #define CLOUD_SAMPLE_MODELLING(p) textureLod(u_CloudModelling, (p), 0.0f)
         // textureLod AND NOT texture: a compute shader has no derivatives, so the implicit level of
         // detail is undefined. The volume has one level, so every implementation happens to pick it — but
         // "happens to" is the state three other sites in this engine were found in.

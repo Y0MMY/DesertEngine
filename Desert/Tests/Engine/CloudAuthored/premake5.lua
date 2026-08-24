@@ -20,6 +20,9 @@ project(test_name)
     files {
         test_files,
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
+        -- The procedural producer: the seam calls BOTH, and a stubbed zero on the other side would
+        -- leave the union untested because the sculpted body would win everywhere.
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingCatalogue.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
     }

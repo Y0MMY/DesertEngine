@@ -23,15 +23,24 @@
 // a one-fold one and changes no answer. It lives here rather than in the test because the macro has to be
 // defined before CloudField.glslh is included.
 
-// THE PROFILE TABLE ARRIVES THE SAME WAY THE NOISE DOES, and that is what makes the second half of this
-// header a test of the GPU's arithmetic rather than of a re-implementation. CLOUD_SAMPLE_PROFILE is
-// defined below as a BILINEAR, REPEAT-WRAPPED read of the very buffer Graphic::CloudBuildProfileTable
+// THE MODELLING VOLUME ARRIVES THE SAME WAY THE NOISE DOES, and that is what makes the second half of
+// this header a test of the GPU's arithmetic rather than of a re-implementation. CLOUD_SAMPLE_MODELLING is
+// defined below as a TRILINEAR, REPEAT-WRAPPED read of the very bytes Assets::BakeCloudProceduralVolume
 // hands the device — the same filter and the same wrap mode every sampler in this engine is created with —
 // so `what the generator writes` and `what the shader reads` can be compared directly, which is the one
-// relation a table nobody can inspect on the GPU would otherwise never be checked on.
+// relation a volume nobody can inspect on the GPU would otherwise never be checked on.
+//
+// IT REPLACED A PROFILE TABLE, and the replacement is the whole of phase Э5 at this seam. The table was
+// `f(height in the envelope, how deep inside the patch)` multiplied by a threshold on the Alligator noise
+// — whose field is `best - second` and is therefore ZERO wherever two feature points contribute equally,
+// so no setting of any slider could fuse two lobes. Everything in this header below the callbacks is
+// unchanged; the tests that measured the table's own shape moved to
+// Desert/Tests/Engine/CloudProceduralField, which owns the generator that now decides it.
 
+#include <Engine/Assets/CloudProceduralVolume.hpp>
+#include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Assets/CloudTypeData.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 
 #include <glm/glm.hpp>
 
@@ -120,52 +129,120 @@ namespace Desert::Tests::CloudFieldRef
 #define CLOUD_SAMPLE_NOISE( p ) CloudSampleBakedVolumeCached( p )
 
         // ------------------------------------------------------------------------------------------
-        // The profile table, exactly as the device would see it
+        // The procedural modelling volume, exactly as the device would see it
         // ------------------------------------------------------------------------------------------
 
-        // Which cloud type the bound table describes. A test that wants another one calls
-        // CloudProfileTableSelect and the next read comes from the new table — the same thing the renderer
-        // does when the artist drops a different `.decloudtype` into the slot, and the same single source
-        // (CloudBuildProfileTable).
-        struct ProfileTableState
+        // WHICH SKY THE BOUND VOLUME IS. A test that wants another one calls CloudModellingVolumeSelect
+        // and the next read comes from the new bake — the same thing the renderer does when the artist
+        // drops a different `.decloudtype` into a slot, and from the same single source
+        // (Assets::BakeCloudProceduralVolume).
+        struct ModellingVolumeState
         {
-            std::vector<float> Texels;
+            std::vector<unsigned char>                 Voxels;
+            Desert::Assets::CloudProceduralFieldParams Params;
+            glm::vec2                                  OriginKm{ 0.0f };
         };
 
-        ProfileTableState& ProfileTable()
+        ModellingVolumeState& ModellingVolume()
         {
-            static ProfileTableState state{
-                 Desert::Graphic::CloudBuildProfileTable( Desert::Assets::CloudTypeDefaultShape() ) };
+            static ModellingVolumeState state;
             return state;
         }
 
-        void CloudProfileTableSelect( const Desert::Graphic::CloudTypeShape& shape )
+        /// The parameters this suite bakes with: one region, centred on the origin, at the component's
+        /// own defaults. The species are handed in, so a test drives exactly the set a layer would carry.
+        Desert::Assets::CloudProceduralFieldParams
+        CloudModellingParams( const Desert::Graphic::CloudTypeShape* shapes, std::uint32_t count, float coverage,
+                              float contrast, vec3 windDirection )
         {
-            ProfileTable().Texels = Desert::Graphic::CloudBuildProfileTable( shape );
+            Desert::Assets::CloudProceduralFieldParams params;
+
+            params.RegionSizeKm = 48.0f;
+
+            const Desert::Graphic::CloudEnvelopeKm envelope =
+                 Desert::Graphic::CloudTypeSetEnvelopeKm( shapes, count );
+
+            params.LayerBottomKm    = std::max( envelope.BottomKm, 0.0f );
+            params.LayerThicknessKm = std::max( envelope.TopKm - params.LayerBottomKm, 0.001f );
+
+            const float latticeKm = 3.0f;
+
+            params.BlendRadiusKm     = 0.02f * latticeKm;
+            params.ProfileDepthKm    = 0.12f * latticeKm;
+            params.Coverage          = coverage;
+            params.CoverageContrast  = contrast;
+            params.Seed              = 1u;
+            params.WindAxis          = glm::vec2( windDirection.x, windDirection.z );
+            params.ResolvableChordKm = Desert::Graphic::CloudFinestResolvableChordKm( 256.0f );
+
+            for ( std::uint32_t slot = 0; slot < count; ++slot )
+            {
+                Desert::Assets::CloudProceduralSpecies species;
+                species.Shape      = shapes[slot];
+                species.CellKm     = latticeKm * std::max( shapes[slot].PlacementScale, 1e-3f );
+                species.Anisotropy = std::max( shapes[slot].PlacementAnisotropy, 1e-3f );
+                params.Species.push_back( species );
+            }
+
+            return params;
         }
 
-        /// The multi-species form: channel k is shapes[k], all of them over the union envelope. The march
-        /// binds exactly this image, so a test that drives the set drives what the GPU would.
-        void CloudProfileTableSelectSet( const Desert::Graphic::CloudTypeShape* shapes, std::uint32_t count )
+        void CloudModellingVolumeSelectSet( const Desert::Graphic::CloudTypeShape* shapes, std::uint32_t count,
+                                            float coverage, float contrast, vec3 windDirection )
         {
-            ProfileTable().Texels = Desert::Graphic::CloudBuildProfileTable( shapes, count );
+            ModellingVolumeState& state = ModellingVolume();
+
+            state.Params   = CloudModellingParams( shapes, count, coverage, contrast, windDirection );
+            state.OriginKm = Desert::Assets::CloudProceduralRegionOriginKm( state.Params, 0.0f, 0.0f );
+
+            const auto baked = Desert::Assets::BakeCloudProceduralVolume( state.Params, state.OriginKm );
+            state.Voxels     = baked ? baked.GetValue() : std::vector<unsigned char>{};
         }
 
-        // A bilinear, REPEAT-wrapped fetch — the filter and the address mode VulkanImage2D creates for
-        // every sampled image, written out here because the difference between this and a nearest fetch is
-        // exactly the half-texel error the relation test exists to catch.
-        vec4 CloudSampleProfileTexture( vec2 uv )
+        /// The same bake over a layer WIDER than the species' own band, which is what makes the vertical
+        /// clamp observable: the volume's top rows are then empty air and its bottom rows are cloud, so a
+        /// read at a height fraction of 1 that wrapped onto the floor would come back with cloud in it.
+        ///
+        /// A layer is normally the union of its types' bands exactly (Graphic::CloudTypeSetEnvelopeKm), so
+        /// this arrangement does not arise by itself — which is precisely why the property needs a fixture
+        /// that produces it rather than a sample of an ordinary sky.
+        void CloudModellingVolumeSelectOverLayer( const Desert::Graphic::CloudTypeShape* shapes,
+                                                  std::uint32_t count, float coverage, float bottomKm,
+                                                  float thicknessKm )
         {
-            const std::vector<float>& texels = ProfileTable().Texels;
+            ModellingVolumeState& state = ModellingVolume();
 
-            constexpr int width  = static_cast<int>( Desert::Graphic::kCloudProfileTableAltitudeTexels );
-            constexpr int height = static_cast<int>( Desert::Graphic::kCloudProfileTablePatternTexels );
+            state.Params = CloudModellingParams( shapes, count, coverage, 1.0f, vec3( 1.0f, 0.0f, 0.0f ) );
 
-            const float x = uv.x * static_cast<float>( width ) - 0.5f;
-            const float y = uv.y * static_cast<float>( height ) - 0.5f;
+            state.Params.LayerBottomKm    = bottomKm;
+            state.Params.LayerThicknessKm = thicknessKm;
+
+            state.OriginKm = Desert::Assets::CloudProceduralRegionOriginKm( state.Params, 0.0f, 0.0f );
+
+            const auto baked = Desert::Assets::BakeCloudProceduralVolume( state.Params, state.OriginKm );
+            state.Voxels     = baked ? baked.GetValue() : std::vector<unsigned char>{};
+        }
+
+        // A TRILINEAR, REPEAT-wrapped fetch — the filter and the address mode VulkanImage3D creates for
+        // every sampled volume, written out here because the difference between this and a nearest fetch
+        // is exactly the half-texel error the relation test exists to catch.
+        vec4 CloudSampleModellingTexture( vec3 uvw )
+        {
+            const std::vector<unsigned char>& voxels = ModellingVolume().Voxels;
+            if ( voxels.empty() )
+                return vec4( 0.0f );
+
+            constexpr int width  = static_cast<int>( Desert::Assets::kCloudProceduralVolumeWidth );
+            constexpr int height = static_cast<int>( Desert::Assets::kCloudProceduralVolumeHeight );
+            constexpr int depth  = static_cast<int>( Desert::Assets::kCloudProceduralVolumeDepth );
+
+            const float x = uvw.x * static_cast<float>( width ) - 0.5f;
+            const float y = uvw.y * static_cast<float>( height ) - 0.5f;
+            const float z = uvw.z * static_cast<float>( depth ) - 0.5f;
 
             const float fx = x - std::floor( x );
             const float fy = y - std::floor( y );
+            const float fz = z - std::floor( z );
 
             const auto wrap = []( float coordinate, int extent )
             {
@@ -175,23 +252,30 @@ namespace Desert::Tests::CloudFieldRef
 
             const int x0 = wrap( x, width );
             const int y0 = wrap( y, height );
+            const int z0 = wrap( z, depth );
             const int x1 = ( x0 + 1 ) % width;
             const int y1 = ( y0 + 1 ) % height;
+            const int z1 = ( z0 + 1 ) % depth;
 
-            const auto texel = [&]( int ix, int iy )
+            const auto texel = [&]( int ix, int iy, int iz )
             {
-                const size_t base =
-                     ( static_cast<size_t>( iy ) * width + ix ) * Desert::Graphic::kCloudProfileTableChannels;
-                return vec4( texels[base], texels[base + 1], texels[base + 2], texels[base + 3] );
+                const size_t base = ( ( static_cast<size_t>( iz ) * height + iy ) * width + ix ) *
+                                    Desert::Assets::kCloudProceduralBytesPerVoxel;
+                return vec4( voxels[base] / 255.0f, voxels[base + 1] / 255.0f, voxels[base + 2] / 255.0f,
+                             voxels[base + 3] / 255.0f );
             };
 
-            const vec4 top    = texel( x0, y0 ) * ( 1.0f - fx ) + texel( x1, y0 ) * fx;
-            const vec4 bottom = texel( x0, y1 ) * ( 1.0f - fx ) + texel( x1, y1 ) * fx;
+            const auto plane = [&]( int iz )
+            {
+                const vec4 top    = texel( x0, y0, iz ) * ( 1.0f - fx ) + texel( x1, y0, iz ) * fx;
+                const vec4 bottom = texel( x0, y1, iz ) * ( 1.0f - fx ) + texel( x1, y1, iz ) * fx;
+                return top * ( 1.0f - fy ) + bottom * fy;
+            };
 
-            return top * ( 1.0f - fy ) + bottom * fy;
+            return plane( z0 ) * ( 1.0f - fz ) + plane( z1 ) * fz;
         }
 
-#define CLOUD_SAMPLE_PROFILE( uv ) CloudSampleProfileTexture( uv )
+#define CLOUD_SAMPLE_MODELLING( p ) CloudSampleModellingTexture( p )
 
         // ------------------------------------------------------------------------------------------
         // SLOT A, DECLARED EMPTY — this suite drives producer P
@@ -239,7 +323,8 @@ namespace Desert::Tests::CloudFieldRef
         // per-species products. Those are the parts that can be wrong; the rest of the packer is a
         // transcription that ComponentReflection drives directly against the real function.
         void CloudBindSpecies( CloudFieldParams& params, const Desert::Graphic::CloudTypeShape* shapes,
-                               std::uint32_t count, vec3 windDirection )
+                               std::uint32_t count, vec3 windDirection, float coverage = 0.35f,
+                               float contrast = 1.0f )
         {
             params.SpeciesCount = static_cast<int>( count );
 
@@ -247,8 +332,7 @@ namespace Desert::Tests::CloudFieldRef
             {
                 if ( slot >= count )
                 {
-                    params.SpeciesEdge[slot]      = vec4( 0.0f );
-                    params.SpeciesPlacement[slot] = vec4( 0.0f );
+                    params.SpeciesEdge[slot] = vec4( 0.0f );
                     continue;
                 }
 
@@ -256,18 +340,30 @@ namespace Desert::Tests::CloudFieldRef
 
                 params.SpeciesEdge[slot] = vec4( shape.DetailCharacter, shape.DetailFactor, shape.DensityFactor,
                                                  shape.ExtinctionFactor );
-
-                const Desert::Graphic::CloudPlacementBasis basis =
-                     Desert::Graphic::CloudSpeciesPlacementBasis( shape, windDirection.x, windDirection.z );
-                params.SpeciesPlacement[slot] = vec4( basis.AlongX, basis.AlongZ, basis.AcrossX, basis.AcrossZ );
             }
+
+            // THE PLACEMENT BASIS IS NOT BOUND HERE BECAUSE IT NO LONGER EXISTS. It told the march how to
+            // read the coverage noise in each species' own frame; the lumps are placed on a lattice in
+            // that frame at BAKE time now, so what the march is handed is where the volume is instead.
+            CloudModellingVolumeSelectSet( shapes, count, coverage, contrast, windDirection );
+
+            params.RegionOriginKm  = ModellingVolume().OriginKm;
+            params.InvRegionSizeKm = 1.0f / ModellingVolume().Params.RegionSizeKm;
+        }
+
+        /// The altitude fraction in the layer the bound volume was baked over — what the march computes
+        /// with CloudHeightFraction and hands to the seam. Exposed so a test can ask about an ABSOLUTE
+        /// altitude, which is what every meteorological assertion in this suite is written in.
+        float CloudLayerHeightFraction( float altitudeKm )
+        {
+            const Desert::Assets::CloudProceduralFieldParams& p = ModellingVolume().Params;
+            return ( altitudeKm - p.LayerBottomKm ) / std::max( p.LayerThicknessKm, 1e-6f );
         }
 
         /// Bind one species into the table AND into the params, which is what every single-type test in
         /// this suite wants and what a layer with one slot filled actually does.
         void CloudBindSingleSpecies( CloudFieldParams& params, const Desert::Graphic::CloudTypeShape& shape )
         {
-            CloudProfileTableSelect( shape );
             CloudBindSpecies( params, &shape, 1u, vec3( 1.0f, 0.0f, 0.0f ) );
         }
 

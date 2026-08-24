@@ -18,9 +18,12 @@
 
 #include "CloudScheduleReference.hpp"
 
+#include <Engine/Assets/CloudProceduralVolume.hpp>
+#include <Engine/Graphic/Clouds/CloudPayload.hpp>
+
 #include <Engine/Assets/CloudNoiseVolume.hpp>
 #include <Engine/Assets/CloudTypeData.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 
 #include <Common/Core/Constants.hpp>
 
@@ -38,7 +41,6 @@
 #include <vector>
 
 using namespace Desert::Assets;
-using Desert::Graphic::CloudProfileCurve;
 using Desert::Graphic::CloudTypeBaseKm;
 using Desert::Graphic::CloudTypeShape;
 using Desert::Graphic::CloudTypeTopKm;
@@ -120,16 +122,104 @@ namespace
         return parsed ? parsed.ExtractValue() : CloudTypeData{};
     }
 
-    // The lowest altitude at which this type has any body at all, at the core of a placement patch, and
-    // the highest. Measured off the generator rather than read off the fields, so a type whose ramps
-    // swallow its own band is measured as it will be rendered.
+    // ------------------------------------------------------------------------------------------------
+    // WHAT A TYPE ACTUALLY PUTS IN THE SKY, measured off the PRODUCER
+    // ------------------------------------------------------------------------------------------------
+    //
+    // These three used to evaluate Graphic::CloudProfileCurve — the parametric curve behind the profile
+    // table. There is no curve and no table: the profile is the normalised distance field of a pile of
+    // lumps the generator places, so a helper that still evaluated the curve would be asserting
+    // meteorology about arithmetic nothing renders.
+    //
+    // They place the lumps this type would place, with the same function the bake calls, and read the
+    // field up a vertical line through the tallest cluster. That is a STRONGER anchor than the curve was:
+    // it measures where the material ends up rather than where a generator intended to put it.
+
+    /// The bake parameters for one type on its own, at the layer's shipped lattice.
+    Desert::Assets::CloudProceduralFieldParams TypeParams( const CloudTypeShape& shape )
+    {
+        Desert::Assets::CloudProceduralFieldParams params;
+
+        const float latticeKm = 3.0f * std::max( shape.PlacementScale, 1e-3f );
+
+        params.RegionSizeKm      = std::max( latticeKm * 6.0f, 16.1f );
+        params.LayerBottomKm     = CloudTypeBaseKm( shape );
+        params.LayerThicknessKm  = std::max( CloudTypeTopKm( shape ) - params.LayerBottomKm, 0.001f );
+        params.BlendRadiusKm     = 0.02f * latticeKm;
+        params.ProfileDepthKm    = 0.12f * latticeKm;
+        params.Coverage          = 1.0f;
+        params.CoverageContrast  = 1.0f;
+        params.Seed              = 1u;
+        params.WindAxis          = glm::vec2( 1.0f, 0.0f );
+        params.ResolvableChordKm = Desert::Graphic::CloudFinestResolvableChordKm( 256.0f );
+
+        Desert::Assets::CloudProceduralSpecies species;
+        species.Shape      = shape;
+        species.CellKm     = latticeKm;
+        species.Anisotropy = std::max( shape.PlacementAnisotropy, 1e-3f );
+        params.Species.push_back( species );
+
+        return params;
+    }
+
+    /// The tallest cluster this type places in one region, and the lumps of that region.
+    struct TypeColumn
+    {
+        Desert::Assets::CloudProceduralFieldParams      Params;
+        std::vector<Desert::Assets::CloudModellingBlob> Blobs;
+        glm::vec3                                       TallestKm{ 0.0f };
+    };
+
+    const TypeColumn& ColumnOf( const CloudTypeShape& shape )
+    {
+        // Memoized on the shape's bytes: nine types, three helpers each, and a bake of the lump list is
+        // the expensive part. It changes no answer — the generator is a pure function.
+        static std::map<std::string, TypeColumn> cache;
+
+        const std::string key( reinterpret_cast<const char*>( &shape ), sizeof( CloudTypeShape ) );
+
+        const auto it = cache.find( key );
+        if ( it != cache.end() )
+            return it->second;
+
+        TypeColumn column;
+        column.Params = TypeParams( shape );
+
+        const glm::vec2 origin = Desert::Assets::CloudProceduralRegionOriginKm( column.Params, 0.0f, 0.0f );
+
+        column.Blobs = Desert::Assets::GenerateCloudProceduralBlobs( column.Params, 0u, origin );
+
+        if ( !column.Blobs.empty() )
+        {
+            column.TallestKm = column.Blobs.front().CentreKm;
+            for ( const Desert::Assets::CloudModellingBlob& blob : column.Blobs )
+            {
+                if ( blob.CentreKm.y > column.TallestKm.y )
+                    column.TallestKm = blob.CentreKm;
+            }
+        }
+
+        return cache.emplace( key, std::move( column ) ).first->second;
+    }
+
+    /// The profile up the vertical line through that cluster, sampled at @p altitudeKm.
+    float ProfileAt( const CloudTypeShape& shape, float altitudeKm )
+    {
+        const TypeColumn& column = ColumnOf( shape );
+        if ( column.Blobs.empty() )
+            return 0.0f;
+
+        return Desert::Assets::EvaluateCloudProceduralProfile(
+             column.Params, column.Blobs, glm::vec3( column.TallestKm.x, altitudeKm, column.TallestKm.z ) );
+    }
+
     float ProfileBaseKm( const CloudTypeShape& shape )
     {
         const float top = CloudTypeTopKm( shape );
-        for ( int i = 0; i <= 4000; ++i )
+        for ( int i = 0; i <= 2000; ++i )
         {
-            const float altitudeKm = top * static_cast<float>( i ) / 4000.0f;
-            if ( CloudProfileCurve( shape, altitudeKm, 1.0f ) > 0.0f )
+            const float altitudeKm = top * static_cast<float>( i ) / 2000.0f;
+            if ( ProfileAt( shape, altitudeKm ) > 0.0f )
                 return altitudeKm;
         }
         return top;
@@ -138,10 +228,10 @@ namespace
     float ProfileTopKm( const CloudTypeShape& shape )
     {
         const float top = CloudTypeTopKm( shape );
-        for ( int i = 4000; i >= 0; --i )
+        for ( int i = 2000; i >= 0; --i )
         {
-            const float altitudeKm = top * static_cast<float>( i ) / 4000.0f;
-            if ( CloudProfileCurve( shape, altitudeKm, 1.0f ) > 0.0f )
+            const float altitudeKm = top * static_cast<float>( i ) / 2000.0f;
+            if ( ProfileAt( shape, altitudeKm ) > 0.0f )
                 return altitudeKm;
         }
         return 0.0f;
@@ -154,11 +244,11 @@ namespace
     {
         const float baseKm = CloudTypeBaseKm( shape );
         const float topKm  = CloudTypeTopKm( shape );
-        const float step   = ( topKm - baseKm ) / 2000.0f;
+        const float step   = ( topKm - baseKm ) / 1000.0f;
 
         float total = 0.0f;
-        for ( int i = 0; i < 2000; ++i )
-            total += CloudProfileCurve( shape, baseKm + ( static_cast<float>( i ) + 0.5f ) * step, 1.0f ) * step;
+        for ( int i = 0; i < 1000; ++i )
+            total += ProfileAt( shape, baseKm + ( static_cast<float>( i ) + 0.5f ) * step ) * step;
 
         return total * shape.DensityFactor * shape.ExtinctionFactor;
     }
@@ -625,116 +715,36 @@ TEST( CloudTypeLibrary, EveryShippedTypeIsOneTheLoaderWouldAccept )
 
 namespace
 {
-    // Clouds_Demo's layer, which is the scene the verification protocol shoots and the one every number
-    // below was measured on. The tile is the layer's, not a type's: a type states how much coarser or
-    // finer than the layer it is, so the pair only means anything together.
-    constexpr float kLayerWeatherTileKm = 12.0f;
-
     // The component's Max Steps default. It is a QUALITY TIER — an artist who lowers it is buying speed
     // with resolution on purpose — so the library is calibrated against the default rather than against
     // whatever a scene happens to carry.
     constexpr float kComponentMaxSteps = 256.0f;
-
-    /**
-     * THE FINEST CELL A TYPE PLACES, in kilometres, over all three axes of its own placement field.
-     *
-     * Mirrors Common/CloudField.glslh: the two horizontal basis vectors come from
-     * Graphic::CloudSpeciesPlacementBasis and the VERTICAL frequency is derived from the across-wind axis
-     * exactly as the producer derives it, `CLOUD_COVERAGE_FREQ_Y * length(across) / CLOUD_COVERAGE_FREQ_Z`.
-     * The vertical is therefore always finer than the across-wind axis, and the along-wind axis is finer
-     * than either only below an anisotropy of 1 / 2.182 — in the shipped library, the Lenticular alone.
-     *
-     * @p latticeCells is how many noise cells the volume packs into one period of that field. THE HIGH
-     * frequency and not the low one: the coverage field is 0.65 of the coarse Alligator plus 0.35 of the
-     * fine one, and it is the fine component that decides how short a chord can be. Measured against the
-     * HF cell the median chord along a view ray is 0.52 to 1.22 of it across nine types and three
-     * elevations; against the LF cell the same 27 measurements scatter over 0.26 to 0.61.
-     */
-    float FinestPlacementCellKm( const CloudTypeShape& shape, float latticeCells )
-    {
-        const Desert::Graphic::CloudPlacementBasis basis =
-             Desert::Graphic::CloudSpeciesPlacementBasis( shape, 1.0f, 0.0f );
-
-        const float alongFreq  = std::sqrt( basis.AlongX * basis.AlongX + basis.AlongZ * basis.AlongZ );
-        const float acrossFreq = std::sqrt( basis.AcrossX * basis.AcrossX + basis.AcrossZ * basis.AcrossZ );
-        const float verticalFreq =
-             Desert::Graphic::kCloudCoverageFreqY * acrossFreq / Desert::Graphic::kCloudCoverageFreqZ;
-
-        const float finestFreq = std::max( { alongFreq, acrossFreq, verticalFreq } );
-
-        return kLayerWeatherTileKm / ( finestFreq * std::max( latticeCells, 1.0f ) );
-    }
-
-    /**
-     * HOW MUCH OF A CELL A CHORD IS. Measured, not derived: T2 established that a body of cloud is a fixed
-     * FRACTION of a placement cell — which is why doubling the lattice period could not cure the speckle —
-     * and this is that fraction, floored.
-     *
-     * The instrument is the one T2b used, re-pointed at the species: Common/CloudField.glslh compiled as
-     * C++, fed the shipped `.dcnv` through a trilinear REPEAT read, 2304 rays of a 45-degree frame per
-     * elevation, three elevations, nine types, the median length of the runs on which the un-eroded
-     * profile is positive. The 27 medians divided by this function's answer span 0.515 to 1.222; 0.5 is
-     * the floor of that, so a type that satisfies the relation below satisfies it for every elevation
-     * rather than on average.
-     */
-    constexpr float kMedianChordPerCell = 0.5f;
-
-    /// What the volume a type reads packs into one period of its placement field, from the volume's own
-    /// header rather than from a table here — the recipe is IN the file, which is what makes a `.dcnv` an
-    /// asset rather than a blob.
-    float VolumeLatticeCells( const std::optional<std::string>& reference )
-    {
-        // Memoized by path. The shipped decoder checks a CRC over eight mebibytes and nine types read two
-        // volumes between them; decoding each of them once is the difference between a suite that runs in
-        // a second and one that runs in eight, and it changes no answer.
-        static std::map<std::string, float> cache;
-
-        std::filesystem::path dir = LibraryDirectory();
-        EXPECT_FALSE( dir.empty() );
-        // Editor/Resources/Assets/Clouds/Types -> Editor/Resources/Assets
-        const std::filesystem::path assets = dir.parent_path().parent_path();
-
-        const std::string relative =
-             reference.has_value() ? reference.value()
-                                   : std::string( "Clouds/" ) + Desert::Assets::kCloudNoiseDefaultVolumeName;
-
-        const std::filesystem::path path = assets / relative;
-
-        const auto cached = cache.find( path.string() );
-        if ( cached != cache.end() )
-            return cached->second;
-
-        std::ifstream file( path, std::ios::binary );
-        EXPECT_TRUE( file.good() ) << "noise volume '" << path.string() << "' could not be opened";
-
-        const std::vector<unsigned char> bytes( ( std::istreambuf_iterator<char>( file ) ),
-                                                std::istreambuf_iterator<char>() );
-
-        const auto decoded = Desert::Assets::DecodeCloudNoiseVolume( bytes );
-        EXPECT_TRUE( decoded ) << "shipped noise volume '" << path.string()
-                               << "' does not decode: " << ( decoded ? std::string{} : decoded.GetError() );
-
-        const float cells = decoded ? decoded.GetValue().Params.BillowPeriodHighFrequency : 1.0f;
-        cache.emplace( path.string(), cells );
-        return cells;
-    }
 } // namespace
 
+// ---------------------------------------------------------------------------------------------------
+// THE RELATION THIS PROGRAMME HAS BEEN BITTEN BY TWICE: what the library PLACES against what the march
+// can FIND
+// ---------------------------------------------------------------------------------------------------
+//
+// HOW THIS TEST CHANGED IN PHASE Э5, and it is worth stating because the shape of the answer changed and
+// not only the arithmetic.
+//
+// It used to derive the finest CELL of a type's placement noise — three frequencies from
+// CloudSpeciesPlacementBasis against the lattice of the `.dcnv` it names — multiply by a measured
+// chord-per-cell of 0.5, and assert the result against the march's search step. It was a good test and it
+// found five of nine types past Nyquist. It measured a chain that no longer exists: there is no placement
+// noise, and a type's structure is the LUMPS the generator places.
+//
+// So it measures the lumps, and the relation is the same relation, held closer to the thing it is about:
+// the smallest semi-axis of any lump the type places, doubled, against the chord the march resolves.
+// Closer, because the old version needed a measured 0.5 to get from a cell to a chord and this needs
+// nothing — a lump's diameter IS a chord through it.
+//
+// AND THE ANSWER IS NOW A CLAMP RATHER THAN A HOPE. The generator floors every semi-axis at half the
+// chord it is handed, so this cannot fail for a shipped type unless the clamp is removed. That is the
+// point: it is the line that fails the day somebody decides the clamp is unnecessary.
 TEST( CloudTypeLibrary, NoShippedTypePlacesStructureThinnerThanTheMarchCanFind )
 {
-    // THE RELATION THIS TEST EXISTS FOR, and the reason it is a test rather than a comment: the two sides
-    // moved three times without ever being compared. T2 measured the ratio on ONE type, brought it to
-    // 1.03x Nyquist, and wrote the number down. T0 then made the shell the species' own envelope, which
-    // moved the march's step; T3 then gave every species its own placement scale and anisotropy, which
-    // moved the structure — by different factors, in different directions, per type. Re-measured on the
-    // whole library afterwards, five of the nine were past Nyquist against the march's SEARCH step, the
-    // worst of them (Cirrus) by 3.66x with three quarters of its chords thinner than one search step.
-    //
-    // The bound is the search step and not the integration step. Outside cloud the march strides by
-    // CloudCoarseStepKm and only drops to the fine tier once a coarse sample has already found material,
-    // so a chord that fits between two coarse samples is never seen at all — and whether it fits is
-    // decided by the ray's jitter, which is the definition of speckle. CloudResolvableChordKm is that
-    // statement; CloudFinestResolvableChordKm is its value at the finest the schedule ever marches.
     using namespace Desert::Tests::CloudScheduleRef;
 
     const float resolvableKm = CloudFinestResolvableChordKm( kComponentMaxSteps );
@@ -750,87 +760,88 @@ TEST( CloudTypeLibrary, NoShippedTypePlacesStructureThinnerThanTheMarchCanFind )
                                kCloudTypeCumulusCongestus, kCloudTypeCumulonimbus, kCloudTypeStratocumulus,
                                kCloudTypeAltocumulus, kCloudTypeCirrus, kCloudTypeLenticular } )
     {
-        const CloudTypeData data = LoadShipped( name );
+        const CloudTypeData data   = LoadShipped( name );
+        const TypeColumn&   column = ColumnOf( data.Shape );
 
-        const float cellKm  = FinestPlacementCellKm( data.Shape, VolumeLatticeCells( data.NoiseVolume ) );
-        const float chordKm = cellKm * kMedianChordPerCell;
+        ASSERT_FALSE( column.Blobs.empty() ) << name << " places nothing at full coverage";
 
-        std::printf( "[CloudTypeLibrary] %-18s finest cell %6.0f m -> median chord %6.0f m, %.2fx the "
-                     "chord the march resolves\n",
-                     name, cellKm * 1000.0f, chordKm * 1000.0f, chordKm / resolvableKm );
+        float smallestKm = column.Blobs.front().RadiiKm.x;
+        for ( const Desert::Assets::CloudModellingBlob& blob : column.Blobs )
+            smallestKm = std::min( { smallestKm, blob.RadiiKm.x, blob.RadiiKm.y, blob.RadiiKm.z } );
+
+        const float chordKm = 2.0f * smallestKm;
+
+        std::printf( "[CloudTypeLibrary] %-18s %5zu lumps, thinnest chord %6.0f m, %.2fx the %.0f m the "
+                     "march resolves\n",
+                     name, column.Blobs.size(), chordKm * 1000.0f, chordKm / resolvableKm,
+                     resolvableKm * 1000.0f );
 
         EXPECT_GE( chordKm, resolvableKm )
-             << name << " places its finest structure on a cell of " << cellKm * 1000.0f
-             << " m, whose median chord along a view ray is " << chordKm * 1000.0f << " m — thinner than the "
+             << name << " places a lump only " << chordKm * 1000.0f << " m across, thinner than the "
              << resolvableKm * 1000.0f
-             << " m the march can be relied on to find, so that fraction of this type is sampled or not "
-                "sampled by the throw of a jitter and reads as dither. Either the type places coarser "
-                "structure (its Placement Scale, its anisotropy, or the lattice of the volume it names) "
-                "or the schedule marches finer (CLOUD_DISTANCE_TO_MAX_STEPS_KM in "
-                "Common/CloudGeometry.glslh) — the two are one relation and this is where it is kept";
+             << " m the march can be relied on to find, so that part of this type is sampled or not "
+                "sampled by the throw of a jitter and reads as dither. The generator's own clamp is what "
+                "makes this impossible — if this line fails, the clamp is gone";
     }
 }
 
 // ---------------------------------------------------------------------------------------------------
 // THE SAME RELATION, READ BACKWARDS: how far Max Steps may fall before the library stops working
 // ---------------------------------------------------------------------------------------------------
-
-// The test above asks "does the shipped library clear the march the component ships with". This one asks
-// the question a QUALITY TIER asks — "how much of that march could a cheaper tier give back" — and the
-// answer is the reason Core::CloudQuality does not touch Max Steps at all.
 //
-// WHY IT IS A TEST AND NOT A PARAGRAPH IN A DOC. The bound moves whenever either side moves: a retuned
-// placement scale, a new type with a finer cell, a change to CLOUD_DISTANCE_TO_MAX_STEPS_KM. Written
-// down it would be a number somebody trusted six months after it stopped being true. Asserted, it is the
-// line that fails the day a tier is added that lowers the march, and it fails with both figures printed.
-TEST( CloudTypeLibrary, TheLibraryPinsTheLowestMaxStepsAnyQualityTierMayMarchWith )
+// THE ANSWER CHANGED IN PHASE Э5 AND THE TEST WITH IT. Before, a type's structure was fixed by its
+// placement noise and the march's step was the only moving part, so a lower Max Steps put types past
+// Nyquist — measured at five of nine when halved — and that measurement is why Graphic::CloudQualityScale
+// has no Max Steps field at all.
+//
+// The generator is handed the march's own resolvable chord and floors every lump against it, so lowering
+// Max Steps now buys COARSER CLOUDS rather than speckle. The bound is gone, and this asserts what
+// replaced it: at every count a tier could plausibly march with, every shipped type still clears THAT
+// count's chord.
+//
+// WHAT THIS MEANS FOR THE REFUSAL RECORDED IN CloudQualityScale: its carrying input has changed, so the
+// refusal should be re-measured rather than trusted. That is a finding of this phase and it is stated
+// here rather than acted on — a tier that lowers Max Steps is a cost-versus-quality decision with its own
+// frames to shoot, and this phase did not shoot them.
+TEST( CloudTypeLibrary, LoweringMaxStepsBuysCoarserCloudsRatherThanSpeckle )
 {
     using namespace Desert::Tests::CloudScheduleRef;
 
-    // CloudFinestResolvableChordKm(n) is CLOUD_COARSE_STEP_MULTIPLIER x 2 x
-    // CLOUD_DISTANCE_TO_MAX_STEPS_KM / n, so the lowest count a given chord tolerates is that constant
-    // over the chord. Derived from the function rather than from the algebra, so the two cannot drift.
-    const float chordAtOne = CloudFinestResolvableChordKm( 1.0f );
-
-    float       bound = 0.0f;
-    const char* binds = "";
-
-    for ( const char* name : { kCloudTypeStratus, kCloudTypeCumulusHumilis, kCloudTypeCumulusMediocris,
-                               kCloudTypeCumulusCongestus, kCloudTypeCumulonimbus, kCloudTypeStratocumulus,
-                               kCloudTypeAltocumulus, kCloudTypeCirrus, kCloudTypeLenticular } )
+    for ( const float maxSteps : { 256.0f, 192.0f, 128.0f, 64.0f } )
     {
-        const CloudTypeData data    = LoadShipped( name );
-        const float         cellKm  = FinestPlacementCellKm( data.Shape, VolumeLatticeCells( data.NoiseVolume ) );
-        const float         chordKm = cellKm * kMedianChordPerCell;
+        const float chordKm = CloudFinestResolvableChordKm( maxSteps );
 
-        // The lowest Max Steps at which THIS type is still findable.
-        const float lowest = chordAtOne / chordKm;
-        if ( lowest > bound )
+        for ( const char* name : { kCloudTypeStratus, kCloudTypeCumulusHumilis, kCloudTypeCumulusMediocris,
+                                   kCloudTypeCumulusCongestus, kCloudTypeCumulonimbus, kCloudTypeStratocumulus,
+                                   kCloudTypeAltocumulus, kCloudTypeCirrus, kCloudTypeLenticular } )
         {
-            bound = lowest;
-            binds = name;
+            const CloudTypeData data = LoadShipped( name );
+
+            Desert::Assets::CloudProceduralFieldParams params = TypeParams( data.Shape );
+            params.ResolvableChordKm                          = chordKm;
+
+            const glm::vec2 origin = Desert::Assets::CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+
+            const std::vector<Desert::Assets::CloudModellingBlob> blobs =
+                 Desert::Assets::GenerateCloudProceduralBlobs( params, 0u, origin );
+
+            ASSERT_FALSE( blobs.empty() ) << name << " at Max Steps " << maxSteps << " placed nothing";
+
+            for ( const Desert::Assets::CloudModellingBlob& blob : blobs )
+            {
+                const float thinnestKm = 2.0f * std::min( { blob.RadiiKm.x, blob.RadiiKm.y, blob.RadiiKm.z } );
+
+                EXPECT_GE( thinnestKm, chordKm )
+                     << name << " at Max Steps " << maxSteps << " places a lump " << thinnestKm * 1000.0f
+                     << " m across against a search chord of " << chordKm * 1000.0f
+                     << " m — the generator is not reading the count it is handed";
+            }
         }
+
+        std::printf( "[CloudTypeLibrary] at Max Steps %3.0f the march resolves %5.0f m and every shipped "
+                     "type clears it\n",
+                     maxSteps, chordKm * 1000.0f );
     }
-
-    std::printf( "[CloudTypeLibrary] the shipped library tolerates Max Steps down to %.0f — %s is what "
-                 "binds it — against the component's %.0f, a margin of %.0f steps (%.0f%%)\n",
-                 std::ceil( bound ), binds, kComponentMaxSteps, kComponentMaxSteps - std::ceil( bound ),
-                 100.0f * ( kComponentMaxSteps - std::ceil( bound ) ) / kComponentMaxSteps );
-
-    EXPECT_GE( kComponentMaxSteps, bound ) << "the component's default Max Steps no longer resolves " << binds
-                                           << ", which needs at least " << std::ceil( bound );
-
-    // AND THE MARGIN IS THE POINT. Under ten per cent of the step budget separates the shipped default
-    // from the value at which four of the nine types start dithering in and out with the ray's jitter, so
-    // there is nothing here for a tier to spend: halving Max Steps would put five of the nine past
-    // Nyquist, the worst at 0.55x. That measurement is why Graphic::CloudQualityScale has no Max Steps
-    // field — a knob whose whole legal range is 9% is not a tier, and one that reaches past it is a
-    // defect wearing a tier's name. If a future change gives the library real headroom here, THIS
-    // assertion is what will say so by starting to fail.
-    EXPECT_LT( kComponentMaxSteps - bound, 0.25f * kComponentMaxSteps )
-         << "the library now has real headroom below the shipped Max Steps (" << bound
-         << "), so the refusal recorded in Graphic::CloudQualityScale should be re-measured rather than "
-            "trusted";
 }
 
 int main( int argc, char** argv )

@@ -9,9 +9,11 @@
 // UNITS: KILOMETRES throughout, already converted on the C++ side by PackCloudParams. Nothing in this
 // block is in world units, and nothing downstream converts a second time.
 //
-// EVERY SLOT HAS A CONSUMER. The block is packed to exactly 48 floats with no padding and no
+// EVERY SLOT HAS A CONSUMER. The block is packed to exactly 63 floats with no padding and no
 // reserved field, because a slot nobody reads is a dead setting wearing a parameter's
-// clothes — and the first person to need a new one will quietly repurpose it.
+// clothes — and the first person to need a new one will quietly repurpose it. Phase Э5 is what that
+// rule looks like when it bites: the coverage, its contrast and its tile moved to the BAKE, so rather
+// than travel to a march that would not read them they left the block, and the region took their slot.
 //
 // FIELDS ARE APPENDED, NEVER INSERTED. Every offset here is a promise to the shader; a field placed in
 // the middle silently reinterprets every field after it.
@@ -30,7 +32,15 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     // w is the LAYER's extinction now, without any species' factor folded into it: with up to four kinds
     // of cloud in one shell the factor became a property of the sample and travels in CloudFieldSample.
     vec4  u_CloudMarch;     // x max steps, y stop transmittance, z tracing start distance (km), w extinction (1/km)
-    vec4  u_CloudWeather;   // x coverage tile (km), y coverage, z coverage contrast, w detail tile (km)
+    // THE MODELLING VOLUME'S REGION, IN THE SLOT THE WEATHER SETTINGS VACATED. Three of the four numbers
+    // that stood here — the coverage tile, the coverage and its contrast — decided WHERE cloud is, and all
+    // three are consumed by the BAKE now (Assets::BakeCloudProceduralVolume); sending them to a march that
+    // would not read them would be three dead slots in a block whose whole discipline is that every slot
+    // has a consumer. The fourth, the erosion's period, is still read here and stayed put.
+    //
+    // xy the region's minimum corner in world kilometres, SNAPPED to the lump lattice; z the RECIPROCAL of
+    // its horizontal side; w the erosion's period in kilometres.
+    vec4  u_CloudRegion;
     // w is HOW MANY SPECIES this layer carries, 0..4, and it is the bound of the march's per-species loop.
     // It is a count rather than a mask because the slots are filled from the front by PackCloudParams.
     vec4  u_CloudDetail;    // x detail strength, y density scale, z scattering albedo, w species count
@@ -50,19 +60,18 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     // reaches full strength (km), z = distance at which the near-camera fade ends (km), w = the
     // distance at which it begins (km).
     vec4  u_CloudFade;
-    // THE FOUR SPECIES, one entry each, and both arrays are indexed by the same slot.
+    // THE FOUR SPECIES, one entry each: x DetailCharacter, y DetailFactor, z DensityFactor,
+    // w ExtinctionFactor — what that kind of cloud is MADE OF, taken by whichever species wins the union
+    // at a sample and never averaged across them.
     //
-    // u_CloudSpeciesEdge[k]:      x DetailCharacter, y DetailFactor, z DensityFactor, w ExtinctionFactor —
-    //                             what that kind of cloud is MADE OF, taken by whichever species wins the
-    //                             union at a sample and never averaged across them.
-    // u_CloudSpeciesPlacement[k]: xy the along-wind basis vector of that species' own placement field, zw
-    //                             the across-wind one. Scale and anisotropy are already in their lengths;
-    //                             the march divides by u_CloudWeather.x.
+    // THE PER-SPECIES PLACEMENT BASIS THAT STOOD BESIDE THIS ARRAY IS GONE, and it is not that it moved:
+    // it told the march how to read the coverage noise in each species' own frame, and there is no
+    // coverage noise. The lumps of the modelling volume are placed on a lattice in that same frame, on the
+    // CPU, at bake time. Four vec4s left the block with it.
     //
     // Slots at or past u_CloudDetail.w are zero and are never read: the loop stops at the count, and the
-    // profile table's channel for an empty slot is zero everywhere anyway.
+    // modelling volume's channel for an empty slot is zero everywhere anyway.
     vec4  u_CloudSpeciesEdge[4];
-    vec4  u_CloudSpeciesPlacement[4];
     // x = aerial-perspective volume far extent (km), y = its read-side view-distance scale,
     // z = 1 when the volume exists and must be sampled.
     //
@@ -70,14 +79,14 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     // used to be a vec4 whose fourth slot carried the cloud type's variance, and then the domain warp's
     // amount; the warp was measured and taken out (see the note in Common/CloudField.glslh), so rather
     // than leave a float nobody reads — which is where the next parameter would get stashed without a
-    // name, a range or a tooltip — the block ends in a vec3. std430 puts it at offset 176 and the block
-    // is 188 bytes; Graphic::CloudGpuPayload pins exactly that with a static_assert.
+    // name, a range or a tooltip — the block ends in a vec3. std430 puts it at offset 240 and the block
+    // is 252 bytes; Graphic::CloudGpuPayload pins exactly that with a static_assert.
     vec3  u_CloudAerial;
 };
 
-// The block is ELEVEN vec4s and a vec3, and it stops there. Seeds and octave counts are absent on purpose:
-// they decide what the baked noise volume CONTAINS, not how the march reads it, so they belong to the
-// generator and would be four values copied into every dispatch here for nothing.
+// The block is ELEVEN vec4s, a vec4[4] and a vec3, and it stops there. Seeds and octave counts are absent
+// on purpose: they decide what the baked volumes CONTAIN, not how the march reads them, so they belong to
+// the generators and would be four values copied into every dispatch here for nothing.
 
 // THE STEP SCHEDULE IS NOT HERE ANY MORE. CLOUD_MIN_STEPS and CLOUD_DISTANCE_TO_MAX_STEPS_KM used to be
 // declared in this file, beside the parameter block, and their two siblings — the coarse multiplier and
@@ -97,19 +106,16 @@ CloudLayer CloudUnpackLayer()
 CloudFieldParams CloudUnpackFieldParams()
 {
     CloudFieldParams p;
-    p.WeatherTileKm    = u_CloudWeather.x;
-    p.Coverage         = u_CloudWeather.y;
-    p.CoverageContrast = u_CloudWeather.z;
-    p.DetailTileKm     = u_CloudWeather.w;
-    p.DetailStrength   = u_CloudDetail.x;
-    p.DensityScale     = u_CloudDetail.y;
-    p.SpeciesCount     = int( clamp( u_CloudDetail.w, 0.0f, float( CLOUD_SPECIES_SLOTS ) ) );
+    p.DetailTileKm   = u_CloudRegion.w;
+    p.DetailStrength = u_CloudDetail.x;
+    p.DensityScale   = u_CloudDetail.y;
+    p.SpeciesCount   = int( clamp( u_CloudDetail.w, 0.0f, float( CLOUD_SPECIES_SLOTS ) ) );
 
     for ( int slot = 0; slot < CLOUD_SPECIES_SLOTS; ++slot )
-    {
-        p.SpeciesEdge[slot]      = u_CloudSpeciesEdge[slot];
-        p.SpeciesPlacement[slot] = u_CloudSpeciesPlacement[slot];
-    }
+        p.SpeciesEdge[slot] = u_CloudSpeciesEdge[slot];
+
+    p.RegionOriginKm  = vec2( u_CloudRegion.x, u_CloudRegion.y );
+    p.InvRegionSizeKm = u_CloudRegion.z;
 
     p.WindOffsetKm = vec3( u_CloudWind.x, u_CloudWind.y, u_CloudWind.z );
     return p;

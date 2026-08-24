@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/Core.hpp>
@@ -42,7 +42,7 @@ namespace Desert::Assets
     inline constexpr const char* kCloudTypeExtension = ".decloudtype";
 
     /// The FILE layout's version, bumped when a field moves. It is not the maths' version: the profile
-    /// generator lives in Engine/Graphic/Clouds/CloudProfileTable.hpp and changing it changes every type at
+    /// generator lives in Engine/Graphic/Clouds/CloudTypeShape.hpp and changing it changes every type at
     /// once, which is a change to the engine rather than to any file.
     /// VERSION 2 SINCE T3. The shape gained `PlacementScale` and `PlacementAnisotropy` — where a type puts
     /// itself in the sky and how it is drawn out by the wind — and a version-1 file does not carry them.

@@ -8,22 +8,18 @@ project(test_name)
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
-    -- One unit under test, GPU-free:
-    --   * Editor/Resources/Shaders/Common/CloudField.glslh — the vertical profile, the coverage mapping
-    --     and the depth-weighted erosion — compiled AS C++ through CloudFieldReference.hpp, fed by the
-    --     same noise functions Programs/Clouds/CloudNoiseBake.shader bakes into the volume the march
-    --     samples. That is why the SHADER ROOT is on the include path: the test drives the exact text the
-    --     cloud passes compile, so a passing test is a statement about the code the GPU runs.
-    -- Still no renderer and no Vulkan. The one engine source listed is the cloud TYPE's data layer, and
-    -- only for CloudTypeDefaultShape: the coverage numbers this suite measures are calibration data for
-    -- the shipped sky, so they have to be measured on the shape a scene with an empty slot actually
-    -- renders rather than on a copy of it that can drift.
+    -- The subject is the PROCEDURAL producer of phase Э5: Engine/Assets/CloudProceduralVolume.cpp, the
+    -- hash that places the lumps and the bake that turns them into a camera-centric periodic volume.
+    --
+    -- CloudModellingVolume.cpp comes with it because the sculpting maths is SHARED rather than copied —
+    -- the distances, the join's term and the join itself are that file's, called by this one. A suite that
+    -- stubbed them would be testing a second implementation instead of the one that ships.
+    --
+    -- The shader root is on the include path for one header: Common/CloudGeometry.glslh, compiled as C++,
+    -- which is what lets the generator's lump-size clamp be asserted against the march's OWN search step
+    -- rather than against a number typed out twice.
     files {
         test_files,
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
-        -- The PRODUCER, because the seam's field is a fetch of the volume this bakes. A suite that
-        -- stubbed the volume would be measuring the sampler and nothing else; what makes the double
-        -- compilation worth anything is that the bytes under the mirror are the bytes the device gets.
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
     }
@@ -32,7 +28,6 @@ project(test_name)
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
         "%{wks.location}/Editor/Resources/Shaders",
-        "%{wks.location}/ThirdParty/reflect-cpp/include", -- the type's file format is rfl::json
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
@@ -55,13 +50,9 @@ project(test_name)
         defines { "DESERT_PLATFORM_LINUX" }
     filter {}
 
-    -- Common: the Result/error type the type's validation is carried in.
+    -- Common: the Result/error type every refusal in the generator is carried in.
     -- Optick: Common's JobSystem registers its worker threads with the profiler.
     links { "Common", "Optick" }
-
-    filter "system:not windows"
-        links { "ReflectCpp" }
-    filter {}
 
     filter "configurations:Debug"
         for name, path in pairs(deps.TestSpecific.Libraries.Debug) do

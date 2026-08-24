@@ -4,6 +4,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -288,6 +289,70 @@ namespace Desert::Assets
         /// to agree on it and neither can see the other.
         std::vector<unsigned char> Voxels;
     };
+
+    // -----------------------------------------------------------------------------------------------
+    // THE SCULPTING MATHS, EXPOSED — because a SECOND producer bakes with it now
+    // -----------------------------------------------------------------------------------------------
+    //
+    // These five declarations were private to the bake until phase Э5 gave the PROCEDURAL producer a
+    // modelling volume of its own (Engine/Assets/CloudProceduralVolume.hpp). That producer places its lumps
+    // by a hash instead of by an artist, and it walks them in a different ORDER — one lump splatted into
+    // its own neighbourhood, rather than every lump gathered at one voxel — because a region holds hundreds
+    // of lumps where a sculpted body holds at most 64.
+    //
+    // A DIFFERENT LOOP MUST NOT MEAN A DIFFERENT FORMULA. The distance, the join's per-lump term and the
+    // join itself are the text below, called by both, so that "the two producers agree about what a lump
+    // is" is true by construction rather than by vigilance — which is exactly the two-statements-of-one-
+    // fact defect class contract §2.3.1 names. Desert/Tests/Engine/CloudProceduralField still asserts it on
+    // the numbers, because that class survives good intentions.
+
+    /// One lump with everything that does not depend on the sample point already done: the rotation
+    /// inverted (a rotation matrix is orthonormal, so the inverse is the transpose — exact and free of the
+    /// drift a general inverse would add), and the two material numbers carried along.
+    struct CloudModellingPreparedBlob
+    {
+        glm::vec3               CentreKm{ 0.0f };
+        glm::vec3               RadiiKm{ 0.0f };
+        glm::mat3               IntoLocal{ 1.0f };
+        CloudModellingPrimitive Primitive    = CloudModellingPrimitive::Ellipsoid;
+        float                   Weight       = 1.0f;
+        float                   DetailType   = 1.0f;
+        float                   DensityScale = 1.0f;
+    };
+
+    CloudModellingPreparedBlob PrepareCloudModellingBlob( const CloudModellingBlob& blob );
+
+    /// The signed distance from @p pointKm to that lump, kilometres, negative inside. Exact for a sphere
+    /// and a capsule, a tight underestimate for an ellipsoid — and an underestimate is the safe direction,
+    /// because it makes the body slightly smaller than the bound Validate checked, never larger.
+    float CloudModellingBlobDistanceKm( const CloudModellingPreparedBlob& blob, const glm::vec3& pointKm );
+
+    /// The lump's world-axis-aligned half-extent once it is rotated. `|R| * r` is the exact AABB of a
+    /// rotated box and every primitive is contained in its own box, so this bounds all three.
+    glm::vec3 CloudModellingBlobHalfExtentKm( const CloudModellingBlob& blob );
+
+    /// Sorts lumps into THE canonical order, in place. The join is commutative and associative in real
+    /// arithmetic and neither in floating point, so a bake whose bytes must not depend on the order its
+    /// inputs arrived in sorts first. The key covers every authored number: two lumps differing only in
+    /// rotation are different lumps, and a key that could not tell them apart would leave their order to
+    /// `std::sort`'s internals — the very non-determinism the sort removes.
+    void SortCloudModellingBlobs( std::vector<CloudModellingBlob>& blobs );
+
+    /// One lump's term in the smooth minimum's sum, with the SHIFT already applied.
+    ///
+    /// The shift is what keeps this finite: `exp(-d/r)` overflows a float once `d/r` passes about 88, which
+    /// at a 60 m blend radius is 5.3 km — nearer than the corner of many regions. Subtracting the smallest
+    /// distance first is algebraically the identity and moves the largest exponent to exactly 1.
+    inline float CloudModellingJoinTerm( float weight, float distanceKm, float nearestKm, float invBlendRadius )
+    {
+        return weight * std::exp( -( distanceKm - nearestKm ) * invBlendRadius );
+    }
+
+    /// The exponential smooth minimum, shifted back: `nearest - r*ln(sum)`.
+    inline float CloudModellingJoinKm( float nearestKm, float weightSum, float blendRadiusKm )
+    {
+        return nearestKm - std::log( weightSum ) * blendRadiusKm;
+    }
 
     /**
      * @brief Lays several baked bodies end to end into the bytes of ONE volume — the atlas the march

@@ -8,7 +8,7 @@
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionSerializer.hpp>
 #include <Engine/Core/SceneSettings.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Units.hpp>

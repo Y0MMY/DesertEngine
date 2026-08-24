@@ -2,10 +2,11 @@
 
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 
+#include <Engine/Assets/CloudProceduralVolume.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
-#include <Engine/Graphic/Clouds/CloudProfileTable.hpp>
+#include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 #include <Engine/Graphic/Clouds/CloudQuality.hpp>
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/Materials/Clouds/MaterialCloudComposite.hpp>
@@ -15,7 +16,9 @@
 
 #include <glm/glm.hpp>
 
+#include <chrono>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -188,12 +191,38 @@ namespace Desert::Graphic::System
          */
         uint32_t ResolveSpecies( CloudTypeShape ( &shapes )[kCloudSpeciesSlots],
                                  Assets::AssetHandle ( &handles )[kCloudSpeciesSlots] ) const;
-        // Builds and uploads the vertical profile table for this layer's cloud type, and only when that
-        // type — or the file behind it — has changed. The table is a pure function of the type's twelve
-        // numbers (Graphic::CloudBuildProfileTable), so rebuilding it per frame would be 16 384 curve
-        // evaluations and a synchronous staging upload for an answer that is identical. Returns false
-        // having logged the reason when the image could not be created.
-        bool EnsureProfileTable();
+        /**
+         * Keeps the procedural MODELLING VOLUME up to date for this view, and collects a finished bake.
+         *
+         * WHAT IT DECIDES, once a frame and cheaply: whether the parameters that go into the bake have
+         * changed, and whether the camera has crossed a snap of the lump lattice. Either answer starts a
+         * bake ON A WORKER THREAD; neither blocks the frame. A bake in flight is collected the frame it
+         * finishes and uploaded then.
+         *
+         * WHY A WORKER AND NOT THE FRAME. The bake is measured, not assumed — that is the exit criterion
+         * this phase was given (ANALYSIS_APPROACH.md §3) — and Desert/Tests/Engine/CloudProceduralField
+         * prints it on every run: 803 / 1584 / 2529 ms for one, two and four species in a Debug build. A
+         * region shift happens once per lattice cell of camera travel, which at the shipped 3 km cell is
+         * rarely; a two-second hitch when it does would be worse than anything the volume buys.
+         *
+         * WHAT THE FRAME DOES MEANWHILE: it marches the volume it already has. That volume was baked for
+         * a region the camera has left by at most one snap step, and it is periodic — so the answer is
+         * the neighbouring tile's rather than nothing, which is the same degenerate far path the sky past
+         * the region already uses. The first bake of a scene is the one case with no previous volume, and
+         * until it lands the species count in the payload is zero and the march composites nothing.
+         *
+         * @return false, having logged the reason, when the image could not be created at all.
+         */
+        bool EnsureModellingVolume();
+
+        /// The parameters this view's volume was baked from, as a pure function of the layer and the
+        /// resolved species. Separated out because it is asked for twice — once to compare against what
+        /// is on the device, once to hand to the bake — and two constructions of one value is the defect
+        /// class §2.3.1 names.
+        ///
+        /// @param shapes / speciesCount the packed set ResolveSpecies produced.
+        Assets::CloudProceduralFieldParams BuildProceduralParams( const CloudTypeShape* shapes,
+                                                                  uint32_t              speciesCount ) const;
 
         /**
          * Turns this frame's hero clouds into the instance buffer the two cloud passes read, and points
@@ -279,21 +308,55 @@ namespace Desert::Graphic::System
         bool m_AuthoredCrowdWarned  = false;
         bool m_AuthoredBodiesWarned = false;
 
-        // The vertical profile table this view marches against — OWNED, unlike the noise volume, because
-        // it is GENERATED here rather than resolved from an asset: the type ships twelve numbers, not
-        // sixteen thousand texels (decision D-13). 64 KiB per view, which is two thousandths of the
-        // subsystem's budget.
-        std::shared_ptr<Image2D> m_ProfileTable;
-        // WHAT THE TABLE WAS BUILT FROM, and it takes two values rather than one. The handle answers "is
-        // this still the type the artist chose"; the generation answers "is the FILE behind that type still
-        // the one I read", which is what makes an edit in the Cloud Type panel show up in the viewport
-        // without the handle changing at all. A null handle with generation 0 is the "no table yet" state,
-        // and it is unreachable as a real answer because a registered type always bumps the generation
-        // past zero.
-        // FOUR HANDLES NOW, in the packed order ResolveSpecies produced them, plus how many of them were
-        // real. Comparing the whole set rather than one handle is what makes dropping a second type into
-        // the layer rebuild the table: the first slot has not changed, and a cache keyed on it alone would
-        // show a one-species sky until something else happened to invalidate it.
+        // The procedural MODELLING VOLUME this view marches against — OWNED, unlike the noise volume,
+        // because it is GENERATED here rather than resolved from an asset, and because WHERE it is baked
+        // depends on THIS view's camera.
+        //
+        // PER VIEW AND NOT SHARED, and the cost of that is named rather than buried: 8.00 MiB per live
+        // renderer where the profile table it replaces was 0.25 MiB. Sharing one volume across views would
+        // be the exact defect Docs/RENDERER_FRAME_STATE.md exists to prevent — the region follows a
+        // camera, so a second live renderer would drag the viewport's sky to wherever the preview's camera
+        // happens to be, and the two would re-bake each other's region every frame. A renderer with no
+        // cloud component never allocates it, which is every asset thumbnail and every mesh preview.
+        std::shared_ptr<Image3D> m_ModellingVolume;
+
+        // A BAKE IN FLIGHT. A future rather than a raw thread so the result is collected exactly once and
+        // the destructor has something to wait on — the same arrangement, for the same reason, that the
+        // sculpting panel's bake uses.
+        std::future<Common::ResultStr<std::vector<unsigned char>>> m_ModellingBake;
+
+        // WHAT THE VOLUME ON THE DEVICE WAS BAKED FROM. Two things, and both have to be asked about: the
+        // PARAMETERS, which change when the artist moves a slider or drops a different type into a slot,
+        // and the REGION ORIGIN, which changes when the camera crosses a snap of the lump lattice. A cache
+        // keyed on one of them alone would either never follow the camera or re-bake on every edit that
+        // did not reach the field.
+        Assets::CloudProceduralFieldParams m_ModellingParams{};
+        glm::vec2                          m_ModellingOriginKm{ 0.0f };
+        bool                               m_ModellingValid = false;
+
+        // The region the bake IN FLIGHT is for, so that the frame it lands the payload can be pointed at
+        // the region that was actually baked rather than at wherever the camera is by then.
+        Assets::CloudProceduralFieldParams m_PendingParams{};
+        glm::vec2                          m_PendingOriginKm{ 0.0f };
+
+        // When the bake in flight was started, so the log line that collects it can print what it cost.
+        // Wall time and not CPU time: what this number bounds is how far the sky lags the camera.
+        std::chrono::steady_clock::time_point m_ModellingBakeStarted{};
+
+        // Latched so a bake that cannot be started, or an image that cannot be created, is said once per
+        // scene rather than sixty times a second.
+        bool m_ModellingFailed = false;
+        // WHAT THE VOLUME WAS BUILT FROM ON THE ASSET SIDE, and it takes two values rather than one. The
+        // handle answers "is this still the type the artist chose"; the generation answers "is the FILE
+        // behind that type still the one I read", which is what makes an edit in the Cloud Type panel show
+        // up in the viewport without the handle changing at all. A null handle with generation 0 is the
+        // "nothing baked yet" state, and it is unreachable as a real answer because a registered type
+        // always bumps the generation past zero.
+        //
+        // FOUR HANDLES, in the packed order ResolveSpecies produced them, plus how many of them were real.
+        // Comparing the whole set rather than one handle is what makes dropping a second type into the
+        // layer re-bake: the first slot has not changed, and a cache keyed on it alone would show a
+        // one-species sky until something else happened to invalidate it.
         Assets::AssetHandle m_ProfileTypes[kCloudSpeciesSlots]{};
         uint32_t            m_ProfileSpeciesCount = 0;
         uint32_t            m_ProfileGeneration   = 0;
