@@ -688,6 +688,18 @@ knock-out build differs from the shipped one by two functions returning their ar
 
 Frames: `Shots/CS_flyover_snap_on_f150.png` and `Shots/CS_flyover_snap_off_f150.png`.
 
+### The sweep
+
+After `rm -rf build/Tests/Intermediates/Debug` **and** with every binary deleted before its own build:
+
+**62 test makefiles, 62 binaries built, 62 binaries run, zero failures.**
+
+The count was 61 before this phase and is 62 because `CloudProceduralField` is new. The audit of the skip
+list — walking every binary in `build/Bin/Tests/Debug` and asking whether the list would have hidden it —
+comes back empty: nothing in the list is a test. The list has hidden real suites once before
+(`DShaderParser`, `FontBaker`, `MeshSimplifier`, 35 tests that never executed for a whole programme), which
+is why the audit is run rather than the list trusted.
+
 ### The frames
 
 | file | what it shows |
@@ -1971,7 +1983,11 @@ interpenetrate by more than a quarter of a lobe.
 ### The six points, before and against
 
 `Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, ImageStat over the full width and the top
-71.9 % of the frame. **Two things changed at once and both are named**: the producer, and the scene's
+71.9 % of the frame.
+
+**The repeat floor is ZERO and was measured rather than assumed**, which is what makes every number below
+exact: the six points were shot twice, across two rebuilds of the engine and the editor, and all six PNGs
+are byte for byte identical between the runs (`cmp`, not a pixel diff — the files themselves). **Two things changed at once and both are named**: the producer, and the scene's
 authored Coverage — 0.24 meant ~66 % sky cover under the old threshold and means ~15 % under the new count,
 so the shipped scenes were re-authored at EQUAL SKY COVER (0.24 -> 0.762). See the note on
 `VolumetricCloudData::Coverage`.
@@ -1996,22 +2012,46 @@ fused masses with blue between them. The two are told apart by looking, which is
 
 ### The relations this phase added, and the breaks that verified them
 
+Nine sabotages, eleven suite runs, **nine red and two green**. Every suite was rebuilt from deleted
+OBJECTS *and* a deleted BINARY first — see the note below, which is why.
+
 | break | result |
 |---|---|
 | the generator ignores its seed | RED |
 | the bake's bin lists lose the lumps' canonical order | RED |
-| the lump size clamp is removed | RED (two suites) |
-| the lumps are not splatted at their wrapped positions | RED (the seam step goes from 0.5/255 to an order of magnitude above the neighbour step) |
-| a cell's hash is taken on its position in the REGION instead of its absolute index | RED |
+| the lump size clamp is removed | RED (two suites: `CloudProceduralField`, `CloudType`) |
+| the lumps are not splatted at their wrapped positions | RED (two tests) |
+| a cell is hashed on its place in the REGION instead of its absolute index | RED |
 | the join cutoff is lowered from 14 radii to 10 | **RED — and this is how the 14 was found** |
-| the coverage exponent is set back to 1.0 | RED |
-| the volume's extents in the shader disagree with the C++ constants | RED |
+| the coverage exponent is set back to 1 | RED |
+| the shader's volume height disagrees with the C++ constant | **GREEN — a real hole, closed** |
+| the volume's vertical read is not clamped to the texel centres | **GREEN — a real hole, closed** |
 
-**One of them is a finding rather than a confirmation.** The cutoff at ten radii was written with a
-quantisation argument that used `N ~ 100` lumps in range. `N` is not a constant of the design — it is how
-many lumps reach a voxel — and widening the clusters to make the coverage slider mean the sky took it to
-about six hundred. The suite went red at 1.24 of a 255th, which is the assertion failing exactly where it
-was written to.
+**Three findings, and only one of them is a confirmation.**
+
+1. **The cutoff at ten radii was written with the wrong `N`.** The quantisation argument used about a
+   hundred lumps in range; `N` is not a constant of the design — it is how many lumps reach a voxel — and
+   widening the clusters to make the coverage slider mean the sky took it to about six hundred. The suite
+   went red at 1.24 of a 255th, which is the assertion failing exactly where it was written to.
+2. **Nobody was comparing the shader's volume height with the C++ constant, and the header said somebody
+   was.** `CloudProceduralField` does not include `Common/CloudField.glslh` at all — it compiles only
+   `CloudGeometry.glslh` — so the claim that it asserted the agreement was simply false. The assertion is
+   in `CloudField` now, which does compile that header. **The same sabotage turned up two dead macros:**
+   `CLOUD_PROCEDURAL_VOLUME_WIDTH` and `_DEPTH` were declared "for symmetry" and never read, because the
+   horizontal mapping is `(world - origin) * invRegionSize` and is in texture units already.
+3. **A property was deleted with the thing that used to carry it.** The profile table had
+   `TheReadIsClampedSoTheLayerCeilingDoesNotWrapOntoItsFloor`; the table went, and the property went with
+   it instead of moving to the volume that replaced it. It needed a FIXTURE, which is why it was easy to
+   lose: an ordinary layer is the union of its types' bands, so both ends of the volume are empty and a
+   wrap onto the floor is invisible. The new test bakes a cumulus into the bottom eighth of an 8 km layer,
+   where 767 of 2304 columns carry cloud low down and none may carry any at the very top.
+
+**And a defect in the harness, for the second time in this programme.** The sweep deleted the
+intermediates before building and not the BINARIES, so `CloudAuthored` — which could not compile at all,
+its reference still calling `CloudBuildProfileTable` — ran its binary from before the change and reported
+**PASSED**. That is phase A2's finding arrived at from the other side, and the lesson is the same one:
+*a measurement that cannot see what it claims to measure looks exactly like a measurement that found
+nothing.* Both the sweep and the break driver delete the binary now.
 
 ### The frames
 
