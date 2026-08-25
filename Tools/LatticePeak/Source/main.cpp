@@ -51,6 +51,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image/stb_image.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -285,6 +286,25 @@ namespace
         std::string pgm;
         std::string csv;
 
+        // THE GENUS UNDER TEST, and it is a PATH rather than a name on purpose. §SIL measures nine forms,
+        // and nine shapes retyped into a tool would be nine more places for the library and the instrument
+        // to disagree — the defect class DEV_CONTRACT.md §2.3.1 names, which this very phase is fixing one
+        // level down. The file is read through the shipped parser, so what is measured is the asset.
+        std::string typePath;
+
+        // WHERE THE EYE IS, so that the degrees below are the degrees of a stated camera rather than of an
+        // unstated one. The default is the mid elevation of the six-point protocol — `--look 0,0.45,-1`,
+        // which is atan(0.45) = 24.23 degrees above the horizon — because that is the elevation §RW2 asked
+        // its question at and the one a player spends the most time looking along.
+        float lookUp      = 0.45f;
+        float lookForward = 1.0f;
+
+        // Only used when a genus is named: the asset's own placement pair is the default, and an explicit
+        // flag still wins. A sentinel is needed because 1.0 is a legal setting of both and could not have
+        // carried "not given".
+        bool scaleGiven = false;
+        bool anisoGiven = false;
+
         for ( int i = 2; i < argc; ++i )
         {
             const std::string arg = argv[i];
@@ -294,10 +314,26 @@ namespace
                 regionKm = static_cast<float>( std::atof( argv[++i] ) );
             else if ( arg == "--tile" && has )
                 tileKm = static_cast<float>( std::atof( argv[++i] ) );
+            else if ( arg == "--type" && has )
+                typePath = argv[++i];
+            else if ( arg == "--elevation" && has )
+            {
+                if ( std::sscanf( argv[++i], "%f,%f", &lookUp, &lookForward ) != 2 )
+                {
+                    std::fprintf( stderr, "LatticePeak: --elevation wants UP,FORWARD\n" );
+                    return 2;
+                }
+            }
             else if ( arg == "--scale" && has )
-                scale = static_cast<float>( std::atof( argv[++i] ) );
+            {
+                scale      = static_cast<float>( std::atof( argv[++i] ) );
+                scaleGiven = true;
+            }
             else if ( arg == "--aniso" && has )
-                aniso = static_cast<float>( std::atof( argv[++i] ) );
+            {
+                aniso      = static_cast<float>( std::atof( argv[++i] ) );
+                anisoGiven = true;
+            }
             else if ( arg == "--coverage" && has )
                 coverage = static_cast<float>( std::atof( argv[++i] ) );
             else if ( arg == "--contrast" && has )
@@ -374,7 +410,46 @@ namespace
             params.PatchStrength = patch;
 
         Desert::Assets::CloudProceduralSpecies species;
-        species.Shape      = Desert::Assets::CloudTypeDefaultShape();
+        species.Shape = Desert::Assets::CloudTypeDefaultShape();
+
+        std::string genus = "cumulus congestus (the built-in default)";
+
+        if ( !typePath.empty() )
+        {
+            std::FILE* file = std::fopen( typePath.c_str(), "rb" );
+            if ( file == nullptr )
+            {
+                std::fprintf( stderr, "LatticePeak: cannot read %s\n", typePath.c_str() );
+                return 1;
+            }
+
+            std::string text;
+            char        chunk[4096];
+            size_t      read = 0;
+            while ( ( read = std::fread( chunk, 1u, sizeof( chunk ), file ) ) > 0 )
+                text.append( chunk, read );
+            std::fclose( file );
+
+            auto parsed = Desert::Assets::ParseCloudType( text );
+            if ( !parsed )
+            {
+                std::fprintf( stderr, "LatticePeak: %s is not a usable type: %s\n", typePath.c_str(),
+                              parsed.GetError().c_str() );
+                return 1;
+            }
+
+            species.Shape = parsed.GetValue().Shape;
+            genus         = parsed.GetValue().DisplayName.value_or( typePath );
+
+            // THE ASSET'S OWN PLACEMENT PAIR IS THE DEFAULT. A genus whose cell had to be typed on the
+            // command line would be measured at whatever the operator remembered, and the two numbers that
+            // decide a cirrus' band are exactly the two under test.
+            if ( !scaleGiven )
+                scale = species.Shape.PlacementScale;
+            if ( !anisoGiven )
+                aniso = species.Shape.PlacementAnisotropy;
+        }
+
         species.CellKm     = latticeKm * std::max( scale, 1e-3f );
         species.Anisotropy = std::max( aniso, 1e-3f );
 
@@ -450,9 +525,10 @@ namespace
         verticalKm /= static_cast<double>( repeats );
         spanKm /= static_cast<double>( repeats );
 
-        std::printf( "field  region %.1f km  voxel %.4f km  cell %.3f x %.3f km (predicted period)  "
+        std::printf( "field  %s  region %.1f km  voxel %.4f km  cell %.3f x %.3f km (predicted period)  "
                      "cover %.4f  lumps %zu  repeats %d  project %s\n",
-                     regionKm, voxelKm, extent.x, extent.y, cover, lumps, repeats, useSum ? "sum" : "max" );
+                     genus.c_str(), regionKm, voxelKm, extent.x, extent.y, cover, lumps, repeats,
+                     useSum ? "sum" : "max" );
 
         // THE SHAPE OF THE BODIES, beside the shape of their arrangement. The layer is 32 voxels deep
         // against 256 across, so the vertical chord is quantised nine times more coarsely than the
@@ -467,6 +543,40 @@ namespace
                      spanKm, params.LayerThicknessKm,
                      100.0 * spanKm / std::max( static_cast<double>( params.LayerThicknessKm ), 1e-9 ),
                      ( spanKm > 1e-9 ) ? verticalKm / spanKm : 0.0 );
+
+        // ---------------------------------------------------------------------------------------------
+        // AND THE SAME THREE LENGTHS IN DEGREES, WHICH IS THE UNIT THE EYE WORKS IN
+        // ---------------------------------------------------------------------------------------------
+        //
+        // WHY THIS IS NOT DECORATION. A ratio of two kilometres is not what a viewer sees: a vertical
+        // extent is FORESHORTENED by the elevation the eye looks along, and the body's distance is set by
+        // that same elevation and by how high the layer is. §RW2 computed these three numbers by hand for
+        // one camera and reported the body's opaque core at 3.3 to 1 while its whole envelope was 1.1 to 1
+        // — the finding that the flat lens is the OPAQUE part and not the body. Hand arithmetic in a report
+        // is a second statement of a quantity that has to agree with the first, so it is computed here.
+        //
+        // THE GEOMETRY, stated so it can be checked rather than trusted: the eye is on the ground, the look
+        // direction is `--elevation UP,FORWARD` (the protocol's own `--look 0,UP,-FORWARD`), the body is
+        // met at the MIDDLE of the layer, and the slant range to it is `midAltitude / sin(elevation)`.
+        // A horizontal extent is unforeshortened at any elevation because it is across the line of sight;
+        // a vertical one is scaled by `cos(elevation)`.
+        const double elevationRad =
+             std::atan2( static_cast<double>( lookUp ), std::abs( static_cast<double>( lookForward ) ) );
+        const double midAltitudeKm =
+             static_cast<double>( params.LayerBottomKm ) + 0.5 * static_cast<double>( params.LayerThicknessKm );
+        const double rangeKm      = midAltitudeKm / std::max( std::sin( elevationRad ), 1e-6 );
+        const double foreshorten  = std::cos( elevationRad );
+        const double toDegrees    = 57.29577951308232;
+        const double wideDeg      = horizontalKm / rangeKm * toDegrees;
+        const double coreTallDeg  = verticalKm * foreshorten / rangeKm * toDegrees;
+        const double wholeTallDeg = spanKm * foreshorten / rangeKm * toDegrees;
+
+        std::printf( "  degrees at %.2f deg elevation, slant range %.2f km (layer middle %.2f km)\n",
+                     elevationRad * toDegrees, rangeKm, midAltitudeKm );
+        std::printf( "          OPAQUE CORE   %.1f deg wide x %.1f deg tall — %.1f : 1\n", wideDeg, coreTallDeg,
+                     ( coreTallDeg > 1e-9 ) ? wideDeg / coreTallDeg : 0.0 );
+        std::printf( "          whole envelope %.1f deg wide x %.1f deg tall — %.1f : 1\n", wideDeg, wholeTallDeg,
+                     ( wholeTallDeg > 1e-9 ) ? wideDeg / wholeTallDeg : 0.0 );
 
         // The lattice is laid out in the WIND's frame, so the map's two axes are the lattice's own axes
         // exactly when the wind runs along one of them. A rotated wind is reported as such rather than
@@ -566,7 +676,15 @@ namespace
             if ( slash != std::string::npos )
                 name = name.substr( slash + 1 );
 
-            std::printf( "%-30s  otsu %.3f  cloud %.4f\n", name.c_str(), threshold, fraction );
+            // THE SILHOUETTE, BESIDE THE PLACEMENT. §DS bought a scalloped edge with the erosion and chose
+            // its Detail Strength on these two numbers; the instrument that produced them was never
+            // committed, so no later phase could show it had not spent them. Both are reported here on
+            // every frame this tool is pointed at.
+            const double ragged = LatticePeak::SilhouetteRaggedness( mask, width, height );
+            const double lap4   = LatticePeak::InteriorLaplacian( lum, mask, width, height, 4 );
+
+            std::printf( "%-30s  otsu %.3f  cloud %.4f  ragged %.4f  lap r4 %.5f\n", name.c_str(), threshold,
+                         fraction, ragged, lap4 );
 
             const int maxLagX = std::min( width / 2, 512 );
             const int maxLagY = std::min( height / 2, 512 );
@@ -586,7 +704,8 @@ namespace
     {
         std::fprintf(
              stderr,
-             "usage: LatticePeak --field  [--region KM] [--tile KM] [--scale F] [--aniso F]\n"
+             "usage: LatticePeak --field  [--type PATH.decloudtype] [--elevation UP,FORWARD]\n"
+             "                            [--region KM] [--tile KM] [--scale F] [--aniso F]\n"
              "                            [--coverage F] [--contrast F] [--seed N] [--wind X,Z]\n"
              "                            [--chord KM] [--maxlag KM] [--repeats N]\n"
              "                            [--density F] [--scatter F] [--variety F] [--patch F]\n"

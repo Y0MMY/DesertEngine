@@ -488,6 +488,108 @@ namespace LatticePeak
     /// down a column it says how much of the layer has cloud in it ABOVE THIS PATCH OF GROUND, which is
     /// less than how tall the body would look from the side, because a cluster's lobes are spread over a
     /// disc and the top of it does not stand over the bottom.
+    /// HOW SCALLOPED THE CLOUD/SKY BOUNDARY IS: the length of that boundary divided by the square root of
+    /// the area it encloses, over a binary mask.
+    ///
+    /// WHY THE NORMALISATION IS `sqrt(area)` AND NOT ANYTHING ELSE. A perimeter on its own is a size, and a
+    /// frame with more cloud in it has more of one whatever its edge looks like. Dividing by the square
+    /// root of the area makes the number answer "how ragged" rather than "how much".
+    ///
+    /// IT IS IN PIXELS AND IT IS SCALE-FREE, and a test is what settled that against the alternative. §DS
+    /// published its numbers as a few thousandths, which is `(P/N) / sqrt(A/N)` — perimeter and area as
+    /// FRACTIONS of the frame — and that form carries a `1/sqrt(N)`: the same picture rendered at twice the
+    /// resolution measures half as much. The test written to assert scale-invariance is what caught it. So
+    /// the raw ratio is what is computed, and §DS's table converts by multiplying by `sqrt(N)` — 839.8 on
+    /// its 1280 x 551 crop, which puts its `0.0038` at **3.19** here. That conversion is arithmetic a
+    /// reader can check rather than a claim.
+    ///
+    /// WHY IT IS HERE. `Docs/Clouds/CALIBRATION.md` §DS chose the erosion's Detail Strength on exactly this
+    /// quantity and reported it to four decimals — and the instrument that produced those numbers was never
+    /// committed, so the erosion §DS bought could not be re-measured by anybody who came after. §SIL had to
+    /// prove that a change to the PLACEMENT had not spent it, found nothing in the tree to prove it with,
+    /// and this is that gap closed rather than worked around.
+    ///
+    /// THE BOUNDARY IS COUNTED IN 4-NEIGHBOUR STEPS and the frame's edge does NOT count as boundary: a
+    /// cloud running out of the picture is not an edge of the cloud, and counting it would make the number
+    /// depend on where the crop was taken.
+    inline double SilhouetteRaggedness( const std::vector<float>& mask, int width, int height )
+    {
+        if ( mask.empty() || width <= 1 || height <= 1 )
+            return 0.0;
+
+        double area      = 0.0;
+        double perimeter = 0.0;
+
+        for ( int y = 0; y < height; ++y )
+            for ( int x = 0; x < width; ++x )
+            {
+                const bool here = mask[static_cast<size_t>( y ) * width + x] > 0.5f;
+                if ( !here )
+                    continue;
+
+                area += 1.0;
+
+                if ( x + 1 < width && mask[static_cast<size_t>( y ) * width + x + 1] <= 0.5f )
+                    perimeter += 1.0;
+                if ( x > 0 && mask[static_cast<size_t>( y ) * width + x - 1] <= 0.5f )
+                    perimeter += 1.0;
+                if ( y + 1 < height && mask[static_cast<size_t>( y + 1 ) * width + x] <= 0.5f )
+                    perimeter += 1.0;
+                if ( y > 0 && mask[static_cast<size_t>( y - 1 ) * width + x] <= 0.5f )
+                    perimeter += 1.0;
+            }
+
+        return ( area > 0.0 ) ? perimeter / std::sqrt( area ) : 0.0;
+    }
+
+    /// HOW MUCH TEXTURE THERE IS INSIDE THE BODY: the mean absolute Laplacian of @p value at radius
+    /// @p radius, gathered over the pixels @p mask says are cloud and over those only.
+    ///
+    /// IT IS THE OTHER HALF OF THE EROSION'S BARGAIN. Raggedness reads the outline; this reads the
+    /// billows. A cut that only nibbled the silhouette would raise one and leave the other, and §DS's own
+    /// table reports both for that reason.
+    ///
+    /// THE RADIUS IS AN ARGUMENT because a Laplacian at one pixel measures the renderer's noise and one at
+    /// a billow's own radius measures billows. §DS used 4 px on a 1280-wide frame and this file keeps that
+    /// as the reported default rather than re-choosing it.
+    inline double InteriorLaplacian( const std::vector<float>& value, const std::vector<float>& mask, int width,
+                                     int height, int radius )
+    {
+        if ( value.empty() || width <= 2 * radius || height <= 2 * radius || radius < 1 )
+            return 0.0;
+
+        double sum   = 0.0;
+        double count = 0.0;
+
+        for ( int y = radius; y + radius < height; ++y )
+            for ( int x = radius; x + radius < width; ++x )
+            {
+                const size_t at = static_cast<size_t>( y ) * width + x;
+
+                // THE WHOLE STENCIL HAS TO BE CLOUD, not only its centre, and a test is what insisted. A
+                // Laplacian reads four neighbours a radius away, so a cloud pixel within one radius of the
+                // silhouette samples SKY — and on a frame where the sky is darker than the body that is a
+                // large number arriving from the boundary rather than from any billow. Fed a flat cloud
+                // beside a checkered sky the centre-only form reported 0.0714 of texture that is not in the
+                // cloud at all. This differs from §DS's own reading of the same quantity by that boundary
+                // ring, so the two files' numbers are the same measurement only away from an edge.
+                if ( mask[at] <= 0.5f || mask[at - radius] <= 0.5f || mask[at + radius] <= 0.5f ||
+                     mask[at - static_cast<size_t>( radius ) * width] <= 0.5f ||
+                     mask[at + static_cast<size_t>( radius ) * width] <= 0.5f )
+                    continue;
+
+                const double centre = value[at];
+                const double lap    = value[at - radius] + value[at + radius] +
+                                   value[at - static_cast<size_t>( radius ) * width] +
+                                   value[at + static_cast<size_t>( radius ) * width] - 4.0 * centre;
+
+                sum += std::fabs( lap );
+                count += 1.0;
+            }
+
+        return ( count > 0.0 ) ? sum / count : 0.0;
+    }
+
     inline size_t OccupiedSpan( const std::vector<float>& line )
     {
         size_t first = line.size();

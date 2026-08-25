@@ -94,20 +94,40 @@ namespace
 
         for ( const CloudModellingBlob& blob : blobs )
         {
-            const float radiusKm = std::max( blob.RadiiKm.x, blob.RadiiKm.z );
-            const float weight   = 2.0f * blob.RadiiKm.y;
+            const float weight = 2.0f * blob.RadiiKm.y;
 
             const float centreX = ( blob.CentreKm.x - originKm.x ) / perVoxelKm;
             const float centreZ = ( blob.CentreKm.z - originKm.y ) / perVoxelKm;
-            const float radius  = radiusKm / perVoxelKm;
 
-            const int first = static_cast<int>( std::floor( -radius ) );
-            const int last  = static_cast<int>( std::ceil( radius ) );
+            // AN ELLIPSE IN THE LUMP'S OWN FRAME, AND A TEST FOUND OUT WHY IT HAS TO BE. This painted a
+            // DISC of the lump's longer horizontal radius, which is exact only while the two are equal —
+            // and §SIL made them unequal, because a lump in an anisotropic lattice is drawn out along the
+            // wind. At an anisotropy of 8 the disc was eight times too wide across the wind and the proxy
+            // reported the sky 0.98 covered where the bake reports 0.52. A proxy that reads the placement
+            // wrong is not a weaker measurement, it is a different one.
+            const float along   = blob.RadiiKm.x / perVoxelKm;
+            const float acrossR = blob.RadiiKm.z / perVoxelKm;
+
+            const float yaw     = blob.RotationDeg.y * 0.017453292519943295f;
+            const float cosYaw  = std::cos( yaw );
+            const float sinYaw  = std::sin( yaw );
+            const float boundKm = std::max( blob.RadiiKm.x, blob.RadiiKm.z );
+            const float bound   = boundKm / perVoxelKm;
+
+            const int first = static_cast<int>( std::floor( -bound ) );
+            const int last  = static_cast<int>( std::ceil( bound ) );
 
             for ( int dz = first; dz <= last; ++dz )
                 for ( int dx = first; dx <= last; ++dx )
                 {
-                    if ( static_cast<float>( dx * dx + dz * dz ) > radius * radius )
+                    // World -> local is the transpose of local -> world, and `glm::quat( radians( 0, yaw,
+                    // 0 ) )` carries local +X to `( cos yaw, 0, -sin yaw )`.
+                    const float localX = static_cast<float>( dx ) * cosYaw - static_cast<float>( dz ) * sinYaw;
+                    const float localZ = static_cast<float>( dx ) * sinYaw + static_cast<float>( dz ) * cosYaw;
+
+                    const float inside = ( localX * localX ) / std::max( along * along, 1e-9f ) +
+                                         ( localZ * localZ ) / std::max( acrossR * acrossR, 1e-9f );
+                    if ( inside > 1.0f )
                         continue;
 
                     int x = static_cast<int>( std::floor( centreX ) ) + dx;
@@ -657,6 +677,82 @@ TEST( CloudPlacementSpectrum, TheAnvilShrinksWithTheClusterItCaps )
             "anvil is a lid the storm has outgrown and at another it is a saucer floating over a stump";
 }
 
+// AND THE ANVIL IS DRAWN OUT WITH THE CLUSTER IT CAPS, which is the SAME hole in the same line found a
+// second time from a new direction.
+//
+// §RW's sabotage run found that deleting the cluster's size, density and packing factors from the anvil's
+// width left the whole repository green, "because only the cumulonimbus has an anvil at all and no suite
+// baked one procedurally and looked at it". §RW closed it with the anvil-over-tower ratio above — which is
+// blind to ANISOTROPY, because the shipped cumulonimbus' is 1 and the ratio is taken on one axis. §SIL's
+// own sabotage run rediscovered the line: deleting the anvil's `stretch` was GREEN across the repository.
+//
+// A storm whose tower is a downwind band under a circular lid is two bodies, and it is exactly the shape
+// nobody would notice in a number until they rendered one.
+TEST( CloudPlacementSpectrum, TheAnvilIsDrawnOutDownwindWithTheTowerItCaps )
+{
+    CloudProceduralFieldParams params = ShippedParams();
+
+    Desert::Graphic::CloudTypeShape& shape = params.Species[0].Shape;
+    shape.BaseAltitudeKm                   = 0.9f;
+    shape.TopAltitudeKm                    = 9.0f;
+    shape.EdgeTopFraction                  = 0.12f;
+    shape.TopTaper                         = 0.4f;
+    shape.AnvilAltitudeKm                  = 9.5f;
+    shape.AnvilThicknessKm                 = 1.8f;
+    shape.AnvilStrength                    = 0.85f;
+
+    params.LayerBottomKm     = 0.9f;
+    params.LayerThicknessKm  = 10.4f;
+    params.Species[0].CellKm = 6.0f;
+
+    // A STRETCHED LATTICE, which is the case the ratio test above cannot see. Anything the cell does to
+    // the tower it must do to the canopy.
+    params.Species[0].Anisotropy = 4.0f;
+
+    const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+    const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );
+
+    double anvilStretch = 0.0;
+    double anvils       = 0.0;
+    double towerStretch = 0.0;
+    double towers       = 0.0;
+
+    for ( const CloudModellingBlob& blob : blobs )
+    {
+        const double stretch = static_cast<double>( blob.RadiiKm.x ) / std::max( blob.RadiiKm.z, 1e-6f );
+
+        if ( std::abs( blob.CentreKm.y - shape.AnvilAltitudeKm ) < 1e-3f )
+        {
+            anvilStretch += stretch;
+            anvils += 1.0;
+        }
+        else
+        {
+            towerStretch += stretch;
+            towers += 1.0;
+        }
+    }
+
+    ASSERT_GT( anvils, 0.0 ) << "no anvil was generated at all, so this test measured nothing";
+    ASSERT_GT( towers, 0.0 );
+
+    const double anvil = anvilStretch / anvils;
+    const double tower = towerStretch / towers;
+
+    std::printf( "[CloudPlacementSpectrum] at anisotropy 4 the tower's lumps are %.2fx long and the anvil "
+                 "is %.2fx\n",
+                 tower, anvil );
+
+    // A FIFTH, AND THE GAP IT ALLOWS IS ACCOUNTED FOR RATHER THAN PADDING. The anvil's across-wind radius
+    // carries a 0.9 of its own — a canopy is slightly oval in plan and always was — so its measured stretch
+    // is the cell's over that 0.9: 4.44 against the tower's 4.01. The tower's lumps additionally carry an
+    // independent wobble on each horizontal axis, which is why its MEAN is what is compared. A fifth
+    // accommodates both and is far inside the factor of four the sabotage produced.
+    EXPECT_NEAR( anvil, tower, 0.20 * tower )
+         << "the anvil is not drawn out downwind by the same factor as the tower under it, so a storm in a "
+            "stretched lattice is a band with a circular lid on it — two bodies rather than one";
+}
+
 // THE CACHE IS THE OTHER PLACE A LIVE SETTING CAN DIE, and this test exists because a sabotage found it
 // green. Every field is wired from the component to the bake, and the bake reads every one of them — and
 // none of that matters if the renderer's staleness check does not NOTICE the change, because then the
@@ -1013,9 +1109,359 @@ TEST( CloudPlacementSpectrum, TheBodysWidthFollowsTheCellAndItsHeightFollowsTheB
     EXPECT_LT( narrowWide, shippedWide * 0.90 )
          << "halving the placement cell left the bodies as wide as before, so the cluster's width no "
             "longer follows the cell it is placed in";
-    EXPECT_NEAR( narrowTall, shippedTall, shippedTall * 0.25 )
-         << "halving the placement cell changed how TALL the bodies are, so the stack has been tied to the "
-            "cell instead of to the type's own band";
+
+    // AND THE LUMP NARROWS WITH IT ON BOTH AXES, WHICH IS §SIL'S DECISION STATED ON THE BAKE. §RW2's
+    // version of this test demanded the opposite — that halving the cell leave the vertical chord alone —
+    // and it passed because a lump's height came from the type's band divided by a constant in the
+    // placement file while its width came from the cell. Those are the two unrelated numbers §RW2 measured
+    // at 2.1 to 2.5 to one, and a lump with ONE size cannot satisfy the old assertion. What must still
+    // hold, and does, is the relation one level up: the BODY's height is the type's band.
+    EXPECT_LT( narrowTall, shippedTall * 0.90 )
+         << "halving the placement cell left the LUMPS as tall as before, so a lump's two radii have been "
+            "untied from one another again — the defect §SIL exists to remove";
+    EXPECT_NEAR( narrowSpan, shippedSpan, shippedSpan * 0.25 )
+         << "halving the placement cell changed how tall the BODY stands, so the stack has been tied to "
+            "the cell instead of to the type's own band";
+}
+
+// A LUMP HAS ONE SIZE — the decision §SIL records, asserted on the lumps the generator emits rather than on
+// the constant that produces them.
+//
+// WHAT IS ACTUALLY UNDER TEST. The claim is not "the ratio is 0.75"; a test that read the constant back
+// would be checking its own arithmetic. The claim is that a lump's height and its width are ONE quantity —
+// so the ratio between them is the same for two types whose cells differ by a factor of three and whose
+// bands differ by a factor of four. If either radius picks up an input the other does not, those four
+// measurements part company, which is precisely how the defect arrived in the first place.
+//
+// THE RATIO IS TAKEN AGAINST THE GEOMETRIC MEAN of the two horizontal radii, because the plan-view outline
+// carries two independent wobble draws and the vertical radius carries their geometric mean — a lump is
+// scaled by the wobble, not reshaped by it.
+TEST( CloudPlacementSpectrum, ALumpsHeightAndItsWidthAreOneQuantity )
+{
+    const auto ratioFor = []( float cellKm, float baseKm, float topKm )
+    {
+        CloudProceduralFieldParams params      = ShippedParams();
+        params.Species[0].CellKm               = cellKm;
+        params.Species[0].Shape.BaseAltitudeKm = baseKm;
+        params.Species[0].Shape.TopAltitudeKm  = topKm;
+        params.LayerBottomKm                   = baseKm;
+        params.LayerThicknessKm                = topKm - baseKm;
+
+        const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );
+
+        double sum   = 0.0;
+        double count = 0.0;
+
+        for ( const CloudModellingBlob& blob : blobs )
+        {
+            // The LOWEST lump of every cluster is reshaped on purpose by Base Ramp Fraction — it is the
+            // spreading floor a type authors — so it is the one lump this relation does not cover, and it
+            // is excluded by the thing that identifies it rather than by its index: it is the only lump
+            // whose height is a stated fraction of what its width would give.
+            const double wide = std::sqrt( static_cast<double>( blob.RadiiKm.x ) * blob.RadiiKm.z );
+            const double tall = static_cast<double>( blob.RadiiKm.y );
+            const double at   = tall / std::max( wide, 1e-9 );
+
+            if ( at < 0.6 * 0.75 )
+                continue;
+
+            sum += at;
+            count += 1.0;
+        }
+
+        EXPECT_GT( count, 0.0 ) << "no lump was measured at all, so this test asserted nothing";
+        return sum / std::max( count, 1.0 );
+    };
+
+    // A 3.6 km band in a 3 km cell — the shipped congestus — against a 0.9 km band in a 1 km cell. Both the
+    // cell and the band move, and by different factors.
+    const double shipped = ratioFor( 3.0f, 2.20f, 5.80f );
+    const double small   = ratioFor( 1.0f, 2.20f, 3.10f );
+    const double deep    = ratioFor( 3.0f, 2.20f, 9.40f );
+
+    std::printf( "[CloudPlacementSpectrum] lump height over width: shipped %.4f, third the cell %.4f, "
+                 "twice the band %.4f\n",
+                 shipped, small, deep );
+
+    EXPECT_NEAR( shipped, small, 0.02 )
+         << "a third of the cell gave lumps of a different SHAPE, so the two radii are not one quantity — "
+            "one of them has picked up the cell and the other has not";
+    EXPECT_NEAR( shipped, deep, 0.02 )
+         << "twice the band gave lumps of a different SHAPE, so the type's altitudes are deciding a lump's "
+            "height again — which is §RW2's defect, back";
+}
+
+// EVERY LUMP STANDS INSIDE THE ALTITUDES ITS OWN TYPE DECLARES, which the stack did not before.
+//
+// The old layout put lump centres at `base + band * fullness * t` and then gave each lump a vertical radius
+// on top of that, so the body reached `band * fullness + 2 * lumpRadius` — 3.78 km out of a 3.60 km band on
+// the shipped congestus. A type's Base and Top Altitude are the two numbers an artist reads off a
+// meteorological table, and a body that stands half a kilometre above its own Top is those two numbers not
+// meaning what they say.
+//
+// THE ANVIL IS EXCLUDED BY NAME AND NOT BY ACCIDENT: it authors its own altitude and thickness, and the
+// cumulonimbus' anvil sits deliberately above the tower's top with a gap under it.
+TEST( CloudPlacementSpectrum, EveryLumpStandsInsideItsTypesOwnBand )
+{
+    const auto checkBand = []( float baseKm, float topKm, float cellKm, float edgeTop )
+    {
+        CloudProceduralFieldParams params       = ShippedParams();
+        params.Species[0].CellKm                = cellKm;
+        params.Species[0].Shape.BaseAltitudeKm  = baseKm;
+        params.Species[0].Shape.TopAltitudeKm   = topKm;
+        params.Species[0].Shape.EdgeTopFraction = edgeTop;
+        params.LayerBottomKm                    = baseKm;
+        params.LayerThicknessKm                 = topKm - baseKm;
+
+        const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );
+
+        ASSERT_FALSE( blobs.empty() );
+
+        float lowest  = std::numeric_limits<float>::max();
+        float highest = -std::numeric_limits<float>::max();
+
+        for ( const CloudModellingBlob& blob : blobs )
+        {
+            lowest  = std::min( lowest, blob.CentreKm.y - blob.RadiiKm.y );
+            highest = std::max( highest, blob.CentreKm.y + blob.RadiiKm.y );
+        }
+
+        std::printf( "[CloudPlacementSpectrum] band %.2f..%.2f km, cell %.2f km: lumps span %.3f..%.3f km\n",
+                     baseKm, topKm, cellKm, lowest, highest );
+
+        // A voxel of the shipped volume is the tolerance, because a body inside the band by less than the
+        // volume can express is inside it as far as any picture is concerned.
+        const float toleranceKm = ( topKm - baseKm ) / static_cast<float>( kCloudProceduralVolumeHeight );
+
+        EXPECT_GE( lowest, baseKm - toleranceKm )
+             << "a lump hangs below the type's own Base Altitude, so the volume clips its floor flat";
+        EXPECT_LE( highest, topKm + toleranceKm )
+             << "a lump stands above the type's own Top Altitude, so a type's altitudes do not bound the "
+                "body they describe";
+    };
+
+    // The shipped congestus, a thin deck whose band the lump floor fights for, and a deep tower.
+    checkBand( 2.20f, 5.80f, 3.0f, 0.15f );
+    checkBand( 0.60f, 1.60f, 1.05f, 0.80f );
+    checkBand( 0.90f, 9.00f, 6.0f, 0.12f );
+}
+
+// THE SKY'S COVER DOES NOT MOVE WITH THE ANISOTROPY — §SIL's first defect, stated as the relation it broke.
+//
+// `CloudProceduralCellExtentKm` holds the cell's AREA constant under anisotropy and its own comment says
+// why: so that stretching the lattice draws a cluster out into a band instead of making the sky emptier.
+// The cluster was sized by `min(extent)` instead, so the sky emptied as the SQUARE of the stretch and a
+// cirrus layer — anisotropy 8 — delivered 0.089 of the sky where its slider asked for 0.5. Four of the nine
+// shipped types are affected. Nothing in the repository asserted the relation the comment claimed.
+//
+// MEASURED ON THE RASTERISED PROXY and not on a bake, for the reason the file note gives: this needs four
+// arms and a bake is seconds. The proxy is the lumps' own column integral, which is what the cover of a
+// projected volume counts.
+TEST( CloudPlacementSpectrum, TheSkysCoverDoesNotMoveWithTheAnisotropy )
+{
+    const auto coverAt = []( float anisotropy )
+    {
+        CloudProceduralFieldParams params = ShippedParams();
+        params.Coverage                   = 0.50f;
+        params.Species[0].Anisotropy      = anisotropy;
+
+        const glm::vec2          origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const std::vector<float> map =
+             RasteriseColumns( GenerateCloudProceduralBlobs( params, 0u, origin ), origin, params.RegionSizeKm );
+
+        double covered = 0.0;
+        for ( float v : map )
+            covered += ( v > 0.0f ) ? 1.0 : 0.0;
+        return covered / static_cast<double>( map.size() );
+    };
+
+    // The four anisotropies the shipped library actually uses: the isotropic types, the stratocumulus and
+    // the altocumulus, the lenticular, and the cirrus.
+    const double isotropic = coverAt( 1.0f );
+    const double rowed     = coverAt( 1.6f );
+    const double across    = coverAt( 0.2f );
+    const double fibrous   = coverAt( 8.0f );
+
+    std::printf( "[CloudPlacementSpectrum] cover at anisotropy 1.0 / 1.6 / 0.2 / 8.0: %.4f %.4f %.4f %.4f\n",
+                 isotropic, rowed, across, fibrous );
+
+    // A TWENTIETH OF THE SKY, and the bound is what the defect cleared by an order of magnitude: the
+    // measured spread on the shipped generator was 0.519 down to 0.089, which is 0.43 of the sky.
+    EXPECT_NEAR( rowed, isotropic, 0.05 )
+         << "a stratocumulus' rowed lattice moved the sky's cover, so its Coverage slider means something "
+            "different from a cumulus'";
+    EXPECT_NEAR( across, isotropic, 0.05 ) << "a lenticular's across-wind lattice moved the sky's cover";
+    EXPECT_NEAR( fibrous, isotropic, 0.05 )
+         << "a cirrus' anisotropy of 8 moved the sky's cover — which is the defect measured in §RW, where "
+            "it delivered a fifth of what its slider asked for";
+}
+
+// AND THE STRETCH GOES ALONG THE WIND RATHER THAN ACROSS IT, asked of the DISTANCE FIELD rather than of the
+// comment that derives the rotation.
+//
+// WHY THIS TEST EXISTS AT ALL. The lump's stretch is expressed as an anisotropic radius plus a yaw, and the
+// yaw's sign depends on a convention — `glm::quat( radians( euler ) )` — that is stated in one file and
+// consumed in another. A sign error there is invisible in every aggregate this suite measures: the cover is
+// the same, the chords are the same on average, and the lattice peak is the same. It shows up only as a
+// cirrus whose bands comb out at right angles to the wind, which is a thing only a frame or this test can
+// see. So the question is put to the field: at a wind of 45 degrees, is a point one radius along the wind
+// INSIDE the lump and the same distance across it OUTSIDE?
+TEST( CloudPlacementSpectrum, AStretchedLumpIsLongAlongTheWindAndNotAcrossIt )
+{
+    CloudProceduralFieldParams params = ShippedParams();
+    params.Species[0].Anisotropy      = 8.0f;
+
+    // A wind that is on neither volume axis, so that a lump which had simply kept the world's axes would
+    // fail rather than accidentally agree.
+    const glm::vec2 along( 0.70710678f, 0.70710678f );
+    const glm::vec2 across( -along.y, along.x );
+    params.WindAxis = along;
+
+    const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+    const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );
+
+    ASSERT_FALSE( blobs.empty() );
+
+    size_t longAlong  = 0;
+    size_t longAcross = 0;
+
+    for ( const CloudModellingBlob& blob : blobs )
+    {
+        // The probe is the lump's own LONGER horizontal radius, stepped from its centre. A lump stretched
+        // along the wind contains that point along the wind and not across it; one stretched the other way
+        // gives the opposite pair; one that ignored the rotation gives a mixture that is neither.
+        const float reachKm = 0.9f * std::max( blob.RadiiKm.x, blob.RadiiKm.z );
+
+        const CloudModellingPreparedBlob prepared = PrepareCloudModellingBlob( blob );
+
+        const glm::vec3 downwind = blob.CentreKm + glm::vec3( along.x * reachKm, 0.0f, along.y * reachKm );
+        const glm::vec3 sideways = blob.CentreKm + glm::vec3( across.x * reachKm, 0.0f, across.y * reachKm );
+
+        const bool insideDownwind = CloudModellingBlobDistanceKm( prepared, downwind ) < 0.0f;
+        const bool insideSideways = CloudModellingBlobDistanceKm( prepared, sideways ) < 0.0f;
+
+        if ( insideDownwind && !insideSideways )
+            ++longAlong;
+        if ( insideSideways && !insideDownwind )
+            ++longAcross;
+    }
+
+    std::printf( "[CloudPlacementSpectrum] of %zu lumps at anisotropy 8: %zu reach downwind only, %zu "
+                 "reach across only\n",
+                 blobs.size(), longAlong, longAcross );
+
+    EXPECT_EQ( longAcross, 0u ) << "a lump reaches ACROSS the wind and not along it, so the yaw that turns "
+                                   "the lump into the lattice's frame has the wrong sign — a cirrus would "
+                                   "comb out at right angles to the wind that combs it";
+    EXPECT_GT( longAlong, blobs.size() / 2 )
+         << "fewer than half the lumps reach downwind at an anisotropy of 8, so the stretch is not being "
+            "applied to the lump at all and only its placement was drawn out";
+}
+
+// THE SILHOUETTE INSTRUMENT, ON SHAPES WHOSE ANSWER THIS FILE CHOSE.
+//
+// WHY IT IS BEING TESTED NOW. §DS chose the erosion's Detail Strength on a "silhouette raggedness" it
+// reported to four decimals, and the code that produced those numbers was never committed. §SIL has to show
+// that a change to the PLACEMENT did not spend the scalloped edge §DS bought, and there was nothing in the
+// tree to show it with. The quantity is in `LatticePeakMath.hpp` now and this is the check on it: a square
+// and a comb of the same area must not measure the same, and the number must not move when the picture is
+// simply made bigger.
+TEST( CloudPlacementSpectrum, RaggednessSeesTheEdgeAndNotTheArea )
+{
+    const int side = 64;
+
+    const auto blank = [side]() { return std::vector<float>( static_cast<size_t>( side ) * side, 0.0f ); };
+
+    // A solid 32 x 32 square in the middle: 1024 pixels of area and 128 of boundary.
+    std::vector<float> square = blank();
+    for ( int y = 16; y < 48; ++y )
+        for ( int x = 16; x < 48; ++x )
+            square[static_cast<size_t>( y ) * side + x] = 1.0f;
+
+    // A COMB OF THE SAME AREA: sixteen 2 x 32 teeth with a gap between each pair, so the area is 1024
+    // again and the boundary is far longer. If the quantity were measuring the amount of cloud these two
+    // would be equal, and they are not.
+    std::vector<float> comb = blank();
+    for ( int y = 16; y < 48; ++y )
+        for ( int t = 0; t < 16; ++t )
+            for ( int x = 0; x < 2; ++x )
+                comb[static_cast<size_t>( y ) * side + ( t * 4 + x )] = 1.0f;
+
+    const double squareRagged = LatticePeak::SilhouetteRaggedness( square, side, side );
+    const double combRagged   = LatticePeak::SilhouetteRaggedness( comb, side, side );
+
+    std::printf( "[CloudPlacementSpectrum] raggedness: square %.4f, comb of the same area %.4f\n", squareRagged,
+                 combRagged );
+
+    EXPECT_GT( combRagged, squareRagged * 3.0 )
+         << "a comb and a solid square of the SAME AREA measure nearly the same raggedness, so the "
+            "quantity is reading how much cloud there is instead of how ragged its edge is";
+
+    // AND THE SAME PICTURE AT TWICE THE RESOLUTION IS THE SAME NUMBER, which is what makes it comparable
+    // across frames — and this assertion is the one that chose the normalisation. Written §DS's way, with
+    // the perimeter and the area as fractions of the FRAME, this measures half as much at twice the
+    // resolution, and the conversion between the two forms is now written on the function.
+    const int          big = side * 2;
+    std::vector<float> bigSquare( static_cast<size_t>( big ) * big, 0.0f );
+    for ( int y = 32; y < 96; ++y )
+        for ( int x = 32; x < 96; ++x )
+            bigSquare[static_cast<size_t>( y ) * big + x] = 1.0f;
+
+    EXPECT_NEAR( LatticePeak::SilhouetteRaggedness( bigSquare, big, big ), squareRagged, 0.02 * squareRagged )
+         << "doubling the resolution changed the raggedness of the same shape, so the quantity carries a "
+            "scale and two frames of different sizes cannot be compared with it";
+
+    // A single square measures 4 for the same reason a disc measures 2*sqrt(pi): the ratio is a property of
+    // the SHAPE. Pinned so that a change of normalisation cannot pass unnoticed.
+    EXPECT_NEAR( squareRagged, 4.0, 1e-6 )
+         << "a solid square no longer measures 4, so the quantity's units have moved and every number "
+            "reported against it has moved with them";
+
+    // THE FRAME'S OWN EDGE IS NOT A CLOUD EDGE. A mask that is cloud everywhere has no boundary at all, and
+    // counting the crop as one would make the number depend on where the rectangle was taken.
+    std::vector<float> full( static_cast<size_t>( side ) * side, 1.0f );
+    EXPECT_DOUBLE_EQ( LatticePeak::SilhouetteRaggedness( full, side, side ), 0.0 )
+         << "a frame that is entirely cloud reported a silhouette, so the crop's own edge is being counted";
+}
+
+// AND THE INTERIOR TEXTURE READS THE BODY AND NOT THE SKY, which is the half of §DS's pair that says
+// whether the erosion is carving billows rather than only nibbling the outline.
+TEST( CloudPlacementSpectrum, TheInteriorLaplacianReadsOnlyWhatTheMaskCallsCloud )
+{
+    const int    side   = 64;
+    const size_t pixels = static_cast<size_t>( side ) * side;
+
+    // The left half is cloud and is FLAT; the right half is not cloud and is a violent checker. A quantity
+    // that respected the mask reports zero; one that did not reports the checker.
+    std::vector<float> value( pixels, 0.0f );
+    std::vector<float> mask( pixels, 0.0f );
+
+    for ( int y = 0; y < side; ++y )
+        for ( int x = 0; x < side; ++x )
+        {
+            const size_t at = static_cast<size_t>( y ) * side + x;
+            if ( x < side / 2 )
+            {
+                mask[at]  = 1.0f;
+                value[at] = 0.5f;
+            }
+            else
+                value[at] = ( ( x + y ) % 2 == 0 ) ? 1.0f : 0.0f;
+        }
+
+    EXPECT_NEAR( LatticePeak::InteriorLaplacian( value, mask, side, side, 4 ), 0.0, 1e-9 )
+         << "a flat cloud beside a violent sky measured texture, so the mask is not being respected and "
+            "every number from this quantity is partly the sky's";
+
+    // Now give the cloud its own texture and demand it be found.
+    for ( int y = 0; y < side; ++y )
+        for ( int x = 0; x < side / 2; ++x )
+            value[static_cast<size_t>( y ) * side + x] = ( ( x / 4 + y / 4 ) % 2 == 0 ) ? 0.8f : 0.2f;
+
+    EXPECT_GT( LatticePeak::InteriorLaplacian( value, mask, side, side, 4 ), 0.1 )
+         << "a cloud with billows in it measured no texture at all";
 }
 
 int main( int argc, char** argv )
