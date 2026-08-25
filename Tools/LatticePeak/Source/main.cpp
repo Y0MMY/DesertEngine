@@ -94,6 +94,92 @@ namespace
         return map;
     }
 
+    /// The shape of the bodies in a baked volume, as the mean chord along each of the three axes.
+    ///
+    /// WHY THIS SITS BESIDE THE AUTOCORRELATION. The peak answers where the bodies are and says nothing
+    /// about what they are; a sky of flat lenses and a sky of towers standing on the same footprints are
+    /// the same placement and the same peak. The owner's word for the sky was "unnatural", and the half of
+    /// that word the peak cannot reach is the SILHOUETTE — whether every cloud is the same shape and
+    /// whether that shape is a plate. Two chords and their ratio are that half, measured.
+    struct VolumeAspect
+    {
+        double HorizontalKm   = 0.0;
+        double VerticalKm     = 0.0;
+        double VerticalSpanKm = 0.0;
+        size_t Columns        = 0;
+    };
+
+    VolumeAspect MeasureAspect( const std::vector<unsigned char>& voxels, uint32_t slot, float voxelKm,
+                                float layerThicknessKm )
+    {
+        const uint32_t width  = Desert::Assets::kCloudProceduralVolumeWidth;
+        const uint32_t height = Desert::Assets::kCloudProceduralVolumeHeight;
+        const uint32_t depth  = Desert::Assets::kCloudProceduralVolumeDepth;
+
+        const auto at = [width, height]( uint32_t x, uint32_t y, uint32_t z )
+        {
+            return ( ( static_cast<size_t>( z ) * height + y ) * width + x ) *
+                   Desert::Assets::kCloudProceduralBytesPerVoxel;
+        };
+
+        LatticePeak::ChordCensus horizontal;
+        LatticePeak::ChordCensus vertical;
+
+        std::vector<float> line;
+
+        // BOTH HORIZONTAL AXES GO INTO ONE CENSUS, because the question is how wide a body is and not which
+        // way it is turned; the placement lattice is anisotropic in general and averaging the two axes is
+        // what makes the ratio a property of the BODY rather than of the wind's direction.
+        for ( uint32_t y = 0; y < height; ++y )
+        {
+            for ( uint32_t z = 0; z < depth; ++z )
+            {
+                line.assign( width, 0.0f );
+                for ( uint32_t x = 0; x < width; ++x )
+                    line[x] = static_cast<float>( voxels[at( x, y, z ) + slot] );
+                LatticePeak::AccumulateChords( line, true, horizontal );
+            }
+
+            for ( uint32_t x = 0; x < width; ++x )
+            {
+                line.assign( depth, 0.0f );
+                for ( uint32_t z = 0; z < depth; ++z )
+                    line[z] = static_cast<float>( voxels[at( x, y, z ) + slot] );
+                LatticePeak::AccumulateChords( line, true, horizontal );
+            }
+        }
+
+        double spanVoxels  = 0.0;
+        size_t spanColumns = 0;
+
+        for ( uint32_t z = 0; z < depth; ++z )
+            for ( uint32_t x = 0; x < width; ++x )
+            {
+                line.assign( height, 0.0f );
+                for ( uint32_t y = 0; y < height; ++y )
+                    line[y] = static_cast<float>( voxels[at( x, y, z ) + slot] );
+
+                LatticePeak::AccumulateChords( line, false, vertical );
+
+                const size_t span = LatticePeak::OccupiedSpan( line );
+                if ( span > 0 )
+                {
+                    spanVoxels += static_cast<double>( span );
+                    ++spanColumns;
+                }
+            }
+
+        const double perVoxelUpKm = static_cast<double>( layerThicknessKm ) / static_cast<double>( height );
+
+        VolumeAspect aspect;
+        aspect.HorizontalKm = horizontal.MeanVoxels() * static_cast<double>( voxelKm );
+        aspect.VerticalKm   = vertical.MeanVoxels() * perVoxelUpKm;
+        aspect.VerticalSpanKm =
+             ( spanColumns > 0 ) ? ( spanVoxels / static_cast<double>( spanColumns ) ) * perVoxelUpKm : 0.0;
+        aspect.Columns = spanColumns;
+        return aspect;
+    }
+
     void WritePgm( const char* path, const std::vector<float>& map, int width, int height, float scale )
     {
         std::FILE* file = std::fopen( path, "wb" );
@@ -315,8 +401,11 @@ namespace
         std::vector<std::vector<double>> curvesX;
         std::vector<std::vector<double>> curvesZ;
 
-        double cover = 0.0;
-        size_t lumps = 0;
+        double cover        = 0.0;
+        size_t lumps        = 0;
+        double horizontalKm = 0.0;
+        double verticalKm   = 0.0;
+        double spanKm       = 0.0;
 
         for ( int repeat = 0; repeat < repeats; ++repeat )
         {
@@ -335,6 +424,11 @@ namespace
 
             const std::vector<float> map = ProjectDown( baked.GetValue(), 0u, useSum );
 
+            const VolumeAspect aspect = MeasureAspect( baked.GetValue(), 0u, voxelKm, params.LayerThicknessKm );
+            horizontalKm += aspect.HorizontalKm;
+            verticalKm += aspect.VerticalKm;
+            spanKm += aspect.VerticalSpanKm;
+
             if ( repeat == 0 )
             {
                 if ( !pgm.empty() )
@@ -352,10 +446,25 @@ namespace
         }
 
         cover /= static_cast<double>( repeats );
+        horizontalKm /= static_cast<double>( repeats );
+        verticalKm /= static_cast<double>( repeats );
+        spanKm /= static_cast<double>( repeats );
 
         std::printf( "field  region %.1f km  voxel %.4f km  cell %.3f x %.3f km (predicted period)  "
                      "cover %.4f  lumps %zu  repeats %d  project %s\n",
                      regionKm, voxelKm, extent.x, extent.y, cover, lumps, repeats, useSum ? "sum" : "max" );
+
+        // THE SHAPE OF THE BODIES, beside the shape of their arrangement. The layer is 32 voxels deep
+        // against 256 across, so the vertical chord is quantised nine times more coarsely than the
+        // horizontal one; both are printed in kilometres rather than in voxels so the comparison is not
+        // silently a comparison of two different rulers.
+        std::printf( "  chord   horizontal %.3f km   vertical %.3f km   wider than tall by %.2fx  "
+                     "(layer %.2f km in %u voxels)\n",
+                     horizontalKm, verticalKm, ( verticalKm > 1e-9 ) ? horizontalKm / verticalKm : 0.0,
+                     params.LayerThicknessKm, Desert::Assets::kCloudProceduralVolumeHeight );
+        std::printf( "  silhouette  vertical span %.3f km   solidity %.2f (chord over span, 1.00 is a "
+                     "plate)   against a %.2f km band\n",
+                     spanKm, ( spanKm > 1e-9 ) ? verticalKm / spanKm : 0.0, params.LayerThicknessKm );
 
         // The lattice is laid out in the WIND's frame, so the map's two axes are the lattice's own axes
         // exactly when the wind runs along one of them. A rotated wind is reported as such rather than

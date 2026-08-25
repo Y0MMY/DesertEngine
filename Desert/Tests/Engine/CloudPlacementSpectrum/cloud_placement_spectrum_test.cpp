@@ -837,6 +837,187 @@ TEST( CloudPlacementSpectrum, TheBakedVolumeAgreesWithTheProxyThatTheShippedSkyH
             "apart and the proxy can no longer be trusted";
 }
 
+// ---------------------------------------------------------------------------------------------------
+// PART THREE — THE SHAPE OF A BODY, WHICH THE PEAK IS BLIND TO
+// ---------------------------------------------------------------------------------------------------
+//
+// The autocorrelation answers where the bodies are. Two skies with identical placement — one of towers and
+// one of plates standing on the same footprints — give the same curve and the same prominence, so "the
+// lattice is gone" and "the sky looks natural" are different claims and only the first of them has been
+// measurable in this programme so far. LatticePeak::AccumulateChords is the second: how far a ray running
+// along an axis stays inside cloud, gathered over every scan line of the baked volume.
+
+TEST( CloudPlacementSpectrum, AChordCensusCountsEveryUnbrokenRunAndNothingElse )
+{
+    LatticePeak::ChordCensus census;
+
+    // Two runs, of one and of two.
+    LatticePeak::AccumulateChords( { 0.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f }, false, census );
+
+    EXPECT_EQ( census.Runs, 2u );
+    EXPECT_NEAR( census.MeanVoxels(), 1.5, 1e-9 );
+
+    // An empty line adds nothing at all rather than a run of zero, which would drag the mean down.
+    LatticePeak::AccumulateChords( { 0.0f, 0.0f, 0.0f }, false, census );
+    EXPECT_EQ( census.Runs, 2u );
+    EXPECT_NEAR( census.MeanVoxels(), 1.5, 1e-9 );
+
+    // An empty vector is not a line and must not fault.
+    LatticePeak::AccumulateChords( {}, true, census );
+    EXPECT_EQ( census.Runs, 2u );
+}
+
+// THE WRAP IS THE DIFFERENCE BETWEEN ONE BODY AND TWO, and this is the assertion that says so. The baked
+// volume is exactly periodic across the region's faces, so a body straddling a face is the same body seen
+// twice; counted without the wrap it arrives as two short chords and the mean falls.
+TEST( CloudPlacementSpectrum, TheWrapJoinsABodyThatStraddlesTheRegionsFace )
+{
+    const std::vector<float> line{ 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+
+    LatticePeak::ChordCensus wrapped;
+    LatticePeak::AccumulateChords( line, true, wrapped );
+    EXPECT_EQ( wrapped.Runs, 1u );
+    EXPECT_NEAR( wrapped.MeanVoxels(), 3.0, 1e-9 );
+
+    LatticePeak::ChordCensus cut;
+    LatticePeak::AccumulateChords( line, false, cut );
+    EXPECT_EQ( cut.Runs, 2u );
+    EXPECT_NEAR( cut.MeanVoxels(), 1.5, 1e-9 );
+
+    // A line that is cloud from end to end is ONE body that circles the world, not two and not none.
+    LatticePeak::ChordCensus solid;
+    LatticePeak::AccumulateChords( { 1.0f, 1.0f, 1.0f, 1.0f }, true, solid );
+    EXPECT_EQ( solid.Runs, 1u );
+    EXPECT_NEAR( solid.MeanVoxels(), 4.0, 1e-9 );
+}
+
+// THE SPAN IS NOT THE CHORD, and a suite that measured only one of them would call a tower with air in it
+// a plate. Both are needed to say what the sky is made of, so both are asserted.
+TEST( CloudPlacementSpectrum, ASpanReachesOverAGapAndAChordStopsAtIt )
+{
+    const std::vector<float> tower{ 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+
+    EXPECT_EQ( LatticePeak::OccupiedSpan( tower ), 4u );
+
+    LatticePeak::ChordCensus census;
+    LatticePeak::AccumulateChords( tower, false, census );
+    EXPECT_EQ( census.Runs, 2u );
+    EXPECT_NEAR( census.MeanVoxels(), 1.0, 1e-9 );
+
+    // A clear column has no span at all rather than a span of one, or the mean over the sky would be
+    // dragged towards the empty half of it.
+    EXPECT_EQ( LatticePeak::OccupiedSpan( { 0.0f, 0.0f, 0.0f } ), 0u );
+    EXPECT_EQ( LatticePeak::OccupiedSpan( {} ), 0u );
+
+    // A solid body's span IS its chord, which is what makes the ratio of the two a measure of solidity.
+    EXPECT_EQ( LatticePeak::OccupiedSpan( { 0.0f, 1.0f, 1.0f, 1.0f, 0.0f } ), 3u );
+}
+
+// THE RELATION, AND IT IS THE ONE §2.3.1 ASKS FOR: the two chords are set by two DIFFERENT numbers, and a
+// change to one must move one of them and not the other. The horizontal chord follows the placement cell —
+// the cluster's radius is a fraction of it — and the vertical chord follows the type's own band. Sizing the
+// cluster off the band, or the stack off the cell, would tie them together and this test is what would say
+// so.
+//
+// It is also where the number the owner was shown comes from: the shipped congestus is measurably WIDER
+// THAN IT IS TALL, and by how much is Docs/Clouds/CALIBRATION.md section RW2.
+TEST( CloudPlacementSpectrum, TheBodysWidthFollowsTheCellAndItsHeightFollowsTheBand )
+{
+    const auto measure =
+         []( const CloudProceduralFieldParams& params, double& horizontalKm, double& verticalKm, double& spanKm )
+    {
+        const glm::vec2 origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const auto      baked  = BakeCloudProceduralVolume( params, origin );
+        ASSERT_TRUE( baked ) << ( baked ? std::string{} : baked.GetError() );
+
+        const uint32_t width  = kCloudProceduralVolumeWidth;
+        const uint32_t height = kCloudProceduralVolumeHeight;
+        const uint32_t depth  = kCloudProceduralVolumeDepth;
+
+        LatticePeak::ChordCensus horizontal;
+        LatticePeak::ChordCensus vertical;
+        std::vector<float>       line;
+
+        for ( uint32_t y = 0; y < height; ++y )
+            for ( uint32_t z = 0; z < depth; ++z )
+            {
+                line.assign( width, 0.0f );
+                for ( uint32_t x = 0; x < width; ++x )
+                {
+                    const size_t at =
+                         ( ( static_cast<size_t>( z ) * height + y ) * width + x ) * kCloudProceduralBytesPerVoxel;
+                    line[x] = static_cast<float>( baked.GetValue()[at] );
+                }
+                LatticePeak::AccumulateChords( line, true, horizontal );
+            }
+
+        double spanVoxels  = 0.0;
+        size_t spanColumns = 0;
+
+        for ( uint32_t z = 0; z < depth; ++z )
+            for ( uint32_t x = 0; x < width; ++x )
+            {
+                line.assign( height, 0.0f );
+                for ( uint32_t y = 0; y < height; ++y )
+                {
+                    const size_t at =
+                         ( ( static_cast<size_t>( z ) * height + y ) * width + x ) * kCloudProceduralBytesPerVoxel;
+                    line[y] = static_cast<float>( baked.GetValue()[at] );
+                }
+
+                LatticePeak::AccumulateChords( line, false, vertical );
+
+                const size_t span = LatticePeak::OccupiedSpan( line );
+                if ( span > 0 )
+                {
+                    spanVoxels += static_cast<double>( span );
+                    ++spanColumns;
+                }
+            }
+
+        const double perVoxelUpKm = static_cast<double>( params.LayerThicknessKm ) / static_cast<double>( height );
+
+        horizontalKm = horizontal.MeanVoxels() *
+                       ( static_cast<double>( params.RegionSizeKm ) / static_cast<double>( width ) );
+        verticalKm = vertical.MeanVoxels() * perVoxelUpKm;
+        spanKm = ( spanColumns > 0 ) ? ( spanVoxels / static_cast<double>( spanColumns ) ) * perVoxelUpKm : 0.0;
+    };
+
+    double shippedWide = 0.0;
+    double shippedTall = 0.0;
+    double shippedSpan = 0.0;
+    measure( ShippedParams(), shippedWide, shippedTall, shippedSpan );
+
+    std::printf( "[CloudPlacementSpectrum] the shipped congestus: chord %.3f km across, %.3f km up, "
+                 "%.2fx wider than tall; silhouette span %.3f km, solidity %.2f\n",
+                 shippedWide, shippedTall, shippedWide / shippedTall, shippedSpan, shippedTall / shippedSpan );
+
+    EXPECT_GT( shippedWide, shippedTall )
+         << "the shipped type is no longer wider than it is tall — section RW2 of "
+            "Docs/Clouds/CALIBRATION.md is written against a body that is, and the number it quotes has to "
+            "be re-measured";
+
+    // HALVE THE CELL AND THE BODY NARROWS; THE BAND IS UNTOUCHED AND SO IS THE HEIGHT. Anything else means
+    // the two have been tied to one number.
+    CloudProceduralFieldParams narrow = ShippedParams();
+    narrow.Species[0].CellKm *= 0.5f;
+
+    double narrowWide = 0.0;
+    double narrowTall = 0.0;
+    double narrowSpan = 0.0;
+    measure( narrow, narrowWide, narrowTall, narrowSpan );
+
+    std::printf( "[CloudPlacementSpectrum] at half the cell: chord %.3f km across, %.3f km up, span %.3f km\n",
+                 narrowWide, narrowTall, narrowSpan );
+
+    EXPECT_LT( narrowWide, shippedWide * 0.90 )
+         << "halving the placement cell left the bodies as wide as before, so the cluster's width no "
+            "longer follows the cell it is placed in";
+    EXPECT_NEAR( narrowTall, shippedTall, shippedTall * 0.25 )
+         << "halving the placement cell changed how TALL the bodies are, so the stack has been tied to the "
+            "cell instead of to the type's own band";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

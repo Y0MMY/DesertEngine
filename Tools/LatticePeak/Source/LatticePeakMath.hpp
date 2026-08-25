@@ -397,4 +397,106 @@ namespace LatticePeak
 
         return bestAt / 255.0;
     }
+
+    /// How long a body is along one axis, gathered over many scan lines of the same field.
+    ///
+    /// WHY A CHORD AND NOT A BOUNDING BOX. The autocorrelation above answers "where are the bodies", and it
+    /// is blind to what each body IS: a sky of flat lenses and a sky of towers of the same footprint have
+    /// the same placement and the same peak. The chord is the complementary question — how far a ray
+    /// travelling along one axis stays inside cloud — and it is the quantity the march integrates, so a
+    /// ratio of two chords is a ratio of two things the picture actually shows rather than of two
+    /// parameters that happen to have the same units.
+    struct ChordCensus
+    {
+        double VoxelsInRuns = 0.0;
+        size_t Runs         = 0;
+
+        double MeanVoxels() const
+        {
+            return ( Runs > 0 ) ? VoxelsInRuns / static_cast<double>( Runs ) : 0.0;
+        }
+    };
+
+    /// Adds every unbroken run of cloud in @p line to @p into. A sample counts as cloud when it is above
+    /// zero, which is the same convention the field mode's cover uses — the byte is already the quantised
+    /// density, so any other threshold would be the operator's opinion rather than the field's.
+    ///
+    /// @p wrap JOINS THE TWO ENDS, and it is not cosmetic: the baked volume is exactly periodic across the
+    /// region's faces, so a body straddling a face is ONE body seen twice. Counted without the wrap it
+    /// arrives as two short chords and the mean falls — on the shipped field by about a twentieth, which is
+    /// the size of the differences this instrument is used to argue about. The vertical axis is the one
+    /// axis that must NOT wrap: the layer has a floor and a ceiling, and a body clipped by them is honestly
+    /// as tall as the march can see it.
+    inline void AccumulateChords( const std::vector<float>& line, bool wrap, ChordCensus& into )
+    {
+        const size_t n = line.size();
+        if ( n == 0 )
+            return;
+
+        size_t first = 0;
+        while ( first < n && line[first] > 0.0f )
+            ++first;
+
+        // Cloud everywhere: one run that circles the line, and it is one run whether or not the ends are
+        // joined. Returning two here is the failure the wrap exists to prevent, taken to its extreme.
+        if ( first == n )
+        {
+            into.VoxelsInRuns += static_cast<double>( n );
+            into.Runs += 1;
+            return;
+        }
+
+        // Walking from the first CLEAR sample makes the wrap free: every run then begins and ends inside
+        // the walk, so the head and the tail of the original line are met as one.
+        const size_t start = wrap ? first : 0;
+
+        size_t run = 0;
+        for ( size_t step = 0; step < n; ++step )
+        {
+            const size_t at = wrap ? ( start + step ) % n : step;
+            if ( line[at] > 0.0f )
+            {
+                ++run;
+                continue;
+            }
+
+            if ( run > 0 )
+            {
+                into.VoxelsInRuns += static_cast<double>( run );
+                into.Runs += 1;
+                run = 0;
+            }
+        }
+
+        if ( run > 0 )
+        {
+            into.VoxelsInRuns += static_cast<double>( run );
+            into.Runs += 1;
+        }
+    }
+
+    /// The distance from the first cloud sample of @p line to its last, inclusive; zero if there is none.
+    ///
+    /// WHY THIS IS NOT THE CHORD, AND THE DIFFERENCE IS THE WHOLE QUESTION. A chord stops at the first gap,
+    /// so a tower of lobes with air between them counts as several short chords and reads as flat. A SPAN
+    /// does not: it is how tall the body's silhouette is, which is what an eye looking at the sky measures.
+    /// A body whose chord is a fifth of its span is a tower one can see through; a body whose chord IS its
+    /// span is a solid plate. Reporting only one of the two would have made those two skies the same
+    /// number, and they are not the same picture.
+    inline size_t OccupiedSpan( const std::vector<float>& line )
+    {
+        size_t first = line.size();
+        size_t last  = 0;
+
+        for ( size_t i = 0; i < line.size(); ++i )
+        {
+            if ( line[i] <= 0.0f )
+                continue;
+            if ( first == line.size() )
+                first = i;
+            last = i;
+        }
+
+        return ( first == line.size() ) ? 0u : ( last - first + 1u );
+    }
 } // namespace LatticePeak
