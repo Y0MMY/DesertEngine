@@ -2060,3 +2060,296 @@ nothing.* Both the sweep and the break driver delete the binary now.
 | `Shots/E5a_before_mid_away.png` / `E5a_after_mid_away.png` | **⬛ THE SHOW.** The same camera, before and after. Before: a deck of separate cushions, each one an Alligator cell, with a dark crease between every pair — because `best - second` is zero there and no slider can close it. After: fused convective masses, a wide flat base with turrets growing out of it, one connected surface per cloud and blue sky between clouds |
 | `Shots/E5a_before_zenith_away.png` / `E5a_after_zenith_away.png` | the same pair straight up, which is the angle the extrusion defect hides at and the angle the empty-zenith defect shows at |
 | `Shots/E5a_fly_frame080.png` / `E5a_fly_frame240.png` | frames 80 and 240 of a camera crossing **12 km — four snaps of the shipped 3 km lattice**. Two rebakes happened during it, at 3936 and 4010 ms, and neither is visible: no seam at the region's boundary, no pop when the volume is swapped, because the field inside the region is invariant under the scroll and the volume is periodic outside it |
+
+## DS — the erosion re-calibrated, and the number's argument was not the one suspected, 2026-08-24
+
+Task DS was set to re-calibrate `Detail Strength`, which had stood at 0.10 since phase T2b. The brief's
+mechanism was that phase Э5 had moved the number's carrying input: that the profile used to be **low
+almost everywhere**, so a shallow cut sufficed, and that the Э5 normalised distance field is **high inside
+bodies**, so the same cut now does nothing.
+
+**Measured on both producers, that is backwards, by a factor of four.** The correction is the first
+finding of the task and everything else follows from it.
+
+### The two censuses, and what they say
+
+Both fields were walked on the same grid — 64 columns per axis over one horizontal period, 24 levels
+through the envelope — at the coverage the shipped scenes carried at the time (0.24 before Э5, 0.762
+after, which the Э5 phase re-authored at equal sky cover). The pre-Э5 census is a standalone program built
+from `git show 3ef714c1:...` — the shader headers, the profile table and the reference of the day — so it
+is the field the 0.10 was last set against, not a reconstruction. **The erosion expression itself is byte
+identical between `3ef714c1` and `HEAD`,** which is what makes the two censuses comparable at all.
+
+| profile mass by decile | 0–.1 | .1–.2 | .2–.3 | .3–.4 | .4–.5 | .5–.6 | .6–.7 | .7–.8 | .8–.9 | .9–1 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| pre-Э5, coverage 0.24 | 0.005 | 0.016 | 0.026 | 0.037 | 0.041 | 0.074 | 0.070 | 0.059 | 0.063 | **0.608** |
+| Э5, coverage 0.762 | 0.044 | 0.065 | 0.067 | 0.073 | 0.106 | 0.095 | 0.119 | 0.103 | 0.121 | **0.207** |
+
+The old field carried **60.8 %** of its profile mass above 0.9; the new one carries **20.7 %**. The old
+producer was a threshold on the Alligator times a profile table, and a thresholded cushion is a PLATEAU at
+1 with a thin skirt; the Э5 field is a normalised distance field, which spends most of its volume ramping.
+
+What the erosion takes at 0.10, as a share of the profile mass it meets:
+
+| | pre-Э5 | Э5 |
+|---|---|---|
+| removed at strength 0.10 | **1.7 %** | **7.1 %** |
+| removed in the edge band, profile < 0.3 | 22.7 % | 33.6 % |
+| samples moved by more than one 255th | 0.491 | 0.796 |
+
+**The cut got four times STRONGER when the producer changed, not weaker.** And the same finding arrives
+from the picture without any arithmetic: `Shots/E5a_before_mid_away.png` — the pre-Э5 frame, committed by
+that phase — is as smooth as the frame this task was handed. Measured with the silhouette instrument
+below, the old frame's raggedness is 0.0059 against the new one's 0.0032, and that difference is the count
+of separate cushions, not tornness: both are smooth blobs.
+
+**So 0.10 never produced an edge on either producer, and no change of producer took one away.**
+
+### What was actually wrong, and it is a relation this programme has been bitten by four times
+
+> the erosion's own wavelength, **884 m** at the four-kilometre tile
+> against a body's own chord,   **1071 m**
+
+One wave across a whole cloud. A field that is nearly constant over a body cannot cut billows into it; it
+makes that body slightly larger on one side and slightly smaller on the other, which is a smooth blob of a
+different size. **On the pre-Э5 producer the same ratio was 1.08** — so this had been wrong on both
+producers, for the whole life of the subsystem, and no setting of `Detail Strength` could reach it.
+
+Measured through the seam, at the depth the eye sees a cloud:
+
+| Detail Tile Size | erosion half-wave | full wave | vs the march's 125 m | vs a 1071 m body |
+|---|---|---|---|---|
+| 8 km | 754 m | 1508 m | 12.06x | 1.41 |
+| **4 km (what shipped)** | 442 m | **884 m** | 7.07x | **0.83** |
+| 2 km | 216 m | 433 m | 3.46x | 0.40 |
+| **1 km (shipped now)** | 117 m | **235 m** | **1.88x** | **0.22** |
+| 0.5 km | 59 m | 119 m | **0.95x — past the march** | 0.11 |
+| 0.2 km (the slider's floor) | 28 m | 56 m | 0.45x | 0.05 |
+
+The window is two-sided and narrow: above by the body, below by `CloudFinestResolvableChordKm`. **One
+kilometre is the smallest tile that still clears the march**, and it is what ships.
+
+### The number, and the two bounds that fix it
+
+The frame gives a monotone trade with no knee in it, so it cannot choose a value on its own:
+
+| Detail Strength | cloud area | silhouette raggedness | texture inside the body (lap r4) |
+|---|---|---|---|
+| 0.10 | 0.9203 | 0.0032 | 0.00558 |
+| 0.20 | 0.9097 | 0.0034 | — |
+| 0.30 | 0.9011 | 0.0036 | 0.00603 |
+| 0.40 | 0.8937 | 0.0038 | — |
+| 0.50 | 0.8868 | 0.0039 | 0.00645 |
+| 0.70 | 0.8756 | 0.0042 | — |
+| 1.00 | 0.8617 | 0.0047 | 0.00727 |
+
+So the value is fixed by a bound instead. **The floor is measured; the ceiling is a convention and is
+labelled as one.**
+
+**BELOW, BY THE MARCH.** For every column, the altitude at which a ray's optical depth first reaches 1 —
+where the eye puts the surface — with the erosion on and off. The difference is what the setting buys, and
+it has to exceed the chord the march can be relied on to find, or the structure carved is finer than the
+renderer represents:
+
+| Detail Strength | surface travel | opaque columns dissolved |
+|---|---|---|
+| 0.10 | **53.5 m** — 0.43x the march | 0.022 |
+| 0.20 | 87.2 m | 0.038 |
+| 0.30 | 113.5 m | 0.053 |
+| 0.35 | 126.0 m | 0.056 |
+| **0.40** | **139.1 m — 1.11x the march** | **0.060** |
+| 0.50 | 161.8 m | 0.070 |
+| 0.80 | 217.2 m | 0.099 |
+| 1.00 | 256.7 m | 0.119 |
+
+**ABOVE, BY A CONVENTION.** The floor does not fix the value on its own — 0.35 clears it by ONE metre and
+0.40 by fourteen. A default is set with headroom over its floor rather than balanced on it: a one-per-cent
+margin would make the suite fail on any change to the generator that moved a body by a voxel. The shipped
+value is the first step with real headroom, and the suite asserts only that it stays within an octave of
+the floor, which is what stops it drifting upward unnoticed.
+
+### THE CEILING NOBODY CAN RAISE, and it is why this is a calibration and not a cure
+
+The ray sees a cloud at a **profile of 0.694** — that is where the optical depth first reaches 1 — and the
+erosion's own weight there is `1 - 0.694 = 0.306`. **Even at the top of the slider only 31 % of the
+nominal depth reaches the surface the eye is looking at.** No setting of this number produces a shredded
+silhouette; the frames at 1.00 still show smooth pills in the far field.
+
+That ceiling is a property of the `(1 - Profile)` weight in `Common/CloudField.glslh`, it **predates phase
+Э5**, and it is protected by a shipped test (`TheCoreKeepsItsDensityAndTheEdgeLosesMostOfItAtFullErosion
+Strength`) that exists for a good reason. Re-deriving the weight against the OPTICAL surface rather than
+against the geometric one is a design change with its own frames to shoot, and this task did not shoot
+them. **It is recorded here rather than attempted.**
+
+### What raising the layer cost the LIBRARY, which is the same defect one level down
+
+The cut's depth is `clamp(DetailStrength * DetailFactor, 0, 1)`. Every type's factor was authored against
+a layer of 0.10, so raising the layer to 0.40 multiplies **every** type's cut by four. Two types were
+authored above 1 and both dissolved. Measured against a CLOUDLESS frame at the same camera, as mean
+`|dLuma|` — the type's own contribution to the picture:
+
+| type | factor | effective cut, 0.10 -> 0.40 | its contribution | share of un-eroded |
+|---|---|---|---|---|
+| cirrus, un-eroded | 2.50 | 0 | 0.00770 | 100 % |
+| cirrus at the old layer | 2.50 | 0.25 | 0.00256 | 33.3 % |
+| **cirrus at the new layer** | 2.50 | **1.00** | **0.00033** | **4.3 %** |
+| altocumulus, un-eroded | 1.60 | 0 | 0.09578 | 100 % |
+| altocumulus at the old layer | 1.60 | 0.16 | 0.04933 | 51.5 % |
+| **altocumulus at the new layer** | 1.60 | **0.64** | **0.00720** | **7.5 %** |
+
+Both are half the density of a cumulus, so a deep cut does not shred them — it deletes them. **There is no
+layer value that serves both ends**: the march needs 0.40 for a type of factor 1, and altocumulus needs
+0.10 to keep half of itself. So the factors were **re-based** — cirrus 2.50 -> **0.625**, altocumulus
+1.60 -> **0.40**.
+
+#### What the re-base restores, and what it does NOT — the correction that matters most in this section
+
+**The re-base restores the DEPTH of the cut and nothing else, and the word "exactly" belongs to the depth
+alone.** An earlier draft of this section claimed the two types "render BYTE FOR BYTE what they rendered
+at the old layer strength". That claim is FALSE of the shipped configuration and the archive says so: the
+md5 of `Shots/DS_cirrus_before.png` and `Shots/DS_cirrus_shipped.png` differ. The `cmp` behind the claim
+had been run with the tile held at one kilometre in both arms — which isolates one variable honestly, but
+is a configuration that does not ship.
+
+The reason is a seam between two scopes, and it is worth naming because it is the same shape as the defect
+this whole task is about:
+
+> `Detail Tile Size` is a property of the **LAYER**. `Detail Factor` is a property of the **TYPE**.
+> Re-basing the factor can restore a type's cut DEPTH; it cannot restore the SCALE of the field that cut
+> is taken from, because the scale moved for all nine types at once.
+
+So the shipped cirrus and altocumulus meet an erosion **four times finer** than anything their files were
+authored against. What that costs, measured:
+
+| | depth restored? | old shipped vs shipped now | its contribution to the frame |
+|---|---|---|---|
+| cirrus | yes, `0.40 x 0.625 = 0.10 x 2.50` | mean luminance delta **0.00076**, 21.7 % of pixels, max **10**/255 | 0.00257 -> **0.00256**, −0.4 % |
+| altocumulus | yes, `0.40 x 0.40 = 0.10 x 1.60` | mean luminance delta **0.00510**, 74.4 % of pixels, max **16**/255 | 0.04879 -> **0.04933**, +1.1 % |
+
+**How much of each type is in the sky is preserved to within one per cent; where its material sits is
+not.** That is the honest statement, and it is the one an artist needs: the finer tile redistributes a
+cirrus into shorter, more broken fibres and an altocumulus into smaller lobes, at the same total amount of
+cloud. `Shots/DS_cirrus_before.png` against `Shots/DS_cirrus_shipped.png` is exactly that change and
+nothing else, because the depth is identical between those two frames — it is the picture of what moving
+the layer's tile does to a type that did not ask for it.
+
+**And the arithmetic of the re-base IS verified byte for byte, on the shipped library, with the one
+variable it is about held alone.** Driving the layer to 0.40 against the re-based files AT THE OLD TILE
+reproduces the old shipped frame exactly (`cmp`, not a pixel diff), for both types. That is what proves
+`0.40 x 0.625 = 0.10 x 2.50` survives the whole renderer, and it is all it proves.
+
+`Desert/Tests/Engine/CloudType` asserts what follows: no shipped type may be cut deeper than the reference
+congestus whose factor is 1 by definition.
+
+#### THE TOP OF THE CIRRUS' RANGE IS GONE, AND THAT IS A DECISION RATHER THAN A SIDE EFFECT
+
+Before the re-base a cirrus reached the clamp — an effective cut of 1.0, the deepest the maths allows — at
+a layer strength of 0.40, so an artist could drive the wispiest type in the library to the deepest cut
+there is. With a factor of 0.625 the deepest it can reach at the TOP of the layer's slider is 0.625. The
+type that is shredded by definition has lost the top of its range.
+
+**That range was not usable and the measurement is above: at an effective cut of 1.0 the cirrus keeps
+4.3 % of its contribution to the frame.** The top of that range did not produce a more ragged cirrus, it
+produced no cirrus — a control whose top end deletes the thing it controls, which is the contract's §1.3
+complaint arrived at from the other side. Removing range that renders nothing is not a loss.
+
+**What an artist who asks for a more ragged cirrus actually needs is a body that can carry a deeper cut.**
+The type's own `DensityFactor` is 0.35 and its `ExtinctionFactor` 0.25 — it is thin on purpose, and thin
+is what the erosion dissolves. The path is to raise the density first and the factor after; `Detail
+Factor`'s own slider runs to 8, so the range exists once the body can hold it. That is content work with
+its own frames, and it is recorded here so the request is met with this measurement rather than with a
+surprise. Note also that it does not escape the ceiling above it: the ray sees a cloud at a profile of
+0.694 whatever the type, so the `(1 - Profile)` weight still delivers 31 % of the nominal depth to the
+surface.
+
+### The six points
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, ImageStat over `0 0 1280 551`.
+
+**The baseline was re-shot rather than quoted, and it reproduces the owner's table on all six points to
+three decimals** — 0.570/0.449/0.135, 0.596/0.308/0.077, 0.628/0.240/0.071, 0.662/0.407/0.037,
+0.614/0.320/0.089, 0.638/0.287/0.086. The first render in this worktree was discarded before it (§A1's
+correction).
+
+**The repeat floor is zero and was measured, not assumed:** with the two numbers authored back into the
+scene at their old values, the REBUILT editor renders `mid_away` **byte for byte** identical to the
+baseline. So everything in the table below is the two numbers and nothing else.
+
+| point | mean before / after | contrast before / after | sat before / after |
+|---|---|---|---|
+| zenith away `0,0.9,-1` | 0.570 / **0.549** | 0.449 / **0.450** | 0.135 / **0.164** |
+| mid away `0,0.45,-1` | 0.596 / **0.591** | 0.308 / **0.384** | 0.077 / **0.087** |
+| horizon away `0,0.12,-1` | 0.628 / **0.630** | 0.240 / **0.281** | 0.071 / **0.073** |
+| zenith sunward `0,0.9,1` | 0.662 / **0.680** | 0.407 / **0.404** | 0.037 / **0.033** |
+| mid sunward `0,0.45,1` | 0.614 / **0.614** | 0.320 / **0.327** | 0.089 / **0.095** |
+| horizon sunward `0,0.12,1` | 0.638 / **0.641** | 0.287 / **0.298** | 0.086 / **0.089** |
+
+Contrast rises at five of six and the mean barely moves, which is what a cut that lands on the silhouette
+and not on the body predicts. The silhouette instrument says it more directly — raggedness is
+`perimeter / sqrt(area)` over the cloud/sky boundary, and `lap r4` is the mean absolute Laplacian of
+luminance INSIDE cloud pixels at a billow's radius:
+
+| point | area before / after | raggedness before / after | lap r4 before / after |
+|---|---|---|---|
+| zenith away | 0.8209 / 0.7601 | 0.0046 / **0.0058** | 0.00530 / **0.00618** |
+| mid away | 0.9203 / 0.8913 | 0.0032 / **0.0038** | 0.00558 / **0.00636** |
+| horizon away | 0.9560 / 0.9386 | 0.0040 / **0.0058** | 0.02512 / **0.02816** |
+| mid sunward | 0.8668 / 0.8361 | 0.0043 / **0.0054** | 0.00636 / **0.00766** |
+| horizon sunward | 0.8930 / 0.8718 | 0.0045 / **0.0060** | 0.03005 / **0.03454** |
+
+**Raggedness up at every point, texture inside the body up at every point, area down by 2 to 7 %.** The
+edge gained and the body was not eaten.
+
+`LineJump` over `2 2 1278 551` finds nothing new. Away from the ground line every row maximum sits at
+0.0013–0.0035 and every column maximum at 0.0024–0.0067, against the 0.010 that means "something to look
+at"; the largest column figure (0.00668 at x 527, zenith away) is BELOW its own before-value of 0.00767.
+The one large number — 0.098 at y 540 on both horizon frames — is the checker floor's own edge, and it
+moves by 0.0002 between before and after.
+
+### The frames
+
+| file | what it shows |
+|---|---|
+| `Shots/DS_before_zenith_away.png` / `DS_after_zenith_away.png` | **⬛ THE SHOW.** Before: soft featureless blobs with no edge anywhere. After: scalloped silhouettes with cauliflower lobes on them, and the bodies are still solid |
+| `Shots/DS_before_mid_away.png` / `DS_after_mid_away.png` | the same pair at the elevation a player looks at |
+| `Shots/DS_before_horizon_away.png` / `DS_after_horizon_away.png` | the far field, which is where a finer erosion would show as dither if the tile had gone below the march's chord. It does not: the band at the vanishing point is clean |
+| `Shots/DS_cirrus_before.png` / `DS_cirrus_dissolved.png` / `DS_cirrus_shipped.png` | **the break, and what the fix does and does not restore.** The middle frame is the new layer strength against the factor the file was authored with — the sky is very nearly empty, 4.3 % of the type left. The third is what ships. The FIRST and THIRD differ by the layer's tile ALONE, because the re-base makes their cut depths identical: that pair is the picture of a type meeting an erosion four times finer than its file was authored against — the same amount of cirrus, redistributed into shorter fibres |
+| `Shots/DS_altocumulus_before.png` / `DS_altocumulus_shipped.png` | the second re-based type, the same comparison: cut depth identical, tile four times finer, 74.4 % of pixels moved by at most 16 of 255 and the type's contribution to the frame up 1.1 % |
+| `Shots/DS_stratocumulus_before.png` / `DS_stratocumulus_after.png` | the type that gains the most: a soft smear becomes individual cloud elements |
+| `Shots/DS_congestus_before.png` / `DS_congestus_after.png` | the reference type, at `0,0.65,-1` — **an elevation deliberately outside the six protocol points**, so that it is a third per-type frame rather than a protocol frame under a second name. An earlier draft shipped it as a byte copy of `DS_*_mid_away.png`, which carried no information the protocol did not already carry |
+
+### The relations added, and the breaks that verified them
+
+Nine sabotages, **eight red and one green**. Every suite was rebuilt from deleted OBJECTS *and* a deleted
+BINARY first.
+
+| break | result |
+|---|---|
+| the tile goes back to the 4 km that shipped | RED |
+| the tile goes to 0.4 km, past the march's chord | RED |
+| the strength goes back to the 0.10 that shipped | RED |
+| the strength goes to the top of the slider | RED |
+| the erosion is applied uniformly instead of by depth | RED (two tests) |
+| the cirrus keeps the factor it was authored with | RED |
+| the shipped default drifts by one step | RED |
+| the billowy pair's fourth-root blend becomes linear | RED |
+| the wispy pair's frequency blend is reversed | **GREEN — a real hole, closed** |
+
+**The green one is the finding.** The erosion composite mixes a WISPY pair and a BILLOWY pair and then
+blends the two on `DetailType`. The built-in congestus every fixture in the suite is built on has a
+`DetailCharacter` of **1.00** — the billowy end EXACTLY — so the wispy pair multiplies out of the
+expression entirely. **Two of the noise volume's four channels were never read by any assertion in this
+programme.** The mirror test sweeps the character over 0, 0.35, 0.7 and 1 now; re-run, the same sabotage
+is RED.
+
+### What this task did NOT do, and why it is here rather than in a commit message
+
+* **It did not produce a shredded silhouette,** and no setting of `Detail Strength` can. The reason is
+  measured and stated above: the surface the eye sees sits at a profile of 0.694 and the erosion's weight
+  there is 0.306. The next phase's question is whether `(1 - Profile)` should be re-derived against the
+  optical surface, and it should be asked with frames.
+* **It did not raise the slider's own floor** on `Detail Tile Size`, which at 200 m permits settings 0.45x
+  past the march's chord. That is an artist's knob and the bound depends on Max Steps, so it is asserted
+  as a RELATION in the suite rather than frozen into a range.
+* **It did not re-author the library beyond the two factors the measurement showed dissolved.** A cirrus
+  that should be MORE eroded than a cumulus needs the density to carry it first.

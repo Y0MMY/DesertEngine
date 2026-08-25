@@ -245,9 +245,12 @@ namespace Desert::Core::Serialize
                     std::error_code ec;
                     const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
                                                                      Common::Constants::Path::ASSETS_PATH, ec );
-                    if ( ec || rel.empty() || rel.native().rfind( "..", 0 ) == 0 )
+                    // generic_string() rather than native(): native() is a WIDE string on Windows and a
+                    // narrow one here, so a narrow ".." literal only compiles on this platform.
+                    const auto relStr = rel.generic_string();
+                    if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
                         return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
-                    return rel.generic_string();
+                    return relStr;
                 }
                 if ( type == "CloudModellingVolumeAsset" )
                 {
@@ -261,9 +264,12 @@ namespace Desert::Core::Serialize
                     std::error_code ec;
                     const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
                                                                      Common::Constants::Path::ASSETS_PATH, ec );
-                    if ( ec || rel.empty() || rel.native().rfind( "..", 0 ) == 0 )
+                    // generic_string() rather than native(): native() is a WIDE string on Windows and a
+                    // narrow one here, so a narrow ".." literal only compiles on this platform.
+                    const auto relStr = rel.generic_string();
+                    if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
                         return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
-                    return rel.generic_string();
+                    return relStr;
                 }
                 if ( type == "FontAsset" )
                 {
