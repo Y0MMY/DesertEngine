@@ -117,31 +117,42 @@ namespace Desert::Assets
         /// squashing is done by the layer the type declares — which is what squashes a real stratus — and
         /// not by a number an artist has to keep consistent with the altitudes beside it.
         ///
-        /// 0.75 AND NOT 1.0, AND THE NUMBER IS MEASURED — see CALIBRATION.md §SIL. The ladder on the
-        /// shipped congestus, `Clouds_Demo`'s configuration, at the shipped placement, 8 realisations, with
-        /// the sky that shipped in the left-hand column:
+        /// 0.45, AND IT IS FIXED FROM ABOVE BY A BOUND THIS TASK DID NOT KNOW IT HAD — see CALIBRATION.md
+        /// §SIL. The ladder on the shipped congestus, `Clouds_Demo`'s configuration, at the shipped
+        /// placement, 8 realisations, with the sky that shipped in the left-hand column:
         ///
-        ///                    §RW2    0.50    0.75    1.00
-        ///     horiz chord    1.705   2.084   2.541   2.916 km
-        ///     vert chord     0.569   0.905   1.509   1.992 km
-        ///     solidity        0.33    0.49    0.77    0.94
-        ///     CORE aspect     3.3     2.5     1.8     1.6  : 1
-        ///     envelope        1.1     1.2     1.4     1.5  : 1
-        ///     sky cover      0.7388  0.7394  0.7404  0.7409
+        ///                    §RW2    0.40    0.45    0.50    0.60    0.75    1.00
+        ///     horiz chord    1.705   1.924   2.002   2.084   2.264   2.541   2.916 km
+        ///     vert chord     0.569   0.681   0.790   0.905   1.144   1.509   1.992 km
+        ///     solidity        0.33    0.38    0.44    0.49    0.60    0.77    0.94
+        ///     CORE aspect     3.3     3.1     2.8     2.5     2.2     1.8     1.6  : 1
+        ///     envelope        1.1     1.2     1.2     1.2     1.3     1.4     1.5  : 1
+        ///     EROSION        139 m   155 m   139 m   126 m   113 m   101 m     —
         ///
-        /// THE COVER DOES NOT MOVE AT ALL — four ten-thousandths over the whole ladder — so this constant
-        /// does not spend the Coverage slider and decision D-20 is untouched by it whatever it is set to.
-        /// What it spends is the SIZE OF A BODY: a taller lump fuses with its neighbours across a wider
-        /// front, so the mean horizontal chord goes from 1.705 km on the shipped sky to 2.916 km at 1.00 —
-        /// bodies 71 per cent wider. That is a silhouette change nobody asked for and it runs against §RW's
-        /// own result, which was clouds of visibly different sizes with gaps between them; 1.00 also drives
-        /// the solidity to 0.94, which is a body with no air in its own column at all.
+        /// **THE EROSION ROW IS THE CEILING AND IT IS SOMEBODY ELSE'S MEASUREMENT.** §DS fixed the layer's
+        /// Detail Strength by a floor: the cut must move the surface at which the optical depth first
+        /// reaches 1 by more than the 125 m the march can be relied on to find, or it costs a texture fetch
+        /// and changes nothing a viewer can see. `Desert/Tests/Engine/CloudField` asserts it, and a taller
+        /// lump makes the body optically thicker per metre — the same cut then moves that surface LESS far.
+        /// At 0.60 and above the shipped erosion falls under §DS's floor and that suite goes red.
         ///
-        /// 0.75 is where the core stops reading as a plate — 1.8 to 1 against the envelope's 1.4, where
-        /// §RW2 measured 3.3 against 1.1 — for a widening of half rather than of three quarters. It is the
-        /// last rung on which the core's aspect and the envelope's are still visibly two numbers, which is
-        /// what a lumpy body IS: a solid of 0.94 has stopped being a pile of lobes and become one lump.
-        constexpr float kLumpVerticalOverHorizontal = 0.75f;
+        /// **0.45 IS THE LARGEST VALUE THAT CLEARS BOTH BOUNDS, and it clears the erosion floor at 1.11x —
+        /// which is §DS's own headroom to the metre** (§DS shipped 0.40 at 139.1 m against the same 125).
+        /// 0.50 clears it by ONE metre, which is the balanced-on-the-bound case §DS looked at and refused
+        /// by name.
+        ///
+        /// THE COVER DOES NOT MOVE — four ten-thousandths over the whole ladder — so this constant does not
+        /// spend the Coverage slider and decision D-20 is untouched by it at any setting. What it spends is
+        /// the SIZE OF A BODY: a taller lump fuses with its neighbours across a wider front.
+        ///
+        /// WHAT 0.45 BUYS AND WHAT IT LEAVES ON THE TABLE, because the difference is a decision the
+        /// teamlead owns rather than one this file can make. It takes the body's OPAQUE CORE from 3.3 to 1
+        /// down to 2.8 to 1 against a whole envelope of 1.2 — a quarter of the defect §RW2 measured. 0.75
+        /// would take it to 1.8, and `Shots/SIL_alt_aspect075_*.png` is what that sky looks like; the price
+        /// is §DS's erosion, which would have to be deepened from 0.40 to about 0.60 with the two thin types'
+        /// Detail Factors re-based by the same ratio — §DS's own recipe, applied a second time, with its own
+        /// frames. That is a re-calibration of another phase's number and it is not taken here.
+        constexpr float kLumpVerticalOverHorizontal = 0.45f;
 
         /// Radians to degrees, written out because a lump's rotation is authored in degrees and the wind
         /// arrives as a vector. Not `glm::degrees` only so that this file keeps its one glm include.
