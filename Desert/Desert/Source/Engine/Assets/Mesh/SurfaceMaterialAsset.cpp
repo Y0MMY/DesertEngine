@@ -55,14 +55,13 @@ namespace Desert::Assets
 
     void SurfaceMaterialAsset::AdoptStableHandle()
     {
-        // Asset-database identity: the internal handle must be STABLE across editor runs so
-        // handle-based references (scene GUIDs, canon textures, service maps) survive restarts.
-        // Priority: the GUID persisted INSIDE the file (also survives renames/moves), else a
-        // path-derived handle (same as meshes/cooked textures).
+        // Asset-database identity: the internal handle must be STABLE across editor runs so handle-based
+        // references (scene GUIDs, canon textures, service maps) survive restarts. A GUID persisted INSIDE
+        // the file is the better identity because it survives renames and moves as well, so it wins when it
+        // is there. When it is not, the path-derived handle AssetBase already installed stands — which is
+        // why there is no `else` here.
         if ( m_Data.MaterialId )
             m_Metadata.Handle = *m_Data.MaterialId;
-        else
-            m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
     }
 
     Common::BoolResultStr SurfaceMaterialAsset::Load()
@@ -71,9 +70,15 @@ namespace Desert::Assets
 
         const auto finalize = [this]()
         {
-            if ( m_Data.MaterialId )
-                m_MaterialUUID = *m_Data.MaterialId;
             AdoptStableHandle();
+
+            // The EXTERNAL id is the handle, always. When the file carries a MaterialId the two are the
+            // same value by AdoptStableHandle; when it does not, they are the same path-derived value. The
+            // external id used to be left unset in that second case, which under the old random default
+            // meant MaterialService keyed such a material under a number that changed every launch — the
+            // mesh->material link resolved through GetAssetHandleByExternal and missed after a restart.
+            m_MaterialUUID = m_Metadata.Handle;
+
             m_ReadyForUse = true;
         };
 

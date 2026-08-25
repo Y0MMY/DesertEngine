@@ -18,7 +18,9 @@ namespace Desert::Graphic
     class Image
     {
     public:
-        Image() : m_Hash( Common::UUID() )
+        // A runtime-only identity: an Image has no path to derive one from, and two images must never
+        // share a key in the descriptor caches.
+        Image() : m_Hash( Common::UUID::Generate() )
         {
         }
 

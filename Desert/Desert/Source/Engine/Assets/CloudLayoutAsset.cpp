@@ -7,16 +7,15 @@
 
 namespace Desert::Assets
 {
+    // NOTHING IN THE BODY, AND THE EMPTINESS IS THE POINT. An earlier draft of this file derived the
+    // handle here — `m_Metadata.Handle = AssetHandle::FromCookedPath(...)` — copying what the three cloud
+    // assets beside it did at the time. That is no longer where identity comes from: `AssetBase`'s own
+    // constructor derives it from the path for every type at once, so a fourth statement of the same rule
+    // would be a fourth place it can drift from. A layout gets its identity BY CONSTRUCTION, and the two
+    // assignments left in the engine are the two that genuinely carry an identity of their own from a file.
     CloudLayoutAsset::CloudLayoutAsset( AssetPriority priority, const Common::Filepath& filepath )
          : AssetBase( priority, filepath, AssetTypeID::CloudLayout )
     {
-        // The base class hands out a RANDOM uuid, which is right for an asset with no source of identity
-        // and wrong for one that lives at a path: a fresh id every launch would mean the cloud layer's
-        // handle resolved to nothing after a restart, and the symptom would be "my painting stopped
-        // working when I reopened the editor" — a long way from the cause. Derived from the path exactly as
-        // the three cloud assets beside it do it, and in the CONSTRUCTOR so a registry shell that has not
-        // loaded yet is already keyed by the handle the loaded asset will have.
-        m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
     }
 
     Common::BoolResultStr CloudLayoutAsset::Load()

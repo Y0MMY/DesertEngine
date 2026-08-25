@@ -11,13 +11,8 @@ namespace Desert::Assets
                                                           const Common::Filepath& filepath )
          : AssetBase( priority, filepath, AssetTypeID::CloudModellingVolume )
     {
-        // The base class hands out a RANDOM uuid, which is right for an asset with no source of identity
-        // and wrong for one that lives at a path. A fresh id every launch would mean the hero cloud
-        // component's handle resolved to nothing after a restart, and the symptom would be "my cloud
-        // disappeared when I reopened the editor" — a long way from the cause. Derived from the path,
-        // exactly as CloudNoiseVolumeAsset and CloudTypeAsset do it, and in the CONSTRUCTOR so a registry
-        // shell that has not loaded yet is already keyed by the handle the loaded asset will have.
-        m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
+        // The path-derived handle this type used to compute for itself now comes from AssetBase, which
+        // derives it the same way for every asset type. See the comment on that constructor.
     }
 
     Common::BoolResultStr CloudModellingVolumeAsset::Load()

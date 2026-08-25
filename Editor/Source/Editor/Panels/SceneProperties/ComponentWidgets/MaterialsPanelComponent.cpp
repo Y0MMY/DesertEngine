@@ -278,7 +278,7 @@ namespace Desert::Editor
         // AssetManager/MaterialService register under is the same one every future editor run gets.
         {
             Assets::MaterialData defaults;
-            defaults.MaterialId = Common::UUID();
+            defaults.MaterialId = Common::UUID::Generate();
             Common::Utils::FileSystem::WriteContentToFile( path.generic_string(),
                                                            rfl::json::write( defaults ) );
         }
@@ -311,7 +311,7 @@ namespace Desert::Editor
 
         {
             Assets::MaterialData data;
-            data.MaterialId = Common::UUID();
+            data.MaterialId = Common::UUID::Generate();
             // Reference the parent by its STABLE in-file id (falls back to the asset handle,
             // which file materials adopt from that id anyway).
             data.ParentMaterialId = ( parent.Data().MaterialId && !parent.Data().MaterialId->IsNull() )

@@ -57,12 +57,12 @@ namespace Desert::Assets
         // Maps a texture-slot enum to the shader schema's sampler name.
         static const char* SamplerNameForType( TextureAsset::Type type );
 
-        // Replaces the ctor's random handle with a stable one (MaterialId from the file, else
-        // path-derived) — asset-database identity that survives restarts and renames.
+        // Upgrades the path-derived handle AssetBase installed to the in-file MaterialId when the file has
+        // one — asset-database identity that survives renames as well as restarts.
         void AdoptStableHandle();
 
-        bool         m_ReadyForUse = false;
-        Common::UUID m_MaterialUUID;
+        bool         m_ReadyForUse  = false;
+        Common::UUID m_MaterialUUID = Common::UUID::Null();
         MaterialData m_Data;
     };
 } // namespace Desert::Assets

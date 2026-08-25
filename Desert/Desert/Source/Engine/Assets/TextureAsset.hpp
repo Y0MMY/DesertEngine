@@ -46,9 +46,13 @@ namespace Desert::Assets
             return m_SourcePath;
         }
 
+        // ONE identity, not two. This used to be a separate `m_Handle` member that Load assigned alongside
+        // m_Metadata.Handle, with a comment explaining that the two must be kept in lock-step or every
+        // handle-based resolve would miss. Two fields that must agree, and nothing checking that they do,
+        // is the defect shape this whole change is about — so there is now one field.
         const auto& GetHandle() const
         {
-            return m_Handle;
+            return m_Metadata.Handle;
         }
 
         static AssetTypeID GetTypeID()
@@ -59,7 +63,6 @@ namespace Desert::Assets
     private:
         Type         m_Type;
         bool         m_IsReadyForUse = false;
-        Common::UUID m_Handle;
         std::string  m_SourcePath;
         std::string  m_CookedPath;
 

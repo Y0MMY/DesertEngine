@@ -49,5 +49,11 @@ namespace Desert::Assets
         // — decision D-5 stands, and these are tables, not nodes. Read at the BAKE and never in the march,
         // so a painting costs the hottest pass of the frame nothing — see Engine/Assets/CloudLayout.hpp.
         CloudLayout,
+
+        // NOT an asset type: the number of them. Every new type is added ABOVE this line, and adding one
+        // turns the AssetHandleStability census red until the type is entered in that suite's catalogue.
+        // That red is the only reason this enumerator exists: an asset type whose handle stability nobody
+        // asserts is exactly how five types kept a random per-launch identity for as long as they did.
+        Count,
     };
 } // namespace Desert::Assets
