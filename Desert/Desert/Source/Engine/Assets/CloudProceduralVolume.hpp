@@ -169,6 +169,64 @@ namespace Desert::Assets
         /// same region origin always bake the same bytes.
         uint32_t Seed = 1u;
 
+        // -----------------------------------------------------------------------------------------------
+        // THE FOUR NUMBERS THAT DECIDE WHETHER THE SKY READS AS A GRID
+        // -----------------------------------------------------------------------------------------------
+        //
+        // WHAT WAS MEASURED, AND IT IS THE REASON THESE EXIST. Tools/LatticePeak takes the autocorrelation
+        // of the baked field's top-down projection and reports the prominence of the bump standing on a
+        // multiple of the lattice's own period. On the field that shipped before them the bumps stood at
+        // 6.000, 9.000 and 12.000 km against a predicted cell of 3.000 km — the multiples of the lattice,
+        // to the voxel — at eight to eighteen times the estimator's own noise. The sky was a grid, and it
+        // was a grid because every alive cell carried EXACTLY ONE cluster, of very nearly ONE SIZE,
+        // displaced by at most a third of the cell it was born in.
+        //
+        // Each of the four attacks one of those, and each is defaulted to the value CALIBRATION.md §RW
+        // measured rather than to the value that makes it inert.
+
+        /// How many clusters an alive cell carries, on average. The count is drawn per cell so that a cell
+        /// holds a whole number of them with this mean — two, then one, then three — and "exactly one per
+        /// cell" stops being a property of the field at all.
+        ///
+        /// THE CLUSTER SHRINKS AS THE COUNT RISES, by one over the square root of this number, so that the
+        /// matter in the sky is REDISTRIBUTED rather than added. That is what keeps the Coverage slider
+        /// meaning what it says: without the compensation, raising the density would raise the sky's cover
+        /// and the mapping decision D-20 re-authorised every scene against would have to be measured again.
+        float PlacementDensity = 2.5f;
+
+        /// How far a cluster may wander from its lattice site, in CELLS — 1.0 means it may sit anywhere in
+        /// a box one cell wide centred on its site, so it crosses into its neighbours' territory.
+        ///
+        /// WHAT THE OLD THIRD-OF-A-CELL BOUND ACTUALLY BOUGHT, because the comment it carried claimed more
+        /// than it delivered. It was written to keep a cluster inside the cell whose hash made it. The
+        /// property that MATTERS is a different one — the set of cells generated must be exactly one
+        /// period's worth, or the bake's wrap places each of them twice — and that property does not
+        /// depend on where inside the period a cluster sits: a cluster leaving through one face re-enters
+        /// through the opposite one, because the wrap is what makes the volume periodic in the first
+        /// place. What the bound really bought is that a region SHIFT changes the sky only within a third
+        /// of a cell of the region's faces, which is 24 km from the camera. At 1.0 that strip goes from
+        /// 1.0 km to 1.5 km at the same distance.
+        float PlacementScatter = 1.0f;
+
+        /// How much cluster sizes spread, 0..1. Zero makes every cluster the size its cell's fill says;
+        /// one makes the largest about four times the width of the smallest.
+        ///
+        /// THE SPREAD IS UNIFORM IN AREA AND NOT IN RADIUS, so that the mean area a cluster covers is
+        /// exactly what it was at zero. Spreading the radius uniformly instead would have raised the mean
+        /// area by a twelfth of the spread squared and moved the Coverage mapping with it.
+        float PlacementSizeVariety = 0.75f;
+
+        /// The world size over which the LARGE-scale modulation of coverage repeats, kilometres. It is the
+        /// scale of a weather system rather than of a cloud: patches of busy sky and patches of clear sky,
+        /// which is the structure a lattice with one number for the whole sky cannot have.
+        float PatchTileKm = 21.0f;
+
+        /// How hard that modulation pushes, 0..1. Zero is a uniformly busy sky — which is what the owner
+        /// described as "the whole sky is cloud" — and one lets a patch reach nearly empty and nearly
+        /// solid. It is SYMMETRIC about the slider's own value, so it redistributes cloud rather than
+        /// adding or removing it.
+        float PatchStrength = 0.60f;
+
         /// The horizontal wind direction the lattice's anisotropy is measured against, world XZ. Need not
         /// be normalized; a zero vector means east, which is what CloudSpeciesPlacementBasis also does.
         glm::vec2 WindAxis{ 1.0f, 0.0f };

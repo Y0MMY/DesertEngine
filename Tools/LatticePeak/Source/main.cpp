@@ -39,6 +39,7 @@
 // Usage:
 //   LatticePeak --field [--region KM] [--tile KM] [--scale F] [--aniso F] [--coverage F] [--contrast F]
 //               [--seed N] [--wind X,Z] [--chord KM] [--maxlag KM] [--repeats N] [--project sum|max]
+//               [--density F] [--scatter F] [--variety F] [--patch F] [--patch-tile KM]
 //               [--pgm PATH] [--csv PATH]
 //   LatticePeak --frame <png> <x0> <y0> <x1> <y1> [<png> <x0> <y0> <x1> <y1> ...]
 
@@ -185,6 +186,11 @@ namespace
         float       contrast = 1.0f;
         float       chordKm  = 0.125f;
         float       maxLagKm = 16.0f;
+        float       density  = -1.0f;
+        float       scatter  = -1.0f;
+        float       variety  = -1.0f;
+        float       patchKm  = -1.0f;
+        float       patch    = -1.0f;
         int         seed     = 1;
         int         repeats  = 8;
         bool        useSum   = true;
@@ -214,6 +220,16 @@ namespace
                 chordKm = static_cast<float>( std::atof( argv[++i] ) );
             else if ( arg == "--maxlag" && has )
                 maxLagKm = static_cast<float>( std::atof( argv[++i] ) );
+            else if ( arg == "--density" && has )
+                density = static_cast<float>( std::atof( argv[++i] ) );
+            else if ( arg == "--scatter" && has )
+                scatter = static_cast<float>( std::atof( argv[++i] ) );
+            else if ( arg == "--variety" && has )
+                variety = static_cast<float>( std::atof( argv[++i] ) );
+            else if ( arg == "--patch-tile" && has )
+                patchKm = static_cast<float>( std::atof( argv[++i] ) );
+            else if ( arg == "--patch" && has )
+                patch = static_cast<float>( std::atof( argv[++i] ) );
             else if ( arg == "--seed" && has )
                 seed = std::atoi( argv[++i] );
             else if ( arg == "--repeats" && has )
@@ -255,6 +271,21 @@ namespace
         params.ResolvableChordKm = chordKm;
         params.BlendRadiusKm     = std::max( 0.02f * latticeKm, 1e-3f );
         params.ProfileDepthKm    = std::max( 0.12f * latticeKm, 1e-3f );
+
+        // THE FOUR PLACEMENT KNOBS DEFAULT TO THE STRUCT'S OWN VALUES, so that running the tool with no
+        // flags measures WHAT SHIPS rather than a configuration only the tool has. A negative on the
+        // command line means "not given" for exactly that reason: zero is a legal setting of every one of
+        // them and could not have carried the meaning.
+        if ( density >= 0.0f )
+            params.PlacementDensity = density;
+        if ( scatter >= 0.0f )
+            params.PlacementScatter = scatter;
+        if ( variety >= 0.0f )
+            params.PlacementSizeVariety = variety;
+        if ( patchKm >= 0.0f )
+            params.PatchTileKm = patchKm;
+        if ( patch >= 0.0f )
+            params.PatchStrength = patch;
 
         Desert::Assets::CloudProceduralSpecies species;
         species.Shape      = Desert::Assets::CloudTypeDefaultShape();
@@ -440,7 +471,8 @@ namespace
              "usage: LatticePeak --field  [--region KM] [--tile KM] [--scale F] [--aniso F]\n"
              "                            [--coverage F] [--contrast F] [--seed N] [--wind X,Z]\n"
              "                            [--chord KM] [--maxlag KM] [--repeats N]\n"
-             "                            [--project sum|max] [--pgm PATH] [--csv PATH]\n"
+             "                            [--density F] [--scatter F] [--variety F] [--patch F]\n"
+             "                            [--patch-tile KM] [--project sum|max] [--pgm PATH] [--csv PATH]\n"
              "       LatticePeak --frame  <png> <x0> <y0> <x1> <y1> [<png> <x0> <y0> <x1> <y1> ...]\n"
              "\n"
              "  --field  bakes the placement field through the shipped generator and measures it; the\n"

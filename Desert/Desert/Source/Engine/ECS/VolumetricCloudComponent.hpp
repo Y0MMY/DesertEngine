@@ -246,10 +246,10 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Weather Tile Size" ), Category( "Weather" ), Length,
                   Range( 200000.0f, 8000000.0f ),
                   Tooltip( "World size the cloud lattice is measured against. One cell is a QUARTER of it, "
-                           "and a cell holds one cloud — which is also what decides whether there is any "
-                           "cloud overhead at all: a cell much larger than the layer altitude cannot fit "
-                           "one above the camera, and the zenith comes out empty however high the "
-                           "coverage is set." ) )
+                           "and a cell carries Cloud Density clouds on average — which is also what "
+                           "decides whether there is any cloud overhead at all: a cell much larger than "
+                           "the layer altitude cannot fit one above the camera, and the zenith comes out "
+                           "empty however high the coverage is set." ) )
         // TWELVE KILOMETRES -> 3 km cells, a cumulus field. The other half of the calibrated pair; see
         // MaxViewDistance for what the two of them together decide and for where it was measured.
         //
@@ -288,6 +288,82 @@ namespace Desert::ECS
         // bake a different volume. The placement is procedural now, so the choice is a number, and a
         // number an artist can turn is worth one slider.
         int32_t Seed = 1;
+
+        // ---- Placement ------------------------------------------------------------------------------
+        //
+        // WHY THIS CATEGORY EXISTS. The owner looked at the sky and said the clouds "just go in a row" and
+        // that the whole sky was cloud "with an obvious pattern". Both statements were true and both were
+        // MEASURABLE, which is what Tools/LatticePeak was built for: it takes the autocorrelation of the
+        // baked field seen from below and reports how far a bump standing on a multiple of the lattice's
+        // own period rises above the estimator's noise. On the sky that shipped before this category the
+        // bumps stood at 6.000, 9.000 and 12.000 km against a predicted cell of 3.000 km — the lattice's
+        // multiples, to the voxel — at eight to eighteen times that noise.
+        //
+        // THE CAUSE WAS NOT THE ONE THE SHAPE OF THE DEFECT SUGGESTED, and the numbers are in
+        // Docs/Clouds/CALIBRATION.md section RW. Raising the number of clouds per cell ALONE makes the
+        // grid two and a half times WORSE, because several small clouds crowded into the middle of a cell
+        // mark that cell's site more sharply than one large one did. What removes the lattice is letting a
+        // cloud LEAVE the cell that made it: on that change alone the bump falls from 0.066 to 0.011.
+        //
+        // Every one of the four below is read by Engine/Assets/CloudProceduralVolume.cpp at BAKE time, not
+        // per frame, so all four are free at render time and cost a rebake when they change.
+
+        PROPERTY( DisplayName( "Cloud Density" ), Category( "Placement" ), Range( 0.25f, 8.0f ),
+                  Tooltip( "How many clouds a lattice cell carries on average — a whole number is drawn "
+                           "per cell with this mean, so 'exactly one per cell' stops being a property of "
+                           "the sky. It does NOT change how much cloud there is: each cloud is narrowed by "
+                           "one over the square root of this, so the matter is redistributed rather than "
+                           "added and Coverage keeps meaning what it says. Raise it for many small clouds "
+                           "at the same cover, lower it for few large ones. On its own it makes the "
+                           "lattice MORE visible, not less — Cloud Scatter is what removes that." ) )
+        // 2.5, AND THE VALUE IS A COMPROMISE BETWEEN TWO MEASUREMENTS RATHER THAN A PREFERENCE. Upward it
+        // is bounded by the bake: the cost is linear in the lump count, and at the shipped 3 km cell a
+        // region holds 256 cells, so every unit of this is another 256 clusters and about six hundred
+        // lumps. Downward it is bounded by the picture: at 1 the sky has one size of cloud in it, which is
+        // what the owner was looking at.
+        float PlacementDensity = 2.5f;
+
+        PROPERTY( DisplayName( "Cloud Scatter" ), Category( "Placement" ), Range( 0.0f, 4.0f ),
+                  Tooltip( "How far a cloud may wander from its lattice site, measured in CELLS — at 1 it "
+                           "may sit anywhere in a cell-wide box around its site and so crosses into its "
+                           "neighbours' ground. THIS IS THE KNOB THAT REMOVES THE GRID: at 0 the sky is a "
+                           "lattice with a wobble, and the measured lattice bump falls by six times "
+                           "between 0 and 1. It is not free — independently placed clouds overlap where a "
+                           "lattice keeps them apart, so the sky covers a few points less than Coverage "
+                           "says at 0 and a few points more when this is returned to zero." ) )
+        // ONE CELL, and the ceiling of 4 is where a cluster's own site stops meaning anything: at four
+        // cells of travel a cloud is as likely to be anywhere in a nine-cell neighbourhood as at home, so
+        // the lattice has already stopped being measurable long before the top of the slider. The travel
+        // above 1 is left because it is what an artist reaches for when the cell is small.
+        float PlacementScatter = 1.0f;
+
+        PROPERTY( DisplayName( "Cloud Size Variety" ), Category( "Placement" ), Range( 0.0f, 1.0f ),
+                  Tooltip( "How much cloud sizes differ from each other. At 0 every cloud in the sky is "
+                           "the size its cell's coverage says, which is the second half of what reads as a "
+                           "pattern; at 1 the widest is about four times the narrowest. The draw is "
+                           "uniform in AREA rather than in width, so the mean cloud covers the same ground "
+                           "at every setting and Coverage does not move with it. A smaller cloud is also a "
+                           "flatter one, which is what a field of cumulus looks like." ) )
+        float PlacementSizeVariety = 0.75f;
+
+        PROPERTY( DisplayName( "Weather Patch Size" ), Category( "Placement" ), Length,
+                  Range( 500000.0f, 20000000.0f ),
+                  Tooltip( "World size over which the sky's BUSY and CLEAR regions alternate — the scale "
+                           "of a weather system rather than of a cloud. It is bounded from both sides and "
+                           "the bounds are refused by name: below three cells the modulation decides "
+                           "single cells and reads as a checkerboard, and above the Region Size it cannot "
+                           "complete a cycle before the sky repeats anyway." ) )
+        // TWENTY-ONE KILOMETRES — seven cells at the shipped 12 km weather tile, and under half the 48 km
+        // region so a full cycle of busy and clear fits inside one period of the sky.
+        float PatchTileSize = 2100000.0f;
+
+        PROPERTY( DisplayName( "Weather Patch Strength" ), Category( "Placement" ), Range( 0.0f, 1.0f ), Summary,
+                  Tooltip( "How hard the sky is divided into busy and clear regions. At 0 the coverage is "
+                           "the same everywhere and the sky is uniformly occupied — which is what 'the "
+                           "whole sky is cloud' describes; at 1 a patch can reach nearly solid and its "
+                           "neighbour nearly empty. It is symmetric about Coverage, so it moves cloud "
+                           "around the sky rather than adding or removing it." ) )
+        float PatchStrength = 0.60f;
 
         // ---- Detail ---------------------------------------------------------------------------------
         //

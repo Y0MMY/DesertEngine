@@ -34,6 +34,15 @@ namespace Desert::Graphic::System
                  a.ResolvableChordKm != b.ResolvableChordKm )
                 return false;
 
+            // THE FOUR PLACEMENT NUMBERS, and they belong here for the reason the note above gives: every
+            // one of them changes the lumps, so a layer whose artist moves one and sees nothing happen has
+            // a dead setting — which is exactly what §1.3 of the contract forbids and exactly what leaving
+            // them out of this comparison would produce.
+            if ( a.PlacementDensity != b.PlacementDensity || a.PlacementScatter != b.PlacementScatter ||
+                 a.PlacementSizeVariety != b.PlacementSizeVariety || a.PatchStrength != b.PatchStrength ||
+                 a.PatchTileKm != b.PatchTileKm )
+                return false;
+
             if ( a.Species.size() != b.Species.size() )
                 return false;
 
@@ -243,6 +252,23 @@ namespace Desert::Graphic::System
         params.CoverageContrast = std::max( m_Data.CoverageContrast, 0.01f );
         params.Seed             = static_cast<uint32_t>( m_Data.Seed );
 
+        // THE FOUR PLACEMENT NUMBERS PASS THROUGH UNCHANGED, and the clamps here are the component's own
+        // ranges rather than second opinions: a scene file is a text file and an out-of-range number in
+        // one must produce a sky rather than a refusal. Assets::ValidateCloudProceduralParams refuses
+        // anything outside them by name, so a clamp that disagreed with a range would turn an artist's
+        // typo into a layer that never bakes.
+        params.PlacementDensity     = std::clamp( m_Data.PlacementDensity, 0.25f, 8.0f );
+        params.PlacementScatter     = std::clamp( m_Data.PlacementScatter, 0.0f, 4.0f );
+        params.PlacementSizeVariety = std::clamp( m_Data.PlacementSizeVariety, 0.0f, 1.0f );
+        params.PatchStrength        = std::clamp( m_Data.PatchStrength, 0.0f, 1.0f );
+
+        // THE PATCH IS THE ONE THAT CAN REFUSE, because it is half of a RELATION — a modulation finer than
+        // three cells decides cells one at a time and reads as a checkerboard. Floored against the
+        // lattice HERE rather than left to fail validation, for the same reason: the layer has to draw a
+        // sky for whatever the file says. An artist who wants finer patches gets them by shrinking the
+        // weather tile, which is what the tooltip names.
+        params.PatchTileKm = std::max( m_Data.PatchTileSize, 1.0f ) / kCloudWorldUnitsPerKm;
+
         // THE BLEND RADIUS AND THE PROFILE DEPTH ARE DERIVED FROM THE LATTICE rather than exposed, and
         // that is a decision with a number behind it. The join inflates its own surface by
         // `BlendRadius * ln(sum of weights in range)`, so with hundreds of overlapping lumps a generous
@@ -278,6 +304,16 @@ namespace Desert::Graphic::System
             species.CellKm     = latticeKm * std::max( shapes[slot].PlacementScale, 1e-3f );
             species.Anisotropy = std::max( shapes[slot].PlacementAnisotropy, 1e-3f );
             params.Species.push_back( species );
+        }
+
+        // THE PATCH AGAINST THE LATTICE, floored after the species are known because the CELL is what the
+        // relation is against and a type's Placement Scale and Anisotropy both move it. Three cells is the
+        // bound Assets::ValidateCloudProceduralParams refuses below: a modulation whose period is near a
+        // cell's decides cells one at a time, which is a checkerboard and not a weather system.
+        for ( const Assets::CloudProceduralSpecies& species : params.Species )
+        {
+            const glm::vec2 extent = Assets::CloudProceduralCellExtentKm( params, species );
+            params.PatchTileKm     = std::max( params.PatchTileKm, 3.0f * std::max( extent.x, extent.y ) );
         }
 
         return params;
