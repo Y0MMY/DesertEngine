@@ -1203,6 +1203,23 @@ TEST( CloudPlacementSpectrum, ALumpsHeightAndItsWidthAreOneQuantity )
     EXPECT_NEAR( shipped, deep, 0.02 )
          << "twice the band gave lumps of a different SHAPE, so the type's altitudes are deciding a lump's "
             "height again — which is §RW2's defect, back";
+
+    // AND THE SHAPE THE LUMPS ACTUALLY HAVE IS THE ONE THE EXPORTED CONSTANT DECLARES.
+    //
+    // The three assertions above are mutual — they say the ratio does not move when the cell and the band
+    // move — and a generator that ignored Assets::kCloudLumpVerticalOverHorizontal entirely would satisfy
+    // every one of them. That is not a hypothetical: the constant is exported precisely so that
+    // Desert/Tests/Engine/CloudField can read it and assert the erosion is calibrated against it, and that
+    // whole relation is worth nothing if the number the test reads and the number the generator uses are
+    // allowed to be two different numbers. This is the line that makes the exported symbol the ONE
+    // statement of the lump's shape rather than a copy of it that happens to agree today.
+    EXPECT_NEAR( shipped, kCloudLumpVerticalOverHorizontal, 0.01 )
+         << "the lumps the generator emits measure " << shipped << " tall over wide, but "
+         << "Assets::kCloudLumpVerticalOverHorizontal declares " << kCloudLumpVerticalOverHorizontal
+         << ". The exported constant is what Desert/Tests/Engine/CloudField reads when it checks that the "
+            "erosion's strength is calibrated against the shape of the lump, so if the generator has gone "
+            "back to spelling that shape out for itself, the erosion is being checked against a number "
+            "nothing in the sky uses.";
 }
 
 // EVERY LUMP STANDS INSIDE THE ALTITUDES ITS OWN TYPE DECLARES, which the stack did not before.
