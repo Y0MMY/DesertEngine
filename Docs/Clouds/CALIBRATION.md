@@ -4236,6 +4236,14 @@ to keep in step.
 The letter reads MIRRORED, and that is the top-down view rather than a defect: looking straight down
 reverses one axis.
 
+**`PT_Layout_LetterD` is authored for LEGIBILITY and says so here rather than pretending to be the shipped
+sky**: `Cloud Scatter` 0.25 against the shipped 1.0, `Cloud Density` 3.0 against 1.75, `Cloud Size Variety`
+0.35 against 0.75. The shipped placement deliberately lets a cloud wander a full cell — that is what §RW
+bought to remove the lattice — and a cloud that wanders a full cell cannot stay inside a stroke 4.8 km
+wide. So the demonstration tightens the placement, and the interaction is the point: **the painting says
+WHERE, and the placement knobs decide how faithfully the clouds keep to it.** The first letter frame, at
+the shipped scatter, is legible as a shape and broken as a glyph.
+
 ### THE SKY THAT SHIPPED DID NOT MOVE — SIX OF SIX, BYTE FOR BYTE
 
 `Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, no layout bound. Every one of the six
