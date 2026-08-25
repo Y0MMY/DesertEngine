@@ -3700,3 +3700,450 @@ named on `kBlobsPerCluster` with the reason.
   and no default outside the generator changed.
 * **It did not pursue §RW2's unexplained Z bump at 5.25–5.44 km**, which the brief put outside its scope.
   What is recorded above is the one new fact that fell out: it moves with the lump's shape.
+
+## SIL2 — the lump goes to 0.75, and the erosion floor is paid for rather than moved, 2026-08-25
+
+§SIL measured a trade honestly and refused to take it alone, because taking it meant re-calibrating another
+phase's number. The teamlead took the decision; this is the other half of it. **Nothing here is a new idea —
+it is §DS's own recipe applied a second time, to a bound §DS did not know it was setting.**
+
+**The baseline is the shipped `dev` sky and it is proven rather than assumed.** All FIFTEEN baseline frames
+shot for this task are **byte for byte identical** to the frames §SIL committed — the six protocol points
+against `Shots/SIL_after_*.png`, eight genus frames against `Shots/SIL_genus_*_after.png`, and the congestus
+genus frame against `Shots/SIL_after_mid_away.png` (§SIL's own note that the congestus scene IS
+`Clouds_Demo`). So every "after" number below is attributable to this change and to nothing else.
+
+**The repeat floor is ZERO and it was measured rather than quoted.** The first render in this fresh worktree
+differs from the second; the second and third are byte for byte identical. That is §A1's correction
+reproduced for the fourth time in this programme, and the first render was discarded before anything was
+measured.
+
+---
+
+### WHAT MOVED, AND THE THING THAT IS NOT A NUMBER IS THE POINT
+
+| | before | after |
+|---|---|---|
+| `Assets::kCloudLumpVerticalOverHorizontal` | 0.45 | **0.75** |
+| `ECS::VolumetricCloudData::DetailStrength` | 0.40 | **0.65** |
+| `Cirrus.decloudtype` Detail Factor | 0.625 | **0.3846154** |
+| `Altocumulus.decloudtype` Detail Factor | 0.40 | **0.2461538** |
+
+The first is what the teamlead asked for. The second is what it costs. The third and fourth are what the
+second costs. **And the thing that moved which is not a number at all is that the first two are now ONE
+calibration in the repository instead of two numbers in two files** — which is the only part of this that is
+engineering rather than arithmetic.
+
+---
+
+### THE STRENGTH WAS MEASURED, AND THE ESTIMATE IT REPLACES WAS WRONG
+
+The brief asked for §SIL's estimate to be checked by measurement rather than believed. It does not survive.
+
+§SIL estimated *"restoring §DS's 1.11x headroom needs a strength of about **0.60**"* from two anchor points.
+**Both anchors reproduce here to a tenth of a metre** — 116.7 m at 0.50 and 157.1 m at 0.80 — so the
+measurement was right and the inference from it was not: even a straight line through that pair reaches
+1.11x only at 0.66. The re-measured ladder, `Desert/Tests/Engine/CloudField` walking 48 x 48 columns through
+the volume the 0.75 lump actually bakes:
+
+| strength | 0.40 | 0.45 | 0.50 | 0.55 | **0.60** | **0.65** | 0.70 | 0.80 | 1.00 |
+|---|---|---|---|---|---|---|---|---|---|
+| surface travel | 101 m | 109 | 117 | 124 | **131** | **139** | 145 | 157 | 180 |
+| against the 125 m march | 0.81x | 0.87x | 0.93x | 0.99x | **1.05x** | **1.11x** | 1.16x | 1.26x | 1.44x |
+| opaque columns dissolved | 0.054 | 0.056 | 0.060 | 0.061 | **0.065** | **0.068** | 0.075 | 0.079 | 0.088 |
+
+> **0.60 CLEARS THE FLOOR BY SIX METRES, WHICH IS THE CASE §DS LOOKED AT AND REFUSED BY NAME.** §DS chose
+> 0.40 over 0.35 because *"0.35 clears it by ONE metre and 0.40 by fourteen… a one-per-cent margin would make
+> the suite fail on any change to the generator that moved a body by a voxel."* At the 0.75 lump the same
+> sentence reads: 0.60 clears it by six metres and **0.65 by fourteen**. The two calibrations land on the
+> same headroom because they are the same rule applied twice — §DS shipped 139.1 m against 125, this ships
+> **138.7 m against 125**.
+
+---
+
+### THE RE-BASE IS AN IDENTITY, AND IT IS VERIFIED ON THE FRAME WITH ONE VARIABLE ALONE
+
+Raising the layer multiplies **every** type's cut by 1.625. §DS measured that the two thin types are
+*deleted* rather than shredded by a deeper cut, and its repair is to divide their factors by the same ratio
+so the product does not move:
+
+| | authored | §DS | §SIL2 | the product |
+|---|---|---|---|---|
+| cirrus | 0.10 x 2.50 | 0.40 x 0.625 | **0.65 x 0.3846154** | **0.250000** |
+| altocumulus | 0.10 x 1.60 | 0.40 x 0.40 | **0.65 x 0.2461538** | **0.160000** |
+
+`Desert/Tests/Engine/CloudType.TheReBasedTypesKeepTheCutDepthTheirFilesWereAuthoredAt` asserts this on the
+shipped assets rather than on the arithmetic in this table, and prints both products.
+
+**AND IT IS PROVEN THROUGH THE WHOLE RENDERER, with the lump held at 0.75 in BOTH arms** — which is §DS's own
+method (*"with the one variable it is about held alone"*) and is what makes it a statement about the re-base
+rather than about the lump:
+
+| control: layer 0.40 x old factor, against shipped: layer 0.65 x re-based factor | result |
+|---|---|
+| **cirrus** | **BYTE FOR BYTE IDENTICAL** (`cmp`) |
+| **altocumulus** | **9 pixels of 980 480 differ (0.001 %), max delta 1/255** |
+
+The nine pixels are the float-rounding floor of `0.65 x 0.2461538` against `0.40 x 0.40`, which are not the
+same bits even though they are the same number. **The re-base changes nothing a viewer can see, and that is
+measured rather than argued.**
+
+---
+
+### THE COUPLING, WHICH IS THE ENGINEERING AND NOT THE ARITHMETIC
+
+> The lump's shape and the erosion's depth were two numbers in two files, and neither named the other.
+
+They are not independent. A taller lump packs more density into a metre of ray, so the altitude at which the
+optical depth first reaches 1 — the surface the eye puts the cloud at — sits at a **shallower profile**
+(0.632 at the 0.45 lump, **0.576** at the 0.75 one), and a given cut moves that surface a **shorter
+distance**. Detail Strength is fixed from below by a floor on exactly that distance.
+
+**HOW THAT COST §SIL A COMMIT.** §SIL raised the lump to 0.75, measured the sky, shot the frames, wrote the
+report and committed it. The travel had gone to 101 m against a 125 m floor. Nothing in the repository said
+so until a full sweep of every suite — run for an unrelated reason — turned `CloudField` red, and §SIL's own
+report says it *"would have shipped"*. §SIL then backed the lump down to the largest value that clears a
+floor nobody had connected it to, and recorded the coupling **in prose**.
+
+**Prose is not a relation.** What ships instead:
+
+1. **The aspect is exported as one public symbol**, `Assets::kCloudLumpVerticalOverHorizontal`, and the
+   generator's own constant is an alias of it rather than a second spelling.
+2. **`CloudField.TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers`** reads that symbol
+   *and* the component's default, bakes the volume the pair produces, and asserts what the pair delivers.
+   Moving either number alone is red and the message names the other one.
+3. **`CloudPlacementSpectrum.ALumpsHeightAndItsWidthAreOneQuantity` now asserts the emitted lumps MEASURE
+   that symbol.** Without it the exported constant could drift from the generator and the coupling test would
+   be checking the erosion against a number nothing in the sky uses. This was found by working through the
+   sabotage list, not by a failure.
+
+**THE THRESHOLD IS A WINDOW AND BOTH ENDS ARE MEASURED.** The physical bound is 1.00x. The shipped pair sits
+at 1.11x. The floor of the window is **1.05x** — halfway between the bound being protected and the value
+protecting it, so a body moving by a voxel does not trip it and a calibration quietly giving up its headroom
+does. The ceiling is **1.35x**, and it exists because of a finding:
+
+> ⚠️ **§DS'S OCTAVE CEILING HAS LOST THE BITE IT WAS WRITTEN FOR, AND THAT IS A CONSEQUENCE OF THIS CHANGE.**
+> Its stated job is to catch "somebody raised Detail Strength and changed nothing else". Against the 0.45
+> lump the top of the slider travelled 243 m — 1.94x, just inside the octave, so the bound only barely
+> caught it. Against the 0.75 lump the top of the slider travels **180 m, 1.44x**, comfortably inside. The
+> bound still fires, but now for the OPPOSITE drift — a lump made flatter without the strength coming down —
+> because a flatter lump is optically thinner per metre and the same cut travels further. Its original bite
+> was an accident of the aspect it was measured at. The 1.35x ceiling restores it: the shipped pair is a
+> fifth below it and the slider's top a fifteenth above.
+
+---
+
+### THE FOUR THINGS THAT COULD NOT BE LOST, EACH CHECKED BY A NUMBER
+
+**1. THE SKY'S COVER — kept, and the movement is named rather than rounded away.**
+`LatticePeak --field`, 32 realisations, `Clouds_Demo`'s configuration: **0.7432 before, 0.7446 after.**
+The before figure is the teamlead's own to four decimals. **The cover rises by 0.0014** — fourteen
+ten-thousandths, 0.19 % relative, in the direction of MORE cloud. §SIL's ladder predicted this: it recorded
+the cover rising from 0.7390 at 0.45 to 0.7409 at 0.75 on 8 realisations, and 32 realisations here reproduce
+the same slope. **It is not zero and it is not rounded to zero; it is named as a trade below.**
+
+**2. THE LATTICE ALONG THE WIND — kept at exactly zero.**
+
+| | X (east, the wind's own axis) | Z (north) |
+|---|---|---|
+| before | **LATTICE 0.0000** | LATTICE 0.0117 at 5.625 km (2P), 1.9x noise |
+| after | **LATTICE 0.0000** | LATTICE 0.0114 at 5.625 km (2P), 1.8x noise |
+
+The Z figure is §RW2's unexplained bump, which §SIL showed is not a lattice; its prominence FALLS and its
+position does not move. Asked at a 4.000 km cell (`--tile 16`, 24 realisations) the after field reports
+**LATTICE 0.0000 on both axes**, which is §SIL's own cross-check reproduced.
+
+**3. THE COVERAGE SLIDER PER GENUS — kept, and the four the teamlead named are all inside 0.06.**
+No genus moves by more than **0.0095** (the cirrus; the next largest is the lenticular at 0.0031 and five of
+the nine move by under 0.002). Against the slider's own 0.5, the four rows the brief lists read
+**cirrus 0.508, lenticular 0.505, stratocumulus 0.521, altocumulus 0.556** — the worst is the altocumulus at
+**+0.056**, which is inside 0.06 and is a shade tighter than the +0.058 §SIL shipped.
+
+**4. THE EROSION'S HEADROOM — restored to §DS's own figure to the metre.** 138.7 m against a 125 m floor,
+**1.11x**, against §DS's 139.1 m and §SIL's 139 m. `CloudField` is green.
+
+---
+
+### FORM BY FORM — WHAT THE LUMP'S SHAPE BUYS
+
+Every row `LatticePeak --field --type <the shipped asset> --coverage 0.5`, 6 realisations, everything else
+at the values that ship. **`Coverage` is 0.5, so a column that does not read 0.5 is the slider lying.**
+
+| genus | cover before | cover after | **OPAQUE CORE** before / after | envelope before / after |
+|---|---|---|---|---|
+| cumulus humilis | 0.5279 | 0.5261 | 5.6 : 1 / **5.4 : 1** | 5.6 / 5.4 |
+| cumulus mediocris | 0.5165 | 0.5172 | 4.0 : 1 / **3.7 : 1** | 3.9 / 3.7 |
+| **cumulus congestus** | 0.5113 | 0.5130 | 2.7 : 1 / **1.8 : 1** | 1.3 / 1.5 |
+| **cumulonimbus** | 0.8543 | 0.8543 | 4.4 : 1 / **3.3 : 1** | 1.0 / 1.1 |
+| stratocumulus | 0.5220 | 0.5213 | 2.2 : 1 / **1.8 : 1** | 1.6 / 1.7 |
+| stratus | 0.5065 | 0.5065 | 38.4 : 1 / 38.4 : 1 | 38.4 / 38.4 |
+| altocumulus | 0.5581 | 0.5560 | 2.4 : 1 / **2.2 : 1** | 2.2 / 2.2 |
+| cirrus | 0.4989 | 0.5084 | 1.8 : 1 / **1.4 : 1** | 1.3 / 1.4 |
+| lenticular | 0.5016 | 0.5047 | 3.2 : 1 / **3.1 : 1** | 3.2 / 3.1 |
+
+**THE SHIPPED CONGESTUS' OPAQUE CORE GOES FROM 2.7 : 1 TO 1.8 : 1 AGAINST AN ENVELOPE OF 1.5.** That is the
+whole object of the task: §RW2 measured the defect as a core of 3.3 : 1 inside an envelope of 1.1 : 1 — a
+ball of air with a plate of cloud through the middle — §SIL took the core to 2.8, and this takes it to 1.8.
+**The core and the envelope now agree because the CORE came up to meet the envelope**, which is the arm §SIL
+said it could not reach at 0.45 (*"at 0.45 the flat lens is corrected mostly by the body getting shorter"*).
+
+> **AND THE CUMULONIMBUS MOVED, WHICH NEITHER EARLIER PHASE COULD DO.** Its anisotropy is 1, so neither of
+> §SIL's two defects touched it and its core sat at 4.4 : 1 before and after. The lump's shape is not an
+> anisotropy effect, so it reaches it: **4.4 : 1 to 3.3 : 1**, the second largest move in the table.
+
+> **AND THE COVERAGE LIE IT CARRIES IS UNTOUCHED, exactly as before: 0.8543 for a slider of 0.5, to four
+> decimals, in both arms.** §SIL named its cause (a 6.000 km cell against a 48 km region, with
+> `kPackingCompensation` and the 0.68 alive exponent both fitted at 3.000 km and carrying no cell dependence)
+> and this task did not touch it either. **It remains the largest single lie left in the Coverage slider.**
+
+> **STRATUS DOES NOT MOVE IN THIS TABLE AND ITS FRAME DOES.** Its 400 m band puts every lump against the band
+> clamp (a lump may not be taller than half its band) at both aspects, so the lump's shape cannot reach it —
+> which is the band clamp doing exactly what its comment claims, and the claim is now checked by a genus
+> rather than asserted. Its FRAME still moves, by the deeper erosion alone: 2.81 % of pixels, max 12/255.
+
+---
+
+### THE SIX POINTS
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, `ImageStat` over `0 0 1280 551`.
+**The before column reproduces §SIL's published table on all six points to three decimals.**
+
+| point | mean before / after | contrast before / after | sat before / after |
+|---|---|---|---|
+| zenith away `0,0.9,-1` | 0.598 / 0.570 | 0.386 / **0.415** | 0.079 / **0.098** |
+| mid away `0,0.45,-1` | 0.552 / 0.534 | 0.388 / **0.395** | 0.172 / **0.174** |
+| horizon away `0,0.12,-1` | 0.622 / 0.606 | 0.273 / 0.205 | 0.087 / 0.085 |
+| **zenith sunward `0,0.9,1`** | **0.648 / 0.571** | **0.444 / 0.303** | 0.063 / **0.084** |
+| mid sunward `0,0.45,1` | 0.601 / 0.560 | 0.297 / 0.254 | 0.099 / **0.117** |
+| horizon sunward `0,0.12,1` | 0.621 / 0.590 | 0.277 / 0.248 | 0.102 / **0.113** |
+
+**Saturation rises at five of six** — more blue in the sky — and the mean falls at all six, which is a
+thicker body letting less light through it. **Contrast rises at the two away-from-sun angles a player looks
+at and falls at the three sunward ones**, and the largest single move in the whole table is the sunward
+zenith's −0.141. That one is a real cost and it has its own heading below.
+
+| point | cloud fraction before / after | ragged before / after | lap r4 before / after |
+|---|---|---|---|
+| zenith away | 0.9274 / 0.3543 | 2.22 / **13.34** | 0.00527 / **0.00568** |
+| mid away | 0.7313 / 0.7566 | 6.79 / 4.51 | 0.00724 / 0.00706 |
+| horizon away | 0.5496 / 0.4493 | 41.64 / 41.32 | 0.02615 / 0.01886 |
+| zenith sunward | 0.2163 / 0.1433 | 5.50 / **6.04** | 0.00530 / **0.00562** |
+| mid sunward | 0.3919 / 0.1897 | 15.32 / **21.51** | 0.00779 / **0.01196** |
+| horizon sunward | 0.4720 / 0.3048 | 44.16 / 43.93 | 0.02833 / 0.02593 |
+
+> ⚠️ **THE `cloud fraction` COLUMN IS NOT TRUSTWORTHY HERE AND SAYING SO IS THE POINT.** `zenith away`
+> reports 0.9274 falling to 0.3543, which reads as the sky emptying by two thirds. **It is not**: the frames
+> are beside each other in `Shots/` and the sky/cloud split is plainly similar. The mask is an Otsu split,
+> and Otsu's own threshold moved from 0.471 to **0.592** on that pair because the deeper erosion and the
+> rounder bodies put a mass of new mid-tones into the histogram. A threshold that moves is a mask that
+> measures something else. **The raggedness on the same frame moving 2.22 -> 13.34 is the honest reading of
+> the same effect: the flat carpet broke into bodies with edges.** The sky's cover is measured on the
+> VOLUME instead, above, and it moved by 0.0014.
+
+---
+
+### ⚠️ THE COST, NAMED: THE SUNWARD ZENITH LOSES ITS HOT SPOT
+
+The single largest move in the six points is `zenith sunward`: mean 0.648 -> 0.571, contrast 0.444 -> 0.303,
+**p95 0.965 -> 0.801**. Looked at rather than read off, `Shots/SIL2_before_zenith_sun.png` has a large blown
+white region around the sun and `Shots/SIL2_after_zenith_sun.png` is a flatter, greyer overcast with the
+bright region much reduced.
+
+**The mechanism is the lump and not the erosion, and the sign says so.** A deeper cut REMOVES material and
+would brighten a backlit deck; a taller lump makes the body optically thicker along the ray to the sun, so
+less light comes through it. This is the same thickening that buys the opaque core, seen from the one
+direction where it costs instead of paying.
+
+**It is a trade and it is the teamlead's to accept or refuse.** What can be said for it: it is one of six
+protocol points, it is the angle where a blown highlight was arguably too blown, and p95 0.801 is still a
+bright sky. What can be said against it: a silver lining is a thing this programme has spent phases on
+(§OE, §OE-FIX), and this spends some of it. **The measurement is here rather than in a footnote because
+nothing else in the task moves a number this far.**
+
+---
+
+### ⚠️ THE SECOND COST, NAMED: THE CIRRUS IS LESS FIBROUS
+
+The cirrus is the type the lump's shape reaches hardest, because a fibre is thin by definition:
+
+| | before | after |
+|---|---|---|
+| mean / sat | 0.483 / 0.272 | 0.543 / **0.180** |
+| ragged | 27.67 | **19.24** |
+| lap r4 (texture inside the body) | 0.01306 | **0.00711** |
+| its cover at a slider of 0.5 | 0.4989 | 0.5084 |
+
+**The amount of cirrus in the sky is preserved — that is the re-base working — and its CHARACTER is not.**
+`Shots/SIL2_genus_Cirrus_before.png` is a sky of thin combed strands; `_after.png` is the same bands with
+the strands fattened into a broader veil. The type's own note says the fibre is the point of the file.
+
+**This is the lump's shape and not the re-base**, and the control frames prove it: with the lump held at
+0.75, the re-based file renders byte for byte what the old file rendered. **The path if the teamlead wants
+the fibre back is the type's own `PlacementScale`, which is what decides a fibre's width, and it is content
+work with its own frames** — it is NOT the lump aspect, which is a property of every genus at once.
+
+---
+
+### THE FRAMES
+
+Every one at `--shot-frames 90`, camera `0,200,0`, 1280x766.
+
+> ⚠️ **THE SET IS PRUNED RATHER THAN COMPLETE, AND THE DUPLICATE CHECK IS WHY.** Thirty-two frames were shot
+> and **fourteen are committed**; the check this programme asks for found the other eighteen to be byte
+> copies of pictures the repository already holds, which is the defect §SIL warned about by name. What was
+> dropped, and what each omission is evidence OF:
+>
+> * **all fifteen baseline frames**, because each is byte-identical to a committed `SIL_after_*` /
+>   `SIL_genus_*_after` frame. **That identity is the proof the baseline is `dev`'s sky** and is worth more
+>   as a reported number than as fifteen duplicate files. The "before" column everywhere above is those
+>   committed frames.
+> * **`SIL2_genus_Cumulus_Congestus_after`**, byte-identical to `SIL2_after_mid_away` because the congestus
+>   genus scene IS `Clouds_Demo` — §SIL's own reason for leaving that pair out.
+> * **the shipped cirrus and the cirrus control**, both byte-identical to the ALREADY COMMITTED
+>   `SIL_alt_aspect075_genus_Cirrus.png`. **That is the strongest single piece of evidence in this task and
+>   it was found by the duplicate check:** §SIL shot that frame at this lump aspect with the OLD layer
+>   strength and the OLD factor — a cut depth of 0.25 — and the shipped file renders the same 0.25 from
+>   0.65 x 0.3846154. **A picture committed before this task began independently verifies its re-base.**
+
+| file | what it shows |
+|---|---|
+| `Shots/SIL2_after_mid_away.png` (against `SIL_after_mid_away.png`) | **THE SHOW.** Before: flattened pills stacked in rows. After: round bodies with shoulders and cauliflower lobes |
+| `Shots/SIL2_after_mid_sun.png` (against `SIL_after_mid_sun.png`) | the clearest single pair in the set: stacks of discs become turrets around a hole of blue |
+| `Shots/SIL2_after_zenith_away.png` | the zenith, where the flat carpet breaks into separate masses with edges |
+| `Shots/SIL2_after_zenith_sun.png` | **THE COST.** The hot spot around the sun flattens — see the heading above |
+| `Shots/SIL2_after_horizon_away.png`, `SIL2_after_horizon_sun.png` | the far field, which had to not turn to dither and does not |
+| `Shots/SIL2_genus_<genus>_after.png` | eight genera at `mid away`, from the committed `SIL_<genus>.desce` scenes; the cirrus is `SIL_alt_aspect075_genus_Cirrus.png` for the reason above |
+| `Shots/SIL2_control_Altocumulus.png` | **the re-base isolated**: the lump held at 0.75, the layer driven back to 0.40 against the OLD factor. Nine pixels from the shipped frame |
+
+**The genus frames are at ONE elevation, which is §SIL's stated limitation carried forward** for the same
+reason: a procedural layer cannot be framed per type without moving the camera between arms, and a camera
+that moves between arms is not a comparison.
+
+---
+
+### `LineJump` FINDS NOTHING NEW
+
+Over `2 2 1278 551`, both arms, all six points. Away from the ground line every row maximum sits at
+0.0014–0.0036 and every column maximum at 0.0014–0.0055, against the 0.010 that means "something to look
+at". The one large figure — 0.096 at y 540 on both horizon frames — is the checker floor's own edge and it
+moves by 0.0003 between arms. **The deeper erosion did not put banding or streaking into the far field.**
+
+---
+
+### THE RELATIONS ADDED
+
+| relation | where | what it would catch |
+|---|---|---|
+| the lump's aspect and the layer's Detail Strength deliver a surface travel inside [1.05, 1.35] x the march's chord | `CloudField` | either number moved without the other — the defect this whole task exists for |
+| a deeper cut always moves the surface further | `CloudField` | the erosion ceasing to be the lever both files say pays for the lump, which would make the recipe advice that does nothing |
+| the pair does not dissolve more than 0.15 of the opaque columns | `CloudField` | a future aspect paid for with a cut deep enough to put holes through the deck |
+| the two re-based types' `strength x factor` is the depth their files were authored at | `CloudType` | a third task raising the layer and re-basing one file, or neither |
+| the emitted lumps MEASURE the exported aspect constant | `CloudPlacementSpectrum` | the generator going back to spelling the shape out for itself, which would leave the coupling test checking a number nothing renders |
+
+#### TWELVE SABOTAGES, AND ONE OF THEM STAYED GREEN
+
+Every one applied to the shipped source, the suite's **objects and binary deleted**, rebuilt, run and
+reverted. The numbers elsewhere in this section come from a binary rebuilt after the last revert.
+
+| break | result |
+|---|---|
+| the lump aspect is raised to 0.90 and the strength left alone | RED |
+| the lump aspect is dropped back to 0.45 and the strength left alone | RED — the ceiling, from the other side |
+| the strength is dropped back to §DS's 0.40 | RED (two tests) |
+| the strength is dragged to the top of its slider | **RED — and ONLY in the new window** |
+| the strength is moved one ladder step, 0.65 → 0.70 | GREEN — intended: inside the window, and not a defect |
+| the cirrus keeps the factor §DS re-based it to | RED |
+| the altocumulus keeps the factor §DS re-based it to | RED |
+| the generator spells the aspect out for itself while the header moves | RED |
+| the erosion field is dead | RED |
+| the shader stops reading the layer's Detail Strength | RED |
+| **the exclusion threshold goes back to the literal `0.6 * 0.75`** | **GREEN — a real hole, closed** |
+| the same break, re-run after the hole was closed | RED |
+
+**THE GREEN ONE IS THE FINDING, AND IT IS A DEFECT OF THE FIXTURE RATHER THAN OF THE ASSERTION.** The
+threshold that drops the one lump per cluster the base ramp deliberately reshapes used to be written
+`0.6 * 0.75` — 0.45, the aspect of the day, spelled out in a form that named neither the constant nor the
+fact that it WAS the constant. Putting that literal back at the new aspect left the suite green **even with
+the new assertion against the exported constant in place**, and the reason is the fixture: its Base Ramp
+Fraction is the shipped congestus' 0.04, which puts the ramped lump at an aspect of 0.39 — still below a
+stale 0.45, so the stale threshold still happened to exclude exactly what it was meant to exclude.
+
+The arm added uses **0.25, which is the cirrus' own authored value** and not a number invented to break a
+test: it puts the ramped lump at 0.469, above a stale 0.45, so a threshold that has not moved with the
+constant averages that lump in and drags the mean to about 0.70. Re-run, the same sabotage is RED.
+
+> **AND THE FOURTH ROW IS WHY THE WINDOW EXISTS.** Dragging Detail Strength to 1.00 turns the new relation
+> red and leaves §DS's own octave ceiling GREEN — the two ran in the same binary and only one of them fired.
+> That is the hole named above, demonstrated rather than argued.
+
+---
+
+### ⚠️ THE SHIPPED SKY IS NOT THE FRAME THE DECISION WAS MADE ON, AND HERE IS THE DIFFERENCE
+
+The teamlead judged `Shots/SIL_alt_aspect075_mid_away.png` — §SIL's 0.75 lump at §DS's **old** strength of
+0.40, which is the arm that fails the erosion floor. What ships is that lump with the floor paid for. The
+two differ by **77.4 % of pixels, max delta 64/255, mean delta 3.2/255 over the pixels that moved**: the
+bodies and their proportions are the ones that were approved, and the deeper cut adds scallops and edge and
+takes a little off each body. **The approved character is preserved; it is not the same file, and saying so
+is the point.**
+
+---
+
+### THE WHOLE SWEEP, IN BOTH CONFIGURATIONS
+
+`CI=true premake5 gmake`, then **every generated makefile built and run with the objects and the binaries
+deleted first**, in Debug AND in Release.
+
+| | debug | release |
+|---|---|---|
+| makefiles generated | **80** | **80** |
+| excluded as tools and libraries | **16** | **16** |
+| suite makefiles | **64** | **64** |
+| suite binaries built | **64** | **64** |
+| missing binaries | **none** | **none** |
+| `not-a-suite` lines | **none** | **none** |
+| `SKIPPED BUT IS A TEST` lines | **none** | **none** |
+| suites failed | **none** | **none** |
+
+> **THE SWEEP FOUND THIS TASK'S REGRESSION, EXACTLY AS IT FOUND §SIL's.** The first Debug sweep reported
+> `FAIL ComponentReflection` — `VolumetricCloudReflection.DefaultsAreTheOnesTheComponentArguesFor`, which
+> pins the component's defaults and per-category census and has nothing to do with clouds in its name. It
+> was fixed with the number and its argument rather than by loosening the assertion. **That is twice in two
+> phases that the only thing between this calibration and a bad merge was running every suite.**
+
+**The exclusion list is §SIL's** — §RW's with `LatticePeak` in it — and **it is still not the one written in
+`DEV_CONTRACT.md` §2.4 item 5a**. That file is the teamlead's and §1.6 says a foreign file is asked for
+rather than taken. The change needed is still one word: `LatticePeak` beside
+`ImageStat|LineJump|SceneMigrator`.
+
+---
+
+### WHAT THIS TASK DID NOT DO, AND THE TRADES IT IS ASKING TO HAVE ACCEPTED
+
+* **THE SUNWARD ZENITH LOSES ITS HOT SPOT** — mean 0.648 → 0.571, contrast 0.444 → 0.303, p95 0.965 → 0.801.
+  Measured, framed and named above. **This is the largest single move in the task and it is a cost.** It is
+  the lump's own thickening seen from the one direction where thickness does not pay, and no setting of the
+  erosion recovers it.
+* **THE CIRRUS IS LESS FIBROUS** — its texture inside the body halves, 0.01306 → 0.00711, and its saturation
+  falls 0.272 → 0.180. The AMOUNT of cirrus is preserved by the re-base to a hundredth; its character is
+  not, and the cause is the lump's shape rather than the erosion. The path back is the type's own
+  `PlacementScale`, which decides a fibre's width, and it is content work with its own frames.
+* **THE SKY'S COVER RISES BY 0.0014**, 0.7432 → 0.7446. Named rather than rounded to zero: it is the
+  direction of MORE cloud, it is 0.19 % relative, and §SIL's own ladder predicted the slope.
+* **THE CUMULONIMBUS' COVERAGE SLIDER STILL LIES BY 0.354**, unchanged to four decimals in both arms. §SIL
+  measured its cause — a 6.000 km cell against a 48 km region, with `kPackingCompensation` and the 0.68
+  alive exponent both fitted at 3.000 km and carrying no cell dependence — and neither phase has fixed it.
+  **It remains the largest single lie left in the Coverage slider**, and it is a calibration with its own
+  frames.
+* **IT DID NOT RE-DERIVE THE `(1 - Profile)` WEIGHT**, and there is a number here worth recording because it
+  moves in the helpful direction for once. §DS's ceiling is that the ray sees a cloud at a profile of 0.694
+  and only `1 - 0.694 = 0.306` of the nominal cut reaches the surface the eye looks at. Measured on this
+  worktree the surface sits at **0.632 before and 0.576 after**, so the weight there rises from 0.368 to
+  **0.424**: a taller lump delivers MORE of the cut to the visible surface. It is still not a shredded
+  silhouette, and re-deriving that weight against the optical surface is still a design change with its own
+  frames.
+* **IT DID NOT RE-SHOOT §RW's TWELVE KNOB FRAMES.** No knob's ends moved; what moved is what a lump is.
+* **IT DID NOT TOUCH THE MARCH, THE LIGHTING OR THE COVERAGE MAPPING.** One shader file was read, none was
+  edited, and no default outside the two named above changed.
+* **IT DID NOT PURSUE §RW2's UNEXPLAINED Z BUMP.** It is still at 5.625 km, its prominence fell 0.0117 →
+  0.0114, and at a 4.000 km cell both axes still report LATTICE 0.0000.
