@@ -71,7 +71,10 @@ namespace Desert::ShaderResources::API::Vulkan
         m_Buffers.resize( copies, VK_NULL_HANDLE );
         m_MemoryAllocs.resize( copies, nullptr );
         m_MappedMemories.resize( copies, nullptr );
-        m_DescriptorInfos.resize( framesInFlight * slots );
+        // Always the FULL matrix, even when persistent collapses the buffers to one: descriptors are
+        // indexed by (frame x slot) regardless, so this array is sized by the layout, not by the buffers.
+        const uint32_t descriptorCount = BufferCopyCount( framesInFlight, slots );
+        m_DescriptorInfos.resize( descriptorCount );
 
         auto vulkanContext = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
                                       EngineContext::GetInstance().GetRendererContext() );
@@ -97,7 +100,7 @@ namespace Desert::ShaderResources::API::Vulkan
         }
 
         // Point every (frame x slot) descriptor at its buffer (persistent: all at buffer 0).
-        for ( uint32_t i = 0; i < framesInFlight * slots; ++i )
+        for ( uint32_t i = 0; i < descriptorCount; ++i )
         {
             const uint32_t idx          = m_Persistent ? 0u : i;
             m_DescriptorInfos[i].buffer = ( idx < m_Buffers.size() ) ? m_Buffers[idx] : VK_NULL_HANDLE;
@@ -135,8 +138,7 @@ namespace Desert::ShaderResources::API::Vulkan
     uint32_t VulkanStorageBuffer::CopyIndex()
     {
         return BufferCopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex(),
-                                EngineContext::GetInstance().GetActiveRendererSlot(),
-                                Engine::kMaxRendererSlots );
+                                EngineContext::GetInstance().GetActiveRendererSlot(), Engine::kMaxRendererSlots );
     }
 
     void VulkanStorageBuffer::UnmapMemory()

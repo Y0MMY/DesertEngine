@@ -60,9 +60,17 @@ namespace
             std::memcpy( copy.data() + offset, data, size );
         }
 
-        uint8_t*    MapMemory() override { return reinterpret_cast<uint8_t*>( m_Copies[CurrentCopy()].data() ); }
-        void        UnmapMemory() override {}
-        const void* GetData() const override { return m_Copies[CurrentCopy()].data(); }
+        uint8_t* MapMemory() override
+        {
+            return reinterpret_cast<uint8_t*>( m_Copies[CurrentCopy()].data() );
+        }
+        void UnmapMemory() override
+        {
+        }
+        const void* GetData() const override
+        {
+            return m_Copies[CurrentCopy()].data();
+        }
 
         /// Bytes the (frame x slot) pair would read.
         const std::vector<std::byte>& Copy( uint32_t frame, uint32_t slot ) const
@@ -120,9 +128,8 @@ namespace
 
     // Drives @p frameCount frames of one route and returns the buffer it wrote. Frame numbering starts
     // from whatever FrameManager is on, so callers comparing two routes re-Initialize between them.
-    std::shared_ptr<RecordingUniformBuffer> RunRoute( Route route, uint32_t frameCount,
-                                                 const std::vector<std::byte>& value,
-                                                 bool                          flushPerDraw = true )
+    std::shared_ptr<RecordingUniformBuffer>
+    RunRoute( Route route, uint32_t frameCount, const std::vector<std::byte>& value, bool flushPerDraw = true )
     {
         auto                           buffer = std::make_shared<RecordingUniformBuffer>( MakeModel() );
         Graphic::UniformBufferProperty prop( buffer );
@@ -182,7 +189,7 @@ TEST_F( MaterialParamUpload, BothRoutesLeaveTheSameBytesInEveryFrameCopy )
 // Unwritten copies are zero-filled by the allocator, which is exactly why the mesh rendered BLACK.
 TEST_F( MaterialParamUpload, NoFrameReadsAnUnwrittenCopy )
 {
-    const auto value = Authored( 0.08f, 0.25f, 0.95f, 1.0f );
+    const auto value  = Authored( 0.08f, 0.25f, 0.95f, 1.0f );
     auto       buffer = RunRoute( Route::ApplyOnceThenFlush, kFramesInFlight * 2, value );
 
     const auto seen = CopiesSeenBy( *buffer, 0 );
@@ -195,8 +202,8 @@ TEST_F( MaterialParamUpload, NoFrameReadsAnUnwrittenCopy )
 // the mechanism has changed and the two tests above have stopped guarding anything.
 TEST_F( MaterialParamUpload, ApplyingOnceWithoutAPerDrawFlushServesExactlyOneCopy )
 {
-    const auto value = Authored( 0.9f, 0.12f, 0.08f, 1.0f );
-    auto buffer = RunRoute( Route::ApplyOnceThenFlush, kFramesInFlight * 2, value, /*flushPerDraw=*/false );
+    const auto value  = Authored( 0.9f, 0.12f, 0.08f, 1.0f );
+    auto       buffer = RunRoute( Route::ApplyOnceThenFlush, kFramesInFlight * 2, value, /*flushPerDraw=*/false );
 
     uint32_t written = 0;
     for ( uint32_t f = 0; f < kFramesInFlight; ++f )
@@ -218,9 +225,9 @@ TEST_F( MaterialParamUpload, ApplyingOnceWithoutAPerDrawFlushServesExactlyOneCop
 // makes this test about slots rather than about bytes.
 TEST_F( MaterialParamUpload, ASecondRendererSlotIsStillOwedTheValue )
 {
-    const auto value  = Authored( 0.1f, 0.85f, 0.15f, 1.0f );
-    const auto zeros  = std::vector<std::byte>( kFieldSize, std::byte{ 0 } );
-    auto       buffer = std::make_shared<RecordingUniformBuffer>( MakeModel() );
+    const auto                     value  = Authored( 0.1f, 0.85f, 0.15f, 1.0f );
+    const auto                     zeros  = std::vector<std::byte>( kFieldSize, std::byte{ 0 } );
+    auto                           buffer = std::make_shared<RecordingUniformBuffer>( MakeModel() );
     Graphic::UniformBufferProperty prop( buffer );
 
     prop.GetField( "Tint" )->SetRawBytes( value.data(), value.size() );
@@ -239,7 +246,8 @@ TEST_F( MaterialParamUpload, ASecondRendererSlotIsStillOwedTheValue )
     {
         EXPECT_EQ( buffer->Copy( f, 0 ), value ) << "slot 0 lost frame copy " << f;
         EXPECT_EQ( buffer->Copy( f, 1 ), zeros )
-             << "slot 0's write reached slot 1's copy " << f << " — the slot dimension is not separating "
+             << "slot 0's write reached slot 1's copy " << f
+             << " — the slot dimension is not separating "
                 "the two views, which is the defect Docs/RENDERER_FRAME_STATE.md exists for";
     }
 

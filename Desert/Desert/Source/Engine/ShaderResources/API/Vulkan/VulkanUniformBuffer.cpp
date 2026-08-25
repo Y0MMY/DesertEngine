@@ -66,7 +66,7 @@ namespace Desert::ShaderResources::API::Vulkan
         // of this change. A uniform block is a few hundred bytes to a few KB, so the extra copies cost
         // kilobytes per material.
         const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
-        const uint32_t copies = BufferCopyCount( framesInFlight, EngineContext::kMaxRendererSlots );
+        const uint32_t copies         = BufferCopyCount( framesInFlight, EngineContext::kMaxRendererSlots );
 
         m_Buffers.resize( copies, VK_NULL_HANDLE );
         m_MemoryAllocs.resize( copies, nullptr );
