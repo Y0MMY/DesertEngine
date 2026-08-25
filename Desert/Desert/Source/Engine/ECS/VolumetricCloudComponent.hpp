@@ -301,19 +301,106 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Detail Tile Size" ), Category( "Detail" ), Length, Range( 20000.0f, 3000000.0f ),
                   Tooltip( "World size over which the erosion field repeats — the scale of the billows "
-                           "and wisps cut into the cloud's edge." ) )
-        float DetailTileSize = 400000.0f; // 4 km
+                           "and wisps cut into the cloud's edge. It is bounded from BOTH sides and the "
+                           "bounds are measured: above by the size of a cloud, because an erosion wave "
+                           "longer than a body scales that body instead of texturing it; below by the "
+                           "march's own search step, because structure the march cannot find is dither." ) )
+        // ONE KILOMETRE, DOWN FROM FOUR, and the correction is a RELATION rather than a taste — the same
+        // relation this programme has been bitten by four times, "what is placed against what can resolve
+        // it", here between the erosion and the body it cuts into.
+        //
+        // MEASURED (Desert/Tests/Engine/CloudField, and the numbers are printed by the suite on every
+        // run). At the shipped weather the procedural producer's bodies have a mean chord of 1071 m. The
+        // erosion field's own full wavelength, walked along the same lines:
+        //
+        //     tile 8 km -> 1508 m   1.41 body chords     tile 1 km ->  235 m   0.22 body chords
+        //     tile 4 km ->  884 m   0.83 body chords     tile 0.5 km-> 119 m   0.11 body chords
+        //     tile 2 km ->  433 m   0.40 body chords     tile 0.2 km->  56 m   0.05 body chords
+        //
+        // At the four kilometres this shipped, the erosion put ONE WAVE ACROSS A WHOLE CLOUD. A field that
+        // is nearly constant over a body cannot cut billows into it; it makes the body slightly larger on
+        // one side and slightly smaller on the other, which is a smooth blob of a different size. That is
+        // why every frame of this subsystem has read as smooth however the Detail Strength was set, and it
+        // was true BEFORE phase Э5 as well — the same measurement on the pre-Э5 producer gives an erosion
+        // wave of 1.08 body chords.
+        //
+        // THE FLOOR IS THE MARCH'S. CloudFinestResolvableChordKm is 125 m at the component's Max Steps, and
+        // at half a kilometre of tile the erosion's wave is 119 m — BELOW it, so whether a wisp is sampled
+        // at all is decided by the ray's jitter and it reads as dither. One kilometre puts the wave at
+        // 235 m, 1.88x the chord, which is the smallest tile that still clears it. The slider's own floor
+        // of 200 m is far past that bound and is left where it is deliberately: it is an artist's knob and
+        // the bound depends on Max Steps, so it is asserted as a RELATION in the suite rather than frozen
+        // into a range.
+        float DetailTileSize = 100000.0f; // 1 km -> a 235 m erosion wave, 0.22 of a body, 1.88x the march
 
         PROPERTY( DisplayName( "Detail Strength" ), Category( "Detail" ), Range( 0.0f, 1.0f ),
                   Tooltip( "How deeply the erosion cuts, for the LAYER. At 0 the cloud keeps the smooth "
                            "silhouette of its coverage field; at 1 the edge is eaten away into wisps. The "
                            "cloud type multiplies this by its own factor, so a lenticular stays smooth and "
                            "a cirrus stays wispy at whatever the layer is set to." ) )
-        // 0.10, DOWN FROM 0.5, and the correction comes from UE's own numbers: its base noise strength
-        // is 0.8 and its detail strength is 0.08 — the erosion is an order of magnitude weaker than the
-        // shape it cuts into. At 0.5 the erosion was removing most of the layer and leaving a veil, which
-        // is the symptom I chased for several iterations before this reference arrived.
-        float DetailStrength = 0.1f;
+        // 0.40, UP FROM 0.10, and the 0.10 it replaces was NOT wrong for the reason it was suspected of.
+        //
+        // WHAT THE 0.10 WAS. It came from UE's own pair — base noise 0.8, detail 0.08 — read as "the
+        // erosion is an order of magnitude weaker than the shape it cuts into", after a 0.5 that was
+        // believed to be eating the layer. The suspicion when this was re-opened was that phase Э5 had
+        // moved the number's carrying input: that the profile used to be low almost everywhere, so a
+        // shallow cut was enough, and that the normalised distance field is high inside bodies, so the
+        // same cut now does nothing. MEASURED ON BOTH PRODUCERS, THAT IS BACKWARDS, and by a factor of
+        // four. The pre-Э5 field carried 60.8 % of its profile MASS above 0.9; the Э5 field carries
+        // 20.7 %. At 0.10 the erosion removed 1.7 % of the old field's mass and removes 7.1 % of this
+        // one's. The cut got STRONGER when the producer changed, not weaker.
+        //
+        // WHY 0.10 IS STILL TOO LOW, and why the answer is exactly 0.40. On the frame the whole slider is
+        // a monotone trade with no knee in it — over `Clouds_Demo` at mid elevation away from the sun the
+        // silhouette's raggedness runs 0.0032 -> 0.0047 and the texture inside the body 0.00558 -> 0.00727
+        // while the cloud loses 6.4 % of its area (Docs/Clouds/CALIBRATION.md §DS). A curve with no knee
+        // does not choose a value, so the value is fixed by TWO BOUNDS, and they touch at one number:
+        //
+        //   BELOW, BY THE MARCH, and this is the measured half. The cut has to move the surface the eye
+        //   sees by at least the chord the march can be relied on to find — CloudFinestResolvableChordKm,
+        //   125 m — or the structure it carves is finer than the renderer represents and the setting is a
+        //   fetch that changes nothing. Measured on the columns, in metres of travel: 0.10 -> 54,
+        //   0.20 -> 88, 0.30 -> 113, 0.35 -> 126, 0.40 -> 139, 1.00 -> 257.
+        //
+        //   ABOVE, BY A CONVENTION, AND IT IS LABELLED AS ONE. The floor does not fix the value on its
+        //   own: 0.35 clears it by ONE metre and 0.40 by fourteen. A default is set with headroom over its
+        //   floor rather than balanced on it, so this is the first step with real headroom — and the suite
+        //   asserts only that it stays inside an octave of the floor, which is what stops it drifting
+        //   upward unnoticed. Everything above the floor costs cloud: over the whole slider the layer
+        //   loses 6.4 % of its area, and 2.9 % of that is already spent at 0.40.
+        //
+        // WHAT IT COST THE LIBRARY, because raising this number multiplies EVERY type's cut by the same
+        // four. The cut's depth is `clamp(DetailStrength * DetailFactor, 0, 1)`, and two shipped types
+        // were authored with a factor above 1 against the old 0.10. Shot against a cloudless frame at the
+        // same camera, the cirrus' contribution to the picture fell from 33.3 % of its un-eroded self to
+        // 4.3 % and the altocumulus' from 51.5 % to 7.5 %: both are half the density of a cumulus, so a
+        // deep cut deletes them rather than shredding them. Their factors were RE-BASED to 0.625 and 0.40,
+        // which restores the effective cut their files were authored at exactly.
+        //
+        // AND "EXACTLY" BELONGS TO THE DEPTH ALONE, because the two settings have different SCOPES: this
+        // one and Detail Tile Size are the LAYER's, Detail Factor is the TYPE's. A re-based factor can
+        // restore a type's cut depth; it cannot restore the SCALE of the field that cut is taken from,
+        // because the tile moved for all nine types at once. Measured, the redistribution is small and
+        // the amount of cloud is not: the cirrus' contribution to the frame moves by −0.4 % and the
+        // altocumulus' by +1.1 %. Docs/Clouds/CALIBRATION.md §DS carries the frames and the correction.
+        //
+        // A CONSEQUENCE RECORDED RATHER THAN LEFT TO BE DISCOVERED: at 2.50 the cirrus reached the clamp
+        // at this value, so the wispiest type in the library could be driven to the deepest cut the maths
+        // allows; at 0.625 it tops out there however far this slider is pushed. That range rendered 4.3 %
+        // of the type — its top end deleted the cloud rather than shredding it — so what was removed is
+        // range that produced nothing. A more ragged cirrus needs the density to carry a deeper cut first.
+        //
+        // Desert/Tests/Engine/CloudType asserts the bound that follows from it — no shipped type may be
+        // cut deeper than the reference congestus — and Desert/Tests/Engine/CloudField asserts the floor.
+        //
+        // AND WHAT IT DOES NOT BUY, stated here because the next person will otherwise re-measure it. The
+        // ray sees a cloud at a profile of 0.694 (the depth at which the optical depth first reaches 1),
+        // and the erosion's weight there is `1 - 0.694 = 0.306`. Even at the slider's maximum only 31 % of
+        // the nominal depth reaches the surface the eye is looking at, so NO setting of this number
+        // produces a shredded silhouette. That is a property of the `(1 - Profile)` weight in
+        // Common/CloudField.glslh, it predates phase Э5, and re-deriving it against the optical surface is
+        // a design change rather than a calibration.
+        float DetailStrength = 0.40f;
 
         PROPERTY( DisplayName( "Density Scale" ), Category( "Detail" ), Range( 0.0f, 2.0f ),
                   Tooltip( "Multiplies the eroded density, for the LAYER. Below 1 the whole layer thins "
