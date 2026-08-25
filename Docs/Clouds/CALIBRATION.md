@@ -4369,6 +4369,35 @@ All in `Desert/Tests/Engine/CloudPlacementSpectrum` unless stated.
 Against §A0's arithmetic — 20.67 MiB occupied, 8.00 MiB for the procedural volume, 4.00 MiB per sculpted
 body — a painting is the cheapest thing in the subsystem, and D-9's 64 MiB is untouched in practice.
 
+### The whole sweep, in both configurations
+
+`build/Bin` and `build/Tests` deleted first, `CI=true premake5 gmake`, then every `*.make` that is not a
+third-party library or an aggregate — built, and run if it produced a test binary.
+
+| | Debug | Release |
+|---|---|---|
+| BUILD-FAIL | none | none |
+| FAIL | none | none |
+
+**Four `not-a-suite` lines in each, and all four are our own instruments:** `ImageStat`, `LatticePeak`,
+`LineJump`, `SceneMigrator`. A fifth name is a tool this task added — `CloudLayoutBaker` — and it is
+excluded in the loop's `case`, which is **list extension, the thing §2.4 item 5a says went stale four
+times**. So it was DERIVED by hand instead and the answer reported: it builds, it produces
+`build/Bin/Debug/CloudLayoutBaker` and no test binary, so it is a tool.
+
+> ⚠️ **THE FIRST SWEEP FOUND FIVE PROJECTS THAT COULD NOT LINK**, and it is the reason the sweep is run
+> over every makefile rather than over the ones whose name resembles the task: `CloudField`,
+> `CloudProceduralField`, `CloudAuthored`, `CloudType` and `Tools/LatticePeak` all compile
+> `CloudProceduralVolume.cpp`, which now calls into `CloudLayout.cpp`. Four suites and one instrument, none
+> of them named after this phase.
+
+**A correction to the order, stated because it is a hole in the method rather than in the result.** Four
+comment strings and one tooltip were fixed AFTER the debug sweep and part-way through the release one.
+They are inert — a tooltip's text and four comments — but "inert" is a claim, so the four projects that
+read the reflection table were rebuilt and re-run in **both** configurations afterwards:
+`ComponentReflection` 31/31, `SettingConsumers` 10/10, `SceneCloudLayoutDefault` 3/3,
+`CloudPlacementSpectrum` 32/32.
+
 ### What this task did NOT do, and why it is here rather than in a commit message
 
 * **`Layout_CloudHeightProfile` is not taken**, in either the 2D or the 1D form, and the teamlead approved
