@@ -152,6 +152,40 @@ That third line is the finding. The multi-slot test checked only that both slots
 value, which is true of a layout with **no slot dimension at all**. It now also asserts that slot 0's
 writes do **not** reach slot 1 while only slot 0 has recorded, and that assertion is what turns it red.
 
+## The sweep
+
+Both configurations, each after deleting `build/Bin/Tests` (binaries) **and** `build/Tests` (objects),
+so every suite in both runs was freshly compiled and freshly linked — nothing could report `PASSED` from
+a stale binary.
+
+| | suites built and run | `BUILD-FAIL` | `FAIL` |
+|---|---|---|---|
+| debug | 66 | none | none |
+| release | 66 | none | none |
+
+`not-a-suite` lines, **identical in both configurations** — and read rather than assumed: each of the
+four produced a tool binary in `build/Bin/<Config>/`, which is what makes it a tool and not a suite that
+silently failed to compile.
+
+```
+not-a-suite ImageStat
+not-a-suite LatticePeak
+not-a-suite LineJump
+not-a-suite SceneMigrator
+```
+
+No fifth name appeared, and no real suite hid among them.
+
+`MaterialParamUpload` runs green in both: 6 tests, 2 test suites.
+
+The release **binary** was checked too, not just the release tests, because this repository has a
+history of release-only divergence: `MAT_Probe.desce` renders ten steady frames with **one** hash, and
+it is `021f2fbe…` — the same hash Debug produces and the same hash the pre-fix run was intermittently
+landing on.
+
+Formatting: `git-clang-format --binary /opt/homebrew/opt/llvm@18/bin/clang-format` against the branch's
+merge-base `7459012a` — "did not modify any files".
+
 ## Left undone, deliberately
 
 * **`SetRawData` and `FieldProperty` remain two sources of truth for one buffer**, with nothing marking
