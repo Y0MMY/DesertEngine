@@ -3143,3 +3143,112 @@ than at a bound, because the ratio is a defect that is **measured and not fixed*
 * **It did not touch the march, the erosion, the lighting or the placement's arithmetic.** The only value
   changed is one default, in the two places that hold it, and the two comments that described the density
   compensation with the wrong exponent.
+
+## NB — the NaN in the density was `0 * (+inf)`, and the picture did not move, 2026-08-25
+
+macOS Release went red on
+`CloudFieldDensity.AtZeroStrengthTheProfileSurvivesUntouchedAndTheDensityScaleIsTheOnlyMultiplier`, with
+`full` = 0.4 and `halved` = NaN out of the same `CloudFieldSample` — only `DensityScale` differed between
+the two calls. Windows Release and every Debug job were green.
+
+### Where the NaN was born, to the expression
+
+`Common/CloudField.glslh`, the erosion term:
+`clamp( params.DetailStrength * max( field.DetailFactor, 0.0f ), 0.0f, 1.0f )`. The test sets
+`DetailStrength` to zero, so this is `0 * max(DetailFactor, 0)`. Injected directly, at a strength of zero:
+
+| DetailFactor | full | halved |
+|---|---|---|
+| 0 | 0.4 | 0.2 |
+| 1 | 0.4 | 0.2 |
+| 8 | 0.4 | 0.2 |
+| +inf | **NaN** | **NaN** |
+| NaN | **NaN** | **NaN** |
+
+`max(+inf, 0)` is `+inf` and `0 * inf` is NaN. The outer `clamp` cannot help — it is outside the product.
+
+### Why only Release, and it is not fast-math
+
+There is no `-ffast-math`, `-Ofast` or `-ffp-contract` anywhere in the premake scripts; Release differs
+from Debug by `optimize "On"` and `NDEBUG` and nothing else. The cause is that the FIXTURE built a
+`CloudFieldSample` out of three of its five fields, and the struct is GLSL compiled as C++ so it has no
+default member initialisers. The `-O2` IR of the test translation unit shows the mechanism exactly: clang
+gives each by-value argument its OWN alloca and writes only bytes 0..11 into each —
+
+```
+store <2 x float> <float 0x3FD99999A0000000, float 0x3FE3333340000000>, ptr %12
+store float 1.000000e+00, ptr %50            ; %12 + 8
+call ... CloudSampleDensity(ptr %11, ptr %12, ...)
+store <2 x float> <float 0x3FD99999A0000000, float 0x3FE3333340000000>, ptr %14
+store float 5.000000e-01, ptr %52            ; %14 + 8
+call ... CloudSampleDensity(ptr %13, ptr %14, ...)
+```
+
+Bytes 12..19 of `%12` and of `%14` are never written and the two allocas are DIFFERENT slots, so the two
+calls read two different leftovers — one finite, one with an all-ones exponent. At `-O0` there is a single
+slot and both calls read the same bytes, which is why no Debug job could ever see it.
+
+### Is it reachable in a frame
+
+Not through the producers as they stand — `SampleCloudField` writes all five fields on every path. But the
+FACTOR being unbounded above is reachable, and the two producers are not equal:
+
+* procedural: `CloudTypeShape.DetailFactor` is refused outside [0, 8] by `Assets::ValidateCloudTypeShape`
+  at load (`Engine/Assets/CloudTypeData.cpp`).
+* authored: `ECS::HeroCloudData.DetailFactor` has a reflected `Range(0, 4)` that constrains the editor's
+  SLIDER and nothing else. `ComponentRegistry` clamps nothing on deserialisation and the packer's
+  `std::max(x, 0.0f)` passes `+inf` through unchanged.
+
+So a hand-edited scene plus Detail Strength at zero — a documented, invited slider position — puts NaN in
+the density of every sample inside that body, and a NaN density is a NaN optical depth, a NaN
+transmittance, and a black or fully transparent hole with nothing in the log.
+
+### The fix, and the four sites
+
+`CLOUD_MATERIAL_FACTOR(x) = min(max(x, 0), 8)`, applied wherever a factor enters a product with a slider:
+the erosion depth, and — found by looking for siblings rather than by a failure — the composition of
+`DensityScale` in BOTH producers, which has the identical `slider * factor` shape and a slider whose zero
+is just as legitimate.
+
+Eight is the ceiling the procedural validator already enforces, so the bound is the identity there by
+construction. Measured against the shipped content it is the identity everywhere: the nine cloud types
+carry Detail/Density/Extinction factors in **[0.15, 1.35]**, and every hero cloud in every shipped scene
+carries **1.0** (one carries 0.5). The layer's Density Scale slider tops out at 2.
+
+### The six-point protocol: SIX of six byte for byte
+
+`Clouds_HeroCloud`, camera `0,200,0`, `--shot-frames 90`, 1280x766, Release. The SAME BINARY throughout —
+this change touches no C++ outside tests — with only `Common/CloudField.glslh` swapped between runs, which
+isolates the shader edit exactly. First render in the worktree discarded per §A1's rule.
+
+| point | dev's shader vs this branch |
+|---|---|
+| zenith away `0,0.9,-1` | identical |
+| mid away `0,0.45,-1` | identical |
+| horizon away `0,0.12,-1` | identical |
+| zenith sunward `0,0.9,1` | identical |
+| mid sunward `0,0.45,1` | identical |
+| horizon sunward `0,0.12,1` | identical |
+
+The repeat floor was taken and is zero: the fixed shader shot twice, six of six identical. The frames were
+LOOKED AT and carry sky and cloud at all three elevations — an identical pair of black frames would have
+proved nothing.
+
+### The sabotages, and one that stayed green
+
+| sabotage | result |
+|---|---|
+| `CLOUD_MATERIAL_FACTOR(field.DetailFactor)` back to `max(field.DetailFactor, 0)` | reds `ASliderAtZeroTimesAMaterialFactorOutOfRangeIsStillANumber` |
+| ceiling 8 -> 1 | reds `TheBoundOnAMaterialFactorIsTheIdentityEverywhereTheFactorIsLegal` |
+| producer `DensityScale` unbounded | reds `TheProducerBoundsTheSpeciesRowRatherThanHandingItToTheMarchAsItFoundIt` |
+| authored `DetailFactor` unbounded | reds `CloudAuthored.TheWinnersMaterialNumbersAreBoundedBecauseNothingUpstreamOfThemIs` |
+
+**The original test stayed GREEN under the first sabotage.** It only ever fired because the CI runner's
+stack happened to hold a non-finite leftover, so as a detector of this defect it was a coin toss. The four
+above are deterministic.
+
+**And the first version of the producer test was a hole.** It asked about one point at the default
+coverage, where there is no cloud; the composition under test lives inside the branch a species takes when
+it WINS the union, so the loop skipped it and the assertion passed without executing the line it was about.
+It stayed green against the unbounded version. What turned it into a test is a count of winners over a
+grid at coverage 0.9.

@@ -27,7 +27,9 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -867,6 +869,56 @@ TEST( CloudAuthored, TheAuthoredWinnerTakesAllItsOwnMaterialNumbers )
     const vec4                  voxel    = CLOUD_SAMPLE_AUTHORED( CloudAuthoredAtlasUvw(
          CloudAuthoredLocalUvw( instance, centre ), instance.BoundsMax.w, CLOUD_AUTHORED_SLAB_COUNT ) );
     EXPECT_FLOAT_EQ( sample.DensityScale, params.DensityScale * 0.5f * voxel.z );
+}
+
+TEST( CloudAuthored, TheWinnersMaterialNumbersAreBoundedBecauseNothingUpstreamOfThemIs )
+{
+    // THE AUTHORED SIDE IS THE ONE WITH NO VALIDATOR IN FRONT OF IT, which is why this test is here and
+    // not only in Desert/Tests/Engine/CloudField. A procedural species' three factors are held to [0, 8]
+    // by Assets::ValidateCloudTypeShape before the file will load at all. A hero cloud's come from
+    // ECS::HeroCloudData, whose reflected Range(0, 4) constrains the editor's SLIDER and nothing else:
+    // Core/Serialize/ComponentRegistry.cpp clamps nothing on the way in, and
+    // Graphic::PackCloudAuthoredInstance's `std::max(x, 0.0f)` is a lower bound that leaves +inf exactly
+    // as it found it.
+    //
+    // What that costs if the shader trusts it: the layer's Detail Strength and Density Scale are sliders
+    // whose ZERO is a documented position, `0 * (+inf)` is NaN, and a NaN density is a NaN optical depth,
+    // therefore a NaN transmittance, therefore a black or fully transparent hole in the sky with nothing
+    // in the log. It went red once as a unit test before it was ever seen in a frame.
+    const glm::vec3 centre( 0.0f, 0.5f, 0.0f );
+
+    const float hostile[] = { std::numeric_limits<float>::infinity(), 1e30f, std::numeric_limits<float>::max() };
+
+    for ( const float factor : hostile )
+    {
+        for ( const float slider : { 0.0f, 1.0f, 2.0f } )
+        {
+            CloudFieldParams params = DefaultParams();
+            params.DensityScale     = slider;
+            params.DetailStrength   = slider == 0.0f ? 0.0f : 0.4f;
+
+            Graphic::CloudAuthoredInstanceGpu solitary = MakeInstance( centre );
+            solitary.Row0.w                            = factor; // DetailFactor
+            solitary.Row1.w                            = factor; // DensityFactor
+            solitary.Row2.w                            = factor; // ExtinctionFactor
+
+            ClearInstances();
+            AddInstance( solitary );
+
+            const CloudFieldSample sample = SampleCloudField( params, centre.y / kLayerThicknessKm, centre );
+            ASSERT_GT( sample.Profile, 0.0f ) << "the fixture put no body in front of the assertion";
+
+            EXPECT_TRUE( std::isfinite( sample.DetailFactor ) ) << "DetailFactor " << factor;
+            EXPECT_TRUE( std::isfinite( sample.DensityScale ) )
+                 << "Density Scale " << slider << " x DensityFactor " << factor;
+            EXPECT_TRUE( std::isfinite( sample.ExtinctionFactor ) ) << "ExtinctionFactor " << factor;
+
+            const float density = CloudSampleDensity( params, sample, centre );
+            EXPECT_TRUE( std::isfinite( density ) ) << "factor " << factor << " slider " << slider;
+            EXPECT_GE( density, 0.0f );
+            EXPECT_LE( density, 1.0f );
+        }
+    }
 }
 
 TEST( CloudAuthored, StrengthScalesTheProfile )

@@ -38,7 +38,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 using namespace Desert::Tests::CloudFieldRef;
@@ -516,9 +518,19 @@ TEST( CloudFieldDensity, AtZeroStrengthTheProfileSurvivesUntouchedAndTheDensityS
             EXPECT_NEAR( Retention( params, profile, position ), 1.0f, 1e-5f ) << "profile " << profile;
     }
 
+    // ALL FIVE FIELDS, and the two nobody reads here are the reason this comment exists. CloudFieldSample
+    // is a GLSL struct compiled as C++, so it has no default member initialisers — GLSL has none to give
+    // it — and a fixture that fills three of five hands CloudSampleDensity two indeterminate floats. That
+    // is not a theoretical complaint: it turned macOS Release red, because at -O2 clang gives each by-value
+    // argument its OWN stack slot, so the two calls below read two DIFFERENT leftovers. One came back
+    // finite and the other with an all-ones exponent, and `DetailStrength * (+inf)` at a strength of zero
+    // is NaN. At -O0 there is a single slot, both calls read the same bytes, and the suite is green — which
+    // is why only Release could ever see it.
     CloudFieldSample sample;
-    sample.Profile    = 0.4f;
-    sample.DetailType = 0.6f;
+    sample.Profile          = 0.4f;
+    sample.DetailType       = 0.6f;
+    sample.DetailFactor     = params.SpeciesEdge[0].y;
+    sample.ExtinctionFactor = params.SpeciesEdge[0].w;
 
     const vec3 position( 1.7f, 0.9f, 2.3f );
 
@@ -539,10 +551,15 @@ TEST( CloudFieldDensity, AnEmptySampleCostsNothingAndTheResultNeverLeavesZeroToO
     params.DetailStrength   = 0.8f;
     params.DensityScale     = 2.0f; // the top of the slider
 
+    // ALL FIVE FIELDS — see the note in the test above. A sample built with three of them fills the other
+    // two with whatever the stack held, and the bounds asserted below are exactly the assertions a NaN
+    // slips through in the direction that reads as a broken build rather than a broken cloud.
     CloudFieldSample empty;
-    empty.Profile      = 0.0f;
-    empty.DetailType   = 0.6f;
-    empty.DensityScale = 2.0f;
+    empty.Profile          = 0.0f;
+    empty.DetailType       = 0.6f;
+    empty.DensityScale     = 2.0f;
+    empty.DetailFactor     = params.SpeciesEdge[0].y;
+    empty.ExtinctionFactor = params.SpeciesEdge[0].w;
     EXPECT_FLOAT_EQ( CloudSampleDensity( params, empty, vec3( 1.0f, 2.0f, 3.0f ) ), 0.0f );
 
     for ( const vec3& position : ErosionProbePositions() )
@@ -550,15 +567,145 @@ TEST( CloudFieldDensity, AnEmptySampleCostsNothingAndTheResultNeverLeavesZeroToO
         for ( const float profile : { 0.02f, 0.25f, 0.7f, 1.0f } )
         {
             CloudFieldSample sample;
-            sample.Profile      = profile;
-            sample.DetailType   = 0.6f;
-            sample.DensityScale = 2.0f;
+            sample.Profile          = profile;
+            sample.DetailType       = 0.6f;
+            sample.DensityScale     = 2.0f;
+            sample.DetailFactor     = params.SpeciesEdge[0].y;
+            sample.ExtinctionFactor = params.SpeciesEdge[0].w;
 
             const float density = CloudSampleDensity( params, sample, position );
             EXPECT_GE( density, 0.0f ) << "profile " << profile;
             EXPECT_LE( density, 1.0f ) << "profile " << profile;
         }
     }
+}
+
+TEST( CloudFieldDensity, ASliderAtZeroTimesAMaterialFactorOutOfRangeIsStillANumber )
+{
+    // THE RELATION THE TWO TESTS ABOVE ASSUME AND NEITHER STATES: every product of a LAYER slider and a
+    // per-body FACTOR in this file has to stay finite, because the march cannot survive one that does not.
+    // A NaN density is not a wrong cloud — it is a NaN optical depth, therefore a NaN transmittance, and it
+    // shows as a black or fully transparent hole with nothing in the log.
+    //
+    // The two operands come from opposite sides of the seam and only one of them is validated. Detail
+    // Strength and Density Scale are sliders whose ZERO is a documented, invited position — the test above
+    // exists precisely to assert that turning the erosion off works. The factors are asset and component
+    // data: the procedural side is held to [0, 8] by Assets::ValidateCloudTypeShape, the AUTHORED side to
+    // nothing at all, because a reflected Range constrains the editor's slider and the deserialiser clamps
+    // nothing. So the shader has to be the bound, and `max(x, 0)` is only half of one: it leaves +inf
+    // intact, and `0 * (+inf)` is NaN.
+    //
+    // This is written as a sweep over BOTH operands rather than as a single probe because the defect it
+    // guards needs the pair — the factor alone is harmless at any strength above zero, and the strength
+    // alone is harmless at any finite factor.
+    CloudFieldParams params = DefaultParams();
+
+    const float hostile[] = {
+         0.0f, 1.0f, 8.0f, 1e30f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::max() };
+
+    for ( const float sliderStrength : { 0.0f, 0.4f, 1.0f } )
+    {
+        for ( const float sliderDensity : { 0.0f, 1.0f, 2.0f } )
+        {
+            for ( const float factor : hostile )
+            {
+                params.DetailStrength = sliderStrength;
+                params.DensityScale   = sliderDensity;
+
+                CloudFieldSample sample;
+                sample.Profile          = 0.4f;
+                sample.DetailType       = 0.6f;
+                sample.DensityScale     = sliderDensity;
+                sample.DetailFactor     = factor;
+                sample.ExtinctionFactor = factor;
+
+                const float density = CloudSampleDensity( params, sample, vec3( 1.7f, 0.9f, 2.3f ) );
+
+                EXPECT_TRUE( std::isfinite( density ) )
+                     << "DetailStrength " << sliderStrength << " x DetailFactor " << factor << " gave " << density;
+                EXPECT_GE( density, 0.0f );
+                EXPECT_LE( density, 1.0f );
+            }
+        }
+    }
+}
+
+TEST( CloudFieldDensity, TheProducerBoundsTheSpeciesRowRatherThanHandingItToTheMarchAsItFoundIt )
+{
+    // THE SAME ARITHMETIC ONE LEVEL UP, and it was found by looking for siblings of the defect above
+    // rather than by a failure. `DensityScale` is composed in CloudSampleProceduralField as
+    // `layer slider * the species' Density Factor`, which is the identical `slider * factor` shape — and
+    // the layer slider's zero is just as legitimate a position as the erosion's, because "thin this whole
+    // deck away to nothing" is what the bottom of the Density Scale slider means.
+    //
+    // It is asserted through SampleCloudField rather than on the sample, because the point is that the
+    // PRODUCER bounds the row: a march that receives an infinite DensityScale has already lost, whatever
+    // CloudSampleDensity does with it afterwards.
+    //
+    // The row is written directly instead of through a cloud type, and that is the whole reason the test
+    // can exist: Assets::ValidateCloudTypeShape would refuse to load a shape carrying these numbers, so a
+    // fixture built from an asset can never reach this path. The AUTHORED producer has no such validator
+    // in front of it at all, which is what makes this shape worth bounding rather than trusting.
+    //
+    // THE SAMPLE HAS TO CONTAIN CLOUD, AND THAT IS NOT A DETAIL. The composition being tested lives inside
+    // `if ( speciesProfile > result.Profile )` — the branch a species takes when it WINS the union. Ask
+    // about a point of clear sky and the loop `continue`s, DensityScale stays at its zeroed 0, and the
+    // assertion passes without having executed the line it is about. This test was written that way first
+    // and stayed green against the unbounded version; the count below is what turned it into a test.
+    //
+    // THE VOLUME IS BAKED ONCE, OUTSIDE THE SWEEP. ParamsAtCoverage runs a full
+    // Assets::BakeCloudProceduralVolume, and the shape is the same on every iteration — so calling it
+    // inside the loop baked the identical two million voxels twelve times over. It cost 1.8 s in release
+    // and over three minutes in debug, which is a test nobody will keep. What the sweep varies is the
+    // SPECIES ROW and the layer's slider, and both are plain fields of the parameter block.
+    const CloudFieldParams baked      = ParamsAtCoverage( 0.9f );
+    const float            envelopeKm = EnvelopeThicknessKm( DefaultShape() );
+
+    int winners = 0;
+
+    for ( const float hostile :
+          { std::numeric_limits<float>::infinity(), 1e30f, std::numeric_limits<float>::max(), -1.0f } )
+    {
+        for ( const float slider : { 0.0f, 1.0f, 2.0f } )
+        {
+            CloudFieldParams params = baked;
+            params.DensityScale     = slider;
+            params.SpeciesEdge[0].y = hostile; // Detail Factor
+            params.SpeciesEdge[0].z = hostile; // Density Factor
+            params.SpeciesEdge[0].w = hostile; // Extinction Factor
+
+            for ( int iz = 0; iz < 6; ++iz )
+                for ( int ix = 0; ix < 6; ++ix )
+                {
+                    const float fraction = 0.5f;
+                    const vec3  at( OriginKm().x + PeriodKm() * ( ix + 0.5f ) / 6.0f, fraction * envelopeKm,
+                                    OriginKm().y + PeriodKm() * ( iz + 0.5f ) / 6.0f );
+
+                    const CloudFieldSample field = SampleCloudField( params, fraction, at );
+                    if ( !( field.Profile > 0.0f ) )
+                        continue;
+
+                    ++winners;
+
+                    EXPECT_TRUE( std::isfinite( field.DensityScale ) )
+                         << "Density Scale " << slider << " x Density Factor " << hostile
+                         << " left the producer as " << field.DensityScale;
+                    EXPECT_TRUE( std::isfinite( field.DetailFactor ) ) << "Detail Factor " << hostile;
+                    EXPECT_TRUE( std::isfinite( field.ExtinctionFactor ) ) << "Extinction Factor " << hostile;
+
+                    EXPECT_GE( field.DensityScale, 0.0f );
+                    EXPECT_GE( field.DetailFactor, 0.0f );
+                    EXPECT_GE( field.ExtinctionFactor, 0.0f );
+
+                    const float density = CloudSampleDensity( params, field, at );
+                    EXPECT_TRUE( std::isfinite( density ) ) << "factor " << hostile << " slider " << slider;
+                    EXPECT_GE( density, 0.0f );
+                    EXPECT_LE( density, 1.0f );
+                }
+        }
+    }
+
+    EXPECT_GT( winners, 100 ) << "no species ever won the union, so the composition under test never ran";
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -955,6 +1102,51 @@ TEST( CloudFieldErosion, TheMirrorOfTheErosionAgreesWithTheShader )
     EXPECT_GT( checked, 100 ) << "the fixture put no cloud in front of the mirror, so it checked nothing";
     EXPECT_LT( worst, 1e-6 ) << "the erosion mirror and Common/CloudField.glslh disagree, so every sweep "
                                 "below is a sweep of something else";
+}
+
+TEST( CloudFieldErosion, TheBoundOnAMaterialFactorIsTheIdentityEverywhereTheFactorIsLegal )
+{
+    // THE OTHER HALF OF CLOUD_MATERIAL_FACTOR_MAX, and it is what stops that bound from being a licence to
+    // clamp anything to anything. The ceiling is 8 because 8 is the number Assets::ValidateCloudTypeShape
+    // already refuses to load a cloud type past, so across the whole legal range the bound has to be the
+    // IDENTITY. A guard that quietly moved a shipped sky would be a worse defect than the NaN it removes,
+    // and it would move it in the direction nobody looks — slightly, everywhere, with no error anywhere.
+    //
+    // WHAT MAKES THIS AN ASSERTION RATHER THAN A TAUTOLOGY: the right-hand side is ErodedDensity, the
+    // mirror the test above pins to the shader, and the mirror has NO bound in it. It takes the effective
+    // depth `clamp(strength * factor, 0, 1)` as an argument and computes the remap from first principles.
+    // So this compares the bounded shader against the unbounded formula, which is exactly the claim.
+    CloudFieldParams params = ParamsAtCoverage( kShippedCoverage );
+
+    const vec3 at( 1.7f, 0.9f, 2.3f );
+
+    int checked = 0;
+
+    for ( const float strength : { 0.0f, 0.1f, 0.4f, 1.0f } )
+    {
+        for ( const float factor : { 0.0f, 0.25f, 1.0f, 2.5f, 8.0f } )
+        {
+            params.DetailStrength = strength;
+
+            CloudFieldSample field;
+            field.Profile          = 0.4f;
+            field.DetailType       = DefaultShape().DetailCharacter;
+            field.DensityScale     = 1.0f;
+            field.DetailFactor     = factor;
+            field.ExtinctionFactor = 1.0f;
+
+            const float fromShader = CloudSampleDensity( params, field, at );
+            const float fromMirror = ErodedDensity( field.Profile, ErosionNoiseAt( params, field, at ),
+                                                    glm::clamp( strength * factor, 0.0f, 1.0f ) );
+
+            EXPECT_NEAR( fromShader, fromMirror, 1e-6f )
+                 << "strength " << strength << " x factor " << factor
+                 << ": the bound altered a value inside the range Assets::ValidateCloudTypeShape allows";
+            ++checked;
+        }
+    }
+
+    EXPECT_EQ( checked, 20 );
 }
 
 TEST( CloudFieldErosion, TheErosionsWaveIsShorterThanABodyAndCoarserThanTheMarchsOwnChord )
