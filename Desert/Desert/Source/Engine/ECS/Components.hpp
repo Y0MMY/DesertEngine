@@ -1745,6 +1745,6 @@ namespace Desert::ECS
         float        GravityScale  = 0.0f;                 // 0 = straight line, 1 = full gravity (arc)
         float        LifeRemaining = 5.0f;                 // seconds before auto-despawn
         float        Damage        = 10.0f;
-        Common::UUID Owner = Common::UUID::Null(); // shooter (so we can skip self-hits); null = unowned
+        Common::UUID Owner         = Common::UUID::Null(); // shooter (so we can skip self-hits); null = unowned
     };
 } // namespace Desert::ECS

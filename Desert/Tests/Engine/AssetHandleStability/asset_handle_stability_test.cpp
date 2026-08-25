@@ -130,9 +130,8 @@ namespace
 #ifdef DESERT_PLATFORM_WINDOWS
         // cmd.exe strips the outer pair of quotes off the whole command line, so a quoted executable AND a
         // quoted argument need one more pair around the lot.
-        const std::string command =
-             "\"\"" + g_ExecutablePath + "\" " + kPrintHandlesFlag + " \"" + path + "\"\"";
-        FILE* pipe = _popen( command.c_str(), "r" );
+        const std::string command = "\"\"" + g_ExecutablePath + "\" " + kPrintHandlesFlag + " \"" + path + "\"\"";
+        FILE*             pipe    = _popen( command.c_str(), "r" );
 #else
         const std::string command = "'" + g_ExecutablePath + "' " + kPrintHandlesFlag + " '" + path + "'";
         FILE*             pipe    = popen( command.c_str(), "r" );
@@ -171,9 +170,8 @@ namespace
              "\"\"" + g_ExecutablePath + "\" " + kResolveFlag + " \"" + path + "\" " + h + "\"";
         FILE* pipe = _popen( command.c_str(), "r" );
 #else
-        const std::string command =
-             "'" + g_ExecutablePath + "' " + kResolveFlag + " '" + path + "' " + h;
-        FILE* pipe = popen( command.c_str(), "r" );
+        const std::string command = "'" + g_ExecutablePath + "' " + kResolveFlag + " '" + path + "' " + h;
+        FILE*             pipe    = popen( command.c_str(), "r" );
 #endif
         if ( !pipe )
             return {};
@@ -246,8 +244,9 @@ TEST( AssetHandleStability, EveryAssetTypeDerivesItsHandleFromItsPath )
     for ( const auto& kind : Catalogue() )
     {
         EXPECT_EQ( kind.Handle( kPathA ), expected )
-             << kind.Name << " does not take the shared path-derived identity. A type that computes its "
-                             "own is a copy of a rule, and the copy is what falls behind.";
+             << kind.Name
+             << " does not take the shared path-derived identity. A type that computes its "
+                "own is a copy of a rule, and the copy is what falls behind.";
     }
 }
 
@@ -309,8 +308,8 @@ TEST( AssetHandleStability, EveryAssetTypeAgreesInTwoIndependentRuns )
     for ( size_t i = 0; i < Catalogue().size(); ++i )
     {
         EXPECT_EQ( firstRun[i], secondRun[i] )
-             << Catalogue()[i].Name << " at '" << kPathA << "' was handle " << firstRun[i]
-             << " in one run and " << secondRun[i]
+             << Catalogue()[i].Name << " at '" << kPathA << "' was handle " << firstRun[i] << " in one run and "
+             << secondRun[i]
              << " in the next. Any scene storing that handle would resolve to nothing after a restart.";
 
         // And the running process agrees with both, which is what makes the value a property of the PATH
@@ -387,10 +386,17 @@ TEST( AssetHandleStability, TheCatalogueCoversEveryAssetTypeId )
     // Every enumerator of AssetTypeID except Unknown, which is the absence of a type and has no asset
     // class. Written out rather than counted from the enum so that RENAMING an enumerator is also caught.
     const std::vector<AssetTypeID> declared = {
-         AssetTypeID::Mesh,      AssetTypeID::Material,         AssetTypeID::Texture2D,
-         AssetTypeID::Skybox,    AssetTypeID::Shader,           AssetTypeID::Skeleton,
-         AssetTypeID::Animation, AssetTypeID::Prefab,           AssetTypeID::CloudNoiseVolume,
-         AssetTypeID::CloudType, AssetTypeID::CloudModellingVolume,
+         AssetTypeID::Mesh,
+         AssetTypeID::Material,
+         AssetTypeID::Texture2D,
+         AssetTypeID::Skybox,
+         AssetTypeID::Shader,
+         AssetTypeID::Skeleton,
+         AssetTypeID::Animation,
+         AssetTypeID::Prefab,
+         AssetTypeID::CloudNoiseVolume,
+         AssetTypeID::CloudType,
+         AssetTypeID::CloudModellingVolume,
     };
 
     // AssetTypeID::Count is the enum's own tally and exists for this assertion. Naming the last real
@@ -438,11 +444,10 @@ int main( int argc, char** argv )
     if ( argc >= 4 && std::strcmp( argv[1], kResolveFlag ) == 0 )
     {
         Desert::Assets::AssetManager manager;
-        manager.CreateAsset<Desert::Assets::SkyboxAsset>( AssetPriority::Medium,
-                                                          Common::Filepath( argv[2] ) );
+        manager.CreateAsset<Desert::Assets::SkyboxAsset>( AssetPriority::Medium, Common::Filepath( argv[2] ) );
 
         const uint64_t wanted = std::strtoull( argv[3], nullptr, 10 );
-        const auto found = manager.FindByHandle<Desert::Assets::SkyboxAsset>( Common::AssetHandle( wanted ) );
+        const auto     found  = manager.FindByHandle<Desert::Assets::SkyboxAsset>( Common::AssetHandle( wanted ) );
         printf( "%s\n", found ? "RESOLVED" : "MISSED" );
         return 0;
     }
