@@ -3521,6 +3521,42 @@ looks exactly like a frame produced by the right one.**
 
 ---
 
+### THE WHOLE SWEEP, IN BOTH CONFIGURATIONS
+
+`CI=true premake5 gmake`, then **every generated makefile built and run with the objects and the binaries
+deleted first**, in Debug AND in Release.
+
+| | debug | release |
+|---|---|---|
+| makefiles generated | **80** | **80** |
+| excluded as tools and libraries | **16** | **16** |
+| suite makefiles | **64** | **64** |
+| suite binaries built | **64** | **64** |
+| missing binaries | **none** | **none** |
+| `not-a-suite` lines | **none** | **none** |
+| suites failed | **none** | **none** |
+
+**The count balances with nothing unexplained and there is not one `not-a-suite` line to read**, which is
+the outcome §2.4 item 5a asks a developer to check for by name. It balances at 80 against §RW's and §RW2's
+79 because the generator produced one more project on this worktree than it did on theirs; the exclusion
+list is §RW's with `LatticePeak` in it, and **it is still not the one written in `DEV_CONTRACT.md` §2.4 item
+5a**. That file is the teamlead's and §1.6 says a foreign file is asked for rather than taken. The change
+needed remains one word: `LatticePeak` beside `ImageStat|LineJump|SceneMigrator` in the `case`.
+
+> **THE SWEEP IS WHAT FOUND THIS PHASE'S OWN REGRESSION.** The first Debug sweep, run on the arm committed
+> at a lump aspect of 0.75, reported `FAIL CloudField` — §DS's erosion floor, 101 m against 125. Nothing
+> else in the repository could see it, the frames looked better than the ones it replaced, and it would have
+> shipped. That is the whole argument for running every suite rather than the ones whose name looks like the
+> task.
+
+**⚠️ THE KNOWN RED TEST DID NOT REPRODUCE, AND IT WAS CHECKED RATHER THAN ASSUMED.** The brief names
+`CloudFieldDensity.AtZeroStrengthTheProfileSurvivesUntouchedAndTheDensityScaleIsTheOnlyMultiplier` as red in
+macOS Release and belonging to another developer. It is **GREEN here in Release**, and it is green at the
+merge base too — the same suite built in Release against `8e8cc1cc`'s own generator passes. So it is neither
+fixed nor hidden by this change; on this machine it does not fail at all.
+
+---
+
 ### THE PRICE
 
 | | before | after |
