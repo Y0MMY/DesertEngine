@@ -4417,3 +4417,37 @@ read the reflection table were rebuilt and re-run in **both** configurations aft
 * **The layout is not per-species-scaled.** `Layout_CloudPerTypeScale` has no counterpart because
   `PlacementScale` and `PlacementAnisotropy` already live on `.decloudtype` (T3). Adding a second scale
   would be two numbers obliged to agree.
+
+---
+
+## CB — the cumulonimbus' slider was never about its cell, it is the ANVIL, 2026-08-25
+
+The teamlead handed this phase the largest lie left in the `Coverage` slider — **the cumulonimbus delivers
+0.856 of the sky for a slider of 0.5, +0.354, unchanged through §SIL and §SIL2** — together with a stated
+cause: `kPackingCompensation` and the 0.68 alive exponent are both fitted at the 3 km cell and carry no cell
+dependence, and the cumulonimbus is the only type on a 6 km cell. The brief asked for the hypothesis to be
+checked across all nine genera **first**, and said in as many words that refuting it is worth more than
+confirming it.
+
+**IT IS REFUTED, AND ONE PAIR OF RUNS IS ENOUGH TO DO IT.**
+
+### THE CELL IS EXONERATED BY FOUR NUMBERS
+
+`LatticePeak --field --coverage 0.5 --repeats 8`, everything else at the values that ship. The only thing
+that changes between the rows is named in the row.
+
+| arm | cell | sky at `Coverage 0.5` | slider out by |
+|---|---|---|---|
+| cumulonimbus, exactly as it ships | 6.000 km | **0.8561** | **+0.356** |
+| cumulonimbus with `AnvilStrength` 0.85 → 0, **same 6 km cell** | 6.000 km | **0.5351** | **+0.035** |
+| congestus with `PlacementScale` forced to 2.0, **the cumulonimbus' own cell**, no anvil | 6.000 km | **0.5323** | **+0.032** |
+| cumulonimbus with `PlacementScale` forced to 1.0, **the reference 3 km cell**, anvil on | 3.000 km | **0.8334** | **+0.333** |
+
+**The lie follows the anvil and not the cell.** At one and the same 6.000 km cell the error is +0.356 with
+the anvil and +0.035 without it; at the reference 3.000 km cell — the very cell both constants were fitted
+at — the cumulonimbus still lies by **+0.333**. A cell-size defect cannot survive being put back on the size
+it was calibrated at, and this one does.
+
+**And the library already contained the counter-example.** `stratus` is on a **12.000 km** cell, four times
+the reference and twice as far from it as the cumulonimbus in ratio, and it reads **0.5098** — dead on. The
+row that would have had to be worst is the best in the table.
