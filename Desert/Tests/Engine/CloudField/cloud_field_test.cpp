@@ -646,11 +646,21 @@ TEST( CloudFieldDensity, TheProducerBoundsTheSpeciesRowRatherThanHandingItToTheM
     // can exist: Assets::ValidateCloudTypeShape would refuse to load a shape carrying these numbers, so a
     // fixture built from an asset can never reach this path. The AUTHORED producer has no such validator
     // in front of it at all, which is what makes this shape worth bounding rather than trusting.
+    //
     // THE SAMPLE HAS TO CONTAIN CLOUD, AND THAT IS NOT A DETAIL. The composition being tested lives inside
     // `if ( speciesProfile > result.Profile )` — the branch a species takes when it WINS the union. Ask
     // about a point of clear sky and the loop `continue`s, DensityScale stays at its zeroed 0, and the
     // assertion passes without having executed the line it is about. This test was written that way first
     // and stayed green against the unbounded version; the count below is what turned it into a test.
+    //
+    // THE VOLUME IS BAKED ONCE, OUTSIDE THE SWEEP. ParamsAtCoverage runs a full
+    // Assets::BakeCloudProceduralVolume, and the shape is the same on every iteration — so calling it
+    // inside the loop baked the identical two million voxels twelve times over. It cost 1.8 s in release
+    // and over three minutes in debug, which is a test nobody will keep. What the sweep varies is the
+    // SPECIES ROW and the layer's slider, and both are plain fields of the parameter block.
+    const CloudFieldParams baked      = ParamsAtCoverage( 0.9f );
+    const float            envelopeKm = EnvelopeThicknessKm( DefaultShape() );
+
     int winners = 0;
 
     for ( const float hostile :
@@ -658,13 +668,11 @@ TEST( CloudFieldDensity, TheProducerBoundsTheSpeciesRowRatherThanHandingItToTheM
     {
         for ( const float slider : { 0.0f, 1.0f, 2.0f } )
         {
-            CloudFieldParams params = ParamsAtCoverage( 0.9f );
+            CloudFieldParams params = baked;
             params.DensityScale     = slider;
             params.SpeciesEdge[0].y = hostile; // Detail Factor
             params.SpeciesEdge[0].z = hostile; // Density Factor
             params.SpeciesEdge[0].w = hostile; // Extinction Factor
-
-            const float envelopeKm = EnvelopeThicknessKm( DefaultShape() );
 
             for ( int iz = 0; iz < 6; ++iz )
                 for ( int ix = 0; ix < 6; ++ix )
