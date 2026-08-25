@@ -70,6 +70,106 @@ the only column that may be added up. The arithmetic and the query-index layout 
 integers in `Engine/Graphic/GpuTimestampLayout.hpp`, asserted by `Desert/Tests/Engine/GpuTimestampLayout`
 — including the relation that no two `(frame, slot)` pairs can ever reach the same query.
 
+## The eighteen milliseconds, itemised
+
+`Clouds_Demo` at **High**, camera `0,200,0`, `--look 0,0.45,1` — the framing all four decisions above
+were measured at, so the two are comparable. Debug build, MoltenVK, machine shared with other agents.
+Five interleaved runs of 400 frames; the run with the lowest GPU frame is shown, and the closure figure
+held at 91.8–94.7 % across all five.
+
+| pass | gpu self ms | % of GPU frame |
+|---|---|---|
+| **Clouds: March** | **7.589** | **41.0 %** |
+| **Clouds: ShadowMap** | **3.796** | **20.5 %** |
+| ExecuteRenderGraph (own work) | 0.835 | 4.5 % |
+| PostFX: Bloom | 0.765 | 4.1 % |
+| Debug: Overlay | 0.680 | 3.7 % |
+| **Clouds: TemporalResolve** | **0.502** | **2.7 %** |
+| UI | 0.436 | 2.4 % |
+| CloudShadowMap (dispatch overhead) | 0.291 | 1.6 % |
+| Deferred: Lighting | 0.216 | 1.2 % |
+| Clouds: ExecuteInFrame (barriers) | 0.197 | 1.1 % |
+| everything else marked (34 passes) | 1.876 | 10.1 % |
+| **unmarked remainder** | **1.337** | **7.2 %** |
+| **GPU frame** | **18.520** | 100 % |
+
+**The cloud subsystem is 12.456 ms — 67 % of the frame.** Everything else marked is 4.7 ms. The
+unmarked 7 % is device work no pass brackets (the ImGui swapchain pass, layout transitions, the final
+blit); it is the error bar on this table and it is named rather than hidden.
+
+The CPU column says something the slope never could: `PresentFinalImage (Submit)` costs ~14 ms of CPU,
+and none of it is work — it is the CPU waiting on the fence. The frame is GPU-bound end to end, and the
+wall clock and the GPU bracket agree to within 0.5 %.
+
+## What this says about the four decisions
+
+**The shadow ray's ×1.87 does not reproduce, and never described the shadow ray.** Varying
+`LightMarchSamples` from a scene copy (one field, no rebuild) and reading the march's own line, three
+interleaved passes, minimum of three:
+
+| samples | Clouds: March | GPU frame |
+|---|---|---|
+| 6 | 2.057 ms | 12.732 ms |
+| 16 | 3.754 ms | 15.019 ms |
+| 32 (shipped) | 6.911 ms | 17.047 ms |
+| 64 | 13.071 ms | 22.161 ms |
+
+The march is linear at **0.190 ms/sample** over a **0.918 ms** fixed part (per-interval: 0.170 / 0.197 /
+0.193). The record says 0.230 ms/sample — **17 % high**. And 6 → 32 costs **+4.85 ms on the march**,
+**+4.32 ms on the whole frame, a ratio of 1.34×** — against a recorded 1.87×.
+
+The ratio was never a property of the shadow ray. It is the ratio of two *whole frames*, and the frame's
+fixed cost has roughly doubled since it was taken (12.7 ms at 6 samples today against the 6.95 ms then).
+The same code change measured on the same machine gives 1.87× on one tree and 1.34× on another, because
+most of what the ratio measures is everything that is *not* the shadow ray. Only the absolute per-sample
+cost transfers between trees, and that one is 17 % off.
+
+**The shadow map's +4.92 ms is ~20 % high; the pass costs 3.7 ms.** Reproducing the record's own A/B
+(`CastShadows` on/off, one field, no rebuild) but reading the breakdown, three passes, minimum of three:
+the whole GPU frame moves **+3.978 ms (1.31×)**, of which **+3.672 ms is the map's own pass**. Pooling
+every run in this session, 17 of them, the map's own line is **3.66–4.80 ms, median 3.96** — the recorded
+4.92 ms sits *above the entire range*.
+
+A hypothesis, tested and **disproved**: that the missing millisecond was the march paying to *sample* the
+map. It is not — the march is 6.553 ms with shadows and 6.670 ms without, a difference of −0.117 ms,
+inside its own 15 % run-to-run spread. Sampling the map is free; building it is the whole cost.
+
+**The tier ladder's conclusion survives its arithmetic.** The two knobs the tiers turn — shadow-ray
+sample count and shadow-map resolution — are exactly the two largest lines in the frame, 41 % and 20 %.
+The ladder was built by distributing a budget nobody had itemised, and the itemisation says it reached
+for the right two knobs. Its constants come from the same whole-frame instrument as the two above and
+should be expected to carry the same error.
+
+**The hero clouds' 1.39× was not re-measured** — it belongs to `Clouds_HeroMass`, and this table is
+`Clouds_Demo`. It rests on the same whole-frame instrument as the other three and deserves the same
+re-check.
+
+## What the instrumentation costs
+
+`--no-gpu-timing` against the default, interleaved in one session, five passes, the engine's own
+averaged frame clock (which makes the ~20 s startup cancel by construction rather than by subtracting
+two runs):
+
+| | frame, min of 5 | spread |
+|---|---|---|
+| timestamps ON | 18.364 ms | 9.1 % |
+| timestamps OFF | 16.218 ms | 16.0 % |
+
+**+2.15 ms on the minima (1.13×); the five per-pass deltas are +0.84, +1.23, +1.77, +2.15, +2.15, mean
++1.63 ms.** An independent two-point frame-count slope taken earlier in the same session gave +1.42 ms.
+So: **roughly 1.5 ± 0.6 ms per frame, about 8 % of an 18 ms debug frame**, on a machine shared with other
+agents.
+
+That is not free, and it is a MoltenVK number rather than a Vulkan one: `vkCmdWriteTimestamp` becomes a
+Metal counter sample, and a counter sample can force an encoder boundary — ~40 timestamp pairs at a few
+tens of microseconds each is the shape of the figure. It is why the switch exists, and why the switch
+turns off the pool reset as well as the writes, so "off" costs exactly nothing.
+
+**It stays ON by default, including in debug**, per the brief: a profiler nobody turns on measures
+nothing, and 8 % of a debug frame is a price worth paying to know where the other 92 % goes. The number
+to remember is that a pass's *share* is unaffected — the overhead is spread across the frame, and the
+table above is a proportion, not an absolute cost of shipping code.
+
 ## Timestamp period
 
 `VkPhysicalDeviceLimits::timestampPeriod` is nanoseconds per tick and differs between devices — it is
