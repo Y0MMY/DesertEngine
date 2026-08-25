@@ -421,7 +421,7 @@ namespace Desert::Graphic::System
         const AtmosphereLutFingerprint wanted = LutFingerprintOf( m_Sky );
         if ( !m_LutsValid || wanted != m_LutBaked )
         {
-            DESERT_PROFILE_SCOPE( "Sky: AtmosphereLuts" );
+            DESERT_PROFILE_PASS( "Sky: AtmosphereLuts" );
 
             DispatchCachedAtmosphereLuts( /*inFrame=*/true );
 
@@ -439,7 +439,7 @@ namespace Desert::Graphic::System
         // runs after the graph recorded the Sky pass) — invisible at 192x104 of slowly-varying sky.
         if ( m_SkyViewLutPipeline && m_ActiveCamera && EnsureSkyViewLutResources() )
         {
-            DESERT_PROFILE_SCOPE( "Sky: SkyViewLut" );
+            DESERT_PROFILE_PASS( "Sky: SkyViewLut" );
             DispatchSkyViewLut();
         }
 
@@ -450,7 +450,7 @@ namespace Desert::Graphic::System
         // it is null rather than sampling a volume nobody wrote.
         if ( m_AerialPerspectivePipeline && m_ActiveCamera && EnsureAerialPerspectiveResources() )
         {
-            DESERT_PROFILE_SCOPE( "Sky: AerialPerspectiveLut" );
+            DESERT_PROFILE_PASS( "Sky: AerialPerspectiveLut" );
             DispatchAerialPerspectiveLut();
 
             m_Atmosphere.AerialPerspectiveVolume            = m_AerialPerspectiveLut.get();
@@ -465,7 +465,7 @@ namespace Desert::Graphic::System
         // nobody wrote.
         if ( m_DistantLightPipeline && EnsureDistantLightResources() )
         {
-            DESERT_PROFILE_SCOPE( "Sky: DistantSkyLight" );
+            DESERT_PROFILE_PASS( "Sky: DistantSkyLight" );
             DispatchDistantLight();
 
             m_Atmosphere.DistantSkyLight = m_DistantLight.get();

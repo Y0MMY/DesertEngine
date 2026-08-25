@@ -507,33 +507,33 @@ namespace Desert::Graphic
         // Bake/rebake the procedural-sky IBL if the sun moved (throttled). Done here — before the render
         // graph records its command buffer — so the heavy compute + device idle stays at a safe boundary.
         {
-            DESERT_PROFILE_SCOPE( "Sky: EnsureProceduralEnv" );
+            DESERT_PROFILE_PASS( "Sky: EnsureProceduralEnv" );
             skyboxSystem->EnsureProceduralEnvironment( sceneRenderInfo.Timestep.GetSeconds() );
         }
 
         // Recompute CSM cascade matrices once per frame BEFORE the render graph records (intra-phase pass
         // order is nondeterministic, so the cascade passes can't compute them themselves).
         {
-            DESERT_PROFILE_SCOPE( "Shadow: UpdateCascades" );
+            DESERT_PROFILE_PASS( "Shadow: UpdateCascades" );
             UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->UpdateCascades();
         }
 
         {
-            DESERT_PROFILE_SCOPE( "ClearMainFramebuffer" );
+            DESERT_PROFILE_PASS( "ClearMainFramebuffer" );
             ClearMainFramebuffer();
         }
 
         // GPU grass culling: dispatch the cull compute (outside any render pass) BEFORE the render graph
         // records the grass draw, so the indirect instanceCount + compacted visible list are ready.
         {
-            DESERT_PROFILE_SCOPE( "Grass: CullInFrame" );
+            DESERT_PROFILE_PASS( "Grass: CullInFrame" );
             UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->CullGrassInFrame();
         }
 
         // Particle simulation compute (outside any render pass) BEFORE the graph records the billboard draw,
         // so the freshly-integrated particle buffer is ready + visible to the vertex stage.
         {
-            DESERT_PROFILE_SCOPE( "Particles: SimulateInFrame" );
+            DESERT_PROFILE_PASS( "Particles: SimulateInFrame" );
             UNIQUE_GET_AS( System::ParticleRenderer, m_RenderSystems["ParticleSystem"] )->SimulateInFrame();
         }
 
@@ -548,12 +548,12 @@ namespace Desert::Graphic
         // records. It is an in-frame compute dispatch and so must be outside any open render pass, which
         // this point is.
         {
-            DESERT_PROFILE_SCOPE( "CloudShadowMap" );
+            DESERT_PROFILE_PASS( "CloudShadowMap" );
             ExecuteCloudShadowMap();
         }
 
         {
-            DESERT_PROFILE_SCOPE( "ExecuteRenderGraph" );
+            DESERT_PROFILE_PASS( "ExecuteRenderGraph" );
             ExecuteRenderGraph();
         }
 
@@ -561,7 +561,7 @@ namespace Desert::Graphic
         // into the scene target before the post chain.
         if ( m_RenderPath == Core::RenderPath::Deferred && m_GBuffer )
         {
-            DESERT_PROFILE_SCOPE( "Deferred: Lighting" );
+            DESERT_PROFILE_PASS( "Deferred: Lighting" );
 
             auto* meshRenderer = UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] );
             meshRenderer->RenderGBufferManual();
@@ -613,7 +613,7 @@ namespace Desert::Graphic
                 const glm::vec3 sunDir( lightDir );
                 if ( glm::distance( sunDir, m_RSMLastSunDir ) > 1e-4f || m_RSMFrameCounter == 0 )
                 {
-                    DESERT_PROFILE_SCOPE( "Deferred: RSM" );
+                    DESERT_PROFILE_PASS( "Deferred: RSM" );
                     meshRenderer->RenderRSMManual();
                     m_RSMLastSunDir = sunDir;
                 }
@@ -621,7 +621,7 @@ namespace Desert::Graphic
 
                 if ( auto* gi = UNIQUE_GET_AS( System::GIResolveRenderer, m_RenderSystems["GISystem"] ) )
                 {
-                    DESERT_PROFILE_SCOPE( "Deferred: GIResolve" );
+                    DESERT_PROFILE_PASS( "Deferred: GIResolve" );
                     gi->Execute( m_GBuffer, m_RSMBuffer->GetColorAttachmentImage( 0 ),
                                  m_RSMBuffer->GetColorAttachmentImage( 1 ),
                                  m_RSMBuffer->GetColorAttachmentImage( 2 ), meshRenderer->GetRSMViewProj(),
@@ -700,7 +700,7 @@ namespace Desert::Graphic
             if ( m_EnableSSR && sceneCopy && EnsureSSRResources() )
                 if ( auto* ssr = UNIQUE_GET_AS( System::SSRRenderer, m_RenderSystems["SSRSystem"] ) )
                 {
-                    DESERT_PROFILE_SCOPE( "Deferred: SSR" );
+                    DESERT_PROFILE_PASS( "Deferred: SSR" );
                     ssr->Execute( m_GBuffer, sceneCopy, viewProj, cameraPos, /*maxSteps*/ 32,
                                   m_SSRMaxDistance, m_SSRIntensity, /*thickness*/ 0.5f );
                 }
@@ -714,7 +714,7 @@ namespace Desert::Graphic
         // frame. The cached pair is almost always a fingerprint compare and an immediate return; nothing
         // here runs at all for SkyModel::ArtisticGradient.
         {
-            DESERT_PROFILE_SCOPE( "SkyAtmosphereLuts" );
+            DESERT_PROFILE_PASS( "SkyAtmosphereLuts" );
             UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->ExecuteAtmosphereLuts();
         }
 
@@ -726,7 +726,7 @@ namespace Desert::Graphic
         // ExecuteTransparency at RenderPassOrder::AtmosphericFog, under the particles, so they are drawn
         // OVER the fogged scene.
         {
-            DESERT_PROFILE_SCOPE( "AtmosphericFog" );
+            DESERT_PROFILE_PASS( "AtmosphericFog" );
             ExecuteAtmosphericFog();
         }
 
@@ -735,7 +735,7 @@ namespace Desert::Graphic
         // both paths and this frame's atmosphere is already evaluated. Its composite is replayed by
         // ExecuteTransparency at RenderPassOrder::FarField — over the fog, under the particles.
         {
-            DESERT_PROFILE_SCOPE( "VolumetricClouds" );
+            DESERT_PROFILE_PASS( "VolumetricClouds" );
             ExecuteVolumetricClouds();
         }
 
@@ -744,7 +744,7 @@ namespace Desert::Graphic
         // the post chain so particles are tonemapped + bloom'd like everything else. Deferred recorded them
         // inside the graph and the composite painted over them wherever geometry existed (the top-down bug).
         {
-            DESERT_PROFILE_SCOPE( "Transparency" );
+            DESERT_PROFILE_PASS( "Transparency" );
             ExecuteTransparency();
         }
 
@@ -752,7 +752,7 @@ namespace Desert::Graphic
         // color. Path-independent (redraws geometry, ignores the G-buffer), so it runs for Forward too.
         if ( m_DeferredDebug == Core::DeferredDebugMode::Overdraw )
         {
-            DESERT_PROFILE_SCOPE( "Debug: Overdraw" );
+            DESERT_PROFILE_PASS( "Debug: Overdraw" );
             UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->RenderOverdrawManual();
         }
 
@@ -760,7 +760,7 @@ namespace Desert::Graphic
         // paths, but critically in Deferred where the lighting composite above would otherwise cover any
         // debug lines recorded inside the graph. Runs before the post chain so tonemap treats them uniformly.
         {
-            DESERT_PROFILE_SCOPE( "Debug: Overlay" );
+            DESERT_PROFILE_PASS( "Debug: Overlay" );
             ExecuteDebugOverlay();
         }
 
@@ -769,7 +769,7 @@ namespace Desert::Graphic
         // and the one-frame delay is invisible (the first glass frame simply blurs the previous image).
         if ( m_BackdropBlurNeeded )
         {
-            DESERT_PROFILE_SCOPE( "UI: BackdropBlur" );
+            DESERT_PROFILE_PASS( "UI: BackdropBlur" );
             if ( auto* backdrop =
                       UNIQUE_GET_AS( System::BackdropBlurRenderer, m_RenderSystems["BackdropBlurSystem"] ) )
                 backdrop->Execute();
@@ -778,14 +778,14 @@ namespace Desert::Graphic
         // UI canvas (Render2D) on top of the finished scene, as a LOAD overlay — see ExecuteUI(). Kept out of
         // the main graph so its CLEAR begin can't wipe the depth the grid/overlays above load.
         {
-            DESERT_PROFILE_SCOPE( "UI" );
+            DESERT_PROFILE_PASS( "UI" );
             ExecuteUI();
         }
 
         // Explicit post-process chain (runs after the scene graph has produced the scene color and
         // the silhouette mask): Jump Flood outline -> Tonemap.
         {
-            DESERT_PROFILE_SCOPE( "PostFX: JumpFlood" );
+            DESERT_PROFILE_PASS( "PostFX: JumpFlood" );
             const auto& jfa =
                  UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] );
             // Skip the JFA step passes when nothing is outlined (sync is handled by render-pass layouts +
@@ -808,7 +808,7 @@ namespace Desert::Graphic
         // Bloom (HDR scene color -> blurred bright) runs before tonemap, which adds it in.
         if ( m_BloomEnabled )
         {
-            DESERT_PROFILE_SCOPE( "PostFX: Bloom" );
+            DESERT_PROFILE_PASS( "PostFX: Bloom" );
             UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )->Execute();
         }
 
@@ -832,7 +832,7 @@ namespace Desert::Graphic
         }
 
         {
-            DESERT_PROFILE_SCOPE( "PostFX: LightShafts" );
+            DESERT_PROFILE_PASS( "PostFX: LightShafts" );
             const auto& shafts  = UNIQUE_GET_AS( System::LightShaftRenderer, m_RenderSystems["LightShaftSystem"] );
             const auto& tonemap = UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] );
 
@@ -851,7 +851,7 @@ namespace Desert::Graphic
         }
 
         {
-            DESERT_PROFILE_SCOPE( "PostFX: LensFlare" );
+            DESERT_PROFILE_PASS( "PostFX: LensFlare" );
             const auto& flare   = UNIQUE_GET_AS( System::LensFlareRenderer, m_RenderSystems["LensFlareSystem"] );
             const auto& tonemap = UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] );
 
@@ -867,23 +867,23 @@ namespace Desert::Graphic
         }
 
         {
-            DESERT_PROFILE_SCOPE( "PostFX: Tonemap" );
+            DESERT_PROFILE_PASS( "PostFX: Tonemap" );
             UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Execute();
         }
 
         if ( m_AAMode == Core::AntiAliasingMode::FXAA )
         {
-            DESERT_PROFILE_SCOPE( "PostFX: FXAA" );
+            DESERT_PROFILE_PASS( "PostFX: FXAA" );
             UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Execute();
         }
         else if ( m_AAMode == Core::AntiAliasingMode::SMAA )
         {
-            DESERT_PROFILE_SCOPE( "PostFX: SMAA" );
+            DESERT_PROFILE_PASS( "PostFX: SMAA" );
             UNIQUE_GET_AS( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Execute();
         }
 
         {
-            DESERT_PROFILE_SCOPE( "CompositeRenderPass" );
+            DESERT_PROFILE_PASS( "CompositeRenderPass" );
             CompositeRenderPass();
         }
     }
@@ -1399,7 +1399,7 @@ namespace Desert::Graphic
                 currentFb = passFb;
             }
 
-            DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
+            DESERT_PROFILE_PASS_DYNAMIC( pass.Name.c_str() );
 
             // Debug-utils region: RenderDoc/Xcode show every graph pass by name in the event tree.
             renderer.BeginDebugLabel( pass.Name.c_str() );
@@ -1437,7 +1437,7 @@ namespace Desert::Graphic
                 currentFb = passFb;
             }
 
-            DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
+            DESERT_PROFILE_PASS_DYNAMIC( pass.Name.c_str() );
             renderer.BeginDebugLabel( pass.Name.c_str() );
             pass.ExecuteFunc();
             renderer.EndDebugLabel();
@@ -1505,7 +1505,7 @@ namespace Desert::Graphic
                 currentFb = passFb;
             }
 
-            DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
+            DESERT_PROFILE_PASS_DYNAMIC( pass.Name.c_str() );
             renderer.BeginDebugLabel( pass.Name.c_str() );
             pass.ExecuteFunc();
             renderer.EndDebugLabel();
@@ -1554,7 +1554,7 @@ namespace Desert::Graphic
                 currentFb = passFb;
             }
 
-            DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
+            DESERT_PROFILE_PASS_DYNAMIC( pass.Name.c_str() );
             renderer.BeginDebugLabel( pass.Name.c_str() );
             pass.ExecuteFunc();
             renderer.EndDebugLabel();

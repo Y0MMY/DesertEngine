@@ -84,6 +84,10 @@ namespace Desert::Engine
         bool SupportsTessellation        = false;
         bool SupportsMultiDrawIndirect   = false;
         bool SupportsTimestampQueries    = false; ///< GPU-side profiling; the profiler is CPU-only without it.
+        /// Nanoseconds per timestamp tick — the factor that turns a query delta into real time. Read by
+        /// the GPU profiler and by nothing else; it is 1.0 on MoltenVK (Metal counts in nanoseconds
+        /// already) and e.g. 38.4 on some AMD parts, so a profiler that assumes either is wrong somewhere.
+        float TimestampPeriodNs = 0.0f;
         /// Sampling + blending into 32-bit float colour targets. Every screen-space pass that accumulates
         /// (SSR trace/resolve, GI resolve, bloom) writes RGBA32F, so this gates them.
         bool SupportsFloatRenderTargets = false;

@@ -125,6 +125,26 @@ namespace Desert::Editor
         std::string Sequence;          // --shot-sequence <dir>; every Nth frame written there
         int         SequenceEvery = 1; // --shot-every N
 
+        // --gpu-profile: switch GPU timestamps ON for this run and write the profiler's CPU and GPU
+        // per-pass table to the log at the end of it.
+        //
+        // It has to do BOTH, because timestamps are off by default (they inflate the frame by ~8 % on
+        // MoltenVK — Common/Core/Profiler.hpp GpuEnabled()). A headless shot draws no ImGui, so the
+        // Profiler panel is unreachable there and this flag is the only way in. An ordinary capture is
+        // therefore an uninstrumented capture, which is the number a budget decision should be taken on.
+        bool GpuProfile = false;
+
+        // --no-gpu-timing: dump the table but leave the timestamps off, so the log carries CPU columns
+        // and no GPU ones. Its reason to exist is the A/B that prices the instrumentation: one binary,
+        // one scene, the feature the only thing that differs.
+        bool GpuTiming = true;
+
+        // --gpu-profile-frame-only: time the whole command buffer and NOT the individual passes. Two
+        // timestamps a frame instead of ~80. This is what prices the per-pass marks against the frame
+        // bracket rather than against nothing, and it is also a legitimate lightweight mode: GPU frame
+        // time for almost no cost.
+        bool GpuFrameOnly = false;
+
         // Headless capture mode at all — either flavour of output activates it. `--shot-sequence` alone is
         // a legitimate run: a motion study wants the frames and has no use for a designated last one.
         bool Active() const
