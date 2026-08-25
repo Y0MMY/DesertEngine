@@ -3,6 +3,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
+#include <Engine/ShaderResources/BufferCopyLayout.hpp>
 
 namespace Desert::ShaderResources::API::Vulkan
 {
@@ -20,9 +21,8 @@ namespace Desert::ShaderResources::API::Vulkan
 
     uint32_t VulkanUniformBuffer::CopyIndex( uint32_t frameIndex )
     {
-        const uint32_t slots = EngineContext::kMaxRendererSlots;
-        const uint32_t slot  = EngineContext::GetInstance().GetActiveRendererSlot();
-        return frameIndex * slots + ( slot < slots ? slot : 0 );
+        return BufferCopyIndex( frameIndex, EngineContext::GetInstance().GetActiveRendererSlot(),
+                                EngineContext::kMaxRendererSlots );
     }
 
     void VulkanUniformBuffer::Release()
@@ -66,7 +66,7 @@ namespace Desert::ShaderResources::API::Vulkan
         // of this change. A uniform block is a few hundred bytes to a few KB, so the extra copies cost
         // kilobytes per material.
         const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
-        const uint32_t copies         = framesInFlight * EngineContext::kMaxRendererSlots;
+        const uint32_t copies = BufferCopyCount( framesInFlight, EngineContext::kMaxRendererSlots );
 
         m_Buffers.resize( copies, VK_NULL_HANDLE );
         m_MemoryAllocs.resize( copies, nullptr );
