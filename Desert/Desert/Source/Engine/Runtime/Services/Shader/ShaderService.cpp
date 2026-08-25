@@ -1,5 +1,7 @@
 #include "ShaderService.hpp"
 
+#include <Common/Core/Logger.hpp>
+
 namespace Desert::Runtime
 {
 
@@ -13,6 +15,15 @@ namespace Desert::Runtime
         const auto shader                            = Graphic::Shader::Create( shaderAsset );
         m_Shaders[shaderAsset->GetMetadata().Handle] = shader;
         m_NameToHandleMap[shader->GetName()]         = shaderAsset->GetMetadata().Handle;
+
+        // Registered either way, deliberately: a shader that fails to compile must keep its NAME, or the
+        // material referencing it silently falls back to the standard one and the artist is told nothing.
+        // It is registered and unusable, and it says so once, here, naming itself — the per-stage error
+        // above names a file and a line, which is not the same as naming the shader a material asks for.
+        if ( !shader->IsCompiled() )
+            LOG_ERROR( "[ShaderService] '{}' registered but has no compiled stages — every material using "
+                       "it will not draw until it compiles ({}).",
+                       shader->GetName(), shaderAsset->GetMetadata().Filepath.string() );
 
         // DSL multi-pass shaders: every named pass is its own program, addressable as
         // "<Shader>/<Pass>" (e.g. GetByName("Unlit/Shadow")).

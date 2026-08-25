@@ -33,6 +33,16 @@ namespace Desert::Graphic
         // Data-driven material metadata parsed from the .shader's `#pragma param` / `#pragma state`.
         virtual const Core::Formats::ShaderProgramMeta& GetProgramMeta() const = 0;
 
+        // False when this shader has never compiled successfully, i.e. it carries no stages at all.
+        //
+        // A failed RECOMPILE is already safe — CompileProgram builds into locals and keeps the previous
+        // modules — but a shader whose FIRST compile fails is still constructed, still registered under
+        // its name, and still handed out by ShaderService. Building a pipeline from it produces
+        // `stageCount = 0`, which Vulkan answers with a validation storm and a crash before the frame is
+        // presented. That is an artist's typo in a shader graph, so the engine has to survive it: callers
+        // ask this and skip, and the pipeline builder refuses as the last line of defence.
+        [[nodiscard]] virtual bool IsCompiled() const = 0;
+
         static std::string             GetStringShaderStage( const Core::Formats::ShaderStage stage );
         // passName selects a `Pass "Name"` block of a DSL multi-pass shader; empty = the default
         // program. Pass shaders are named "<Shader>/<Pass>".

@@ -63,6 +63,15 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_PipelineShaderStageCreateInfos;
         }
+
+        // No stages means CompileProgram never succeeded — it is transactional, so a shader that has ever
+        // compiled keeps its modules even if a later recompile fails. Reading the stage list rather than
+        // a separate bool keeps this from becoming a second piece of state that can disagree with the
+        // first: the list IS what a pipeline would be built from.
+        [[nodiscard]] virtual bool IsCompiled() const override
+        {
+            return !m_PipelineShaderStageCreateInfos.empty();
+        }
         /**
          * The layout for @p set, as a STRONG reference.
          *
