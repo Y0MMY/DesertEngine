@@ -274,6 +274,86 @@ namespace Desert::Assets
             return 0.65f * ValueNoise( seed, coarse ) + 0.35f * ValueNoise( HashCombine( seed, 0x5eedu ), fine );
         }
 
+        /// THE ONE PLACE A CELL'S COVERAGE IS DECIDED, and it is one place on purpose.
+        ///
+        /// Before the painted layout there were two lines here — the slider, then the procedural patch
+        /// field folded into it. There are now two possible SOURCES for that same modulation, the painting
+        /// and the hash, and the contract's rule about second paths (§1.3, §4.2) is what makes this a
+        /// function rather than another `if` in the cell loop: a cell's coverage has exactly one modulator,
+        /// chosen here, and no caller can apply both.
+        ///
+        /// WHY THE PAINTING WINS WHEN IT IS BOUND. It is the artist saying where the weather is, and the
+        /// patch field is the engine guessing. Guessing is what happens when nobody has said. Turning
+        /// `PatternStrength` down to zero hands the decision back to the guess rather than to nothing at
+        /// all — which is what makes that end of the slider a live position instead of "no modulation",
+        /// a state the sky already reads as "the whole sky is cloud" (CALIBRATION.md §RW).
+        ///
+        /// WHY THE PATTERN IS APPLIED ZERO-MEAN AND THE MASK IS NOT.
+        ///
+        ///   * The PATTERN is on by default the moment a painting is bound, so if it could move the sky's
+        ///     average cover, then `Coverage` would stop meaning the fraction of sky it delivers — and that
+        ///     mapping is what decision D-20 re-authorised every shipped scene against. Subtracting the
+        ///     painting's own mean makes it redistribute cloud exactly as the patch field it replaces does
+        ///     ("symmetric about the slider"), so the average is the slider again whatever is painted.
+        ///   * The MASK is asymmetric, and that is its job: "add cloud here, remove it there" is the one
+        ///     control an artist reaches for when they want MORE sky covered, and a symmetric version of it
+        ///     could not do that. It is safe for D-20 in a way the pattern is not because a layout with no
+        ///     mask table contributes exactly nothing, so no sky moves that an artist did not paint. This is
+        ///     Unreal's own arrangement unchanged — the mask is summed into the assembled shape, and it
+        ///     subtracts by carrying a negative weight rather than by multiplying
+        ///     (Docs/Clouds/RESEARCH_LAYOUT_TEXTURES.md §3).
+        float CloudCellCoverage( const CloudProceduralFieldParams& params, uint32_t slot, uint32_t patchSeed,
+                                 const glm::vec2& centreKm )
+        {
+            const float base = std::clamp( params.Coverage, 0.0f, 1.0f );
+
+            const CloudLayoutData* layout = params.Layout.get();
+
+            const bool paintedPattern =
+                 layout != nullptr && layout->HasPattern() && params.LayoutPlacement.PatternStrength > 1e-4f;
+
+            float modulated = base;
+
+            if ( paintedPattern )
+            {
+                const glm::vec2 uv = CloudLayoutUv( params.LayoutPlacement, params.RegionSizeKm, centreKm );
+
+                // The channel is the SLOT and not a genus. Unreal fixes R/G/B/A to four named types for
+                // ever; ours is whichever kind of cloud the artist dropped into that slot, which is the
+                // more general arrangement and costs nothing.
+                const float painted = SampleCloudLayoutPattern( *layout, slot, uv );
+                const float centred = painted - layout->PatternMean[std::min( slot, kCloudLayoutChannels - 1u )];
+
+                // The same shape the patch field's own expression has, so the two sources push the slider
+                // by comparable amounts and swapping one for the other is not also a change of scale. The
+                // factor of two is what takes a centred fraction — which spans at most -1..1 and typically
+                // far less — onto the same +/-100 per cent the patch field's `2*p - 1` covers.
+                modulated = base * ( 1.0f + params.LayoutPlacement.PatternStrength * 2.0f * centred );
+            }
+            else
+            {
+                // Clamped HERE rather than by the caller, which is where it used to be. The clamp belongs
+                // with the read: a strength that reached this function unclamped would scale the modulation
+                // past its own documented range, and the caller that used to hold it is no longer the only
+                // one there is.
+                const float patchStrength = std::clamp( params.PatchStrength, 0.0f, 1.0f );
+                if ( patchStrength > 1e-4f )
+                {
+                    const float patch = PatchField( patchSeed, centreKm, params.PatchTileKm );
+                    modulated         = base * ( 1.0f + patchStrength * ( 2.0f * patch - 1.0f ) );
+                }
+            }
+
+            if ( layout != nullptr && layout->HasMask() && params.LayoutPlacement.MaskStrength > 1e-4f )
+            {
+                const glm::vec2 uv = CloudLayoutUv( params.LayoutPlacement, params.RegionSizeKm, centreKm );
+                const float     maskStrength = std::clamp( params.LayoutPlacement.MaskStrength, 0.0f, 1.0f );
+                modulated += maskStrength * SampleCloudLayoutMask( *layout, uv );
+            }
+
+            return std::clamp( modulated, 0.0f, 1.0f );
+        }
+
         /// How many clusters this cell carries, given a mean of @p density.
         ///
         /// A WHOLE NUMBER WITH THAT MEAN EXACTLY, by taking the integer part always and the fraction with
@@ -320,6 +400,30 @@ namespace Desert::Assets
         if ( a.PlacementDensity != b.PlacementDensity || a.PlacementScatter != b.PlacementScatter ||
              a.PlacementSizeVariety != b.PlacementSizeVariety || a.PatchStrength != b.PatchStrength ||
              a.PatchTileKm != b.PatchTileKm )
+            return false;
+
+        // THE PAINTING IS COMPARED BY ITS CONTENT HASH AND NOT BY ITS POINTER, and the difference matters
+        // in both directions. By pointer, a hot reload into a different allocation with identical pixels
+        // would re-bake two million voxels for nothing; by pixels, every slider move would memcmp up to
+        // five megabytes. The hash is that number stated once, and it is the CRC the container already
+        // verified — so "the painting changed" and "the file's checksum changed" cannot come apart.
+        //
+        // Null on either side reads as 0, which is the same 0 an unpainted layer carries: binding no layout
+        // and binding none again is not a change, and an unpainted sky is never re-baked by this line.
+        const uint32_t hashA = a.Layout ? a.Layout->ContentHash : 0u;
+        const uint32_t hashB = b.Layout ? b.Layout->ContentHash : 0u;
+        if ( hashA != hashB )
+            return false;
+
+        // AND THE PLACEMENT ONLY WHEN THERE IS SOMETHING TO PLACE. With no painting bound, none of those
+        // five numbers reaches a single lump — CloudCellCoverage does not read them — so comparing them
+        // would call a rebake of two million voxels for a slider that provably changed nothing. That is not
+        // a saving for its own sake: an artist dragging Layout Repeats on an unpainted layer would stall
+        // the editor for seconds per frame, and the cause would look like the region shifting.
+        //
+        // The test that walks every field asserts these five on a base that HAS a painting, which is the
+        // only state in which they mean anything.
+        if ( hashA != 0u && !CloudLayoutPlacementEqual( a.LayoutPlacement, b.LayoutPlacement ) )
             return false;
 
         if ( a.Species.size() != b.Species.size() )
@@ -462,6 +566,52 @@ namespace Desert::Assets
                          "Either the patch grows or the weather tile shrinks",
                          params.PatchTileKm, longer, params.PatchTileKm / longer );
             }
+        }
+
+        if ( auto layout = ValidateCloudProceduralLayout( params ); !layout )
+            return layout;
+
+        return Common::MakeSuccess( true );
+    }
+
+    Common::BoolResultStr ValidateCloudProceduralLayout( const CloudProceduralFieldParams& params )
+    {
+        // THE PLACEMENT IS CHECKED WHETHER OR NOT A PAINTING IS BOUND, and that is deliberate: a repeat
+        // count of zero is a division by zero and a rotation of 7 is a lattice that does not map onto
+        // itself, and neither becomes safe because the slot happens to be empty today. A number that is
+        // only validated when it is read is a number that goes wrong the first time somebody fills the
+        // slot — which is the worst moment for it.
+        if ( auto placement = ValidateCloudLayoutPlacement( params.LayoutPlacement ); !placement )
+            return placement;
+
+        if ( !params.Layout )
+            return Common::MakeSuccess( true );
+
+        // The PAINTING is checked when there is one. A layout that reached here unusable would place its
+        // clouds from whatever bytes happened to be in the vectors, and the symptom would be a sky that is
+        // merely not the one that was painted.
+        if ( auto layout = ValidateCloudLayoutData( *params.Layout ); !layout )
+            return Common::MakeFormattedError<bool>( "the bound cloud layout is unusable: {}", layout.GetError() );
+
+        // THE PAINTING MUST BE ABLE TO DESCRIBE A CELL, and this is the relation that says so. One texel of
+        // the painting spans `RegionSize / (Repeats * Resolution)` kilometres; if that is coarser than the
+        // lattice cell the painting cannot distinguish two neighbouring cells at all and every shape in it
+        // is rounded to the cell grid — the artist draws a letter and the sky shows a staircase. Checked
+        // against the FINEST species, because it is the one that loses most.
+        const float texelKm = params.RegionSizeKm /
+                              ( static_cast<float>( std::max( params.LayoutPlacement.RepeatsPerRegion, 1u ) ) *
+                                static_cast<float>( std::max( params.Layout->Resolution, 1u ) ) );
+
+        for ( const CloudProceduralSpecies& species : params.Species )
+        {
+            const glm::vec2 extent  = CloudProceduralCellExtentKm( params, species );
+            const float     shorter = std::min( extent.x, extent.y );
+            if ( texelKm > shorter )
+                return Common::MakeFormattedError<bool>(
+                     "one layout texel is {:.2f} km against a cell of {:.2f} km, so the painting cannot tell "
+                     "two neighbouring cells apart and every shape in it would be rounded to the lattice. "
+                     "Either the layout gains resolution, Layout Repeats rises, or the region shrinks",
+                     texelKm, shorter );
         }
 
         return Common::MakeSuccess( true );
@@ -627,8 +777,7 @@ namespace Desert::Assets
         const float scatter = std::max( params.PlacementScatter, 0.0f );
         const float variety = std::clamp( params.PlacementSizeVariety, 0.0f, 1.0f );
 
-        const float    patchStrength = std::clamp( params.PatchStrength, 0.0f, 1.0f );
-        const uint32_t patchSeed     = HashCombine( speciesSeed, 0x9a71c4u );
+        const uint32_t patchSeed = HashCombine( speciesSeed, 0x9a71c4u );
 
         for ( int32_t iv = firstV; iv <= lastV; ++iv )
         {
@@ -659,19 +808,16 @@ namespace Desert::Assets
                 const uint32_t cellSeed =
                      HashCombine( HashCombine( speciesSeed, IndexWord( iu ) ), IndexWord( iv ) );
 
-                // WHERE THE WEATHER IS BUSY AND WHERE IT IS CLEAR. The patch field is sampled at the CELL's
-                // own site rather than per voxel, so it modulates whole clouds into and out of existence
-                // instead of eroding their edges — which is what a weather system does and what erosion
-                // does not. It is symmetric about the slider, so it moves cloud around the sky rather than
-                // adding it: a cell in a busy patch reaches over the threshold, one in a clear patch falls
-                // under it, and averaged over the region the threshold is the slider again.
-                float cellCoverage = std::clamp( params.Coverage, 0.0f, 1.0f );
-                if ( patchStrength > 1e-4f )
-                {
-                    const float patch = PatchField( patchSeed, centre, params.PatchTileKm );
-                    cellCoverage = std::clamp( cellCoverage * ( 1.0f + patchStrength * ( 2.0f * patch - 1.0f ) ),
-                                               0.0f, 1.0f );
-                }
+                // WHERE THE WEATHER IS BUSY AND WHERE IT IS CLEAR. Sampled at the CELL's own site rather
+                // than per voxel, so it modulates whole clouds into and out of existence instead of eroding
+                // their edges — which is what a weather system does and what erosion does not.
+                //
+                // WHICH SOURCE DECIDES IT — the artist's painting or the procedural patch — is settled
+                // inside CloudCellCoverage, and it is settled in one place because two mechanisms setting
+                // one number is the second path the contract forbids. The choice is NOT made here and must
+                // not be: the moment this loop could apply both, the sky would answer to two sliders that
+                // do not know about each other.
+                const float cellCoverage = CloudCellCoverage( params, slot, patchSeed, centre );
 
                 const float aliveFraction = std::pow( cellCoverage, 0.68f );
 

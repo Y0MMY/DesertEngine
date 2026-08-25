@@ -459,6 +459,15 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "PlacementSizeVariety",
          "PatchTileSize",
          "PatchStrength",
+         // Layout — the PAINTED sky. Six fields rather than one, because a painting has to be placed as
+         // well as bound: an asset slot on its own would put an artist's picture over the world at one
+         // scale, one orientation and one position, none of which they chose.
+         "CloudLayout",
+         "LayoutPatternStrength",
+         "LayoutMaskStrength",
+         "LayoutRepeats",
+         "LayoutRotation",
+         "LayoutOffset",
          "DetailTileSize",
          "DetailStrength",
          "DensityScale",
@@ -488,7 +497,7 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 45u );
+    EXPECT_EQ( cloud.Fields.size(), 51u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
     EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 9u );
@@ -497,6 +506,10 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     // that shipped before them put a measurable lattice bump at every multiple of the weather tile's
     // quarter, and each of these attacks one reason for it.
     EXPECT_EQ( CountInCategory( cloud, "Placement" ), 5u );
+    // The painted layout: one slot and five numbers that place the painting in the world. Its own group
+    // rather than more rows under Placement, because the two answer different questions — Placement is how
+    // the ENGINE arranges clouds when nobody has said, and Layout is what happens when somebody has.
+    EXPECT_EQ( CountInCategory( cloud, "Layout" ), 6u );
     // NO "Noise" GROUP ANY MORE: it held one row, the noise volume slot, and that moved onto the cloud
     // type. A group with nothing in it is a heading an artist opens and finds empty.
     EXPECT_EQ( CountInCategory( cloud, "Noise" ), 0u );

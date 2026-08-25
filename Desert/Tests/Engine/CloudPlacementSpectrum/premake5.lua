@@ -24,6 +24,10 @@ project(test_name)
         test_files,
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
+        -- The painted layout: the placement reads it, so the placement's suite compiles it. It brings no
+        -- asset layer with it by design — CloudLayout.cpp knows about pixels and arithmetic and nothing
+        -- about files, which is what lets the tables be built in a test without a disk.
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudLayout.cpp",
     }
 
     includedirs {

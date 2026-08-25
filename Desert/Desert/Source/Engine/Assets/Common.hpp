@@ -43,6 +43,12 @@ namespace Desert::Assets
         // authored producer — the half of the cloud field that can be a shape the procedural one cannot
         // make — see Engine/Assets/CloudModellingVolume.hpp.
         CloudModellingVolume,
+        // A PAINTED cloud layout (`.dclayout`): a four-channel pattern saying where each of the layer's
+        // species slots lives, and a signed mask that adds or removes cloud regionally. Unreal's
+        // `Layout_CloudGlobalPattern` and `Layout_GlobalCloudMask` as data rather than as a material graph
+        // — decision D-5 stands, and these are tables, not nodes. Read at the BAKE and never in the march,
+        // so a painting costs the hottest pass of the frame nothing — see Engine/Assets/CloudLayout.hpp.
+        CloudLayout,
 
         // NOT an asset type: the number of them. Every new type is added ABOVE this line, and adding one
         // turns the AssetHandleStability census red until the type is entered in that suite's catalogue.

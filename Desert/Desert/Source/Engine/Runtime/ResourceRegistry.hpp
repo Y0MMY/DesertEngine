@@ -16,6 +16,7 @@
 #include "Services/CloudNoise/CloudNoiseService.hpp"
 #include "Services/CloudType/CloudTypeService.hpp"
 #include "Services/CloudModelling/CloudModellingService.hpp"
+#include "Services/CloudLayout/CloudLayoutService.hpp"
 
 namespace Desert::Runtime
 {
@@ -42,5 +43,9 @@ namespace Desert::Runtime
         static CloudTypeService*     GetCloudTypeService();
         // The sculpted hero-cloud bodies (`.dcmv`), slot A of the cloud field's seam.
         static CloudModellingService* GetCloudModellingService();
+        // The painted cloud layouts (`.dclayout`) — where the artist says the weather is. Consumed by the
+        // placement BAKE and never by a shader, which is the one service here that owns nothing on the GPU
+        // by design rather than by accident.
+        static CloudLayoutService* GetCloudLayoutService();
     };
 } // namespace Desert::Runtime

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Engine/Assets/CloudLayout.hpp>
 #include <Engine/Assets/CloudModellingVolume.hpp>
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 
@@ -8,6 +9,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace Desert::Assets
@@ -267,6 +269,41 @@ namespace Desert::Assets
         /// be normalized; a zero vector means east, which is what CloudSpeciesPlacementBasis also does.
         glm::vec2 WindAxis{ 1.0f, 0.0f };
 
+        // -----------------------------------------------------------------------------------------------
+        // THE PAINTED LAYOUT — the artist's own answer to "where are the clouds"
+        // -----------------------------------------------------------------------------------------------
+        //
+        // WHY IT IS HERE AND NOT IN THE MARCH. Unreal reads its three layout textures on every evaluation
+        // of the cloud material — once per march step and again at seven further sites on the shadow rays
+        // (Docs/Clouds/RESEARCH_LAYOUT_TEXTURES.md §1.2) — because it has no precomputed field at all: the
+        // material IS the field. We have one, and placement is decided here, once per lattice cell, a few
+        // hundred times per bake. So the painting joins where `Coverage` already joins, and the hottest
+        // pass of the frame gains not one instruction.
+        //
+        // WHAT REPLACES WHAT. The painted pattern and the procedural patch field decide the SAME number —
+        // how busy this part of the sky is — and two mechanisms for one number is the second path §1.3 and
+        // §4.2 of the contract forbid. So they are not both applied: the painting is the source when one is
+        // bound and turned up, the hash is the source otherwise. CloudCellCoverage in the .cpp is the one
+        // place that choice is made.
+
+        /// Where the painting sits and how hard it pushes. Every field of it changes the baked volume, so
+        /// every field of it is compared by CloudProceduralParamsEqual.
+        CloudLayoutPlacement LayoutPlacement{};
+
+        /// The painting itself, or null when the layer has no layout bound — which is what every scene in
+        /// this repository carries and what must keep rendering the frame it rendered before.
+        ///
+        /// A SHARED POINTER AND NOT A COPY, because the tables are up to 5 MiB and these parameters are
+        /// held by the renderer across frames and re-used at every region shift; a copy per rebuild would
+        /// be a megabyte memcpy for a value that never changes. Shared rather than borrowed for the
+        /// lifetime reason spelt out on Runtime::CloudLayoutService::Get.
+        ///
+        /// IT IS NOT COMPARED BY CloudProceduralParamsEqual — the CONTENT HASH inside it is, which is the
+        /// same number stated once rather than twice. Comparing the pointer would call a re-bake every time
+        /// the asset was reloaded into a different allocation with identical pixels; comparing the pixels
+        /// would be a megabyte memcmp on a path that runs whenever a slider moves.
+        std::shared_ptr<const CloudLayoutData> Layout;
+
         /// The finest chord the march can be relied on to FIND, kilometres — CloudFinestResolvableChordKm
         /// at the component's Max Steps, handed in rather than assumed.
         ///
@@ -285,6 +322,21 @@ namespace Desert::Assets
     /// Rejects parameters the generator cannot honour, with the offending number in the message. Pure, so
     /// the component's validation and the bake refuse for the same reason rather than disagreeing.
     Common::BoolResultStr ValidateCloudProceduralParams( const CloudProceduralFieldParams& params );
+
+    /**
+     * @brief The LAYOUT half of the check above, on its own.
+     *
+     * IT EXISTS BECAUSE THE TWO CALLERS WANT DIFFERENT THINGS FROM A FAILURE, and calling the whole
+     * validator for a layout question would give the wrong diagnosis. The bake refuses everything: an
+     * invalid Coverage and an over-coarse painting are both reasons not to produce a volume. The RENDERER
+     * cannot refuse — a scene must always draw a sky — so when the painting alone is at fault it drops the
+     * painting and places the clouds procedurally. Handed the whole validator it would have dropped the
+     * artist's painting because somebody mistyped a patch tile, and said so in a message naming the
+     * painting.
+     *
+     * ValidateCloudProceduralParams calls this, so there is one statement of the relations and not two.
+     */
+    Common::BoolResultStr ValidateCloudProceduralLayout( const CloudProceduralFieldParams& params );
 
     /**
      * @brief The lattice cell's two side lengths, kilometres — longer along the wind, shorter across it,

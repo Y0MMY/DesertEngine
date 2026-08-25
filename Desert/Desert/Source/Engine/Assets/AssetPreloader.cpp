@@ -10,6 +10,7 @@
 #include "CloudNoiseVolumeAsset.hpp"
 #include "CloudTypeAsset.hpp"
 #include "CloudModellingVolumeAsset.hpp"
+#include "CloudLayoutAsset.hpp"
 
 namespace Desert::Assets
 {
@@ -25,6 +26,7 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_NOISE_EXTENSIONS  = { ".dcnv" };
     constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_TYPE_EXTENSIONS   = { ".decloudtype" };
     constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_BODY_EXTENSIONS   = { ".dcmv" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_CLOUD_LAYOUT_EXTENSIONS = { ".dclayout" };
 
     AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager )
          : m_AssetManager( assetManager )
@@ -39,6 +41,7 @@ namespace Desert::Assets
         PreloadCloudNoiseVolumes();
         PreloadCloudTypes();
         PreloadCloudModellingVolumes();
+        PreloadCloudLayouts();
     }
 
     namespace
@@ -260,6 +263,31 @@ namespace Desert::Assets
                 if ( const auto result = service->Register( bodyAsset ); !result )
                     LOG_ERROR( "[Clouds] Modelling volume '{}' could not be registered: {}",
                                bodyAsset->GetMetadata().Filepath.string(), result.GetError() );
+            }
+        }
+    }
+
+    void AssetPreloader::PreloadCloudLayouts()
+    {
+        // Loaded eagerly like the volumes beside it, and it is cheaper than any of them: 1.25 MiB at the
+        // shipped 512 square, with no parse beyond a CRC. The BAKE needs the pixels the first time a
+        // painted layer places a cloud, and the bake runs on the first frame.
+        //
+        // NO DEFAULT IS NOMINATED, and here the absence is the shipped state rather than an edge case: an
+        // empty slot means the sky places its clouds procedurally, which is what every scene in this
+        // repository does and what the phase's acceptance criterion requires stay byte-identical.
+        ProcessAssetFiles<CloudLayoutAsset>( Common::Constants::Path::CLOUD_LAYOUT_PATH,
+                                             SUPPORTED_CLOUD_LAYOUT_EXTENSIONS, m_AssetManager,
+                                             AssetPriority::Medium );
+
+        if ( auto manager = m_AssetManager.lock() )
+        {
+            auto* service = Runtime::ResourceRegistry::GetCloudLayoutService();
+            for ( const auto& [handle, layoutAsset] : manager->FindAllByType<Assets::CloudLayoutAsset>() )
+            {
+                if ( const auto result = service->Register( layoutAsset ); !result )
+                    LOG_ERROR( "[Clouds] Cloud layout '{}' could not be registered: {}",
+                               layoutAsset->GetMetadata().Filepath.string(), result.GetError() );
             }
         }
     }

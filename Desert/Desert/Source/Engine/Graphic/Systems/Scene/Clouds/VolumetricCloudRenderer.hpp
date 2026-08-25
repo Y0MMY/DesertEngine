@@ -334,6 +334,14 @@ namespace Desert::Graphic::System
         glm::vec2                          m_ModellingOriginKm{ 0.0f };
         bool                               m_ModellingValid = false;
 
+        // The content hash of the painting already complained about, so a layout the layer cannot honour is
+        // named ONCE rather than sixty times a second. MUTABLE because BuildProceduralParams is const and
+        // must stay const — it is a pure translation of the component into bake parameters, and the only
+        // state it owns is the memory of what it has already said out loud. Zero means "nothing to
+        // complain about", which is also the state a usable painting restores it to, so re-fixing a
+        // painting and breaking it again reports the second break.
+        mutable uint32_t m_ReportedBadLayoutHash = 0u;
+
         // The region the bake IN FLIGHT is for, so that the frame it lands the payload can be pointed at
         // the region that was actually baked rather than at wherever the camera is by then.
         Assets::CloudProceduralFieldParams m_PendingParams{};
