@@ -27,8 +27,9 @@ namespace Desert::Runtime
 
         const Assets::CloudLayoutData& layout = asset->GetLayout();
         LOG_INFO( "[Clouds] Cloud layout '{}' registered as {} ({}x{}, pattern {}, mask {}, content {:08x}).",
-                  asset->GetDisplayName(), static_cast<uint64_t>( handle ), layout.Resolution,
-                  layout.Resolution, layout.HasPattern() ? "yes" : "no", layout.HasMask() ? "yes" : "no", hash );
+                  asset->GetMetadata().Filepath.filename().string(), static_cast<uint64_t>( handle ),
+                  layout.Resolution, layout.Resolution, layout.HasPattern() ? "yes" : "no",
+                  layout.HasMask() ? "yes" : "no", hash );
         return BOOLSUCCESS;
     }
 

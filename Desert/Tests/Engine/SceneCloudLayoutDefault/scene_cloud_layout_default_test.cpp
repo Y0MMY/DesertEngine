@@ -1,0 +1,260 @@
+// A scene written before the painted layout existed must read back as the sky it was authored as.
+//
+// WHY THERE IS NO MIGRATION FUNCTION, AND WHY THAT MAKES THIS SUITE NECESSARY RATHER THAN OPTIONAL.
+//
+// Every earlier cloud migration in Engine/Core/Serialize/SceneMigration.cpp exists because a key was
+// RENAMED, DROPPED or REINTERPRETED — the noise volume became an asset, the species became a handle,
+// `CloudType` became `CloudType1`. The painted layout does none of those: it ADDS six fields and touches
+// nothing that was there. An absent key is already how the reflected serializer spells "keep the C++
+// default", so a v6 -> v7 function would have nothing to do, and a function that returns zeros is the stub
+// §1.2 of the contract forbids. The version stamp is not moved either, for the same reason.
+//
+// That decision is only safe if one thing is true, and it is exactly the thing nobody checks when they
+// skip a migration: THAT THE DEFAULTS ARE THE OLD BEHAVIOUR. Six new fields default to something, and if
+// any of them defaulted to a painting being applied, then every scene in the repository would quietly
+// change the day this phase landed — with no migration, no log line and no version bump to point at.
+//
+// So the claim under test is stated as a relation rather than as a hope:
+//
+//     a `VolumetricCloud` payload with no layout keys in it deserialises into a layer that binds no
+//     painting, and into bake parameters in which the five placement numbers cannot reach a cloud.
+//
+// It is the file-level half of the phase's acceptance criterion. The frame-level half is the six-point
+// protocol; the lump-level half is
+// CloudPlacementSpectrum.WithNoPaintingBoundTheLayoutKnobsCannotReachOneCloud. This is the cheapest of the
+// three and the one that localises a regression, because a frame that moved says only that something did.
+//
+// Everything below runs on the parsed tree and on pure functions. No GPU, no scene graph, no asset
+// manager.
+
+#include <Engine/Assets/CloudProceduralVolume.hpp>
+#include <Engine/Core/Serialize/SceneMigration.hpp>
+#include <Engine/ECS/VolumetricCloudComponent.hpp>
+#include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Engine/Reflection/ReflectionSerializer.hpp>
+
+#include <rflcpp/rfl/json.hpp>
+
+#include <gtest/gtest.h>
+
+#include <string>
+#include <vector>
+
+using Desert::Assets::CloudProceduralFieldParams;
+using Desert::Assets::CloudProceduralSpecies;
+using Desert::Assets::GenerateCloudProceduralBlobs;
+using Desert::Assets::CloudProceduralRegionOriginKm;
+using Desert::Assets::CloudModellingBlob;
+using Desert::Reflection::DeserializeReflected;
+using Desert::Reflection::ReflectionRegistry;
+using Desert::Reflection::TypeInfo;
+
+namespace
+{
+    /// Whether the parsed payload carries a key at all. Written by hand because `rfl::Object`'s own `find`
+    /// is private and there is no `contains` — and the DISTINCTION between "absent" and "present but
+    /// defaulted" is the entire subject of this suite, so it cannot be reached for through `operator[]`,
+    /// which would insert the key it was asked about.
+    bool HasKey( const rfl::Generic::Object& object, const std::string& key )
+    {
+        for ( auto it = object.begin(); it != object.end(); ++it )
+            if ( it->first == key )
+                return true;
+        return false;
+    }
+
+    const TypeInfo& CloudType()
+    {
+        const TypeInfo* t = ReflectionRegistry::Get().Find( "VolumetricCloudData" );
+        EXPECT_NE( t, nullptr ) << "VolumetricCloudData is not in the reflection registry, so nothing below "
+                                   "means anything";
+        return *t;
+    }
+
+    /// A cloud payload exactly as a scene file carried it BEFORE this phase: schema v6, one cloud type in
+    /// the first slot, and a representative spread of the settings that stay — including the two the
+    /// painted pattern can take over from, so that a bug which quietly re-pointed them would show here.
+    ///
+    /// WRITTEN OUT RATHER THAN SERIALISED FROM A DEFAULTED COMPONENT, and that is the point of the fixture:
+    /// serialising today's struct would write the six new keys and prove nothing at all. What a v6 file has
+    /// is the ABSENCE of them.
+    rfl::Generic::Object CloudPayloadV6()
+    {
+        rfl::Generic::Object o;
+        o["Enabled"]              = true;
+        o["CloudType1"]           = std::string( "Clouds/Types/CumulusCongestus.decloudtype" );
+        o["Coverage"]             = 0.762;
+        o["CoverageContrast"]     = 1.0;
+        o["WeatherTileSize"]      = 1200000.0;
+        o["RegionSize"]           = 4800000.0;
+        o["Seed"]                 = 1;
+        o["PlacementDensity"]     = 1.75;
+        o["PlacementScatter"]     = 1.0;
+        o["PlacementSizeVariety"] = 0.75;
+        o["PatchTileSize"]        = 2100000.0;
+        o["PatchStrength"]        = 0.60;
+        o["DetailStrength"]       = 0.45;
+        o["MaxSteps"]             = 192;
+        return o;
+    }
+
+    /// The shipped congestus at the shipped weather, so the parameter half of the test is measured on the
+    /// arrangement the scene above describes rather than on an abstraction of it.
+    CloudProceduralFieldParams ShippedParams()
+    {
+        CloudProceduralFieldParams params;
+        params.RegionSizeKm      = 48.0f;
+        params.LayerBottomKm     = 2.20f;
+        params.LayerThicknessKm  = 3.60f;
+        params.BlendRadiusKm     = 0.06f;
+        params.ProfileDepthKm    = 0.36f;
+        params.Coverage          = 0.762f;
+        params.CoverageContrast  = 1.0f;
+        params.Seed              = 1u;
+        params.WindAxis          = glm::vec2( 1.0f, 0.0f );
+        params.ResolvableChordKm = 0.125f;
+
+        CloudProceduralSpecies species;
+        species.Shape.BaseAltitudeKm      = 2.20f;
+        species.Shape.TopAltitudeKm       = 5.80f;
+        species.Shape.EdgeTopFraction     = 0.15f;
+        species.Shape.BaseRampFraction    = 0.04f;
+        species.Shape.TopTaper            = 0.50f;
+        species.Shape.DetailCharacter     = 1.00f;
+        species.Shape.DetailFactor        = 1.00f;
+        species.Shape.DensityFactor       = 1.15f;
+        species.Shape.ExtinctionFactor    = 1.00f;
+        species.Shape.PlacementScale      = 1.00f;
+        species.Shape.PlacementAnisotropy = 1.00f;
+        species.CellKm                    = 3.0f;
+        species.Anisotropy                = 1.0f;
+        params.Species.push_back( species );
+
+        return params;
+    }
+} // namespace
+
+// THE SIX NEW KEYS ARE ABSENT AND THE LAYER READS AS UNPAINTED. This is the whole reason no migration was
+// written, stated as an assertion instead of as an argument in a commit message.
+TEST( SceneCloudLayoutDefault, AV6PayloadWithNoLayoutKeysBindsNoPainting )
+{
+    const rfl::Generic::Object payload = CloudPayloadV6();
+
+    for ( const char* key : { "CloudLayout", "LayoutPatternStrength", "LayoutMaskStrength", "LayoutRepeats",
+                              "LayoutRotation", "LayoutOffset" } )
+        ASSERT_FALSE( HasKey( payload, key ) )
+             << "the fixture carries '" << key
+             << "', so it is not the pre-phase file it claims to be and this suite is testing itself";
+
+    Desert::ECS::VolumetricCloudData layer;
+    DeserializeReflected( CloudType(), &layer, payload );
+
+    // The settings that were in the file arrived, so the deserialiser ran and the rest of the test is
+    // about absence rather than about nothing having happened.
+    EXPECT_TRUE( layer.Enabled );
+    EXPECT_FLOAT_EQ( layer.Coverage, 0.762f );
+    EXPECT_FLOAT_EQ( layer.PatchStrength, 0.60f );
+    EXPECT_FLOAT_EQ( layer.PlacementDensity, 1.75f );
+
+    // AND THE SIX THAT WERE NOT IN IT ARE THE DEFAULTS. The one that decides everything is the first:
+    // an empty handle is what the renderer resolves to a null painting, and a null painting is what makes
+    // the bake take the procedural branch it has always taken.
+    EXPECT_EQ( layer.CloudLayout, Desert::Assets::AssetHandle::Null() )
+         << "a scene written before the painted layout existed came back with a painting bound, so every "
+            "shipped scene changed the day this phase landed and nothing in the file says so";
+
+    EXPECT_EQ( layer.LayoutRepeats, 1 );
+    EXPECT_EQ( layer.LayoutRotation, 0 );
+    EXPECT_FLOAT_EQ( layer.LayoutOffset.x, 0.0f );
+    EXPECT_FLOAT_EQ( layer.LayoutOffset.y, 0.0f );
+
+    // THE TWO STRENGTHS DEFAULT TO ONE AND THAT IS DELIBERATE, so it is asserted rather than left to look
+    // like an oversight. They are inert while no painting is bound — proved by the test below and by
+    // CloudPlacementSpectrum.WithNoPaintingBoundTheLayoutKnobsCannotReachOneCloud — and defaulting them to
+    // zero instead would mean an artist who drops a painting into the slot sees nothing happen and cannot
+    // tell a slot that is not wired from a slider that is down.
+    EXPECT_FLOAT_EQ( layer.LayoutPatternStrength, 1.0f );
+    EXPECT_FLOAT_EQ( layer.LayoutMaskStrength, 1.0f );
+}
+
+// AND THE DEFAULTS PLACE THE CLOUDS THE OLD WAY. The assertion above says the fields arrive unset; this
+// says that being unset is the same sky.
+//
+// It is the parameter-level statement of "an empty slot renders the frame it rendered before", and it is
+// here rather than only in the spectrum suite because the two are different claims: that one starts from
+// bake parameters somebody wrote, this one starts from a FILE. A default that was right in C++ and wrong
+// through the deserialiser would pass there and fail here.
+TEST( SceneCloudLayoutDefault, TheDefaultsFromAV6FileArePlacementNothingCanTellFromTheOldOne )
+{
+    Desert::ECS::VolumetricCloudData layer;
+    DeserializeReflected( CloudType(), &layer, CloudPayloadV6() );
+
+    CloudProceduralFieldParams fromFile = ShippedParams();
+    fromFile.Coverage                   = layer.Coverage;
+    fromFile.PatchStrength              = layer.PatchStrength;
+    fromFile.PlacementDensity           = layer.PlacementDensity;
+    fromFile.PlacementScatter           = layer.PlacementScatter;
+    fromFile.PlacementSizeVariety       = layer.PlacementSizeVariety;
+
+    // The layout numbers as the file's silence produced them, mapped the way
+    // VolumetricCloudRenderer::BuildProceduralParams maps them. `Layout` stays null because the handle is
+    // empty and the service answers null for an empty handle.
+    fromFile.LayoutPlacement.RepeatsPerRegion = static_cast<uint32_t>( layer.LayoutRepeats );
+    fromFile.LayoutPlacement.QuarterTurns     = static_cast<uint32_t>( layer.LayoutRotation );
+    fromFile.LayoutPlacement.OffsetKm         = glm::vec2( layer.LayoutOffset.x, layer.LayoutOffset.y );
+    fromFile.LayoutPlacement.PatternStrength  = layer.LayoutPatternStrength;
+    fromFile.LayoutPlacement.MaskStrength     = layer.LayoutMaskStrength;
+
+    ASSERT_EQ( fromFile.Layout, nullptr );
+
+    // The same parameters with the layout block never touched at all — which is literally the struct as it
+    // was before this phase, since the six fields did not exist.
+    CloudProceduralFieldParams asBefore = ShippedParams();
+    asBefore.Coverage                   = layer.Coverage;
+    asBefore.PatchStrength              = layer.PatchStrength;
+    asBefore.PlacementDensity           = layer.PlacementDensity;
+    asBefore.PlacementScatter           = layer.PlacementScatter;
+    asBefore.PlacementSizeVariety       = layer.PlacementSizeVariety;
+
+    const glm::vec2 origin = CloudProceduralRegionOriginKm( asBefore, 0.0f, 0.0f );
+
+    const std::vector<CloudModellingBlob> before = GenerateCloudProceduralBlobs( asBefore, 0u, origin );
+    const std::vector<CloudModellingBlob> after  = GenerateCloudProceduralBlobs( fromFile, 0u, origin );
+
+    ASSERT_FALSE( before.empty() ) << "the fixture placed no clouds at all, so this proves nothing";
+    ASSERT_EQ( before.size(), after.size() )
+         << "a v6 file's defaults changed how many clouds the layer has, which is the whole thing the "
+            "absence of a migration is betting against";
+
+    for ( size_t i = 0; i < before.size(); ++i )
+    {
+        ASSERT_EQ( before[i].CentreKm, after[i].CentreKm ) << "lump " << i << " moved";
+        ASSERT_EQ( before[i].RadiiKm, after[i].RadiiKm ) << "lump " << i << " changed size";
+    }
+
+    // AND THE CACHE AGREES, which is the same statement one level up: a layer loaded from a v6 file must
+    // not be considered stale against the parameters it would have had before the fields existed, or every
+    // pre-phase scene re-bakes two million voxels on its first frame for nothing.
+    EXPECT_TRUE( Desert::Assets::CloudProceduralParamsEqual( asBefore, fromFile ) );
+}
+
+// THE SCHEMA VERSION DID NOT MOVE, AND THAT IS RECORDED HERE SO IT IS A DECISION RATHER THAN AN OVERSIGHT.
+//
+// Six of the constants in SceneMigration.hpp exist because a cloud change needed one. This one did not, and
+// the difference is worth pinning: if somebody later adds a v7 for an unrelated reason, this test fails and
+// they read the paragraph explaining that the layout is NOT what v7 is for — instead of assuming it was and
+// wiring a migration to it.
+TEST( SceneCloudLayoutDefault, ThePaintedLayoutDidNotMoveTheSchemaVersion )
+{
+    EXPECT_EQ( Desert::Core::kSceneVersion, Desert::Core::kSceneVersionCloudSet )
+         << "the scene schema version moved. The painted layout did NOT move it — it adds fields and "
+            "renames none, and an absent key already means 'the C++ default'. If your change renames, drops "
+            "or reinterprets a key then it needs its own constant AND its own migration function; if it "
+            "only adds fields, it needs neither, and it needs a test like the two above instead.";
+}
+
+int main( int argc, char** argv )
+{
+    ::testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
+}
