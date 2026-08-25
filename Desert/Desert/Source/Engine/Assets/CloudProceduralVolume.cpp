@@ -751,6 +751,8 @@ namespace Desert::Assets
                     float lumpT[kBlobsPerCluster];
                     float lumpRadiusKm[kBlobsPerCluster];
                     float lumpVerticalKm[kBlobsPerCluster];
+                    float lumpWobbleAlong[kBlobsPerCluster];
+                    float lumpWobbleAcross[kBlobsPerCluster];
 
                     const float lumpFloorKm = 0.5f * params.ResolvableChordKm;
 
@@ -769,16 +771,32 @@ namespace Desert::Assets
                         const float ramp = std::clamp( shape.BaseRampFraction, 0.05f, 1.0f );
                         const float rampFactor = ( step == 0 ) ? ramp + ( 1.0f - ramp ) * 0.5f : 1.0f;
 
+                        // THE WOBBLE IS DRAWN HERE, WITH THE LAYOUT, AND A TEST IS WHY. It scales the lump
+                        // by up to 1.15, and drawn at emission time — where it was first written — the
+                        // vertical radius the band was fitted against was not the vertical radius the lump
+                        // ended up with: `EveryLumpStandsInsideItsTypesOwnBand` measured the shipped
+                        // congestus reaching 5.883 km out of a 5.80 km band and 2.079 km under a 2.20 km
+                        // base. A fit against a number that is then multiplied is the same two-places
+                        // defect one scale smaller.
+                        const uint32_t lumpSeed = HashCombine( clusterSeed, 0x100u + step );
+
+                        lumpWobbleAlong[step]  = 0.85f + 0.3f * HashUnit( HashCombine( lumpSeed, 0xcu ) );
+                        lumpWobbleAcross[step] = 0.85f + 0.3f * HashUnit( HashCombine( lumpSeed, 0xdu ) );
+
                         // THE BAND CLAMP IS WHERE A GENUS'S FLATNESS COMES FROM, and it is the reason the
                         // lump's aspect did not have to become a fifteenth authored number. A lump may not
                         // be taller than half the band it lives in, so a 400 m stratus deck gets 200 m
                         // lumps however wide its cell is while a 3.6 km congestus never meets the clamp at
                         // all. The type squashes its own lumps through the altitudes it already declares.
-                        lumpT[step]          = t;
-                        lumpRadiusKm[step]   = radius;
-                        lumpVerticalKm[step] = std::max(
-                             std::min( kLumpVerticalOverHorizontal * radius * rampFactor, 0.5f * bandFullKm ),
-                             lumpFloorKm );
+                        const float wobbleUp =
+                             std::sqrt( lumpWobbleAlong[step] * lumpWobbleAcross[step] );
+
+                        lumpT[step]        = t;
+                        lumpRadiusKm[step] = radius;
+                        lumpVerticalKm[step] =
+                             std::max( std::min( kLumpVerticalOverHorizontal * radius * rampFactor * wobbleUp,
+                                                 0.5f * bandFullKm ),
+                                       lumpFloorKm );
                     }
 
                     // The travel is what is left of the band once both end lumps have been let in, divided
@@ -869,14 +887,12 @@ namespace Desert::Assets
                         // for every lump that the ramp and the band clamp have left alone. A lump has ONE
                         // size; that is the whole of the decision, and it is stated in a form a test can
                         // read off the emitted lumps.
-                        const float floorKm      = lumpFloorKm;
-                        const float wobbleAlong  = 0.85f + 0.3f * HashUnit( HashCombine( lumpSeed, 0xcu ) );
-                        const float wobbleAcross = 0.85f + 0.3f * HashUnit( HashCombine( lumpSeed, 0xdu ) );
+                        const float floorKm = lumpFloorKm;
 
-                        blob.RadiiKm = glm::vec3(
-                             std::max( radius * wobbleAlong * stretch, floorKm ),
-                             std::max( lumpVerticalKm[step] * std::sqrt( wobbleAlong * wobbleAcross ), floorKm ),
-                             std::max( radius * wobbleAcross / stretch, floorKm ) );
+                        blob.RadiiKm =
+                             glm::vec3( std::max( radius * lumpWobbleAlong[step] * stretch, floorKm ),
+                                        lumpVerticalKm[step],
+                                        std::max( radius * lumpWobbleAcross[step] / stretch, floorKm ) );
 
                         blob.RotationDeg  = glm::vec3( 0.0f, yawDeg, 0.0f );
                         blob.Weight       = 1.0f;
