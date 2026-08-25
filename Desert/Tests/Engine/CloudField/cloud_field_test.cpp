@@ -1554,8 +1554,33 @@ TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAn
                  "and travels %.1f m, %.2fx the %.0f m the march resolves\n",
                  aspect, strength, census.SurfaceProfile, result.TravelM, result.TravelM / floorM, floorM );
 
-    // ── THE RELATION ────────────────────────────────────────────────────────────────────────────────────
+    // ── THE RELATION, AND IT IS A WINDOW RATHER THAN A FLOOR ────────────────────────────────────────────
+    //
+    // THE TOP OF THE WINDOW IS NOT DECORATION, AND MEASURING IT IS WHAT SHOWED WHY. The test above ships
+    // §DS's own ceiling — the travel must stay within an OCTAVE of its floor — whose stated job is to catch
+    // "somebody raised Detail Strength and changed nothing else". That bound still fires, but no longer for
+    // that case: it fires when the LUMP is lowered without lowering the strength with it, because a flatter
+    // lump is optically thinner per metre and the same cut travels FURTHER. Against the 0.75 lump the top
+    // of the strength slider now travels 180 m — 1.44x the floor, comfortably inside an octave — so the
+    // octave has stopped catching the drift it was written for. Its bite was an accident of the aspect it
+    // was measured at, and this is the half of the window that restores it.
+    //
+    // 1.35x IS WHERE IT IS BECAUSE BOTH ENDS ARE MEASURED. The shipped pair sits at 1.11x, the top of the
+    // slider at 1.44x: a ceiling anywhere between those two catches a slider dragged to maximum without
+    // being balanced on the shipped value, and 1.35 leaves the shipped pair a fifth of headroom below it
+    // while leaving the slider's top a fifteenth above.
     constexpr double kRequiredHeadroom = 1.05;
+    constexpr double kHeadroomCeiling  = 1.35;
+
+    EXPECT_LE( result.TravelM, kHeadroomCeiling * floorM )
+         << "THE PAIR HAS DRIFTED UPWARD. A lump aspect of " << aspect << " against a Detail Strength of "
+         << strength << " moves the visible surface " << result.TravelM << " m, " << result.TravelM / floorM
+         << "x the " << floorM << " m the march resolves, and past the " << kHeadroomCeiling
+         << "x that the pair is calibrated to hold.\n"
+            "Every step above the floor costs cloud for a gain nothing has measured a need for. Either the "
+            "strength was raised on its own — at the shipped aspect the top of the slider reaches 1.44x — "
+            "or the lump was made FLATTER without the strength coming down with it, which is the same "
+            "calibration coming apart in the other direction.";
 
     EXPECT_GE( result.TravelM, kRequiredHeadroom * floorM )
          << "THE LUMP AND THE EROSION HAVE COME APART. A lump aspect of " << aspect
