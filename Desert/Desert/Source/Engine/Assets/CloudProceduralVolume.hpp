@@ -169,6 +169,82 @@ namespace Desert::Assets
         /// same region origin always bake the same bytes.
         uint32_t Seed = 1u;
 
+        // -----------------------------------------------------------------------------------------------
+        // THE FOUR NUMBERS THAT DECIDE WHETHER THE SKY READS AS A GRID
+        // -----------------------------------------------------------------------------------------------
+        //
+        // WHAT WAS MEASURED, AND IT IS THE REASON THESE EXIST. Tools/LatticePeak takes the autocorrelation
+        // of the baked field's top-down projection and reports the prominence of the bump standing on a
+        // multiple of the lattice's own period. On the field that shipped before them the bumps stood at
+        // 6.000, 9.000 and 12.000 km against a predicted cell of 3.000 km — the multiples of the lattice,
+        // to the voxel — at eight to eighteen times the estimator's own noise. The sky was a grid, and it
+        // was a grid because every alive cell carried EXACTLY ONE cluster, of very nearly ONE SIZE,
+        // displaced by at most a third of the cell it was born in.
+        //
+        // Each of the four attacks one of those, and each is defaulted to the value CALIBRATION.md §RW
+        // measured rather than to the value that makes it inert.
+
+        /// How many clusters an alive cell carries, on average. The count is drawn per cell so that a cell
+        /// holds a whole number of them with this mean — two, then one, then three — and "exactly one per
+        /// cell" stops being a property of the field at all.
+        ///
+        /// THE CLUSTER SHRINKS AS THE COUNT RISES, by this number to the power of kDensityCompensation, so
+        /// that the matter in the sky is REDISTRIBUTED rather than added. That is what keeps the Coverage
+        /// slider meaning what it says: without the compensation, raising the density would raise the sky's
+        /// cover and the mapping decision D-20 re-authorised every scene against would have to be measured
+        /// again. The exponent is 0.40 and NOT a half — see kDensityCompensation, which says why the half
+        /// is the answer to a different question.
+        ///
+        /// 1.75 AND NOT 2.5, AND THE MOVE IS A MEASUREMENT — see CALIBRATION.md §RW2. §RW shipped 2.5 on
+        /// the argument that the count is what breaks the lattice. Measured one setting at a time at 32
+        /// realisations, with everything else at the values that ship, the lattice bump is inside the
+        /// estimator's noise from 1.5 upward and only comes back at 1.0:
+        ///
+        ///     density   1.0     1.5     1.75    2.0     2.5
+        ///     LATTICE   0.0264  0.0007  0.0017  0.0027  0.0000
+        ///     x noise   5.9     0.2     0.3     0.6     —
+        ///
+        /// so 2.5 buys nothing the grid can see, and it COSTS the picture: the cluster narrows as this
+        /// rises, and at 2.5 every cloud in the frame had shrunk to the size the far ones already were.
+        /// The mean horizontal chord through the baked field goes 1.784 / 1.705 / 1.634 / 1.541 km over
+        /// those four settings and the frame's contrast goes 0.378 / 0.379 / 0.374 / 0.349 against the
+        /// 0.384 of the sky the owner accepted. 1.75 is the lowest setting that is a whole measured step
+        /// away from the one that fails and is on the contrast plateau.
+        float PlacementDensity = 1.75f;
+
+        /// How far a cluster may wander from its lattice site, in CELLS — 1.0 means it may sit anywhere in
+        /// a box one cell wide centred on its site, so it crosses into its neighbours' territory.
+        ///
+        /// WHAT THE OLD THIRD-OF-A-CELL BOUND ACTUALLY BOUGHT, because the comment it carried claimed more
+        /// than it delivered. It was written to keep a cluster inside the cell whose hash made it. The
+        /// property that MATTERS is a different one — the set of cells generated must be exactly one
+        /// period's worth, or the bake's wrap places each of them twice — and that property does not
+        /// depend on where inside the period a cluster sits: a cluster leaving through one face re-enters
+        /// through the opposite one, because the wrap is what makes the volume periodic in the first
+        /// place. What the bound really bought is that a region SHIFT changes the sky only within a third
+        /// of a cell of the region's faces, which is 24 km from the camera. At 1.0 that strip goes from
+        /// 1.0 km to 1.5 km at the same distance.
+        float PlacementScatter = 1.0f;
+
+        /// How much cluster sizes spread, 0..1. Zero makes every cluster the size its cell's fill says;
+        /// one makes the largest about four times the width of the smallest.
+        ///
+        /// THE SPREAD IS UNIFORM IN AREA AND NOT IN RADIUS, so that the mean area a cluster covers is
+        /// exactly what it was at zero. Spreading the radius uniformly instead would have raised the mean
+        /// area by a twelfth of the spread squared and moved the Coverage mapping with it.
+        float PlacementSizeVariety = 0.75f;
+
+        /// The world size over which the LARGE-scale modulation of coverage repeats, kilometres. It is the
+        /// scale of a weather system rather than of a cloud: patches of busy sky and patches of clear sky,
+        /// which is the structure a lattice with one number for the whole sky cannot have.
+        float PatchTileKm = 21.0f;
+
+        /// How hard that modulation pushes, 0..1. Zero is a uniformly busy sky — which is what the owner
+        /// described as "the whole sky is cloud" — and one lets a patch reach nearly empty and nearly
+        /// solid. It is SYMMETRIC about the slider's own value, so it redistributes cloud rather than
+        /// adding or removing it.
+        float PatchStrength = 0.60f;
+
         /// The horizontal wind direction the lattice's anisotropy is measured against, world XZ. Need not
         /// be normalized; a zero vector means east, which is what CloudSpeciesPlacementBasis also does.
         glm::vec2 WindAxis{ 1.0f, 0.0f };
@@ -191,6 +267,42 @@ namespace Desert::Assets
     /// Rejects parameters the generator cannot honour, with the offending number in the message. Pure, so
     /// the component's validation and the bake refuse for the same reason rather than disagreeing.
     Common::BoolResultStr ValidateCloudProceduralParams( const CloudProceduralFieldParams& params );
+
+    /**
+     * @brief The lattice cell's two side lengths, kilometres — longer along the wind, shorter across it,
+     *        with the AREA held constant so that raising the anisotropy draws a cluster out into a band
+     *        instead of making the sky emptier.
+     *
+     * PUBLIC BECAUSE IT IS THE PERIOD SOMETHING ELSE HAS TO PREDICT. `Tools/LatticePeak` measures the
+     * autocorrelation of the baked field and states the lag it expects a lattice peak at; if that number
+     * were computed a second time in the tool, a disagreement between the generator and the tool would
+     * look like a clean sky. Two statements of one quantity is the defect class DEV_CONTRACT.md §2.3.1
+     * names, so there is one statement and everybody calls it.
+     */
+    glm::vec2 CloudProceduralCellExtentKm( const CloudProceduralFieldParams& params,
+                                           const CloudProceduralSpecies&     species );
+
+    /**
+     * @brief Do these two sets of parameters bake the same volume?
+     *
+     * WHAT IT IS FOR. The renderer keeps a baked volume and has to know when it is stale. If this answers
+     * "same" for two sets that bake differently, the artist moves a slider and NOTHING HAPPENS — which is
+     * the dead setting §1.3 of the contract forbids, arrived at from the far side: the setting is wired
+     * all the way through and the cache is what eats it. If it answers "different" for two sets that bake
+     * identically, every frame re-bakes and the editor stalls for seconds at a time.
+     *
+     * WRITTEN OUT FIELD BY FIELD RATHER THAN `operator==`, and that is the safe direction: a defaulted
+     * comparison would silently start comparing any field somebody adds, which sounds right until the
+     * added field is one the bake does not read — and then every frame re-bakes. Comparing the fields the
+     * bake actually reads means a new one has to be CONSIDERED rather than inherited.
+     *
+     * AND IT LIVES HERE, BESIDE THE BAKE, RATHER THAN IN THE RENDERER, because that is what makes the
+     * paragraph above checkable. It was in the renderer's own translation unit, where nothing links, and a
+     * deliberate sabotage — dropping one of the four placement numbers from the comparison — stayed GREEN
+     * across the whole suite. Desert/Tests/Engine/CloudPlacementSpectrum now moves every field of the
+     * struct in turn and demands this function notice.
+     */
+    bool CloudProceduralParamsEqual( const CloudProceduralFieldParams& a, const CloudProceduralFieldParams& b );
 
     /**
      * @brief Where the region's corner sits for a camera at @p cameraXKm, @p cameraZKm — SNAPPED.

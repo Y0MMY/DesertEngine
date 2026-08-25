@@ -237,6 +237,15 @@ namespace
          { "RegionSize", kCloudRenderer },
          { "Seed", kCloudRenderer },
 
+         // Placement - where the clouds are, which is baked and not marched. Same consumer as the four
+         // rows above it and for the same reason: VolumetricCloudRenderer::BuildProceduralParams turns
+         // them into CloudProceduralFieldParams and the bake reads them there.
+         { "PlacementDensity", kCloudRenderer },
+         { "PlacementScatter", kCloudRenderer },
+         { "PlacementSizeVariety", kCloudRenderer },
+         { "PatchTileSize", kCloudRenderer },
+         { "PatchStrength", kCloudRenderer },
+
          // Detail - the erosion field.
          { "DetailTileSize", kCloudPayload },
          { "DetailStrength", kCloudPayload },

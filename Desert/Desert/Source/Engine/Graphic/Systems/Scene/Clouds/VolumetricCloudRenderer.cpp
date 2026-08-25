@@ -18,42 +18,6 @@ namespace Desert::Graphic::System
 {
     namespace
     {
-        // WHETHER TWO SETS OF BAKE PARAMETERS DESCRIBE THE SAME VOLUME, field by field.
-        //
-        // WRITTEN OUT RATHER THAN DEFAULTED, and that is the safe direction here: `operator==` on the
-        // struct would silently start comparing any field somebody adds, which sounds right until the
-        // added field is one that does not change the bytes — and then every frame re-bakes. Comparing
-        // the fields the bake actually reads means a new one has to be considered rather than inherited.
-        bool SameProceduralParams( const Assets::CloudProceduralFieldParams& a,
-                                   const Assets::CloudProceduralFieldParams& b )
-        {
-            if ( a.RegionSizeKm != b.RegionSizeKm || a.LayerBottomKm != b.LayerBottomKm ||
-                 a.LayerThicknessKm != b.LayerThicknessKm || a.BlendRadiusKm != b.BlendRadiusKm ||
-                 a.ProfileDepthKm != b.ProfileDepthKm || a.Coverage != b.Coverage ||
-                 a.CoverageContrast != b.CoverageContrast || a.Seed != b.Seed || a.WindAxis != b.WindAxis ||
-                 a.ResolvableChordKm != b.ResolvableChordKm )
-                return false;
-
-            if ( a.Species.size() != b.Species.size() )
-                return false;
-
-            for ( size_t i = 0; i < a.Species.size(); ++i )
-            {
-                if ( a.Species[i].CellKm != b.Species[i].CellKm ||
-                     a.Species[i].Anisotropy != b.Species[i].Anisotropy )
-                    return false;
-
-                // The SHAPE decides where the lumps go and how tall they are, so a type edited in place —
-                // which the generation counter already catches — and a type whose numbers were reached
-                // some other way both have to re-bake. Compared as bytes because CloudTypeShape is a
-                // flat aggregate of floats with no padding to be uninitialised.
-                if ( std::memcmp( &a.Species[i].Shape, &b.Species[i].Shape, sizeof( CloudTypeShape ) ) != 0 )
-                    return false;
-            }
-
-            return true;
-        }
-
         // 8x8 for the screen-space march, matching the LocalSize the shader declares. 64 invocations is
         // inside every implementation's guaranteed maximum and the dispatch bounds-checks, so any target
         // size is fine.
@@ -243,6 +207,23 @@ namespace Desert::Graphic::System
         params.CoverageContrast = std::max( m_Data.CoverageContrast, 0.01f );
         params.Seed             = static_cast<uint32_t>( m_Data.Seed );
 
+        // THE FOUR PLACEMENT NUMBERS PASS THROUGH UNCHANGED, and the clamps here are the component's own
+        // ranges rather than second opinions: a scene file is a text file and an out-of-range number in
+        // one must produce a sky rather than a refusal. Assets::ValidateCloudProceduralParams refuses
+        // anything outside them by name, so a clamp that disagreed with a range would turn an artist's
+        // typo into a layer that never bakes.
+        params.PlacementDensity     = std::clamp( m_Data.PlacementDensity, 0.25f, 8.0f );
+        params.PlacementScatter     = std::clamp( m_Data.PlacementScatter, 0.0f, 4.0f );
+        params.PlacementSizeVariety = std::clamp( m_Data.PlacementSizeVariety, 0.0f, 1.0f );
+        params.PatchStrength        = std::clamp( m_Data.PatchStrength, 0.0f, 1.0f );
+
+        // THE PATCH IS THE ONE THAT CAN REFUSE, because it is half of a RELATION — a modulation finer than
+        // three cells decides cells one at a time and reads as a checkerboard. Floored against the
+        // lattice HERE rather than left to fail validation, for the same reason: the layer has to draw a
+        // sky for whatever the file says. An artist who wants finer patches gets them by shrinking the
+        // weather tile, which is what the tooltip names.
+        params.PatchTileKm = std::max( m_Data.PatchTileSize, 1.0f ) / kCloudWorldUnitsPerKm;
+
         // THE BLEND RADIUS AND THE PROFILE DEPTH ARE DERIVED FROM THE LATTICE rather than exposed, and
         // that is a decision with a number behind it. The join inflates its own surface by
         // `BlendRadius * ln(sum of weights in range)`, so with hundreds of overlapping lumps a generous
@@ -278,6 +259,16 @@ namespace Desert::Graphic::System
             species.CellKm     = latticeKm * std::max( shapes[slot].PlacementScale, 1e-3f );
             species.Anisotropy = std::max( shapes[slot].PlacementAnisotropy, 1e-3f );
             params.Species.push_back( species );
+        }
+
+        // THE PATCH AGAINST THE LATTICE, floored after the species are known because the CELL is what the
+        // relation is against and a type's Placement Scale and Anisotropy both move it. Three cells is the
+        // bound Assets::ValidateCloudProceduralParams refuses below: a modulation whose period is near a
+        // cell's decides cells one at a time, which is a checkerboard and not a weather system.
+        for ( const Assets::CloudProceduralSpecies& species : params.Species )
+        {
+            const glm::vec2 extent = Assets::CloudProceduralCellExtentKm( params, species );
+            params.PatchTileKm     = std::max( params.PatchTileKm, 3.0f * std::max( extent.x, extent.y ) );
         }
 
         return params;
@@ -321,7 +312,8 @@ namespace Desert::Graphic::System
                 sameTypes = m_ProfileTypes[slot] == handles[slot];
 
             const bool sameRegion = m_ModellingValid && m_ModellingOriginKm == wantedOrigin;
-            const bool sameParams = m_ModellingValid && SameProceduralParams( m_ModellingParams, wanted );
+            const bool sameParams =
+                 m_ModellingValid && Assets::CloudProceduralParamsEqual( m_ModellingParams, wanted );
 
             if ( !( sameTypes && sameRegion && sameParams ) )
             {

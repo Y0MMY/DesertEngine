@@ -34,6 +34,7 @@ include "Desert/"
 -- so it needs the same include paths the engine has.
 group "Tools"
 include "Tools/CloudVolumeBaker/"
+include "Tools/LatticePeak/"
 group ""
 
 include "Editor/"
