@@ -70,27 +70,6 @@ namespace Desert::Assets
             return static_cast<uint32_t>( index ) ^ 0x80000000u;
         }
 
-        /// The cell's two side lengths, kilometres: longer along the wind, shorter across it, with the AREA
-        /// held constant so that raising the anisotropy draws a cluster out into a band instead of making
-        /// the sky emptier. That is the same statement CloudSpeciesPlacementBasis makes with its two
-        /// frequencies, and it is exact here where there it was a frequency ratio.
-        glm::vec2 CellExtentKm( const CloudProceduralFieldParams& params, const CloudProceduralSpecies& species )
-        {
-            // THE FLOOR IS NOT DEFENSIVE PADDING, IT IS A MEASURED BOUND. A cell smaller than a few voxels
-            // cannot be expressed by the volume at all — the cluster inside it is narrower than the
-            // trilinear filter's own support — and the cost of trying is quadratic in the region: the suite
-            // authored a species with a 50 m cell and the generator produced 4 180 731 lumps for one 48 km
-            // region, which took a minute to place and could never have been baked. Four voxels is the
-            // narrowest cluster the volume can carry with an inside and two edges.
-            const float voxelKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
-            const float floorKm = std::max( 4.0f * voxelKm, 2.0f * params.ResolvableChordKm );
-
-            const float anisotropy = std::max( species.Anisotropy, 1e-3f );
-            const float root       = std::sqrt( anisotropy );
-            const float cell       = std::max( species.CellKm, floorKm );
-            return glm::vec2( cell * root, cell / root );
-        }
-
         /// The horizontal frame the lattice is laid out in: the wind's direction and the axis across it.
         /// A zero wind means east, which is what Graphic::CloudSpeciesPlacementBasis also answers.
         void WindFrame( const glm::vec2& windAxis, glm::vec2& along, glm::vec2& across )
@@ -116,6 +95,24 @@ namespace Desert::Assets
             return HashUnit( word ) - 0.5f;
         }
     } // namespace
+
+    glm::vec2 CloudProceduralCellExtentKm( const CloudProceduralFieldParams& params,
+                                           const CloudProceduralSpecies&     species )
+    {
+        // THE FLOOR IS NOT DEFENSIVE PADDING, IT IS A MEASURED BOUND. A cell smaller than a few voxels
+        // cannot be expressed by the volume at all — the cluster inside it is narrower than the trilinear
+        // filter's own support — and the cost of trying is quadratic in the region: the suite authored a
+        // species with a 50 m cell and the generator produced 4 180 731 lumps for one 48 km region, which
+        // took a minute to place and could never have been baked. Four voxels is the narrowest cluster the
+        // volume can carry with an inside and two edges.
+        const float voxelKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
+        const float floorKm = std::max( 4.0f * voxelKm, 2.0f * params.ResolvableChordKm );
+
+        const float anisotropy = std::max( species.Anisotropy, 1e-3f );
+        const float root       = std::sqrt( anisotropy );
+        const float cell       = std::max( species.CellKm, floorKm );
+        return glm::vec2( cell * root, cell / root );
+    }
 
     Common::BoolResultStr ValidateCloudProceduralParams( const CloudProceduralFieldParams& params )
     {
@@ -202,7 +199,7 @@ namespace Desert::Assets
         float coarsest = 1.0f;
         for ( const CloudProceduralSpecies& species : params.Species )
         {
-            const glm::vec2 extent = CellExtentKm( params, species );
+            const glm::vec2 extent = CloudProceduralCellExtentKm( params, species );
             coarsest               = std::max( coarsest, std::max( extent.x, extent.y ) );
         }
         return coarsest;
@@ -237,7 +234,7 @@ namespace Desert::Assets
         glm::vec2 across;
         WindFrame( params.WindAxis, along, across );
 
-        const glm::vec2 extent = CellExtentKm( params, species );
+        const glm::vec2 extent = CloudProceduralCellExtentKm( params, species );
 
         // THE SET OF CELLS IS EXACTLY ONE PERIOD'S WORTH — those whose CENTRE lies in the region — and not
         // one cell more. The bake wraps every lump across the region's faces to make the volume periodic,

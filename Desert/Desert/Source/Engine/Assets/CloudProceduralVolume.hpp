@@ -193,6 +193,20 @@ namespace Desert::Assets
     Common::BoolResultStr ValidateCloudProceduralParams( const CloudProceduralFieldParams& params );
 
     /**
+     * @brief The lattice cell's two side lengths, kilometres — longer along the wind, shorter across it,
+     *        with the AREA held constant so that raising the anisotropy draws a cluster out into a band
+     *        instead of making the sky emptier.
+     *
+     * PUBLIC BECAUSE IT IS THE PERIOD SOMETHING ELSE HAS TO PREDICT. `Tools/LatticePeak` measures the
+     * autocorrelation of the baked field and states the lag it expects a lattice peak at; if that number
+     * were computed a second time in the tool, a disagreement between the generator and the tool would
+     * look like a clean sky. Two statements of one quantity is the defect class DEV_CONTRACT.md §2.3.1
+     * names, so there is one statement and everybody calls it.
+     */
+    glm::vec2 CloudProceduralCellExtentKm( const CloudProceduralFieldParams& params,
+                                           const CloudProceduralSpecies&     species );
+
+    /**
      * @brief Where the region's corner sits for a camera at @p cameraXKm, @p cameraZKm — SNAPPED.
      *
      * The snap is to the coarsest species' lattice cell, so that a cell inside the region before a shift is
