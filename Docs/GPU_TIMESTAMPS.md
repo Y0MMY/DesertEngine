@@ -23,12 +23,34 @@ same scope, under the same name. There is no second list of pass names anywhere:
 the site is the string the profiler shows, for both the CPU and the GPU column.
 
 The numbers appear in the editor's **Profiler** panel (View → Profiler), in the same table and the same
-row as the CPU time, with a `GPU` checkbox beside `Enabled`. Comparing the two columns on one frame is
+row as the CPU time, behind a `GPU` checkbox beside `Enabled`. Comparing the two columns on one frame is
 half the point of the feature — `PresentFinalImage (Submit)` costing 14 ms of CPU is not work, it is the
 CPU waiting on a GPU that is 17 ms deep.
 
-A headless `--shot` run draws no ImGui, so `--gpu-profile` writes the same table to the log at the end of
-the run, and `--no-gpu-timing` starts with timestamps off (what the A/B below is measured with).
+**Timestamps are OFF until asked for** (see "Why it is OFF by default"). The flags:
+
+| flag | effect |
+|---|---|
+| `--gpu-profile` | timestamps on, and the table dumped to the log at the end of the run |
+| `--gpu-profile --gpu-profile-frame-only` | time the whole frame only — two timestamps, near-free |
+| `--gpu-profile --no-gpu-timing` | dump the table with CPU columns only (the B leg of the A/B below) |
+
+A headless `--shot` draws no ImGui, so the log dump is the only way to read the numbers there.
+
+![The Profiler panel with the GPU columns live](Clouds/Shots/GT_profiler_panel_gpu_columns.png)
+
+Verified by running the editor and looking at it, not by reasoning about it. Two things that shot
+settled and no amount of reading would have:
+
+* **Six columns do not fit the panel's usual dock.** The first build truncated every header to
+  `cp… gp… gpu…`, which is unreadable exactly where a reader has to tell the two GPU columns apart.
+  The numeric columns are fixed-width now and the scope name stretches; the name clips instead, and
+  hovering a row shows it in full — `Clouds: Sha…` and `Clouds: Exe…` are two different passes.
+* **The panel aggregates across every live renderer.** That capture reads 24.7 ms against the 18.5 ms
+  of a headless shot, because the editor had two scene views open and both were being timed. The
+  queries are per (frame × slot) so the views cannot corrupt each other, but the *display* sums rows by
+  name, exactly as the CPU column always has. A per-view breakdown would need the panel to pick a slot;
+  nothing needs that yet, and it is written down here rather than discovered later.
 
 Use `DESERT_PROFILE_PASS` at **pass** granularity only — a dispatch, a render pass, a stage of the frame.
 Inner scopes keep `DESERT_PROFILE_SCOPE`: some of them run hundreds of times a frame, and a timestamp
@@ -77,6 +99,9 @@ were measured at, so the two are comparable. Debug build, MoltenVK, machine shar
 Five interleaved runs of 400 frames; the run with the lowest GPU frame is shown, and the closure figure
 held at 91.8–94.7 % across all five.
 
+Percentages are against the **instrumented** frame — see "Two denominators" below for the share of an
+uninstrumented one, which is the number budgets are set against.
+
 | pass | gpu self ms | % of GPU frame |
 |---|---|---|
 | **Clouds: March** | **7.589** | **41.0 %** |
@@ -90,16 +115,53 @@ held at 91.8–94.7 % across all five.
 | Deferred: Lighting | 0.216 | 1.2 % |
 | Clouds: ExecuteInFrame (barriers) | 0.197 | 1.1 % |
 | everything else marked (34 passes) | 1.876 | 10.1 % |
-| **unmarked remainder** | **1.337** | **7.2 %** |
-| **GPU frame** | **18.520** | 100 % |
+| **unmarked remainder — the instrument itself, see below** | **1.337** | **7.2 %** |
+| **GPU frame (instrumented)** | **18.520** | 100 % |
 
-**The cloud subsystem is 12.456 ms — 67 % of the frame.** Everything else marked is 4.7 ms. The
-unmarked 7 % is device work no pass brackets (the ImGui swapchain pass, layout transitions, the final
-blit); it is the error bar on this table and it is named rather than hidden.
+**The cloud subsystem is 12.456 ms.** Everything else marked is 4.7 ms.
 
 The CPU column says something the slope never could: `PresentFinalImage (Submit)` costs ~14 ms of CPU,
 and none of it is work — it is the CPU waiting on the fence. The frame is GPU-bound end to end, and the
 wall clock and the GPU bracket agree to within 0.5 %.
+
+### The unmarked remainder is the instrument, not the engine
+
+This table first said the remainder was "device work no pass brackets — the ImGui swapchain pass, layout
+transitions, the final blit". **That was an assumption and it is wrong.** Measured, one session, four
+interleaved passes:
+
+| | GPU frame, min |
+|---|---|
+| full per-pass marking (~80 timestamps) | 17.106 ms |
+| frame bracket only (2 timestamps) | 15.862 ms |
+| **cost of the per-pass marks** | **1.244 ms** |
+
+The unmarked remainder in the full configuration is **1.137–1.438 ms**. The per-pass marks cost
+**1.244 ms**. They are the same number, and the mechanism says they must be: with both timestamps at
+`BOTTOM_OF_PIPE`, a pass's interval ends at its own end mark and the next begins at its own begin mark,
+so the encoder split that a Metal counter sample forces lands in the **gap between** them — which is
+precisely where "unmarked" is measured.
+
+So the remainder row is the instrument's own footprint. The per-pass figures above are not
+correspondingly inflated — the overhead sits between them, not inside them — which is why the
+proportions survive even though the total does not.
+
+### Two denominators, and the one budgets are set against
+
+Every percentage has to name its frame, because the instrument inflates the frame it measures by ~8 %.
+Same session, three passes:
+
+| | clouds | frame | share |
+|---|---|---|---|
+| against the **instrumented** frame | 12.148 ms | 17.106 ms | **71 %** (70.8–72.9) |
+| against the **uninstrumented** frame | 12.148 ms | 15.862 ms | **77 %** (75.5–77.8) |
+
+**77 % is the number a budget decision is taken on** — it is the share of a frame the player actually
+gets, with no profiler running. 71 % is what the panel shows you while you are looking at it, and it is
+the smaller number precisely because the act of looking added ~1.2 ms of instrument to the denominator.
+
+Quoting one without the other is how the same measurement reads as "67 %" in one place and "73 %" in
+another. Both are right; they answer different questions.
 
 ## What this says about the four decisions
 
@@ -160,15 +222,34 @@ two runs):
 So: **roughly 1.5 ± 0.6 ms per frame, about 8 % of an 18 ms debug frame**, on a machine shared with other
 agents.
 
-That is not free, and it is a MoltenVK number rather than a Vulkan one: `vkCmdWriteTimestamp` becomes a
-Metal counter sample, and a counter sample can force an encoder boundary — ~40 timestamp pairs at a few
-tens of microseconds each is the shape of the figure. It is why the switch exists, and why the switch
-turns off the pool reset as well as the writes, so "off" costs exactly nothing.
+Where it goes, measured rather than guessed — the frame bracket against the per-pass marks:
 
-**It stays ON by default, including in debug**, per the brief: a profiler nobody turns on measures
-nothing, and 8 % of a debug frame is a price worth paying to know where the other 92 % goes. The number
-to remember is that a pass's *share* is unaffected — the overhead is spread across the frame, and the
-table above is a proportion, not an absolute cost of shipping code.
+| configuration | GPU frame, min | vs the one below |
+|---|---|---|
+| full per-pass marking (~80 timestamps) | 17.106 ms | **+1.244 ms** |
+| frame bracket only (2 timestamps) | 15.862 ms | free, within noise |
+| no timestamps at all | — (wall 16.344 ms) | — |
+
+**Essentially all of it is the per-pass marks; the two-timestamp frame bracket is free.** It is a
+MoltenVK number rather than a Vulkan one: `vkCmdWriteTimestamp` becomes a Metal counter sample and a
+counter sample can force an encoder boundary, so ~40 pass scopes at ~31 µs apiece is the shape of the
+figure. That also explains where the cost lands — in the gaps between passes, which is exactly the
+"unmarked remainder" above.
+
+`--gpu-profile-frame-only` and the panel's **per-pass** checkbox exist because of this table: GPU frame
+time is available for nothing, and only the itemisation costs.
+
+### Why it is OFF by default
+
+An instrument that inflates its subject by 8 % must not be running when nobody asked. If it were on by
+default, every performance number taken in this engine from now on would carry the tax, and sooner or
+later somebody would compare an instrumented number against an uninstrumented one — which is precisely
+the defect shape this engine has been burned by again and again: two quantities that must agree, and
+nothing checking that they do.
+
+So: an ordinary frame is the shipped frame, and measuring is a deliberate act — `--gpu-profile` on the
+command line, or the panel's `GPU` checkbox. The switch also skips the pool reset, not just the writes,
+so "off" costs exactly nothing rather than nearly nothing.
 
 ## Timestamp period
 

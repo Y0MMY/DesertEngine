@@ -94,11 +94,17 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
                 shot.GpuProfile = true;
             else if ( std::strcmp( argv[i], "--no-gpu-timing" ) == 0 )
                 shot.GpuTiming = false;
+            else if ( std::strcmp( argv[i], "--gpu-profile-frame-only" ) == 0 )
+                shot.GpuFrameOnly = true;
         }
 
-        // Applied here, before the renderer exists: the flag has to be in force for the very first frame,
-        // or the measurement it exists for would include a few instrumented ones.
-        Common::Profiling::Profiler::Get().GpuEnabled() = shot.GpuTiming;
+        // Applied here, before the renderer exists: the flags have to be in force for the very first
+        // frame, or a measurement would include a few frames of the other configuration.
+        //
+        // GPU timing is OFF unless --gpu-profile asks for it. A run that did not ask to be measured is
+        // not measured, and its frame time is the one a budget decision should be taken on.
+        Common::Profiling::Profiler::Get().GpuEnabled()    = shot.GpuProfile && shot.GpuTiming;
+        Common::Profiling::Profiler::Get().GpuPassScopes() = !shot.GpuFrameOnly;
     }
 
     if ( !Desert::Editor::ProjectContext::HasProject() )

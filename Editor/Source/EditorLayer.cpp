@@ -1862,10 +1862,21 @@ namespace Desert::Editor
         ImGui::SameLine();
         ImGui::Checkbox( "Sort by time", &prof.SortByTime() );
         ImGui::SameLine();
-        // GPU timestamps are not free (see Docs/GPU_TIMESTAMPS.md for the measured price), so they can be
-        // turned off — but they default ON, because a profiler nobody switches on measures nothing.
+        // GPU timestamps are OFF by default: they cost ~8 % of a debug frame on MoltenVK, and an
+        // always-on instrument means every later measurement carries the tax. Turning this on is a
+        // deliberate act. See Docs/GPU_TIMESTAMPS.md for the measured price.
         ImGui::BeginDisabled( prof.GetGpuSink() == nullptr );
         ImGui::Checkbox( "GPU", &prof.GpuEnabled() );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Device timestamps around every pass.\n"
+                               "Costs about 8%% of the frame it measures, so it is off by default." );
+        ImGui::SameLine();
+        ImGui::BeginDisabled( !prof.GpuEnabled() );
+        ImGui::Checkbox( "per-pass", &prof.GpuPassScopes() );
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+            ImGui::SetTooltip( "Off: time the whole frame only (two timestamps, near-free).\n"
+                               "On: also time every pass, which is what costs." );
         ImGui::EndDisabled();
         if ( prof.GetGpuSink() == nullptr && ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
             ImGui::SetTooltip( "This device reports no usable timestamp queries — CPU columns only." );
@@ -1896,12 +1907,18 @@ namespace Desert::Editor
                                 ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders |
                                      ImGuiTableFlags_SizingStretchProp ) )
         {
-            ImGui::TableSetupColumn( "Scope" );
-            ImGui::TableSetupColumn( "cpu ms" );
-            ImGui::TableSetupColumn( "gpu ms" );
-            ImGui::TableSetupColumn( "gpu self" );
-            ImGui::TableSetupColumn( "%" );
-            ImGui::TableSetupColumn( "calls" );
+            // The numeric columns are FIXED width and the name stretches. With six columns sharing the
+            // width proportionally, the panel docked at its usual size truncated every header to
+            // "cp... gp... gpu..." — unreadable, and the two GPU columns are the ones a reader has to
+            // tell apart. A millisecond figure needs a known number of characters, not a share of the
+            // panel, so it gets one.
+            const float kNumWidth = ImGui::CalcTextSize( "0000.000" ).x;
+            ImGui::TableSetupColumn( "scope", ImGuiTableColumnFlags_WidthStretch );
+            ImGui::TableSetupColumn( "cpu", ImGuiTableColumnFlags_WidthFixed, kNumWidth );
+            ImGui::TableSetupColumn( "gpu", ImGuiTableColumnFlags_WidthFixed, kNumWidth );
+            ImGui::TableSetupColumn( "self", ImGuiTableColumnFlags_WidthFixed, kNumWidth );
+            ImGui::TableSetupColumn( "%", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize( "000" ).x );
+            ImGui::TableSetupColumn( "x", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize( "000" ).x );
             ImGui::TableHeadersRow();
 
             for ( const auto& s : prof.LastFrame() )
@@ -1910,6 +1927,10 @@ namespace Desert::Editor
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted( s.Name.c_str() );
+                // Docked at its usual width the name column clips, and "Clouds: Sha" / "Clouds: Exe" are
+                // two different passes. The full name on hover costs nothing and settles it.
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "%s", s.Name.c_str() );
                 ImGui::TableNextColumn();
                 ImGui::Text( "%.3f", s.TotalMs );
                 ImGui::TableNextColumn();

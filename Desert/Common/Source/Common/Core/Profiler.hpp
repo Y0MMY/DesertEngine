@@ -91,11 +91,27 @@ namespace Common::Profiling
             return m_GpuSink;
         }
 
-        // GPU timestamps cost real time on the GPU timeline (a write plus, once a frame, a pool reset and
-        // a readback), so they are switchable. Default ON — a profiler nobody turns on measures nothing.
+        // GPU timestamps cost real time on the GPU TIMELINE — measured at ~8 % of a debug frame on
+        // MoltenVK, where a timestamp becomes a Metal counter sample that can split an encoder.
+        //
+        // DEFAULT OFF, deliberately. An always-on instrument that inflates the thing it measures by 8 %
+        // means every performance number taken afterwards carries the tax, and sooner or later somebody
+        // compares an instrumented number with an uninstrumented one. That is the defect shape this
+        // engine has been burned by repeatedly: two quantities that must agree, and nothing checking.
+        // An ordinary frame is therefore the shipped frame, and measuring is a deliberate act —
+        // `--gpu-profile` on the command line, or the panel's GPU checkbox.
         bool& GpuEnabled()
         {
             return m_GpuEnabled;
+        }
+
+        // Per-PASS timestamps, as opposed to the single pair bracketing the whole command buffer. Turning
+        // this off leaves the frame total (two timestamps, negligible) and drops the ~40 pass marks — a
+        // cheap way to watch GPU frame time, and the control that lets the per-pass marks be priced
+        // against the frame bracket rather than against nothing.
+        bool& GpuPassScopes()
+        {
+            return m_GpuPassScopes;
         }
 
         // Published, averaged-over-the-window results (see BeginFrame).
@@ -137,7 +153,8 @@ namespace Common::Profiling
         bool                                         m_Enabled       = true;
         bool                                         m_SortByTime    = true;
         float                                        m_AvgWindowSec  = 0.5f;
-        bool                                         m_GpuEnabled    = true;
+        bool                                         m_GpuEnabled    = false; // see GpuEnabled()
+        bool                                         m_GpuPassScopes = true;
         IGpuProfilerSink*                            m_GpuSink       = nullptr;
     };
 
@@ -168,7 +185,7 @@ namespace Common::Profiling
         explicit GpuScopedTimer( const char* name )
         {
             Profiler& profiler = Profiler::Get();
-            if ( profiler.GpuEnabled() )
+            if ( profiler.GpuEnabled() && profiler.GpuPassScopes() )
             {
                 if ( IGpuProfilerSink* sink = profiler.GetGpuSink() )
                 {
