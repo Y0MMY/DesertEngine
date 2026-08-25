@@ -34,9 +34,12 @@ namespace Common::Profiling
         for ( const auto& [name, result] : m_Accum )
         {
             ScopeResult avg;
-            avg.Name    = name;
-            avg.TotalMs = result.TotalMs * inv;                                  // avg ms / frame
-            avg.Calls   = static_cast<uint32_t>( result.Calls * inv + 0.5 );     // avg calls / frame
+            avg.Name      = name;
+            avg.TotalMs   = result.TotalMs * inv;                              // avg ms / frame
+            avg.Calls     = static_cast<uint32_t>( result.Calls * inv + 0.5 ); // avg calls / frame
+            avg.GpuMs     = result.GpuMs * inv;                                // avg GPU ms / frame
+            avg.GpuSelfMs = result.GpuSelfMs * inv;
+            avg.GpuCalls  = static_cast<uint32_t>( result.GpuCalls * inv + 0.5 );
             m_Display.push_back( avg );
         }
         if ( m_SortByTime )
@@ -64,5 +67,23 @@ namespace Common::Profiling
             r.Name = name;
         r.TotalMs += ms;
         r.Calls += 1;
+    }
+
+    void Profiler::AddGpuSample( const char* name, double inclusiveMs, double selfMs )
+    {
+        if ( !m_Enabled )
+            return;
+
+        // The backend resolves a frame's queries MaxFramesInFlight frames after they were written, so this
+        // lands in a LATER window than the CPU sample of the same scope. Over a window of hundreds of
+        // frames that shifts the average by the lag divided by the window — well under a per cent — and it
+        // keeps the read off the GPU's critical path, which is the whole point.
+        std::lock_guard<std::mutex> lock( m_Mutex );
+        auto&                       r = m_Accum[name];
+        if ( r.Name.empty() )
+            r.Name = name;
+        r.GpuMs += inclusiveMs;
+        r.GpuSelfMs += selfMs;
+        r.GpuCalls += 1;
     }
 } // namespace Common::Profiling

@@ -26,9 +26,11 @@ namespace Desert::Graphic::API::Vulkan
 {
     void VulkanRendererAPI::Init()
     {
+        m_GpuProfiler.Init();
     }
     void VulkanRendererAPI::Shutdown()
     {
+        m_GpuProfiler.Shutdown();
     }
 
     Common::BoolResultStr VulkanRendererAPI::BeginFrame()
@@ -48,6 +50,11 @@ namespace Desert::Graphic::API::Vulkan
                                                .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
         VK_CHECK_RESULT_BOOL( vkBeginCommandBuffer( m_CurrentCommandBuffer, &beginInfo ) );
 
+        // Resolve the previous results and reset this frame's queries. Must be here: vkCmdResetQueryPool
+        // is illegal inside a render pass, and this is the one point in the frame where the command buffer
+        // is recording and no pass is open.
+        m_GpuProfiler.BeginFrame( m_CurrentCommandBuffer );
+
         return BOOLSUCCESS;
     }
 
@@ -55,6 +62,8 @@ namespace Desert::Graphic::API::Vulkan
     {
         if ( m_CurrentCommandBuffer )
         {
+            m_GpuProfiler.EndFrame( m_CurrentCommandBuffer );
+
             VK_CHECK_RESULT_BOOL( vkEndCommandBuffer( m_CurrentCommandBuffer ) );
             m_CurrentCommandBuffer = nullptr;
         }

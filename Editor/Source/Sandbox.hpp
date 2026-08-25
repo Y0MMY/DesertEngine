@@ -6,6 +6,8 @@
 #include <Editor/Core/ProjectContext.hpp>
 #include <Editor/Core/ShotOptions.hpp>
 
+#include <Common/Core/Profiler.hpp>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -86,7 +88,17 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
                 shot.Sequence = argv[++i];
             else if ( hasNext && std::strcmp( argv[i], "--shot-every" ) == 0 )
                 shot.SequenceEvery = std::max( 1, std::atoi( argv[++i] ) );
+            // No argument, so it is checked against argc rather than hasNext — as the last flag on the
+            // line it would otherwise be silently dropped.
+            else if ( std::strcmp( argv[i], "--gpu-profile" ) == 0 )
+                shot.GpuProfile = true;
+            else if ( std::strcmp( argv[i], "--no-gpu-timing" ) == 0 )
+                shot.GpuTiming = false;
         }
+
+        // Applied here, before the renderer exists: the flag has to be in force for the very first frame,
+        // or the measurement it exists for would include a few instrumented ones.
+        Common::Profiling::Profiler::Get().GpuEnabled() = shot.GpuTiming;
     }
 
     if ( !Desert::Editor::ProjectContext::HasProject() )

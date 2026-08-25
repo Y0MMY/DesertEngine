@@ -127,6 +127,7 @@ namespace Desert::Graphic::API::Vulkan
             m_Capabilities.SupportsTessellation      = deviceFeatures.tessellationShader == VK_TRUE;
             m_Capabilities.SupportsMultiDrawIndirect = deviceFeatures.multiDrawIndirect == VK_TRUE;
             m_Capabilities.SupportsTimestampQueries  = deviceProperties.limits.timestampComputeAndGraphics == VK_TRUE;
+            m_Capabilities.TimestampPeriodNs         = deviceProperties.limits.timestampPeriod;
 
             // MSAA counts usable for BOTH colour and depth — a count only one of them supports is useless
             // to a framebuffer that has each.
@@ -163,11 +164,10 @@ namespace Desert::Graphic::API::Vulkan
             LOG_INFO( "[Vulkan] GPU: {} ({}, {}, {} MB VRAM)", m_Capabilities.Name, m_Capabilities.VendorName,
                       typeName, m_Capabilities.VideoMemory / ( 1024ull * 1024ull ) );
             LOG_INFO( "[Vulkan] Caps: maxMSAA {}x, maxTex2D {}, colorAttachments {}, float RTs {}, "
-                      "timestamps {}",
+                      "timestamps {} (period {} ns/tick)",
                       m_Capabilities.MaxMSAASamples(), m_Capabilities.MaxTexture2DSize,
-                      m_Capabilities.MaxColorAttachments,
-                      m_Capabilities.SupportsFloatRenderTargets ? "yes" : "NO",
-                      m_Capabilities.SupportsTimestampQueries ? "yes" : "no" );
+                      m_Capabilities.MaxColorAttachments, m_Capabilities.SupportsFloatRenderTargets ? "yes" : "NO",
+                      m_Capabilities.SupportsTimestampQueries ? "yes" : "no", m_Capabilities.TimestampPeriodNs );
         }
 
         // Publish anisotropy support to the low-level sampler-creation path (0 = unsupported -> no aniso).

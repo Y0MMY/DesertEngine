@@ -84,6 +84,8 @@ namespace Desert::Editor
 
         void DrawEngineStats();
         void DrawProfilerWindow();
+        /// The profiler's CPU+GPU table as log lines — the panel's button and --gpu-profile share it.
+        void DumpProfilerToLog();
 
         // ===== Popups =====
         void DrawPopups();

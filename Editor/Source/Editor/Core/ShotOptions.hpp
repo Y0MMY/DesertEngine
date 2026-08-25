@@ -125,6 +125,17 @@ namespace Desert::Editor
         std::string Sequence;          // --shot-sequence <dir>; every Nth frame written there
         int         SequenceEvery = 1; // --shot-every N
 
+        // --gpu-profile: write the profiler's CPU and GPU per-pass table to the log at the end of the run.
+        // A headless shot draws no ImGui, so the Profiler panel is unreachable there; without this the
+        // per-pass GPU numbers exist in memory and nothing can read them. Off by default so an ordinary
+        // capture's log stays a capture's log.
+        bool GpuProfile = false;
+
+        // --no-gpu-timing: start with GPU timestamps switched off (the Profiler panel's "GPU" checkbox,
+        // reachable from a headless run). Its reason to exist is the A/B that prices the instrumentation:
+        // one binary, one scene, the feature the only thing that differs.
+        bool GpuTiming = true;
+
         // Headless capture mode at all — either flavour of output activates it. `--shot-sequence` alone is
         // a legitimate run: a motion study wants the frames and has no use for a designated last one.
         bool Active() const

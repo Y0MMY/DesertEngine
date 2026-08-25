@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/RendererAPI.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanGpuProfiler.hpp>
 
 #include <vulkan/vulkan.h>
 
@@ -79,6 +80,11 @@ namespace Desert::Graphic::API::Vulkan
 
     private:
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
+
+        /// Owned outright rather than reached through a global: there is one renderer API and the query
+        /// pool's lifetime is exactly its lifetime. The profiling macros find it through the sink the
+        /// profiler holds, so nothing else needs a pointer to it.
+        VulkanGpuProfiler m_GpuProfiler;
 
         std::weak_ptr<Framebuffer> m_CompositeFramebuffer;
     };

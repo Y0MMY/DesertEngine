@@ -176,7 +176,7 @@ namespace Desert::Graphic::System
 
     void HeightFogRenderer::ExecuteInFrame()
     {
-        DESERT_PROFILE_SCOPE( "HeightFog: ExecuteInFrame" );
+        DESERT_PROFILE_PASS( "HeightFog: ExecuteInFrame" );
 
         m_HasFrameResult = false;
 

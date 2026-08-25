@@ -593,7 +593,7 @@ namespace Desert::Graphic::System
 
     void VolumetricCloudRenderer::ExecuteShadowMapInFrame()
     {
-        DESERT_PROFILE_SCOPE( "Clouds: ShadowMap" );
+        DESERT_PROFILE_PASS( "Clouds: ShadowMap" );
 
         // Cleared FIRST and set only at the end, so every early return below leaves consumers with "no
         // cloud shadow this frame" rather than with the projection of a frame the sun has since left.
@@ -1007,7 +1007,7 @@ namespace Desert::Graphic::System
 
     void VolumetricCloudRenderer::ExecuteInFrame()
     {
-        DESERT_PROFILE_SCOPE( "Clouds: ExecuteInFrame" );
+        DESERT_PROFILE_PASS( "Clouds: ExecuteInFrame" );
 
         m_HasFrameResult = false;
 
@@ -1135,8 +1135,14 @@ namespace Desert::Graphic::System
         const uint32_t traceWidth  = HalfExtent( m_HalfWidth );
         const uint32_t traceHeight = HalfExtent( m_HalfHeight );
 
-        renderer.DispatchComputeInFrame( m_MarchPipeline.get(), GroupCount( traceWidth, kMarchWorkGroupSize ),
-                                         GroupCount( traceHeight, kMarchWorkGroupSize ), 1 );
+        {
+            // The march and the temporal resolve shared ONE scope until GPU timing arrived, which is
+            // precisely the split the cost breakdown needed: they are a heavy half-res raymarch and a
+            // cheap reprojection, and lumping them hid the ratio.
+            DESERT_PROFILE_PASS( "Clouds: March" );
+            renderer.DispatchComputeInFrame( m_MarchPipeline.get(), GroupCount( traceWidth, kMarchWorkGroupSize ),
+                                             GroupCount( traceHeight, kMarchWorkGroupSize ), 1 );
+        }
 
         renderer.ComputeImageEndWrite( m_TraceGuideImage.get() );
         renderer.ComputeImageEndWrite( m_TraceImage.get() );
@@ -1185,8 +1191,12 @@ namespace Desert::Graphic::System
         m_ResolvePipeline->SetInput( kCloudResolveHistoryBinding, historyScatter ? historyScatter : fallback );
         m_ResolvePipeline->SetInput( kCloudResolveHistoryGuideBinding, historyGuide ? historyGuide : fallback );
 
-        renderer.DispatchComputeInFrame( m_ResolvePipeline.get(), GroupCount( m_HalfWidth, kMarchWorkGroupSize ),
-                                         GroupCount( m_HalfHeight, kMarchWorkGroupSize ), 1 );
+        {
+            DESERT_PROFILE_PASS( "Clouds: TemporalResolve" );
+            renderer.DispatchComputeInFrame( m_ResolvePipeline.get(),
+                                             GroupCount( m_HalfWidth, kMarchWorkGroupSize ),
+                                             GroupCount( m_HalfHeight, kMarchWorkGroupSize ), 1 );
+        }
 
         renderer.ComputeImageEndWrite( m_HistoryGuideImage[writeIndex].get() );
         renderer.ComputeImageEndWrite( m_HistoryImage[writeIndex].get() );
