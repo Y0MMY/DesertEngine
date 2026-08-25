@@ -2353,3 +2353,116 @@ is RED.
   as a RELATION in the suite rather than frozen into a range.
 * **It did not re-author the library beyond the two factors the measurement showed dissolved.** A cirrus
   that should be MORE eroded than a cumulus needs the density to carry it first.
+
+## GT — the four cost decisions re-measured per pass, and one of them measured the wrong thing, 2026-08-25
+
+Every cost decision in this document above was taken on the **frame-count slope**,
+`(t900 - t300) / 600`. The method is honest and its discipline was kept — configurations interleaved in
+one session, minimum of N, spread named. But it measures **the whole frame**, and it cannot say which
+pass the milliseconds are in.
+
+GPU timestamps now can (`Docs/GPU_TIMESTAMPS.md`; `DESERT_PROFILE_PASS`, off by default, `--gpu-profile`
+to arm). What follows are **corrections**, and each one names what the old number was actually measuring
+rather than quietly replacing a digit. `Clouds_Demo` at High, camera `0,200,0`, `--look 0,0.45,1` — the
+same framing the originals used, so the two are comparable. Debug, MoltenVK, machine shared.
+
+### The frame, itemised
+
+| pass | gpu self ms | share of an UNINSTRUMENTED frame |
+|---|---|---|
+| **Clouds: March** | **7.589** | 41 % |
+| **Clouds: ShadowMap** | **3.796** | 20 % |
+| Clouds: TemporalResolve | 0.502 | 2.7 % |
+| everything else marked | 4.7 | 25 % |
+| **cloud subsystem, total** | **12.15–12.46** | **77 %** (75.5–77.8) |
+
+**Two denominators, and they answer different questions.** The instrument inflates the frame it measures
+by ~8 %, so clouds are **71 %** of the instrumented frame and **77 %** of the uninstrumented one. **77 %
+is the number a budget is set against** — the share of a frame the player actually gets. Quoting one
+without the other is how the same measurement reads as two different numbers.
+
+### Correction 1 — the shadow ray's ×1.87 measured the ratio of two whole frames
+
+The OE-FIX table above records **1.87x** and **0.230 ms per sample** for `LightMarchSamples` 6 → 32.
+
+Sweeping the same field from a scene copy (one field, no rebuild) and reading the **march's own line**,
+three interleaved passes, minimum of three:
+
+| samples | Clouds: March | GPU frame |
+|---|---|---|
+| 6 | 2.057 ms | 12.732 ms |
+| 16 | 3.754 ms | 15.019 ms |
+| **32 (shipped)** | **6.911 ms** | 17.047 ms |
+| 64 | 13.071 ms | 22.161 ms |
+
+* The march is linear at **0.190 ms/sample** over a **0.918 ms** fixed part (per-interval 0.170 / 0.197 /
+  0.193). The recorded 0.230 is **17 % high**.
+* 6 → 32 costs **+4.85 ms on the march** and **+4.32 ms on the whole frame — a ratio of 1.34x**, against
+  the recorded 1.87x.
+
+**What the old number measured:** a ratio of two *whole frames*, in a tree whose frame was 6.95 ms at 6
+samples. Today the same frame is 12.73 ms, because everything else in it has grown. A ratio whose
+denominator is mostly the part you did not change is not a property of the part you did — the identical
+code change gives 1.87x on one tree and 1.34x on another. **Only the absolute per-sample cost transfers
+between trees**, and that one is 17 % off.
+
+The shadow map is unaffected by this knob (3.977 / 3.667 / 3.656 / 3.705 across the four counts), so the
+sweep isolates the march cleanly.
+
+### Correction 2 — the cloud shadow map's +4.92 ms is ~20 % high
+
+Reproducing this document's own A/B (`CastShadows` on/off, one field, no rebuild) but reading the
+breakdown, three interleaved passes, minimum of three:
+
+| | gpu self, ON | gpu self, OFF | delta |
+|---|---|---|---|
+| Clouds: ShadowMap | 3.686 | 0.014 | **+3.672** |
+| Clouds: March | 6.553 | 6.670 | −0.117 |
+| **whole GPU frame** | **16.862** | **12.884** | **+3.978 (1.31x)** |
+
+Against the recorded **+4.92 ms, 1.38x**. Pooling every run in the session — 17 of them — the map's own
+line is **3.66–4.80 ms, median 3.96**; the recorded 4.92 sits **above the entire range**.
+
+**What the old number measured:** a whole-frame delta, on the same instrument and with the same drift as
+correction 1. The conclusion it was used for survives — the map really is ~20 % of the frame and really
+is the second-largest line — but the digit is optimistic by a fifth.
+
+**A hypothesis, tested and disproved:** that the missing millisecond was the march paying to *sample* the
+map. It is not. The march is 6.553 ms with shadows and 6.670 ms without — a difference of −0.117 ms,
+inside its own 15 % run-to-run spread. **Building the map is the whole cost; sampling it is free.**
+
+### Correction 3 — the tier ladder's conclusion survives its constants
+
+The tier table records 17.99 / 14.24 / 8.61 ms. Those are whole-frame slopes from the same instrument and
+should be expected to carry the same error as the two corrections above.
+
+The conclusion, however, is **confirmed by the itemisation**: the two knobs the ladder turns — shadow-ray
+sample count and shadow-map resolution — are exactly the two largest lines in the frame, 41 % and 20 %.
+The ladder was built by distributing a budget nobody had ever seen itemised, and the itemisation says it
+reached for the right two knobs.
+
+### Not re-measured
+
+**The hero clouds' 1.39x on eight instances** belongs to `Clouds_HeroMass`, not `Clouds_Demo`, and was
+left alone. It rests on the same whole-frame instrument as the three above and deserves the same
+re-check; it is filed as its own task.
+
+### What the instrument costs, so the next reader does not repeat the mistake
+
+**+1.244 ms/frame**, and it is *all* the per-pass marks — the two-timestamp frame bracket is free:
+
+| configuration | GPU frame, min |
+|---|---|
+| full per-pass marking (~80 timestamps) | 17.106 ms |
+| frame bracket only (2 timestamps) | 15.862 ms |
+
+On MoltenVK a `vkCmdWriteTimestamp` becomes a Metal counter sample, which can force an encoder boundary.
+That is why it is **off by default**: an instrument that inflates its subject by 8 % must not be running
+when nobody asked, or every number taken afterwards carries the tax and someone eventually compares an
+instrumented figure against an uninstrumented one.
+
+The cost lands **between** the passes, not inside them — with both marks at `BOTTOM_OF_PIPE` the encoder
+split falls in the gap between one pass's end mark and the next one's begin mark. So the per-pass figures
+above are trustworthy and only their **sum** is inflated. This was checked rather than assumed: the
+unmarked remainder in the full configuration is 1.137–1.438 ms and the marks cost 1.244 ms, which are the
+same number.
