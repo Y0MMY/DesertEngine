@@ -161,11 +161,24 @@ namespace Desert::Assets
 
         const glm::vec2 shifted = worldKm - placement.OffsetKm;
 
-        // THE QUARTER TURN IS EXACT ARITHMETIC AND NOT A COSINE, and that is the point of restricting it.
-        // A rotation by 90 degrees written as a matrix of `cos`/`sin` produces 6.1e-17 instead of 0, and
-        // that residue is enough to make the periodicity assertion below fail by a texel at large world
-        // coordinates. Written as a swap and a negation it is exact at every magnitude, so the lattice
-        // maps onto itself for real rather than nearly.
+        // THE RESTRICTION IS ON THE ANGLE, NOT ON THE ARITHMETIC, and a sabotage is what settled which.
+        //
+        // The first version of this comment claimed that writing the quarter turn as a `cos`/`sin` matrix
+        // would break the periodicity by a texel at large world coordinates. It does not: replacing the
+        // swap below with a float `cos`/`sin` at 90 degrees was measured at 3.8e-6 of a period against the
+        // exact form's 1.9e-6, on probes out to 12 345 km, and
+        // CloudPlacementSpectrum.ThePaintingRepeatsExactlyWithTheRegionAtEveryRotationAndOffset stayed
+        // GREEN. The claim was wrong and is corrected rather than deleted, because the decision it was
+        // offered in support of is the right one for a different reason.
+        //
+        // WHAT ACTUALLY BREAKS IS ANY OTHER ANGLE. A square lattice maps onto itself under a quarter turn
+        // and under nothing else, so the periodicity the far field depends on is a property of the SET of
+        // permitted rotations. The same sabotage at 45 degrees moves the departure to 0.414 of a period —
+        // five orders of magnitude — and the test goes red at once. That is why `QuarterTurns` is a count
+        // and not an angle.
+        //
+        // The exact swap is kept anyway: it is cheaper than two transcendentals and it is exact at every
+        // magnitude, so it removes a residue that is small rather than one that was large.
         glm::vec2 turned = shifted;
         switch ( placement.QuarterTurns & 3u )
         {

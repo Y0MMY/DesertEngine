@@ -416,7 +416,15 @@ namespace Desert::Assets
         if ( hashA != hashB )
             return false;
 
-        if ( !CloudLayoutPlacementEqual( a.LayoutPlacement, b.LayoutPlacement ) )
+        // AND THE PLACEMENT ONLY WHEN THERE IS SOMETHING TO PLACE. With no painting bound, none of those
+        // five numbers reaches a single lump — CloudCellCoverage does not read them — so comparing them
+        // would call a rebake of two million voxels for a slider that provably changed nothing. That is not
+        // a saving for its own sake: an artist dragging Layout Repeats on an unpainted layer would stall
+        // the editor for seconds per frame, and the cause would look like the region shifting.
+        //
+        // The test that walks every field asserts these five on a base that HAS a painting, which is the
+        // only state in which they mean anything.
+        if ( hashA != 0u && !CloudLayoutPlacementEqual( a.LayoutPlacement, b.LayoutPlacement ) )
             return false;
 
         if ( a.Species.size() != b.Species.size() )
