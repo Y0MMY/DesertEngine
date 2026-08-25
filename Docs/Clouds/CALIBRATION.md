@@ -2567,9 +2567,13 @@ arrives smeared and the number is a lower bound rather than a size.
 | mid sunward | none / 0.0349 | 0.0020 / none |
 | horizon sunward | 0.0127 / **0.0095** | 0.0142 / **0.0285** |
 
-**Four of the ten measurable pairs improve, two worsen and the rest are at the noise.** The one that matters
-is `horizon away`, which is the frame the defect was visible in: columns 0.0913 to 0.0276, a factor of 3.3.
-The mixed result at the other points is exactly what the mode's own caveat predicts, and it is why the
+**Of the twelve pairs: four fall, three go from a bump to NO BUMP AT ALL, three rise, and two are pairs in
+which one side has no bump to compare.** Counted honestly that is seven better and three worse, and the
+three that rise are 0.0000 to 0.0009 (which is not a change), 0.0142 to 0.0285 and none to 0.0349.
+
+The one that matters is `horizon away`, which is the frame the defect was visible in: **columns 0.0913 to
+0.0276, a factor of 3.3**. The mixed result elsewhere is exactly what this mode's own caveat predicts — it
+cannot separate a lattice from any other repeated feature of a perspective image — and it is why the
 argument is settled in the field mode and not here.
 
 ### The price
@@ -2673,10 +2677,16 @@ DELETED FIRST.
 | missing binaries | **none** |
 | suites failed | **1**, and it was ours |
 
-**The count balances exactly this time, and it balances BECAUSE the exclusion list was extended.** §2.4
-item 5a records that the list had gone stale three times and that "makefiles against binaries" then failed
-to reconcile by two. `Tools/LatticePeak` is the fourth tool of that kind — it lands in `build/Bin/Debug/`
-and links no gtest — so it is in the list, and 63 against 63 is the whole audit.
+**The count balances exactly, and it balances only because the exclusion list was extended for this run.**
+§2.4 item 5a records that the list had gone stale three times and that "makefiles against binaries" then
+failed to reconcile by two. `Tools/LatticePeak` is the fourth tool of that kind — it lands in
+`build/Bin/Debug/` and links no gtest — and with it excluded the audit is 63 against 63 with nothing
+unexplained.
+
+> ⚠️ **THE ONE-LINER IN `DEV_CONTRACT.md` §2.4 ITEM 5A IS NOW STALE FOR THE FOURTH TIME**, and this task did
+> not edit it: that file is the teamlead's and §1.6 says a foreign file is asked for rather than taken. The
+> change needed is one word — `LatticePeak` beside `ImageStat|LineJump|SceneMigrator` in the `case` — and
+> without it the next developer's sweep will try to run a tool as a suite and count one binary short.
 
 The one failure was `ComponentReflection.ExposesExactlyTheSpecifiedFieldsInOrder`: **45 fields against the
 40 the assertion named.** That is the third of the three failures §2.3.1 tells a developer to expect after
