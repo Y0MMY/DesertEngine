@@ -80,4 +80,10 @@ namespace Desert::Runtime
         return &cloudModellingService;
     }
 
+    CloudLayoutService* ResourceRegistry::GetCloudLayoutService()
+    {
+        static CloudLayoutService cloudLayoutService;
+        return &cloudLayoutService;
+    }
+
 } // namespace Desert::Runtime

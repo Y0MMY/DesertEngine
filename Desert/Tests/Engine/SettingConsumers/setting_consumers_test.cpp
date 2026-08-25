@@ -246,6 +246,22 @@ namespace
          { "PatchTileSize", kCloudRenderer },
          { "PatchStrength", kCloudRenderer },
 
+         // Layout - the PAINTED sky, and the same consumer as Placement for the same reason: the painting
+         // decides which lattice cells carry a cloud, which is a bake question and not a march one.
+         // `CloudLayout` is a handle the renderer resolves through Runtime::CloudLayoutService and hands to
+         // the bake as bytes; the other five are numbers that travel in CloudProceduralFieldParams.
+         //
+         // THE ROW FOR `CloudLayout` IS THE ONE WORTH LOOKING AT TWICE. An asset slot that resolves to
+         // nothing renders exactly like an asset slot that is not wired, so this is precisely the shape of
+         // dead setting this suite exists to catch — and unlike a slider, nobody notices, because the sky
+         // an unwired painting produces is a perfectly good procedural sky.
+         { "CloudLayout", kCloudRenderer },
+         { "LayoutPatternStrength", kCloudRenderer },
+         { "LayoutMaskStrength", kCloudRenderer },
+         { "LayoutRepeats", kCloudRenderer },
+         { "LayoutRotation", kCloudRenderer },
+         { "LayoutOffset", kCloudRenderer },
+
          // Detail - the erosion field.
          { "DetailTileSize", kCloudPayload },
          { "DetailStrength", kCloudPayload },

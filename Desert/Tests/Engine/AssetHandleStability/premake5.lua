@@ -31,6 +31,8 @@ project(test_name)
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolumeAsset.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudLayoutAsset.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudLayout.cpp",
         -- SkeletonAsset::Load builds an Animation::Skeleton, whose constructor computes the signature.
         "%{wks.location}/Desert/Desert/Source/Engine/Animation/Skeleton.cpp",
     }

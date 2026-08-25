@@ -38,6 +38,10 @@ namespace Desert::Assets
         // asset and no other asset names it — so its position in the order is free; it is last because
         // a scene without one still has a sky and this is the stage a project may have nothing in.
         void PreloadCloudModellingVolumes();
+        // Painted cloud layouts (`.dclayout`). Independent of the three above — a layout names no other
+        // asset and no other asset names it — so its position in the order is free; it is last because a
+        // scene without one still has a sky, which is the state every shipped scene is in.
+        void PreloadCloudLayouts();
 
     private:
         std::weak_ptr<AssetManager> m_AssetManager;

@@ -82,6 +82,72 @@ namespace
         return params;
     }
 
+    /// A painting whose answer this file chose: the left half of the table white in every channel, the
+    /// right half black, so its mean is exactly 0.5 per channel and its shape is one nobody can mistake for
+    /// noise. A stripe rather than a gradient because the tests below have to be able to say WHERE the
+    /// painting says cloud is, and a stripe has a side.
+    ///
+    /// Built through MakeCloudLayoutFromImage rather than by filling the struct, so that what the tests
+    /// measure is the layout a FILE would produce — means and content hash included. A fixture assembled
+    /// around the encoder is a fixture that can disagree with every layout an artist ever saves.
+    std::shared_ptr<const CloudLayoutData> StripeLayout( uint32_t resolution = 64u, bool withMask = false )
+    {
+        std::vector<unsigned char> pixels( static_cast<size_t>( resolution ) * resolution * 4u, 0u );
+
+        for ( uint32_t y = 0; y < resolution; ++y )
+            for ( uint32_t x = 0; x < resolution; ++x )
+            {
+                const bool   lit = x < resolution / 2u;
+                const size_t at  = ( static_cast<size_t>( y ) * resolution + x ) * 4u;
+                pixels[at + 0]   = lit ? 255u : 0u;
+                pixels[at + 1]   = lit ? 255u : 0u;
+                pixels[at + 2]   = lit ? 255u : 0u;
+                // The alpha is the MASK source and is mid-grey — neutral — unless the caller wants a mask
+                // that does something. An opaque 255 here would be a mask that adds cloud to the whole sky,
+                // which is the silent, uniform, wrong answer MakeCloudLayoutFromImage's `takeMask` exists
+                // to make impossible by accident.
+                pixels[at + 3] = withMask ? ( lit ? 255u : 0u ) : 128u;
+            }
+
+        const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+
+        auto made = MakeCloudLayoutFromImage( pixels, resolution, resolution, channels, withMask );
+        if ( !made )
+            return nullptr;
+
+        return std::make_shared<const CloudLayoutData>( made.ExtractValue() );
+    }
+
+    /// What fraction of the region's columns carry any cloud at all, measured on the REAL bake. The same
+    /// quantity TheCoverageSliderStillMeansTheSkyAtTheShippedPlacement measures, lifted out of it so the
+    /// zero-mean relation can measure the same thing rather than something like it.
+    double SkyCover( const CloudProceduralFieldParams& params )
+    {
+        const glm::vec2 origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const auto      baked  = BakeCloudProceduralVolume( params, origin );
+        if ( !baked )
+            return -1.0;
+
+        size_t columns = 0;
+        for ( uint32_t z = 0; z < kCloudProceduralVolumeDepth; ++z )
+            for ( uint32_t x = 0; x < kCloudProceduralVolumeWidth; ++x )
+                for ( uint32_t y = 0; y < kCloudProceduralVolumeHeight; ++y )
+                {
+                    const size_t at = ( ( static_cast<size_t>( z ) * kCloudProceduralVolumeHeight + y ) *
+                                             kCloudProceduralVolumeWidth +
+                                        x ) *
+                                      kCloudProceduralBytesPerVoxel;
+                    if ( baked.GetValue()[at] != 0u )
+                    {
+                        ++columns;
+                        break;
+                    }
+                }
+
+        return static_cast<double>( columns ) /
+               static_cast<double>( kCloudProceduralVolumeWidth * kCloudProceduralVolumeDepth );
+    }
+
     /// The lumps of one region, rasterised into the top-down column integral described in the file note.
     /// Periodic, because the region is: a lump against a face contributes to the opposite one, which is
     /// exactly what the bake's wrap does and what makes a circular autocorrelation the right estimator.
@@ -852,6 +918,356 @@ TEST( CloudPlacementSpectrum, EveryFieldTheBakeReadsMakesTheCachedVolumeStale )
     moved = base;
     moved.Species.push_back( moved.Species[0] );
     notices( moved, "a second species" );
+
+    // THE PAINTED LAYOUT. Binding one, and changing which one is bound, both have to be noticed — the
+    // second is the one that would not be if this compared the pointer instead of the content.
+    const std::shared_ptr<const CloudLayoutData> stripe = StripeLayout();
+    const std::shared_ptr<const CloudLayoutData> other  = StripeLayout( 128u );
+    ASSERT_TRUE( stripe && other ) << "the fixture painting could not be built, so nothing below means "
+                                      "anything";
+    ASSERT_NE( stripe->ContentHash, other->ContentHash )
+         << "two paintings of different resolutions hash the same, so this test cannot tell them apart "
+            "and neither can the cache";
+
+    moved        = base;
+    moved.Layout = stripe;
+    notices( moved, "binding a cloud layout" );
+
+    CloudProceduralFieldParams painted = base;
+    painted.Layout                     = stripe;
+
+    moved        = painted;
+    moved.Layout = other;
+    EXPECT_FALSE( CloudProceduralParamsEqual( painted, moved ) )
+         << "a DIFFERENT painting was bound and the cached volume was still considered current — which is "
+            "what comparing the pointer rather than the content would do only by luck, and what comparing "
+            "nothing at all does always";
+
+    // AND THE FIVE PLACEMENT NUMBERS, ON A BASE THAT HAS A PAINTING. They are deliberately NOT compared
+    // when the slot is empty, because none of them reaches a lump then and a rebake for a slider that
+    // provably changed nothing is a stall an artist feels. That exemption is exactly the kind of thing that
+    // silently grows to cover a field that DOES matter, so it is asserted from both sides: inert without a
+    // painting (the test below), noticed with one (here).
+    const auto noticesPainted = [&]( CloudProceduralFieldParams m, const char* what )
+    {
+        EXPECT_FALSE( CloudProceduralParamsEqual( painted, m ) )
+             << what
+             << " was changed on a layer WITH a painting bound and the cached volume was still considered "
+                "current, so moving it in the editor would do nothing at all";
+    };
+
+    moved                                  = painted;
+    moved.LayoutPlacement.RepeatsPerRegion = 3u;
+    noticesPainted( moved, "Layout Repeats" );
+
+    moved                              = painted;
+    moved.LayoutPlacement.QuarterTurns = 1u;
+    noticesPainted( moved, "Layout Rotation" );
+
+    moved                          = painted;
+    moved.LayoutPlacement.OffsetKm = glm::vec2( 5.0f, -2.0f );
+    noticesPainted( moved, "Layout Offset" );
+
+    moved                                 = painted;
+    moved.LayoutPlacement.PatternStrength = 0.25f;
+    noticesPainted( moved, "Layout Pattern Strength" );
+
+    moved                              = painted;
+    moved.LayoutPlacement.MaskStrength = 0.25f;
+    noticesPainted( moved, "Layout Mask Strength" );
+}
+
+// THE GUARD ON THE WALK ABOVE, AND IT IS THE POINT OF THIS PAIR RATHER THAN AN EXTRA.
+//
+// The test above lists its fields BY HAND. That list is a second statement of the struct's contents, and a
+// second statement with nothing checking it against the first is the defect class DEV_CONTRACT.md §2.3.1
+// names — it is how the anvil went untested twice in a row and how two channels of the noise volume were
+// read by nobody. A field added to CloudProceduralFieldParams without a line added there is a setting the
+// cache cannot see, and nothing else in this suite would go red for it.
+//
+// ⚠️ THE FIRST VERSION OF THIS GUARD PINNED `sizeof` AND A SABOTAGE WALKED STRAIGHT THROUGH IT. Adding
+// `float SabotageTwo` to the struct left the size at 136 bytes — it landed in the padding before the
+// shared_ptr — and this test stayed GREEN. A size is not a field count, and the two agree only until the
+// next field happens to fit in a hole. Recorded here rather than quietly replaced, because the failed
+// version is the more useful half of the lesson: a guard that cannot go red for the thing it guards is
+// worse than no guard, since it also stops anyone from writing a real one.
+//
+// WHAT IS HERE INSTEAD IS A STRUCTURED BINDING, and it is exact rather than nearly. A decomposition names
+// every field of an aggregate, so a struct with one more or one fewer than the list below does not COMPILE
+// — the check fires before the suite even links, it cannot be defeated by padding, and the error stands in
+// this file, next to the walk that has to be extended. The runtime half only records the size for the
+// benefit of whoever reads a failure on a platform that lays the struct out differently.
+TEST( CloudPlacementSpectrum, AddingAFieldToTheBakesParametersForcesAVisitToTheStalenessWalk )
+{
+    const CloudProceduralFieldParams params;
+
+    // EIGHTEEN FIELDS. If this line stops compiling, a field was added to or removed from
+    // CloudProceduralFieldParams. Do BOTH of these before you touch this list:
+    //
+    //   1. add a line for it to EveryFieldTheBakeReadsMakesTheCachedVolumeStale above, and
+    //   2. add it to Assets::CloudProceduralParamsEqual,
+    //
+    // or the artist will move it in the editor and nothing at all will happen — the dead setting §1.3 of
+    // the contract forbids, arrived at from the far side where the knob is wired and the CACHE is what eats
+    // it.
+    const auto& [regionSizeKm, layerBottomKm, layerThicknessKm, blendRadiusKm, profileDepthKm, coverage,
+                 coverageContrast, seed, placementDensity, placementScatter, placementSizeVariety, patchTileKm,
+                 patchStrength, windAxis, layoutPlacement, layout, resolvableChordKm, species] = params;
+
+    // Named so the decomposition is not optimised away as unused, and asserted on the two that the walk
+    // above cannot reach through CloudProceduralParamsEqual at all — a defaulted set must be the shipped
+    // state, which is "no painting".
+    EXPECT_EQ( layout, nullptr ) << "a defaulted set of bake parameters arrives with a painting already "
+                                    "bound, so an unpainted scene is not the default state";
+    EXPECT_EQ( layoutPlacement.RepeatsPerRegion, 1u );
+    EXPECT_EQ( layoutPlacement.QuarterTurns, 0u );
+
+    (void)regionSizeKm;
+    (void)layerBottomKm;
+    (void)layerThicknessKm;
+    (void)blendRadiusKm;
+    (void)profileDepthKm;
+    (void)coverage;
+    (void)coverageContrast;
+    (void)seed;
+    (void)placementDensity;
+    (void)placementScatter;
+    (void)placementSizeVariety;
+    (void)patchTileKm;
+    (void)patchStrength;
+    (void)windAxis;
+    (void)resolvableChordKm;
+    (void)species;
+
+    std::printf( "[CloudPlacementSpectrum] CloudProceduralFieldParams is %zu bytes over 18 fields\n",
+                 sizeof( CloudProceduralFieldParams ) );
+}
+
+// THE PAINTING REPEATS EXACTLY WITH THE SKY, AND THIS IS THE RELATION THE TWO INTEGERS EXIST TO KEEP.
+//
+// The modelling volume is periodic over the region and everything past the region is REPEAT sampling of it
+// — that is what the far field IS (Engine/Assets/CloudProceduralVolume.hpp), and the wrap seam is measured
+// at 0.950/255 against 1.239/255 between ordinary neighbours. A painting sampled on a world period that did
+// not divide the region would break it, and the defect would be a hard discontinuity across every region
+// face, an order of magnitude larger than the seam that exists.
+//
+// The argument for why it cannot happen is that `RepeatsPerRegion` is a whole number and the rotation is a
+// count of QUARTER turns — a square lattice maps onto itself under a quarter turn and under nothing else.
+// An argument is not a test. This asserts the consequence directly.
+//
+// WHAT IT CATCHES AND WHAT IT DOES NOT, both measured rather than assumed. Rotating by 45 degrees instead
+// of 90 takes the departure to 0.414 of a period and this goes red instantly. Rotating by 90 degrees
+// through a float `cos`/`sin` matrix instead of the exact swap takes it from 1.9e-6 to 3.8e-6 and this
+// stays GREEN — which is the correct verdict and not a gap, because that change does not break anything:
+// the relation is about the ANGLE being a quarter turn, not about how the quarter turn is spelt. The first
+// draft of this comment claimed otherwise and the sabotage disproved it.
+TEST( CloudPlacementSpectrum, ThePaintingRepeatsExactlyWithTheRegionAtEveryRotationAndOffset )
+{
+    constexpr float kRegionKm = 48.0f;
+
+    // Points far from the origin ON PURPOSE. A world that measures in centimetres reaches thousands of
+    // kilometres in ordinary use, and any residue in the rotation is multiplied by the distance — so a
+    // fault invisible at the origin is the one this has to look for.
+    const glm::vec2 probes[] = {
+         { 0.0f, 0.0f }, { 1.3f, -7.7f }, { -123.5f, 88.25f }, { 4000.0f, -4000.0f }, { -9999.5f, 12345.75f } };
+
+    double worst = 0.0;
+
+    for ( uint32_t repeats : { 1u, 2u, 3u, 7u, 16u } )
+        for ( uint32_t turns = 0u; turns < 4u; ++turns )
+            for ( const glm::vec2& offset : { glm::vec2( 0.0f, 0.0f ), glm::vec2( 3.25f, -11.5f ) } )
+            {
+                CloudLayoutPlacement placement;
+                placement.RepeatsPerRegion = repeats;
+                placement.QuarterTurns     = turns;
+                placement.OffsetKm         = offset;
+
+                for ( const glm::vec2& p : probes )
+                    for ( const glm::vec2& step : { glm::vec2( kRegionKm, 0.0f ), glm::vec2( 0.0f, kRegionKm ),
+                                                    glm::vec2( -kRegionKm, kRegionKm ) } )
+                    {
+                        const glm::vec2 here  = CloudLayoutUv( placement, kRegionKm, p );
+                        const glm::vec2 there = CloudLayoutUv( placement, kRegionKm, p + step );
+
+                        // Both must land on the same texel of the painting, which is equality MODULO ONE:
+                        // the table wraps, so a whole number of turns around it is no movement at all.
+                        const glm::vec2 delta = there - here;
+
+                        for ( int axis = 0; axis < 2; ++axis )
+                        {
+                            const double d    = static_cast<double>( delta[axis] );
+                            const double away = std::abs( d - std::round( d ) );
+                            worst             = std::max( worst, away );
+                        }
+                    }
+            }
+
+    std::printf( "[CloudPlacementSpectrum] worst departure from a whole period: %.3e texture units\n", worst );
+
+    // A THOUSANDTH OF A TEXEL AT THE FINEST SETTING, which is what the bound means: at 16 repeats of a 1024
+    // table over 48 km, one texture unit is 3 km and a thousandth of a texel is 3 metres. A cos/sin
+    // rotation at 4000 km is out by far more than that; an exact quarter turn is out by zero.
+    EXPECT_LT( worst, 1.0e-3 ) << "the painting does not repeat with the region — it is out by " << worst
+                               << " of a period, so the modelling volume is no longer periodic and the far "
+                                  "field grows a seam at every region face";
+}
+
+// THE PAINTING REDISTRIBUTES THE SKY RATHER THAN ADDING TO IT, and this is the single relation that keeps
+// decision D-20 true once a layout can be bound.
+//
+// `Coverage` addresses a FRACTION OF SKY directly, and every shipped scene was re-authorised against that
+// mapping (CALIBRATION.md §RW: out by at most 0.019 over five settings). The painted pattern is ON the
+// moment a layout is dropped into the slot, so if it could move the sky's average cover then the slider
+// would quietly stop meaning the sky for every painted layer — and the artist would discover it as "my
+// clouds got thicker when I loaded my picture".
+//
+// What prevents it is one subtraction: the pattern is applied about its OWN MEAN, which the container
+// computes once and carries in its header. Delete `- layout->PatternMean[...]` in
+// Assets::CloudCellCoverage and this goes red.
+TEST( CloudPlacementSpectrum, APaintedPatternRedistributesTheSkyRatherThanAddingToIt )
+{
+    CloudProceduralFieldParams plain = ShippedParams();
+    plain.Coverage                   = 0.5f;
+
+    const double unpainted = SkyCover( plain );
+    ASSERT_GE( unpainted, 0.0 ) << "the unpainted bake failed, so there is nothing to compare against";
+
+    CloudProceduralFieldParams painted = plain;
+    painted.Layout                     = StripeLayout();
+    ASSERT_TRUE( painted.Layout ) << "the fixture painting could not be built";
+
+    // HALF STRENGTH AND NOT FULL, and the reason is that the fixture is the harshest painting there is: a
+    // hard black-and-white stripe. At full strength the lit half asks for twice the slider and the dark
+    // half for none, so both ends CLAMP — and a clamped mean is no longer the mean that was subtracted.
+    // At a half the modulation spans 0.25..0.75 around a slider of 0.5 and nothing clamps, which is what
+    // makes this a measurement of the zero-mean rule rather than of the clamp.
+    painted.LayoutPlacement.PatternStrength = 0.5f;
+
+    const double withPainting = SkyCover( painted );
+    ASSERT_GE( withPainting, 0.0 ) << "the painted bake failed";
+
+    std::printf( "[CloudPlacementSpectrum] sky at Coverage 0.50: %.3f unpainted, %.3f painted (%+.3f)\n",
+                 unpainted, withPainting, withPainting - unpainted );
+
+    EXPECT_NEAR( withPainting, unpainted, 0.10 )
+         << "binding a painting moved the sky's cover by " << std::abs( withPainting - unpainted )
+         << " at the same Coverage. The pattern must be applied about its own mean, or the slider stops "
+            "meaning the fraction of sky it delivers and decision D-20's re-authorisation of every shipped "
+            "scene stops holding for any painted layer";
+
+    // AND THE PAINTING IS NOT INERT, which the assertion above cannot say on its own: a pattern that did
+    // nothing at all would pass it perfectly. The stripe must actually move cloud from one half of the sky
+    // to the other, and the lumps are where that shows.
+    const glm::vec2 origin = CloudProceduralRegionOriginKm( painted, 0.0f, 0.0f );
+
+    const std::vector<CloudModellingBlob> without = GenerateCloudProceduralBlobs( plain, 0u, origin );
+    const std::vector<CloudModellingBlob> with    = GenerateCloudProceduralBlobs( painted, 0u, origin );
+
+    size_t moved = 0;
+    for ( size_t i = 0; i < std::min( without.size(), with.size() ); ++i )
+        if ( without[i].CentreKm != with[i].CentreKm )
+            ++moved;
+
+    EXPECT_TRUE( without.size() != with.size() || moved > 0 )
+         << "the painting changed neither the number of clouds nor where any of them is, so it is a slot an "
+            "artist can fill and never see";
+}
+
+// ONE NUMBER, ONE SOURCE — the rule that keeps the painted pattern and the procedural patch field from
+// both deciding how busy a cell is.
+//
+// Two mechanisms setting one value is the second path §1.3 and §4.2 of the contract forbid, and this is the
+// first time this subsystem has had two candidates for one number. The rule is that the painting wins when
+// it is bound and turned up, and the hash wins otherwise. Asserted from BOTH sides, because only one side
+// would be satisfied by a bug that ignored the painting entirely.
+TEST( CloudPlacementSpectrum, OnlyOneSourceModulatesACellsCoverage )
+{
+    CloudProceduralFieldParams painted = ShippedParams();
+    painted.Layout                     = StripeLayout();
+    ASSERT_TRUE( painted.Layout ) << "the fixture painting could not be built";
+
+    const glm::vec2 origin = CloudProceduralRegionOriginKm( painted, 0.0f, 0.0f );
+
+    const auto centres = []( const std::vector<CloudModellingBlob>& blobs )
+    {
+        std::vector<glm::vec3> out;
+        out.reserve( blobs.size() );
+        for ( const CloudModellingBlob& blob : blobs )
+            out.push_back( blob.CentreKm );
+        return out;
+    };
+
+    // WITH THE PAINTING RULING, the patch field must be unreachable — moving its strength from end to end
+    // cannot move one lump.
+    {
+        CloudProceduralFieldParams quiet = painted;
+        quiet.PatchStrength              = 0.0f;
+
+        CloudProceduralFieldParams loud = painted;
+        loud.PatchStrength              = 1.0f;
+
+        EXPECT_EQ( centres( GenerateCloudProceduralBlobs( quiet, 0u, origin ) ),
+                   centres( GenerateCloudProceduralBlobs( loud, 0u, origin ) ) )
+             << "the procedural patch field still moved clouds while a painting was ruling the sky, so two "
+                "mechanisms are deciding one number and the artist's painting is being argued with";
+    }
+
+    // WITH THE PATTERN TURNED DOWN, the patch field must be back — this end of the slider hands the
+    // decision to the hash rather than to nothing, which is what makes it a live position rather than an
+    // absence of weather.
+    {
+        CloudProceduralFieldParams quiet      = painted;
+        quiet.LayoutPlacement.PatternStrength = 0.0f;
+        quiet.PatchStrength                   = 0.0f;
+
+        CloudProceduralFieldParams loud      = painted;
+        loud.LayoutPlacement.PatternStrength = 0.0f;
+        loud.PatchStrength                   = 1.0f;
+
+        EXPECT_NE( centres( GenerateCloudProceduralBlobs( quiet, 0u, origin ) ),
+                   centres( GenerateCloudProceduralBlobs( loud, 0u, origin ) ) )
+             << "with Layout Pattern Strength at zero the procedural patch field did nothing either, so "
+                "that end of the slider is a sky with no weather in it rather than the procedural sky it is "
+                "documented to be";
+    }
+}
+
+// AN EMPTY SLOT IS THE SKY THAT SHIPPED, AND THE FIVE LAYOUT NUMBERS CANNOT REACH IT.
+//
+// This is the other half of the phase's acceptance criterion, one level below the frame: the six-point
+// protocol says the PICTURE does not move, and this says the PLACEMENT cannot, whatever the layout knobs
+// are set to. It is the cheaper of the two and it is the one that localises a regression — a frame that
+// moved says only that something did.
+TEST( CloudPlacementSpectrum, WithNoPaintingBoundTheLayoutKnobsCannotReachOneCloud )
+{
+    const CloudProceduralFieldParams plain  = ShippedParams();
+    const glm::vec2                  origin = CloudProceduralRegionOriginKm( plain, 0.0f, 0.0f );
+
+    const std::vector<CloudModellingBlob> reference = GenerateCloudProceduralBlobs( plain, 0u, origin );
+    ASSERT_FALSE( reference.empty() ) << "the unpainted layer placed no clouds, so this proves nothing";
+
+    CloudProceduralFieldParams turned       = plain;
+    turned.LayoutPlacement.RepeatsPerRegion = 9u;
+    turned.LayoutPlacement.QuarterTurns     = 3u;
+    turned.LayoutPlacement.OffsetKm         = glm::vec2( 17.5f, -4.25f );
+    turned.LayoutPlacement.PatternStrength  = 0.0f;
+    turned.LayoutPlacement.MaskStrength     = 0.0f;
+
+    const std::vector<CloudModellingBlob> after = GenerateCloudProceduralBlobs( turned, 0u, origin );
+
+    ASSERT_EQ( reference.size(), after.size() )
+         << "the layout knobs changed how many clouds an UNPAINTED layer has, which they must not be able "
+            "to do at all";
+
+    for ( size_t i = 0; i < reference.size(); ++i )
+        ASSERT_EQ( reference[i].CentreKm, after[i].CentreKm )
+             << "lump " << i << " moved when a layout knob was turned on a layer with no painting bound";
+
+    // AND THE CACHE AGREES: turning them must not call for a rebake either, or the editor stalls for
+    // seconds on a slider that provably cannot change a pixel.
+    EXPECT_TRUE( CloudProceduralParamsEqual( plain, turned ) )
+         << "the staleness check wants a rebake of two million voxels for layout knobs on a layer with no "
+            "painting, and the assertions above have just proved the result would be identical";
 }
 
 // The density's ceiling is the bake's cost and is refused rather than survived: the cost is linear in the

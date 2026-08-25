@@ -271,6 +271,54 @@ namespace Desert::Graphic::System
             params.PatchTileKm     = std::max( params.PatchTileKm, 3.0f * std::max( extent.x, extent.y ) );
         }
 
+        // THE PAINTED LAYOUT. Resolved through the service exactly as the cloud types above are, so the
+        // renderer never learns how to read a file and three viewports resolve one asset once.
+        //
+        // THE CLAMPS ARE THE COMPONENT'S OWN RANGES rather than second opinions, for the reason the four
+        // placement numbers state above them: a scene file is a text file, an out-of-range number in one
+        // must produce a sky rather than a refusal, and Assets::ValidateCloudLayoutPlacement refuses
+        // anything outside them by name — so a clamp that disagreed with a range would turn a typo into a
+        // layer that never bakes.
+        params.LayoutPlacement.RepeatsPerRegion =
+             static_cast<uint32_t>( std::clamp( m_Data.LayoutRepeats, 1, 16 ) );
+        params.LayoutPlacement.QuarterTurns = static_cast<uint32_t>( std::clamp( m_Data.LayoutRotation, 0, 3 ) );
+        params.LayoutPlacement.OffsetKm =
+             glm::vec2( m_Data.LayoutOffset.x, m_Data.LayoutOffset.y ) / kCloudWorldUnitsPerKm;
+        params.LayoutPlacement.PatternStrength = std::clamp( m_Data.LayoutPatternStrength, 0.0f, 1.0f );
+        params.LayoutPlacement.MaskStrength    = std::clamp( m_Data.LayoutMaskStrength, 0.0f, 1.0f );
+
+        // A NULL HERE IS THE SHIPPED STATE AND NOT A FAILURE — every scene in this repository carries an
+        // empty slot, and the bake reads null as "there is no painting" and places the sky exactly as it
+        // did before this field existed. A handle that names a layout nobody registered is logged by the
+        // service, once, and also arrives here as null.
+        params.Layout = Runtime::ResourceRegistry::GetCloudLayoutService()->Get( m_Data.CloudLayout );
+
+        // WHEN THE PAINTING CANNOT BE HONOURED IT IS DROPPED, NOT THE SKY. The narrow validator is the one
+        // called here on purpose — handed the whole one, a mistyped patch tile would have dropped the
+        // artist's painting and blamed the painting for it (see ValidateCloudProceduralLayout).
+        //
+        // Said out loud, because a painting that silently stopped applying is the least diagnosable thing
+        // this slot can do — and said ONCE per painting rather than once per frame, because this function
+        // runs every frame and a message at sixty hertz is a log nobody reads.
+        if ( params.Layout )
+        {
+            if ( const auto usable = Assets::ValidateCloudProceduralLayout( params ); !usable )
+            {
+                if ( m_ReportedBadLayoutHash != params.Layout->ContentHash )
+                {
+                    m_ReportedBadLayoutHash = params.Layout->ContentHash;
+                    LOG_ERROR( "[Clouds] The bound cloud layout is not usable and the sky will be placed "
+                               "procedurally instead: {}",
+                               usable.GetError() );
+                }
+                params.Layout = nullptr;
+            }
+            else
+            {
+                m_ReportedBadLayoutHash = 0u;
+            }
+        }
+
         return params;
     }
 

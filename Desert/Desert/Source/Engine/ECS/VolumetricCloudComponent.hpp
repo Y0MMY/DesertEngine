@@ -373,6 +373,106 @@ namespace Desert::ECS
                            "around the sky rather than adding or removing it." ) )
         float PatchStrength = 0.60f;
 
+        // ---- Layout ---------------------------------------------------------------------------------
+        //
+        // WHY THIS CATEGORY EXISTS. The owner asked two questions in one breath: "will we have a cloud
+        // material editor like Unreal's, so I can load noise textures for the cloud shape", and separately,
+        // about the arrangement of clouds in the sky, "is there a parameter to do this by HAND". The first
+        // is refused and stays refused — decision D-5, no material graph — and the second is this.
+        //
+        // They are not the same request. Unreal's `Layout_CloudGlobalPattern` and `Layout_GlobalCloudMask`
+        // are DATA, and data is the one part of that material we can take without taking the graph: the
+        // same formula this programme has already applied three times (`.decloudtype`, `.dcnv`, `.dcmv`) —
+        // Unreal's semantics, our formats. The full account of what Unreal actually does with those
+        // textures, and which half of it is verifiable from engine source at all, is in
+        // Docs/Clouds/RESEARCH_LAYOUT_TEXTURES.md.
+        //
+        // THE THIRD TEXTURE IS DELIBERATELY ABSENT. `Layout_CloudHeightProfile` is a table
+        // `f(altitude, pattern value)` per type, and Unreal needs it because its placement field is two
+        // dimensional and the table is the only vertical structure it has. Ours is geometry — a lump has
+        // three radii and an altitude, and `fill` in Engine/Assets/CloudProceduralVolume.cpp already drives
+        // the stack's vertical band by how deep inside the coverage threshold a cell fell. A painted table
+        // would be a SECOND way to say the same thing (§2.3.1) and would fight the §SIL2 calibration, in
+        // which the lump's aspect and the erosion's strength are one quantity guarded by a test that names
+        // both numbers.
+        //
+        // EVERY FIELD BELOW IS READ AT THE BAKE, like Placement above it and for the same reason: where a
+        // cloud is gets decided once, when the settings change or the region shifts, and never per frame.
+        // The march reads the volume it already read.
+
+        PROPERTY( DisplayName( "Cloud Layout" ), Category( "Layout" ), Summary, Asset<CloudLayoutAsset>,
+                  Tooltip( "A PAINTED sky — drag a .dclayout from the Content Browser. Bake one from a picture "
+                           "with Tools/CloudLayoutBaker. Its four channels say where each of this "
+                           "layer's four cloud type slots lives, and its mask adds or removes cloud in "
+                           "regions you paint. EMPTY IS THE NORMAL STATE: with no layout the sky is placed "
+                           "procedurally exactly as before, and Weather Patch Strength decides which parts "
+                           "of it are busy. The painting is read when the clouds are placed, not while they "
+                           "are drawn, so it costs the frame nothing." ) )
+        // ALL LAYERS SHIP WITH THIS EMPTY, and that is the phase's own acceptance criterion rather than a
+        // convenience: an unpainted sky must render the frame it rendered before this field existed, byte
+        // for byte, at all six points of the protocol. The default is 0 and not the id of a shipped file
+        // for the same reason every other asset default here is — a scene must not depend on a file being
+        // present.
+        Assets::AssetHandle CloudLayout;
+
+        PROPERTY( DisplayName( "Layout Pattern Strength" ), Category( "Layout" ), Range( 0.0f, 1.0f ),
+                  Tooltip( "How strongly the painting decides where clouds are. At 1 the painted pattern "
+                           "rules: bright regions of a channel fill with that slot's kind of cloud and dark "
+                           "ones empty. AT 0 THE PROCEDURAL PATCH FIELD TAKES OVER INSTEAD — the sky goes "
+                           "back to Weather Patch Strength's busy and clear regions, so this end of the "
+                           "slider is a live sky and not an absence of one. The painting is applied about "
+                           "its OWN AVERAGE, so it moves cloud around the sky rather than adding it and "
+                           "Coverage keeps meaning the fraction of sky it delivers." ) )
+        // ONE, so that dropping a painting into the slot shows it. A default of zero would be the safer
+        // number and the worse one: the artist would bind a layout, see nothing at all, and have no way of
+        // telling a slot that is not wired from a slider that is down.
+        float LayoutPatternStrength = 1.0f;
+
+        PROPERTY( DisplayName( "Layout Mask Strength" ), Category( "Layout" ), Range( 0.0f, 1.0f ),
+                  Tooltip( "How hard the painted mask adds and removes cloud. The mask is the layout's "
+                           "alpha: mid-grey changes nothing, brighter adds cloud, darker takes it away. "
+                           "Unlike the pattern it is NOT balanced about its own average — adding cloud "
+                           "where you paint is what it is for — so it does move the sky's total cover. A "
+                           "layout with no mask in it contributes nothing at any setting." ) )
+        // ONE, and it diverges from Epic's own default of zero for a reason their arrangement does not
+        // have: their mask slot always holds a texture (a stub when nobody set one), so a non-zero default
+        // would apply a placeholder to every sky. Ours can be ABSENT, and absent already contributes
+        // nothing — so the default can be the value an artist who painted a mask meant.
+        float LayoutMaskStrength = 1.0f;
+
+        PROPERTY( DisplayName( "Layout Repeats" ), Category( "Layout" ), Range( 1, 16 ),
+                  Tooltip( "How many times the painting repeats across Region Size. At 1 the whole painting "
+                           "covers the region once — 48 km at the default — and at 16 it repeats every 3 "
+                           "km, which is one cloud lattice cell. A WHOLE NUMBER because the sky repeats at "
+                           "Region Size: a painting whose period did not divide it would put a hard seam "
+                           "across every region boundary." ) )
+        // AN INTEGER IS THE RELATION, NOT A CHECK ON ONE. The modelling volume is periodic over the region
+        // and everything past the region is that volume again (Engine/Assets/CloudProceduralVolume.hpp);
+        // the wrap seam is measured at 0.950/255 against 1.239/255 between ordinary neighbours. A painting
+        // sampled on a period that does not divide the region breaks that, and the defect is an order of
+        // magnitude larger than the seam that exists. Expressed as a count of repeats, the divisibility
+        // cannot be stated wrongly — which is the difference between a property of the type and a
+        // validator somebody has to remember (§2.3.1).
+        int32_t LayoutRepeats = 1;
+
+        PROPERTY( DisplayName( "Layout Rotation" ), Category( "Layout" ), Range( 0, 3 ),
+                  Tooltip( "Quarter turns of the painting about the vertical axis: 0, 1, 2 or 3 — that is "
+                           "0, 90, 180 and 270 degrees. Use it to point a painted band north-south instead "
+                           "of east-west without repainting. QUARTER TURNS AND NOT A FREE ANGLE, because "
+                           "only a quarter turn maps the sky's own repeat onto itself; any other angle "
+                           "would put a seam at the distance the sky repeats." ) )
+        // Unreal rotates its layout freely (`Layout_GlobalTexturePlacement.a`) and can afford to: it has no
+        // baked volume to keep in step, because it has no baked volume. The divergence is named here and in
+        // Docs/Clouds/RESEARCH_LAYOUT_TEXTURES.md §2.3, and its bearing input is the measured wrap seam.
+        int32_t LayoutRotation = 0;
+
+        PROPERTY( DisplayName( "Layout Offset" ), Category( "Layout" ), Length,
+                  Tooltip( "Where the painting's origin sits in the world, east and north. Slide it to put "
+                           "a painted feature over a particular place on the ground. Continuous, unlike the "
+                           "rotation — sliding a repeating pattern along its own axis leaves it repeating, "
+                           "so there is nothing here for the sky's own period to disagree with." ) )
+        glm::vec2 LayoutOffset = { 0.0f, 0.0f };
+
         // ---- Detail ---------------------------------------------------------------------------------
         //
         // THE NOISE VOLUME SLOT THAT USED TO STAND BETWEEN Weather AND Detail IS GONE FROM HERE, and it

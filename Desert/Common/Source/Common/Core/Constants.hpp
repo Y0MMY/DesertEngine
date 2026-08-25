@@ -48,6 +48,10 @@ namespace Common::Constants
         // separately so a `.dcmv` can never be offered in a noise slot and a `.dcnv` can never be offered
         // in a hero cloud's.
         inline std::filesystem::path CLOUD_VOLUME_PATH = "Resources/Assets/Clouds/Volumes/";
+        // Painted cloud layouts (`.dclayout`) — where the artist says the weather is. A third subfolder of
+        // Clouds/ for the same reason as the other two: one body of content, scanned separately so a
+        // painting can never be offered in a noise slot, a type slot or a hero cloud's.
+        inline std::filesystem::path CLOUD_LAYOUT_PATH = "Resources/Assets/Clouds/Layouts/";
 
         // --- Cooked / intermediate (generated; PROJECT-owned) ---
         inline std::filesystem::path COOKED_PATH         = "Cooked/";
@@ -76,6 +80,7 @@ namespace Common::Constants
             CLOUD_NOISE_PATH   = assets / "Clouds/";
             CLOUD_TYPE_PATH    = assets / "Clouds/Types/";
             CLOUD_VOLUME_PATH  = assets / "Clouds/Volumes/";
+            CLOUD_LAYOUT_PATH  = assets / "Clouds/Layouts/";
 
             const std::filesystem::path cooked = ( projectDir / "Cooked" ).lexically_normal();
             COOKED_PATH                        = cooked / "";
