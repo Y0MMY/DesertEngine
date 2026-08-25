@@ -431,11 +431,11 @@ B=(Expression="…MaterialExpressionTextureSample'MaterialGraphNode_195…'",Out
   L1352–L1356 в порядке `Altitude`, `AltitudeInLayer`, **`NormAltitudeInLayer`**, `ShadowSampleDistance`;
   `OutputIndex=2` — третий, то есть именно нормированная высота в слое.
 - **V = канал R выборки ПАТТЕРНА РАЗМЕЩЕНИЯ в той же точке.** Узел 195 (`TextureSample_25`, L4474) берёт
-  текстуру из реroute 129 → декларации 128 с именем **`LayoutObject`** (L2913), чей вход —
+  текстуру из reroute 129 → декларации 128 с именем **`LayoutObject`** (L2913), чей вход —
   `TextureObjectParameter` узла 98 = **`Layout_CloudGlobalPattern`** (L2195). Координаты узла 195 —
   `Multiply` узла 198 (L4571–4572): маска компонент узла 76, умноженная на
   **`Layout_CloudPerTypeScale`** (L4443) с маской `.R`.
-- **Выборка профиля — узел 86 / `TextureSample_19`** (L1920–1927): текстура из реroute 104 → декларации
+- **Выборка профиля — узел 86 / `TextureSample_19`** (L1920–1927): текстура из reroute 104 → декларации
   103 с именем **`ProfileObject`** (L2343) ← `TextureObjectParameter` узла 102 =
   **`Layout_CloudHeightProfile`** (L2310). Там же **`MipValueMode=TMVM_MipLevel`, `ConstMipValue=0`** —
   мип принудительно нулевой.
@@ -494,7 +494,7 @@ B=(Expression="…MaterialExpressionTextureSample'MaterialGraphNode_195…'",Out
 - **`Layout_GlobalTexturePlacement`** (L4237) — имена каналов записаны буквально (L4236):
   `Position.X`, `Position.Y`, `Position.Z`, **`SkyTextureRotation`**. Смещение по трём осям плюс поворот.
 - `SkyTexScale` (декларация узла 46, L1050) = `Subtract` узла 185 (L4217–4218): `AppendVector` узла 190
-  минус реroute смещения.
+  минус reroute смещения.
 - **`MaterialExpressionRotator_1` (узел 187, L4269)** — поворот СВОБОДНЫМ углом.
 
 > **Расхождение с эталоном названо точно.** У Epic период раскладки — вещественное число километров

@@ -189,8 +189,8 @@ namespace Desert::Assets
 
     bool CloudLayoutPlacementEqual( const CloudLayoutPlacement& a, const CloudLayoutPlacement& b );
 
-    /// Rejects a placement the bake cannot honour, naming the offending number. Pure, so the panel greys
-    /// out for the same reason the bake refuses rather than the two disagreeing.
+    /// Rejects a placement the bake cannot honour, naming the offending number. Pure, so a caller can refuse for
+    /// the same reason the bake refuses rather than the two disagreeing about what is legal.
     Common::BoolResultStr ValidateCloudLayoutPlacement( const CloudLayoutPlacement& placement );
 
     /// Rejects a decoded layout that cannot be sampled: no resolution, both tables absent, a table whose

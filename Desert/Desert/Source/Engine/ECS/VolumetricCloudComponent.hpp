@@ -401,8 +401,8 @@ namespace Desert::ECS
         // The march reads the volume it already read.
 
         PROPERTY( DisplayName( "Cloud Layout" ), Category( "Layout" ), Summary, Asset<CloudLayoutAsset>,
-                  Tooltip( "A PAINTED sky — drag a .dclayout from the Content Browser, or make one from an "
-                           "image in Window > Cloud Layout. Its four channels say where each of this "
+                  Tooltip( "A PAINTED sky — drag a .dclayout from the Content Browser. Bake one from a picture "
+                           "with Tools/CloudLayoutBaker. Its four channels say where each of this "
                            "layer's four cloud type slots lives, and its mask adds or removes cloud in "
                            "regions you paint. EMPTY IS THE NORMAL STATE: with no layout the sky is placed "
                            "procedurally exactly as before, and Weather Patch Strength decides which parts "
