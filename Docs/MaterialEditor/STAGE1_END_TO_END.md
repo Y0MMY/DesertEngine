@@ -14,6 +14,7 @@ Every claim below has a frame or a log line behind it.
 | `Editor/Resources/Assets/ShaderGraphs/MatBroken.dgraph` | a `vec2` wired into the `vec4` Albedo pin — legal in the file, rejected by the canvas. |
 | `Editor/Resources/Assets/Materials/MP_*.demat` | one material per shader; `MP_BlendMax` / `MP_GreenTint` carry non-default parameter values. |
 | `Editor/Resources/Assets/Scenes/MAT_Probe.desce` | the six-sphere comparison. |
+| `Editor/Resources/Assets/Scenes/MAT_ProbeOverride.desce` | the same shader down both routes: `MaterialComponent` override vs `.demat` slot. |
 | `Editor/Resources/Assets/Scenes/MAT_ProbeBroken.desce` | the broken-shader repro, kept apart because it kills the editor. |
 
 The `.shader` files under `Editor/Resources/Shaders/Programs/Graph/` were produced by
@@ -78,6 +79,30 @@ therefore has no material UB to miss.
 
 The constants shot is the control that makes this a defect in the parameter path specifically and
 not in the generic mesh path.
+
+### The override path is correct, and that is the worst part
+
+`MAT_ProbeOverride.desce` puts the two paths side by side on the **same shader**: two spheres driven
+by a `MaterialComponent` shader override (no material asset), one sphere driven by the `.demat` slot.
+
+* `Docs/MaterialEditor/Shots/MAT_override_ok_slot_black_frame7.png`
+* `Docs/MaterialEditor/Shots/MAT_override_ok_slot_red_frame8.png`
+
+The two override spheres are byte-identical across all twelve frames — defaults and the `Blend`=1
+override both correct, `Lit` shading present, no strobe. The slot sphere alternates black/red on the
+same period 3. One shader, one set of values, two routes, and only one of them works.
+
+The Node Graph panel's existing 128 px preview (`AssetThumbnailRenderer::RequestShader`) clears
+`MaterialSlots` and drives the sphere through `MaterialComponent::ShaderName` — the **override**
+path. So today's preview already shows the artist a correct material while the scene renders it
+black two frames in three. The preview lies, and it lies in the flattering direction. Any live
+preview window built on the thumbnail renderer inherits that lie unless the slot path is fixed
+first.
+
+### Nothing tests this
+
+`grep -rl "DataDrivenMaterial\|SetParamRaw" Desert/Tests` returns nothing. The entire generic
+material parameter path — the one every shader-graph material takes — has no test of any kind.
 
 ## 3. Restart: the shader survives, and the `.demat` does not use a path-derived handle
 
