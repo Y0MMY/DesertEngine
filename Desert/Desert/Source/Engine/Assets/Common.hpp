@@ -43,5 +43,11 @@ namespace Desert::Assets
         // authored producer — the half of the cloud field that can be a shape the procedural one cannot
         // make — see Engine/Assets/CloudModellingVolume.hpp.
         CloudModellingVolume,
+
+        // NOT an asset type: the number of them. Every new type is added ABOVE this line, and adding one
+        // turns the AssetHandleStability census red until the type is entered in that suite's catalogue.
+        // That red is the only reason this enumerator exists: an asset type whose handle stability nobody
+        // asserts is exactly how five types kept a random per-launch identity for as long as they did.
+        Count,
     };
 } // namespace Desert::Assets
