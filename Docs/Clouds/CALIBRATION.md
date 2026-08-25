@@ -4314,6 +4314,18 @@ Ten arms on `PT_Layout_LetterD`, each differing from the shipped scene by ONE fi
 > mean **0.1693** here — can only pull the background down to 0.66 of the slider. Emptying the sky is the
 > mask's job. **The two controls interact, and an artist has to be told so.**
 
+**AND `PT_knob_repeats_high.png` NAMES A LIMIT THE VALIDATOR DOES NOT CHECK.** At 4 repeats the letter's
+world period is 12 km and its stroke is 1.2 km — narrower than the 3.0 km placement cell — so the glyph
+collapses into evenly spaced clumps. It still repeats four times as often, which is what the knob promises
+and what the frame shows; what it stops doing is reading as a letter.
+
+`ValidateCloudProceduralLayout` checks one layout TEXEL against the cell, and that is the right bound for
+"can the painting distinguish two neighbouring cells". **It is not the bound for legibility, which is the
+painting's thinnest STROKE against the cell** — a quantity no validator can measure without knowing what
+the artist drew. Reported rather than guarded, because guessing at a stroke width is exactly the kind of
+opinion about somebody's picture this format refuses to take elsewhere. The knob's ceiling of 16 is
+therefore honest about periods and silent about pictures.
+
 Ten arms produced **five distinct configurations**, so five files are duplicates and are not committed.
 Every "low" arm of repeats, rotation and offset is byte-identical to the shipped letter frame; mask-off is
 byte-identical to pattern-on-mask-off.
