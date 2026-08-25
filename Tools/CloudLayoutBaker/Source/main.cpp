@@ -16,10 +16,11 @@
 //                the protocol is for, and the strongest possible answer to "did the sky follow the
 //                painting" — a hash does not produce a letter.
 //
-// `--image` is the path an artist takes TODAY, and it is the only one: the PNG is read to RGBA8 and handed
-// to Assets::MakeCloudLayoutFromImage. THERE IS NO AUTHORING WINDOW IN THIS PHASE — the Details slot takes
-// a finished `.dclayout` and this is what makes one — and when a window arrives it has to call that same
-// function rather than grow a second reading of what a picture means.
+// `--image` is the path an artist takes, and it is the same path the editor takes: the PNG is read to
+// RGBA8 and handed to exactly the function the Cloud Layout panel calls,
+// Assets::MakeCloudLayoutFromImage. The tool and the panel cannot disagree about what a picture means
+// because there is one function and both call it — which CALIBRATION.md §PTP checks by baking one picture
+// both ways and comparing the files byte for byte.
 //
 // GPU-FREE, ASSET-LAYER-FREE, filesystem only through <fstream>. See the premake file for why that is
 // checked rather than hoped for.
