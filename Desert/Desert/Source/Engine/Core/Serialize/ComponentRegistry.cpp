@@ -15,6 +15,7 @@
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Assets/CloudTypeAsset.hpp>
 #include <Engine/Assets/CloudModellingVolumeAsset.hpp>
+#include <Engine/Assets/CloudLayoutAsset.hpp>
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -271,6 +272,25 @@ namespace Desert::Core::Serialize
                         return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
                     return relStr;
                 }
+                if ( type == "CloudLayoutAsset" )
+                {
+                    auto a = mgr.FindByHandle<Assets::CloudLayoutAsset>( Common::UUID( handle ) );
+                    if ( !a )
+                        return "";
+
+                    // RELATIVE, on exactly the terms the two cloud assets above are relative: a painting is
+                    // content that ships WITH the project, and an absolute path would carry one developer's
+                    // home directory into every scene that names one.
+                    std::error_code ec;
+                    const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
+                                                                     Common::Constants::Path::ASSETS_PATH, ec );
+                    // generic_string() rather than native(): native() is a WIDE string on Windows and a
+                    // narrow one here, so a narrow ".." literal only compiles on this platform.
+                    const auto relStr = rel.generic_string();
+                    if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
+                        return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
+                    return relStr;
+                }
                 if ( type == "FontAsset" )
                 {
                     // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
@@ -390,6 +410,28 @@ namespace Desert::Core::Serialize
                          !registered )
                         LOG_ERROR( "[Clouds] Cloud modelling volume '{}' named by the scene could not be "
                                    "uploaded: {}",
+                                   full.string(), registered.GetError() );
+                    return static_cast<uint64_t>( a->GetMetadata().Handle );
+                }
+                if ( type == "CloudLayoutAsset" )
+                {
+                    // Both forms accepted, for the reason the cloud type's branch gives above.
+                    const std::filesystem::path named( path );
+                    const std::filesystem::path full =
+                         named.is_absolute() ? named
+                                             : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+
+                    auto a = mgr.FindByPath<Assets::CloudLayoutAsset>( full );
+                    if ( !a )
+                        a = m.CreateAsset<Assets::CloudLayoutAsset>( Assets::AssetPriority::Medium, full );
+                    if ( !a )
+                        return 0;
+                    if ( !a->IsReadyForUse() && !a->Load() )
+                        return 0;
+                    if ( const auto registered =
+                              Runtime::ResourceRegistry::GetCloudLayoutService()->Register( a );
+                         !registered )
+                        LOG_ERROR( "[Clouds] Cloud layout '{}' named by the scene could not be registered: {}",
                                    full.string(), registered.GetError() );
                     return static_cast<uint64_t>( a->GetMetadata().Handle );
                 }
