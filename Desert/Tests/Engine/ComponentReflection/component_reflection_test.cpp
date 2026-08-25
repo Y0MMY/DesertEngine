@@ -590,10 +590,19 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     // 12 km, the other half of the calibrated pair.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "WeatherTileSize" ), 1200000.0f );
 
-    // Detail: the erosion is an order of magnitude weaker than the shape it cuts into, which is UE's own
-    // ratio (base noise 0.8 against detail 0.08). At 0.5 it removed most of the layer and left a veil.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailTileSize" ), 400000.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailStrength" ), 0.1f );
+    // Detail: BOTH of these are relations rather than tastes, and both were re-measured after phase Э5
+    // moved the producer under them (Desert/Tests/Engine/CloudField owns the measurements and asserts the
+    // relations; what is pinned here is only that the shipped numbers are the ones it measured).
+    //
+    // The tile is one kilometre because the erosion's wave has to be SHORTER than a cloud — at the four
+    // kilometres this used to carry, one wave spanned 0.83 of a body and scaled it instead of texturing
+    // it — and LONGER than the march's 125 m resolvable chord, which half a kilometre already is not.
+    //
+    // The strength is 0.40 because it is the SMALLEST value at which the cut moves the surface the eye
+    // sees by more than the 125 m the march can find — below it the erosion carves structure finer than
+    // the renderer represents, and above it every step costs cloud for a gain nothing has measured.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailTileSize" ), 100000.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailStrength" ), 0.40f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DensityScale" ), 1.0f );
     // The EFFECTIVE extinction of a three-octave approximation, not the ~45/km of real cloud: at the
     // physical value every scattering order arrives at zero and the cloud renders uniformly grey.

@@ -25,6 +25,10 @@
 #include <Engine/Assets/CloudTypeData.hpp>
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 
+// The LAYER's Detail Strength, for the one relation that is between the library and the layer: the cut's
+// depth is their product and it is clamped. PROPERTY expands to nothing, so this costs no reflection.
+#include <Engine/ECS/VolumetricCloudComponent.hpp>
+
 #include <Common/Core/Constants.hpp>
 
 #include <gtest/gtest.h>
@@ -842,6 +846,104 @@ TEST( CloudTypeLibrary, LoweringMaxStepsBuysCoarserCloudsRatherThanSpeckle )
                      "type clears it\n",
                      maxSteps, chordKm * 1000.0f );
     }
+}
+
+
+// ---------------------------------------------------------------------------------------------------
+// THE LIBRARY AGAINST THE LAYER'S EROSION SLIDER — task DS, 2026-08-24
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CloudTypeLibrary, TheLayersDetailStrengthStillMovesEveryShippedType )
+{
+    // THE RELATION. The depth of the erosion's cut is `clamp(DetailStrength * DetailFactor, 0, 1)` — the
+    // layer's slider times the TYPE's own multiplier, formed per sample in Common/CloudField.glslh because
+    // one product formed on the CPU could only describe one kind of cloud. That clamp is not decoration:
+    // the erosion is subtracted from a profile that lives in [0, 1] and a depth above 1 would collapse the
+    // remap's window.
+    //
+    // WHAT IT COSTS WHEN IT CLOSES. A type whose product has reached 1 stops responding to the layer's
+    // slider ALTOGETHER: the artist drags Detail Strength and that type does not change. This programme
+    // calls a control that moves nothing a TODO wearing a feature's clothes (contract §1.3), and here it
+    // would be a control that moves eight types out of nine.
+    //
+    // WHY IT IS ASSERTED HERE AND NOT ON THE COMPONENT. The bound is a property of the LIBRARY — of the
+    // largest DetailFactor anyone shipped — and the library is nine files on disk. This suite is the one
+    // that opens them. The component's own default is read rather than transcribed, so the two sides of
+    // the relation are the two real ones.
+    //
+    // AND THERE IS A SECOND, TIGHTER BOUND THAN THE CLAMP, MEASURED ON THE FRAME. A type does not have to
+    // reach the clamp to be ruined by the erosion; a THIN type dissolves well before it. Task DS raised
+    // the layer's Detail Strength from 0.10 to 0.40 — for the march's sake, see the component — and shot
+    // every type against a CLOUDLESS frame at the same camera to measure what survived:
+    //
+    //     type          factor   effective cut   its contribution to the frame, as a share of un-eroded
+    //     cirrus         2.50    0.25 -> 1.00    33.3 %  ->  4.3 %
+    //     altocumulus    1.60    0.16 -> 0.64    51.5 %  ->  7.5 %
+    //
+    // Both were authored against a layer of 0.10 and both are half the density of a cumulus, so the same
+    // arithmetic that gives a congestus an edge deletes them. Their factors were re-based — 0.625 and
+    // 0.40 — which restores their effective cut to what their files were authored at, EXACTLY.
+    //
+    // So the bound asserted below is the reference type's own cut: no type may be cut DEEPER than the
+    // congestus whose factor is 1 by definition, because past that depth the measurement says a thin body
+    // stops being a cloud. A type that genuinely wants a deeper cut needs the density to carry it, and
+    // that is content work with its own frames.
+    const Desert::ECS::VolumetricCloudData layer;
+
+    float       largestFactor = 0.0f;
+    const char* largestName   = "";
+
+    for ( const char* name : { kCloudTypeStratus, kCloudTypeCumulusHumilis, kCloudTypeCumulusMediocris,
+                               kCloudTypeCumulusCongestus, kCloudTypeCumulonimbus, kCloudTypeStratocumulus,
+                               kCloudTypeAltocumulus, kCloudTypeCirrus, kCloudTypeLenticular } )
+    {
+        const CloudTypeData data = LoadShipped( name );
+
+        const float depth = layer.DetailStrength * data.Shape.DetailFactor;
+
+        std::printf( "[CloudTypeLibrary] %-18s detail factor %.2f -> cut depth %.3f at the layer's %.2f\n",
+                     name, data.Shape.DetailFactor, depth, layer.DetailStrength );
+
+        if ( data.Shape.DetailFactor > largestFactor )
+        {
+            largestFactor = data.Shape.DetailFactor;
+            largestName   = name;
+        }
+
+        EXPECT_LE( depth, 1.0f )
+             << name << " has a detail factor of " << data.Shape.DetailFactor
+             << ", which at the layer's shipped Detail Strength of " << layer.DetailStrength
+             << " gives a cut depth of " << depth
+             << " — past the clamp in Common/CloudField.glslh, so the layer's slider moves this type by "
+                "nothing at all from here upward";
+
+        // AND THE OTHER END: a factor of zero is a type that ignores the slider in the other direction.
+        // The lenticular's 0.15 is the smallest shipped and is deliberate — a lens has to stay a lens —
+        // but zero would be a type nobody can erode, which is what Detail Factor 0 is FOR and is
+        // therefore allowed. What is asserted is only that the shipped library does not do it by accident.
+        EXPECT_GT( data.Shape.DetailFactor, 0.0f )
+             << name << " cannot be eroded at all, which is a smooth silhouette however the layer is set";
+
+        // THE MEASURED BOUND. The reference type's factor is 1 by definition, so this says "no shipped
+        // type is cut deeper than the reference". At 1.6 and 2.5 the frames measured 7.5 % and 4.3 % of
+        // the type left in the picture — a type that is gone is not a wispy type.
+        EXPECT_LE( data.Shape.DetailFactor, 1.0f )
+             << name << " is cut " << data.Shape.DetailFactor
+             << " times as deep as the reference congestus. Measured on the frame, a factor above 1 at the "
+                "shipped Detail Strength dissolves a thin type rather than shredding it: the cirrus at 2.5 "
+                "kept 4.3 % of its contribution to the picture and the altocumulus at 1.6 kept 7.5 %";
+    }
+
+    std::printf( "[CloudTypeLibrary] the largest factor shipped is %s at %.2f, which fixes the layer's "
+                 "Detail Strength ceiling at %.3f\n",
+                 largestName, largestFactor, 1.0f / largestFactor );
+
+    // Stated the other way round, so the failure names the ceiling rather than the type: the shipped
+    // Detail Strength may not exceed the reciprocal of the largest factor anyone authored.
+    EXPECT_LE( layer.DetailStrength, 1.0f / largestFactor )
+         << "the layer's Detail Strength of " << layer.DetailStrength << " is above the " << 1.0f / largestFactor
+         << " that the library's largest Detail Factor (" << largestName << " at " << largestFactor
+         << ") leaves room for";
 }
 
 int main( int argc, char** argv )

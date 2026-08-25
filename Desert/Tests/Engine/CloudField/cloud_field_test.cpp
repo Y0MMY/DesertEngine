@@ -30,6 +30,11 @@
 
 #include "CloudFieldReference.hpp"
 
+// The LAYER's two erosion settings are the component's, and this suite is where their justification is
+// measured — so they are read from the component rather than transcribed. PROPERTY expands to nothing, so
+// this costs the suite no reflection and no registry.
+#include <Engine/ECS/VolumetricCloudComponent.hpp>
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -82,8 +87,10 @@ namespace
     }
 
     // The component's defaults, converted to the kilometres this header works in exactly as
-    // Graphic::PackCloudParams converts them. Written out rather than read from the component because
-    // ComponentReflection owns the defaults; what this suite owns is what they PRODUCE.
+    // Graphic::PackCloudParams converts them. The two EROSION settings are read from the component and no
+    // longer transcribed, because this suite is where their justification is measured — a copy would be a
+    // second statement of a number whose only argument is the assertions at the bottom of this file.
+    // ComponentReflection still owns the census of defaults; what this suite owns is what they PRODUCE.
     //
     // COVERAGE AND ITS CONTRAST ARE NOT FIELDS OF THIS STRUCT ANY MORE. They decide what is IN the
     // modelling volume, so they are arguments to the bake and reach the seam through the bytes rather
@@ -92,9 +99,15 @@ namespace
     {
         const CloudTypeShape& shape = DefaultShape();
 
+        // THE COMPONENT'S OWN TWO, read rather than copied. Both are calibrated against things this suite
+        // MEASURES — the erosion's wave against a body's chord, the cut's depth against the surface the
+        // eye sees — so a copy here would be a second statement of a number whose whole justification
+        // lives in the assertions below it.
+        const Desert::ECS::VolumetricCloudData shipped;
+
         CloudFieldParams params;
-        params.DetailTileKm   = 4.0f; // Detail Tile Size 400 000 cm
-        params.DetailStrength = 0.1f; // Detail Strength
+        params.DetailTileKm   = shipped.DetailTileSize / 100000.0f; // centimetres to kilometres
+        params.DetailStrength = shipped.DetailStrength;
         // THE LAYER'S OWN SCALES, WITHOUT THE SPECIES' FACTORS IN THEM, which is where T3 moved the
         // product: with four kinds of cloud in one shell the multiply cannot be done once, so it happens
         // at the sample and the factor rides in CloudFieldSample.
@@ -820,6 +833,428 @@ TEST( CloudFieldSpecies, AnEmptySetStillHasASkyAndAnUnfilledSlotCostsNothing )
             EXPECT_FLOAT_EQ( volume.w, 0.0f ) << "an unwritten channel is not zero";
         }
     }
+}
+
+
+// ---------------------------------------------------------------------------------------------------
+// THE EROSION AGAINST WHAT IT CUTS INTO — task DS, 2026-08-24
+// ---------------------------------------------------------------------------------------------------
+//
+// WHY THIS SECTION EXISTS. `Detail Strength` had stood at 0.10 since phase T2b and `Detail Tile Size` at
+// four kilometres since before that, and every frame this subsystem has ever produced reads as smooth.
+// The suspicion was that phase Э5 had moved the numbers' carrying input — that the profile used to be low
+// almost everywhere so a shallow cut sufficed, and that the normalised distance field is high inside
+// bodies so the same cut does nothing.
+//
+// MEASURED ON BOTH PRODUCERS, THAT IS BACKWARDS. The pre-Э5 field carried 60.8 % of its profile MASS
+// above 0.9 against this one's 20.7 %, and at 0.10 the erosion removed 1.7 % of the old field's mass
+// against 7.1 % of this one's. The cut got four times STRONGER when the producer changed. The old frame
+// is as smooth as the new one (`Docs/Clouds/Shots/E5a_before_mid_away.png`), which is the same finding
+// arrived at from the picture.
+//
+// WHAT WAS ACTUALLY WRONG is a relation of the family this programme has been bitten by four times —
+// "what is placed against what can resolve it" — and it had been wrong on BOTH producers:
+//
+//     the erosion's own wavelength, 884 m at the four-kilometre tile
+//     against a body's own chord,   1071 m
+//
+// One wave across a whole cloud. A field that is nearly constant over a body cannot cut billows into it;
+// it makes that body slightly larger on one side and slightly smaller on the other, which is a smooth
+// blob of a different size. The three assertions below are that relation and its two ends.
+
+namespace
+{
+    // The erosion's own noise term, mirrored from CloudSampleDensity so that a sweep over the strength
+    // costs one walk of the field rather than one per setting. It is VERIFIED against the source rather
+    // than trusted — TheMirrorOfTheErosionAgreesWithTheShader is the first test below, and every other
+    // test in this section rests on it.
+    float ErosionNoiseAt( const CloudFieldParams& params, const CloudFieldSample& field, vec3 positionKm )
+    {
+        const vec3 windPos( positionKm.x - params.WindOffsetKm.x, positionKm.y - params.WindOffsetKm.y,
+                            positionKm.z - params.WindOffsetKm.z );
+
+        const float tile = std::max( params.DetailTileKm, 1e-4f );
+        const vec3  detailPos( windPos.x * CLOUD_DETAIL_FREQ_X / tile, windPos.y * CLOUD_DETAIL_FREQ_Y / tile,
+                               windPos.z * CLOUD_DETAIL_FREQ_Z / tile );
+
+        const vec4 noise = CLOUD_SAMPLE_NOISE( detailPos );
+
+        const float wispy   = glm::mix( noise.x, noise.y, field.Profile );
+        const float billowy = glm::mix( noise.z, noise.w, std::pow( field.Profile, 0.25f ) );
+
+        return glm::clamp( glm::mix( wispy, billowy, glm::clamp( field.DetailType, 0.0f, 1.0f ) ), 0.0f, 1.0f );
+    }
+
+    /// The eroded density from the pair, at an EFFECTIVE depth t = clamp(strength * the type's factor).
+    float ErodedDensity( float profile, float erosionNoise, float t )
+    {
+        const float erosion = erosionNoise * t * ( 1.0f - profile );
+        return glm::clamp( ( profile - erosion ) / std::max( 1.0f - erosion, 1e-6f ), 0.0f, 1.0f );
+    }
+
+    /// The finest chord the march is relied on to FIND, metres. Every bound in this section is stated
+    /// against it rather than against a constant, so lowering Max Steps moves the bound with it.
+    double MarchResolvableM()
+    {
+        return Desert::Graphic::CloudFinestResolvableChordKm( 256.0f ) * 1000.0;
+    }
+
+    /// The coverage `Clouds_Demo` and the other shipped cloud scenes are authored at. The calibration
+    /// below is for the shipped sky, so it is measured on the shipped sky.
+    constexpr float kShippedCoverage = 0.762f;
+} // namespace
+
+TEST( CloudFieldErosion, TheMirrorOfTheErosionAgreesWithTheShader )
+{
+    // The two tests after this one sweep the erosion over ONE walk of the field, which is only legitimate
+    // while ErosionNoiseAt is the shader's own expression. This is the line that fails the day the
+    // composite in Common/CloudField.glslh changes and the mirror does not.
+    //
+    // IT SWEEPS THE DETAIL CHARACTER, AND THAT IS NOT THOROUGHNESS — IT IS A HOLE THAT WAS FOUND BY
+    // BREAKING IT. The composite mixes a WISPY pair and a BILLOWY pair and then blends the two on
+    // DetailType. The built-in congestus this suite's fixture is built on has a DetailCharacter of 1.00,
+    // which is the billowy end EXACTLY: at that value the wispy pair's own frequency blend multiplies out
+    // of the expression entirely. Reversing `mix(noise.x, noise.y, Profile)` to
+    // `mix(noise.y, noise.x, Profile)` in the shader left this whole suite GREEN — two of the volume's
+    // four channels were never read by any assertion in the programme. Sweeping the character is what
+    // makes the mirror a mirror of the composite rather than of half of it.
+    CloudFieldParams params = ParamsAtCoverage( kShippedCoverage );
+    params.DetailStrength   = 1.0f;
+
+    const float envelopeKm = EnvelopeThicknessKm( DefaultShape() );
+
+    int    checked = 0;
+    double worst   = 0.0;
+
+    for ( const float character : { 0.0f, 0.35f, 0.7f, 1.0f } )
+        for ( int iz = 0; iz < 12; ++iz )
+            for ( int ix = 0; ix < 12; ++ix )
+                for ( int ih = 0; ih < 8; ++ih )
+                {
+                    const float fraction = ( ih + 0.5f ) / 8.0f;
+                    const vec3  at( OriginKm().x + PeriodKm() * ( ix + 0.5f ) / 12.0f, fraction * envelopeKm,
+                                    OriginKm().y + PeriodKm() * ( iz + 0.5f ) / 12.0f );
+
+                    CloudFieldSample field = SampleCloudField( params, fraction, at );
+                    if ( field.Profile <= 0.0f )
+                        continue;
+
+                    field.DensityScale = 1.0f;
+                    field.DetailFactor = 1.0f;
+                    field.DetailType   = character;
+
+                    const float fromShader = CloudSampleDensity( params, field, at );
+                    const float fromMirror =
+                         ErodedDensity( field.Profile, ErosionNoiseAt( params, field, at ), 1.0f );
+
+                    worst = std::max( worst, static_cast<double>( std::abs( fromShader - fromMirror ) ) );
+                    ++checked;
+                }
+
+    std::printf( "[CloudFieldErosion] mirror checked at %d samples, worst disagreement %.3e\n", checked,
+                 worst );
+
+    EXPECT_GT( checked, 100 ) << "the fixture put no cloud in front of the mirror, so it checked nothing";
+    EXPECT_LT( worst, 1e-6 ) << "the erosion mirror and Common/CloudField.glslh disagree, so every sweep "
+                                "below is a sweep of something else";
+}
+
+TEST( CloudFieldErosion, TheErosionsWaveIsShorterThanABodyAndCoarserThanTheMarchsOwnChord )
+{
+    // THE RELATION, AND IT IS TWO-SIDED.
+    //
+    //   ABOVE, by the body. An erosion whose wavelength is as long as a cloud has ONE wave across that
+    //   cloud and cannot texture it — it scales it. This is what shipped for two phases: 884 m of wave
+    //   against a 1071 m chord, and it is why no setting of Detail Strength ever produced an edge.
+    //
+    //   BELOW, by the march. Structure finer than CloudFinestResolvableChordKm is structure whose
+    //   sampling is decided by the ray's jitter, which is the definition of dither in this programme. At
+    //   half a kilometre of tile the wave is 119 m against a 125 m chord and is already past it.
+    //
+    // The window between the two is narrow and the shipped tile sits in it. If this fails, either the
+    // generator's bodies changed size or the tile was moved out of the window.
+    CloudFieldParams params     = ParamsAtCoverage( kShippedCoverage );
+    const float      envelopeKm = EnvelopeThicknessKm( DefaultShape() );
+
+    const float stepKm = 0.015625f; // a quarter of the march's 62.5 m search step
+
+    std::vector<float> bodyChords;
+    std::vector<float> erosionHalfWaves;
+
+    constexpr int kLines = 64;
+
+    for ( int line = 0; line < kLines; ++line )
+    {
+        const float z        = OriginKm().y + PeriodKm() * ( line + 0.5f ) / kLines;
+        const float fraction = 0.25f + 0.5f * ( ( line * 7 ) % kLines ) / static_cast<float>( kLines );
+        const float y        = fraction * envelopeKm;
+
+        float bodyRun    = 0.0f;
+        float erosionRun = 0.0f;
+        bool  wasBody    = false;
+        bool  wasHigh    = false;
+
+        for ( float x = OriginKm().x; x < OriginKm().x + PeriodKm(); x += stepKm )
+        {
+            const CloudFieldSample field = SampleCloudField( params, fraction, vec3( x, y, z ) );
+
+            const bool body = field.Profile > 0.5f;
+            if ( body )
+                bodyRun += stepKm;
+            else if ( wasBody )
+            {
+                bodyChords.push_back( bodyRun );
+                bodyRun = 0.0f;
+            }
+            wasBody = body;
+
+            // The erosion field is defined everywhere, so it is walked on its own terms: a run above its
+            // own midpoint is one half-wave. It is read at the depth the eye sees a cloud at, because the
+            // composite blends its two octaves ON the profile and the wavelength therefore depends on it.
+            CloudFieldSample probe = field;
+            probe.Profile          = 0.694f;
+            probe.DetailType       = DefaultShape().DetailCharacter;
+
+            const bool high = ErosionNoiseAt( params, probe, vec3( x, y, z ) ) > 0.5f;
+            if ( high )
+                erosionRun += stepKm;
+            else if ( wasHigh )
+            {
+                erosionHalfWaves.push_back( erosionRun );
+                erosionRun = 0.0f;
+            }
+            wasHigh = high;
+        }
+    }
+
+    auto meanM = []( const std::vector<float>& values )
+    {
+        double sum = 0.0;
+        for ( float value : values )
+            sum += value;
+        return values.empty() ? 0.0 : sum / values.size() * 1000.0;
+    };
+
+    ASSERT_FALSE( bodyChords.empty() ) << "the fixture put no bodies in the volume to measure";
+    ASSERT_FALSE( erosionHalfWaves.empty() ) << "the erosion field never crossed its own midpoint";
+
+    const double bodyM  = meanM( bodyChords );
+    const double waveM  = 2.0 * meanM( erosionHalfWaves );
+    const double chordM = MarchResolvableM();
+
+    std::printf( "[CloudFieldErosion] tile %.2f km: erosion wave %.0f m against a body chord of %.0f m "
+                 "(%.2f of it) and the march's %.0f m (%.2fx)\n",
+                 params.DetailTileKm, waveM, bodyM, waveM / bodyM, chordM, waveM / chordM );
+
+    EXPECT_LE( waveM, 0.5 * bodyM )
+         << "the erosion's wave is " << waveM << " m against a body chord of " << bodyM
+         << " m, so there is not even one full wave across half a cloud — the erosion scales the body "
+            "instead of texturing it, and no setting of Detail Strength can produce an edge";
+
+    EXPECT_GE( waveM, chordM )
+         << "the erosion's wave is " << waveM << " m against the " << chordM
+         << " m the march can be relied on to find, so whether a wisp is sampled at all is decided by the "
+            "ray's jitter and it reads as dither";
+}
+
+TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatingTheBody )
+{
+    // MEASURED, NOT DERIVED. For every column: the altitude at which the optical depth of a ray coming up
+    // from below first reaches 1 — the depth at which the cloud becomes opaque, which is where the eye
+    // puts its surface — with the erosion on and with it off. The DIFFERENCE is what the erosion buys.
+    //
+    // THE TWO ENDS OF THE ANSWER:
+    //
+    //   IT HAS TO MOVE THE SURFACE BY MORE THAN THE MARCH CAN RESOLVE, or the structure it carves is
+    //   below the scale the renderer represents and the setting is a fetch that changes nothing. At the
+    //   0.10 this replaces the travel was 54 m against a 125 m chord — under half of it.
+    //
+    //   AND IT MUST NOT DISSOLVE THE LAYER. A column that was opaque and stops being opaque is a hole in
+    //   the deck; that is the "translucent veil" this parameter was first lowered to escape.
+    //
+    // A NUMBER THIS TEST PRINTS AND DOES NOT ASSERT, because the next calibration needs it: the surface
+    // sits at a PROFILE of about 0.69, so the erosion's own (1 - Profile) weight throttles the cut to
+    // about 31 % of its nominal depth exactly where the eye is looking. That ceiling is why no setting of
+    // this slider produces a shredded silhouette, it predates phase Э5, and moving it is a design change
+    // rather than a calibration.
+    CloudFieldParams params     = ParamsAtCoverage( kShippedCoverage );
+    const float      envelopeKm = EnvelopeThicknessKm( DefaultShape() );
+
+    // WHAT A RAY ACTUALLY INTEGRATES, and it is a product of THREE numbers rather than one: the layer's
+    // Extinction Scale, the type's own extinction factor, and the type's DENSITY factor — because the
+    // density the march multiplies the extinction by is the eroded profile times that factor. Leaving the
+    // density out puts the surface a decile deeper than the frame does, which moves every number below it.
+    const float extinctionPerKm =
+         kExtinctionPerKm * DefaultShape().ExtinctionFactor * DefaultShape().DensityFactor;
+
+    constexpr int kColumns = 48;
+    constexpr int kLevels  = 240;
+
+    const float stepKm = envelopeKm / kLevels;
+
+    struct Column
+    {
+        std::vector<float> Profile;
+        std::vector<float> Noise;
+    };
+
+    std::vector<Column> columns;
+    columns.reserve( kColumns * kColumns );
+
+    for ( int iz = 0; iz < kColumns; ++iz )
+        for ( int ix = 0; ix < kColumns; ++ix )
+        {
+            const float x = OriginKm().x + PeriodKm() * ( ix + 0.5f ) / kColumns;
+            const float z = OriginKm().y + PeriodKm() * ( iz + 0.5f ) / kColumns;
+
+            Column column;
+            column.Profile.assign( kLevels, 0.0f );
+            column.Noise.assign( kLevels, 0.0f );
+
+            for ( int ih = 0; ih < kLevels; ++ih )
+            {
+                const float fraction = ( ih + 0.5f ) / kLevels;
+                const vec3  at( x, fraction * envelopeKm, z );
+
+                const CloudFieldSample field = SampleCloudField( params, fraction, at );
+                if ( field.Profile <= 0.0f )
+                    continue;
+
+                column.Profile[ih] = field.Profile;
+                column.Noise[ih]   = ErosionNoiseAt( params, field, at );
+            }
+            columns.push_back( std::move( column ) );
+        }
+
+    // Where the column becomes opaque, as an altitude in kilometres; negative when it never does.
+    auto surfaceKm = [&]( const Column& column, float t )
+    {
+        double opticalDepth = 0.0;
+        for ( int ih = kLevels - 1; ih >= 0; --ih )
+        {
+            if ( column.Profile[ih] <= 0.0f )
+                continue;
+
+            opticalDepth += static_cast<double>( ErodedDensity( column.Profile[ih], column.Noise[ih], t ) ) *
+                            extinctionPerKm * stepKm;
+
+            if ( opticalDepth >= 1.0 )
+                return ( ih + 0.5f ) / kLevels * envelopeKm;
+        }
+        return -1.0f;
+    };
+
+    double sumProfileAtSurface = 0.0;
+    long   surfaces            = 0;
+
+    std::vector<float> reference;
+    reference.reserve( columns.size() );
+
+    for ( const Column& column : columns )
+    {
+        reference.push_back( surfaceKm( column, 0.0f ) );
+
+        // The profile AT that surface, which is what decides how much of the cut ever reaches the eye.
+        double opticalDepth = 0.0;
+        for ( int ih = kLevels - 1; ih >= 0; --ih )
+        {
+            if ( column.Profile[ih] <= 0.0f )
+                continue;
+
+            opticalDepth += static_cast<double>( column.Profile[ih] ) * extinctionPerKm * stepKm;
+            if ( opticalDepth >= 1.0 )
+            {
+                sumProfileAtSurface += column.Profile[ih];
+                ++surfaces;
+                break;
+            }
+        }
+    }
+
+    ASSERT_GT( surfaces, 0 ) << "no column in the fixture ever became opaque, so there is no surface to move";
+
+    const Desert::ECS::VolumetricCloudData shipped;
+
+    // The travel at a given strength, and how much of the deck it dissolved getting there.
+    auto measure = [&]( float t )
+    {
+        long   opaque = 0;
+        long   lost   = 0;
+        double travel = 0.0;
+
+        for ( size_t i = 0; i < columns.size(); ++i )
+        {
+            if ( reference[i] < 0.0f )
+                continue;
+
+            ++opaque;
+
+            const float moved = surfaceKm( columns[i], t );
+            if ( moved < 0.0f )
+            {
+                ++lost;
+                continue;
+            }
+            travel += ( reference[i] - moved ) * 1000.0;
+        }
+
+        struct Result
+        {
+            double TravelM;
+            double LostShare;
+            long   Opaque;
+        };
+        return Result{ opaque > lost ? travel / static_cast<double>( opaque - lost ) : 0.0,
+                       static_cast<double>( lost ) / static_cast<double>( opaque ), opaque };
+    };
+
+    const auto shippedResult = measure( shipped.DetailStrength );
+
+    ASSERT_GT( shippedResult.Opaque, 0 ) << "no column was opaque without the erosion";
+
+    const double meanTravelM = shippedResult.TravelM;
+    const double lostShare   = shippedResult.LostShare;
+
+    std::printf( "[CloudFieldErosion] the surface sits at profile %.3f; at strength %.2f it travels %.0f m "
+                 "(the march resolves %.0f m) and %.3f of the opaque columns stop being opaque\n",
+                 sumProfileAtSurface / surfaces, shipped.DetailStrength, meanTravelM, MarchResolvableM(),
+                 lostShare );
+
+    EXPECT_GE( meanTravelM, MarchResolvableM() )
+         << "at the shipped Detail Strength the erosion moves the surface the eye sees by " << meanTravelM
+         << " m, which is under the " << MarchResolvableM()
+         << " m the march can resolve — the cut is finer than the renderer can represent, so it costs a "
+            "fetch and changes nothing a viewer can see";
+
+    EXPECT_LE( lostShare, 0.15 ) << "the erosion dissolved " << lostShare * 100.0
+                                 << "% of the columns that were opaque without it, which is the "
+                                    "translucent veil this parameter was first lowered to escape";
+
+    // WHERE THE FLOOR ACTUALLY IS, printed so that the shipped value can be read against it rather than
+    // taken on trust. This is the sweep the calibration was chosen from.
+    std::printf( "[CloudFieldErosion]  strength   travel (m)   dissolved\n" );
+    for ( const float t : { 0.10f, 0.20f, 0.30f, 0.35f, 0.40f, 0.50f, 0.80f, 1.00f } )
+    {
+        const auto row = measure( t );
+        std::printf( "[CloudFieldErosion]    %.2f       %6.1f       %.3f\n", t, row.TravelM, row.LostShare );
+    }
+
+    // AND THE OTHER END OF THE SHIPPED VALUE, which is otherwise a number nobody can check: the floor
+    // above is cleared by 0.35 and by 1.00 alike, and every step above it costs cloud for a gain nothing
+    // has measured a need for.
+    //
+    // THIS BOUND IS A CONVENTION AND IS LABELLED AS ONE, because the honest answer is that the floor does
+    // not fix the value on its own. The measured floor is 125 m of travel; 0.35 clears it by ONE metre and
+    // 0.40 by fourteen, and a default is set with headroom over its floor rather than balanced on it — a
+    // one-per-cent margin would make this suite fail on any change to the generator that moved a body by a
+    // voxel. So the shipped value is the first step with real headroom, and what is asserted is that it
+    // stays within an octave of its own floor. A sabotage that raises Detail Strength and changes nothing
+    // else is caught here and nowhere else.
+    EXPECT_LE( meanTravelM, 2.0 * MarchResolvableM() )
+         << "the shipped Detail Strength moves the surface by " << meanTravelM
+         << " m, more than twice the " << MarchResolvableM()
+         << " m floor that chose it — the value has drifted a long way above the bound that justifies it, "
+            "and every step of that costs cloud for a gain nothing has measured";
 }
 
 int main( int argc, char** argv )
