@@ -126,6 +126,36 @@ struct CloudFieldParams
 #define CLOUD_DETAIL_FREQ_Y 0.833f // 25 / 30 — BELOW one: this octave is stretched upward
 #define CLOUD_DETAIL_FREQ_Z 1.333f // 40 / 30
 
+// THE CEILING ON THE THREE MATERIAL FACTORS, and it is here because a `max(x, 0)` is only half a bound.
+//
+// Detail Factor, Density Factor and Extinction Factor all reach this file as a multiplier on a LAYER
+// slider, and every one of those products is written `slider * factor`. A slider at zero is not an edge
+// case — it is the position the artist is invited to use, and the whole of
+// CloudFieldDensity.AtZeroStrengthTheProfileSurvivesUntouched exists to assert that turning the erosion
+// off works. But `0 * (+inf)` is NaN, not zero, and a NaN density is the one value the march cannot
+// survive: it propagates into the optical depth, from there into the transmittance, and shows as a black
+// or fully transparent hole in the cloud with nothing in the log.
+//
+// A lower bound alone does not close it, because `max(+inf, 0)` is `+inf`. So the factors are bounded on
+// BOTH sides at the point they enter a sample.
+//
+// WHY EIGHT AND NOT FOUR. Eight is the ceiling Assets::ValidateCloudTypeShape already enforces on the
+// procedural side (Engine/Assets/CloudTypeData.cpp), so on that path this bound is the identity and can
+// change no shipped pixel. It is four times the reflected Range of the authored side's own three factors
+// (ECS::HeroCloudData) and four times the layer's Density Scale slider (Range(0, 2)), so it is the
+// identity on every value the editor can produce as well.
+//
+// It is restated in the shader rather than trusted to those validators because only ONE of them exists.
+// The reflected Range constrains a slider and nothing else: a scene file carrying a value outside it is
+// deserialised verbatim (Core/Serialize/ComponentRegistry.cpp clamps nothing), survives the packer's
+// `std::max(x, 0.0f)` unchanged, and arrives here. A shader must not depend on a CPU-side check it cannot
+// see, and on the authored path there is no check to depend on.
+#define CLOUD_MATERIAL_FACTOR_MAX 8.0f
+
+// One bound, applied wherever a factor is read out of a species row, an instance row or the layer block
+// on its way into a product with a slider.
+#define CLOUD_MATERIAL_FACTOR( x ) min( max( x, 0.0f ), CLOUD_MATERIAL_FACTOR_MAX )
+
 // ---------------------------------------------------------------------------------------------------
 // THE MODELLING VOLUME: what replaced the coverage threshold, and why it had to
 // ---------------------------------------------------------------------------------------------------
@@ -251,9 +281,9 @@ CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heig
 
         result.Profile          = speciesProfile;
         result.DetailType       = clamp( edge.x, 0.0f, 1.0f );
-        result.DetailFactor     = max( edge.y, 0.0f );
-        result.DensityScale     = max( params.DensityScale, 0.0f ) * max( edge.z, 0.0f );
-        result.ExtinctionFactor = max( edge.w, 0.0f );
+        result.DetailFactor     = CLOUD_MATERIAL_FACTOR( edge.y );
+        result.DensityScale     = CLOUD_MATERIAL_FACTOR( params.DensityScale ) * CLOUD_MATERIAL_FACTOR( edge.z );
+        result.ExtinctionFactor = CLOUD_MATERIAL_FACTOR( edge.w );
     }
 
     return result;
@@ -352,12 +382,13 @@ CloudAuthoredResult CloudSampleAuthoredField( CloudFieldParams params, vec3 posi
 
         result.Field.Profile      = profile;
         result.Field.DetailType   = clamp( voxel.y, 0.0f, 1.0f );
-        result.Field.DetailFactor = instance.Row0.w;
+        result.Field.DetailFactor = CLOUD_MATERIAL_FACTOR( instance.Row0.w );
         // The layer's density, this body's factor and the volume's own per-voxel scale, in that order —
         // the same three-level composition the procedural producer performs, so a Density Scale of 1
         // means the same thing on both sides of the seam.
-        result.Field.DensityScale     = max( params.DensityScale, 0.0f ) * instance.Row1.w * voxel.z;
-        result.Field.ExtinctionFactor = instance.Row2.w;
+        result.Field.DensityScale =
+             CLOUD_MATERIAL_FACTOR( params.DensityScale ) * CLOUD_MATERIAL_FACTOR( instance.Row1.w ) * voxel.z;
+        result.Field.ExtinctionFactor = CLOUD_MATERIAL_FACTOR( instance.Row2.w );
     }
 
     return result;
@@ -463,9 +494,15 @@ float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 
     // than folded together on the CPU as it was while a layer had one kind of cloud in it. A lenticular
     // has to stay a smooth lens and a cirrus has to stay shredded when the two are in the same sky, and a
     // single product formed once could only describe one of them.
+    // THE FACTOR IS BOUNDED ON BOTH SIDES AND NOT ONLY BELOW. `max(x, 0)` leaves `+inf` intact, and this
+    // product's other operand is a slider whose zero position is the whole subject of the test below it —
+    // so the unbounded version turns "erosion off" into a NaN density for every sample in the body. See
+    // the note on CLOUD_MATERIAL_FACTOR_MAX: on every value either producer can legally carry, this bound
+    // is the identity.
     float edgeWeight = 1.0f - clamp( field.Profile, 0.0f, 1.0f );
-    float erosion =
-         detailField * clamp( params.DetailStrength * max( field.DetailFactor, 0.0f ), 0.0f, 1.0f ) * edgeWeight;
+    float erosion    = detailField *
+                    clamp( params.DetailStrength * CLOUD_MATERIAL_FACTOR( field.DetailFactor ), 0.0f, 1.0f ) *
+                    edgeWeight;
 
     float density = CloudRemap( field.Profile, erosion, 1.0f, 0.0f, 1.0f );
 
