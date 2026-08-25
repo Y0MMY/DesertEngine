@@ -3467,8 +3467,40 @@ as C++ the way the `.glslh` suites compile shader maths.
 | the BODY's height still follows the band while the LUMP follows the cell on both axes | §RW2's version of this test demanded the opposite and is inverted here, deliberately and in the comment |
 | raggedness sees the edge and not the area; a solid square measures exactly 4 | a normalisation drifting under §DS's published numbers |
 | the interior Laplacian reads only what the mask calls cloud | the boundary ring arriving as "texture" |
+| the anvil is drawn out downwind by the same factor as the tower it caps | a storm that is a band with a circular lid, which §RW's own anvil assertion cannot see |
 
-**TWO WERE RED ON THEIR FIRST RUN AND BOTH WERE REAL DEFECTS IN THIS TASK'S OWN WORK.**
+#### TWELVE SABOTAGES, AND ONE OF THEM STAYED GREEN
+
+Every one applied, the suite's **objects and binary deleted**, rebuilt, run, and reverted — and the numbers
+in this section come from a binary rebuilt after the last revert, which is the stale-binary trap §RW's own
+report names.
+
+| break | result |
+|---|---|
+| the cluster is sized by the cell's SHORT side again | RED |
+| the stretch is thrown away and the cluster stays round | RED |
+| the yaw's sign is flipped | RED |
+| the lump keeps its round radii and only its PLACEMENT is stretched | RED |
+| a lump's height comes from the band over the count again | RED (two tests) |
+| the stack is no longer inset into the band | RED |
+| a cluster is built from three lumps instead of six | RED |
+| the suite's proxy paints a DISC of the longer radius again | RED |
+| raggedness normalises by the area instead of its root | RED |
+| the Laplacian stencil may straddle the silhouette again | RED |
+| the anvil's own aspect is written a second time (see below) | RED — it does not build |
+| **the anvil stops being drawn out with the cluster it caps** | **GREEN — a real hole, closed** |
+
+**THE GREEN IS THE SAME LINE §RW FOUND, FROM A NEW DIRECTION, AND THAT IS THE INTERESTING PART.** §RW's own
+sabotage run found that the anvil's width was written a SECOND time rather than derived from the cluster's,
+and closed it with the anvil-over-tower ratio. That assertion is blind to ANISOTROPY — it is taken on one
+axis, and the shipped cumulonimbus' anisotropy is 1 — so deleting the anvil's `stretch` left every suite in
+the repository green: a storm whose tower is a downwind band under a circular lid, which is two bodies.
+`TheAnvilIsDrawnOutDownwindWithTheTowerItCaps` asserts it at an anisotropy of 4 and the same break is now
+RED. **A line that has been the hole twice is worth naming as such: the anvil is the one lump of a cluster
+whose radii are authored rather than derived, and every property of a cluster has to be re-asserted for it
+by hand.**
+
+**AND TWO RELATIONS WERE RED ON THEIR FIRST RUN, BOTH REAL DEFECTS IN THIS TASK'S OWN WORK.**
 
 1. **The band fit was made against a vertical radius that was then multiplied.** The wobble draw (0.85 to
    1.15) was applied at emission, after the stack had been fitted into the band, so the shipped congestus

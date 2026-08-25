@@ -677,6 +677,82 @@ TEST( CloudPlacementSpectrum, TheAnvilShrinksWithTheClusterItCaps )
             "anvil is a lid the storm has outgrown and at another it is a saucer floating over a stump";
 }
 
+// AND THE ANVIL IS DRAWN OUT WITH THE CLUSTER IT CAPS, which is the SAME hole in the same line found a
+// second time from a new direction.
+//
+// §RW's sabotage run found that deleting the cluster's size, density and packing factors from the anvil's
+// width left the whole repository green, "because only the cumulonimbus has an anvil at all and no suite
+// baked one procedurally and looked at it". §RW closed it with the anvil-over-tower ratio above — which is
+// blind to ANISOTROPY, because the shipped cumulonimbus' is 1 and the ratio is taken on one axis. §SIL's
+// own sabotage run rediscovered the line: deleting the anvil's `stretch` was GREEN across the repository.
+//
+// A storm whose tower is a downwind band under a circular lid is two bodies, and it is exactly the shape
+// nobody would notice in a number until they rendered one.
+TEST( CloudPlacementSpectrum, TheAnvilIsDrawnOutDownwindWithTheTowerItCaps )
+{
+    CloudProceduralFieldParams params = ShippedParams();
+
+    Desert::Graphic::CloudTypeShape& shape = params.Species[0].Shape;
+    shape.BaseAltitudeKm                   = 0.9f;
+    shape.TopAltitudeKm                    = 9.0f;
+    shape.EdgeTopFraction                  = 0.12f;
+    shape.TopTaper                         = 0.4f;
+    shape.AnvilAltitudeKm                  = 9.5f;
+    shape.AnvilThicknessKm                 = 1.8f;
+    shape.AnvilStrength                    = 0.85f;
+
+    params.LayerBottomKm     = 0.9f;
+    params.LayerThicknessKm  = 10.4f;
+    params.Species[0].CellKm = 6.0f;
+
+    // A STRETCHED LATTICE, which is the case the ratio test above cannot see. Anything the cell does to
+    // the tower it must do to the canopy.
+    params.Species[0].Anisotropy = 4.0f;
+
+    const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+    const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );
+
+    double anvilStretch = 0.0;
+    double anvils       = 0.0;
+    double towerStretch = 0.0;
+    double towers       = 0.0;
+
+    for ( const CloudModellingBlob& blob : blobs )
+    {
+        const double stretch = static_cast<double>( blob.RadiiKm.x ) / std::max( blob.RadiiKm.z, 1e-6f );
+
+        if ( std::abs( blob.CentreKm.y - shape.AnvilAltitudeKm ) < 1e-3f )
+        {
+            anvilStretch += stretch;
+            anvils += 1.0;
+        }
+        else
+        {
+            towerStretch += stretch;
+            towers += 1.0;
+        }
+    }
+
+    ASSERT_GT( anvils, 0.0 ) << "no anvil was generated at all, so this test measured nothing";
+    ASSERT_GT( towers, 0.0 );
+
+    const double anvil = anvilStretch / anvils;
+    const double tower = towerStretch / towers;
+
+    std::printf( "[CloudPlacementSpectrum] at anisotropy 4 the tower's lumps are %.2fx long and the anvil "
+                 "is %.2fx\n",
+                 tower, anvil );
+
+    // A FIFTH, AND THE GAP IT ALLOWS IS ACCOUNTED FOR RATHER THAN PADDING. The anvil's across-wind radius
+    // carries a 0.9 of its own — a canopy is slightly oval in plan and always was — so its measured stretch
+    // is the cell's over that 0.9: 4.44 against the tower's 4.01. The tower's lumps additionally carry an
+    // independent wobble on each horizontal axis, which is why its MEAN is what is compared. A fifth
+    // accommodates both and is far inside the factor of four the sabotage produced.
+    EXPECT_NEAR( anvil, tower, 0.20 * tower )
+         << "the anvil is not drawn out downwind by the same factor as the tower under it, so a storm in a "
+            "stretched lattice is a band with a circular lid on it — two bodies rather than one";
+}
+
 // THE CACHE IS THE OTHER PLACE A LIVE SETTING CAN DIE, and this test exists because a sabotage found it
 // green. Every field is wired from the component to the bake, and the bake reads every one of them — and
 // none of that matters if the renderer's staleness check does not NOTICE the change, because then the
