@@ -138,7 +138,10 @@ TEST( GpuTimestampLayout, SelfTimesSumToTheRootInclusive )
 
     const std::vector<double> self = GpuSelfTimes( inclusive, parents );
 
-    EXPECT_DOUBLE_EQ( self[0], 0.100 );   // 8.000 - 7.900
+    // NEAR, not DOUBLE_EQ, on the SUBTRACTIONS: 8.000 - 7.900 is 0.09999999999999964 in binary floating
+    // point, and a breakdown in milliseconds has no interest in the sixteenth digit. The leaves below are
+    // never subtracted from, so those stay exact and are asserted exactly.
+    EXPECT_NEAR( self[0], 0.100, 1e-12 ); // 8.000 - 7.900
     EXPECT_NEAR( self[1], 0.100, 1e-12 ); // 7.900 - 7.100 - 0.700
     EXPECT_DOUBLE_EQ( self[2], 7.100 );   // leaves keep their own time
     EXPECT_DOUBLE_EQ( self[3], 0.700 );
@@ -203,4 +206,11 @@ TEST( GpuTimestampLayout, OnlyDirectChildrenAreSubtracted )
     EXPECT_DOUBLE_EQ( self[2], 1.0 );
     EXPECT_DOUBLE_EQ( self[3], 7.0 );
     EXPECT_NEAR( Sum( self ), inclusive[0], 1e-12 );
+}
+
+// Only gtest is linked, not gtest_main — every suite in this tree brings its own entry point.
+int main( int argc, char** argv )
+{
+    testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
 }
