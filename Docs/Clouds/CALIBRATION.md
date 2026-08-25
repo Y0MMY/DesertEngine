@@ -4147,3 +4147,224 @@ rather than taken. The change needed is still one word: `LatticePeak` beside
   edited, and no default outside the two named above changed.
 * **IT DID NOT PURSUE §RW2's UNEXPLAINED Z BUMP.** It is still at 5.625 km, its prominence fell 0.0117 →
   0.0114, and at a 4.000 km cell both axes still report LATTICE 0.0000.
+
+---
+
+## PT — the sky can be PAINTED, and the march did not learn a single new instruction, 2026-08-25
+
+The owner asked two things in one breath: *«будет ли у нас типа редактора материалов для облаков как в UE?
+чтобы я мог загрузить например текстуры шума для формы облаков итд»*, and separately, about the
+arrangement of clouds in the sky, *«есть ли какой-то параметр, чтобы можно было ещё и вручную это
+делать?»*.
+
+The first is refused and stays refused — **decision D-5, no cloud material graph**. The second is this
+phase. They are not the same request: Unreal's `Layout_CloudGlobalPattern` and `Layout_GlobalCloudMask`
+are **data**, and data is the one part of that material we can take without taking the graph. The same
+formula this programme has already applied three times (`.decloudtype`, `.dcnv`, `.dcmv`): Unreal's
+semantics, our formats.
+
+### The research came first, and its most useful finding was about method
+
+`Docs/Clouds/RESEARCH_LAYOUT_TEXTURES.md`. Three facts from the engine source decided where the painting
+enters, and none of them is about the layout textures at all:
+
+| what | where |
+|---|---|
+| the material is evaluated **once per march step AND at seven further sites on the shadow rays and the shadow map** | `VolumetricCloud.usf:858, 903, 991, 1012, 1092, 1106, 1181, 1317, 1920, 2186` |
+| altitude is **spherical**, the horizontal lookup is whatever the graph makes of a raw world position in centimetres | `VolumetricCloudMaterialPixelCommon.ush:50-51, 61-64` |
+| UE has **no weather patch, no coverage, no placement** on the component — the whole shape surface is one `TSoftObjectPtr<UMaterialInterface>` | `VolumetricCloudComponent.h:71` |
+
+Epic reads three textures inside the hottest loop of the frame because it has no precomputed field: the
+material *is* the field. **We have one.** So the painting joins where placement is already decided — once
+per lattice cell, on the CPU, at bake time — and the march is not touched.
+
+> ⚠️ **AND ONE METHOD ERROR, RECORDED BECAUSE IT IS THE REUSABLE PART.** The research reported that
+> `m_SimpleVolumetricCloud.graph.txt` was "not in the tree", on the evidence of
+> `git log --all -- '*graph.txt'`. The file had been on disk for a week. It is in `.gitignore` **on
+> purpose** (line 113): the waiver covers USING Epic's material, not committing it verbatim. The tool
+> answered honestly, to a different question. **"Not in the history" and "not on disk" are two claims and
+> the second needs a second tool.** All four load-bearing graph claims were then re-verified node by node
+> — §8 of the research document — and all four hold, one with a correction that sharpens the reference
+> rather than the design (the fourth cloud type is excluded from the `max` **structurally**, by an
+> RGB-only mask on the multiply, not by being handled elsewhere).
+
+### Where it enters, and why that is the seam rather than a way around it
+
+`CloudProceduralVolume.cpp` decides a cell's coverage in one place. Before this phase that place read the
+slider and folded in the procedural patch field. It now calls **`CloudCellCoverage`**, and that function is
+the whole of the design:
+
+* **The painted pattern and the patch field decide the same number, so they are not both applied.** The
+  painting is the source when one is bound and turned up; the hash is the source otherwise. Two mechanisms
+  setting one value is the second path §1.3 and §4.2 forbid, and this is the first time this subsystem has
+  had two candidates for one number.
+* **The pattern is applied ZERO-MEAN.** A bright painting must redistribute cloud, not add it, or
+  `Coverage` stops meaning the fraction of sky it delivers — and that mapping is what decision **D-20**
+  re-authorised every shipped scene against.
+* **The mask is deliberately asymmetric.** "Add cloud here, take it away there" is what a mask is for, and
+  a symmetric one could not do it. It is safe for D-20 in a way the pattern is not, because a layout with
+  no mask table contributes exactly nothing.
+
+Nothing above `SampleCloudField` changed, and no shader file changed at all. **The painting reaches the
+march as the contents of the volume the march already fetched once.**
+
+### The one real constraint, and it is expressed as a TYPE rather than as a check
+
+The modelling volume must be exactly periodic over the region — everything past the region is REPEAT
+sampling of it, and the wrap seam is measured at **0.950/255 against 1.239/255** between ordinary
+neighbours (§RW). A world-anchored painting whose period did not divide the region would put a hard
+discontinuity across every region face.
+
+So `Layout Repeats` is a **whole number** of repeats per region and `Layout Rotation` is a count of
+**quarter turns**. A square lattice maps onto itself under a quarter turn and under nothing else. Neither
+constraint can be spelt wrongly, which is the difference between a property of the type and a validator
+somebody has to remember (§2.3.1).
+
+**Epic does neither**, and the divergence is named rather than inherited: `Layout_CloudGlobalScale` is a
+float in kilometres (256 by default, and the parameter's own `Desc` says "in km"), and
+`MaterialExpressionRotator_1` turns by a free angle. Epic can afford both because it has no baked volume
+to keep in step.
+
+### THE PICTURE: the sky follows a shape somebody drew
+
+| file | what it shows |
+|---|---|
+| `Shots/PT_letter_topdown.png` | **THE SHOW.** A capital D drawn out of cloud, seen from 90 km, and REPEATING exactly with the region — the periodicity relation showing up in a picture as well as in a test |
+| `Shots/PT_stripe_mid_away.png` | the same claim at the elevation the game is played at: clear blue on one side of a painted boundary, a wall of cloud on the other |
+| `Shots/PT_stripe_horizon_away.png` | the far field, which had to not turn to dither and does not |
+
+The letter reads MIRRORED, and that is the top-down view rather than a defect: looking straight down
+reverses one axis.
+
+### THE SKY THAT SHIPPED DID NOT MOVE — SIX OF SIX, BYTE FOR BYTE
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, no layout bound. Every one of the six
+protocol points is byte-identical to the frame **committed before this task existed**:
+
+| point | md5 | equals |
+|---|---|---|
+| zenith away `0,0.9,-1` | `73c7806b04c1c71317e4aba52e3f20dc` | `SIL2_after_zenith_away.png` |
+| mid away `0,0.45,-1` | `4819e9c0c6dcdfadbf7477bd90a409d7` | `SIL2_after_mid_away.png` |
+| horizon away `0,0.12,-1` | `304f4c2b56ea4751f50b6eb7b6351b4e` | `SIL2_after_horizon_away.png` |
+| zenith sunward `0,0.9,1` | `ada3c729466065ad749a473698b2f903` | `SIL2_after_zenith_sun.png` |
+| mid sunward `0,0.45,1` | `4a2ddc2a6a5bd7637701fd1a3fe7da8b` | `SIL2_after_mid_sun.png` |
+| horizon sunward `0,0.12,1` | `bfd06fce1094adaa4e538cebba2f66f7` | `SIL2_after_horizon_sun.png` |
+
+**SIX and not five**, which is a step up from §A0 and §A2, and the reason is structural rather than lucky:
+those phases moved 199 pixels because a SHADER FILE changed and the SPIR-V was rescheduled.
+`git diff --name-only origin/dev HEAD -- Editor/Resources/Shaders` returns **nothing at all** here.
+
+The six frames are **not committed**: they are byte copies of pictures the repository already holds, which
+is the duplicate check §SIL warned about. The identity is the evidence.
+
+### THE PRICE, and the march's own line
+
+`--gpu-profile`, `Clouds_Demo` / `PT_Layout_Cost` (which is `Clouds_Demo` **plus a painting and nothing
+else**), camera `0,200,0`, `--look 0,0.45,1`, 400 frames, Debug, interleaved, machine shared:
+
+| run | `Clouds: March` |
+|---|---|
+| unpainted | 13.961 ms |
+| painted | 9.363 ms |
+| unpainted | 13.663 ms |
+| painted | 9.350 ms |
+
+**The painted march is a third FASTER — 9.35 against 13.66 ms.** That is not an optimisation and must not
+be read as one: the stripe empties half the sky, so half the rays leave the layer early. It is §RW's own
+finding in the other direction — *the march meeting a different volume*.
+
+The unpainted pair brackets the noise at **0.298 ms**, so the fall is fifteen times it.
+
+> **The absolute numbers are about twice §GT's published 7.589 ms and the difference is the MACHINE, not
+> the change.** This ran on a box that was building three configurations at the time. The A/B is
+> interleaved on that same box within four minutes, which is what makes the comparison sound and the
+> absolute figure not comparable to §GT's.
+
+**And the claim the measurement is only corroborating: the march gained no instruction.** Zero shader
+files differ from `dev`, and the six unpainted frames are byte-identical — so the unpainted march provably
+performs the identical work. What a painting changes is how much cloud the rays meet.
+
+### The knobs, and the pair that came back IDENTICAL
+
+Ten arms on `PT_Layout_LetterD`, each differing from the shipped scene by ONE field, all at
+`0,9000000,0` / `--look 0,-0.995,0.05`.
+
+| knob | range, default | low | high |
+|---|---|---|---|
+| Layout Pattern Strength | 0..1, **1.0** | `Shots/PT_knob_pattern_low.png` | `Shots/PT_knob_pattern_high.png` |
+| Layout Mask Strength | 0..1, **1.0** | = `PT_knob_pattern_high.png` | = `PT_letter_topdown.png` |
+| Layout Repeats | 1..16, **1** | = `PT_letter_topdown.png` | `Shots/PT_knob_repeats_high.png` |
+| Layout Rotation | 0..3 quarter turns, **0** | = `PT_letter_topdown.png` | `Shots/PT_knob_rotation_high.png` |
+| Layout Offset | km, **(0,0)** | = `PT_letter_topdown.png` | `Shots/PT_knob_offset_high.png` |
+
+> ⚠️ **THE PATTERN PAIR WAS BYTE-IDENTICAL ON THE FIRST RUN — both ends `044b9e33` — AND THE REASON IS
+> WORTH MORE THAN THE FRAME.** It is not a dead knob. The MASK was at full strength in both arms, and the
+> mask alone already drives the letter's interior over 1 and its exterior under 0; the clamp then eats the
+> pattern's entire contribution. Shot again with the mask off, the pair separates (`5bd98087` against
+> `35afc1d8`) — and the difference is **visible but weak**, which is a property of the construction rather
+> than an accident: the pattern is a redistribution about the painting's OWN MEAN, so a sparse figure —
+> mean **0.1693** here — can only pull the background down to 0.66 of the slider. Emptying the sky is the
+> mask's job. **The two controls interact, and an artist has to be told so.**
+
+Ten arms produced **five distinct configurations**, so five files are duplicates and are not committed.
+Every "low" arm of repeats, rotation and offset is byte-identical to the shipped letter frame; mask-off is
+byte-identical to pattern-on-mask-off.
+
+### The relations added, and the breaks that verified them
+
+All in `Desert/Tests/Engine/CloudPlacementSpectrum` unless stated.
+
+| relation | broken by | what the break did |
+|---|---|---|
+| binding a painting, and binding a DIFFERENT one, make the cached volume stale | dropping the content hash from `CloudProceduralParamsEqual` | RED |
+| a field added to the bake's parameters forces a visit to the staleness walk | adding `float SabotageTwo` | **COMPILE ERROR** — "decomposes into 19 elements, but only 18 names were provided" |
+| the painting repeats exactly with the region at every rotation and offset | rotating by 45 degrees instead of 90 | RED, 0.414 of a period against a bound of 1e-3 |
+| a painted pattern redistributes the sky rather than adding to it | deleting the zero-mean subtraction | RED, sky at Coverage 0.50 went 0.498 -> **0.658** against an unpainted 0.532 |
+| exactly one source modulates a cell's coverage | applying the patch field alongside the painting | RED |
+| with no painting bound the five layout knobs cannot reach one cloud | letting the offset displace the patch field | RED |
+| a v6 file's defaults are a layer with no painting (`SceneCloudLayoutDefault`) | moving Layout Pattern Strength's default to 0.5 | RED |
+
+> ⚠️ **TWO SABOTAGES STAYED GREEN AND BOTH ARE FINDINGS.**
+>
+> **The first was a defect in my own guard.** It pinned `sizeof(CloudProceduralFieldParams)` against the
+> hand-written staleness walk. Adding a float left the size at **136** — it landed in the padding before
+> the `shared_ptr` — so the guard could not go red for the one thing it existed to catch. **A size is not
+> a field count, and the two agree only until the next field happens to fit in a hole.** Replaced by a
+> structured binding, which names all eighteen fields and turns the same sabotage into a compile error.
+> Recorded rather than quietly swapped, because a guard that cannot go red is worse than no guard: it also
+> stops anyone writing a real one.
+>
+> **The second disproved a comment I had written.** I claimed that spelling the quarter turn as a float
+> `cos`/`sin` matrix would break the periodicity "by a whole texel at 4000 km". Measured out to 12 345 km:
+> **1.9e-6 exact against 3.8e-6 through cos/sin**, and the test correctly stayed GREEN. The relation is
+> about the ANGLE being a quarter turn, not about how the turn is spelt. The comment is corrected in place.
+
+### The format, the memory and the two shipped paintings
+
+| | |
+|---|---|
+| `Layout_Stripe.dclayout` | 512 squared, pattern only, **1 048 624 B (1.00 MiB)**, content `1c8566c8`, channel means 0.4981 |
+| `Layout_LetterD.dclayout` | 512 squared, pattern **and** mask, **1 310 768 B (1.25 MiB)**, content `4a286994`, channel means 0.1693 |
+
+Against §A0's arithmetic — 20.67 MiB occupied, 8.00 MiB for the procedural volume, 4.00 MiB per sculpted
+body — a painting is the cheapest thing in the subsystem, and D-9's 64 MiB is untouched in practice.
+
+### What this task did NOT do, and why it is here rather than in a commit message
+
+* **`Layout_CloudHeightProfile` is not taken**, in either the 2D or the 1D form, and the teamlead approved
+  the refusal. Unreal needs a `f(altitude, pattern value)` table because its placement field is
+  two-dimensional and the table is its only vertical structure. Ours is geometry, and `fill` in
+  `CloudProceduralVolume.cpp` already carries exactly that dependency — the comment there names D-13. A
+  painted table would be a second way to state one thing (§2.3.1) and would fight §SIL2, where the lump's
+  aspect and the erosion's strength are one calibration guarded by a test that names both numbers.
+* **No scene-schema version, and no migration function.** The phase adds six fields and renames none; an
+  absent key is already how the reflected serializer spells "the C++ default", so a v6 to v7 that returned
+  zeros would be the stub §1.2 forbids. What replaces it is `SceneCloudLayoutDefault`, which asserts the
+  consequence: a v6 payload deserialises into a layer that binds no painting and into lumps identical, one
+  by one, to the struct as it was before the fields existed.
+* **The thing that BAKES a painting from an image is `Tools/CloudLayoutBaker`, not a window.** The Details
+  slot, the picker and the drag-and-drop target exist and are wired; an authoring *window* with a preview
+  is not in this phase, and the owner's own words — "load a texture" — are served by the slot.
+* **The layout is not per-species-scaled.** `Layout_CloudPerTypeScale` has no counterpart because
+  `PlacementScale` and `PlacementAnisotropy` already live on `.decloudtype` (T3). Adding a second scale
+  would be two numbers obliged to agree.
