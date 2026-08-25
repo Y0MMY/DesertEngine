@@ -113,13 +113,20 @@
                 "Coverage": 0.35,
                 "CloudType1": "Clouds/Types/Cumulus_Congestus.decloudtype",
                 "WeatherTileSize": 1200000.0,
-                "MaxViewDistance": 6000000.0,
+                "MaxViewDistance": 40000000.0,
                 "AerialPerspectiveStartDistance": 3000000.0,
                 "AerialPerspectiveFadeDistance": 9000000.0,
                 "CloudLayout": "Clouds/Layouts/Layout_LetterD.dclayout",
                 "LayoutPatternStrength": 1.0,
                 "LayoutMaskStrength": 1.0,
-                "LayoutRepeats": 1
+                "LayoutRepeats": 1,
+                "LayoutOffset": [
+                    -2020000.0,
+                    -2400000.0
+                ],
+                "PlacementScatter": 0.25,
+                "PlacementDensity": 3.0,
+                "PlacementSizeVariety": 0.35
             }
         },
         {
