@@ -95,7 +95,7 @@ namespace Desert::Editor::Commands
                 if ( preserveIds && FindEntity( original ) )
                     continue; // already alive (double-restore guard)
 
-                const Common::UUID newId = preserveIds ? original : Common::UUID();
+                const Common::UUID newId = preserveIds ? original : Common::UUID::Generate();
                 ECS::Entity        e = s_Scene->CreateEntityWithUUID( newId, ed.Tag.value_or( "Entity" ) );
                 idMap.insert( { original, e } );
             }

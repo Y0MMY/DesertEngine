@@ -14,12 +14,11 @@ namespace Common
     // working unchanged), while OWNING the stable-id derivation that used to live in the free
     // Desert::Assets::StableAssetId() helper.
     //
-    // Two deliberate differences from UUID:
-    //   * the DEFAULT ctor is Null (0), not random — an unset handle field must read as "no asset", never
-    //     as a random collision. Use Generate() when you actually want a fresh runtime id (procedural /
-    //     builtin meshes that have no source path).
+    // What it adds over UUID:
     //   * FromCookedPath()/FromKey() give deterministic, path-derived handles that survive re-cooks and
     //     restarts and are computable WITHOUT reading the asset payload.
+    // (The null default ctor is no longer a difference: UUID's default is null too, for the reasons in
+    // UUID.hpp. Both are spelled out here anyway because this is the type asset code reads.)
     //
     // The 64-bit value and its serialized form are unchanged, so existing cooked assets / saved scenes
     // resolve identically.
@@ -60,7 +59,7 @@ namespace Common
         // Fresh, random runtime id — for assets with no stable source path (procedural / builtin meshes).
         static AssetHandle Generate() noexcept
         {
-            return AssetHandle( UUID() );
+            return AssetHandle( UUID::Generate() );
         }
 
         static AssetHandle Null() noexcept

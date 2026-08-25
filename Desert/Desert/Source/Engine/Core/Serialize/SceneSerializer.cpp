@@ -182,25 +182,37 @@ namespace Desert::Core
 
         std::unordered_map<Common::UUID, ECS::Entity> entityMap;
 
+        // The id each normal entity was created under, aligned with normalData.
+        //
+        // It is REMEMBERED rather than recomputed because an entity saved without an `id` needs one minted,
+        // and a mint is not a pure function of the record: the two passes below used to call
+        // `id.value_or(...)` independently and so minted two DIFFERENT ids for such an entity. Pass 2 then
+        // looked the entity up under the second id, missed, and `continue`d — the entity existed in the
+        // scene with nothing but a tag, and no parent link pointing at it ever resolved.
+        std::vector<Common::UUID> normalIds;
+        normalIds.reserve( normalData.size() );
+
         // Pass 1 — create normal entities
         for ( const auto* entityData : normalData )
         {
-            Common::UUID id     = entityData->id.value_or( Common::UUID() );
-            ECS::Entity  entity = m_Scene->CreateEntityWithUUID( id, entityData->Tag.value_or( "Entity" ) );
+            const Common::UUID id     = entityData->id.value_or( Common::UUID::Generate() );
+            ECS::Entity        entity = m_Scene->CreateEntityWithUUID( id, entityData->Tag.value_or( "Entity" ) );
+            normalIds.push_back( id );
             entityMap.insert( { id, entity } );
         }
 
         // Pass 2 — deserialize normal entities and wire up hierarchy
-        for ( const auto* entityData : normalData )
+        for ( size_t i = 0; i < normalData.size(); ++i )
         {
-            Common::UUID id = entityData->id.value_or( Common::UUID{} );
-            auto         it = entityMap.find( id );
+            const auto* entityData = normalData[i];
+
+            auto it = entityMap.find( normalIds[i] );
             if ( it == entityMap.end() ) continue;
 
             ECS::Entity entity = it->second;
             Serialize::EntitySerializer::DeserializeEntity( *entityData, entity, *m_AssetManager );
 
-            if ( entityData->parent.has_value() && *entityData->parent != Common::UUID{} )
+            if ( entityData->parent.has_value() && !entityData->parent->IsNull() )
             {
                 auto parentIt = entityMap.find( *entityData->parent );
                 if ( parentIt != entityMap.end() )
@@ -245,12 +257,14 @@ namespace Desert::Core
                 if ( entityData->Scale )       tc.Scale       = *entityData->Scale;
             }
 
-            // Register in map under the original saved UUID so parent links resolve
-            Common::UUID savedID = entityData->id.value_or( Common::UUID{} );
-            entityMap[savedID]   = prefabRoot;
+            // Register in map under the original saved UUID so parent links resolve. A prefab root saved
+            // without an id has nothing for a child's `parent` to name, so there is nothing to register:
+            // the map entry would only shadow whatever else lacked an id.
+            if ( entityData->id.has_value() && !entityData->id->IsNull() )
+                entityMap[*entityData->id] = prefabRoot;
 
             // Attach to parent if one exists (e.g. prefab nested under a regular entity)
-            if ( entityData->parent.has_value() && *entityData->parent != Common::UUID{} )
+            if ( entityData->parent.has_value() && !entityData->parent->IsNull() )
             {
                 auto parentIt = entityMap.find( *entityData->parent );
                 if ( parentIt != entityMap.end() )

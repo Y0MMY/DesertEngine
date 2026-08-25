@@ -5,19 +5,42 @@
 
 namespace Common
 {
+    // A 64-bit identity.
+    //
+    // THE DEFAULT-CONSTRUCTED VALUE IS NULL (0), AND RANDOMNESS IS ASKED FOR BY NAME.
+    //
+    // It used to be the other way round: `UUID()` minted a random id and the header carried a warning that
+    // `UUID{}` must therefore never be used as a "none/not-found" sentinel. A warning is not a mechanism.
+    // Every C++ idiom that reaches for a zero — a struct member written without an initializer, `= {}`,
+    // `value_or({})`, `!= {}`, a partially aggregate-initialized struct — silently produced a fresh random
+    // number instead, and the resulting bug is invisible: nothing throws, nothing logs, a comparison that
+    // was meant to read "is this unset?" simply answers "no" forever. That defect shipped in the scene
+    // deserializer, in both prefab instantiators and in two ECS components at once.
+    //
+    // So the safe value is now the one you get for free, and the dangerous one has to be spelled
+    // `UUID::Generate()`. Callers that genuinely want a fresh identity (a new entity, a new material GUID,
+    // a runtime-only image key) say so at the call site, where a reader can check the intent.
     class UUID
     {
     public:
-        UUID();
+        // Null (0) — "no id". Cheap, deterministic, and the same value in every process.
+        constexpr UUID() noexcept : m_UUID( 0 )
+        {
+        }
+
         explicit UUID( uint64_t uuid );
         UUID( const UUID& other );
         explicit UUID( const std::string& uuidStr );
 
-        // Explicit "no UUID" value (0). NOTE: the default ctor mints a RANDOM id, so `UUID{}` must NEVER be
-        // used as an invalid/not-found sentinel — use Null()/IsNull() for that.
+        // A fresh random identity. The ONLY way to get one — see the class comment for why it is not the
+        // default.
+        static UUID Generate();
+
+        // Explicit "no UUID" value (0). Identical to the default ctor; kept because `UUID::Null()` reads as
+        // an intent at a call site where `{}` reads as an oversight.
         static UUID Null()
         {
-            return UUID( static_cast<uint64_t>( 0 ) );
+            return UUID();
         }
 
         bool IsNull() const
@@ -52,9 +75,8 @@ namespace std
     {
         std::size_t operator()( const Common::UUID& uuid ) const
         {
-            // uuid is already a randomly generated number, and is suitable as a hash key as-is.
-            // this may change in future, in which case return hash<uint64_t>{}(uuid); might be more
-            // appropriate
+            // The value is either a random draw or an FNV-1a digest of a path, so it is already well
+            // spread and serves as its own hash.
             return uuid;
         }
     };

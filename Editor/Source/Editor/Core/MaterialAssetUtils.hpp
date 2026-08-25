@@ -54,7 +54,7 @@ namespace Desert::Editor::MaterialAssetUtils
         if ( !std::filesystem::exists( path, ec ) )
         {
             Assets::MaterialData data;
-            data.MaterialId = Common::UUID();
+            data.MaterialId = Common::UUID::Generate(); // a brand-new material's stable, file-borne GUID
             for ( const auto& [pname, value] : params )
                 data.SetParam( pname, value );
             Common::Utils::FileSystem::WriteContentToFile( path.generic_string(),

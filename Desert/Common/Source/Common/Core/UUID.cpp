@@ -12,8 +12,12 @@ namespace Common
     {
     }
 
-    UUID::UUID() : m_UUID( s_UniformDistribution( eng ) )
+    UUID UUID::Generate()
     {
+        // Never hand out 0: it is the null id, and a "fresh" identity that compares equal to "no identity"
+        // is worse than no identity at all. One draw in 2^64 lands here.
+        const uint64_t value = s_UniformDistribution( eng );
+        return UUID( value ? value : 1ull );
     }
 
     UUID::UUID( const UUID& other ) : m_UUID( other.m_UUID )

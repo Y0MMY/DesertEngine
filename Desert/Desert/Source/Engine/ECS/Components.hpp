@@ -63,7 +63,10 @@ namespace Desert::ECS
 
     struct UUIDComponent
     {
-        Common::UUID UUID;
+        // The one place in the engine that WANTS a fresh random id per construction: every entity must be
+        // distinguishable from every other, and there is no path or file to derive that from. Spelled out
+        // because `Common::UUID` alone is null — see UUID.hpp.
+        Common::UUID UUID = Common::UUID::Generate();
     };
 
     // "Reflected render-data block": editable, reflected fields the editor draws and the renderer maps
@@ -1722,7 +1725,9 @@ namespace Desert::ECS
     // Used for weapons-in-hand, hats, backpacks, scope attachments, etc.
     struct SocketAttachmentComponent
     {
-        Common::UUID Target;   // the skinned-mesh entity whose bone we follow (invalid = detached)
+        // The skinned-mesh entity whose bone we follow. Null = detached, and it starts detached: a socket
+        // that has not been pointed at anything must not claim to follow a target that does not exist.
+        Common::UUID Target = Common::UUID::Null();
         std::string  BoneName; // bone/socket name on the target's skeleton (e.g. "mixamorig:RightHand")
 
         // Grip alignment relative to the bone (the weapon almost never sits exactly on the bone origin).
@@ -1740,6 +1745,6 @@ namespace Desert::ECS
         float        GravityScale  = 0.0f;                 // 0 = straight line, 1 = full gravity (arc)
         float        LifeRemaining = 5.0f;                 // seconds before auto-despawn
         float        Damage        = 10.0f;
-        Common::UUID Owner; // shooter (so we can skip self-hits)
+        Common::UUID Owner = Common::UUID::Null(); // shooter (so we can skip self-hits); null = unowned
     };
 } // namespace Desert::ECS

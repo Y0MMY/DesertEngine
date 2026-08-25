@@ -25,22 +25,34 @@ namespace Desert::Runtime::Factory
         std::unordered_map<Common::UUID, ECS::Entity> entityMap; // original prefab UUID → new entity
         ECS::Entity rootEntity = {};
 
+        // The entity each prefab record became, aligned with GetEntities().
+        //
+        // Pass 2 used to re-derive the map key from the record and index `entityMap` with it. For a record
+        // with no `id` that key was a fresh value each time, so the lookup missed AND `operator[]` inserted
+        // a null entity, which the deserializer then wrote components into. Holding the entity directly
+        // removes both the second derivation and the accidental insert; `entityMap` is left to do the one
+        // job it is actually for, resolving `parent` links between records that DO carry ids.
+        std::vector<ECS::Entity> created;
+        created.reserve( prefab.GetEntities().size() );
+
         // 1. Create all entities with FRESH UUIDs to avoid collisions when multiple instances exist
         for ( const auto& data : prefab.GetEntities() )
         {
-            Common::UUID originalID = data.id.value_or( Common::UUID{} );
-            Common::UUID freshID;   // default-constructed generates a new random UUID
-            ECS::Entity e = scene.CreateEntityWithUUID( freshID, data.Tag.value_or( "PrefabEntity" ) );
-            entityMap[originalID] = e;
+            ECS::Entity e =
+                 scene.CreateEntityWithUUID( Common::UUID::Generate(), data.Tag.value_or( "PrefabEntity" ) );
+            created.push_back( e );
+
+            if ( data.id.has_value() && !data.id->IsNull() )
+                entityMap[*data.id] = e;
 
             if ( !rootEntity ) rootEntity = e;
         }
 
         // 2. Apply components and setup hierarchy
-        for ( const auto& data : prefab.GetEntities() )
+        for ( size_t i = 0; i < prefab.GetEntities().size(); ++i )
         {
-            Common::UUID originalID = data.id.value_or( Common::UUID{} );
-            ECS::Entity e = entityMap[originalID];
+            const auto& data = prefab.GetEntities()[i];
+            ECS::Entity e    = created[i];
 
             if ( data.PrefabPath.has_value() )
             {
@@ -54,7 +66,7 @@ namespace Desert::Runtime::Factory
 
             Core::Serialize::EntitySerializer::DeserializeEntity( data, e, assetManager );
 
-            if ( data.parent.has_value() && *data.parent != Common::UUID{} )
+            if ( data.parent.has_value() && !data.parent->IsNull() )
             {
                 // parent lookup uses original prefab UUIDs as keys
                 if ( entityMap.contains( *data.parent ) )
