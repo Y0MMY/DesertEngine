@@ -201,19 +201,15 @@ namespace Desert::Editor
         return def;
     }
 
-    // Deterministic 64-bit id (FNV-1a) from a stable key, as a Common::UUID. Re-importing the same source
-    // yields the SAME material id, so a mesh submesh's reference survives re-cooks (unlike a random UUID).
+    // Deterministic 64-bit id from a stable key. Re-importing the same source yields the SAME material id,
+    // so a mesh submesh's reference survives re-cooks (unlike a random UUID).
+    //
+    // The FNV-1a loop this used to hold was one of THREE hand-written copies of the same derivation
+    // (here, TextureImporter, and Common::AssetHandle::FromKey). Three copies of one rule is how two of
+    // them drift; there is now one, and it lives with the handle type.
     static Common::UUID StableMaterialId( const std::string& key )
     {
-        uint64_t h = 1469598103934665603ull;
-        for ( unsigned char c : key )
-        {
-            h ^= c;
-            h *= 1099511628211ull;
-        }
-        if ( h == 0 )
-            h = 1; // never collide with the null handle
-        return Common::UUID( h );
+        return Common::AssetHandle::FromKey( key );
     }
 
     // Extract every source material into the unified, reflected PBRSurfaceParams (the .demat schema). Recovers

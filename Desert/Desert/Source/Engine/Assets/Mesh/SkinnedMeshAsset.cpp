@@ -13,9 +13,9 @@ namespace Desert::Assets
     SkinnedMeshAsset::SkinnedMeshAsset( const AssetPriority priority, const Common::Filepath& filepath )
          : MeshAsset( priority, filepath, GetTypeID() )
     {
-        // Path-derived handle in the ctor (see StaticMeshAsset) so a not-yet-loaded registry shell is keyed
-        // correctly. Load re-derives the same value.
-        m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
+        // The path-derived handle this type used to compute for itself (twice — here and again in Load)
+        // now comes from AssetBase, which derives it the same way for every asset type. See the comment on
+        // that constructor.
     }
 
     Common::BoolResultStr SkinnedMeshAsset::Load()
@@ -37,10 +37,6 @@ namespace Desert::Assets
         {
             return Common::MakeError( "SkinnedMeshAsset cannot load static mesh data." );
         }
-
-        // Stable, path-derived handle (see StaticMeshAsset::Load) — survives re-cooks + lets the registry
-        // compute it from the path without parsing the mesh payload.
-        m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
 
         m_Vertices.clear();
         m_Indices.clear();

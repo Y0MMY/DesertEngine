@@ -44,9 +44,12 @@ namespace Desert::Assets
         PrefabData data;
         data.Name = m_Metadata.Filepath.stem().string();
         data.Entities = m_EntityData;
-        if ( !m_EntityData.empty() )
+        // Root names the first record BY ID, so it can only be written when that record has one. It used to
+        // fall back to a default-constructed UUID, which was a random number — a root id pointing at no
+        // entity, baked into the file.
+        if ( !m_EntityData.empty() && m_EntityData.front().id.has_value() )
         {
-            data.Root = m_EntityData.front().id.value_or( Common::UUID{} );
+            data.Root = *m_EntityData.front().id;
         }
 
         return rfl::json::write( data );
@@ -95,24 +98,29 @@ namespace Desert::Assets
         std::unordered_map<Common::UUID, ECS::Entity> entityMap;
         ECS::Entity rootEntity;
 
+        // The entity each record became, aligned with m_EntityData — see PrefabFactory::Instantiate for why
+        // the second pass must not re-derive this from the record.
+        std::vector<ECS::Entity> created;
+        created.reserve( m_EntityData.size() );
+
         for ( const auto& entityData : m_EntityData )
         {
-            Common::UUID newUUID;
-            Common::UUID originalID = entityData.id.value_or( Common::UUID{} );
-            ECS::Entity newEntity = scene->CreateEntityWithUUID( newUUID, entityData.Tag.value_or( "Entity" ) );
-            entityMap.insert( { originalID, newEntity } );
+            ECS::Entity newEntity =
+                 scene->CreateEntityWithUUID( Common::UUID::Generate(), entityData.Tag.value_or( "Entity" ) );
+            created.push_back( newEntity );
+
+            if ( entityData.id.has_value() && !entityData.id->IsNull() )
+                entityMap.insert( { *entityData.id, newEntity } );
         }
 
-        for ( const auto& entityData : m_EntityData )
+        for ( size_t i = 0; i < m_EntityData.size(); ++i )
         {
-            Common::UUID originalID = entityData.id.value_or( Common::UUID{} );
-            auto it = entityMap.find( originalID );
-            if ( it == entityMap.end() ) continue;
+            const auto& entityData = m_EntityData[i];
+            ECS::Entity newEntity  = created[i];
 
-            ECS::Entity newEntity = it->second;
             Core::Serialize::EntitySerializer::DeserializeEntity( entityData, newEntity, assetManager );
 
-            if ( entityData.parent.has_value() && *entityData.parent != Common::UUID{} )
+            if ( entityData.parent.has_value() && !entityData.parent->IsNull() )
             {
                 auto parentIt = entityMap.find( *entityData.parent );
                 if ( parentIt != entityMap.end() )

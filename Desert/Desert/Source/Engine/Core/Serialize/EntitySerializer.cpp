@@ -20,7 +20,7 @@ namespace Desert::Core::Serialize
         if ( entity.HasComponent<ECS::UUIDComponent>() )
             data.id = entity.GetComponent<ECS::UUIDComponent>().UUID;
         else
-            data.id = Common::UUID();
+            data.id = Common::UUID::Generate(); // no UUIDComponent: mint one so the record is addressable
 
         if ( entity.HasComponent<ECS::RelationshipComponent>() )
         {

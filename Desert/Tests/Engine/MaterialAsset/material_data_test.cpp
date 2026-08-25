@@ -58,7 +58,7 @@ TEST( MaterialData, JsonRoundTrip )
     m.ShaderName = "Unlit";
     m.SetParam( "Color", glm::vec4( 0.1f, 0.2f, 0.3f, 1.0f ) );
     m.SetTexture( "u_AlbedoTex", 12345ull );
-    m.MaterialId = Common::UUID();
+    m.MaterialId = Common::UUID::Generate();
 
     const std::string json = rfl::json::write( m );
     auto              back = rfl::json::read<MaterialData>( json );
@@ -92,7 +92,7 @@ TEST( PBRSurfaceParams, TypedViewToCanonAndBack )
     p.GlassTint       = glm::vec4( 0.9f, 0.8f, 0.7f, 0.5f );
     p.AlbedoTexture   = Desert::Assets::AssetHandle( 777ull );
     p.UVTiling        = glm::vec2( 3.0f, 5.0f );
-    p.MaterialId      = Common::UUID();
+    p.MaterialId      = Common::UUID::Generate();
 
     const MaterialData canon = p.ToMaterialData();
     EXPECT_FLOAT_EQ( canon.GetParam( "AlbedoColor" ).y, 0.4f );

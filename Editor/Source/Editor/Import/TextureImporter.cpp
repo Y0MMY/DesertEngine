@@ -54,21 +54,15 @@ namespace Desert::Editor
 
     namespace
     {
-        // Deterministic 64-bit id (FNV-1a) from a stable key -> Common::UUID. Used so a texture's handle is
-        // DERIVED from its source path, not random: deleting Cooked/ and re-cooking yields the SAME handle, so
-        // every material/.demat/scene reference keyed by it still resolves (random handles broke on a Cooked
-        // wipe). Mirrors AssimpImporter::StableMaterialId.
+        // Deterministic 64-bit id from a stable key. A texture's handle is DERIVED from its source path,
+        // not random: deleting Cooked/ and re-cooking yields the SAME handle, so every material/.demat/
+        // scene reference keyed by it still resolves.
+        //
+        // The FNV-1a loop this used to hold was one of three hand-written copies of the same derivation;
+        // it now defers to the one that lives with the handle type.
         Common::UUID StableTextureId( const std::string& key )
         {
-            uint64_t h = 1469598103934665603ull;
-            for ( unsigned char c : key )
-            {
-                h ^= c;
-                h *= 1099511628211ull;
-            }
-            if ( h == 0 )
-                h = 1; // never collide with the null handle
-            return Common::UUID( h );
+            return Common::AssetHandle::FromKey( key );
         }
     } // namespace
 
@@ -89,27 +83,27 @@ namespace Desert::Editor
 
         const auto meta = BuildCookedPath( path, ".tex" );
 
-        // Deterministic default so the handle survives a Cooked/ wipe (re-cook -> same id). If a .tex already
-        // exists, PRESERVE whatever handle it stored (back-compat with older random-handle cooks); if it's
-        // also up-to-date, skip rewriting.
-        Common::UUID    handle = StableTextureId( abs );
+        // Deterministic, always: the handle is a function of the source path, so wiping Cooked/ and
+        // re-cooking yields the SAME id and every material/scene reference keyed by it still resolves.
+        //
+        // This used to read the handle back out of an existing `.tex` instead, "back-compat with older
+        // random-handle cooks". That branch did not preserve compatibility, it preserved the DEFECT: a
+        // texture cooked in the random era kept its per-launch id frozen on disk for ever, and the moment
+        // anyone deleted Cooked/ the id changed and every reference to it died. One such handle was still
+        // in the repository (T_Checker.tex, referenced by M_CheckerFloor.demat); both files were re-stamped
+        // with the derived id by the change that deleted this branch.
+        const Common::UUID handle = StableTextureId( abs );
+
         std::error_code ec;
         if ( std::filesystem::exists( meta, ec ) )
         {
-            const auto existing = rfl::json::read<Assets::Serialization::TextureAssetData>(
-                 Common::Utils::FileSystem::ReadFileContent( meta ) );
-            if ( existing.has_value() )
+            std::error_code ec2;
+            const auto      metaT = std::filesystem::last_write_time( meta, ec2 );
+            const auto      srcT  = std::filesystem::last_write_time( path, ec2 );
+            if ( !ec2 && metaT >= srcT )
             {
-                handle = existing->Handle;
-
-                std::error_code ec2;
-                const auto      metaT = std::filesystem::last_write_time( meta, ec2 );
-                const auto      srcT  = std::filesystem::last_write_time( path, ec2 );
-                if ( !ec2 && metaT >= srcT )
-                {
-                    m_Cache[abs] = handle; // up-to-date — keep the existing cooked metadata as-is
-                    return handle;
-                }
+                m_Cache[abs] = handle; // up-to-date — keep the existing cooked metadata as-is
+                return handle;
             }
         }
 

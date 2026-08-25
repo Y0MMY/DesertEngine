@@ -13,9 +13,9 @@ namespace Desert::Assets
     StaticMeshAsset::StaticMeshAsset( const AssetPriority priority, const Common::Filepath& filepath )
          : MeshAsset( priority, filepath, GetTypeID() )
     {
-        // Path-derived handle in the ctor (not just Load) so a NOT-yet-loaded registry shell is keyed by the
-        // correct stable handle. Load re-derives the same value.
-        m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
+        // The path-derived handle this type used to compute for itself (twice — here and again in Load)
+        // now comes from AssetBase, which derives it the same way for every asset type. See the comment on
+        // that constructor.
     }
 
     Common::BoolResultStr StaticMeshAsset::Load()
@@ -39,12 +39,6 @@ namespace Desert::Assets
         {
             return Common::MakeError( "StaticMeshAsset cannot load skinned mesh data." );
         }
-
-        // Stable, path-derived handle: the .stmesh has no stored handle (unlike .tex/.demat), so the mesh used
-        // to get a RANDOM per-session id. Derive it deterministically from the cooked path so it survives
-        // re-cooks/restarts (saved scenes resolve the mesh) AND the asset registry can compute the same handle
-        // from the path without parsing the (large) .stmesh. Normalized so every call site agrees.
-        m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
 
         m_Vertices.clear();
         m_Indices.clear();
