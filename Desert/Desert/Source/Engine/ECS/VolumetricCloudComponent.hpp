@@ -311,17 +311,23 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Cloud Density" ), Category( "Placement" ), Range( 0.25f, 8.0f ),
                   Tooltip( "How many clouds a lattice cell carries on average — a whole number is drawn "
                            "per cell with this mean, so 'exactly one per cell' stops being a property of "
-                           "the sky. It does NOT change how much cloud there is: each cloud is narrowed by "
-                           "one over the square root of this, so the matter is redistributed rather than "
-                           "added and Coverage keeps meaning what it says. Raise it for many small clouds "
-                           "at the same cover, lower it for few large ones. On its own it makes the "
-                           "lattice MORE visible, not less — Cloud Scatter is what removes that." ) )
-        // 2.5, AND THE VALUE IS A COMPROMISE BETWEEN TWO MEASUREMENTS RATHER THAN A PREFERENCE. Upward it
-        // is bounded by the bake: the cost is linear in the lump count, and at the shipped 3 km cell a
-        // region holds 256 cells, so every unit of this is another 256 clusters and about six hundred
-        // lumps. Downward it is bounded by the picture: at 1 the sky has one size of cloud in it, which is
-        // what the owner was looking at.
-        float PlacementDensity = 2.5f;
+                           "the sky. It does NOT change how much cloud there is: each cloud is narrowed as "
+                           "this rises, so the matter is redistributed rather than added and Coverage "
+                           "keeps meaning what it says. Raise it for many small clouds at the same cover, "
+                           "lower it for few large ones. On its own it makes the lattice MORE visible, not "
+                           "less — Cloud Scatter is what removes that." ) )
+        // 1.75, AND THE VALUE IS MEASURED TWICE OVER — see Docs/Clouds/CALIBRATION.md §RW2, which moved it
+        // down from the 2.5 §RW shipped. Upward it is bounded by the PICTURE and not by the bake: the
+        // cluster narrows as this rises, so at 2.5 every cloud in the frame had shrunk to the size the far
+        // ones already were and the sky read as one flat pelt of identical lozenges. The frame's contrast
+        // goes 0.379 here against 0.349 at 2.5, and the sky the owner accepted measured 0.384.
+        //
+        // Downward it is bounded by the GRID, and that bound is where §RW put it: at a density of 1 the
+        // lattice bump comes back at 0.0264, 5.9 times the estimator's noise. Between them the bump is
+        // inside the noise at every setting measured — 0.0007 at 1.5, 0.0017 here, 0.0027 at 2.0 — so the
+        // count is not what removes the grid and 2.5 was buying nothing the instrument could see. Cloud
+        // Scatter is what removes it, and §RW's own arm table says so.
+        float PlacementDensity = 1.75f;
 
         PROPERTY( DisplayName( "Cloud Scatter" ), Category( "Placement" ), Range( 0.0f, 4.0f ),
                   Tooltip( "How far a cloud may wander from its lattice site, measured in CELLS — at 1 it "

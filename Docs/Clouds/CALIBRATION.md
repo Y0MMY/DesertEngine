@@ -2749,3 +2749,219 @@ from a binary rebuilt after the revert.
 * **The frame mode of `LatticePeak` is a lower bound and is documented as one.** A mode that undid the
   perspective — measuring the mask in the ground plane through the camera's inverse projection — would give
   a number comparable with the field mode's. It is not needed to settle this task and was not built.
+
+---
+
+## RW2 — three questions about §RW's defaults, answered with numbers, 2026-08-25
+
+§RW removed the grid and the number that says so is `LATTICE 0.0000` on both axes. Looking at the frames it
+delivered, the teamlead asked three questions the lattice peak structurally cannot answer, because **the
+autocorrelation says where the bodies are and nothing at all about what they are**: two skies, one of towers
+and one of plates standing on the same footprints, give the same curve and the same prominence.
+
+1. Is a `Cloud Density` of **2.5** the right shipped default, or does a lower one hold the lattice inside
+   the noise without covering the sky in identical lozenges?
+2. Is the flooded zenith of `Shots/RW_after_zenith_away.png` a camera that happened to stand under a cloud,
+   or is it what the default does?
+3. Where does the **flatness** come from — the catalogue's altitudes, or somewhere else?
+
+**The baseline reproduces byte for byte, and it was checked before anything was believed.** Three renders of
+`Clouds_Demo` at `mid away` on this worktree's binary are identical to each other **and to the committed
+`Shots/RW_after_mid_away.png`** (`aea16b7a…`), so the sky measured below is §RW's sky and not a local
+variant. The repeat floor is zero.
+
+### The instrument had to grow a second quantity first
+
+`Tools/LatticePeak`'s field mode now reports, beside the cover it already reported:
+
+* **the mean chord** — how far a ray stays inside cloud, gathered over every scan line of the baked volume,
+  horizontally (both axes, wrapped across the region's faces because the volume is periodic) and vertically
+  (not wrapped: the layer has a floor and a ceiling);
+* **the column span** — first cloud voxel to last down one column, over whatever air is between them, and
+  the **solidity** that is the chord divided by it.
+
+A chord alone cannot tell a plate from a tower with holes in it; a span alone cannot tell a solid body from
+a haze. `Desert/Tests/Engine/CloudPlacementSpectrum` pins both on lines whose answer it chose, including the
+wrap (a body straddling a face is **one** body, not two) and the relation the pair must satisfy: **halving
+the placement cell narrows the bodies and leaves their height alone**, because the width follows the cell
+and the height follows the type's own band. Tying either to the other is the defect that test would name.
+
+> ⚠️ **A column span is NOT a silhouette**, and the first version of this report called it one. It is
+> measured down one column, so it says how much of the layer has cloud above one patch of ground — which is
+> half of how tall the body looks from the side, because the lobes are spread over a disc and the top of the
+> pile does not stand over its bottom. The two differ by a factor of two on the shipped type, so the wrong
+> word would have been read as the wrong number.
+
+### QUESTION 1 — 2.5 IS NOT NEEDED, AND THE MEASUREMENT SAYS WHERE THE BOUND ACTUALLY IS
+
+One setting at a time, everything else at the values §RW ships, `Clouds_Demo`'s configuration (48 km region,
+12 km weather tile → 3.000 km cell, coverage 0.762, wind +X), **32 realisations**. `LATTICE` is the
+prominence of the strongest bump standing on a multiple of the predicted 3.000 km period.
+
+| Cloud Density | lumps | sky cover | LATTICE X | LATTICE Z | verdict |
+|---|---|---|---|---|---|
+| **1.0** | 1242 | 0.7561 | 0.0000 | **0.0264 at 5.812 km (2P), 5.9x noise** | **the grid is back** |
+| **1.5** | 1902 | 0.7387 | 0.0007 (0.2x noise) | 0.0000 | inside the noise |
+| **1.75** | 2208 | 0.7431 | 0.0017 (0.3x noise) | 0.0000 | inside the noise |
+| **2.0** | 2484 | 0.7504 | 0.0027 (0.6x noise) | 0.0000 | inside the noise |
+| **2.5** (§RW) | 3144 | 0.7446 | 0.0000 | 0.0000 | inside the noise |
+
+> **The lattice bump is inside the estimator's own noise at every setting from 1.5 upward, and only comes
+> back at 1.0.** §RW's own arm table already said this and the conclusion was not drawn from it: the count is
+> not what removes the grid — the SCATTER is — so paying for the count above the point where the grid is
+> already gone buys nothing the instrument can see.
+
+**And it costs the picture, which is the other half of the answer.** The compensation that keeps `Coverage`
+honest narrows every cluster as the density rises, so raising it does not add cloud — it makes the same
+cloud out of smaller bodies:
+
+| Cloud Density | mean horizontal chord | mean vertical chord | wider than tall | column span (of 3.60 km) | solidity |
+|---|---|---|---|---|---|
+| 1.0 | 1.991 km | 0.532 km | 3.74x | 1.636 km (45%) | 0.33 |
+| 1.5 | 1.784 km | 0.561 km | 3.18x | 1.685 km (47%) | 0.33 |
+| **1.75** | **1.705 km** | **0.570 km** | **2.99x** | 1.706 km (47%) | 0.33 |
+| 2.0 | 1.634 km | 0.575 km | 2.84x | 1.721 km (48%) | 0.33 |
+| 2.5 | 1.541 km | 0.591 km | 2.61x | 1.748 km (49%) | 0.34 |
+
+At 2.5 the typical body is **23 per cent narrower** than at 1.5. That is what turned the frame into a pelt:
+in `Shots/RW_before_mid_away.png` the lozenges are confined to the lower third — the far distance — and the
+near sky is made of large fused banks; at 2.5 the near bodies have shrunk to the angular size the far ones
+already had, so the whole frame reads as one texture. **The shape did not change and the size cue did.**
+
+The frame agrees, at `mid away`, `ImageStat` over `0 0 1280 551`:
+
+| Cloud Density | mean | contrast | sat | frame cloud fraction |
+|---|---|---|---|---|
+| 1.5 | 0.568 | **0.378** | **0.147** | 0.762 |
+| **1.75** | 0.574 | **0.379** | 0.141 | 0.773 |
+| 2.0 | 0.598 | 0.374 | 0.107 | 0.836 |
+| 2.5 (§RW) | 0.570 | **0.349** | 0.109 | 0.712 |
+| the sky the owner accepted (`RW_before_mid_away.png`) | 0.591 | **0.384** | 0.087 | 0.889 |
+
+**Contrast is what a field of identical lozenges costs, and 2.5 is the only setting that loses it.** At 1.75
+the frame measures 0.379 against the 0.384 of the sky that shipped before §RW, and there is half again as
+much blue in it as at 2.5.
+
+> **THE DEFAULT MOVES TO 1.75.** It is the lowest setting that is a whole measured step above the one that
+> fails (1.0, at 5.9x noise) and it sits on the contrast plateau. The sky's cover moves from 0.7446 to
+> 0.7431 — a change of 0.0015 — so **no scene is re-authored and decision D-20's condition is untouched**;
+> the deviation from the 0.762 the slider asks for is 0.019, inside the 0.025 the suite asserts at this
+> cell. The bake gets cheaper: 2208 lumps against 3144, a fall of 30 per cent.
+
+Frames: `Shots/RW2_density_mid_1p5.png`, `Shots/RW2_after_mid_away.png` (1.75, the new default),
+`Shots/RW2_density_mid_2p0.png`, and `Shots/RW_after_mid_away.png` for 2.5 — that last one is §RW's own file
+and re-shooting it would have put a duplicate in the directory. Same four at the horizon:
+`RW2_density_horizon_1p5.png`, `RW2_after_horizon_away.png`, `RW2_density_horizon_2p0.png`,
+`RW_after_horizon_away.png`.
+
+### QUESTION 2 — THE FLOODED ZENITH IS NOT THE CAMERA, NOT THE SIZE SPREAD, AND NOT NEW
+
+The measurement is the Otsu cloud fraction of the frame, which is `LatticePeak --frame`'s own split, over
+`0 0 1280 551`. A frame above **0.90** has under a tenth of blue in it and is what "the view is flooded"
+means here.
+
+**Eight seeds, one camera** (`0,200,0`, `--look 0,0.9,-1`), at §RW's shipped default:
+
+| seed | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| cloud | **0.9460** | 0.3769 | 0.3464 | 0.2325 | 0.6360 | 0.5308 | 0.1878 | 0.4487 |
+
+One of eight. On that evidence alone the shipped seed would look like bad luck — **and it is the wrong
+experiment**, because a player does not change the seed, he walks. **Fifteen camera positions along +X from
+0 to 100 km, one seed, one sky**, against the same fifteen with §RW's four knobs returned to their old
+values on this same binary:
+
+| x km | 0 | 2 | 4 | 6 | 8 | 10 | 12 | 14 | 25 | 37 | 50 | 62 | 75 | 87 | 100 | mean | ≥0.90 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **density 2.5** | .946 | .664 | .659 | .872 | .961 | .947 | .897 | .720 | .642 | .783 | .786 | .732 | .709 | .909 | .821 | **.803** | **4 of 15** |
+| **old knobs** | .920 | .808 | .822 | .974 | .389 | .956 | .833 | .850 | .927 | .901 | .444 | .204 | .609 | .855 | .982 | **.765** | **6 of 15** |
+| **density 1.75** | *below* | | | | | | | | | | | | | | | | |
+
+> **The old sky floods the zenith MORE often than §RW's, not less — 6 of 15 against 4 of 15 — and it floods
+> it in an all-or-nothing way** (0.204 to 0.982) because it has no patch modulation, so a whole region is
+> either busy or clear. §RW's sky is flatter in distribution and higher on average. Neither of them is a
+> camera accident: **at a `Coverage` of 0.762 the flooded zenith is the sky that was authored.**
+
+The geometry says the same thing without a render. The slider delivers 0.745 of the sky as cloud measured
+straight down. The zenith point looks at **42 degrees** of elevation, and a ray at 42 degrees crosses the
+3.6 km layer over `1/sin 42 = 1.49` times the vertical path, so the fraction of DIRECTIONS that meet cloud
+must exceed the fraction of COLUMNS that do. 0.80 against 0.745 is that factor, arriving where it should.
+
+**AND §RW'S OWN EXPLANATION OF THAT FRAME IS WRONG, which is worth more than the table above.** §RW wrote
+that the zenith went to one mass because "a cluster may now be 1.38 times the base width, and one that lands
+near the camera fills the zenith from two kilometres below", and offered `Cloud Size Variety` as the artist's
+answer. Measured: **at `Cloud Size Variety` 0, the same camera and the same seed give 0.9398 against 0.9460**
+— six thousandths. `Shots/RW2_zenith_variety_zero.png` is that frame and it is the same overhead mass. The
+size spread is not what put it there. Neither is the density, which moves it by ten points and does not
+remove it: **0.8380 at 1.5, 0.8947 at 2.0, 0.9460 at 2.5**.
+
+`Shots/RW2_zenith_pos_8km.png` (0.961) and `Shots/RW2_zenith_pos_25km.png` (0.642) are two positions in one
+sky; `Shots/RW2_zenith_oldknobs_pos_62km.png` (0.204) and `Shots/RW2_zenith_oldknobs_pos_100km.png` (0.982)
+are the old placement's two extremes.
+
+### QUESTION 3 — THE LENS IS THE LUMP, AND ITS ASPECT IS AN ACCIDENT OF TWO UNRELATED NUMBERS
+
+**The catalogue is NOT the cause, and the arithmetic is short enough to check.** For the shipped congestus at
+the new default: the cluster's horizontal half-extent is `0.48 R + 0.62 R = 1.10 R` and `R` is
+`0.72 x 3.000 km` scaled by the density and the packing and the mean fill and the mean size draw — 1.672 km —
+so the body is **3.66 km across**. Its vertical envelope is the type's band times the mean fullness plus a
+lobe at each end: `3.60 x 0.849 + 0.72` = **3.78 km**. **0.97 to one. The shipped type is as tall as it is
+wide.** Raising or lowering `BaseAltitudeKm`/`TopAltitudeKm` is not where the flat lens comes from.
+
+**What is flat is the LUMP the cluster is built out of, and its two radii are written in two places that
+have never had to agree:**
+
+| | where it comes from | shipped value |
+|---|---|---|
+| a lump's **vertical** radius | `0.6 x band / kMaxBlobsPerCluster` — the TYPE's altitudes divided by a constant `6` that lives in the placement file | `0.6 x 3.60/6` = **0.360 km** (diameter 0.72 km) |
+| a lump's **horizontal** radius | `(0.62 - 0.16 t) x clusterRadius`, and `clusterRadius` is `0.72 x` the placement CELL | **0.63 to 0.89 km** (diameter 1.3 to 1.8 km) |
+
+> **A lump is between 2.1 and 2.5 times wider than it is tall, and nothing in the code asserts a relation
+> between the two numbers that decide it.** Double the type's band and the lumps get twice as tall; halve
+> the placement cell and they get twice as narrow. This is exactly the shape §2.3.1 of the contract is about
+> — two places that must agree and nobody checks that they do — and `CloudPlacementSpectrum` now has the
+> relation test, which passes and records the ratio rather than fixing it.
+
+**And the lumps do not stack, they are spread over a disc**, one golden angle apart at a radius of
+`0.48 R (1 - 0.55 t)`. So a column through a "tower" meets ONE lump and not six, and the measurement says so
+exactly: the mean vertical chord is **0.570 km** against a lump diameter of 0.720 km — a random line through
+one ellipsoid, and nothing above it. The column's cloud spans 1.706 km of the 3.60 km band at a **solidity
+of 0.33**: two thirds of the body's own height is air.
+
+**IN DEGREES, at the mid elevation the question asked about** — camera at 2 m, `--look 0,0.45,-1` is 24.23
+degrees of elevation, the layer's middle at 4.0 km is a slant range of 9.75 km, and a vertical extent is
+foreshortened by `cos 24.23 = 0.912`:
+
+| | at the new default (1.75) | at §RW's 2.5 |
+|---|---|---|
+| the body's **opaque core** | **10.0 deg wide x 3.1 deg tall — 3.3 to 1** | 9.1 x 3.2 — 2.9 to 1 |
+| the body's **whole envelope**, air included | 10.0 x 9.1 — **1.1 to 1** | 9.1 x 9.4 — 1.0 to 1 |
+
+> **That is the whole answer to "why does it look like a flat lens".** The body is round; the part of it that
+> is opaque is a slab three degrees tall in the middle of it, because the lumps sit BESIDE one another
+> instead of ON one another. The eye reads the opaque part. The fix is the lobe layout — `spread` against
+> `verticalKm` in `GenerateCloudProceduralBlobs` — and it is not the catalogue and not this task.
+
+### The six points, at the new default
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, `ImageStat` over `0 0 1280 551`. The 2.5
+column is §RW's published table, which this worktree reproduced byte for byte at `mid away` before anything
+was changed.
+
+| point | mean 2.5 / 1.75 | contrast 2.5 / 1.75 | sat 2.5 / 1.75 |
+|---|---|---|---|
+| zenith away `0,0.9,-1` | 0.600 / **0.616** | 0.251 / **0.354** | 0.068 / 0.067 |
+| mid away `0,0.45,-1` | 0.570 / **0.574** | 0.349 / **0.379** | 0.109 / **0.141** |
+| horizon away `0,0.12,-1` | 0.639 / 0.630 | 0.281 / **0.292** | 0.071 / 0.078 |
+| zenith sunward `0,0.9,1` | 0.714 / 0.644 | 0.435 / **0.462** | 0.029 / **0.060** |
+| mid sunward `0,0.45,1` | 0.620 / 0.610 | 0.303 / **0.274** | 0.069 / 0.073 |
+| horizon sunward `0,0.12,1` | 0.636 / 0.634 | 0.274 / **0.282** | 0.076 / 0.091 |
+
+**Five of six points gain contrast and one loses it**, and the one that loses it is named rather than
+glossed: `mid sunward` falls from 0.303 to 0.274. Looking into the sun the bodies are lit through rather
+than lit on, so making them larger and fewer removes edges from the frame instead of adding them — the same
+mechanism that helps at every other point, running the other way at the one point where the silhouette is
+the dark side of the cloud.
+
+The point that moves most is `zenith away`: contrast 0.251 to 0.354, because the single undifferentiated
+mass §RW's frame showed breaks into bodies with edges and blue between them.

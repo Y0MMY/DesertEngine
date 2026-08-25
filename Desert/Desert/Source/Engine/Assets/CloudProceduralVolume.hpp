@@ -188,11 +188,29 @@ namespace Desert::Assets
         /// holds a whole number of them with this mean — two, then one, then three — and "exactly one per
         /// cell" stops being a property of the field at all.
         ///
-        /// THE CLUSTER SHRINKS AS THE COUNT RISES, by one over the square root of this number, so that the
-        /// matter in the sky is REDISTRIBUTED rather than added. That is what keeps the Coverage slider
-        /// meaning what it says: without the compensation, raising the density would raise the sky's cover
-        /// and the mapping decision D-20 re-authorised every scene against would have to be measured again.
-        float PlacementDensity = 2.5f;
+        /// THE CLUSTER SHRINKS AS THE COUNT RISES, by this number to the power of kDensityCompensation, so
+        /// that the matter in the sky is REDISTRIBUTED rather than added. That is what keeps the Coverage
+        /// slider meaning what it says: without the compensation, raising the density would raise the sky's
+        /// cover and the mapping decision D-20 re-authorised every scene against would have to be measured
+        /// again. The exponent is 0.40 and NOT a half — see kDensityCompensation, which says why the half
+        /// is the answer to a different question.
+        ///
+        /// 1.75 AND NOT 2.5, AND THE MOVE IS A MEASUREMENT — see CALIBRATION.md §RW2. §RW shipped 2.5 on
+        /// the argument that the count is what breaks the lattice. Measured one setting at a time at 32
+        /// realisations, with everything else at the values that ship, the lattice bump is inside the
+        /// estimator's noise from 1.5 upward and only comes back at 1.0:
+        ///
+        ///     density   1.0     1.5     1.75    2.0     2.5
+        ///     LATTICE   0.0264  0.0007  0.0017  0.0027  0.0000
+        ///     x noise   5.9     0.2     0.3     0.6     —
+        ///
+        /// so 2.5 buys nothing the grid can see, and it COSTS the picture: the cluster narrows as this
+        /// rises, and at 2.5 every cloud in the frame had shrunk to the size the far ones already were.
+        /// The mean horizontal chord through the baked field goes 1.784 / 1.705 / 1.634 / 1.541 km over
+        /// those four settings and the frame's contrast goes 0.378 / 0.379 / 0.374 / 0.349 against the
+        /// 0.384 of the sky the owner accepted. 1.75 is the lowest setting that is a whole measured step
+        /// away from the one that fails and is on the contrast plateau.
+        float PlacementDensity = 1.75f;
 
         /// How far a cluster may wander from its lattice site, in CELLS — 1.0 means it may sit anywhere in
         /// a box one cell wide centred on its site, so it crosses into its neighbours' territory.
