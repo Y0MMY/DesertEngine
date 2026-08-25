@@ -96,6 +96,24 @@ namespace Desert::Assets
          static_cast<uint64_t>( kCloudProceduralVolumeWidth ) * kCloudProceduralVolumeHeight *
          kCloudProceduralVolumeDepth * kCloudProceduralBytesPerVoxel;
 
+    /// A LUMP'S HEIGHT OVER ITS OWN WIDTH — the one ratio that turns a cluster's single size into both of a
+    /// lump's radii. The decision behind it, the alternative it was chosen over and the ladder it was read
+    /// off are at its use site in CloudProceduralVolume.cpp; what belongs HERE is why it is public at all.
+    ///
+    /// IT IS EXPORTED BECAUSE IT IS ONE HALF OF A CALIBRATION WHOSE OTHER HALF LIVES IN ANOTHER FILE, and
+    /// that pairing was a mine for a whole phase. A taller lump makes a body optically thicker per metre, so
+    /// the SAME erosion cut moves the visible surface a shorter distance — and ECS::VolumetricCloudData's
+    /// Detail Strength is fixed by a floor on exactly that distance (the chord the march can be relied on to
+    /// find, CloudFinestResolvableChordKm). §SIL raised this constant, measured, framed and committed the
+    /// result, and only the full test sweep found that it had pushed §DS's floor through the floor — 101 m
+    /// against 125. The two numbers had never been named in one place, so nothing could say so.
+    ///
+    /// Desert/Tests/Engine/CloudField
+    /// (`TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers`) reads THIS symbol and the
+    /// component's own default, bakes the volume the pair produces and asserts the product still clears the
+    /// march. Anyone moving either number alone gets a red test that names the other one.
+    inline constexpr float kCloudLumpVerticalOverHorizontal = 0.75f;
+
     /**
      * @brief Everything the placement needs about one KIND of cloud, and nothing about where the camera is.
      *

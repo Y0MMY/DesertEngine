@@ -484,7 +484,61 @@ namespace Desert::ECS
         // produces a shredded silhouette. That is a property of the `(1 - Profile)` weight in
         // Common/CloudField.glslh, it predates phase Э5, and re-deriving it against the optical surface is
         // a design change rather than a calibration.
-        float DetailStrength = 0.40f;
+        //
+        // ---------------------------------------------------------------------------------------------
+        // 0.65, UP FROM §DS's 0.40, AND THE REASON IS NOT IN THIS FILE — see CALIBRATION.md §SIL2.
+        // ---------------------------------------------------------------------------------------------
+        //
+        // THIS NUMBER IS ONE HALF OF A PAIR. The other half is Assets::kCloudLumpVerticalOverHorizontal,
+        // the shape of the lump a body is built out of. A taller lump makes that body optically thicker per
+        // metre, so the surface at which the optical depth first reaches 1 sits at a SHALLOWER profile
+        // (0.632 at the 0.45 lump, 0.576 at the 0.75 one) and the same cut moves it a SHORTER distance. The
+        // floor above is a floor on that distance. Raise the lump and this number has to follow, or the
+        // erosion drops through a bound that is measured in another suite and named in neither file.
+        //
+        // §SIL RAISED THE LUMP TO 0.75, MEASURED IT, FRAMED IT AND COMMITTED IT, and the full sweep is what
+        // found that its travel was 101 m against the 125 m floor. That is the whole argument for the
+        // relation test named at the bottom of this comment.
+        //
+        // THE LADDER, RE-MEASURED AGAINST THE 0.75 LUMP — the same instrument as §DS's, which is
+        // Desert/Tests/Engine/CloudField walking 48 x 48 columns and printing what it asserts:
+        //
+        //     strength   0.40   0.45   0.50   0.55   0.60   0.65   0.70   0.80   1.00
+        //     travel     101    109    117    124    131    139    145    157    180   m
+        //     vs floor  0.81x  0.87x  0.93x  0.99x  1.05x  1.11x  1.16x  1.26x  1.44x
+        //     dissolved 0.054  0.056  0.060  0.061  0.065  0.068  0.075  0.079  0.088
+        //
+        // 0.65 IS THE FIRST STEP WITH REAL HEADROOM AND THAT IS §DS'S OWN CONVENTION, not a new one: §DS
+        // shipped 0.40 because 0.35 cleared its floor by ONE metre and 0.40 cleared it by fourteen — 1.11x.
+        // Here 0.60 clears by six metres (1.05x) and 0.65 by fourteen (1.11x). The two calibrations land on
+        // the same headroom because they are the same rule applied twice.
+        //
+        // ⚠️ THE ESTIMATE THIS REPLACES WAS 0.60 AND IT WAS CHECKED RATHER THAN TAKEN. §SIL's report
+        // estimated "about 0.60" from two anchor points it measured correctly (116.7 m at 0.50, 157.1 m at
+        // 0.80 — both reproduce here to a tenth of a metre) and then interpolated between them badly: even
+        // straight-line interpolation of that pair needs 0.66. Measured, 0.60 delivers 1.05x, which is the
+        // balanced-on-the-bound case §DS looked at and refused BY NAME, because a one-per-cent margin makes
+        // the suite fail on any change to the generator that moves a body by a voxel.
+        //
+        // WHAT IT COSTS THE LIBRARY, WHICH IS §DS'S QUESTION ASKED A SECOND TIME. The cut's depth is
+        // `clamp(DetailStrength * DetailFactor, 0, 1)`, so raising this multiplies EVERY type's cut by
+        // 1.625. The two types §DS re-based because a deep cut DELETES them rather than shredding them are
+        // re-based again by the same ratio, which holds their cut depth exactly where it has been since
+        // before §DS: cirrus 0.625 -> 0.3846154 and altocumulus 0.40 -> 0.2461538, so
+        //
+        //     cirrus       0.65 x 0.3846154 = 0.250 = 0.40 x 0.625 = 0.10 x 2.50
+        //     altocumulus  0.65 x 0.2461538 = 0.160 = 0.40 x 0.40  = 0.10 x 1.60
+        //
+        // Desert/Tests/Engine/CloudType asserts that identity on the shipped assets rather than trusting
+        // the arithmetic in this comment, and §SIL2 verifies it on the FRAME with the lump held fixed, so
+        // that the one variable it is about is alone.
+        //
+        // AND THE PAIR IS A TESTED RELATION NOW. Desert/Tests/Engine/CloudField's
+        // `TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers` reads this default and
+        // Assets::kCloudLumpVerticalOverHorizontal together, bakes the volume they produce and asserts the
+        // travel their PRODUCT delivers still clears the march. Moving either one alone is red, and the
+        // message names the other.
+        float DetailStrength = 0.65f;
 
         PROPERTY( DisplayName( "Density Scale" ), Category( "Detail" ), Range( 0.0f, 2.0f ),
                   Tooltip( "Multiplies the eroded density, for the LAYER. Below 1 the whole layer thins "

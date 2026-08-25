@@ -1159,11 +1159,24 @@ TEST( CloudPlacementSpectrum, ALumpsHeightAndItsWidthAreOneQuantity )
             // spreading floor a type authors — so it is the one lump this relation does not cover, and it
             // is excluded by the thing that identifies it rather than by its index: it is the only lump
             // whose height is a stated fraction of what its width would give.
+            //
+            // THE THRESHOLD IS THE CONSTANT ITSELF AND IT USED TO BE A LITERAL SPELLING OF IT. It stood as
+            // `0.6 * 0.75`, which is 0.45 — the aspect that shipped at the time, written in a form that
+            // named neither the constant nor the fact that it WAS the constant. §SIL2 moved the aspect to
+            // 0.75 and this line would have gone on excluding everything below 0.45: the ramped lumps it
+            // exists to drop are at `aspect * rampFactor` and rampFactor is never below 0.525, so at the
+            // new aspect they land ABOVE the old threshold and would have been averaged in as if they were
+            // unreshaped. The test would not have failed — it would have quietly measured something else.
+            //
+            // A lump the ramp and the band clamp have both left alone measures the constant EXACTLY (the
+            // vertical radius takes the geometric mean of the two horizontal wobble draws, which is what
+            // makes that true), so the threshold is the constant with one part in a thousand of slack for
+            // the float division rather than a fraction of it.
             const double wide = std::sqrt( static_cast<double>( blob.RadiiKm.x ) * blob.RadiiKm.z );
             const double tall = static_cast<double>( blob.RadiiKm.y );
             const double at   = tall / std::max( wide, 1e-9 );
 
-            if ( at < 0.6 * 0.75 )
+            if ( at < 0.999 * kCloudLumpVerticalOverHorizontal )
                 continue;
 
             sum += at;

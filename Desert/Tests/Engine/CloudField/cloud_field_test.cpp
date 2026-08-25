@@ -1048,6 +1048,159 @@ namespace
     /// The coverage `Clouds_Demo` and the other shipped cloud scenes are authored at. The calibration
     /// below is for the shipped sky, so it is measured on the shipped sky.
     constexpr float kShippedCoverage = 0.762f;
+
+    /// What one walk of the field's columns records, so that a ladder of erosion depths costs ONE walk.
+    ///
+    /// It is a census and not a measurement: the profile and the erosion noise are sampled once per cell of
+    /// a 48 x 48 x 240 grid and kept, and every depth is then integrated out of the same samples. Walking
+    /// per depth instead would make the ladder below thirteen times more expensive and — worse — would let
+    /// two rows of it disagree for a reason other than the depth.
+    struct SurfaceCensus
+    {
+        struct Column
+        {
+            std::vector<float> Profile;
+            std::vector<float> Noise;
+        };
+
+        std::vector<Column> Columns;
+        std::vector<float>  ReferenceKm;           // where each column goes opaque with NO erosion; < 0 if never
+        double              SurfaceProfile  = 0.0; // the profile at that un-eroded surface, averaged
+        long                Surfaces        = 0;
+        float               EnvelopeKm      = 0.0f;
+        float               StepKm          = 0.0f;
+        float               ExtinctionPerKm = 0.0f;
+
+        struct Result
+        {
+            double TravelM;   // how far the erosion moved the visible surface, metres
+            double LostShare; // share of opaque columns that stopped being opaque
+            long   Opaque;
+        };
+
+        /// Where a column becomes opaque at an effective cut depth `t`, kilometres; negative if it never does.
+        float SurfaceKmAt( const Column& column, float t ) const
+        {
+            double opticalDepth = 0.0;
+            for ( int ih = static_cast<int>( column.Profile.size() ) - 1; ih >= 0; --ih )
+            {
+                if ( column.Profile[ih] <= 0.0f )
+                    continue;
+
+                opticalDepth += static_cast<double>( ErodedDensity( column.Profile[ih], column.Noise[ih], t ) ) *
+                                ExtinctionPerKm * StepKm;
+
+                if ( opticalDepth >= 1.0 )
+                    return ( ih + 0.5f ) / static_cast<float>( column.Profile.size() ) * EnvelopeKm;
+            }
+            return -1.0f;
+        }
+
+        Result At( float t ) const
+        {
+            long   opaque = 0;
+            long   lost   = 0;
+            double travel = 0.0;
+
+            for ( size_t i = 0; i < Columns.size(); ++i )
+            {
+                if ( ReferenceKm[i] < 0.0f )
+                    continue;
+
+                ++opaque;
+
+                const float moved = SurfaceKmAt( Columns[i], t );
+                if ( moved < 0.0f )
+                {
+                    ++lost;
+                    continue;
+                }
+                travel += ( ReferenceKm[i] - moved ) * 1000.0;
+            }
+
+            return Result{ opaque > lost ? travel / static_cast<double>( opaque - lost ) : 0.0,
+                           opaque > 0 ? static_cast<double>( lost ) / static_cast<double>( opaque ) : 0.0,
+                           opaque };
+        }
+    };
+
+    /// Walks the shipped field once. The volume it walks is baked by the SHIPPED generator, so the shape of
+    /// the lump — Assets::kCloudLumpVerticalOverHorizontal — is an input to every number that comes out of
+    /// here, which is the whole reason the relation test below can see it at all.
+    SurfaceCensus TakeSurfaceCensus( const CloudFieldParams& params )
+    {
+        SurfaceCensus census;
+
+        census.EnvelopeKm = EnvelopeThicknessKm( DefaultShape() );
+
+        constexpr int kColumns = 48;
+        constexpr int kLevels  = 240;
+
+        census.StepKm = census.EnvelopeKm / kLevels;
+
+        // WHAT A RAY ACTUALLY INTEGRATES, and it is a product of THREE numbers rather than one: the layer's
+        // Extinction Scale, the type's own extinction factor, and the type's DENSITY factor — because the
+        // density the march multiplies the extinction by is the eroded profile times that factor. Leaving
+        // the density out puts the surface a decile deeper than the frame does.
+        census.ExtinctionPerKm = kExtinctionPerKm * DefaultShape().ExtinctionFactor * DefaultShape().DensityFactor;
+
+        census.Columns.reserve( kColumns * kColumns );
+
+        for ( int iz = 0; iz < kColumns; ++iz )
+            for ( int ix = 0; ix < kColumns; ++ix )
+            {
+                const float x = OriginKm().x + PeriodKm() * ( ix + 0.5f ) / kColumns;
+                const float z = OriginKm().y + PeriodKm() * ( iz + 0.5f ) / kColumns;
+
+                SurfaceCensus::Column column;
+                column.Profile.assign( kLevels, 0.0f );
+                column.Noise.assign( kLevels, 0.0f );
+
+                for ( int ih = 0; ih < kLevels; ++ih )
+                {
+                    const float fraction = ( ih + 0.5f ) / kLevels;
+                    const vec3  at( x, fraction * census.EnvelopeKm, z );
+
+                    const CloudFieldSample field = SampleCloudField( params, fraction, at );
+                    if ( field.Profile <= 0.0f )
+                        continue;
+
+                    column.Profile[ih] = field.Profile;
+                    column.Noise[ih]   = ErosionNoiseAt( params, field, at );
+                }
+                census.Columns.push_back( std::move( column ) );
+            }
+
+        double sumProfileAtSurface = 0.0;
+
+        census.ReferenceKm.reserve( census.Columns.size() );
+
+        for ( const SurfaceCensus::Column& column : census.Columns )
+        {
+            census.ReferenceKm.push_back( census.SurfaceKmAt( column, 0.0f ) );
+
+            // The profile AT that surface, which is what decides how much of the cut ever reaches the eye.
+            double opticalDepth = 0.0;
+            for ( int ih = kLevels - 1; ih >= 0; --ih )
+            {
+                if ( column.Profile[ih] <= 0.0f )
+                    continue;
+
+                opticalDepth += static_cast<double>( column.Profile[ih] ) * census.ExtinctionPerKm * census.StepKm;
+                if ( opticalDepth >= 1.0 )
+                {
+                    sumProfileAtSurface += column.Profile[ih];
+                    ++census.Surfaces;
+                    break;
+                }
+            }
+        }
+
+        census.SurfaceProfile =
+             census.Surfaces > 0 ? sumProfileAtSurface / static_cast<double>( census.Surfaces ) : 0.0;
+
+        return census;
+    }
 } // namespace
 
 TEST( CloudFieldErosion, TheMirrorOfTheErosionAgreesWithTheShader )
@@ -1284,138 +1437,15 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
     // about 31 % of its nominal depth exactly where the eye is looking. That ceiling is why no setting of
     // this slider produces a shredded silhouette, it predates phase Э5, and moving it is a design change
     // rather than a calibration.
-    CloudFieldParams params     = ParamsAtCoverage( kShippedCoverage );
-    const float      envelopeKm = EnvelopeThicknessKm( DefaultShape() );
+    const CloudFieldParams params = ParamsAtCoverage( kShippedCoverage );
+    const SurfaceCensus    census = TakeSurfaceCensus( params );
 
-    // WHAT A RAY ACTUALLY INTEGRATES, and it is a product of THREE numbers rather than one: the layer's
-    // Extinction Scale, the type's own extinction factor, and the type's DENSITY factor — because the
-    // density the march multiplies the extinction by is the eroded profile times that factor. Leaving the
-    // density out puts the surface a decile deeper than the frame does, which moves every number below it.
-    const float extinctionPerKm =
-         kExtinctionPerKm * DefaultShape().ExtinctionFactor * DefaultShape().DensityFactor;
-
-    constexpr int kColumns = 48;
-    constexpr int kLevels  = 240;
-
-    const float stepKm = envelopeKm / kLevels;
-
-    struct Column
-    {
-        std::vector<float> Profile;
-        std::vector<float> Noise;
-    };
-
-    std::vector<Column> columns;
-    columns.reserve( kColumns * kColumns );
-
-    for ( int iz = 0; iz < kColumns; ++iz )
-        for ( int ix = 0; ix < kColumns; ++ix )
-        {
-            const float x = OriginKm().x + PeriodKm() * ( ix + 0.5f ) / kColumns;
-            const float z = OriginKm().y + PeriodKm() * ( iz + 0.5f ) / kColumns;
-
-            Column column;
-            column.Profile.assign( kLevels, 0.0f );
-            column.Noise.assign( kLevels, 0.0f );
-
-            for ( int ih = 0; ih < kLevels; ++ih )
-            {
-                const float fraction = ( ih + 0.5f ) / kLevels;
-                const vec3  at( x, fraction * envelopeKm, z );
-
-                const CloudFieldSample field = SampleCloudField( params, fraction, at );
-                if ( field.Profile <= 0.0f )
-                    continue;
-
-                column.Profile[ih] = field.Profile;
-                column.Noise[ih]   = ErosionNoiseAt( params, field, at );
-            }
-            columns.push_back( std::move( column ) );
-        }
-
-    // Where the column becomes opaque, as an altitude in kilometres; negative when it never does.
-    auto surfaceKm = [&]( const Column& column, float t )
-    {
-        double opticalDepth = 0.0;
-        for ( int ih = kLevels - 1; ih >= 0; --ih )
-        {
-            if ( column.Profile[ih] <= 0.0f )
-                continue;
-
-            opticalDepth += static_cast<double>( ErodedDensity( column.Profile[ih], column.Noise[ih], t ) ) *
-                            extinctionPerKm * stepKm;
-
-            if ( opticalDepth >= 1.0 )
-                return ( ih + 0.5f ) / kLevels * envelopeKm;
-        }
-        return -1.0f;
-    };
-
-    double sumProfileAtSurface = 0.0;
-    long   surfaces            = 0;
-
-    std::vector<float> reference;
-    reference.reserve( columns.size() );
-
-    for ( const Column& column : columns )
-    {
-        reference.push_back( surfaceKm( column, 0.0f ) );
-
-        // The profile AT that surface, which is what decides how much of the cut ever reaches the eye.
-        double opticalDepth = 0.0;
-        for ( int ih = kLevels - 1; ih >= 0; --ih )
-        {
-            if ( column.Profile[ih] <= 0.0f )
-                continue;
-
-            opticalDepth += static_cast<double>( column.Profile[ih] ) * extinctionPerKm * stepKm;
-            if ( opticalDepth >= 1.0 )
-            {
-                sumProfileAtSurface += column.Profile[ih];
-                ++surfaces;
-                break;
-            }
-        }
-    }
-
-    ASSERT_GT( surfaces, 0 ) << "no column in the fixture ever became opaque, so there is no surface to move";
+    ASSERT_GT( census.Surfaces, 0 )
+         << "no column in the fixture ever became opaque, so there is no surface to move";
 
     const Desert::ECS::VolumetricCloudData shipped;
 
-    // The travel at a given strength, and how much of the deck it dissolved getting there.
-    auto measure = [&]( float t )
-    {
-        long   opaque = 0;
-        long   lost   = 0;
-        double travel = 0.0;
-
-        for ( size_t i = 0; i < columns.size(); ++i )
-        {
-            if ( reference[i] < 0.0f )
-                continue;
-
-            ++opaque;
-
-            const float moved = surfaceKm( columns[i], t );
-            if ( moved < 0.0f )
-            {
-                ++lost;
-                continue;
-            }
-            travel += ( reference[i] - moved ) * 1000.0;
-        }
-
-        struct Result
-        {
-            double TravelM;
-            double LostShare;
-            long   Opaque;
-        };
-        return Result{ opaque > lost ? travel / static_cast<double>( opaque - lost ) : 0.0,
-                       static_cast<double>( lost ) / static_cast<double>( opaque ), opaque };
-    };
-
-    const auto shippedResult = measure( shipped.DetailStrength );
+    const auto shippedResult = census.At( shipped.DetailStrength );
 
     ASSERT_GT( shippedResult.Opaque, 0 ) << "no column was opaque without the erosion";
 
@@ -1424,8 +1454,7 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
 
     std::printf( "[CloudFieldErosion] the surface sits at profile %.3f; at strength %.2f it travels %.0f m "
                  "(the march resolves %.0f m) and %.3f of the opaque columns stop being opaque\n",
-                 sumProfileAtSurface / surfaces, shipped.DetailStrength, meanTravelM, MarchResolvableM(),
-                 lostShare );
+                 census.SurfaceProfile, shipped.DetailStrength, meanTravelM, MarchResolvableM(), lostShare );
 
     EXPECT_GE( meanTravelM, MarchResolvableM() )
          << "at the shipped Detail Strength the erosion moves the surface the eye sees by " << meanTravelM
@@ -1440,9 +1469,10 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
     // WHERE THE FLOOR ACTUALLY IS, printed so that the shipped value can be read against it rather than
     // taken on trust. This is the sweep the calibration was chosen from.
     std::printf( "[CloudFieldErosion]  strength   travel (m)   dissolved\n" );
-    for ( const float t : { 0.10f, 0.20f, 0.30f, 0.35f, 0.40f, 0.50f, 0.80f, 1.00f } )
+    for ( const float t :
+          { 0.10f, 0.20f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.55f, 0.60f, 0.65f, 0.70f, 0.80f, 1.00f } )
     {
-        const auto row = measure( t );
+        const auto row = census.At( t );
         std::printf( "[CloudFieldErosion]    %.2f       %6.1f       %.3f\n", t, row.TravelM, row.LostShare );
     }
 
@@ -1462,6 +1492,119 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
          << MarchResolvableM()
          << " m floor that chose it — the value has drifted a long way above the bound that justifies it, "
             "and every step of that costs cloud for a gain nothing has measured";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE SHAPE OF A LUMP AND THE DEPTH OF THE EROSION ARE ONE CALIBRATION, AND THIS IS WHERE THEY MEET.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// THE DEFECT THIS EXISTS FOR, and it is a defect of the repository rather than of the sky. Two numbers live
+// in two files and neither names the other:
+//
+//     Assets::kCloudLumpVerticalOverHorizontal   the shape of the lump a cloud is built out of
+//     ECS::VolumetricCloudData::DetailStrength   how deeply the erosion cuts into it
+//
+// They are not independent. A taller lump packs more density into a metre of ray, so the altitude at which
+// the optical depth first reaches 1 — the surface the eye puts the cloud at — sits at a SHALLOWER profile
+// (0.632 at a lump of 0.45, 0.576 at one of 0.75), and a given cut moves that surface a SHORTER distance.
+// Detail Strength is fixed from below by a floor on exactly that distance: the chord the march can be
+// relied on to find. So raising the lump lowers the erosion's headroom, and past a point it pushes it
+// through the floor.
+//
+// HOW IT WAS FOUND, because it is the argument for this test being here at all. §SIL raised the lump from
+// 0.45 to 0.75, measured the sky, shot the frames, wrote the report and COMMITTED it. The travel had gone
+// to 101 m against a 125 m floor. Nothing in the repository said so until a full sweep of every suite —
+// run for an unrelated reason — turned this file red, and the report's own note says it "would have
+// shipped". §SIL then backed the lump down to 0.45, which is the largest value that clears a floor nobody
+// had connected it to, and recorded the coupling in prose.
+//
+// PROSE IS NOT A RELATION. §2.3.1 of the contract is about exactly this shape — two values that must agree
+// with nothing asserting that they do — and the fix is not to widen the floor or to freeze either number,
+// it is to assert the AGREEMENT. This test reads both symbols, bakes the volume the pair actually
+// produces, and measures what the pair delivers. Move either one alone and it is red, and the message
+// names the other one.
+//
+// WHY THE THRESHOLD IS 1.05x AND NOT THE 1.11x THE PAIR SHIPS AT. The physical bound is 1.00x — below it
+// the erosion carves structure finer than the renderer can represent. §DS's convention is to ship the
+// first ladder step with REAL headroom over that, which it put at 1.11x and which this pair also lands on
+// (0.65 gives 139 m against 125). Asserting at the shipped value would make the test a copy of the default
+// rather than a guard on it, and asserting at the bare floor would let a future pair sit balanced on a
+// bound §DS refused to balance on by name. 1.05x is halfway between the bound being protected and the
+// value protecting it: a generator change that moves a body by a voxel does not trip it, and a calibration
+// that quietly gives up its headroom does.
+TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers )
+{
+    const Desert::ECS::VolumetricCloudData shipped;
+
+    const float  aspect   = Desert::Assets::kCloudLumpVerticalOverHorizontal;
+    const float  strength = shipped.DetailStrength;
+    const double floorM   = MarchResolvableM();
+
+    const CloudFieldParams params = ParamsAtCoverage( kShippedCoverage );
+    const SurfaceCensus    census = TakeSurfaceCensus( params );
+
+    ASSERT_GT( census.Surfaces, 0 ) << "no column in the fixture ever became opaque, so there is nothing to "
+                                       "measure and this test asserted nothing";
+
+    const auto result = census.At( strength );
+
+    ASSERT_GT( result.Opaque, 0 ) << "no column was opaque without the erosion";
+
+    std::printf( "[CloudFieldErosion] lump aspect %.3f x strength %.3f: the surface sits at profile %.3f "
+                 "and travels %.1f m, %.2fx the %.0f m the march resolves\n",
+                 aspect, strength, census.SurfaceProfile, result.TravelM, result.TravelM / floorM, floorM );
+
+    // ── THE RELATION ────────────────────────────────────────────────────────────────────────────────────
+    constexpr double kRequiredHeadroom = 1.05;
+
+    EXPECT_GE( result.TravelM, kRequiredHeadroom * floorM )
+         << "THE LUMP AND THE EROSION HAVE COME APART. A lump aspect of " << aspect
+         << " (Assets::kCloudLumpVerticalOverHorizontal) against a Detail Strength of " << strength
+         << " (ECS::VolumetricCloudData) moves the visible surface " << result.TravelM << " m, which is "
+         << result.TravelM / floorM << "x the " << floorM << " m the march can be relied on to find — under the "
+         << kRequiredHeadroom
+         << "x this pair is calibrated to hold.\n"
+            "These two numbers are ONE calibration: a taller lump is optically thicker per metre, so the "
+            "same cut moves the surface less far. If the aspect was just raised, the strength has to "
+            "follow it up; if the strength was just lowered, the aspect has to come down with it. "
+            "Docs/Clouds/CALIBRATION.md §SIL2 carries the measured ladder for both.";
+
+    // ── AND THE LEVER HAS TO STILL BE A LEVER ───────────────────────────────────────────────────────────
+    //
+    // The repair above only works while a deeper cut buys more travel. That is not a tautology of the
+    // maths: the erosion's weight is `(1 - Profile)` and the remap it feeds is a ratio, so a field whose
+    // surface sat deep enough could in principle stop responding — and if it ever did, "raise Detail
+    // Strength to pay for a taller lump" would be advice that quietly does nothing. Asserting the
+    // MONOTONICITY is what makes the recipe in both files a recipe rather than a hope.
+    double previousM = -1.0;
+    for ( const float t : { 0.20f, 0.40f, 0.60f, 0.80f, 1.00f } )
+    {
+        const double travelM = census.At( t ).TravelM;
+
+        EXPECT_GT( travelM, previousM )
+             << "at an effective cut of " << t << " the surface travels " << travelM << " m, no further than the "
+             << previousM
+             << " m a shallower cut moved it — the erosion has stopped being the lever that pays for the "
+                "lump's shape, so the coupling recorded in CloudProceduralVolume.hpp and "
+                "VolumetricCloudComponent.hpp cannot be repaired the way both files say it can";
+
+        previousM = travelM;
+    }
+
+    // ── AND THE PAIR MUST NOT DISSOLVE THE DECK EITHER ──────────────────────────────────────────────────
+    //
+    // The other end of the same repair. Paying for a taller lump with a deeper cut is only legitimate while
+    // the cut is shredding the deck's edge rather than opening holes through it, and the two are told apart
+    // by exactly one number: how many columns that were opaque stop being opaque. The bound is the one the
+    // test above ships with, restated here against the PAIR so that a future aspect paid for with a very
+    // deep cut is caught by the thing that makes it wrong.
+    EXPECT_LE( result.LostShare, 0.15 )
+         << "the pair dissolves " << result.LostShare * 100.0
+         << "% of the columns that were opaque without the erosion — the strength bought to pay for a lump "
+            "aspect of "
+         << aspect
+         << " is deep enough to put holes through the deck, which is the translucent veil this "
+            "parameter was first lowered to escape";
 }
 
 int main( int argc, char** argv )
