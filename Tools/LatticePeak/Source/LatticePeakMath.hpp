@@ -479,10 +479,15 @@ namespace LatticePeak
     ///
     /// WHY THIS IS NOT THE CHORD, AND THE DIFFERENCE IS THE WHOLE QUESTION. A chord stops at the first gap,
     /// so a tower of lobes with air between them counts as several short chords and reads as flat. A SPAN
-    /// does not: it is how tall the body's silhouette is, which is what an eye looking at the sky measures.
+    /// does not: it reaches from the body's first sample to its last over whatever air is between them.
     /// A body whose chord is a fifth of its span is a tower one can see through; a body whose chord IS its
     /// span is a solid plate. Reporting only one of the two would have made those two skies the same
     /// number, and they are not the same picture.
+    ///
+    /// IT IS A SPAN ALONG ONE LINE AND NOT A SILHOUETTE, and the distinction is worth the sentence: taken
+    /// down a column it says how much of the layer has cloud in it ABOVE THIS PATCH OF GROUND, which is
+    /// less than how tall the body would look from the side, because a cluster's lobes are spread over a
+    /// disc and the top of it does not stand over the bottom.
     inline size_t OccupiedSpan( const std::vector<float>& line )
     {
         size_t first = line.size();

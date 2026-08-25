@@ -462,9 +462,11 @@ namespace
                      "(layer %.2f km in %u voxels)\n",
                      horizontalKm, verticalKm, ( verticalKm > 1e-9 ) ? horizontalKm / verticalKm : 0.0,
                      params.LayerThicknessKm, Desert::Assets::kCloudProceduralVolumeHeight );
-        std::printf( "  silhouette  vertical span %.3f km   solidity %.2f (chord over span, 1.00 is a "
-                     "plate)   against a %.2f km band\n",
-                     spanKm, ( spanKm > 1e-9 ) ? verticalKm / spanKm : 0.0, params.LayerThicknessKm );
+        std::printf( "  column  cloud spans %.3f km of the %.2f km band (%.0f%%)   solidity %.2f "
+                     "(chord over span, 1.00 is a solid plate)\n",
+                     spanKm, params.LayerThicknessKm,
+                     100.0 * spanKm / std::max( static_cast<double>( params.LayerThicknessKm ), 1e-9 ),
+                     ( spanKm > 1e-9 ) ? verticalKm / spanKm : 0.0 );
 
         // The lattice is laid out in the WIND's frame, so the map's two axes are the lattice's own axes
         // exactly when the wind runs along one of them. A rotated wind is reported as such rather than

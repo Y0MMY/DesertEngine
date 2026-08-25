@@ -989,7 +989,7 @@ TEST( CloudPlacementSpectrum, TheBodysWidthFollowsTheCellAndItsHeightFollowsTheB
     measure( ShippedParams(), shippedWide, shippedTall, shippedSpan );
 
     std::printf( "[CloudPlacementSpectrum] the shipped congestus: chord %.3f km across, %.3f km up, "
-                 "%.2fx wider than tall; silhouette span %.3f km, solidity %.2f\n",
+                 "%.2fx wider than tall; column span %.3f km, solidity %.2f\n",
                  shippedWide, shippedTall, shippedWide / shippedTall, shippedSpan, shippedTall / shippedSpan );
 
     EXPECT_GT( shippedWide, shippedTall )
