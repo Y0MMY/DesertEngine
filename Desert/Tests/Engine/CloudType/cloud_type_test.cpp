@@ -848,7 +848,6 @@ TEST( CloudTypeLibrary, LoweringMaxStepsBuysCoarserCloudsRatherThanSpeckle )
     }
 }
 
-
 // ---------------------------------------------------------------------------------------------------
 // THE LIBRARY AGAINST THE LAYER'S EROSION SLIDER — task DS, 2026-08-24
 // ---------------------------------------------------------------------------------------------------
@@ -901,8 +900,8 @@ TEST( CloudTypeLibrary, TheLayersDetailStrengthStillMovesEveryShippedType )
 
         const float depth = layer.DetailStrength * data.Shape.DetailFactor;
 
-        std::printf( "[CloudTypeLibrary] %-18s detail factor %.2f -> cut depth %.3f at the layer's %.2f\n",
-                     name, data.Shape.DetailFactor, depth, layer.DetailStrength );
+        std::printf( "[CloudTypeLibrary] %-18s detail factor %.2f -> cut depth %.3f at the layer's %.2f\n", name,
+                     data.Shape.DetailFactor, depth, layer.DetailStrength );
 
         if ( data.Shape.DetailFactor > largestFactor )
         {

@@ -835,7 +835,6 @@ TEST( CloudFieldSpecies, AnEmptySetStillHasASkyAndAnUnfilledSlotCostsNothing )
     }
 }
 
-
 // ---------------------------------------------------------------------------------------------------
 // THE EROSION AGAINST WHAT IT CUTS INTO — task DS, 2026-08-24
 // ---------------------------------------------------------------------------------------------------
@@ -951,8 +950,7 @@ TEST( CloudFieldErosion, TheMirrorOfTheErosionAgreesWithTheShader )
                     ++checked;
                 }
 
-    std::printf( "[CloudFieldErosion] mirror checked at %d samples, worst disagreement %.3e\n", checked,
-                 worst );
+    std::printf( "[CloudFieldErosion] mirror checked at %d samples, worst disagreement %.3e\n", checked, worst );
 
     EXPECT_GT( checked, 100 ) << "the fixture put no cloud in front of the mirror, so it checked nothing";
     EXPECT_LT( worst, 1e-6 ) << "the erosion mirror and Common/CloudField.glslh disagree, so every sweep "
@@ -1038,23 +1036,40 @@ TEST( CloudFieldErosion, TheErosionsWaveIsShorterThanABodyAndCoarserThanTheMarch
     ASSERT_FALSE( bodyChords.empty() ) << "the fixture put no bodies in the volume to measure";
     ASSERT_FALSE( erosionHalfWaves.empty() ) << "the erosion field never crossed its own midpoint";
 
-    const double bodyM  = meanM( bodyChords );
-    const double waveM  = 2.0 * meanM( erosionHalfWaves );
-    const double chordM = MarchResolvableM();
+    const double bodyM = meanM( bodyChords );
+    const double waveM = 2.0 * meanM( erosionHalfWaves );
 
     std::printf( "[CloudFieldErosion] tile %.2f km: erosion wave %.0f m against a body chord of %.0f m "
-                 "(%.2f of it) and the march's %.0f m (%.2fx)\n",
-                 params.DetailTileKm, waveM, bodyM, waveM / bodyM, chordM, waveM / chordM );
+                 "(%.2f of it)\n",
+                 params.DetailTileKm, waveM, bodyM, waveM / bodyM );
 
     EXPECT_LE( waveM, 0.5 * bodyM )
          << "the erosion's wave is " << waveM << " m against a body chord of " << bodyM
          << " m, so there is not even one full wave across half a cloud — the erosion scales the body "
             "instead of texturing it, and no setting of Detail Strength can produce an edge";
 
-    EXPECT_GE( waveM, chordM )
-         << "the erosion's wave is " << waveM << " m against the " << chordM
-         << " m the march can be relied on to find, so whether a wisp is sampled at all is decided by the "
-            "ray's jitter and it reads as dither";
+    // AND THE LOWER END AT EVERY QUALITY TIER, stated as a loop rather than assumed.
+    //
+    // Graphic::CloudQualityScale carries NO Max Steps field — phase Э3 measured that halving it would put
+    // five of nine shipped types past Nyquist and refused — so all four tiers march with the component's
+    // own count and this bound is the same at every one of them. The four literals below say that out
+    // loud, exactly as Desert/Tests/Engine/CloudProceduralField says it about the lumps: the day a tier
+    // gains a step count, one of these lines fails, and it should, because the erosion's wave does not
+    // move when the march's chord does.
+    for ( const float maxSteps : { 256.0f, 256.0f, 256.0f, 256.0f } )
+    {
+        const double tierChordM = Desert::Graphic::CloudFinestResolvableChordKm( maxSteps ) * 1000.0;
+
+        EXPECT_GE( waveM, tierChordM )
+             << "at Max Steps " << maxSteps << " the erosion's wave is " << waveM << " m against the "
+             << tierChordM
+             << " m the march can be relied on to find, so whether a wisp is sampled at all is decided by "
+                "the ray's jitter and it reads as dither";
+    }
+
+    std::printf( "[CloudFieldErosion] at every tier the march resolves %.0f m and the erosion's wave is "
+                 "%.2fx it\n",
+                 MarchResolvableM(), waveM / MarchResolvableM() );
 }
 
 TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatingTheBody )
@@ -1251,8 +1266,8 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
     // stays within an octave of its own floor. A sabotage that raises Detail Strength and changes nothing
     // else is caught here and nowhere else.
     EXPECT_LE( meanTravelM, 2.0 * MarchResolvableM() )
-         << "the shipped Detail Strength moves the surface by " << meanTravelM
-         << " m, more than twice the " << MarchResolvableM()
+         << "the shipped Detail Strength moves the surface by " << meanTravelM << " m, more than twice the "
+         << MarchResolvableM()
          << " m floor that chose it — the value has drifted a long way above the bound that justifies it, "
             "and every step of that costs cloud for a gain nothing has measured";
 }
