@@ -579,7 +579,7 @@ namespace LatticePeak
                     continue;
 
                 const double centre = value[at];
-                const double lap = value[at - radius] + value[at + radius] +
+                const double lap    = value[at - radius] + value[at + radius] +
                                    value[at - static_cast<size_t>( radius ) * width] +
                                    value[at + static_cast<size_t>( radius ) * width] - 4.0 * centre;
 

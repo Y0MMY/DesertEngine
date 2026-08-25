@@ -777,7 +777,7 @@ namespace Desert::Assets
                         // a type whose base fills in slowly has a thin, spreading floor and a fat body over
                         // it. It is the one authored number that reshapes a single lump, and it reshapes
                         // exactly one of them.
-                        const float ramp = std::clamp( shape.BaseRampFraction, 0.05f, 1.0f );
+                        const float ramp       = std::clamp( shape.BaseRampFraction, 0.05f, 1.0f );
                         const float rampFactor = ( step == 0 ) ? ramp + ( 1.0f - ramp ) * 0.5f : 1.0f;
 
                         // THE WOBBLE IS DRAWN HERE, WITH THE LAYOUT, AND A TEST IS WHY. It scales the lump
@@ -797,8 +797,7 @@ namespace Desert::Assets
                         // be taller than half the band it lives in, so a 400 m stratus deck gets 200 m
                         // lumps however wide its cell is while a 3.6 km congestus never meets the clamp at
                         // all. The type squashes its own lumps through the altitudes it already declares.
-                        const float wobbleUp =
-                             std::sqrt( lumpWobbleAlong[step] * lumpWobbleAcross[step] );
+                        const float wobbleUp = std::sqrt( lumpWobbleAlong[step] * lumpWobbleAcross[step] );
 
                         lumpT[step]        = t;
                         lumpRadiusKm[step] = radius;
@@ -863,7 +862,7 @@ namespace Desert::Assets
                         // anisotropy of 1 `stretch` is 1 and the two axes below are the wind's own frame,
                         // which for the shipped +X wind is the world's — so an isotropic type's lobes land
                         // exactly where they always did.
-                        const float offsetAlong  = ( std::cos( angle ) * spread +
+                        const float offsetAlong = ( std::cos( angle ) * spread +
                                                     HashSigned( HashCombine( lumpSeed, 0xau ) ) * wobble ) *
                                                   stretch;
                         const float offsetAcross = ( std::sin( angle ) * spread +
@@ -878,8 +877,7 @@ namespace Desert::Assets
                         const float halfBandKm = 0.5f * bandFullKm;
                         const float lowKm      = std::min( lumpVerticalKm[step], halfBandKm );
                         const float highKm     = std::max( bandFullKm - lumpVerticalKm[step], lowKm );
-                        const float upKm =
-                             std::clamp( lumpVerticalKm[0] + travelKm * t, lowKm, highKm );
+                        const float upKm       = std::clamp( lumpVerticalKm[0] + travelKm * t, lowKm, highKm );
 
                         blob.CentreKm = glm::vec3( clusterXZ.x + along.x * offsetAlong + across.x * offsetAcross,
                                                    shape.BaseAltitudeKm + upKm,
@@ -898,10 +896,9 @@ namespace Desert::Assets
                         // read off the emitted lumps.
                         const float floorKm = lumpFloorKm;
 
-                        blob.RadiiKm =
-                             glm::vec3( std::max( radius * lumpWobbleAlong[step] * stretch, floorKm ),
-                                        lumpVerticalKm[step],
-                                        std::max( radius * lumpWobbleAcross[step] / stretch, floorKm ) );
+                        blob.RadiiKm = glm::vec3( std::max( radius * lumpWobbleAlong[step] * stretch, floorKm ),
+                                                  lumpVerticalKm[step],
+                                                  std::max( radius * lumpWobbleAcross[step] / stretch, floorKm ) );
 
                         blob.RotationDeg  = glm::vec3( 0.0f, yawDeg, 0.0f );
                         blob.Weight       = 1.0f;

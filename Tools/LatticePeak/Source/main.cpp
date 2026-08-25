@@ -575,8 +575,8 @@ namespace
                      elevationRad * toDegrees, rangeKm, midAltitudeKm );
         std::printf( "          OPAQUE CORE   %.1f deg wide x %.1f deg tall — %.1f : 1\n", wideDeg, coreTallDeg,
                      ( coreTallDeg > 1e-9 ) ? wideDeg / coreTallDeg : 0.0 );
-        std::printf( "          whole envelope %.1f deg wide x %.1f deg tall — %.1f : 1\n", wideDeg,
-                     wholeTallDeg, ( wholeTallDeg > 1e-9 ) ? wideDeg / wholeTallDeg : 0.0 );
+        std::printf( "          whole envelope %.1f deg wide x %.1f deg tall — %.1f : 1\n", wideDeg, wholeTallDeg,
+                     ( wholeTallDeg > 1e-9 ) ? wideDeg / wholeTallDeg : 0.0 );
 
         // The lattice is laid out in the WIND's frame, so the map's two axes are the lattice's own axes
         // exactly when the wind runs along one of them. A rotated wind is reported as such rather than

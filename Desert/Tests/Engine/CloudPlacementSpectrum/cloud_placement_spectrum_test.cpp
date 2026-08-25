@@ -105,7 +105,7 @@ namespace
             // wind. At an anisotropy of 8 the disc was eight times too wide across the wind and the proxy
             // reported the sky 0.98 covered where the bake reports 0.52. A proxy that reads the placement
             // wrong is not a weaker measurement, it is a different one.
-            const float along = blob.RadiiKm.x / perVoxelKm;
+            const float along   = blob.RadiiKm.x / perVoxelKm;
             const float acrossR = blob.RadiiKm.z / perVoxelKm;
 
             const float yaw     = blob.RotationDeg.y * 0.017453292519943295f;
@@ -1064,8 +1064,8 @@ TEST( CloudPlacementSpectrum, ALumpsHeightAndItsWidthAreOneQuantity )
 {
     const auto ratioFor = []( float cellKm, float baseKm, float topKm )
     {
-        CloudProceduralFieldParams params = ShippedParams();
-        params.Species[0].CellKm          = cellKm;
+        CloudProceduralFieldParams params      = ShippedParams();
+        params.Species[0].CellKm               = cellKm;
         params.Species[0].Shape.BaseAltitudeKm = baseKm;
         params.Species[0].Shape.TopAltitudeKm  = topKm;
         params.LayerBottomKm                   = baseKm;
@@ -1130,13 +1130,13 @@ TEST( CloudPlacementSpectrum, EveryLumpStandsInsideItsTypesOwnBand )
 {
     const auto checkBand = []( float baseKm, float topKm, float cellKm, float edgeTop )
     {
-        CloudProceduralFieldParams params           = ShippedParams();
-        params.Species[0].CellKm                    = cellKm;
-        params.Species[0].Shape.BaseAltitudeKm      = baseKm;
-        params.Species[0].Shape.TopAltitudeKm       = topKm;
-        params.Species[0].Shape.EdgeTopFraction     = edgeTop;
-        params.LayerBottomKm                        = baseKm;
-        params.LayerThicknessKm                     = topKm - baseKm;
+        CloudProceduralFieldParams params       = ShippedParams();
+        params.Species[0].CellKm                = cellKm;
+        params.Species[0].Shape.BaseAltitudeKm  = baseKm;
+        params.Species[0].Shape.TopAltitudeKm   = topKm;
+        params.Species[0].Shape.EdgeTopFraction = edgeTop;
+        params.LayerBottomKm                    = baseKm;
+        params.LayerThicknessKm                 = topKm - baseKm;
 
         const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
         const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );
@@ -1191,7 +1191,7 @@ TEST( CloudPlacementSpectrum, TheSkysCoverDoesNotMoveWithTheAnisotropy )
         params.Coverage                   = 0.50f;
         params.Species[0].Anisotropy      = anisotropy;
 
-        const glm::vec2 origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const glm::vec2          origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
         const std::vector<float> map =
              RasteriseColumns( GenerateCloudProceduralBlobs( params, 0u, origin ), origin, params.RegionSizeKm );
 
@@ -1203,10 +1203,10 @@ TEST( CloudPlacementSpectrum, TheSkysCoverDoesNotMoveWithTheAnisotropy )
 
     // The four anisotropies the shipped library actually uses: the isotropic types, the stratocumulus and
     // the altocumulus, the lenticular, and the cirrus.
-    const double isotropic  = coverAt( 1.0f );
-    const double rowed      = coverAt( 1.6f );
-    const double across     = coverAt( 0.2f );
-    const double fibrous    = coverAt( 8.0f );
+    const double isotropic = coverAt( 1.0f );
+    const double rowed     = coverAt( 1.6f );
+    const double across    = coverAt( 0.2f );
+    const double fibrous   = coverAt( 8.0f );
 
     std::printf( "[CloudPlacementSpectrum] cover at anisotropy 1.0 / 1.6 / 0.2 / 8.0: %.4f %.4f %.4f %.4f\n",
                  isotropic, rowed, across, fibrous );
@@ -1216,8 +1216,7 @@ TEST( CloudPlacementSpectrum, TheSkysCoverDoesNotMoveWithTheAnisotropy )
     EXPECT_NEAR( rowed, isotropic, 0.05 )
          << "a stratocumulus' rowed lattice moved the sky's cover, so its Coverage slider means something "
             "different from a cumulus'";
-    EXPECT_NEAR( across, isotropic, 0.05 )
-         << "a lenticular's across-wind lattice moved the sky's cover";
+    EXPECT_NEAR( across, isotropic, 0.05 ) << "a lenticular's across-wind lattice moved the sky's cover";
     EXPECT_NEAR( fibrous, isotropic, 0.05 )
          << "a cirrus' anisotropy of 8 moved the sky's cover — which is the defect measured in §RW, where "
             "it delivered a fifth of what its slider asked for";
@@ -1261,10 +1260,8 @@ TEST( CloudPlacementSpectrum, AStretchedLumpIsLongAlongTheWindAndNotAcrossIt )
 
         const CloudModellingPreparedBlob prepared = PrepareCloudModellingBlob( blob );
 
-        const glm::vec3 downwind =
-             blob.CentreKm + glm::vec3( along.x * reachKm, 0.0f, along.y * reachKm );
-        const glm::vec3 sideways =
-             blob.CentreKm + glm::vec3( across.x * reachKm, 0.0f, across.y * reachKm );
+        const glm::vec3 downwind = blob.CentreKm + glm::vec3( along.x * reachKm, 0.0f, along.y * reachKm );
+        const glm::vec3 sideways = blob.CentreKm + glm::vec3( across.x * reachKm, 0.0f, across.y * reachKm );
 
         const bool insideDownwind = CloudModellingBlobDistanceKm( prepared, downwind ) < 0.0f;
         const bool insideSideways = CloudModellingBlobDistanceKm( prepared, sideways ) < 0.0f;
@@ -1319,8 +1316,8 @@ TEST( CloudPlacementSpectrum, RaggednessSeesTheEdgeAndNotTheArea )
     const double squareRagged = LatticePeak::SilhouetteRaggedness( square, side, side );
     const double combRagged   = LatticePeak::SilhouetteRaggedness( comb, side, side );
 
-    std::printf( "[CloudPlacementSpectrum] raggedness: square %.4f, comb of the same area %.4f\n",
-                 squareRagged, combRagged );
+    std::printf( "[CloudPlacementSpectrum] raggedness: square %.4f, comb of the same area %.4f\n", squareRagged,
+                 combRagged );
 
     EXPECT_GT( combRagged, squareRagged * 3.0 )
          << "a comb and a solid square of the SAME AREA measure nearly the same raggedness, so the "
