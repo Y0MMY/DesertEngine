@@ -1014,8 +1014,7 @@ namespace Desert::Editor
                         }
                         if ( assetMgr )
                         {
-                            for ( const auto& [h, painting] :
-                                  assetMgr->FindAllByType<Assets::CloudLayoutAsset>() )
+                            for ( const auto& [h, painting] : assetMgr->FindAllByType<Assets::CloudLayoutAsset>() )
                             {
                                 const bool selected = ( static_cast<uint64_t>( h ) == *layoutHandle );
                                 if ( ImGui::Selectable(
@@ -1047,7 +1046,7 @@ namespace Desert::Editor
                                  std::filesystem::path( path ).extension() == Assets::kCloudLayoutExtension )
                             {
                                 auto& mutableManager = const_cast<Assets::AssetManager&>( *assetMgr );
-                                auto  painting = mutableManager.FindByPath<Assets::CloudLayoutAsset>( path );
+                                auto  painting       = mutableManager.FindByPath<Assets::CloudLayoutAsset>( path );
                                 if ( !painting )
                                     painting = mutableManager.CreateAsset<Assets::CloudLayoutAsset>(
                                          Assets::AssetPriority::Medium, path );

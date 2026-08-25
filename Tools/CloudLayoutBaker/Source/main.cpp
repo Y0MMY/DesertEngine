@@ -38,20 +38,19 @@ namespace
 {
     int Usage()
     {
-        std::fprintf(
-             stderr,
-             "usage: CloudLayoutBaker --out <path.dclayout> [--image <path.png>] [--figure <name>]\n"
-             "                        [--size <n>] [--channels r,g,b,a] [--mask]\n"
-             "  --out       where to write the layout\n"
-             "  --image     a square PNG/JPG/TGA to paint with; RGBA8 after decode\n"
-             "  --figure    generate instead of reading: 'stripe' or 'letter-d'\n"
-             "  --size      side of a generated figure in texels, %u..%u (default 512)\n"
-             "  --channels  which SOURCE channel feeds each of the four species slots,\n"
-             "              e.g. 0,0,0,0 to put one greyscale painting on every slot (default 0,1,2,3)\n"
-             "  --mask      take the source's alpha as the add/remove mask; without it the layout\n"
-             "              carries no mask at all, because an opaque image's alpha is 255 everywhere\n"
-             "              and that would silently add cloud to the whole sky\n",
-             Desert::Assets::kCloudLayoutMinResolution, Desert::Assets::kCloudLayoutMaxResolution );
+        std::fprintf( stderr,
+                      "usage: CloudLayoutBaker --out <path.dclayout> [--image <path.png>] [--figure <name>]\n"
+                      "                        [--size <n>] [--channels r,g,b,a] [--mask]\n"
+                      "  --out       where to write the layout\n"
+                      "  --image     a square PNG/JPG/TGA to paint with; RGBA8 after decode\n"
+                      "  --figure    generate instead of reading: 'stripe' or 'letter-d'\n"
+                      "  --size      side of a generated figure in texels, %u..%u (default 512)\n"
+                      "  --channels  which SOURCE channel feeds each of the four species slots,\n"
+                      "              e.g. 0,0,0,0 to put one greyscale painting on every slot (default 0,1,2,3)\n"
+                      "  --mask      take the source's alpha as the add/remove mask; without it the layout\n"
+                      "              carries no mask at all, because an opaque image's alpha is 255 everywhere\n"
+                      "              and that would silently add cloud to the whole sky\n",
+                      Desert::Assets::kCloudLayoutMinResolution, Desert::Assets::kCloudLayoutMaxResolution );
         return 2;
     }
 
@@ -74,7 +73,7 @@ namespace
                 // Two edges, not one: the table wraps, so a single step would put a second, unintended
                 // boundary at u = 0 where the last column meets the first. Both are placed deliberately.
                 const float edge = 1.0f / static_cast<float>( side );
-                const float lit  = ( u > edge && u < 0.5f - edge )   ? 1.0f
+                const float lit  = ( u > edge && u < 0.5f - edge )                 ? 1.0f
                                    : ( u <= edge || u >= 0.5f - edge ) && u < 0.5f ? 0.5f
                                                                                    : 0.0f;
 
@@ -109,14 +108,14 @@ namespace
 
                 const bool stem = u > 0.22f && u < 0.32f && v > 0.18f && v < 0.82f;
 
-                const float dx    = u - 0.32f;
-                const float dy    = ( v - 0.50f ) * 0.78f; // squashed, so the bowl is taller than it is wide
-                const float r     = std::sqrt( dx * dx + dy * dy );
-                const bool  bowl  = u >= 0.32f && r > 0.20f && r < 0.30f;
+                const float dx   = u - 0.32f;
+                const float dy   = ( v - 0.50f ) * 0.78f; // squashed, so the bowl is taller than it is wide
+                const float r    = std::sqrt( dx * dx + dy * dy );
+                const bool  bowl = u >= 0.32f && r > 0.20f && r < 0.30f;
 
                 // The bar that closes the top and bottom of the bowl onto the stem.
-                const bool bar = u >= 0.22f && u < 0.42f &&
-                                 ( ( v > 0.18f && v < 0.28f ) || ( v > 0.72f && v < 0.82f ) );
+                const bool bar =
+                     u >= 0.22f && u < 0.42f && ( ( v > 0.18f && v < 0.28f ) || ( v > 0.72f && v < 0.82f ) );
 
                 const unsigned char lit = ( stem || bowl || bar ) ? 255u : 0u;
                 const size_t        at  = ( static_cast<size_t>( y ) * side + x ) * 4u;
@@ -152,7 +151,7 @@ int main( int argc, char** argv )
     std::string out;
     std::string image;
     std::string figure;
-    uint32_t    side    = 512u;
+    uint32_t    side     = 512u;
     bool        takeMask = false;
 
     uint32_t channels[Desert::Assets::kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
@@ -234,12 +233,10 @@ int main( int argc, char** argv )
 
     if ( !figure.empty() )
     {
-        if ( side < Desert::Assets::kCloudLayoutMinResolution ||
-             side > Desert::Assets::kCloudLayoutMaxResolution )
+        if ( side < Desert::Assets::kCloudLayoutMinResolution || side > Desert::Assets::kCloudLayoutMaxResolution )
         {
             std::fprintf( stderr, "--size %u lies outside [%u, %u]\n", side,
-                          Desert::Assets::kCloudLayoutMinResolution,
-                          Desert::Assets::kCloudLayoutMaxResolution );
+                          Desert::Assets::kCloudLayoutMinResolution, Desert::Assets::kCloudLayoutMaxResolution );
             return 1;
         }
 
@@ -255,7 +252,7 @@ int main( int argc, char** argv )
     }
     else
     {
-        int w = 0, h = 0, comp = 0;
+        int      w = 0, h = 0, comp = 0;
         stbi_uc* decoded = stbi_load( image.c_str(), &w, &h, &comp, 4 );
         if ( !decoded )
         {
@@ -297,8 +294,7 @@ int main( int argc, char** argv )
         return 1;
     }
 
-    file.write( reinterpret_cast<const char*>( bytes.data() ),
-                static_cast<std::streamsize>( bytes.size() ) );
+    file.write( reinterpret_cast<const char*>( bytes.data() ), static_cast<std::streamsize>( bytes.size() ) );
     if ( !file )
     {
         std::fprintf( stderr, "'%s' was opened but the %zu bytes could not be written\n", out.c_str(),

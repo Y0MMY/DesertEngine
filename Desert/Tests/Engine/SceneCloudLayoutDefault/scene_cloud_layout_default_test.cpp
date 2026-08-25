@@ -40,11 +40,11 @@
 #include <string>
 #include <vector>
 
+using Desert::Assets::CloudModellingBlob;
 using Desert::Assets::CloudProceduralFieldParams;
+using Desert::Assets::CloudProceduralRegionOriginKm;
 using Desert::Assets::CloudProceduralSpecies;
 using Desert::Assets::GenerateCloudProceduralBlobs;
-using Desert::Assets::CloudProceduralRegionOriginKm;
-using Desert::Assets::CloudModellingBlob;
 using Desert::Reflection::DeserializeReflected;
 using Desert::Reflection::ReflectionRegistry;
 using Desert::Reflection::TypeInfo;

@@ -206,14 +206,13 @@ namespace Desert::Assets
         const uint32_t             resolution = data.Resolution;
         const unsigned char* const pixels     = data.Pattern.data();
 
-        return BilinearWrapped( uv, resolution,
-                                [pixels, resolution, slot]( uint32_t x, uint32_t y )
-                                {
-                                    const size_t index =
-                                         ( static_cast<size_t>( y ) * resolution + x ) * kPatternBytesPerTexel +
-                                         slot;
-                                    return static_cast<float>( pixels[index] ) * ( 1.0f / 255.0f );
-                                } );
+        return BilinearWrapped(
+             uv, resolution,
+             [pixels, resolution, slot]( uint32_t x, uint32_t y )
+             {
+                 const size_t index = ( static_cast<size_t>( y ) * resolution + x ) * kPatternBytesPerTexel + slot;
+                 return static_cast<float>( pixels[index] ) * ( 1.0f / 255.0f );
+             } );
     }
 
     float SampleCloudLayoutMask( const CloudLayoutData& data, const glm::vec2& uv )
@@ -224,12 +223,9 @@ namespace Desert::Assets
         const uint32_t             resolution = data.Resolution;
         const unsigned char* const pixels     = data.Mask.data();
 
-        const float raw = BilinearWrapped( uv, resolution,
-                                           [pixels, resolution]( uint32_t x, uint32_t y )
-                                           {
-                                               return static_cast<float>(
-                                                    pixels[static_cast<size_t>( y ) * resolution + x] );
-                                           } );
+        const float raw = BilinearWrapped(
+             uv, resolution, [pixels, resolution]( uint32_t x, uint32_t y )
+             { return static_cast<float>( pixels[static_cast<size_t>( y ) * resolution + x] ); } );
 
         // THE TWO SIDES OF NEUTRAL ARE NOT THE SAME WIDTH — 128 has 128 values below it and 127 above — so
         // the two halves are normalised separately. Dividing by one number instead would make a fully white
@@ -347,17 +343,16 @@ namespace Desert::Assets
         at += 4;
 
         if ( data.Resolution < kCloudLayoutMinResolution || data.Resolution > kCloudLayoutMaxResolution )
-            return Common::MakeFormattedError<CloudLayoutData>(
-                 "layout resolution {} lies outside [{}, {}]", data.Resolution, kCloudLayoutMinResolution,
-                 kCloudLayoutMaxResolution );
+            return Common::MakeFormattedError<CloudLayoutData>( "layout resolution {} lies outside [{}, {}]",
+                                                                data.Resolution, kCloudLayoutMinResolution,
+                                                                kCloudLayoutMaxResolution );
 
         const uint64_t texels = static_cast<uint64_t>( data.Resolution ) * data.Resolution;
 
         const bool hasPattern = ( flags & kFlagHasPattern ) != 0u;
         const bool hasMask    = ( flags & kFlagHasMask ) != 0u;
 
-        const uint64_t expected =
-             ( hasPattern ? texels * kPatternBytesPerTexel : 0u ) + ( hasMask ? texels : 0u );
+        const uint64_t expected = ( hasPattern ? texels * kPatternBytesPerTexel : 0u ) + ( hasMask ? texels : 0u );
 
         if ( payloadBytes != expected )
             return Common::MakeFormattedError<CloudLayoutData>(
@@ -397,10 +392,9 @@ namespace Desert::Assets
         return Common::MakeSuccess( std::move( data ) );
     }
 
-    Common::ResultStr<CloudLayoutData> MakeCloudLayoutFromImage( const std::vector<unsigned char>& pixels,
-                                                                 uint32_t width, uint32_t height,
-                                                                 const uint32_t channelForSlot[kCloudLayoutChannels],
-                                                                 bool takeMask )
+    Common::ResultStr<CloudLayoutData>
+    MakeCloudLayoutFromImage( const std::vector<unsigned char>& pixels, uint32_t width, uint32_t height,
+                              const uint32_t channelForSlot[kCloudLayoutChannels], bool takeMask )
     {
         if ( width != height )
             return Common::MakeFormattedError<CloudLayoutData>(

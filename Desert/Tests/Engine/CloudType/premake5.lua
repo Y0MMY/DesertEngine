@@ -28,6 +28,10 @@ project(test_name)
         -- curve in a header said it would. The anchor is the shipped library either way; what moved is
         -- the instrument it is measured with.
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
+        -- The painted layout: CloudProceduralVolume.cpp reads it to decide a cell's coverage, so
+        -- everything that compiles the bake compiles this too. It brings nothing with it -- no asset
+        -- layer, no GPU, no filesystem -- which is the property that makes adding one line enough.
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudLayout.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
     }
 

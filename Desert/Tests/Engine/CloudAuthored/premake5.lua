@@ -23,6 +23,10 @@ project(test_name)
         -- The procedural producer: the seam calls BOTH, and a stubbed zero on the other side would
         -- leave the union untested because the sculpted body would win everywhere.
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
+        -- The painted layout: CloudProceduralVolume.cpp reads it to decide a cell's coverage, so
+        -- everything that compiles the bake compiles this too. It brings nothing with it -- no asset
+        -- layer, no GPU, no filesystem -- which is the property that makes adding one line enough.
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudLayout.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingCatalogue.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
     }

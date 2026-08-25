@@ -309,15 +309,14 @@ namespace Desert::Assets
 
             const CloudLayoutData* layout = params.Layout.get();
 
-            const bool paintedPattern = layout != nullptr && layout->HasPattern() &&
-                                        params.LayoutPlacement.PatternStrength > 1e-4f;
+            const bool paintedPattern =
+                 layout != nullptr && layout->HasPattern() && params.LayoutPlacement.PatternStrength > 1e-4f;
 
             float modulated = base;
 
             if ( paintedPattern )
             {
-                const glm::vec2 uv =
-                     CloudLayoutUv( params.LayoutPlacement, params.RegionSizeKm, centreKm );
+                const glm::vec2 uv = CloudLayoutUv( params.LayoutPlacement, params.RegionSizeKm, centreKm );
 
                 // The channel is the SLOT and not a genus. Unreal fixes R/G/B/A to four named types for
                 // ever; ours is whichever kind of cloud the artist dropped into that slot, which is the
@@ -592,8 +591,7 @@ namespace Desert::Assets
         // clouds from whatever bytes happened to be in the vectors, and the symptom would be a sky that is
         // merely not the one that was painted.
         if ( auto layout = ValidateCloudLayoutData( *params.Layout ); !layout )
-            return Common::MakeFormattedError<bool>( "the bound cloud layout is unusable: {}",
-                                                     layout.GetError() );
+            return Common::MakeFormattedError<bool>( "the bound cloud layout is unusable: {}", layout.GetError() );
 
         // THE PAINTING MUST BE ABLE TO DESCRIBE A CELL, and this is the relation that says so. One texel of
         // the painting spans `RegionSize / (Repeats * Resolution)` kilometres; if that is coarser than the

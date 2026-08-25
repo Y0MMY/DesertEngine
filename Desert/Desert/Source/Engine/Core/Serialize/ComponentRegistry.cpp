@@ -428,8 +428,7 @@ namespace Desert::Core::Serialize
                         return 0;
                     if ( !a->IsReadyForUse() && !a->Load() )
                         return 0;
-                    if ( const auto registered =
-                              Runtime::ResourceRegistry::GetCloudLayoutService()->Register( a );
+                    if ( const auto registered = Runtime::ResourceRegistry::GetCloudLayoutService()->Register( a );
                          !registered )
                         LOG_ERROR( "[Clouds] Cloud layout '{}' named by the scene could not be registered: {}",
                                    full.string(), registered.GetError() );

@@ -90,8 +90,7 @@ namespace Desert::Assets
             return Common::MakeFormattedError<bool>( "'{}' could not be opened for writing", filepath.string() );
 
         const std::vector<unsigned char>& bytes = encoded.GetValue();
-        file.write( reinterpret_cast<const char*>( bytes.data() ),
-                    static_cast<std::streamsize>( bytes.size() ) );
+        file.write( reinterpret_cast<const char*>( bytes.data() ), static_cast<std::streamsize>( bytes.size() ) );
         if ( !file )
             return Common::MakeFormattedError<bool>( "'{}' was opened but the {} bytes could not be written",
                                                      filepath.string(), bytes.size() );

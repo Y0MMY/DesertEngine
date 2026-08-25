@@ -97,11 +97,11 @@ namespace
         for ( uint32_t y = 0; y < resolution; ++y )
             for ( uint32_t x = 0; x < resolution; ++x )
             {
-                const bool   lit   = x < resolution / 2u;
-                const size_t at    = ( static_cast<size_t>( y ) * resolution + x ) * 4u;
-                pixels[at + 0]     = lit ? 255u : 0u;
-                pixels[at + 1]     = lit ? 255u : 0u;
-                pixels[at + 2]     = lit ? 255u : 0u;
+                const bool   lit = x < resolution / 2u;
+                const size_t at  = ( static_cast<size_t>( y ) * resolution + x ) * 4u;
+                pixels[at + 0]   = lit ? 255u : 0u;
+                pixels[at + 1]   = lit ? 255u : 0u;
+                pixels[at + 2]   = lit ? 255u : 0u;
                 // The alpha is the MASK source and is mid-grey — neutral — unless the caller wants a mask
                 // that does something. An opaque 255 here would be a mask that adds cloud to the whole sky,
                 // which is the silent, uniform, wrong answer MakeCloudLayoutFromImage's `takeMask` exists
@@ -133,11 +133,10 @@ namespace
             for ( uint32_t x = 0; x < kCloudProceduralVolumeWidth; ++x )
                 for ( uint32_t y = 0; y < kCloudProceduralVolumeHeight; ++y )
                 {
-                    const size_t at =
-                         ( ( static_cast<size_t>( z ) * kCloudProceduralVolumeHeight + y ) *
-                                kCloudProceduralVolumeWidth +
-                           x ) *
-                         kCloudProceduralBytesPerVoxel;
+                    const size_t at = ( ( static_cast<size_t>( z ) * kCloudProceduralVolumeHeight + y ) *
+                                             kCloudProceduralVolumeWidth +
+                                        x ) *
+                                      kCloudProceduralBytesPerVoxel;
                     if ( baked.GetValue()[at] != 0u )
                     {
                         ++columns;
@@ -925,7 +924,7 @@ TEST( CloudPlacementSpectrum, EveryFieldTheBakeReadsMakesTheCachedVolumeStale )
     const std::shared_ptr<const CloudLayoutData> stripe = StripeLayout();
     const std::shared_ptr<const CloudLayoutData> other  = StripeLayout( 128u );
     ASSERT_TRUE( stripe && other ) << "the fixture painting could not be built, so nothing below means "
-                                     "anything";
+                                      "anything";
     ASSERT_NE( stripe->ContentHash, other->ContentHash )
          << "two paintings of different resolutions hash the same, so this test cannot tell them apart "
             "and neither can the cache";
@@ -957,24 +956,24 @@ TEST( CloudPlacementSpectrum, EveryFieldTheBakeReadsMakesTheCachedVolumeStale )
                 "current, so moving it in the editor would do nothing at all";
     };
 
-    moved                                    = painted;
-    moved.LayoutPlacement.RepeatsPerRegion   = 3u;
+    moved                                  = painted;
+    moved.LayoutPlacement.RepeatsPerRegion = 3u;
     noticesPainted( moved, "Layout Repeats" );
 
-    moved                                = painted;
-    moved.LayoutPlacement.QuarterTurns   = 1u;
+    moved                              = painted;
+    moved.LayoutPlacement.QuarterTurns = 1u;
     noticesPainted( moved, "Layout Rotation" );
 
-    moved                            = painted;
-    moved.LayoutPlacement.OffsetKm   = glm::vec2( 5.0f, -2.0f );
+    moved                          = painted;
+    moved.LayoutPlacement.OffsetKm = glm::vec2( 5.0f, -2.0f );
     noticesPainted( moved, "Layout Offset" );
 
-    moved                                  = painted;
-    moved.LayoutPlacement.PatternStrength  = 0.25f;
+    moved                                 = painted;
+    moved.LayoutPlacement.PatternStrength = 0.25f;
     noticesPainted( moved, "Layout Pattern Strength" );
 
-    moved                               = painted;
-    moved.LayoutPlacement.MaskStrength  = 0.25f;
+    moved                              = painted;
+    moved.LayoutPlacement.MaskStrength = 0.25f;
     noticesPainted( moved, "Layout Mask Strength" );
 }
 
@@ -1011,16 +1010,15 @@ TEST( CloudPlacementSpectrum, AddingAFieldToTheBakesParametersForcesAVisitToTheS
     // or the artist will move it in the editor and nothing at all will happen — the dead setting §1.3 of
     // the contract forbids, arrived at from the far side where the knob is wired and the CACHE is what eats
     // it.
-    const auto& [ regionSizeKm, layerBottomKm, layerThicknessKm, blendRadiusKm, profileDepthKm, coverage,
-                  coverageContrast, seed, placementDensity, placementScatter, placementSizeVariety,
-                  patchTileKm, patchStrength, windAxis, layoutPlacement, layout, resolvableChordKm,
-                  species ] = params;
+    const auto& [regionSizeKm, layerBottomKm, layerThicknessKm, blendRadiusKm, profileDepthKm, coverage,
+                 coverageContrast, seed, placementDensity, placementScatter, placementSizeVariety, patchTileKm,
+                 patchStrength, windAxis, layoutPlacement, layout, resolvableChordKm, species] = params;
 
     // Named so the decomposition is not optimised away as unused, and asserted on the two that the walk
     // above cannot reach through CloudProceduralParamsEqual at all — a defaulted set must be the shipped
     // state, which is "no painting".
     EXPECT_EQ( layout, nullptr ) << "a defaulted set of bake parameters arrives with a painting already "
-                                   "bound, so an unpainted scene is not the default state";
+                                    "bound, so an unpainted scene is not the default state";
     EXPECT_EQ( layoutPlacement.RepeatsPerRegion, 1u );
     EXPECT_EQ( layoutPlacement.QuarterTurns, 0u );
 
@@ -1070,8 +1068,8 @@ TEST( CloudPlacementSpectrum, ThePaintingRepeatsExactlyWithTheRegionAtEveryRotat
     // Points far from the origin ON PURPOSE. A world that measures in centimetres reaches thousands of
     // kilometres in ordinary use, and any residue in the rotation is multiplied by the distance — so a
     // fault invisible at the origin is the one this has to look for.
-    const glm::vec2 probes[] = { { 0.0f, 0.0f },      { 1.3f, -7.7f },      { -123.5f, 88.25f },
-                                 { 4000.0f, -4000.0f }, { -9999.5f, 12345.75f } };
+    const glm::vec2 probes[] = {
+         { 0.0f, 0.0f }, { 1.3f, -7.7f }, { -123.5f, 88.25f }, { 4000.0f, -4000.0f }, { -9999.5f, 12345.75f } };
 
     double worst = 0.0;
 
@@ -1218,13 +1216,13 @@ TEST( CloudPlacementSpectrum, OnlyOneSourceModulatesACellsCoverage )
     // decision to the hash rather than to nothing, which is what makes it a live position rather than an
     // absence of weather.
     {
-        CloudProceduralFieldParams quiet          = painted;
-        quiet.LayoutPlacement.PatternStrength     = 0.0f;
-        quiet.PatchStrength                       = 0.0f;
+        CloudProceduralFieldParams quiet      = painted;
+        quiet.LayoutPlacement.PatternStrength = 0.0f;
+        quiet.PatchStrength                   = 0.0f;
 
-        CloudProceduralFieldParams loud       = painted;
-        loud.LayoutPlacement.PatternStrength  = 0.0f;
-        loud.PatchStrength                    = 1.0f;
+        CloudProceduralFieldParams loud      = painted;
+        loud.LayoutPlacement.PatternStrength = 0.0f;
+        loud.PatchStrength                   = 1.0f;
 
         EXPECT_NE( centres( GenerateCloudProceduralBlobs( quiet, 0u, origin ) ),
                    centres( GenerateCloudProceduralBlobs( loud, 0u, origin ) ) )
@@ -1248,12 +1246,12 @@ TEST( CloudPlacementSpectrum, WithNoPaintingBoundTheLayoutKnobsCannotReachOneClo
     const std::vector<CloudModellingBlob> reference = GenerateCloudProceduralBlobs( plain, 0u, origin );
     ASSERT_FALSE( reference.empty() ) << "the unpainted layer placed no clouds, so this proves nothing";
 
-    CloudProceduralFieldParams turned          = plain;
-    turned.LayoutPlacement.RepeatsPerRegion    = 9u;
-    turned.LayoutPlacement.QuarterTurns        = 3u;
-    turned.LayoutPlacement.OffsetKm            = glm::vec2( 17.5f, -4.25f );
-    turned.LayoutPlacement.PatternStrength     = 0.0f;
-    turned.LayoutPlacement.MaskStrength        = 0.0f;
+    CloudProceduralFieldParams turned       = plain;
+    turned.LayoutPlacement.RepeatsPerRegion = 9u;
+    turned.LayoutPlacement.QuarterTurns     = 3u;
+    turned.LayoutPlacement.OffsetKm         = glm::vec2( 17.5f, -4.25f );
+    turned.LayoutPlacement.PatternStrength  = 0.0f;
+    turned.LayoutPlacement.MaskStrength     = 0.0f;
 
     const std::vector<CloudModellingBlob> after = GenerateCloudProceduralBlobs( turned, 0u, origin );
 

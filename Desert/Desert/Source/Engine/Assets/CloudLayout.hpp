@@ -281,8 +281,7 @@ namespace Desert::Assets
      * Non-square and oversized sources are REFUSED by name rather than resampled: resampling is an opinion
      * about the artist's painting, and one taken silently is the worst kind.
      */
-    Common::ResultStr<CloudLayoutData> MakeCloudLayoutFromImage( const std::vector<unsigned char>& pixels,
-                                                                 uint32_t width, uint32_t height,
-                                                                 const uint32_t channelForSlot[kCloudLayoutChannels],
-                                                                 bool takeMask );
+    Common::ResultStr<CloudLayoutData>
+    MakeCloudLayoutFromImage( const std::vector<unsigned char>& pixels, uint32_t width, uint32_t height,
+                              const uint32_t channelForSlot[kCloudLayoutChannels], bool takeMask );
 } // namespace Desert::Assets
