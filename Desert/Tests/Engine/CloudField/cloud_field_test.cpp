@@ -630,6 +630,76 @@ TEST( CloudFieldDensity, ASliderAtZeroTimesAMaterialFactorOutOfRangeIsStillANumb
     }
 }
 
+TEST( CloudFieldDensity, TheProducerBoundsTheSpeciesRowRatherThanHandingItToTheMarchAsItFoundIt )
+{
+    // THE SAME ARITHMETIC ONE LEVEL UP, and it was found by looking for siblings of the defect above
+    // rather than by a failure. `DensityScale` is composed in CloudSampleProceduralField as
+    // `layer slider * the species' Density Factor`, which is the identical `slider * factor` shape — and
+    // the layer slider's zero is just as legitimate a position as the erosion's, because "thin this whole
+    // deck away to nothing" is what the bottom of the Density Scale slider means.
+    //
+    // It is asserted through SampleCloudField rather than on the sample, because the point is that the
+    // PRODUCER bounds the row: a march that receives an infinite DensityScale has already lost, whatever
+    // CloudSampleDensity does with it afterwards.
+    //
+    // The row is written directly instead of through a cloud type, and that is the whole reason the test
+    // can exist: Assets::ValidateCloudTypeShape would refuse to load a shape carrying these numbers, so a
+    // fixture built from an asset can never reach this path. The AUTHORED producer has no such validator
+    // in front of it at all, which is what makes this shape worth bounding rather than trusting.
+    // THE SAMPLE HAS TO CONTAIN CLOUD, AND THAT IS NOT A DETAIL. The composition being tested lives inside
+    // `if ( speciesProfile > result.Profile )` — the branch a species takes when it WINS the union. Ask
+    // about a point of clear sky and the loop `continue`s, DensityScale stays at its zeroed 0, and the
+    // assertion passes without having executed the line it is about. This test was written that way first
+    // and stayed green against the unbounded version; the count below is what turned it into a test.
+    int winners = 0;
+
+    for ( const float hostile :
+          { std::numeric_limits<float>::infinity(), 1e30f, std::numeric_limits<float>::max(), -1.0f } )
+    {
+        for ( const float slider : { 0.0f, 1.0f, 2.0f } )
+        {
+            CloudFieldParams params = ParamsAtCoverage( 0.9f );
+            params.DensityScale     = slider;
+            params.SpeciesEdge[0].y = hostile; // Detail Factor
+            params.SpeciesEdge[0].z = hostile; // Density Factor
+            params.SpeciesEdge[0].w = hostile; // Extinction Factor
+
+            const float envelopeKm = EnvelopeThicknessKm( DefaultShape() );
+
+            for ( int iz = 0; iz < 6; ++iz )
+                for ( int ix = 0; ix < 6; ++ix )
+                {
+                    const float fraction = 0.5f;
+                    const vec3  at( OriginKm().x + PeriodKm() * ( ix + 0.5f ) / 6.0f, fraction * envelopeKm,
+                                    OriginKm().y + PeriodKm() * ( iz + 0.5f ) / 6.0f );
+
+                    const CloudFieldSample field = SampleCloudField( params, fraction, at );
+                    if ( !( field.Profile > 0.0f ) )
+                        continue;
+
+                    ++winners;
+
+                    EXPECT_TRUE( std::isfinite( field.DensityScale ) )
+                         << "Density Scale " << slider << " x Density Factor " << hostile
+                         << " left the producer as " << field.DensityScale;
+                    EXPECT_TRUE( std::isfinite( field.DetailFactor ) ) << "Detail Factor " << hostile;
+                    EXPECT_TRUE( std::isfinite( field.ExtinctionFactor ) ) << "Extinction Factor " << hostile;
+
+                    EXPECT_GE( field.DensityScale, 0.0f );
+                    EXPECT_GE( field.DetailFactor, 0.0f );
+                    EXPECT_GE( field.ExtinctionFactor, 0.0f );
+
+                    const float density = CloudSampleDensity( params, field, at );
+                    EXPECT_TRUE( std::isfinite( density ) ) << "factor " << hostile << " slider " << slider;
+                    EXPECT_GE( density, 0.0f );
+                    EXPECT_LE( density, 1.0f );
+                }
+        }
+    }
+
+    EXPECT_GT( winners, 100 ) << "no species ever won the union, so the composition under test never ran";
+}
+
 // ---------------------------------------------------------------------------------------------------
 // The producer as a whole
 // ---------------------------------------------------------------------------------------------------
