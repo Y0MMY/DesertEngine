@@ -29,6 +29,7 @@
 #include <Common/Core/AssetHandle.hpp>
 
 #include <Engine/Assets/AssetBase.hpp>
+#include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/AssetMetadata.hpp>
 #include <Engine/Assets/CloudModellingVolumeAsset.hpp>
 #include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
@@ -44,6 +45,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <set>
 #include <string>
 #include <vector>
@@ -57,6 +60,7 @@ namespace
     std::string g_ExecutablePath;
 
     constexpr const char* kPrintHandlesFlag = "--print-handles";
+    constexpr const char* kResolveFlag      = "--resolve";
 
     // The subject: the handle an asset carries THE MOMENT IT IS CONSTRUCTED, before any file is read.
     // Construction and not post-Load, because the AssetManager keys a not-yet-loaded registry shell by it
@@ -151,6 +155,40 @@ namespace
         pclose( pipe );
 #endif
         return lines;
+    }
+
+    // The other half of the reproduction: a SECOND process registers the asset at `path` in a fresh
+    // AssetManager and asks for `handle` — the number the first process would have written into a scene.
+    // Prints RESOLVED or MISSED.
+    std::string ResolveInAnIndependentProcess( const std::string& path, uint64_t handle )
+    {
+        if ( g_ExecutablePath.empty() )
+            return {};
+
+        const std::string h = std::to_string( handle );
+#ifdef DESERT_PLATFORM_WINDOWS
+        const std::string command =
+             "\"\"" + g_ExecutablePath + "\" " + kResolveFlag + " \"" + path + "\" " + h + "\"";
+        FILE* pipe = _popen( command.c_str(), "r" );
+#else
+        const std::string command =
+             "'" + g_ExecutablePath + "' " + kResolveFlag + " '" + path + "' " + h;
+        FILE* pipe = popen( command.c_str(), "r" );
+#endif
+        if ( !pipe )
+            return {};
+
+        std::string output;
+        char        buffer[256];
+        while ( fgets( buffer, sizeof( buffer ), pipe ) != nullptr )
+            output += buffer;
+
+#ifdef DESERT_PLATFORM_WINDOWS
+        _pclose( pipe );
+#else
+        pclose( pipe );
+#endif
+        return Trimmed( output );
     }
 } // namespace
 
@@ -281,6 +319,65 @@ TEST( AssetHandleStability, EveryAssetTypeAgreesInTwoIndependentRuns )
     }
 }
 
+TEST( AssetHandleStability, AMaterialsExternalIdIsItsHandleWhenTheFileCarriesNoGuid )
+{
+    // MaterialService keys the mesh->material link by the material's EXTERNAL id
+    // (GetAssetHandleByExternal). A `.demat` with no MaterialId used to leave that id unset, which under
+    // the random default meant the material was registered under a number that changed every launch — so
+    // the link resolved in the session that wrote it and missed after a restart. The two ids must be the
+    // same value, and this is the assertion that says so.
+    //
+    // A REAL file with no MaterialId in it, because that is the case under test. It is written rather than
+    // fixtured because the whole point is a material the importer never stamped, which by definition is
+    // not something the repository ships.
+    const auto scratch = std::filesystem::temp_directory_path() / "desert_assethandlestability_noguid.demat";
+    {
+        std::ofstream out( scratch );
+        ASSERT_TRUE( out.is_open() ) << "could not write the fixture at " << scratch.string();
+        out << R"({"Params":[],"Textures":[]})";
+    }
+
+    Desert::Assets::SurfaceMaterialAsset material( AssetPriority::Medium, Common::Filepath( scratch ) );
+    ASSERT_TRUE( material.Load().IsSuccess() );
+    std::filesystem::remove( scratch );
+
+    EXPECT_EQ( static_cast<uint64_t>( material.GetMaterialUUID() ),
+               static_cast<uint64_t>( material.GetMetadata().Handle ) )
+         << "a material's external id and its handle disagree; the mesh->material link resolves through "
+            "the external id and would miss after a restart";
+    EXPECT_FALSE( material.GetMaterialUUID().IsNull() );
+}
+
+// The defect as a USER meets it: save a reference, restart, dereference it.
+//
+// This is the scenario spelled out literally rather than argued about. Process A registers a skybox and
+// reports the handle a scene would have written down. Process B — a genuinely separate run, the "restart"
+// — registers the same asset from the same path and asks the AssetManager for that number.
+//
+// Skybox is the subject because it was one of the five types that carried the random handle, and because
+// its Load touches no file, so what is measured is identity and nothing else.
+TEST( AssetHandleStability, AHandleSavedByOneRunResolvesInTheNext )
+{
+    const uint64_t saved = HandleOf<Desert::Assets::SkyboxAsset>( kPathA );
+
+    const std::string verdict = ResolveInAnIndependentProcess( kPathA, saved );
+
+    ASSERT_FALSE( verdict.empty() ) << "the child run printed nothing; the guard did not run at all";
+    EXPECT_EQ( verdict, "RESOLVED" )
+         << "a handle written down by one run did not resolve in the next. This is the defect exactly as "
+            "an artist meets it: the scene still names the asset, the asset is still on disk, and the "
+            "reference silently points at nothing.";
+}
+
+TEST( AssetHandleStability, AHandleFromNoAssetStillFailsToResolve )
+{
+    // The companion the test above needs to mean anything: if FindByHandle returned something for every
+    // number, "RESOLVED" would be worthless.
+    const std::string verdict = ResolveInAnIndependentProcess( kPathA, 12345ull );
+    ASSERT_FALSE( verdict.empty() );
+    EXPECT_EQ( verdict, "MISSED" );
+}
+
 // ---------------------------------------------------------------------------------------------------
 // The census: the catalogue above against the enum it claims to cover.
 // ---------------------------------------------------------------------------------------------------
@@ -333,6 +430,20 @@ int main( int argc, char** argv )
     {
         for ( const auto& kind : Catalogue() )
             printf( "%llu\n", static_cast<unsigned long long>( kind.Handle( argv[2] ) ) );
+        return 0;
+    }
+
+    // The "restart" half of the round-trip: a fresh process, a fresh AssetManager, and a handle that came
+    // from somewhere else entirely — which is what a saved scene is.
+    if ( argc >= 4 && std::strcmp( argv[1], kResolveFlag ) == 0 )
+    {
+        Desert::Assets::AssetManager manager;
+        manager.CreateAsset<Desert::Assets::SkyboxAsset>( AssetPriority::Medium,
+                                                          Common::Filepath( argv[2] ) );
+
+        const uint64_t wanted = std::strtoull( argv[3], nullptr, 10 );
+        const auto found = manager.FindByHandle<Desert::Assets::SkyboxAsset>( Common::AssetHandle( wanted ) );
+        printf( "%s\n", found ? "RESOLVED" : "MISSED" );
         return 0;
     }
 
