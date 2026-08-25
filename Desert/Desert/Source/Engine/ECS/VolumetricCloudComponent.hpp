@@ -376,6 +376,20 @@ namespace Desert::ECS
         // 4.3 % and the altocumulus' from 51.5 % to 7.5 %: both are half the density of a cumulus, so a
         // deep cut deletes them rather than shredding them. Their factors were RE-BASED to 0.625 and 0.40,
         // which restores the effective cut their files were authored at exactly.
+        //
+        // AND "EXACTLY" BELONGS TO THE DEPTH ALONE, because the two settings have different SCOPES: this
+        // one and Detail Tile Size are the LAYER's, Detail Factor is the TYPE's. A re-based factor can
+        // restore a type's cut depth; it cannot restore the SCALE of the field that cut is taken from,
+        // because the tile moved for all nine types at once. Measured, the redistribution is small and
+        // the amount of cloud is not: the cirrus' contribution to the frame moves by −0.4 % and the
+        // altocumulus' by +1.1 %. Docs/Clouds/CALIBRATION.md §DS carries the frames and the correction.
+        //
+        // A CONSEQUENCE RECORDED RATHER THAN LEFT TO BE DISCOVERED: at 2.50 the cirrus reached the clamp
+        // at this value, so the wispiest type in the library could be driven to the deepest cut the maths
+        // allows; at 0.625 it tops out there however far this slider is pushed. That range rendered 4.3 %
+        // of the type — its top end deleted the cloud rather than shredding it — so what was removed is
+        // range that produced nothing. A more ragged cirrus needs the density to carry a deeper cut first.
+        //
         // Desert/Tests/Engine/CloudType asserts the bound that follows from it — no shipped type may be
         // cut deeper than the reference congestus — and Desert/Tests/Engine/CloudField asserts the floor.
         //

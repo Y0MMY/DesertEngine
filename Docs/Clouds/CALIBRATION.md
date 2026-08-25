@@ -2200,15 +2200,67 @@ authored above 1 and both dissolved. Measured against a CLOUDLESS frame at the s
 Both are half the density of a cumulus, so a deep cut does not shred them — it deletes them. **There is no
 layer value that serves both ends**: the march needs 0.40 for a type of factor 1, and altocumulus needs
 0.10 to keep half of itself. So the factors were **re-based** — cirrus 2.50 -> **0.625**, altocumulus
-1.60 -> **0.40** — which restores the effective cut their files were authored at, exactly.
+1.60 -> **0.40**.
 
-**And the re-base is verified the strongest way available: both types now render BYTE FOR BYTE what they
-rendered at the old layer strength** (`cmp`, not a pixel diff), because `0.40 x 0.625 = 0.10 x 2.50` and
-`0.40 x 0.40 = 0.10 x 1.60`.
+#### What the re-base restores, and what it does NOT — the correction that matters most in this section
+
+**The re-base restores the DEPTH of the cut and nothing else, and the word "exactly" belongs to the depth
+alone.** An earlier draft of this section claimed the two types "render BYTE FOR BYTE what they rendered
+at the old layer strength". That claim is FALSE of the shipped configuration and the archive says so: the
+md5 of `Shots/DS_cirrus_before.png` and `Shots/DS_cirrus_shipped.png` differ. The `cmp` behind the claim
+had been run with the tile held at one kilometre in both arms — which isolates one variable honestly, but
+is a configuration that does not ship.
+
+The reason is a seam between two scopes, and it is worth naming because it is the same shape as the defect
+this whole task is about:
+
+> `Detail Tile Size` is a property of the **LAYER**. `Detail Factor` is a property of the **TYPE**.
+> Re-basing the factor can restore a type's cut DEPTH; it cannot restore the SCALE of the field that cut
+> is taken from, because the scale moved for all nine types at once.
+
+So the shipped cirrus and altocumulus meet an erosion **four times finer** than anything their files were
+authored against. What that costs, measured:
+
+| | depth restored? | old shipped vs shipped now | its contribution to the frame |
+|---|---|---|---|
+| cirrus | yes, `0.40 x 0.625 = 0.10 x 2.50` | mean luminance delta **0.00076**, 21.7 % of pixels, max **10**/255 | 0.00257 -> **0.00256**, −0.4 % |
+| altocumulus | yes, `0.40 x 0.40 = 0.10 x 1.60` | mean luminance delta **0.00510**, 74.4 % of pixels, max **16**/255 | 0.04879 -> **0.04933**, +1.1 % |
+
+**How much of each type is in the sky is preserved to within one per cent; where its material sits is
+not.** That is the honest statement, and it is the one an artist needs: the finer tile redistributes a
+cirrus into shorter, more broken fibres and an altocumulus into smaller lobes, at the same total amount of
+cloud. `Shots/DS_cirrus_before.png` against `Shots/DS_cirrus_shipped.png` is exactly that change and
+nothing else, because the depth is identical between those two frames — it is the picture of what moving
+the layer's tile does to a type that did not ask for it.
+
+**And the arithmetic of the re-base IS verified byte for byte, on the shipped library, with the one
+variable it is about held alone.** Driving the layer to 0.40 against the re-based files AT THE OLD TILE
+reproduces the old shipped frame exactly (`cmp`, not a pixel diff), for both types. That is what proves
+`0.40 x 0.625 = 0.10 x 2.50` survives the whole renderer, and it is all it proves.
 
 `Desert/Tests/Engine/CloudType` asserts what follows: no shipped type may be cut deeper than the reference
-congestus whose factor is 1 by definition. A type that genuinely wants a deeper cut needs the density to
-carry it, and that is content work with its own frames.
+congestus whose factor is 1 by definition.
+
+#### THE TOP OF THE CIRRUS' RANGE IS GONE, AND THAT IS A DECISION RATHER THAN A SIDE EFFECT
+
+Before the re-base a cirrus reached the clamp — an effective cut of 1.0, the deepest the maths allows — at
+a layer strength of 0.40, so an artist could drive the wispiest type in the library to the deepest cut
+there is. With a factor of 0.625 the deepest it can reach at the TOP of the layer's slider is 0.625. The
+type that is shredded by definition has lost the top of its range.
+
+**That range was not usable and the measurement is above: at an effective cut of 1.0 the cirrus keeps
+4.3 % of its contribution to the frame.** The top of that range did not produce a more ragged cirrus, it
+produced no cirrus — a control whose top end deletes the thing it controls, which is the contract's §1.3
+complaint arrived at from the other side. Removing range that renders nothing is not a loss.
+
+**What an artist who asks for a more ragged cirrus actually needs is a body that can carry a deeper cut.**
+The type's own `DensityFactor` is 0.35 and its `ExtinctionFactor` 0.25 — it is thin on purpose, and thin
+is what the erosion dissolves. The path is to raise the density first and the factor after; `Detail
+Factor`'s own slider runs to 8, so the range exists once the body can hold it. That is content work with
+its own frames, and it is recorded here so the request is met with this measurement rather than with a
+surprise. Note also that it does not escape the ceiling above it: the ray sees a cloud at a profile of
+0.694 whatever the type, so the `(1 - Profile)` weight still delivers 31 % of the nominal depth to the
+surface.
 
 ### The six points
 
@@ -2261,9 +2313,10 @@ moves by 0.0002 between before and after.
 | `Shots/DS_before_zenith_away.png` / `DS_after_zenith_away.png` | **⬛ THE SHOW.** Before: soft featureless blobs with no edge anywhere. After: scalloped silhouettes with cauliflower lobes on them, and the bodies are still solid |
 | `Shots/DS_before_mid_away.png` / `DS_after_mid_away.png` | the same pair at the elevation a player looks at |
 | `Shots/DS_before_horizon_away.png` / `DS_after_horizon_away.png` | the far field, which is where a finer erosion would show as dither if the tile had gone below the march's chord. It does not: the band at the vanishing point is clean |
-| `Shots/DS_cirrus_before.png` / `DS_cirrus_dissolved.png` / `DS_cirrus_rebased.png` | **the break and its fix.** The middle frame is the new layer strength against the factor the file was authored with — the sky is very nearly empty. The third is the re-based factor |
+| `Shots/DS_cirrus_before.png` / `DS_cirrus_dissolved.png` / `DS_cirrus_shipped.png` | **the break, and what the fix does and does not restore.** The middle frame is the new layer strength against the factor the file was authored with — the sky is very nearly empty, 4.3 % of the type left. The third is what ships. The FIRST and THIRD differ by the layer's tile ALONE, because the re-base makes their cut depths identical: that pair is the picture of a type meeting an erosion four times finer than its file was authored against — the same amount of cirrus, redistributed into shorter fibres |
+| `Shots/DS_altocumulus_before.png` / `DS_altocumulus_shipped.png` | the second re-based type, the same comparison: cut depth identical, tile four times finer, 74.4 % of pixels moved by at most 16 of 255 and the type's contribution to the frame up 1.1 % |
 | `Shots/DS_stratocumulus_before.png` / `DS_stratocumulus_after.png` | the type that gains the most: a soft smear becomes individual cloud elements |
-| `Shots/DS_congestus_before.png` / `DS_congestus_after.png` | the shipped default type, which is what `Clouds_Demo` renders |
+| `Shots/DS_congestus_before.png` / `DS_congestus_after.png` | the reference type, at `0,0.65,-1` — **an elevation deliberately outside the six protocol points**, so that it is a third per-type frame rather than a protocol frame under a second name. An earlier draft shipped it as a byte copy of `DS_*_mid_away.png`, which carried no information the protocol did not already carry |
 
 ### The relations added, and the breaks that verified them
 

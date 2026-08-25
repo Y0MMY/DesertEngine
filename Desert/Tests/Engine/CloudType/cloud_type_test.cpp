@@ -881,7 +881,10 @@ TEST( CloudTypeLibrary, TheLayersDetailStrengthStillMovesEveryShippedType )
     //
     // Both were authored against a layer of 0.10 and both are half the density of a cumulus, so the same
     // arithmetic that gives a congestus an edge deletes them. Their factors were re-based — 0.625 and
-    // 0.40 — which restores their effective cut to what their files were authored at, EXACTLY.
+    // 0.40 — which restores their effective cut DEPTH to what their files were authored at, exactly, and
+    // restores nothing else: Detail Tile Size is the LAYER's and it moved for all nine types, so both now
+    // meet an erosion four times finer than their files ever saw. The amount of each type in the sky is
+    // preserved to about one per cent; where its material sits is not (CALIBRATION.md §DS).
     //
     // So the bound asserted below is the reference type's own cut: no type may be cut DEEPER than the
     // congestus whose factor is 1 by definition, because past that depth the measurement says a thin body
