@@ -190,11 +190,26 @@ TEST( CloudNoiseLattice, TheFadeCurveIsFlatAtBothEnds )
     EXPECT_FLOAT_EQ( CloudFade( 1.0f ), 1.0f );
     EXPECT_NEAR( CloudFade( 0.5f ), 0.5f, 1e-6f );
 
-    constexpr float kEps        = 1e-3f;
-    const float     slopeAtZero = ( CloudFade( kEps ) - CloudFade( 0.0f ) ) / kEps;
-    const float     slopeAtOne  = ( CloudFade( 1.0f ) - CloudFade( 1.0f - kEps ) ) / kEps;
-    EXPECT_LT( slopeAtZero, 1e-4f );
-    EXPECT_LT( slopeAtOne, 1e-4f );
+    // The step is a twentieth and NOT an epsilon, which looks lax and is the opposite. `CloudFade` is
+    // Horner's form, so at t = 1 - 1e-3 it evaluates `10.0 - 8.997` — a cancellation that leaves about
+    // one ULP of 9, i.e. ~1e-6, in a result of 1. Divided by an epsilon of 1e-3 that noise becomes ~1e-3
+    // of slope, while the slope actually being measured is 1e-5: a hundred times BELOW the arithmetic's
+    // own floor. This assertion used to read `< 1e-4` at that epsilon and it passed here by luck and
+    // failed on MSVC at 8.94e-4 — it was measuring float cancellation, not the curve.
+    //
+    // At a twentieth the true difference is ~1.16e-3, a thousand times above that floor, and the quantity
+    // is expressed against the slope at the curve's middle so the threshold means something scale-free.
+    constexpr float kStep = 0.05f;
+
+    const float slopeAtMiddle = ( CloudFade( 0.5f + kStep ) - CloudFade( 0.5f - kStep ) ) / ( 2.0f * kStep );
+    const float slopeAtZero   = ( CloudFade( kStep ) - CloudFade( 0.0f ) ) / kStep;
+    const float slopeAtOne    = ( CloudFade( 1.0f ) - CloudFade( 1.0f - kStep ) ) / kStep;
+
+    // 1/30 discriminates against the named alternative rather than against nothing: the cubic
+    // 3t^2-2t^3, whose second derivative does NOT vanish at the ends, measures 0.097 of its own middle
+    // slope by this same construction, where the quintic measures 0.012 — eight times apart.
+    EXPECT_LT( slopeAtZero, slopeAtMiddle / 30.0f );
+    EXPECT_LT( slopeAtOne, slopeAtMiddle / 30.0f );
 }
 
 TEST( CloudNoiseHash, OneChangedInputBitChangesAboutHalfTheOutputBits )
