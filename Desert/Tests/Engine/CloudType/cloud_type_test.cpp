@@ -948,6 +948,69 @@ TEST( CloudTypeLibrary, TheLayersDetailStrengthStillMovesEveryShippedType )
          << ") leaves room for";
 }
 
+// THE RE-BASE IS AN IDENTITY, AND AN IDENTITY IS A THING A TEST CAN HOLD.
+//
+// WHAT A RE-BASE IS FOR. The depth of a type's cut is `DetailStrength * DetailFactor` — one number owned by
+// the LAYER times one owned by the TYPE. When the layer's number has to move for a reason that has nothing
+// to do with any particular type, every type's cut moves with it, and for a THIN type a deeper cut does not
+// shred it, it deletes it: task DS measured the cirrus keeping 4.3 % of its contribution to the frame and
+// the altocumulus 7.5 %. The repair is to divide the type's factor by the same ratio the layer's number was
+// multiplied by, so that the product — the only quantity the shader ever forms — does not move at all.
+//
+// IT HAS NOW BEEN DONE TWICE, BY TWO TASKS, FOR TWO UNRELATED REASONS:
+//
+//     authored      strength 0.10 x factor 2.50 = 0.250   cirrus
+//     §DS           strength 0.40 x factor 0.625 = 0.250   the march needed a deeper layer
+//     §SIL2         strength 0.65 x factor 0.3846154 = 0.250   a taller lump needed a deeper layer again
+//
+//     authored      strength 0.10 x factor 1.60 = 0.160   altocumulus
+//     §DS           strength 0.40 x factor 0.40 = 0.160
+//     §SIL2         strength 0.65 x factor 0.2461538 = 0.160
+//
+// WHY IT IS ASSERTED RATHER THAN RECOMPUTED IN A COMMENT. Both re-bases were arithmetic done by hand in a
+// report, and the numbers then had to be typed into a JSON file by hand as well. A slip in either — a digit,
+// or a third task raising the layer and re-basing only one of the two files — is invisible: nothing renders
+// an error, the type simply gets thinner, and the next person measures a library that has drifted from its
+// own authored intent with no record of when. The depth is the invariant; this is the line that holds it.
+//
+// AND THE TOLERANCE IS THE FILE'S, NOT THE MATHS'. 0.25 / 0.65 is not representable in decimal, so the asset
+// carries seven digits of it and the product lands within about one part in ten million of 0.250. The bound
+// below is a thousand times looser than that and a thousand times tighter than a typo.
+TEST( CloudTypeLibrary, TheReBasedTypesKeepTheCutDepthTheirFilesWereAuthoredAt )
+{
+    const Desert::ECS::VolumetricCloudData layer;
+
+    // The depth each of these files has been authored at since before task DS, and which no re-base of the
+    // layer's Detail Strength is permitted to move.
+    struct AuthoredDepth
+    {
+        const char* Name;
+        float       Depth;
+    };
+
+    for ( const AuthoredDepth& authored :
+          { AuthoredDepth{ kCloudTypeCirrus, 0.25f }, AuthoredDepth{ kCloudTypeAltocumulus, 0.16f } } )
+    {
+        const CloudTypeData data = LoadShipped( authored.Name );
+
+        const float depth = layer.DetailStrength * data.Shape.DetailFactor;
+
+        std::printf( "[CloudTypeLibrary] %-18s %.7f x the layer's %.2f = %.6f, authored at %.3f\n", authored.Name,
+                     data.Shape.DetailFactor, layer.DetailStrength, depth, authored.Depth );
+
+        EXPECT_NEAR( depth, authored.Depth, 1e-4f )
+             << authored.Name << " is cut to a depth of " << depth << " at the layer's shipped Detail Strength of "
+             << layer.DetailStrength << ", but its file was authored for a cut of " << authored.Depth
+             << ".\nThis type's Detail Factor is a RE-BASE and not an art direction: whenever the layer's "
+                "Detail Strength moves, this factor is divided by the same ratio so that the product does "
+                "not. If the layer was just raised, this file was not re-based with it — and a thin type "
+                "meeting a deeper cut is not a wispier type, it is a missing one (CALIBRATION.md §DS "
+                "measured 4.3 % of the cirrus surviving). If this factor was edited on purpose, the depth "
+                "above is the number that was actually changed, and it is a re-art-direction that needs its "
+                "own frames.";
+    }
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

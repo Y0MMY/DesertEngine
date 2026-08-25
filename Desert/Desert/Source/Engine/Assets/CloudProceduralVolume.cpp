@@ -117,9 +117,9 @@ namespace Desert::Assets
         /// squashing is done by the layer the type declares — which is what squashes a real stratus — and
         /// not by a number an artist has to keep consistent with the altitudes beside it.
         ///
-        /// 0.45, AND IT IS FIXED FROM ABOVE BY A BOUND THIS TASK DID NOT KNOW IT HAD — see CALIBRATION.md
-        /// §SIL. The ladder on the shipped congestus, `Clouds_Demo`'s configuration, at the shipped
-        /// placement, 8 realisations, with the sky that shipped in the left-hand column:
+        /// 0.75, AND THE BOUND THAT HELD IT AT 0.45 WAS PAID FOR RATHER THAN MOVED — see CALIBRATION.md
+        /// §SIL2. The ladder on the shipped congestus, `Clouds_Demo`'s configuration, at the shipped
+        /// placement, 8 realisations, with the sky that shipped before §SIL in the left-hand column:
         ///
         ///                    §RW2    0.40    0.45    0.50    0.60    0.75    1.00
         ///     horiz chord    1.705   1.924   2.002   2.084   2.264   2.541   2.916 km
@@ -127,32 +127,34 @@ namespace Desert::Assets
         ///     solidity        0.33    0.38    0.44    0.49    0.60    0.77    0.94
         ///     CORE aspect     3.3     3.1     2.8     2.5     2.2     1.8     1.6  : 1
         ///     envelope        1.1     1.2     1.2     1.2     1.3     1.4     1.5  : 1
-        ///     EROSION        139 m   155 m   139 m   126 m   113 m   101 m     —
         ///
-        /// **THE EROSION ROW IS THE CEILING AND IT IS SOMEBODY ELSE'S MEASUREMENT.** §DS fixed the layer's
-        /// Detail Strength by a floor: the cut must move the surface at which the optical depth first
-        /// reaches 1 by more than the 125 m the march can be relied on to find, or it costs a texture fetch
-        /// and changes nothing a viewer can see. `Desert/Tests/Engine/CloudField` asserts it, and a taller
-        /// lump makes the body optically thicker per metre — the same cut then moves that surface LESS far.
-        /// At 0.60 and above the shipped erosion falls under §DS's floor and that suite goes red.
+        /// **THE OPAQUE CORE IS WHAT THE EYE READS AND IT IS WHY THIS NUMBER MOVED.** §RW2 measured the
+        /// shipped body as a core of 3.3 : 1 inside an envelope of 1.1 : 1 — a ball of air with a plate of
+        /// cloud through the middle of it — and named it the largest thing left. §SIL took it to 2.8 at
+        /// 0.45; this constant takes it to 1.8, which is a body with volume in it rather than a blin.
         ///
-        /// **0.45 IS THE LARGEST VALUE THAT CLEARS BOTH BOUNDS, and it clears the erosion floor at 1.11x —
-        /// which is §DS's own headroom to the metre** (§DS shipped 0.40 at 139.1 m against the same 125).
-        /// 0.50 clears it by ONE metre, which is the balanced-on-the-bound case §DS looked at and refused
-        /// by name.
+        /// **WHAT STOPPED §SIL AT 0.45 WAS NOT THE PICTURE, IT WAS §DS'S EROSION FLOOR.** A taller lump makes
+        /// a body optically thicker per metre, so the same cut moves the surface at which the optical depth
+        /// first reaches 1 a SHORTER distance, and that distance has a floor: the chord the march can be
+        /// relied on to find (CloudFinestResolvableChordKm, 125 m). At 0.75 against §DS's shipped strength of
+        /// 0.40 the travel is 101 m — under the floor — and `Desert/Tests/Engine/CloudField` goes red.
+        ///
+        /// **THE FLOOR IS CLEARED BY DEEPENING THE CUT, WHICH IS §DS'S OWN RECIPE APPLIED A SECOND TIME.**
+        /// The layer's Detail Strength moves 0.40 -> 0.60 and the two thin types whose Detail Factors were
+        /// re-based by §DS are re-based again by the same ratio, so their cut DEPTH — `strength x factor` —
+        /// does not move at all. The measured ladder and the identity are in ECS::VolumetricCloudData beside
+        /// the strength itself; the frames are `Shots/SIL2_*`.
+        ///
+        /// **AND THE PAIRING IS NOW A TESTED RELATION RATHER THAN A COINCIDENCE.** This constant is exported
+        /// as `kCloudLumpVerticalOverHorizontal` for one reason: `Desert/Tests/Engine/CloudField` reads it
+        /// and the component's Detail Strength together and asserts their PRODUCT still clears the march.
+        /// §SIL committed 0.75 with frames and a report before its own sweep found the floor underneath it;
+        /// the two numbers had never been named in one place, so nothing in the repository could say so.
         ///
         /// THE COVER DOES NOT MOVE — four ten-thousandths over the whole ladder — so this constant does not
         /// spend the Coverage slider and decision D-20 is untouched by it at any setting. What it spends is
         /// the SIZE OF A BODY: a taller lump fuses with its neighbours across a wider front.
-        ///
-        /// WHAT 0.45 BUYS AND WHAT IT LEAVES ON THE TABLE, because the difference is a decision the
-        /// teamlead owns rather than one this file can make. It takes the body's OPAQUE CORE from 3.3 to 1
-        /// down to 2.8 to 1 against a whole envelope of 1.2 — a quarter of the defect §RW2 measured. 0.75
-        /// would take it to 1.8, and `Shots/SIL_alt_aspect075_*.png` is what that sky looks like; the price
-        /// is §DS's erosion, which would have to be deepened from 0.40 to about 0.60 with the two thin types'
-        /// Detail Factors re-based by the same ratio — §DS's own recipe, applied a second time, with its own
-        /// frames. That is a re-calibration of another phase's number and it is not taken here.
-        constexpr float kLumpVerticalOverHorizontal = 0.45f;
+        constexpr float kLumpVerticalOverHorizontal = kCloudLumpVerticalOverHorizontal;
 
         /// Radians to degrees, written out because a lump's rotation is authored in degrees and the wind
         /// arrives as a vector. Not `glm::degrees` only so that this file keeps its one glm include.

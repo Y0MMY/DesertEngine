@@ -1138,14 +1138,15 @@ TEST( CloudPlacementSpectrum, TheBodysWidthFollowsTheCellAndItsHeightFollowsTheB
 // scaled by the wobble, not reshaped by it.
 TEST( CloudPlacementSpectrum, ALumpsHeightAndItsWidthAreOneQuantity )
 {
-    const auto ratioFor = []( float cellKm, float baseKm, float topKm )
+    const auto ratioFor = []( float cellKm, float baseKm, float topKm, float rampFraction = 0.04f )
     {
-        CloudProceduralFieldParams params      = ShippedParams();
-        params.Species[0].CellKm               = cellKm;
-        params.Species[0].Shape.BaseAltitudeKm = baseKm;
-        params.Species[0].Shape.TopAltitudeKm  = topKm;
-        params.LayerBottomKm                   = baseKm;
-        params.LayerThicknessKm                = topKm - baseKm;
+        CloudProceduralFieldParams params        = ShippedParams();
+        params.Species[0].CellKm                 = cellKm;
+        params.Species[0].Shape.BaseAltitudeKm   = baseKm;
+        params.Species[0].Shape.TopAltitudeKm    = topKm;
+        params.Species[0].Shape.BaseRampFraction = rampFraction;
+        params.LayerBottomKm                     = baseKm;
+        params.LayerThicknessKm                  = topKm - baseKm;
 
         const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
         const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );
@@ -1159,11 +1160,24 @@ TEST( CloudPlacementSpectrum, ALumpsHeightAndItsWidthAreOneQuantity )
             // spreading floor a type authors — so it is the one lump this relation does not cover, and it
             // is excluded by the thing that identifies it rather than by its index: it is the only lump
             // whose height is a stated fraction of what its width would give.
+            //
+            // THE THRESHOLD IS THE CONSTANT ITSELF AND IT USED TO BE A LITERAL SPELLING OF IT. It stood as
+            // `0.6 * 0.75`, which is 0.45 — the aspect that shipped at the time, written in a form that
+            // named neither the constant nor the fact that it WAS the constant. §SIL2 moved the aspect to
+            // 0.75 and this line would have gone on excluding everything below 0.45: the ramped lumps it
+            // exists to drop are at `aspect * rampFactor` and rampFactor is never below 0.525, so at the
+            // new aspect they land ABOVE the old threshold and would have been averaged in as if they were
+            // unreshaped. The test would not have failed — it would have quietly measured something else.
+            //
+            // A lump the ramp and the band clamp have both left alone measures the constant EXACTLY (the
+            // vertical radius takes the geometric mean of the two horizontal wobble draws, which is what
+            // makes that true), so the threshold is the constant with one part in a thousand of slack for
+            // the float division rather than a fraction of it.
             const double wide = std::sqrt( static_cast<double>( blob.RadiiKm.x ) * blob.RadiiKm.z );
             const double tall = static_cast<double>( blob.RadiiKm.y );
             const double at   = tall / std::max( wide, 1e-9 );
 
-            if ( at < 0.6 * 0.75 )
+            if ( at < 0.999 * kCloudLumpVerticalOverHorizontal )
                 continue;
 
             sum += at;
@@ -1180,9 +1194,32 @@ TEST( CloudPlacementSpectrum, ALumpsHeightAndItsWidthAreOneQuantity )
     const double small   = ratioFor( 1.0f, 2.20f, 3.10f );
     const double deep    = ratioFor( 3.0f, 2.20f, 9.40f );
 
+    // AND ONE ARM WITH A FAT BASE RAMP, WHICH IS HERE BECAUSE A SABOTAGE STAYED GREEN WITHOUT IT.
+    //
+    // The exclusion below drops the one lump per cluster that Base Ramp Fraction deliberately reshapes, and
+    // its threshold has to be the aspect constant. It used to be the literal `0.6 * 0.75` — the constant of
+    // the day, 0.45, spelled out. Putting that literal back at the new aspect of 0.75 left this test GREEN,
+    // and the reason is that the fixture's ramp is the shipped congestus' 0.04: that gives a ramp factor of
+    // 0.52 and a ramped lump at 0.39, which the stale threshold still happens to exclude. The hole was real
+    // and invisible.
+    //
+    // 0.25 IS THE CIRRUS' OWN AUTHORED VALUE, not a number invented to break the test. It gives a ramp
+    // factor of 0.625 and a ramped lump at 0.469 — ABOVE a stale 0.45 threshold, so a threshold that has
+    // not moved with the constant averages that lump in and drags the mean to about 0.70, which the
+    // assertion against the constant then catches. A test whose fixture cannot express the defect is a test
+    // that passes for the wrong reason.
+    const double fatRamp = ratioFor( 3.0f, 2.20f, 5.80f, 0.25f );
+
     std::printf( "[CloudPlacementSpectrum] lump height over width: shipped %.4f, third the cell %.4f, "
-                 "twice the band %.4f\n",
-                 shipped, small, deep );
+                 "twice the band %.4f, fat base ramp %.4f\n",
+                 shipped, small, deep, fatRamp );
+
+    EXPECT_NEAR( fatRamp, kCloudLumpVerticalOverHorizontal, 0.01 )
+         << "with a Base Ramp Fraction of 0.25 the measured aspect is " << fatRamp << ", not the "
+         << kCloudLumpVerticalOverHorizontal
+         << " the constant declares — the lump the base ramp reshapes is being averaged in as though it "
+            "were an unreshaped one, which is what happens when the exclusion threshold below stops being "
+            "the constant and becomes a stale spelling of an older value";
 
     EXPECT_NEAR( shipped, small, 0.02 )
          << "a third of the cell gave lumps of a different SHAPE, so the two radii are not one quantity — "
@@ -1190,6 +1227,23 @@ TEST( CloudPlacementSpectrum, ALumpsHeightAndItsWidthAreOneQuantity )
     EXPECT_NEAR( shipped, deep, 0.02 )
          << "twice the band gave lumps of a different SHAPE, so the type's altitudes are deciding a lump's "
             "height again — which is §RW2's defect, back";
+
+    // AND THE SHAPE THE LUMPS ACTUALLY HAVE IS THE ONE THE EXPORTED CONSTANT DECLARES.
+    //
+    // The three assertions above are mutual — they say the ratio does not move when the cell and the band
+    // move — and a generator that ignored Assets::kCloudLumpVerticalOverHorizontal entirely would satisfy
+    // every one of them. That is not a hypothetical: the constant is exported precisely so that
+    // Desert/Tests/Engine/CloudField can read it and assert the erosion is calibrated against it, and that
+    // whole relation is worth nothing if the number the test reads and the number the generator uses are
+    // allowed to be two different numbers. This is the line that makes the exported symbol the ONE
+    // statement of the lump's shape rather than a copy of it that happens to agree today.
+    EXPECT_NEAR( shipped, kCloudLumpVerticalOverHorizontal, 0.01 )
+         << "the lumps the generator emits measure " << shipped << " tall over wide, but "
+         << "Assets::kCloudLumpVerticalOverHorizontal declares " << kCloudLumpVerticalOverHorizontal
+         << ". The exported constant is what Desert/Tests/Engine/CloudField reads when it checks that the "
+            "erosion's strength is calibrated against the shape of the lump, so if the generator has gone "
+            "back to spelling that shape out for itself, the erosion is being checked against a number "
+            "nothing in the sky uses.";
 }
 
 // EVERY LUMP STANDS INSIDE THE ALTITUDES ITS OWN TYPE DECLARES, which the stack did not before.

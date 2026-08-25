@@ -607,11 +607,20 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     // kilometres this used to carry, one wave spanned 0.83 of a body and scaled it instead of texturing
     // it — and LONGER than the march's 125 m resolvable chord, which half a kilometre already is not.
     //
-    // The strength is 0.40 because it is the SMALLEST value at which the cut moves the surface the eye
-    // sees by more than the 125 m the march can find — below it the erosion carves structure finer than
-    // the renderer represents, and above it every step costs cloud for a gain nothing has measured.
+    // The strength is the smallest value with REAL headroom over the floor that the cut must clear: it has
+    // to move the surface the eye sees by more than the 125 m the march can find, or the erosion carves
+    // structure finer than the renderer represents — and above that floor every step costs cloud for a gain
+    // nothing has measured.
+    //
+    // 0.65 AND NOT §DS'S 0.40, AND THE REASON IS NOT IN THIS COMPONENT. This number is one half of a pair
+    // whose other half is Assets::kCloudLumpVerticalOverHorizontal, the shape of the lump a body is built
+    // from. §SIL2 raised that from 0.45 to 0.75 so a cloud reads as a body rather than a plate; a taller
+    // lump is optically thicker per metre, so the SAME cut moves the visible surface a shorter distance,
+    // and at §DS's 0.40 the travel fell to 101 m — under the floor. 0.65 restores it to 139 m, which is
+    // §DS's own 1.11x to the metre. Docs/Clouds/CALIBRATION.md §SIL2 carries the ladder and the frames, and
+    // Desert/Tests/Engine/CloudField asserts the PAIR rather than either number.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailTileSize" ), 100000.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailStrength" ), 0.40f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailStrength" ), 0.65f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DensityScale" ), 1.0f );
     // The EFFECTIVE extinction of a three-octave approximation, not the ~45/km of real cloud: at the
     // physical value every scattering order arrives at zero and the cloud renders uniformly grey.
