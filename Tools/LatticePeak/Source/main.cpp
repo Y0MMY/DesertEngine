@@ -453,8 +453,22 @@ namespace
         species.CellKm     = latticeKm * std::max( scale, 1e-3f );
         species.Anisotropy = std::max( aniso, 1e-3f );
 
-        params.LayerBottomKm    = species.Shape.BaseAltitudeKm;
-        params.LayerThicknessKm = species.Shape.TopAltitudeKm - species.Shape.BaseAltitudeKm;
+        // THE SHELL IS THE RENDERER'S OWN, AND IT IS NOT `Top - Base`. `Graphic::CloudTypeSetEnvelopeKm` is
+        // what VolumetricCloudRenderer::BuildProceduralParams hands the generator, and its top is
+        // `max(TopAltitudeKm, AnvilAltitudeKm + AnvilThicknessKm)` — because a type's second lobe stands
+        // ABOVE its tower and a shell that stopped at the tower would cut it off.
+        //
+        // WRITING `Top - Base` HERE MEANT THE INSTRUMENT MEASURED A SKY THE ENGINE DOES NOT DRAW, and it
+        // did so for exactly one genus: the cumulonimbus, whose canopy runs to 11.30 km against a tower
+        // that stops at 9.00. Every measurement of it in CALIBRATION.md §SIL and §SIL2 was taken with the
+        // widest slice of that canopy outside the volume. It is the same two-places-must-agree shape the
+        // instrument was built to hunt, one level up, and it is why the number is taken from the shared
+        // function rather than recomputed here.
+        const Desert::Graphic::CloudEnvelopeKm envelope =
+             Desert::Graphic::CloudTypeSetEnvelopeKm( &species.Shape, 1u );
+
+        params.LayerBottomKm    = std::max( envelope.BottomKm, 0.0f );
+        params.LayerThicknessKm = std::max( envelope.TopKm - params.LayerBottomKm, 0.001f );
         params.Species.push_back( species );
 
         const int   width   = static_cast<int>( Desert::Assets::kCloudProceduralVolumeWidth );

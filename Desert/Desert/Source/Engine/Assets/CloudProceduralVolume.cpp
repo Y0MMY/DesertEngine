@@ -57,6 +57,23 @@ namespace Desert::Assets
         /// kDensityCompensation is for. It DOES depend on the SCATTER, which is precisely what it is
         /// compensating — an artist who returns the scatter to zero gets a sky a few points fuller than
         /// the slider says, which is inside the suite's tenth and is stated on the knob's own tooltip.
+        ///
+        /// AND IT DOES NOT DEPEND ON THE CELL, WHICH WAS MEASURED RATHER THAN ASSUMED — §CB, and it is
+        /// recorded here because two phases in a row named the opposite as the cause of the cumulonimbus'
+        /// slider and neither tested it. Both this line and the alive exponent below are fitted at the
+        /// 3 km cell and neither carries a cell term, which LOOKS like the defect. It is not: the cover a
+        /// placement delivers is SCALE-FREE in the cell, because the clusters per unit area fall as the
+        /// cell's area exactly as fast as one cluster's footprint rises with it, so the cell cancels out of
+        /// the expected cover. Measured at `Coverage 0.5` on ONE genus with the cell the only thing that
+        /// changes — the shipped congestus at five settings of its Placement Scale, 8 realisations:
+        ///
+        ///     cell     1.500  2.400  3.000  6.000  12.000 km
+        ///     sky      0.502  0.505  0.512  0.532  0.503
+        ///
+        /// — eight times of cell for a spread of 0.030, and NOT MONOTONE: the widest cell in the library
+        /// is the second most accurate row. What is left is the estimator's own wobble on a region that
+        /// holds only four coarse cells across, not a law. Against it, the cumulonimbus was out by 0.356.
+        /// What its 6 km cell was carrying is its ANVIL, and that is priced by CloudClusterFootprintGain.
         constexpr float kPackingCompensation = 0.08f;
 
         /// How fast a cluster narrows as a cell is given more of them, as the exponent of the count.
@@ -155,6 +172,35 @@ namespace Desert::Assets
         /// spend the Coverage slider and decision D-20 is untouched by it at any setting. What it spends is
         /// the SIZE OF A BODY: a taller lump fuses with its neighbours across a wider front.
         constexpr float kLumpVerticalOverHorizontal = kCloudLumpVerticalOverHorizontal;
+
+        /// HOW FAR A FULL ANVIL SPREADS BEYOND THE TOWER IT CAPS, per unit of `AnvilStrength`. It is the
+        /// authored meaning of that slider: at 1.0 the canopy is 1.8 times the cluster's radius.
+        ///
+        /// IT IS A NAMED CONSTANT BECAUSE TWO PLACES READ IT — the emission below and
+        /// CloudClusterFootprintGain, which prices the sky that canopy covers. Written twice, a change to
+        /// one would leave the Coverage slider paying for a canopy of the wrong size and the sky would drift
+        /// with no test able to say why: the two-places-that-must-agree shape DEV_CONTRACT.md §2.3.1 is
+        /// about, and the shape that produced the very defect this constant is part of the cure for.
+        constexpr float kAnvilSpreadPerStrength = 0.8f;
+
+        /// The canopy is not quite round — a tenth narrower across the wind than along it, which is what
+        /// spreading against a stable layer under a shear looks like. Read by the emission and by the
+        /// footprint gain, for the same reason as above.
+        constexpr float kAnvilAcrossOverAlong = 0.9f;
+
+        /// THE TOWER'S OWN FOOTPRINT, at the two ends of the `TopTaper` knob, as the radius of the circle of
+        /// the same area in cluster radii. Both come from one quadrature over the layout below — six lobes a
+        /// golden angle apart on a disc of `0.48 * (1 - 0.55 t)` cluster radii, each `(0.62 - 0.16 t)` wide
+        /// and scaled by a wobble on [0.85, 1.15], each displaced by up to 0.18 radii — with the union taken
+        /// in projection. NOTHING IN THEM IS FITTED TO A SKY: no coverage, no cell, no genus and no seed
+        /// enters the calculation, which is exactly the property `kPackingCompensation` beside them does not
+        /// have and is honest about not having.
+        ///
+        /// THE LAW BETWEEN THE ENDS IS LINEAR TO 0.2 PER CENT — the quadrature gives 0.9363 at a taper of
+        /// 0.4 against the 0.9377 the line predicts, and 0.9254 at 0.6 against 0.9268 — so a table would be
+        /// three more numbers saying what two already say.
+        constexpr float kTowerFootprintAtNoTaper   = 0.9594f;
+        constexpr float kTowerFootprintAtFullTaper = 0.9051f;
 
         /// Radians to degrees, written out because a lump's rotation is authored in degrees and the wind
         /// arrives as a vector. Not `glm::degrees` only so that this file keeps its one glm include.
@@ -386,6 +432,37 @@ namespace Desert::Assets
         const float root       = std::sqrt( anisotropy );
         const float cell       = std::max( species.CellKm, floorKm );
         return glm::vec2( cell * root, cell / root );
+    }
+
+    float CloudClusterTowerFootprintRadii( float topTaper )
+    {
+        const float taper = std::clamp( topTaper, 0.0f, 1.0f );
+        return kTowerFootprintAtNoTaper + ( kTowerFootprintAtFullTaper - kTowerFootprintAtNoTaper ) * taper;
+    }
+
+    float CloudClusterFootprintGain( const Graphic::CloudTypeShape& shape )
+    {
+        // THE SAME TEST THE EMISSION MAKES, and it has to be the same one: a canopy this function priced
+        // and the emission then declined to place would shrink every storm in the sky for nothing.
+        if ( shape.AnvilStrength <= 1e-3f || shape.AnvilThicknessKm <= 1e-4f )
+            return 1.0f;
+
+        // THE CANOPY'S FOOTPRINT IS EXACT AND NOT ESTIMATED, because it is ONE solid ellipse rather than a
+        // union of lobes: `pi * a * b` with the two radii the emission writes below, so the equivalent
+        // radius is their geometric mean. The lattice's `stretch` multiplies one and divides the other and
+        // therefore cancels out of it exactly — which is why an anisotropic storm needs no second term
+        // here, and is the same argument §SIL made for sizing a cluster by the cell's geometric mean.
+        const float strength = std::clamp( shape.AnvilStrength, 0.0f, 1.0f );
+        const float anvil =
+             ( 1.0f + kAnvilSpreadPerStrength * strength ) * std::sqrt( kAnvilAcrossOverAlong );
+
+        const float tower = CloudClusterTowerFootprintRadii( shape.TopTaper );
+
+        // FLOORED AT ONE, and the floor is a statement rather than a guard: a canopy narrower than the
+        // tower it caps sits INSIDE the tower's own silhouette and costs the sky nothing at all, so there
+        // is nothing to pay for. Widening the cluster to "compensate" for it would be this file inventing
+        // cloud the type never asked for.
+        return std::max( 1.0f, anvil / std::max( tower, 1e-3f ) );
     }
 
     bool CloudProceduralParamsEqual( const CloudProceduralFieldParams& a, const CloudProceduralFieldParams& b )
@@ -720,8 +797,24 @@ namespace Desert::Assets
         // own slider asked for. FOUR OF THE NINE SHIPPED TYPES were affected. The geometric mean is exactly
         // `species.CellKm` again, so the cluster is the size the artist's Placement Scale says whatever the
         // stretch does, and the stretch is spent on the cluster's SHAPE below instead of on its area.
-        const float cellMeanKm   = std::sqrt( extent.x * extent.y );
-        const float baseRadiusKm = std::max( 0.72f * cellMeanKm, 0.5f * params.ResolvableChordKm );
+        // AND THE TYPE'S OWN CANOPY IS PAID FOR HERE, which is §CB's whole content. The Coverage mapping
+        // below is a statement about the AREA one cluster covers, and this file already holds that area
+        // still against the three things that could move it — the density, the size spread and the
+        // anisotropy. The fourth was the ANVIL: a canopy 1.70 times the tower's footprint covers 2.9 times
+        // the sky, and nothing priced it, so the cumulonimbus delivered 0.856 of the sky for a slider of
+        // 0.5 while every other genus in the library sat within 0.06 of its setting.
+        //
+        // IT IS THE CLUSTER THAT SHRINKS AND NOT THE CANOPY, and the reason is what `AnvilStrength` means:
+        // it is authored as how far the canopy spreads BEYOND its tower, so scaling the canopy alone would
+        // silently redefine the artist's number. A factor here leaves the storm's proportions exactly as
+        // its asset states them and changes only how much sky one storm is worth.
+        //
+        // ABOVE THE MARCH'S FLOOR, still: the floor is what keeps a cluster findable by the ray, and a
+        // compensation that pushed a body under it would trade a lying slider for speckle.
+        const float cellMeanKm     = std::sqrt( extent.x * extent.y );
+        const float footprintGain  = CloudClusterFootprintGain( shape );
+        const float baseRadiusKm =
+             std::max( 0.72f * cellMeanKm / footprintGain, 0.5f * params.ResolvableChordKm );
 
         // AND THE STRETCH THE CELL NO LONGER SPENDS ON ITS AREA IS SPENT ON THE CLUSTER'S SHAPE. A cluster
         // is drawn out along the wind by the same factor its cell is, so a cluster covers the same fraction
@@ -1080,15 +1173,17 @@ namespace Desert::Assets
                         // Wider than the tower and much flatter, which is what spreading against a stable layer
                         // looks like. The strength decides how far it spreads and how much matter is in it.
                         const float spread = baseRadiusKm * ( 0.60f + 0.40f * fill ) * size * densityScale *
-                                             radiusGain * ( 1.0f + 0.8f * shape.AnvilStrength );
+                                             radiusGain *
+                                             ( 1.0f + kAnvilSpreadPerStrength * shape.AnvilStrength );
                         const float floorKm = 0.5f * params.ResolvableChordKm;
 
                         // THE CANOPY IS DRAWN OUT WITH THE CLUSTER IT CAPS, by the same `stretch`. A storm in
                         // an anisotropic lattice whose tower was a band and whose anvil was a circle would be
                         // two bodies, and the anvil's own thickness is the one radius it authors itself.
-                        anvil.RadiiKm = glm::vec3( std::max( spread * stretch, floorKm ),
-                                                   std::max( shape.AnvilThicknessKm, floorKm ),
-                                                   std::max( spread * 0.9f / stretch, floorKm ) );
+                        anvil.RadiiKm =
+                             glm::vec3( std::max( spread * stretch, floorKm ),
+                                        std::max( shape.AnvilThicknessKm, floorKm ),
+                                        std::max( spread * kAnvilAcrossOverAlong / stretch, floorKm ) );
 
                         anvil.RotationDeg = glm::vec3( 0.0f, yawDeg, 0.0f );
                         anvil.Weight      = 1.0f;
