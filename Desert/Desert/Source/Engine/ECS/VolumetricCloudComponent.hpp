@@ -893,6 +893,27 @@ namespace Desert::ECS
         float WindSpeed = 3000.0f; // 30 m/s
     };
 
+    /**
+     * @brief The layer's PLACEMENT LATTICE in kilometres — Weather Tile Size divided by four.
+     *
+     * FOUR CELLS TO A TILE is a ratio the component's own tooltip has stated since phase T1 ("12 km ->
+     * 3 km cells, a cumulus field") and that Graphic::System::VolumetricCloudRenderer turns into
+     * `CloudProceduralSpecies::CellKm`. It is stated HERE, once, because a second reader appeared: the
+     * Cloud Layout panel measures a painting's strokes against the cell, and a panel that computed the
+     * ratio for itself would quote a resolution the sky does not have the day somebody changes it.
+     *
+     * A TYPE'S Placement Scale STILL MULTIPLIES IT — this is the layer's own lattice, before the kind of
+     * cloud in a slot says how much coarser or finer than the layer it is.
+     */
+    inline float CloudLayerLatticeKm( const VolumetricCloudData& data )
+    {
+        // 100 000 world units to the kilometre, the project-wide centimetre convention. Written out
+        // rather than taken from Graphic::kCloudWorldUnitsPerKm because Engine/ECS must not depend on
+        // Engine/Graphic, and the number is the unit of the whole project rather than the renderer's.
+        constexpr float unitsPerKm = 100000.0f;
+        return ( data.WeatherTileSize > 1.0f ? data.WeatherTileSize : 1.0f ) / unitsPerKm / 4.0f;
+    }
+
     struct VolumetricCloudComponent
     {
         VolumetricCloudData Data;

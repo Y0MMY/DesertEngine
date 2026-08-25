@@ -18,12 +18,16 @@ namespace Desert::Graphic
 {
     class Image2D;
 }
+namespace Desert::Core
+{
+    class Scene;
+}
 
 namespace Desert::Editor
 {
     /**
      * @brief The artist's tool for a PAINTED SKY: point at a picture, say which of its channels feeds
-     *        which slot, look at the sky it makes, bake it to a `.dclayout`.
+     *        which slot, look at the SKY it makes, bake it to a `.dclayout`.
      *
      * WHY IT EXISTS. Phase PT shipped the format, the engine path, the Details slot with its picker and
      * its drag-and-drop target, and `Tools/CloudLayoutBaker`. That closes half the loop: an artist could
@@ -46,6 +50,14 @@ namespace Desert::Editor
      * resolution the sky can express. The painting is shown beside it at its own resolution, and the
      * difference between the two panes is the whole of what an artist needs to learn.
      *
+     * THE LAYER IS READ FROM THE SCENE AND NEVER EDITED HERE. Region Size, Weather Tile Size, Coverage,
+     * Seed, Weather Patch Strength and the five Layout fields live on the cloud component, and the panel
+     * takes them from whichever layer the open scene has. There are deliberately NO copies of them on this
+     * panel: a duplicated Layout Repeats would be two numbers obliged to agree (§4.2), and it would be the
+     * one that is wrong that the artist believes. Move them in Details and this panel follows the same
+     * frame. With no cloud layer in the scene the panel says so and previews against the shipped defaults,
+     * printed rather than assumed.
+     *
      * AND IT SHOWS THE TWO THINGS §PT MEASURED AND ONLY THE PROTOCOL KNEW:
      *
      *   1. PATTERN STRENGTH AND MASK STRENGTH ARE NOT INDEPENDENT. With the mask at full strength a pair
@@ -64,26 +76,47 @@ namespace Desert::Editor
      * NO BACKGROUND WORK, unlike the noise volume panel: building a 512-square layout from an image is
      * one pass over a million texels and the map is a few thousand evaluations of a closed-form
      * expression, so both are recomputed when something changes and never per frame.
-     *
-     * THE PREVIEW'S LAYER SETTINGS ARE THE PANEL'S OWN AND ARE NOT WRITTEN TO THE FILE. A `.dclayout`
-     * carries pixels; where a painting sits in the world and how hard it pushes are the cloud LAYER's
-     * fields, on the component, and duplicating them into the file would be two values obliged to agree
-     * (§4.2). They are here so the artist can see what their picture will do at the settings they intend
-     * to use, and they default to the shipped scene's.
      */
     class CloudLayoutPanel final : public IPanel
     {
     public:
-        explicit CloudLayoutPanel( Assets::AssetManager* assets );
+        CloudLayoutPanel( std::shared_ptr<::Desert::Core::Scene> scene, Assets::AssetManager* assets );
 
         ImVec2 GetDefaultSize() const override
         {
-            return ImVec2( 700.0f, 820.0f );
+            return ImVec2( 720.0f, 900.0f );
         }
 
         void OnUIRender() override;
 
+        void SetScene( const std::shared_ptr<::Desert::Core::Scene>& scene ) override
+        {
+            m_Scene        = scene;
+            m_PreviewDirty = true;
+        }
+
     private:
+        /// Everything about the cloud LAYER the preview needs. Read from the scene each frame, or the
+        /// shipped defaults when the scene has no layer — and `FromScene` says which, because a preview
+        /// drawn against numbers that are not the artist's is worse than no preview.
+        struct LayerContext
+        {
+            bool  FromScene         = false;
+            float RegionSizeKm      = 48.0f;
+            float CellKm            = 3.0f;
+            float Coverage          = 0.45f;
+            float PatchStrength     = 0.60f;
+            float ResolvableChordKm = 0.125f;
+
+            uint32_t Seed = 1u;
+
+            Assets::CloudLayoutPlacement Placement;
+
+            /// The painting the layer has bound, or a null handle. It is what the panel adopts when it
+            /// opens with nothing loaded: the tool starts on the sky you are looking at.
+            uint64_t BoundLayout = 0u;
+        };
+
         void DrawSourceSection();
         void DrawChannelSection();
         void DrawLayerSection();
@@ -91,23 +124,27 @@ namespace Desert::Editor
         void DrawVerdictSection();
         void DrawSaveSection();
 
-        /// Reads an image off disk into m_Source. Named so the file dialog and the drag-and-drop target are
-        /// one operation and cannot decode a picture two different ways.
+        /// Reads the open scene's first cloud layer. Pure of side effects on the panel's own state.
+        LayerContext ReadLayer() const;
+
+        /// Reads an image off disk into the source. Named so the file dialog and the drag-and-drop target
+        /// are one operation and cannot decode a picture two different ways.
         void LoadImage( const std::filesystem::path& path );
 
-        /// Rebuilds m_Layout from m_Source through Assets::MakeCloudLayoutFromImage — the tool's function,
-        /// not a second reading of what a picture means.
+        /// Rebuilds m_Layout from the source through Assets::MakeCloudLayoutFromImage — the tool's
+        /// function, not a second reading of what a picture means.
         void RebuildLayout();
 
-        /// Rebuilds m_Preview, the stroke statistics and both device images. Called when the layout, the
-        /// layer settings or the previewed slot change — never per frame, because it allocates images.
-        void RefreshPreview();
+        /// Rebuilds the map, the stroke statistics and both device images. Called when the layout, the
+        /// layer or the previewed slot changes — never per frame, because it allocates device images.
+        void RefreshPreview( const LayerContext& layer );
 
-        /// The parameters a layer with these panel settings would hand the bake. One place, so the map and
-        /// the numbers beside it cannot describe different skies.
-        Assets::CloudProceduralFieldParams BuildParams() const;
+        /// The parameters a bake would receive for @p layer with this painting bound. One place, so the
+        /// map and the numbers beside it cannot describe different skies.
+        Assets::CloudProceduralFieldParams BuildParams( const LayerContext& layer ) const;
 
-        Assets::AssetManager* m_Assets = nullptr;
+        std::shared_ptr<::Desert::Core::Scene> m_Scene;
+        Assets::AssetManager*        m_Assets = nullptr;
 
         // ---- source -----------------------------------------------------------------------------------
 
@@ -116,9 +153,10 @@ namespace Desert::Editor
         uint32_t                   m_SourceHeight = 0u;
         std::string                m_SourceName;   // the picture's file name, or the .dclayout's
 
-        /// Which SOURCE channel feeds each species slot. THE CONVENTION IS A CONTROL AND NOT AN ASSUMPTION:
-        /// a painting is usually greyscale, and without this an artist wanting one drawing on slot 2 would
-        /// have to author an RGBA image to say so. Defaults to straight RGBA, which is the tool's default.
+        /// Which SOURCE channel feeds each species slot. THE CONVENTION IS A CONTROL AND NOT AN
+        /// ASSUMPTION: a painting is usually greyscale, and without this an artist wanting one drawing on
+        /// slot 2 would have to author an RGBA image to say so. Defaults to straight RGBA, the tool's own
+        /// default.
         uint32_t m_ChannelForSlot[Assets::kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
 
         /// Take the source's alpha as the add/remove mask. OFF by default and not "alpha is always the
@@ -136,20 +174,10 @@ namespace Desert::Editor
         /// rather than sitting there implying they would do something.
         bool m_LayoutFromFile = false;
 
-        // ---- the layer the preview assumes ------------------------------------------------------------
-        // Defaults are the shipped scene's: Region Size 48 km, a 3 km placement cell (Weather Tile Size
-        // 12 km, four cells to a tile), Coverage 0.45, Weather Patch Strength 0.60, Seed 1.
-
-        float    m_RegionSizeKm = 48.0f;
-        float    m_CellKm       = 3.0f;
-        float    m_Coverage     = 0.45f;
-        float    m_PatchStrength = 0.60f;
-        int      m_Seed         = 1;
-        int      m_Repeats      = 1;
-        int      m_QuarterTurns = 0;
-        float    m_OffsetKm[2]  = { 0.0f, 0.0f };
-        float    m_PatternStrength = 1.0f;
-        float    m_MaskStrength    = 1.0f;
+        /// The layer's bound painting as of the last frame. The panel adopts a layer's layout ONCE, when
+        /// it changes, so that an artist who then opens a different picture is not overwritten every
+        /// frame by the scene.
+        uint64_t m_AdoptedLayout = 0u;
 
         // ---- preview ----------------------------------------------------------------------------------
 
@@ -164,17 +192,23 @@ namespace Desert::Editor
 
         int          m_PreviewSlot  = 0;
         PaintingView m_PaintingView = PaintingView::Slot0;
-        int          m_SpanRegions  = 1;   // how many region periods the sky map covers, so tiling is visible
-        int          m_PreviewSide  = 256; // pixels the two panes are drawn at
+        int          m_SpanRegions  = 1;   // region periods the sky map covers, so tiling is visible
+        int          m_PreviewSide  = 280; // pixels each pane is drawn at
 
         Assets::CloudLayoutPreview     m_Preview;
         bool                           m_HasPreview = false;
         Assets::CloudLayoutStrokeStats m_Strokes;
 
+        /// The texel size and period the verdicts were computed at, carried out of the refresh so the text
+        /// beside the map cannot quote a different sky than the map.
+        float m_TexelKm  = 0.0f;
+        float m_PeriodKm = 0.0f;
+
         std::shared_ptr<Graphic::Image2D> m_PaintingImage;
         std::shared_ptr<Graphic::Image2D> m_SkyImage;
 
-        bool m_PreviewDirty = true;
+        bool         m_PreviewDirty = true;
+        LayerContext m_LastLayer;
 
         // ---- status -----------------------------------------------------------------------------------
 

@@ -70,6 +70,7 @@
 #include "Editor/Panels/History/HistoryPanel.hpp"
 #include "Editor/Panels/Validation/SceneValidationPanel.hpp"
 #include "Editor/Panels/Clouds/CloudModellingVolumePanel.hpp"
+#include "Editor/Core/StartupOptions.hpp"
 #include "Editor/Panels/Clouds/CloudLayoutPanel.hpp"
 #include "Editor/Panels/Clouds/CloudNoiseVolumePanel.hpp"
 #include "Editor/Panels/Clouds/CloudTypePanel.hpp"
@@ -434,7 +435,7 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::CloudNoiseVolumePanel>( m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::CloudTypePanel>( m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::CloudModellingVolumePanel>( m_AssetManager.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::CloudLayoutPanel>( m_AssetManager.get() ) );
+        m_Panels.emplace_back( std::make_unique<Editor::CloudLayoutPanel>( m_MainScene, m_AssetManager.get() ) );
 
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
@@ -452,6 +453,35 @@ namespace Desert::Editor
         m_Panels.emplace_back(
              std::make_unique<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::BuildSettingsPanel>() );
+
+        // `--open-panel <name>`: put a tool on screen at boot, by the name the View menu shows. See
+        // Editor/Core/StartupOptions.hpp for why it is an argument rather than a click. A CONTEXTUAL
+        // panel is also PINNED, because opening one by hand is what pinning means and a name on the
+        // command line is as deliberate as a menu tick.
+        for ( const std::string& wanted : Editor::StartupOptions::Get().PanelsToOpen )
+        {
+            bool found = false;
+            for ( auto& panel : m_Panels )
+            {
+                if ( panel->GetName() != wanted )
+                    continue;
+                panel->GetVisibility() = true;
+                if ( panel->IsContextual() )
+                    panel->Pinned() = true;
+                found = true;
+                break;
+            }
+
+            if ( !found )
+            {
+                // NAMED, WITH THE LIST. A flag that quietly did nothing is indistinguishable from a panel
+                // that failed to draw, and this argument exists precisely for runs nobody is watching.
+                std::string known;
+                for ( auto& panel : m_Panels )
+                    known += ( known.empty() ? "" : ", " ) + panel->GetName();
+                LOG_ERROR( "[Editor] --open-panel '{}' names no panel. Known panels: {}", wanted, known );
+            }
+        }
 #endif // EBABLE_IMGUI
 
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );

@@ -6,8 +6,12 @@
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/CloudLayoutAsset.hpp>
+#include <Engine/Core/Scene.hpp>
+#include <Engine/ECS/VolumetricCloudComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/CloudType/CloudTypeService.hpp>
 
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Logger.hpp>
@@ -19,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <filesystem>
 
 namespace Desert::Editor
@@ -31,7 +36,8 @@ namespace Desert::Editor
     namespace
     {
         /// The panel's own UIHelper, created on first use exactly as the noise volume panel's is: the
-        /// helper caches ImGui texture ids by image view, and a panel that never opens should not build one.
+        /// helper caches ImGui texture ids by image view, and a panel that never opens should not build
+        /// one.
         std::unique_ptr<UI::UIHelper>& LayoutPreviewHelper()
         {
             static std::unique_ptr<UI::UIHelper> helper;
@@ -43,39 +49,82 @@ namespace Desert::Editor
             return helper;
         }
 
-        const char* SourceChannelName( uint32_t channel )
-        {
-            switch ( channel )
-            {
-                case 0:
-                    return "Red";
-                case 1:
-                    return "Green";
-                case 2:
-                    return "Blue";
-                default:
-                    return "Alpha";
-            }
-        }
-
         bool LooksLikeAnImage( const std::filesystem::path& path )
         {
             std::string extension = path.extension().string();
             std::transform( extension.begin(), extension.end(), extension.begin(),
                             []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
 
-            return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".tga" ||
-                   extension == ".bmp" || extension == ".psd" || extension == ".hdr";
+            return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
+                   extension == ".tga" || extension == ".bmp";
         }
 
-        constexpr ImVec4 kErrorColour{ 0.95f, 0.45f, 0.40f, 1.0f };
-        constexpr ImVec4 kWarnColour{ 0.95f, 0.78f, 0.35f, 1.0f };
-        constexpr ImVec4 kGoodColour{ 0.55f, 0.85f, 0.55f, 1.0f };
+        const ImVec4 kErrorColour( 0.95f, 0.45f, 0.40f, 1.0f );
+        const ImVec4 kWarnColour( 0.95f, 0.78f, 0.35f, 1.0f );
+        const ImVec4 kGoodColour( 0.55f, 0.85f, 0.55f, 1.0f );
     } // namespace
 
-    CloudLayoutPanel::CloudLayoutPanel( Assets::AssetManager* assets )
-         : IPanel( "Cloud Layout", /*showPanel=*/false ), m_Assets( assets )
+    CloudLayoutPanel::CloudLayoutPanel( std::shared_ptr<::Desert::Core::Scene> scene,
+                                        Assets::AssetManager*                    assets )
+         : IPanel( "Cloud Layout", /*showPanel=*/false ), m_Scene( std::move( scene ) ), m_Assets( assets )
     {
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // The layer
+    // -------------------------------------------------------------------------------------------------
+
+    CloudLayoutPanel::LayerContext CloudLayoutPanel::ReadLayer() const
+    {
+        LayerContext layer;
+
+        if ( !m_Scene )
+            return layer;
+
+        auto view = m_Scene->GetRegistry().view<ECS::VolumetricCloudComponent>();
+        if ( view.begin() == view.end() )
+            return layer;
+
+        const ECS::VolumetricCloudData& data = view.get<ECS::VolumetricCloudComponent>( *view.begin() ).Data;
+
+        layer.FromScene    = true;
+        layer.RegionSizeKm = std::max( data.RegionSize, 1.0f ) / Graphic::kCloudWorldUnitsPerKm;
+        layer.Coverage     = std::clamp( data.Coverage, 0.0f, 1.0f );
+        layer.PatchStrength = std::clamp( data.PatchStrength, 0.0f, 1.0f );
+        layer.Seed          = static_cast<uint32_t>( std::max( data.Seed, 0 ) );
+        layer.ResolvableChordKm =
+             Graphic::CloudFinestResolvableChordKm( static_cast<float>( std::clamp( data.MaxSteps, 8, 512 ) ) );
+
+        // THE CELL IS THE LAYER'S LATTICE TIMES THE FINEST TYPE'S Placement Scale, and the finest is the
+        // right one because it is the species a thin stroke loses first — the same species
+        // ValidateCloudProceduralLayout measures its texel against.
+        float finestScale = 0.0f;
+        if ( auto* types = Runtime::ResourceRegistry::GetCloudTypeService() )
+        {
+            const Assets::AssetHandle bound[] = { data.CloudType1, data.CloudType2, data.CloudType3,
+                                                  data.CloudType4 };
+            for ( const Assets::AssetHandle& handle : bound )
+            {
+                if ( handle == Assets::AssetHandle::Null() )
+                    continue;
+                const float scale = types->GetShape( handle ).PlacementScale;
+                if ( scale > 1e-3f && ( finestScale <= 0.0f || scale < finestScale ) )
+                    finestScale = scale;
+            }
+        }
+
+        layer.CellKm = ECS::CloudLayerLatticeKm( data ) * ( finestScale > 0.0f ? finestScale : 1.0f );
+
+        layer.Placement.RepeatsPerRegion = static_cast<uint32_t>( std::clamp( data.LayoutRepeats, 1, 16 ) );
+        layer.Placement.QuarterTurns     = static_cast<uint32_t>( std::clamp( data.LayoutRotation, 0, 3 ) );
+        layer.Placement.OffsetKm =
+             glm::vec2( data.LayoutOffset.x, data.LayoutOffset.y ) / Graphic::kCloudWorldUnitsPerKm;
+        layer.Placement.PatternStrength = std::clamp( data.LayoutPatternStrength, 0.0f, 1.0f );
+        layer.Placement.MaskStrength    = std::clamp( data.LayoutMaskStrength, 0.0f, 1.0f );
+
+        layer.BoundLayout = static_cast<uint64_t>( data.CloudLayout );
+
+        return layer;
     }
 
     void CloudLayoutPanel::OnUIRender()
@@ -83,13 +132,57 @@ namespace Desert::Editor
         if ( !m_SowPanel )
             return;
 
+        const LayerContext layer = ReadLayer();
+
+        // THE LAYER IS COMPARED FIELD BY FIELD rather than by a dirty flag somebody has to set: the
+        // numbers live on a component the Details panel edits, and there is no notification. Comparing is
+        // eleven floats a frame and it is what makes moving Layout Repeats in Details redraw this map.
+        const bool layerMoved = layer.FromScene != m_LastLayer.FromScene ||
+                                layer.RegionSizeKm != m_LastLayer.RegionSizeKm ||
+                                layer.CellKm != m_LastLayer.CellKm || layer.Coverage != m_LastLayer.Coverage ||
+                                layer.PatchStrength != m_LastLayer.PatchStrength ||
+                                layer.ResolvableChordKm != m_LastLayer.ResolvableChordKm ||
+                                layer.Seed != m_LastLayer.Seed ||
+                                !Assets::CloudLayoutPlacementEqual( layer.Placement, m_LastLayer.Placement );
+
+        if ( layerMoved )
+            m_PreviewDirty = true;
+        m_LastLayer = layer;
+
+        // THE PANEL OPENS ON THE SKY YOU ARE LOOKING AT. A layer with a painting bound hands it to the
+        // panel once, when it changes — once and not every frame, so that an artist who then opens a
+        // different picture is not overwritten by the scene on the next frame.
+        if ( layer.BoundLayout != m_AdoptedLayout )
+        {
+            m_AdoptedLayout = layer.BoundLayout;
+            if ( layer.BoundLayout != 0u && m_Assets )
+            {
+                if ( auto painting = m_Assets->FindByHandle<Assets::CloudLayoutAsset>(
+                          Common::UUID( layer.BoundLayout ) );
+                     painting && painting->IsReadyForUse() )
+                {
+                    m_Layout    = painting->GetLayout();
+                    m_HasLayout = true;
+                    m_SourcePixels.clear();
+                    m_SourceWidth    = 0u;
+                    m_SourceHeight   = 0u;
+                    m_SourceName     = painting->GetMetadata().Filepath.filename().string();
+                    m_LayoutFromFile = true;
+                    m_PreviewDirty   = true;
+                    m_Status         = "Showing the painting this scene's cloud layer has bound. Point at a "
+                                       "picture to author a new one.";
+                    m_StatusIsError = false;
+                }
+            }
+        }
+
         if ( ImGui::Begin( m_PanelName.c_str(), &m_SowPanel ) )
         {
             ImGui::TextWrapped(
                  "A PAINTED SKY. Point at a picture, say which of its channels feeds which of the layer's "
-                 "four cloud type slots, and bake it to a .dclayout the cloud component's Cloud Layout slot "
-                 "accepts. The painting is read when the clouds are PLACED, not while they are drawn, so it "
-                 "costs the frame nothing." );
+                 "four cloud type slots, and bake it to a .dclayout the cloud component's Cloud Layout "
+                 "slot accepts. The painting is read when the clouds are PLACED, not while they are "
+                 "drawn, so it costs the frame nothing." );
             ImGui::Separator();
 
             DrawSourceSection();
@@ -98,6 +191,10 @@ namespace Desert::Editor
             ImGui::Separator();
             DrawLayerSection();
             ImGui::Separator();
+
+            if ( m_PreviewDirty )
+                RefreshPreview( layer );
+
             DrawPreviewSection();
             ImGui::Separator();
             DrawVerdictSection();
@@ -128,7 +225,8 @@ namespace Desert::Editor
         {
             // NAMED, WITH THE REASON stb gives. A picture that silently failed to load would leave the
             // previous painting on screen and the artist would bake the wrong file.
-            m_Status = "'" + path.filename().string() + "' could not be read as an image: " +
+            m_Status = "'" + path.filename().string() +
+                       "' could not be read as an image: " +
                        ( stbi_failure_reason() ? stbi_failure_reason() : "unknown" );
             m_StatusIsError = true;
             LOG_ERROR( "[CloudLayout] {}", m_Status );
@@ -143,8 +241,9 @@ namespace Desert::Editor
         m_SourceName     = path.filename().string();
         m_LayoutFromFile = false;
 
-        m_Status = "Read '" + m_SourceName + "': " + std::to_string( width ) + "x" + std::to_string( height ) +
-                   ", " + std::to_string( sourceChannels ) + " channels in the file.";
+        m_Status = "Read '" + m_SourceName + "': " + std::to_string( width ) + "x" +
+                   std::to_string( height ) + ", " + std::to_string( sourceChannels ) +
+                   " channels in the file.";
         m_StatusIsError = false;
 
         RebuildLayout();
@@ -182,15 +281,15 @@ namespace Desert::Editor
 
         if ( ImGui::Button( "Image...", ImVec2( 120.0f, 0.0f ) ) )
         {
-            const std::filesystem::path picked = Common::Utils::FileSystem::OpenFileDialog(
-                 "Image\0*.png;*.jpg;*.jpeg;*.tga;*.bmp\0" );
+            const std::filesystem::path picked =
+                 Common::Utils::FileSystem::OpenFileDialog( "Image\0*.png;*.jpg;*.jpeg;*.tga;*.bmp\0" );
             if ( !picked.empty() )
                 LoadImage( picked );
         }
 
-        // The same generic Content Browser payload the Details slot accepts, filtered HERE by extension for
-        // the same reason it filters there: the browser emits one AssetFile payload for everything it has
-        // no icon for, so without this the panel would hand a dropped .desce to an image decoder.
+        // The same generic Content Browser payload the Details slot accepts, filtered HERE by extension
+        // for the same reason it filters there: the browser emits one AssetFile payload for everything it
+        // has no icon for, so without this the panel would hand a dropped .desce to an image decoder.
         if ( ImGui::BeginDragDropTarget() )
         {
             if ( const ImGuiPayload* payload =
@@ -209,7 +308,7 @@ namespace Desert::Editor
                                "about your painting, and one taken silently is the worst kind." );
 
         ImGui::SameLine();
-        ImGui::TextDisabled( "or drag a .png here" );
+        ImGui::TextDisabled( "or drag a .png here from the Content Browser" );
 
         // Opening a finished painting is the other half of the tool: it is how an artist sees what a
         // shipped layout does to their sky before binding it, and how they check one somebody else baked.
@@ -233,10 +332,10 @@ namespace Desert::Editor
                         m_SourceName     = name;
                         m_LayoutFromFile = true;
                         m_PreviewDirty   = true;
-                        m_Status         = "Opened '" + name + "'. It has no source picture here, so the "
-                                                               "channel mapping below is what it was baked "
-                                                               "with and cannot be changed — point at the "
-                                                               "picture again to re-map it.";
+                        m_Status         = "Opened '" + name +
+                                   "'. It has no source picture here, so the channel mapping below is "
+                                   "what it was baked with and cannot be changed — point at the picture "
+                                   "again to re-map it.";
                         m_StatusIsError = false;
                     }
                 }
@@ -253,10 +352,10 @@ namespace Desert::Editor
             ImGui::TextDisabled( "channel means %.4f %.4f %.4f %.4f", m_Layout.PatternMean[0],
                                  m_Layout.PatternMean[1], m_Layout.PatternMean[2], m_Layout.PatternMean[3] );
             if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "The painting is applied about its OWN average, so it moves cloud around "
-                                   "the sky rather than adding it and Coverage keeps meaning the fraction "
-                                   "of sky it delivers. A mean near 0 or near 1 leaves very little room to "
-                                   "redistribute anything." );
+                ImGui::SetTooltip( "The painting is applied about its OWN average, so it moves cloud "
+                                   "around the sky rather than adding it and Coverage keeps meaning the "
+                                   "fraction of sky it delivers. A mean near 0 or near 1 leaves very "
+                                   "little room to redistribute anything." );
         }
         else
         {
@@ -272,16 +371,16 @@ namespace Desert::Editor
     {
         Utils::ImGuiUtilities::SectionHeader( "Channels" );
 
-        ImGui::TextWrapped( "Which channel of the picture feeds which of the layer's four cloud type slots. "
-                            "A slot's channel is its own field of 'is there cloud of this kind here' — the "
-                            "four overlap freely and the sky takes whichever wins." );
+        ImGui::TextWrapped( "Which channel of the picture feeds which of the layer's four cloud type "
+                            "slots. A slot's channel is its own field of 'is there cloud of this kind "
+                            "here' — the four overlap freely and the sky takes whichever wins." );
 
         ImGui::BeginDisabled( m_LayoutFromFile || m_SourcePixels.empty() );
 
         bool remap = false;
         for ( uint32_t slot = 0; slot < Assets::kCloudLayoutChannels; ++slot )
         {
-            const std::string label = "Slot " + std::to_string( slot + 1 ) + " takes";
+            const std::string label   = "Slot " + std::to_string( slot ) + " takes";
             int               channel = static_cast<int>( m_ChannelForSlot[slot] );
             if ( ImGui::Combo( label.c_str(), &channel, "Red\0Green\0Blue\0Alpha\0" ) )
             {
@@ -297,8 +396,8 @@ namespace Desert::Editor
             remap = true;
         }
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Red into all four slots — what a greyscale painting usually wants, and the "
-                               "tool's `--channels 0,0,0,0`." );
+            ImGui::SetTooltip( "Red into all four slots — what a greyscale painting usually wants, and "
+                               "the tool's `--channels 0,0,0,0`." );
 
         ImGui::SameLine();
         if ( ImGui::Button( "Straight RGBA" ) )
@@ -311,10 +410,10 @@ namespace Desert::Editor
         if ( ImGui::Checkbox( "Take the alpha as the add/remove mask", &m_TakeMask ) )
             remap = true;
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "OFF by default, and not because a mask is unusual: an opaque PNG has alpha "
-                               "255 everywhere, and under the signed convention (mid-grey neutral, brighter "
-                               "adds, darker removes) that would be a mask adding cloud to the whole sky. "
-                               "Turn it on when your alpha means something." );
+            ImGui::SetTooltip( "OFF by default, and not because a mask is unusual: an opaque PNG has "
+                               "alpha 255 everywhere, and under the signed convention (mid-grey neutral, "
+                               "brighter adds, darker removes) that would be a mask adding cloud to the "
+                               "whole sky. Turn it on when your alpha means something." );
 
         ImGui::EndDisabled();
 
@@ -326,106 +425,74 @@ namespace Desert::Editor
     }
 
     // -------------------------------------------------------------------------------------------------
-    // The layer the preview assumes
+    // The layer, READ and not edited
     // -------------------------------------------------------------------------------------------------
 
     void CloudLayoutPanel::DrawLayerSection()
     {
-        if ( !Utils::ImGuiUtilities::SectionHeader( "The layer this will hang in", /*defaultOpen=*/true ) )
-            return;
+        Utils::ImGuiUtilities::SectionHeader( "The layer this hangs in" );
 
-        ImGui::TextWrapped( "These are the cloud component's OWN fields, not the file's — a .dclayout carries "
-                            "pixels and nothing else. Set them to the layer you mean to bind this to and the "
-                            "map below is the sky you will get." );
+        const LayerContext& layer = m_LastLayer;
 
-        bool dirty = false;
+        if ( layer.FromScene )
+            ImGui::TextWrapped( "Read from this scene's cloud layer. Change any of it in Details and the "
+                                "map below follows on the same frame — there is deliberately no copy of "
+                                "these numbers here." );
+        else
+            ImGui::TextColored( kWarnColour, "This scene has NO cloud layer, so the map below is drawn "
+                                             "against the shipped defaults printed here." );
 
-        dirty |= ImGui::DragFloat( "Region Size (km)", &m_RegionSizeKm, 1.0f, 4.0f, 400.0f, "%.1f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "The layer's Region Size. The painting repeats with it, so it is also the "
-                               "world period of your picture at one repeat." );
-
-        dirty |= ImGui::DragFloat( "Cloud Cell (km)", &m_CellKm, 0.05f, 0.25f, 40.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "The placement cell — the layer's Weather Tile Size divided by four, times "
-                               "the type's Placement Scale. 12 km gives the shipped 3 km. It is the "
-                               "resolution the sky can express, and the bound a painted stroke has to clear "
-                               "to read as a shape." );
-
-        dirty |= ImGui::SliderFloat( "Coverage", &m_Coverage, 0.0f, 1.0f, "%.2f" );
-        dirty |= ImGui::SliderFloat( "Weather Patch Strength", &m_PatchStrength, 0.0f, 1.0f, "%.2f" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "What decides the sky when the painting does NOT — with Layout Pattern "
-                               "Strength at zero this is the source again, which is why that end of the "
-                               "slider is a live sky rather than an absence of one." );
-
-        dirty |= ImGui::DragInt( "Seed", &m_Seed, 1.0f, 0, 1000000 );
-
-        ImGui::Spacing();
-
-        dirty |= ImGui::SliderFloat( "Layout Pattern Strength", &m_PatternStrength, 0.0f, 1.0f, "%.2f" );
-        dirty |= ImGui::SliderFloat( "Layout Mask Strength", &m_MaskStrength, 0.0f, 1.0f, "%.2f" );
-        dirty |= ImGui::SliderInt( "Layout Repeats", &m_Repeats, 1, 16 );
-        dirty |= ImGui::SliderInt( "Layout Rotation", &m_QuarterTurns, 0, 3, "%d quarter turns" );
-        dirty |= ImGui::DragFloat2( "Layout Offset (km)", m_OffsetKm, 0.1f, -1000.0f, 1000.0f, "%.2f" );
+        ImGui::Text( "Region Size %.1f km      placement cell %.2f km", layer.RegionSizeKm, layer.CellKm );
+        ImGui::Text( "Coverage %.2f      Weather Patch Strength %.2f      Seed %u", layer.Coverage,
+                     layer.PatchStrength, layer.Seed );
+        ImGui::Text( "Layout Repeats %u      Rotation %u quarter turns      Offset (%.2f, %.2f) km",
+                     layer.Placement.RepeatsPerRegion, layer.Placement.QuarterTurns,
+                     layer.Placement.OffsetKm.x, layer.Placement.OffsetKm.y );
+        ImGui::Text( "Layout Pattern Strength %.2f      Layout Mask Strength %.2f",
+                     layer.Placement.PatternStrength, layer.Placement.MaskStrength );
 
         // The SAME validator the bake runs, so the panel refuses for the same reason the bake refuses
         // rather than the two disagreeing about what is legal.
-        Assets::CloudLayoutPlacement placement;
-        placement.RepeatsPerRegion = static_cast<uint32_t>( m_Repeats );
-        placement.QuarterTurns     = static_cast<uint32_t>( m_QuarterTurns );
-        placement.OffsetKm         = glm::vec2( m_OffsetKm[0], m_OffsetKm[1] );
-        placement.PatternStrength  = m_PatternStrength;
-        placement.MaskStrength     = m_MaskStrength;
-
-        if ( const auto valid = Assets::ValidateCloudLayoutPlacement( placement ); !valid )
+        if ( const auto valid = Assets::ValidateCloudLayoutPlacement( layer.Placement ); !valid )
             ImGui::TextColored( kErrorColour, "%s", valid.GetError().c_str() );
-
-        if ( dirty )
-            m_PreviewDirty = true;
     }
 
     // -------------------------------------------------------------------------------------------------
     // Preview
     // -------------------------------------------------------------------------------------------------
 
-    Assets::CloudProceduralFieldParams CloudLayoutPanel::BuildParams() const
+    Assets::CloudProceduralFieldParams CloudLayoutPanel::BuildParams( const LayerContext& layer ) const
     {
         Assets::CloudProceduralFieldParams params;
 
-        params.RegionSizeKm = std::max( m_RegionSizeKm, 1e-3f );
-        params.Coverage     = std::clamp( m_Coverage, 0.0f, 1.0f );
-        params.Seed         = static_cast<uint32_t>( std::max( m_Seed, 0 ) );
-        params.PatchStrength = std::clamp( m_PatchStrength, 0.0f, 1.0f );
+        params.RegionSizeKm      = std::max( layer.RegionSizeKm, 1e-3f );
+        params.Coverage          = layer.Coverage;
+        params.Seed              = layer.Seed;
+        params.PatchStrength     = layer.PatchStrength;
+        params.ResolvableChordKm = layer.ResolvableChordKm;
+        params.LayoutPlacement   = layer.Placement;
 
         // THE PATCH TILE IS FLOORED AGAINST THE CELL exactly as the renderer floors it, because a
         // modulation finer than three cells decides cells one at a time and reads as a checkerboard. A
         // preview drawn with an unfloored tile would show a sky the layer cannot produce.
-        params.PatchTileKm = std::max( 21.0f, 3.0f * m_CellKm );
-
-        params.LayoutPlacement.RepeatsPerRegion = static_cast<uint32_t>( std::clamp( m_Repeats, 1, 16 ) );
-        params.LayoutPlacement.QuarterTurns     = static_cast<uint32_t>( std::clamp( m_QuarterTurns, 0, 3 ) );
-        params.LayoutPlacement.OffsetKm         = glm::vec2( m_OffsetKm[0], m_OffsetKm[1] );
-        params.LayoutPlacement.PatternStrength  = std::clamp( m_PatternStrength, 0.0f, 1.0f );
-        params.LayoutPlacement.MaskStrength     = std::clamp( m_MaskStrength, 0.0f, 1.0f );
+        params.PatchTileKm = std::max( 21.0f, 3.0f * layer.CellKm );
 
         if ( m_HasLayout )
             params.Layout = std::make_shared<const Assets::CloudLayoutData>( m_Layout );
 
-        // Four slots of one size, because the panel is authoring a FILE and not a layer: the map answers
-        // "what does this picture do to a sky whose cells are this big", and a per-species scale would be a
-        // second number obliged to agree with the type asset the artist has not chosen yet.
+        // Four slots of one size, because the map answers "what does this picture do to a sky whose cells
+        // are this big". The layer's own per-type scales are already folded into LayerContext::CellKm.
         params.Species.resize( Assets::kCloudLayoutChannels );
         for ( auto& species : params.Species )
         {
-            species.CellKm     = std::max( m_CellKm, 1e-3f );
+            species.CellKm     = std::max( layer.CellKm, 1e-3f );
             species.Anisotropy = 1.0f;
         }
 
         return params;
     }
 
-    void CloudLayoutPanel::RefreshPreview()
+    void CloudLayoutPanel::RefreshPreview( const LayerContext& layer )
     {
         m_PreviewDirty = false;
         m_HasPreview   = false;
@@ -436,13 +503,13 @@ namespace Desert::Editor
         if ( !m_HasLayout )
             return;
 
-        const Assets::CloudProceduralFieldParams params = BuildParams();
-        const uint32_t                           slot = static_cast<uint32_t>( std::clamp( m_PreviewSlot, 0, 3 ) );
+        const Assets::CloudProceduralFieldParams params = BuildParams( layer );
+        const uint32_t slot = static_cast<uint32_t>( std::clamp( m_PreviewSlot, 0, 3 ) );
 
         const float spanKm = params.RegionSizeKm * static_cast<float>( std::clamp( m_SpanRegions, 1, 4 ) );
 
-        // 256 cells a side is the ceiling: it is what the pane is drawn at, so a finer map could not be
-        // seen, and it bounds the work behind a slider at 65 536 evaluations regardless of the cell.
+        // 256 cells a side is the ceiling: it is about what the pane is drawn at, so a finer map could
+        // not be seen, and it bounds the work behind a slider at 65 536 evaluations whatever the cell.
         auto mapped = Assets::BuildCloudLayoutPreview( params, slot, spanKm, 256u );
         if ( !mapped )
         {
@@ -456,12 +523,12 @@ namespace Desert::Editor
 
         // THE STROKE LIMIT IS THE CELL EXPRESSED IN TEXELS OF THIS PAINTING. One texel spans
         // `period / resolution` kilometres with `period = RegionSize / Repeats`, so a cell is
-        // `cell / texelKm` texels wide. That conversion is what turns a fact about pixels into a fact about
-        // the sky, and it is the whole reason the measure takes a limit rather than a verdict.
-        const float periodKm = params.RegionSizeKm /
-                               static_cast<float>( params.LayoutPlacement.RepeatsPerRegion );
-        const float texelKm = periodKm / static_cast<float>( std::max( m_Layout.Resolution, 1u ) );
-        const float limitTexels = texelKm > 0.0f ? m_Preview.CellKm / texelKm : 0.0f;
+        // `cell / texelKm` texels wide. That conversion is what turns a fact about pixels into a fact
+        // about the sky, and it is the whole reason the measure takes a limit rather than a verdict.
+        m_PeriodKm = params.RegionSizeKm / static_cast<float>( params.LayoutPlacement.RepeatsPerRegion );
+        m_TexelKm  = m_PeriodKm / static_cast<float>( std::max( m_Layout.Resolution, 1u ) );
+
+        const float limitTexels = m_TexelKm > 0.0f ? m_Preview.CellKm / m_TexelKm : 0.0f;
 
         m_Strokes = Assets::MeasureCloudLayoutStrokes( m_Layout, slot, limitTexels );
 
@@ -597,9 +664,6 @@ namespace Desert::Editor
 
         ImGui::SliderInt( "Pane size", &m_PreviewSide, 128, 512, "%d px" );
 
-        if ( m_PreviewDirty )
-            RefreshPreview();
-
         const float pane = static_cast<float>( m_PreviewSide );
 
         if ( m_PaintingImage )
@@ -640,57 +704,56 @@ namespace Desert::Editor
             return;
         }
 
-        ImGui::Text( "Coverage asks for %.2f and this painting delivers %.2f over the map.", m_Coverage,
-                     m_Preview.MeanCoverage );
+        ImGui::Text( "Coverage asks for %.2f and this painting delivers %.2f over the map.",
+                     m_LastLayer.Coverage, m_Preview.MeanCoverage );
 
         // ---- 1. the pattern and the mask are not independent -------------------------------------
 
-        const float clampedFraction = m_Preview.Cells > 0u ? static_cast<float>( m_Preview.CellsClamped ) /
-                                                                  static_cast<float>( m_Preview.Cells )
-                                                           : 0.0f;
-        const float movedFraction = m_Preview.Cells > 0u ? static_cast<float>( m_Preview.CellsPatternMoves ) /
-                                                                static_cast<float>( m_Preview.Cells )
-                                                         : 0.0f;
+        const float clampedFraction =
+             m_Preview.Cells > 0u
+                  ? static_cast<float>( m_Preview.CellsClamped ) / static_cast<float>( m_Preview.Cells )
+                  : 0.0f;
+        const float movedFraction =
+             m_Preview.Cells > 0u
+                  ? static_cast<float>( m_Preview.CellsPatternMoves ) / static_cast<float>( m_Preview.Cells )
+                  : 0.0f;
 
         if ( m_Layout.HasPattern() && m_Preview.CellsPatternMoves == 0u )
         {
             ImGui::TextColored( kWarnColour,
                                 "Layout Pattern Strength does NOTHING here: both ends of it give the same "
                                 "sky, cell for cell." );
-            ImGui::TextWrapped( "It is not a dead knob — the mask has saturated it. %.0f%% of the cells are "
-                                "already pinned at empty or full by the clamp, and a redistribution about "
-                                "the painting's own mean has nowhere left to go. Turn Layout Mask Strength "
-                                "down and the pattern comes back.",
+            ImGui::TextWrapped( "It is not a dead knob — the mask has saturated it. %.0f%% of the cells "
+                                "are already pinned at empty or full by the clamp, and a redistribution "
+                                "about the painting's own mean has nowhere left to go. Turn Layout Mask "
+                                "Strength down and the pattern comes back.",
                                 100.0f * clampedFraction );
         }
         else if ( m_Layout.HasPattern() )
         {
-            ImGui::TextColored( kGoodColour, "Layout Pattern Strength moves %.0f%% of the cells across its "
-                                             "range (%u of %u).",
+            ImGui::TextColored( kGoodColour,
+                                "Layout Pattern Strength moves %.0f%% of the cells across its range (%u of "
+                                "%u).",
                                 100.0f * movedFraction, m_Preview.CellsPatternMoves, m_Preview.Cells );
             ImGui::TextWrapped( "%.0f%% of the cells are pinned at empty or full by the clamp. The pattern "
                                 "and the mask are NOT independent: the mask can drive a region past both "
-                                "ends of the clamp, and everything the pattern would have said inside it is "
-                                "then eaten.",
+                                "ends of the clamp, and everything the pattern would have said inside it "
+                                "is then eaten.",
                                 100.0f * clampedFraction );
         }
         else
         {
-            ImGui::TextDisabled( "This layout carries no pattern, so Layout Pattern Strength has nothing to "
-                                 "apply — only the mask acts." );
+            ImGui::TextDisabled( "This layout carries no pattern, so Layout Pattern Strength has nothing "
+                                 "to apply — only the mask acts." );
         }
 
         ImGui::Spacing();
 
         // ---- 2. legibility is bounded by the STROKE, and the validator checks the TEXEL ----------
 
-        const float periodKm =
-             std::max( m_RegionSizeKm, 1e-3f ) / static_cast<float>( std::clamp( m_Repeats, 1, 16 ) );
-        const float texelKm = periodKm / static_cast<float>( std::max( m_Layout.Resolution, 1u ) );
-
         ImGui::Text( "One texel is %.3f km; the placement cell is %.2f km; one period of your painting is "
                      "%.1f km.",
-                     texelKm, m_Preview.CellKm, periodKm );
+                     m_TexelKm, m_Preview.CellKm, m_PeriodKm );
 
         if ( m_Strokes.PaintedTexels == 0u )
         {
@@ -700,8 +763,8 @@ namespace Desert::Editor
         }
         else
         {
-            const float thinKm   = m_Strokes.ThinnestTenthTexels * texelKm;
-            const float medianKm = m_Strokes.MedianTexels * texelKm;
+            const float thinKm   = m_Strokes.ThinnestTenthTexels * m_TexelKm;
+            const float medianKm = m_Strokes.MedianTexels * m_TexelKm;
 
             ImGui::Text( "Your strokes: the thinnest tenth is %.2f km, the median is %.2f km.", thinKm,
                          medianKm );
@@ -709,11 +772,13 @@ namespace Desert::Editor
             if ( m_Strokes.FractionBelowLimit > 0.02f )
             {
                 ImGui::TextColored( kWarnColour,
-                                    "%.0f%% of what you drew on this slot is NARROWER THAN ONE CLOUD CELL.",
+                                    "%.0f%% of what you drew on this slot is NARROWER THAN ONE CLOUD "
+                                    "CELL.",
                                     100.0f * m_Strokes.FractionBelowLimit );
-                ImGui::TextWrapped( "Those strokes will break into evenly spaced clumps rather than read as "
-                                    "a shape — the sky cannot place a cloud finer than a cell. Lower Layout "
-                                    "Repeats, paint thicker, or give the layer a finer Weather Tile Size." );
+                ImGui::TextWrapped( "Those strokes will break into evenly spaced clumps rather than read "
+                                    "as a shape — the sky cannot place a cloud finer than a cell. Lower "
+                                    "Layout Repeats, paint thicker, or give the layer a finer Weather "
+                                    "Tile Size." );
             }
             else
             {
@@ -723,15 +788,16 @@ namespace Desert::Editor
 
         // SAID EVERY TIME, not only when it bites. The engine's own validator compares one TEXEL against
         // the cell, which is the right bound for "can the painting tell two cells apart" and says nothing
-        // at all about whether a letter still looks like a letter. That gap is the reason this section
-        // exists, and an artist who never sees the warning still has to know which question was answered.
+        // about whether a letter still looks like a letter. That gap is the reason this section exists,
+        // and an artist who never sees the warning still has to know which question was answered.
         ImGui::TextDisabled( "The engine checks one TEXEL against the cell — that a painting can tell two "
                              "cells apart. Legibility is your thinnest STROKE against the cell, which no "
-                             "validator can know, so it is measured here and reported rather than refused." );
+                             "validator can know, so it is measured here and reported rather than "
+                             "refused." );
     }
 
     // -------------------------------------------------------------------------------------------------
-    // Save
+    // Bake
     // -------------------------------------------------------------------------------------------------
 
     void CloudLayoutPanel::DrawSaveSection()
@@ -756,13 +822,14 @@ namespace Desert::Editor
                 }
                 else
                 {
-                    m_SourceName    = target.filename().string();
-                    m_Status        = "Baked to " + target.string();
-                    m_StatusIsError = false;
+                    m_SourceName     = target.filename().string();
+                    m_LayoutFromFile = true;
+                    m_Status         = "Baked to " + target.string();
+                    m_StatusIsError  = false;
 
-                    // Registered straight away so the cloud component's slot lists it without a restart. A
-                    // tool whose output only appears after the editor is reopened is a tool nobody iterates
-                    // in.
+                    // Registered straight away so the cloud component's slot lists it without a restart.
+                    // A tool whose output only appears after the editor is reopened is a tool nobody
+                    // iterates in.
                     if ( m_Assets )
                     {
                         auto painting = m_Assets->FindByPath<Assets::CloudLayoutAsset>( target );
@@ -775,7 +842,8 @@ namespace Desert::Editor
                         if ( painting )
                         {
                             if ( const auto registered =
-                                      Runtime::ResourceRegistry::GetCloudLayoutService()->Register( painting );
+                                      Runtime::ResourceRegistry::GetCloudLayoutService()->Register(
+                                           painting );
                                  !registered )
                             {
                                 m_Status = "Baked, but the painting could not be registered: " +

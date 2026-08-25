@@ -232,7 +232,9 @@ namespace Desert::Graphic::System
         // that dilation under 200 m while still fusing lobes that already overlap, which is where the
         // fusion comes from. An artist who wants softer clouds has Detail Strength, which is the knob that
         // means it.
-        const float latticeKm = std::max( m_Data.WeatherTileSize, 1.0f ) / kCloudWorldUnitsPerKm / 4.0f;
+        // ONE STATEMENT OF "four cells to a tile", shared with the Cloud Layout panel, which measures a
+        // painting's strokes against the cell and must not compute the ratio a second time.
+        const float latticeKm = ECS::CloudLayerLatticeKm( m_Data );
 
         params.BlendRadiusKm  = std::max( 0.02f * latticeKm, 1e-3f );
         params.ProfileDepthKm = std::max( 0.12f * latticeKm, 1e-3f );
