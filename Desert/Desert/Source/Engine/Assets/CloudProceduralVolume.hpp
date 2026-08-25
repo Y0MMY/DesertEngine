@@ -265,6 +265,28 @@ namespace Desert::Assets
                                            const CloudProceduralSpecies&     species );
 
     /**
+     * @brief Do these two sets of parameters bake the same volume?
+     *
+     * WHAT IT IS FOR. The renderer keeps a baked volume and has to know when it is stale. If this answers
+     * "same" for two sets that bake differently, the artist moves a slider and NOTHING HAPPENS — which is
+     * the dead setting §1.3 of the contract forbids, arrived at from the far side: the setting is wired
+     * all the way through and the cache is what eats it. If it answers "different" for two sets that bake
+     * identically, every frame re-bakes and the editor stalls for seconds at a time.
+     *
+     * WRITTEN OUT FIELD BY FIELD RATHER THAN `operator==`, and that is the safe direction: a defaulted
+     * comparison would silently start comparing any field somebody adds, which sounds right until the
+     * added field is one the bake does not read — and then every frame re-bakes. Comparing the fields the
+     * bake actually reads means a new one has to be CONSIDERED rather than inherited.
+     *
+     * AND IT LIVES HERE, BESIDE THE BAKE, RATHER THAN IN THE RENDERER, because that is what makes the
+     * paragraph above checkable. It was in the renderer's own translation unit, where nothing links, and a
+     * deliberate sabotage — dropping one of the four placement numbers from the comparison — stayed GREEN
+     * across the whole suite. Desert/Tests/Engine/CloudPlacementSpectrum now moves every field of the
+     * struct in turn and demands this function notice.
+     */
+    bool CloudProceduralParamsEqual( const CloudProceduralFieldParams& a, const CloudProceduralFieldParams& b );
+
+    /**
      * @brief Where the region's corner sits for a camera at @p cameraXKm, @p cameraZKm — SNAPPED.
      *
      * The snap is to the coarsest species' lattice cell, so that a cell inside the region before a shift is

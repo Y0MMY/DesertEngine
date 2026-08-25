@@ -454,6 +454,11 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "WeatherTileSize",
          "RegionSize",
          "Seed",
+         "PlacementDensity",
+         "PlacementScatter",
+         "PlacementSizeVariety",
+         "PatchTileSize",
+         "PatchStrength",
          "DetailTileSize",
          "DetailStrength",
          "DensityScale",
@@ -483,11 +488,15 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 40u );
+    EXPECT_EQ( cloud.Fields.size(), 45u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
     EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 9u );
     EXPECT_EQ( CountInCategory( cloud, "Weather" ), 5u );
+    // The five that decide whether the sky reads as a grid. See CALIBRATION.md section RW: the placement
+    // that shipped before them put a measurable lattice bump at every multiple of the weather tile's
+    // quarter, and each of these attacks one reason for it.
+    EXPECT_EQ( CountInCategory( cloud, "Placement" ), 5u );
     // NO "Noise" GROUP ANY MORE: it held one row, the noise volume slot, and that moved onto the cloud
     // type. A group with nothing in it is a heading an artist opens and finds empty.
     EXPECT_EQ( CountInCategory( cloud, "Noise" ), 0u );

@@ -349,10 +349,12 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Weather Patch Size" ), Category( "Placement" ), Length,
                   Range( 500000.0f, 20000000.0f ),
                   Tooltip( "World size over which the sky's BUSY and CLEAR regions alternate — the scale "
-                           "of a weather system rather than of a cloud. It is bounded from both sides and "
-                           "the bounds are refused by name: below three cells the modulation decides "
-                           "single cells and reads as a checkerboard, and above the Region Size it cannot "
-                           "complete a cycle before the sky repeats anyway." ) )
+                           "of a weather system rather than of a cloud. Bounded from BELOW at three "
+                           "lattice cells and raised to it silently if set finer, because a modulation "
+                           "whose period is near a cell's decides cells one at a time and reads as a "
+                           "checkerboard rather than as weather. Above Region Size it stops buying "
+                           "anything: the sky already repeats at that distance, so a longer period cannot "
+                           "complete a cycle before the repetition does." ) )
         // TWENTY-ONE KILOMETRES — seven cells at the shipped 12 km weather tile, and under half the 48 km
         // region so a full cycle of busy and clear fits inside one period of the sky.
         float PatchTileSize = 2100000.0f;

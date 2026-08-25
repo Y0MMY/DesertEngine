@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 namespace Desert::Assets
@@ -38,17 +39,44 @@ namespace Desert::Assets
         /// alone, and to 0.640 with the size spread and the patches as well.
         ///
         /// THE SHAPE IS A LINE THROUGH ONE AT ZERO, because at zero coverage there is nothing to overlap
-        /// and nothing to compensate, and the loss grows with how much cloud is in the sky. The slope is
-        /// measured on the top-down projection at five settings: the widening the cover needs is 1.03 at a
-        /// coverage of 0.15 and 1.17 at 0.75, and 0.22 is the line through them.
+        /// and nothing to compensate, and the loss grows with how much cloud is in the sky.
         ///
-        /// IT DOES NOT DEPEND ON THE DENSITY OR THE SIZE SPREAD, and both are by construction: `d`
-        /// clusters each shrunk by one over the square root of `d` cover the same area as one, and the
-        /// size draw is uniform in AREA with a mean of one. It DOES depend on the scatter, which is what
-        /// it is compensating — an artist who returns the scatter to zero gets a sky about three points
-        /// fuller than the slider says, which is inside the tenth
-        /// Desert/Tests/Engine/CloudProceduralField allows and is stated on the knob's own tooltip.
-        constexpr float kPackingCompensation = 0.22f;
+        /// THE SLOPE IS MEASURED AT THE SHIPPED PLACEMENT AND NOWHERE ELSE, and saying so is the honest
+        /// part: it is fitted on the top-down projection of the baked volume at five settings of the
+        /// slider, with the density, the scatter and the size spread at the values this component ships.
+        /// At 0.08 the sky the slider asks for and the sky it delivers are
+        ///
+        ///     Coverage  0.15   0.24   0.35   0.50   0.75
+        ///     measured  0.169  0.249  0.357  0.519  0.741
+        ///
+        /// — out by at most 0.019, against the tenth Desert/Tests/Engine/CloudProceduralField allows and
+        /// against the 0.11 the free placement was out by before this line existed.
+        ///
+        /// IT DOES NOT DEPEND ON THE SIZE SPREAD, which is by construction: the size draw is uniform in
+        /// AREA with a mean of one. It depends only weakly on the density, which is what
+        /// kDensityCompensation is for. It DOES depend on the SCATTER, which is precisely what it is
+        /// compensating — an artist who returns the scatter to zero gets a sky a few points fuller than
+        /// the slider says, which is inside the suite's tenth and is stated on the knob's own tooltip.
+        constexpr float kPackingCompensation = 0.08f;
+
+        /// How fast a cluster narrows as a cell is given more of them, as the exponent of the count.
+        ///
+        /// A HALF IS THE ANSWER TO THE WRONG QUESTION, and the suite is what said so. A half preserves the
+        /// total AREA of the clusters in a cell exactly — `d` of them, each of `1/sqrt(d)` the width — and
+        /// that would be the right compensation if the ground they covered were the sum of their areas. It
+        /// is not, because they OVERLAP, and how much they overlap depends on how many there are: one
+        /// cluster at the shipped size covers 1.63 cell-areas, so it saturates its own cell and spills into
+        /// its neighbours, while four clusters of a quarter that area each cover 0.41 of a cell and between
+        /// them leave 12 per cent of it open. Measured on the placement, a half took the sky's cover from
+        /// 0.701 at a density of 1 to 0.597 at 4 — a tenth of the sky, which is the whole tolerance
+        /// Desert/Tests/Engine/CloudProceduralField allows the Coverage slider.
+        ///
+        /// 0.40 IS MEASURED AND NOT DERIVED, and the difference is worth naming: the derivation would need
+        /// the saturation of a cluster wider than its own cell, which depends on the coverage as well as on
+        /// the count. What is asserted instead is the RELATION — Desert/Tests/Engine/CloudPlacementSpectrum
+        /// re-measures the cover at a density of 1 and of 4 on every run and fails if they part company by
+        /// more than a twentieth of the sky.
+        constexpr float kDensityCompensation = 0.40f;
 
         /// The lattice is walked in this many blobs per cluster at most. A ceiling rather than a count: the
         /// stack is shortened whenever the band is too thin to hold that many lumps that the march can
@@ -201,6 +229,41 @@ namespace Desert::Assets
         const float root       = std::sqrt( anisotropy );
         const float cell       = std::max( species.CellKm, floorKm );
         return glm::vec2( cell * root, cell / root );
+    }
+
+    bool CloudProceduralParamsEqual( const CloudProceduralFieldParams& a, const CloudProceduralFieldParams& b )
+    {
+        if ( a.RegionSizeKm != b.RegionSizeKm || a.LayerBottomKm != b.LayerBottomKm ||
+             a.LayerThicknessKm != b.LayerThicknessKm || a.BlendRadiusKm != b.BlendRadiusKm ||
+             a.ProfileDepthKm != b.ProfileDepthKm || a.Coverage != b.Coverage ||
+             a.CoverageContrast != b.CoverageContrast || a.Seed != b.Seed || a.WindAxis != b.WindAxis ||
+             a.ResolvableChordKm != b.ResolvableChordKm )
+            return false;
+
+        if ( a.PlacementDensity != b.PlacementDensity || a.PlacementScatter != b.PlacementScatter ||
+             a.PlacementSizeVariety != b.PlacementSizeVariety || a.PatchStrength != b.PatchStrength ||
+             a.PatchTileKm != b.PatchTileKm )
+            return false;
+
+        if ( a.Species.size() != b.Species.size() )
+            return false;
+
+        for ( size_t slot = 0; slot < a.Species.size(); ++slot )
+        {
+            if ( a.Species[slot].CellKm != b.Species[slot].CellKm ||
+                 a.Species[slot].Anisotropy != b.Species[slot].Anisotropy )
+                return false;
+
+            // The SHAPE decides where the lumps go and how tall they are, so a type edited in place — which
+            // the renderer's generation counter already catches — and a type whose numbers were reached
+            // some other way both have to re-bake. Compared as bytes because CloudTypeShape is a flat
+            // aggregate of floats with no padding to be left uninitialised.
+            if ( std::memcmp( &a.Species[slot].Shape, &b.Species[slot].Shape,
+                              sizeof( Graphic::CloudTypeShape ) ) != 0 )
+                return false;
+        }
+
+        return true;
     }
 
     Common::BoolResultStr ValidateCloudProceduralParams( const CloudProceduralFieldParams& params )
@@ -450,13 +513,18 @@ namespace Desert::Assets
         // Desert/Tests/Engine/CloudProceduralField re-measures it on every run and fails if the slider
         // and the sky part company by more than a tenth. Being a power it keeps both ends EXACT, which is
         // the property the ends were built to have: 0 stays empty and 1 stays full.
-        // THE DENSITY DOES NOT ADD MATTER, IT REDISTRIBUTES IT. A cell that carries `d` clusters gives each
-        // of them one over the square root of `d` of the width, so the total area they cover is what one
-        // cluster covered. Without this line the density knob would move the sky's cover and the Coverage
-        // mapping decision D-20 re-authorised every scene against would have to be measured again for every
-        // setting of it — which is a knob that silently invalidates another knob.
+        //
+        // IT IS EVALUATED INSIDE THE CELL LOOP AND NOT HERE, because the patch modulation moves the
+        // threshold from place to place: the whole point of that modulation is that the sky is not equally
+        // busy everywhere, so there is no single alive fraction for a region any more.
+
+        // THE DENSITY DOES NOT ADD MATTER, IT REDISTRIBUTES IT. A cell that carries `d` clusters narrows
+        // each of them by `d` to the power of kDensityCompensation, so the ground they cover between them
+        // is the ground one covered. Without this line the density knob would move the sky's cover, and
+        // the Coverage mapping decision D-20 re-authorised every scene against would have to be measured
+        // again for every setting of it — which is a knob that silently invalidates another knob.
         const float density      = std::max( params.PlacementDensity, 0.0f );
-        const float densityScale = 1.0f / std::sqrt( std::max( density, 1e-3f ) );
+        const float densityScale = std::pow( std::max( density, 1e-3f ), -kDensityCompensation );
 
         const float scatter = std::max( params.PlacementScatter, 0.0f );
         const float variety = std::clamp( params.PlacementSizeVariety, 0.0f, 1.0f );

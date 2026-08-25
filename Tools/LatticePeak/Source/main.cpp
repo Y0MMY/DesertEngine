@@ -305,6 +305,13 @@ namespace
         // recomputed the cell would be checking its own multiplication rather than the sky's.
         const glm::vec2 extent = Desert::Assets::CloudProceduralCellExtentKm( params, params.Species[0] );
 
+        // THE SAME FLOOR VolumetricCloudRenderer::BuildProceduralParams APPLIES, so that a strongly
+        // anisotropic species is measured rather than refused. The generator rejects a patch finer than
+        // three cells by name; the renderer floors it instead, because a layer has to draw a sky for
+        // whatever the scene file says, and a tool that refused where the engine draws would be measuring
+        // a configuration that cannot occur.
+        params.PatchTileKm = std::max( params.PatchTileKm, 3.0f * std::max( extent.x, extent.y ) );
+
         std::vector<std::vector<double>> curvesX;
         std::vector<std::vector<double>> curvesZ;
 

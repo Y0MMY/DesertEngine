@@ -18,51 +18,6 @@ namespace Desert::Graphic::System
 {
     namespace
     {
-        // WHETHER TWO SETS OF BAKE PARAMETERS DESCRIBE THE SAME VOLUME, field by field.
-        //
-        // WRITTEN OUT RATHER THAN DEFAULTED, and that is the safe direction here: `operator==` on the
-        // struct would silently start comparing any field somebody adds, which sounds right until the
-        // added field is one that does not change the bytes — and then every frame re-bakes. Comparing
-        // the fields the bake actually reads means a new one has to be considered rather than inherited.
-        bool SameProceduralParams( const Assets::CloudProceduralFieldParams& a,
-                                   const Assets::CloudProceduralFieldParams& b )
-        {
-            if ( a.RegionSizeKm != b.RegionSizeKm || a.LayerBottomKm != b.LayerBottomKm ||
-                 a.LayerThicknessKm != b.LayerThicknessKm || a.BlendRadiusKm != b.BlendRadiusKm ||
-                 a.ProfileDepthKm != b.ProfileDepthKm || a.Coverage != b.Coverage ||
-                 a.CoverageContrast != b.CoverageContrast || a.Seed != b.Seed || a.WindAxis != b.WindAxis ||
-                 a.ResolvableChordKm != b.ResolvableChordKm )
-                return false;
-
-            // THE FOUR PLACEMENT NUMBERS, and they belong here for the reason the note above gives: every
-            // one of them changes the lumps, so a layer whose artist moves one and sees nothing happen has
-            // a dead setting — which is exactly what §1.3 of the contract forbids and exactly what leaving
-            // them out of this comparison would produce.
-            if ( a.PlacementDensity != b.PlacementDensity || a.PlacementScatter != b.PlacementScatter ||
-                 a.PlacementSizeVariety != b.PlacementSizeVariety || a.PatchStrength != b.PatchStrength ||
-                 a.PatchTileKm != b.PatchTileKm )
-                return false;
-
-            if ( a.Species.size() != b.Species.size() )
-                return false;
-
-            for ( size_t i = 0; i < a.Species.size(); ++i )
-            {
-                if ( a.Species[i].CellKm != b.Species[i].CellKm ||
-                     a.Species[i].Anisotropy != b.Species[i].Anisotropy )
-                    return false;
-
-                // The SHAPE decides where the lumps go and how tall they are, so a type edited in place —
-                // which the generation counter already catches — and a type whose numbers were reached
-                // some other way both have to re-bake. Compared as bytes because CloudTypeShape is a
-                // flat aggregate of floats with no padding to be uninitialised.
-                if ( std::memcmp( &a.Species[i].Shape, &b.Species[i].Shape, sizeof( CloudTypeShape ) ) != 0 )
-                    return false;
-            }
-
-            return true;
-        }
-
         // 8x8 for the screen-space march, matching the LocalSize the shader declares. 64 invocations is
         // inside every implementation's guaranteed maximum and the dispatch bounds-checks, so any target
         // size is fine.
@@ -357,7 +312,8 @@ namespace Desert::Graphic::System
                 sameTypes = m_ProfileTypes[slot] == handles[slot];
 
             const bool sameRegion = m_ModellingValid && m_ModellingOriginKm == wantedOrigin;
-            const bool sameParams = m_ModellingValid && SameProceduralParams( m_ModellingParams, wanted );
+            const bool sameParams =
+                 m_ModellingValid && Assets::CloudProceduralParamsEqual( m_ModellingParams, wanted );
 
             if ( !( sameTypes && sameRegion && sameParams ) )
             {

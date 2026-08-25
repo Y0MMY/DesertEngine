@@ -2353,3 +2353,389 @@ is RED.
   as a RELATION in the suite rather than frozen into a range.
 * **It did not re-author the library beyond the two factors the measurement showed dissolved.** A cirrus
   that should be MORE eroded than a cumulus needs the density to carry it first.
+
+---
+
+## RW — the sky was on a 3 km grid, and the cause was the confinement rather than the count, 2026-08-25
+
+The owner of the product looked at the sky and said the clouds **"just go in a row"**, that the whole sky
+was cloud **"with an obvious pattern"**, and asked whether there is **a parameter to do this by hand**.
+
+### Neither instrument this programme owns can see a grid, so one was built first
+
+`ImageStat` measures the DISTRIBUTION of luminance: a grid of clouds and a natural field of the same clouds
+have the same histogram. `LineJump` measures the STEP between adjacent rows and columns: a period longer
+than one row makes no step at all. **Both are satisfied by a perfect lattice**, so "it got better" would
+have been an opinion, and an opinion cannot be reviewed.
+
+`Tools/LatticePeak` takes the **autocorrelation** of a coverage field and reports the **PROMINENCE** of a
+bump — its height above the higher of the two troughs bracketing it — which is exactly zero for any
+decaying curve whatever that curve's height. It has two modes:
+
+* `--field` bakes the placement through the shipped generator, projects it down and measures it. It PREDICTS
+  the period it expects from the generator's own `CloudProceduralCellExtentKm` — which was promoted out of
+  an anonymous namespace for exactly this, so the tool cannot check its own multiplication — and prints the
+  prediction beside the measurement.
+* `--frame` measures a rendered PNG's cloud mask, split at Otsu's threshold so the split is a property of
+  the image rather than of the operator.
+
+**Two things the instrument taught its author before it measured anything, and both are in it now.**
+
+1. **One region is sixteen cells across, and an autocorrelation estimated from sixteen things wobbles by
+   about a quarter of its own scale.** The very first run reported a "peak" of prominence **0.085 at
+   9.5 km**, and there is no lattice at 9.5 km. Hence `--repeats`, which averages the curve over disjoint
+   regions, and a **jackknife noise** figure on every line: half the difference between two halves of the
+   realisations, which cancels everything they agree about and leaves what they do not.
+2. **The background must NOT be the median prominence of the curve's own local maxima.** That was the first
+   statistic tried, and on a strongly periodic curve nearly every local maximum IS a lattice harmonic — so
+   it measures the signal and reports a floor of 0.05 that never falls however many realisations are
+   averaged. It is estimated from the realisations instead.
+
+### The instrument checked against a period this file chose
+
+`Desert/Tests/Engine/CloudPlacementSpectrum` compiles `Tools/LatticePeak/Source/LatticePeakMath.hpp` — the
+same trick the `.glslh` suites use on shader maths, arrived at from the other side — and feeds it fields
+whose answer is not in question:
+
+| field | verdict |
+|---|---|
+| a curve that only decays | **no peak at all**, which is what makes prominence the right quantity |
+| a bump of 0.20 planted at lag 40 on a decay | found at 40, prominence within 0.005 of the height above its own trough |
+| a perfect lattice of period 16 | bump at 16, prominence **1.108** |
+| the same bodies placed by a hash over the whole map | prominence **0.0045** |
+| two identical realisations | noise **0** |
+
+### WHAT THE INSTRUMENT SAID ABOUT THE SHIPPED SKY
+
+`Clouds_Demo` as it shipped: 48 km region, 12 km weather tile (3 km cells), one cumulus congestus,
+coverage 0.762, wind along +X. **32 realisations.**
+
+| axis | 1P (3.000 km) | 2P (6.000 km) | 3P (9.000 km) | 4P (12.000 km) | noise |
+|---|---|---|---|---|---|
+| X (east) | 3.375 km, prom 0.0152, 2.4x | 6.000 km, **0.0541, 8.6x** | 9.000 km, **0.0491, 7.8x** | 12.000 km, **0.0593, 9.4x** | 0.0063 |
+| Z (north) | 3.188 km, prom 0.0073, 2.1x | 6.000 km, **0.0600, 16.9x** | 9.000 km, **0.0644, 18.1x** | 12.000 km, **0.0626, 17.6x** | 0.0036 |
+
+**The bumps land on the predicted multiples to the voxel.** The prediction came from the generator and the
+measurement from the volume, and they agree — which is the check that makes every other number here mean
+something. The owner was right, and the period is the weather tile's own quarter.
+
+**THE FIRST HARMONIC IS THE WEAK ONE, and an instrument that asked only about P would have called this sky
+clean.** A cluster at the shipped size is 2.16 km wide against a 3.00 km cell, so a neighbour one period
+away is still inside the body's own correlation lobe and the bump at 1P rides on its tail. That is why
+`LatticeScore` asks about four multiples rather than one.
+
+### THE CAUSE IS NOT THE ONE THE SHAPE OF THE DEFECT SUGGESTS
+
+Four mechanisms were implemented behind four numbers and each was measured ALONE, on the same binary, at
+16 realisations, changing nothing else:
+
+| arm | LATTICE X | LATTICE Z | sky cover |
+|---|---|---|---|
+| all four at their old values | 0.0514 | 0.0549 | 0.8186 |
+| **more clouds per cell** (density 1 -> 2.5) | **0.1504** | **0.1404** | 0.7446 |
+| **the cloud may leave its cell** (scatter 0.66 -> 1.0) | **0.0117** | **0.0328** | 0.7794 |
+| **clouds differ in size** (variety 0 -> 0.75) | 0.0344 | 0.0296 | 0.8061 |
+| **busy and clear regions** (patch 0 -> 0.6) | 0.0528 | 0.0449 | 0.7948 |
+| **all four, which is what ships** | **0.0000** | **0.0000** | 0.7446 |
+
+> **Raising the number of clouds per cell, on its own, makes the grid THREE TIMES STRONGER.**
+
+That is the finding, and it is the opposite of what "one per cell" suggests. Several small clouds crowded
+into the middle third of a cell mark that cell's site MORE sharply than one large one did: the cluster is
+no longer a smooth body wide enough to blur its own site, it is a knot of small bodies at it.
+
+**What removes the lattice is letting a cloud leave the cell whose hash made it** — a factor of 4.4 on X
+and 1.7 on Z, on that change alone. The size spread is second and worth about a factor of 1.6. The patch
+modulation does nothing to the lattice at all (0.0528 against 0.0514), which is correct and expected: it
+works at 21 km, not at 3 km, and it is in the sky for the OTHER half of the complaint.
+
+### The invariance the old bound claimed to protect is not the one the wrap needs
+
+The jitter was bounded at a third of a cell, and the comment said why: so that a cluster stays in the cell
+whose hash produced it. Breaking that bound is the whole cure, so the argument had to be re-examined rather
+than dropped.
+
+> **What the bake actually requires is that exactly ONE PERIOD of cells is generated** — the comment above
+> the cell loop says so, and it is right: the bake splats every lump at plus and minus one region, so
+> generating a neighbouring cell as well would place it twice.
+>
+> **That requirement says nothing about where inside the period a cluster sits.** A cluster displaced out
+> through one face of the region arrives back through the opposite one, because the wrap is what makes the
+> volume periodic in the first place. The periodicity is measured and unchanged: the mean step across the
+> wrap is **0.950/255 against 1.239/255 between ordinary neighbours** — a seam smaller than the ordinary
+> texture of the field, which is the assertion `CloudProceduralField` already carried.
+
+What the bound really bought is narrower and is now written on the knob: **a region SHIFT disturbs the sky
+only within a third of a cell of the region's faces**, which is 24 km from the camera. At a scatter of 1.0
+that strip goes from 1.0 km to 1.5 km at the same distance. The scroll-invariance test still passes with
+its 4 km margin: **1298 of 1800 lumps lie in the overlap of two regions one snap apart, and every one of
+them is unmoved.**
+
+### The coverage slider had to be PAID FOR rather than re-authorised
+
+Free placement packs worse than a jittered lattice — independently placed bodies overlap where a lattice
+keeps them apart. Measured at the shipped setting, the sky fell from **0.781 to 0.640**, which would have
+failed `CloudProceduralField`'s tenth at a coverage of 0.75.
+
+**A packing law derived from first principles was tried and rejected BY MEASUREMENT.** Independently placed
+bodies of area `a` at density `n` leave `exp(-n a)` of the sky uncovered, so the alive fraction wanted is
+`-ln(1-c)/u` with `u` the cell-areas one cluster covers. Predicted `u = pi * 0.72^2 = 1.629`. It does not
+hold, because `u` is NOT a constant: a cluster's radius rises with how deep inside the threshold its cell
+fell, so `u` measured 0.545 at an alive fraction of 0.28 and 1.476 at 1.0. Driven by that law the slider
+came out at **0.047 of the sky for a setting of 0.15**. It is recorded because it is the more attractive of
+the two answers and it is wrong.
+
+What ships is a **widening of the cluster linear in the coverage**, slope measured at the shipped placement:
+
+| Coverage | 0.15 | 0.24 | 0.35 | 0.50 | 0.75 |
+|---|---|---|---|---|---|
+| sky delivered | 0.169 | 0.249 | 0.357 | 0.519 | 0.741 |
+| out by | +0.019 | +0.009 | +0.007 | +0.019 | -0.009 |
+
+**Out by at most 0.019, against the 0.11 the free placement was out by before it and against the tenth the
+suite allows.** No scene needs re-authoring, which is decision **D-20's condition met rather than invoked**
+— and the condition is stated as a number rather than as a hope. Each shipped scene's authored Coverage,
+put through the new mapping:
+
+| scene | Coverage | sky it now delivers |
+|---|---|---|
+| `Clouds_TwoSpecies` | 0.347 | 0.354 |
+| `Clouds_HeroCloud` | 0.384 | 0.395 |
+| `Clouds_Demo`, `Clouds_ShadowsOnGround` | 0.762 | 0.745 |
+| `Clouds_Showcase` | 0.779 | 0.760 |
+| `Clouds_Sunset` | 0.855 | 0.810 |
+
+**The one scene measured against the shipped `dev` binary directly is `Clouds_Demo`: 0.7827 before, 0.7446
+after — a fall of 0.038 of the sky at a setting of 0.762.** D-20's bar is what the previous two
+recalibrations failed and this one has to clear: the frame still reads as the sky it was authored for, and
+`Shots/RW_before_mid_away.png` against `Shots/RW_after_mid_away.png` is that comparison. Where the earlier
+recalibration took `Clouds_Demo` from 66 per cent of the sky to 15 and produced an empty zenith, this moves
+it by four points.
+
+A second constant was needed and the suite is what found it. The density's compensation was `1/sqrt(d)` —
+which preserves the total AREA of a cell's clusters exactly — and that is the answer to the wrong question,
+because the ground they cover is not the sum of their areas when they overlap. One cluster covers 1.63
+cell-areas and saturates its own cell; four of a quarter that area each cover 0.41 of a cell and leave 12
+per cent of it open. Measured, a half took the sky from **0.701 at a density of 1 to 0.597 at 4**. The
+shipped exponent is **0.40**, measured, and at it the same pair is **0.701 / 0.684**.
+
+### The six points
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, `ImageStat` over `0 0 1280 551`.
+
+**The repeat floor is zero and was measured.** Two runs of the same binary at `mid away` are byte for byte
+identical — but only from the SECOND render onward: the first render in a fresh worktree differs, which is
+§A1's correction reproduced exactly. The baseline also reproduces §DS's published table on all six points
+to three decimals, so it is the shipped `dev` and not a local variant.
+
+| point | mean before / after | contrast before / after | sat before / after |
+|---|---|---|---|
+| zenith away `0,0.9,-1` | 0.549 / **0.600** | 0.450 / **0.251** | 0.164 / **0.068** |
+| mid away `0,0.45,-1` | 0.591 / **0.570** | 0.384 / **0.349** | 0.087 / **0.109** |
+| horizon away `0,0.12,-1` | 0.630 / **0.639** | 0.281 / **0.281** | 0.073 / **0.071** |
+| zenith sunward `0,0.9,1` | 0.680 / **0.714** | 0.404 / **0.435** | 0.033 / **0.029** |
+| mid sunward `0,0.45,1` | 0.614 / **0.620** | 0.327 / **0.303** | 0.089 / **0.069** |
+| horizon sunward `0,0.12,1` | 0.641 / **0.636** | 0.298 / **0.274** | 0.086 / **0.076** |
+
+The two points that move are the two the change is FOR, and they move in OPPOSITE directions, which is the
+whole content of the result.
+
+* At `zenith away` the frame goes from a scatter of same-sized round blobs with blue between them to **one
+  large body directly overhead** — contrast 0.450 to 0.251 and saturation 0.164 to 0.068, because there is
+  less blue in it, and the cloud fraction of that frame rises from 0.744 to 0.946.
+* At `mid away` the opposite: saturation 0.087 to 0.109 and the cloud fraction falls from 0.889 to 0.712 as
+  a clear region opens.
+
+**The direction at the zenith is worth naming rather than glossing, because at that one camera the sky got
+BUSIER and the complaint was that the sky is all cloud.** It is not the coverage rising — the sky's average
+cover fell from 0.781 to 0.745 — it is the size spread doing exactly what it is documented to do: a cluster
+may now be 1.38 times the base width, and one that lands near the camera fills the zenith from two
+kilometres below. The old sky could not produce that frame because every cloud in it was the same size,
+which is the defect. An artist who does not want it has `Cloud Size Variety`, and the frame at 0 is
+`Shots/RW_knob_variety_low.png`.
+
+**And the frame mode of the instrument, on the same six.** It is the weaker measurement and the file note
+says why: perspective maps one world period onto a pixel period that shrinks with distance, so a lattice
+arrives smeared and the number is a lower bound rather than a size.
+
+| point | columns before / after | rows before / after |
+|---|---|---|
+| zenith away | 0.0002 / **none** | 0.0185 / **none** |
+| mid away | 0.0000 / 0.0009 | none / 0.0017 |
+| horizon away | **0.0913 / 0.0276** | 0.0798 / **0.0535** |
+| zenith sunward | 0.0344 / **0.0156** | none / 0.0000 |
+| mid sunward | none / 0.0349 | 0.0020 / none |
+| horizon sunward | 0.0127 / **0.0095** | 0.0142 / **0.0285** |
+
+**Four of the ten measurable pairs improve, two worsen and the rest are at the noise.** The one that matters
+is `horizon away`, which is the frame the defect was visible in: columns 0.0913 to 0.0276, a factor of 3.3.
+The mixed result at the other points is exactly what the mode's own caveat predicts, and it is why the
+argument is settled in the field mode and not here.
+
+### The price
+
+**The placement is computed at the BAKE and not per frame, and here is that as a number rather than as an
+assertion.** The A/B is authored in the SCENE — the four knobs are properties now, so the old placement and
+the new one are two scene files and one binary. Interleaved, three repeats, minimum of each, Debug:
+
+| | t(300 frames) | t(900 frames) | slope per frame | fixed cost |
+|---|---|---|---|---|
+| old placement | 32.398 s | 45.641 s | **22.07 ms** | 25.78 s |
+| shipped | 35.705 s | 49.381 s | **22.79 ms** | 28.87 s |
+
+* **The one-off cost is +3.09 s in Debug**, and it is the bake: 3144 lumps against 1248. `CloudProceduralField`
+  re-measures it directly and reports **3060.7 / 5685.7 / 9426.5 ms** for 1 / 2 / 4 species against phase
+  Э5's 1746 / 3263 / 5168, which is the same 1.75x on the same axis.
+* **The per-frame cost is +0.72 ms of 22.79, which is 3.3 per cent** — and it is NOT the placement being
+  computed per frame. It is the march meeting a different volume: more, smaller bodies means more silhouette
+  crossings and fewer early exits.
+
+### The knobs, and a frame for each end of each
+
+Every one is read by `Engine/Assets/CloudProceduralVolume.cpp` at bake time, is in
+`Assets::CloudProceduralParamsEqual` so that moving it invalidates the cached volume, and has a row in
+`SettingConsumers` and `ComponentReflection`.
+
+| knob | range, default | low | high |
+|---|---|---|---|
+| Cloud Density | 0.25 .. 8, **2.5** | `Shots/RW_knob_density_low.png` | `Shots/RW_knob_density_high.png` |
+| Cloud Scatter | 0 .. 4, **1.0** | `Shots/RW_knob_scatter_low.png` | `Shots/RW_knob_scatter_high.png` |
+| Cloud Size Variety | 0 .. 1, **0.75** | `Shots/RW_knob_variety_low.png` | `Shots/RW_knob_variety_high.png` |
+| Weather Patch Strength | 0 .. 1, **0.60** | `Shots/RW_knob_patch_off.png` | `Shots/RW_knob_patch_full.png` |
+| Weather Patch Size | 5 .. 200 km, **21 km** | `Shots/RW_knob_patchtile_small.png` | `Shots/RW_knob_patchtile_large.png` |
+
+All twelve knob frames are at one camera and differ only by the knob, and **all twelve md5s differ** — no
+knob is inert. The shipped arm of that table is `Shots/RW_after_mid_away.png`, and the scene built for the
+knob sweep reproduces it **byte for byte**, which is what proves the sweep's arms differ by the knob alone.
+
+**The patch pair is shot at the HORIZON and not at the mid elevation**, because a modulation whose period
+is 21 km cannot be judged in a frame that shows about that much sky. Its own number, from the field mode,
+is the mid-range correlation the modulation puts back into the field:
+
+| lag | 3.0 km | 4.5 km | 6.0 km | 8.0 km | 9.0 km |
+|---|---|---|---|---|---|
+| patch 0 | +0.003 | +0.006 | -0.011 | -0.003 | +0.003 |
+| patch 1 | +0.045 | +0.045 | +0.027 | +0.018 | +0.014 |
+
+### A SECOND DEFECT, MEASURED AND NOT FIXED, and it is the same slider lying for a different reason
+
+`CloudProceduralCellExtentKm` holds the cell's AREA constant under anisotropy — `cell * root` by
+`cell / root` — and its comment says this is "so that raising the anisotropy draws a cluster out into a band
+instead of making the sky emptier". **The comment is false, and the cluster is what makes it false:** the
+cluster's radius is `0.72 * min(extent.x, extent.y)`, so an anisotropic cell gets a cluster sized by its
+SHORT side and the sky empties as the square of the stretch.
+
+Measured at Coverage 0.5, one species, everything else shipped:
+
+| Placement Anisotropy | cell | sky cover | slider out by |
+|---|---|---|---|
+| 1.0 (congestus, humilis, mediocris, cumulonimbus, stratus) | 3.000 x 3.000 km | 0.519 | +0.019 |
+| 1.6 (stratocumulus; altocumulus is 1.5) | 3.795 x 2.372 km | 0.378 | **-0.122** |
+| 0.2 (lenticular) | 1.342 x 6.708 km | 0.143 | **-0.357** |
+| 8.0 (cirrus) | 8.485 x 1.061 km | 0.089 | **-0.411** |
+
+**Four of the nine shipped types are affected, and a cirrus layer delivers a fifth of the sky its slider
+asks for.** It also makes the row WORSE where it applies: on the old placement, anisotropy 4 took the
+lattice bump along the wind from 0.066 to **0.134 at 32.5x noise** — twice as strong, and on one axis only,
+which is the literal reading of "the clouds go in a row".
+
+**It is reported rather than fixed, and the reason is scope rather than difficulty.** The cure is to size
+the cluster by the cell's geometric mean and to stretch its lobes along the wind with a rotation, which
+changes the silhouette of four shipped types — and phase A3 measures every type with a frame per genus
+(§A2 "form by form"). That is a re-calibration of the catalogue with its own ten frames, and this task did
+not shoot them. `Clouds_Demo`, the scene the owner was looking at and the scene of this protocol, uses the
+congestus at anisotropy 1.0, so nothing here rests on it.
+
+### The frames
+
+| file | what it shows |
+|---|---|
+| `Shots/RW_before_horizon_away.png` / `RW_after_horizon_away.png` | **THE SHOW.** Before: a carpet of identical lozenges, one size, evenly spaced, receding to the vanishing point. After: clouds of visibly different sizes in groups with gaps between them |
+| `Shots/RW_before_mid_away.png` / `RW_after_mid_away.png` | the same pair at the elevation a player looks at |
+| `Shots/RW_before_zenith_away.png` / `RW_after_zenith_away.png` | the zenith, which the patch modulation changes most: a mixed sky becomes one overhead mass with clear sky beside it |
+| `Shots/RW_before_*_sun.png` / `RW_after_*_sun.png` | the three sunward points, which the placement had to not break |
+| `Shots/RW_field_before.png` / `RW_field_after.png` | **the instrument's own view** — the top-down column integral of the baked volume, 48 km across, which is what the autocorrelation is taken of. The grid is visible by eye in the first and the size spread in the second |
+| `Shots/RW_field_patch_off.png` / `RW_field_patch_full.png` | the patch modulation on the same view, where its 21 km period fits |
+| `Shots/RW_knob_placement_old.png` | the four knobs returned to their old values under the new coverage mapping — the row, back |
+| `Shots/RW_knob_*.png` | the ten ends of the five knobs |
+
+### The whole sweep, and the counts the contract asks for
+
+`CI=true premake5 gmake`, then every generated makefile built and run with the OBJECTS AND THE BINARIES
+DELETED FIRST.
+
+| | |
+|---|---|
+| makefiles generated | **79** |
+| excluded as tools and libraries | **16** |
+| suite makefiles | **63** |
+| suite binaries built | **63** |
+| missing binaries | **none** |
+| suites failed | **1**, and it was ours |
+
+**The count balances exactly this time, and it balances BECAUSE the exclusion list was extended.** §2.4
+item 5a records that the list had gone stale three times and that "makefiles against binaries" then failed
+to reconcile by two. `Tools/LatticePeak` is the fourth tool of that kind — it lands in `build/Bin/Debug/`
+and links no gtest — so it is in the list, and 63 against 63 is the whole audit.
+
+The one failure was `ComponentReflection.ExposesExactlyTheSpecifiedFieldsInOrder`: **45 fields against the
+40 the assertion named.** That is the third of the three failures §2.3.1 tells a developer to expect after
+adding a reflected field, and it is fixed by the truth (45, plus a new `Placement` category of 5) rather
+than by deleting the assertion.
+
+### Twelve sabotages, and TWO OF THEM STAYED GREEN — both holes are closed
+
+Every one was applied, the affected suites' **objects and binaries deleted**, rebuilt, run, and reverted.
+
+| break | result |
+|---|---|
+| the scatter's default returns to the old 0.66 | RED |
+| the generator ignores `PlacementScatter` and hard-codes the old third of a cell | RED |
+| the density compensation returns to one over the square root | RED |
+| the packing compensation is deleted | **GREEN — a real hole, closed** |
+| the size draw becomes uniform in RADIUS instead of in area | RED |
+| `CloudProceduralParamsEqual` drops `PatchStrength` | RED |
+| the autocorrelation's lag is off by one | RED |
+| the prominence becomes the plain height of the bump | RED |
+| the patch's three-cell bound is removed | RED |
+| the cluster count rounds instead of drawing its fraction | RED |
+| the patch modulation only ever ADDS cloud instead of being symmetric | RED |
+| the anvil's width stops following its own cluster | **GREEN — a real hole, closed** |
+
+**THE FIRST GREEN.** Deleting the packing compensation — the whole reason the Coverage slider still means
+the sky after the placement was freed — left the entire repository green.
+`CloudProceduralField.CoverageIsTheFractionOfSkyThatHasCloudInTheColumn` allows a TENTH, a bound set for a
+placement that kept every cluster near its site, and it measures a fixture whose cell is finer than the
+shipped one: its worst deviation went from 0.033 to 0.050 and a tenth swallowed both. The relation is now
+asserted where it bites — at the shipped 3 km cell, near the top of the slider, on the real bake, at a
+bound of 0.025 — and the same sabotage is RED.
+
+**THE SECOND GREEN, and it is the more interesting of the two.** The anvil is the one lump whose width is
+written a SECOND TIME rather than derived from the cluster's radius, which is the two-places-that-must-agree
+shape §2.3.1 is entirely about. Deleting the cluster's size, density and packing factors from that line left
+every suite in the repository green, because **only the cumulonimbus has an anvil at all and no suite baked
+one procedurally and looked at it**. What is asserted now is the ratio between the anvil and the tower it
+caps, which cannot depend on the density: 3.169 at a density of 1 against 3.217 at 4. Re-run, the sabotage
+is RED.
+
+**A third thing the sabotage runs taught, and it is about method rather than about clouds.** A sabotage
+script that reverts the SOURCE leaves the sabotaged BINARY on disk. Running the suite straight after the
+last revert reported a failure that no longer existed in any file — the same stale-binary trap that has
+reported PASSED four times in this programme, arrived at from the opposite direction. Every number above is
+from a binary rebuilt after the revert.
+
+### What this task did NOT do, and why it is here rather than in a commit message
+
+* **It did not fix the anisotropy defect** measured above, and that is the largest single thing left: four
+  of the nine shipped types make the Coverage slider lie by up to 0.41 of the sky. It is a re-calibration of
+  the form catalogue with a frame per genus, and this task did not shoot them.
+* **The degenerate configuration is not byte-compatible with the sky that shipped.** Setting the four knobs
+  back to their old values gives a statistically identical field, not the identical one: each cluster now
+  hangs off its own sub-hash of the cell rather than off the cell's hash directly, which is what lets a cell
+  hold more than one. `Shots/RW_knob_placement_old.png` is that sky, and it is a different realisation of
+  the same lattice.
+* **It did not touch the march, the erosion or the lighting.** The per-frame cost moved by 0.72 ms and the
+  reason is measured — a different volume, not different work per sample — but no shader was edited.
+* **The frame mode of `LatticePeak` is a lower bound and is documented as one.** A mode that undid the
+  perspective — measuring the mask in the ground plane through the camera's inverse projection — would give
+  a number comparable with the field mode's. It is not needed to settle this task and was not built.
