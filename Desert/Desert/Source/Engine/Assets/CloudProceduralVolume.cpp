@@ -117,21 +117,30 @@ namespace Desert::Assets
         /// squashing is done by the layer the type declares — which is what squashes a real stratus — and
         /// not by a number an artist has to keep consistent with the altitudes beside it.
         ///
-        /// 0.75 AND NOT 1.0, AND THE NUMBER IS MEASURED — see CALIBRATION.md §SIL. At 1.0 the lump is a
-        /// sphere and the cluster's opaque core is as tall as the cluster, which is right about the eye and
-        /// wrong about the count: a sphere of the lump's width leaves the stack with almost no travel
-        /// inside the band, so six lobes pile into one ball and the body loses a fifth of its height. The
-        /// measured ladder on the shipped congestus, at the shipped placement, 8 realisations:
+        /// 0.75 AND NOT 1.0, AND THE NUMBER IS MEASURED — see CALIBRATION.md §SIL. The ladder on the
+        /// shipped congestus, `Clouds_Demo`'s configuration, at the shipped placement, 8 realisations, with
+        /// the sky that shipped in the left-hand column:
         ///
-        ///     aspect        0.50    0.75    1.00
-        ///     vert chord    0.836   1.086   1.266 km
-        ///     solidity      0.40    0.52    0.62
-        ///     core aspect   4.4     2.4     1.9  : 1
-        ///     body height   3.05    2.93    2.66 km  (the band is 3.60)
+        ///                    §RW2    0.50    0.75    1.00
+        ///     horiz chord    1.705   2.084   2.541   2.916 km
+        ///     vert chord     0.569   0.905   1.509   1.992 km
+        ///     solidity        0.33    0.49    0.77    0.94
+        ///     CORE aspect     3.3     2.5     1.8     1.6  : 1
+        ///     envelope        1.1     1.2     1.4     1.5  : 1
+        ///     sky cover      0.7388  0.7394  0.7404  0.7409
         ///
-        /// 0.75 is where the core stops reading as a plate — the eye's own bound is about 3:1 — while the
-        /// body still stands 2.93 km of its 3.60 km band. 1.00 buys half a point of core aspect for a
-        /// tenth of the cloud's height, and the height is what the horizon frame shows.
+        /// THE COVER DOES NOT MOVE AT ALL — four ten-thousandths over the whole ladder — so this constant
+        /// does not spend the Coverage slider and decision D-20 is untouched by it whatever it is set to.
+        /// What it spends is the SIZE OF A BODY: a taller lump fuses with its neighbours across a wider
+        /// front, so the mean horizontal chord goes from 1.705 km on the shipped sky to 2.916 km at 1.00 —
+        /// bodies 71 per cent wider. That is a silhouette change nobody asked for and it runs against §RW's
+        /// own result, which was clouds of visibly different sizes with gaps between them; 1.00 also drives
+        /// the solidity to 0.94, which is a body with no air in its own column at all.
+        ///
+        /// 0.75 is where the core stops reading as a plate — 1.8 to 1 against the envelope's 1.4, where
+        /// §RW2 measured 3.3 against 1.1 — for a widening of half rather than of three quarters. It is the
+        /// last rung on which the core's aspect and the envelope's are still visibly two numbers, which is
+        /// what a lumpy body IS: a solid of 0.94 has stopped being a pile of lobes and become one lump.
         constexpr float kLumpVerticalOverHorizontal = 0.75f;
 
         /// Radians to degrees, written out because a lump's rotation is authored in degrees and the wind

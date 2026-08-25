@@ -3143,3 +3143,372 @@ than at a bound, because the ratio is a defect that is **measured and not fixed*
 * **It did not touch the march, the erosion, the lighting or the placement's arithmetic.** The only value
   changed is one default, in the two places that hold it, and the two comments that described the density
   compensation with the wrong exponent.
+
+---
+
+## SIL — the cluster was sized by the cell's short side, and a lump had two sizes, 2026-08-25
+
+Two defects, both already measured and neither fixed: §RW's closing note ("it did not fix the anisotropy
+defect… the largest single thing left") and §RW2's ("IT DID NOT FIX THE FLAT LENS, and that is the largest
+thing left"). They are one phase because they touch one catalogue and need one set of frames.
+
+**The baseline is the shipped `dev` sky and that is proven rather than assumed.**
+`Shots/SIL_before_mid_away.png` is **byte for byte identical** to the committed `Shots/RW2_after_mid_away.png`
+(`204cc71f59bdff06c51a0cff0a02c33e`), so every "before" number below is §RW2's own sky measured again on
+this worktree's binary. The repeat floor is zero from the SECOND render onward — the first render in a fresh
+worktree differs, which is §A1's correction reproduced for the third time in this programme.
+
+---
+
+### DEFECT A — the comment said the area was held constant, and the cluster threw it away
+
+`CloudProceduralCellExtentKm` returns `cell * root` by `cell / root` and says why: *"with the AREA held
+constant so that raising the anisotropy draws a cluster out into a band instead of making the sky
+emptier."* The cluster was then sized by `0.72 * min(extent.x, extent.y)` — **the SHORT side** — so an
+anisotropic cell got a cluster scaled by its narrowest dimension on BOTH axes and the sky emptied as the
+square of the stretch.
+
+The cure is one line and one consequence: the cluster's size is the **geometric mean** of the two sides,
+which is `species.CellKm` itself, and the stretch the cell no longer spends on its area is spent on the
+cluster's SHAPE — the lobe disc becomes an ellipse in the wind's frame, and the lumps are given
+anisotropic radii and a yaw so that they turn with the lattice instead of pointing east in a north-west
+wind.
+
+**`stretch` is taken from the extents the cell function returned and not from `species.Anisotropy`.** That
+is deliberate and it is the same discipline the defect broke: one statement of the quantity, so a floor
+applied inside the cell function cannot be forgotten outside it.
+
+---
+
+### DEFECT B — a lump's height came from one file and its width from another
+
+§RW2 located it to the line. A lump's vertical radius was `0.6 * band / kMaxBlobsPerCluster` — the TYPE's
+altitudes divided by a constant living in the PLACEMENT file — and its horizontal radius was
+`(0.62 - 0.16t) * clusterRadius`, a fraction of the placement CELL. Nothing asserted a relation between
+them, and measured they were 2.1 to 2.5 times wider than tall. The lobes were then spread over a golden-angle
+disc rather than stacked, so a vertical column met **one** of them: chord 0.570 km against a lump diameter
+of 0.720, solidity 0.33.
+
+#### THE DECISION THE TEAMLEAD ASKED FOR, AND THE ALTERNATIVE IT WAS CHOSEN OVER
+
+> **A lump has ONE size.** Both of its radii come from one quantity — the cluster's own radius — through a
+> single dimensionless constant `kLumpVerticalOverHorizontal`. The type's band no longer decides how TALL a
+> lump is; it decides only WHERE the stack sits, by insetting it so that the body's vertical envelope is
+> exactly the altitudes the type declares.
+
+**The alternative was to make the lump's aspect a property of the TYPE** — a fifteenth number in
+`.decloudtype`, authored nine times. It is refused, and the argument is not "one constant is simpler":
+
+* **A lump is the convective PARCEL, and a genus is a statement about how parcels are ARRANGED** — a heap,
+  a deck, a downwind band, a sheet — not about what one parcel looks like. At the small scale every genus
+  in the licence record shows the same roughly-isotropic turret texture.
+* **Nine numbers with no independent evidence behind any of them can only ever be asserted equal to
+  themselves.** That is a dead setting in the sense of `DEV_CONTRACT.md` §1.3 arrived at from the far side:
+  live, wired, and meaningless. One constant can be asserted, and
+  `Desert/Tests/Engine/CloudPlacementSpectrum` asserts it by moving the cell by a factor of three and the
+  band by a factor of four and demanding the measured ratio not move.
+* **A genus's flatness survives anyway, and it survives THROUGH the type rather than beside it.** A lump may
+  not be taller than half the band it lives in, so a 400 m stratus deck gets 200 m lumps however wide its
+  cell is and a 3.6 km congestus never meets the clamp at all. **The squashing is done by the layer the
+  type already declares — which is what squashes a real stratus.**
+
+#### AND THE COUNT STOPPED BEING A CEILING
+
+`kMaxBlobsPerCluster` was a ceiling shortened by the band, and the arithmetic behind that shortening —
+"the vertical radius is 0.6 of the spacing" — is exactly the rule being deleted. It is `kBlobsPerCluster`
+now, a count, and the relation it used to protect (a lump the march cannot find) is enforced where it
+belongs: the per-lump floor at half of `ResolvableChordKm`. **Six is a property of the DISC**: the lobes are
+one golden angle apart as well as up the band, and six is how many a disc needs before its outline reads as
+a lumpy mass rather than as a rosette. The two types the old ceiling actually bit — humilis and stratus,
+both 400 m bands — went from three lumps per cluster to six, and both of them moved TOWARD the slider.
+
+---
+
+### THE CONSTANT IS MEASURED, NOT CHOSEN
+
+The shipped congestus, `Clouds_Demo`'s configuration (48 km region, 3.000 km cell, coverage 0.762,
+wind +X), 8 realisations, `Tools/LatticePeak --field`:
+
+| | §RW2's sky | 0.50 | **0.75** | 1.00 |
+|---|---|---|---|---|
+| mean horizontal chord | 1.705 km | 2.084 | **2.541** | 2.916 |
+| mean vertical chord | 0.569 km | 0.905 | **1.509** | 1.992 |
+| column span, of 3.60 km | 1.713 | 1.842 | **1.970** | 2.113 |
+| solidity | 0.33 | 0.49 | **0.77** | 0.94 |
+| **OPAQUE CORE** | **3.3 : 1** | 2.5 | **1.8** | 1.6 |
+| whole envelope | 1.1 : 1 | 1.2 | **1.4** | 1.5 |
+| sky cover | 0.7388 | 0.7394 | **0.7404** | 0.7409 |
+
+**THE COVER DOES NOT MOVE AT ALL over the whole ladder — four ten-thousandths — so this constant does not
+spend the Coverage slider and decision D-20 is untouched by it at any setting.** What it spends is the SIZE
+OF A BODY: a taller lump fuses with its neighbours across a wider front, and at 1.00 the mean horizontal
+chord is 71 per cent above the sky that shipped. That is a silhouette change nobody asked for and it runs
+against §RW's own result — clouds of visibly different sizes with gaps between them. 1.00 also drives the
+solidity to 0.94, which is a body with no air in its own column: it has stopped being a pile of lobes and
+become one lump.
+
+**0.75 is the last rung on which the core's aspect and the envelope's are still visibly two numbers.**
+
+---
+
+### FORM BY FORM, WHICH IS WHERE DEFECT A IS ACTUALLY PAID FOR
+
+Every row is `LatticePeak --field --type <the shipped asset> --coverage 0.5`, 6 realisations, everything
+else at the values that ship. The type's own `PlacementScale` and `PlacementAnisotropy` are read from the
+asset by the shipped parser — the tool does not retype nine shapes.
+
+**`Coverage` is set to 0.5, so a column that does not read 0.5 is the slider lying by that much.**
+
+| genus | aniso | cover before | cover after | slider out by, before → after |
+|---|---|---|---|---|
+| cumulus humilis | 1.0 | 0.4505 | **0.5261** | −0.050 → +0.026 |
+| cumulus mediocris | 1.0 | 0.5288 | **0.5172** | +0.029 → +0.017 |
+| cumulus congestus | 1.0 | 0.5111 | **0.5130** | +0.011 → +0.013 |
+| cumulonimbus | 1.0 | 0.8543 | 0.8543 | **+0.354 → +0.354** |
+| stratocumulus | 1.6 | 0.3778 | **0.5213** | −0.122 → +0.021 |
+| stratus | 1.0 | 0.4268 | **0.5065** | −0.073 → +0.007 |
+| altocumulus | 1.5 | 0.4408 | **0.5560** | −0.059 → +0.056 |
+| **cirrus** | **8.0** | **0.0827** | **0.5084** | **−0.417 → +0.008** |
+| **lenticular** | **0.2** | **0.1338** | **0.5047** | **−0.366 → +0.005** |
+
+**The two worst rows in the library go from delivering a fifth and a quarter of what their slider asks for
+to delivering it.** The four anisotropic types are the four §RW named, and all four are inside 0.06 now.
+
+> **AND ONE ROW IS UNCHANGED AND STILL WRONG, which is a finding rather than an omission.** The
+> **cumulonimbus delivers 0.854 for a slider of 0.5**, before and after, to four decimals. Its anisotropy is
+> 1, so neither defect touches it — its cause is its 6.000 km cell, the coarsest in the library by a factor
+> of two, against a region that holds only eight of them across. `kPackingCompensation` and the 0.68 alive
+> exponent were both fitted at the 3 km cell and neither carries a cell dependence. **This is measured and
+> not fixed, and it is now the largest single lie left in the Coverage slider.**
+
+#### The shape, form by form
+
+| genus | solidity before / after | **OPAQUE CORE** before / after | envelope before / after |
+|---|---|---|---|
+| cumulus humilis | 0.91 / 1.00 | 6.2 : 1 / **5.4 : 1** | 5.6 / 5.4 |
+| cumulus mediocris | 0.61 / 1.00 | 6.5 : 1 / **3.7 : 1** | 4.0 / 3.7 |
+| cumulus congestus | 0.42 / 0.81 | 3.0 : 1 / **1.8 : 1** | 1.2 / 1.5 |
+| cumulonimbus | 0.21 / 0.33 | 4.4 : 1 / **3.3 : 1** | 0.9 / 1.1 |
+| stratocumulus | 0.57 / 0.95 | 2.2 : 1 / **1.8 : 1** | 1.2 / 1.7 |
+| stratus | 0.80 / 1.00 | 46.4 : 1 / **38.4 : 1** | 37.3 / 38.4 |
+| altocumulus | 0.77 / 1.00 | 2.3 : 1 / **2.2 : 1** | 1.8 / 2.2 |
+| cirrus | 0.43 / 0.97 | 1.4 : 1 / **1.4 : 1** | 0.6 / 1.4 |
+| lenticular | 0.57 / 1.00 | 3.1 : 1 / **3.1 : 1** | 1.8 / 3.1 |
+
+**The core's aspect and the envelope's now agree in every row, and that IS the phase.** §RW2's complaint was
+that they were 3.3 and 1.1 — the eye reads the opaque part, so a body that was round read as a plate. In
+every genus above the two columns have converged, and where they converged by the envelope coming DOWN to
+the core (cirrus 0.6 → 1.4, lenticular 1.8 → 3.1, stratocumulus 1.2 → 1.7) the reason is the same one: the
+body now fits the altitudes its type declares instead of standing `2 * lumpRadius` outside them.
+
+> ⚠️ **TWO ROWS ARE NOT A MEASUREMENT AND ARE MARKED AS SUCH.** `stratus` reports a core 807 degrees wide,
+> which is a body wider than the 48 km region the chord census runs in: its 12.000 km cell puts one body
+> across the whole map and the wrap counts it as a single run. Its RATIO is still meaningful (the same
+> measurement window before and after) but its width in degrees is not. `cumulus humilis` at 35 degrees is
+> the same effect one order weaker.
+
+---
+
+### THE SIX POINTS
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, `ImageStat` over `0 0 1280 551`.
+
+| point | mean before / after | contrast before / after | sat before / after |
+|---|---|---|---|
+| zenith away `0,0.9,-1` | 0.616 / 0.576 | 0.354 / **0.408** | 0.067 / **0.093** |
+| mid away `0,0.45,-1` | 0.574 / 0.540 | 0.379 / **0.396** | 0.141 / **0.168** |
+| horizon away `0,0.12,-1` | 0.630 / 0.607 | 0.292 / **0.201** | 0.078 / **0.086** |
+| zenith sunward `0,0.9,1` | 0.644 / 0.566 | 0.462 / **0.260** | 0.060 / **0.086** |
+| mid sunward `0,0.45,1` | 0.610 / 0.562 | 0.274 / **0.255** | 0.073 / **0.116** |
+| horizon sunward `0,0.12,1` | 0.634 / 0.591 | 0.282 / **0.247** | 0.091 / **0.114** |
+
+**Saturation rises at all six and the mean falls at all six** — there is more blue in the sky at every
+point, which is the opposite of the "the whole sky is cloud" the owner complained of. Contrast rises at the
+two away points a player looks along and falls at three others, and the three that fall are named rather
+than glossed: **the bodies are fewer and larger, so there are fewer edges in the frame**, and where the
+frame's contrast was being carried by a pelt of small lozenges rather than by cloud-against-sky it goes
+down when the pelt goes away. `zenith sunward` moves most (0.462 → 0.260) and is the clearest case: looking
+into the sun the old sky's contrast was the bright rims of many small bodies.
+
+**The frame's own cloud fraction, at Otsu's split, says the same thing in one number:**
+
+| point | cloud before / after |
+|---|---|
+| zenith away | 0.9234 / **0.3449** |
+| mid away | 0.7730 / 0.7750 |
+| horizon away | 0.8033 / **0.4525** |
+| zenith sunward | 0.1961 / 0.1379 |
+| mid sunward | 0.3719 / **0.1683** |
+| horizon sunward | 0.5862 / **0.3031** |
+
+> **AND THAT IS THE FLOODED ZENITH §RW2 COULD NOT REMOVE, removed.** §RW2 measured the zenith at
+> **0.9460** and reported after fifteen camera positions and eight seeds that *"at a `Coverage` of 0.762 the
+> flooded zenith is the sky that was authored"*. It was not the coverage. **0.9234 to 0.3449 at the same
+> camera, the same seed and the same Coverage** — the sky's cover measured straight down is unchanged at
+> 0.744, and what changed is that the bodies now stand up into the layer instead of lying across it, so a
+> ray at 42 degrees of elevation passes BETWEEN them where before it grazed a stack of lenses.
+
+---
+
+### THE THREE THINGS THE EARLIER PHASES BOUGHT, EACH CHECKED BY A NUMBER
+
+**1. THE SKY'S COVER — kept.** `LatticePeak --field`, 32 realisations, `Clouds_Demo`'s configuration:
+**0.7431 before, 0.7446 after.** §RW's own published figure is 0.7446 and §RW2's is 0.7431; the pair
+brackets both.
+
+**2. NO LATTICE — kept, with one line of honest small print.**
+
+| | X (east) | Z (north) |
+|---|---|---|
+| before | LATTICE **0.0017** at 9.188 km (3P), 0.3x noise | LATTICE **0.0000**; strongest bump 5.438 km, prom 0.0131 |
+| after | LATTICE **0.0000** | LATTICE **0.0114** at 5.625 km (2P), 1.8x noise |
+
+The X axis, which is the wind's own axis and the one the owner's "the clouds go in a row" was about, goes
+from a countable bump to none at all. **The Z figure is NOT a returning grid and the evidence is in the
+before column beside it**: §RW2 recorded an unexplained repeatable bump at 5.25–5.44 km on Z and said it is
+not within an eighth of any multiple of 3.000 km. It is still there, its prominence has FALLEN
+(0.0131 → 0.0114), and it has drifted 0.19 km — which is enough to carry it across `LatticeScore`'s
+tolerance window around 2P and make it countable. Asked at a 4.000 km cell (`--tile 16`, 24 realisations)
+the after field reports **LATTICE 0.0000 on both axes**, which a real lattice at 8.000 km could not do.
+
+> **What this phase learned about §RW2's unexplained bump, since it was asked to say if it found out:** it
+> **moves with the lump geometry** — 5.438 km before, 5.625 km after, on a change that touched nothing but
+> the shape of a lump — so it is a property of the BODY and not of the placement lattice. That is one fact
+> more than §RW2 had and it is short of an explanation. It was not pursued further.
+
+**3. THE SCALLOPED EDGE FROM THE EROSION — kept, and the instrument had to be BUILT to say so.**
+
+§DS chose the erosion's Detail Strength on a "silhouette raggedness" it reported to four decimals — and
+**the code that produced those numbers was never committed**, so the thing §DS bought could not be
+re-measured by anybody who came after it. `Tools/LatticePeak --frame` now reports it, together with §DS's
+other half, the mean absolute Laplacian inside the body at a billow's radius.
+
+| point | ragged before / after | lap r4 before / after |
+|---|---|---|
+| zenith away | 3.11 / **12.14** | 0.00533 / 0.00533 |
+| mid away | 6.26 / 4.22 | 0.00720 / 0.00658 |
+| horizon away | 20.16 / **39.87** | 0.02615 / 0.01669 |
+| zenith sunward | 5.61 / **6.65** | 0.00520 / **0.00562** |
+| mid sunward | 18.35 / **19.91** | 0.00771 / **0.01108** |
+| horizon sunward | 36.35 / **42.23** | 0.03359 / 0.02244 |
+
+**Raggedness rises at five of the six points and falls at one.** It rises because the same erosion is now
+cutting a longer silhouette — there is more cloud-against-sky boundary in a sky of separated bodies than in
+a pelt. Where it falls (`mid away`, 6.26 → 4.22) the reason is measurable rather than a guess: the frame's
+cloud fraction is unchanged there (0.7730 / 0.7750) and the bodies are fewer and larger, so the same
+scalloping runs around a shorter outline. **The edge is not smoother; there is less of it in that one
+frame.** The interior texture moves both ways by about a quarter and averages flat.
+
+> ⚠️ **THE UNITS ARE NOT §DS'S AND THE CONVERSION IS WRITTEN DOWN.** §DS reported the perimeter and the
+> area as fractions of the FRAME, which carries a `1/sqrt(N)` — the same picture at twice the resolution
+> measures half as much, and the test written to assert scale-invariance is what caught it. What is computed
+> is the raw `perimeter / sqrt(area)` in pixels, so a solid square measures exactly 4; §DS's `0.0038` at
+> `mid away` converts by `sqrt(1280 x 551) = 839.8` to **3.19**, against the 6.26 this file measures on the
+> same camera. The two differ because §DS shot `Clouds_Demo` at the density of 2.5 that §RW shipped and
+> §RW2 then moved the default to 1.75. **The `lap r4` column additionally differs by definition**: §DS
+> centred its stencil on cloud pixels, so a pixel within one radius of the silhouette sampled SKY; this
+> version requires the whole stencil to be cloud, which a test insisted on after the centre-only form
+> reported 0.0714 of "texture" on a flat cloud beside a checkered sky.
+
+---
+
+### THE FRAMES
+
+Every one at `--shot-frames 90`, camera `0,200,0`. **All 28 md5s are distinct** — checked, because this
+programme has shipped byte-identical copies under two names before. The congestus genus pair is NOT in the
+directory for exactly that reason: its scene IS `Clouds_Demo`, so its frames were byte-identical to
+`SIL_before_mid_away.png` / `SIL_after_mid_away.png` and those are what the table points at.
+
+| file | what it shows |
+|---|---|
+| `Shots/SIL_before_mid_away.png` / `SIL_after_mid_away.png` | **THE SHOW.** Before: a field of same-sized flat pancakes at one altitude. After: convective bodies with shoulders, turrets and vertical development. The `before` file is byte-identical to the committed `RW2_after_mid_away.png`, which is what proves the pair is a comparison against `dev` |
+| `Shots/SIL_before_zenith_away.png` / `SIL_after_zenith_away.png` | **the flooded zenith, gone** — 0.9234 of the frame to 0.3449 at the same camera and the same Coverage |
+| `Shots/SIL_*_horizon_away.png`, `SIL_*_*_sun.png` | the other four protocol points, which the change had to not break |
+| `Shots/SIL_genus_Cirrus_before.png` / `_after.png` | **DEFECT A, ALONE IN ONE PAIR.** Before: a dust of specks over an empty sky, 0.083 of the sky for a slider set to 0.5. After: fibrous bands combed downwind across the whole frame, which is what `Cirrus.decloudtype`'s own note has described since it was written |
+| `Shots/SIL_genus_Lenticular_before.png` / `_after.png` | the same defect with the stretch the other way round: 0.134 to 0.505 |
+| `Shots/SIL_genus_<genus>_before.png` / `_after.png` | the remaining six genera, one pair each, all at `mid away` so that the comparison is like for like |
+
+**The nine genus scenes are IN THE REPOSITORY** — `Resources/Assets/Scenes/SIL_<genus>.desce`, each one
+`Clouds_Demo` with a single field changed, its `CloudType1`. They are committed rather than generated on
+the spot because a frame whose scene is not in the tree cannot be re-shot by the next reader, which is the
+same argument §RW made for authoring its knob sweep in scene files. They differ from `Clouds_Demo` in one
+field and in the scene's name and in nothing else, so the arms of every pair above differ by the binary
+alone.
+
+> **The nine genus frames are all at ONE elevation and that is a stated limitation rather than an
+> oversight.** §A3 framed each sculpted body for its own size; a procedural LAYER cannot be framed that way
+> without changing the camera between the two arms of the comparison, and a camera that moves between arms
+> is not a comparison. `mid away` is the elevation §RW2 asked its question at. A stratus deck at 0.15 km and
+> a cirrus deck at 8.0 km are both partly outside that frame, and the stratus pair's difference lies almost
+> entirely BELOW the `0 0 1280 551` crop — measured over the whole frame it is mean 0.398 → 0.400.
+
+---
+
+### THE RELATIONS ADDED, AND THE BREAKS THAT VERIFIED THEM
+
+`Desert/Tests/Engine/CloudPlacementSpectrum`, which compiles `Tools/LatticePeak/Source/LatticePeakMath.hpp`
+as C++ the way the `.glslh` suites compile shader maths.
+
+| relation | what it would catch |
+|---|---|
+| a lump's height and its width are ONE quantity — the cell moved by 3, the band by 4, the ratio must not move | either radius picking up an input the other does not, which is the defect itself |
+| every lump stands inside its type's own Base and Top Altitude | a body standing outside the altitudes an artist reads off a meteorological table |
+| the sky's cover does not move with the anisotropy | defect A, in the form its own comment claimed |
+| a stretched lump is long ALONG the wind — asked of the DISTANCE FIELD | a yaw of the wrong sign, which no aggregate in this suite can see and only a frame otherwise would |
+| the BODY's height still follows the band while the LUMP follows the cell on both axes | §RW2's version of this test demanded the opposite and is inverted here, deliberately and in the comment |
+| raggedness sees the edge and not the area; a solid square measures exactly 4 | a normalisation drifting under §DS's published numbers |
+| the interior Laplacian reads only what the mask calls cloud | the boundary ring arriving as "texture" |
+
+**TWO WERE RED ON THEIR FIRST RUN AND BOTH WERE REAL DEFECTS IN THIS TASK'S OWN WORK.**
+
+1. **The band fit was made against a vertical radius that was then multiplied.** The wobble draw (0.85 to
+   1.15) was applied at emission, after the stack had been fitted into the band, so the shipped congestus
+   reached **5.883 km out of a 5.800 km band** and hung to 2.079 km under a 2.200 km base. It is the same
+   two-places-must-agree shape one scale smaller, and it was invisible in every aggregate. The wobble is
+   drawn with the layout now, and the test reports the band filled exactly: `2.200..5.800`.
+2. **The suite's own rasterised proxy painted every lump as a DISC of its longer radius.** Exact while the
+   two horizontal radii were equal, and this phase made them unequal. At an anisotropy of 8 the proxy
+   reported the sky **0.98** covered where the bake reports 0.52 — it would have hidden defect A's cure
+   behind a worse defect of the instrument. It paints the ellipse, in the lump's own yawed frame, now.
+
+**A third finding, about the environment rather than about clouds.** The scratchpad this session was given
+is SHARED with another agent's session, and a helper script written into it was overwritten mid-run by that
+other agent's script — pointed at a different worktree, a different binary and a different scene. Four
+frames were produced by it before the collision was noticed and they were deleted rather than measured. All
+scripts moved to a path keyed to this worktree. **A frame produced by the wrong binary looks exactly like a
+frame produced by the right one.**
+
+---
+
+### THE PRICE
+
+| | before | after |
+|---|---|---|
+| lumps in one region, `Clouds_Demo` | 2208 | 2208 |
+| lumps, cumulus humilis | 3306 | **6612** |
+| lumps, stratus | 42 | **84** |
+
+**The shipped scene's bake is unchanged in cost to the lump**, because the congestus' 3.60 km band never
+made the old ceiling bite. The two 400 m types double, and that is the count ceiling becoming a count —
+named on `kBlobsPerCluster` with the reason.
+
+---
+
+### WHAT THIS TASK DID NOT DO
+
+* **The cumulonimbus' Coverage slider still lies by 0.354**, measured above, and neither defect this phase
+  fixed is its cause: it is the 6.000 km cell against a 48 km region, and both `kPackingCompensation` and
+  the 0.68 alive exponent were fitted at 3.000 km with no cell dependence. It is the largest single thing
+  left in the slider and it is a calibration with its own frames.
+* **The Coverage slider's low end moved by three points.**
+  `CloudProceduralField.CoverageIsTheFractionOfSkyThatHasCloudInTheColumn` now measures −0.030 / −0.025 /
+  −0.032 / +0.022 / +0.009 at 0.15 / 0.24 / 0.35 / 0.50 / 0.75 against the tenth it allows and the 0.025
+  it asserts near the top. It is inside both bounds, it is not a scale error (the sign flips), and refitting
+  `kPackingCompensation` cannot remove it because the shape of the error changed rather than its slope.
+  **Named as a trade rather than absorbed.**
+* **It did not re-shoot §RW's twelve knob frames.** Every one is at a setting this task did not touch, and
+  the knobs' ends are still the ends of the same sliders. What moved is what a cluster is made of.
+* **It did not touch the march, the erosion, the lighting, or the coverage mapping.** No shader was edited
+  and no default outside the generator changed.
+* **It did not pursue §RW2's unexplained Z bump at 5.25–5.44 km**, which is outside this task's scope by
+  the brief. What is recorded above is the one new fact that fell out: it moves with the lump's shape.

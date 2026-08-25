@@ -676,7 +676,15 @@ namespace
             if ( slash != std::string::npos )
                 name = name.substr( slash + 1 );
 
-            std::printf( "%-30s  otsu %.3f  cloud %.4f\n", name.c_str(), threshold, fraction );
+            // THE SILHOUETTE, BESIDE THE PLACEMENT. §DS bought a scalloped edge with the erosion and chose
+            // its Detail Strength on these two numbers; the instrument that produced them was never
+            // committed, so no later phase could show it had not spent them. Both are reported here on
+            // every frame this tool is pointed at.
+            const double ragged = LatticePeak::SilhouetteRaggedness( mask, width, height );
+            const double lap4   = LatticePeak::InteriorLaplacian( lum, mask, width, height, 4 );
+
+            std::printf( "%-30s  otsu %.3f  cloud %.4f  ragged %.4f  lap r4 %.5f\n", name.c_str(), threshold,
+                         fraction, ragged, lap4 );
 
             const int maxLagX = std::min( width / 2, 512 );
             const int maxLagY = std::min( height / 2, 512 );

@@ -1287,6 +1287,110 @@ TEST( CloudPlacementSpectrum, AStretchedLumpIsLongAlongTheWindAndNotAcrossIt )
             "applied to the lump at all and only its placement was drawn out";
 }
 
+// THE SILHOUETTE INSTRUMENT, ON SHAPES WHOSE ANSWER THIS FILE CHOSE.
+//
+// WHY IT IS BEING TESTED NOW. §DS chose the erosion's Detail Strength on a "silhouette raggedness" it
+// reported to four decimals, and the code that produced those numbers was never committed. §SIL has to show
+// that a change to the PLACEMENT did not spend the scalloped edge §DS bought, and there was nothing in the
+// tree to show it with. The quantity is in `LatticePeakMath.hpp` now and this is the check on it: a square
+// and a comb of the same area must not measure the same, and the number must not move when the picture is
+// simply made bigger.
+TEST( CloudPlacementSpectrum, RaggednessSeesTheEdgeAndNotTheArea )
+{
+    const int side = 64;
+
+    const auto blank = [side]() { return std::vector<float>( static_cast<size_t>( side ) * side, 0.0f ); };
+
+    // A solid 32 x 32 square in the middle: 1024 pixels of area and 128 of boundary.
+    std::vector<float> square = blank();
+    for ( int y = 16; y < 48; ++y )
+        for ( int x = 16; x < 48; ++x )
+            square[static_cast<size_t>( y ) * side + x] = 1.0f;
+
+    // A COMB OF THE SAME AREA: sixteen 2 x 32 teeth with a gap between each pair, so the area is 1024
+    // again and the boundary is far longer. If the quantity were measuring the amount of cloud these two
+    // would be equal, and they are not.
+    std::vector<float> comb = blank();
+    for ( int y = 16; y < 48; ++y )
+        for ( int t = 0; t < 16; ++t )
+            for ( int x = 0; x < 2; ++x )
+                comb[static_cast<size_t>( y ) * side + ( t * 4 + x )] = 1.0f;
+
+    const double squareRagged = LatticePeak::SilhouetteRaggedness( square, side, side );
+    const double combRagged   = LatticePeak::SilhouetteRaggedness( comb, side, side );
+
+    std::printf( "[CloudPlacementSpectrum] raggedness: square %.4f, comb of the same area %.4f\n",
+                 squareRagged, combRagged );
+
+    EXPECT_GT( combRagged, squareRagged * 3.0 )
+         << "a comb and a solid square of the SAME AREA measure nearly the same raggedness, so the "
+            "quantity is reading how much cloud there is instead of how ragged its edge is";
+
+    // AND THE SAME PICTURE AT TWICE THE RESOLUTION IS THE SAME NUMBER, which is what makes it comparable
+    // across frames — and this assertion is the one that chose the normalisation. Written §DS's way, with
+    // the perimeter and the area as fractions of the FRAME, this measures half as much at twice the
+    // resolution, and the conversion between the two forms is now written on the function.
+    const int          big = side * 2;
+    std::vector<float> bigSquare( static_cast<size_t>( big ) * big, 0.0f );
+    for ( int y = 32; y < 96; ++y )
+        for ( int x = 32; x < 96; ++x )
+            bigSquare[static_cast<size_t>( y ) * big + x] = 1.0f;
+
+    EXPECT_NEAR( LatticePeak::SilhouetteRaggedness( bigSquare, big, big ), squareRagged, 0.02 * squareRagged )
+         << "doubling the resolution changed the raggedness of the same shape, so the quantity carries a "
+            "scale and two frames of different sizes cannot be compared with it";
+
+    // A single square measures 4 for the same reason a disc measures 2*sqrt(pi): the ratio is a property of
+    // the SHAPE. Pinned so that a change of normalisation cannot pass unnoticed.
+    EXPECT_NEAR( squareRagged, 4.0, 1e-6 )
+         << "a solid square no longer measures 4, so the quantity's units have moved and every number "
+            "reported against it has moved with them";
+
+    // THE FRAME'S OWN EDGE IS NOT A CLOUD EDGE. A mask that is cloud everywhere has no boundary at all, and
+    // counting the crop as one would make the number depend on where the rectangle was taken.
+    std::vector<float> full( static_cast<size_t>( side ) * side, 1.0f );
+    EXPECT_DOUBLE_EQ( LatticePeak::SilhouetteRaggedness( full, side, side ), 0.0 )
+         << "a frame that is entirely cloud reported a silhouette, so the crop's own edge is being counted";
+}
+
+// AND THE INTERIOR TEXTURE READS THE BODY AND NOT THE SKY, which is the half of §DS's pair that says
+// whether the erosion is carving billows rather than only nibbling the outline.
+TEST( CloudPlacementSpectrum, TheInteriorLaplacianReadsOnlyWhatTheMaskCallsCloud )
+{
+    const int    side   = 64;
+    const size_t pixels = static_cast<size_t>( side ) * side;
+
+    // The left half is cloud and is FLAT; the right half is not cloud and is a violent checker. A quantity
+    // that respected the mask reports zero; one that did not reports the checker.
+    std::vector<float> value( pixels, 0.0f );
+    std::vector<float> mask( pixels, 0.0f );
+
+    for ( int y = 0; y < side; ++y )
+        for ( int x = 0; x < side; ++x )
+        {
+            const size_t at = static_cast<size_t>( y ) * side + x;
+            if ( x < side / 2 )
+            {
+                mask[at]  = 1.0f;
+                value[at] = 0.5f;
+            }
+            else
+                value[at] = ( ( x + y ) % 2 == 0 ) ? 1.0f : 0.0f;
+        }
+
+    EXPECT_NEAR( LatticePeak::InteriorLaplacian( value, mask, side, side, 4 ), 0.0, 1e-9 )
+         << "a flat cloud beside a violent sky measured texture, so the mask is not being respected and "
+            "every number from this quantity is partly the sky's";
+
+    // Now give the cloud its own texture and demand it be found.
+    for ( int y = 0; y < side; ++y )
+        for ( int x = 0; x < side / 2; ++x )
+            value[static_cast<size_t>( y ) * side + x] = ( ( x / 4 + y / 4 ) % 2 == 0 ) ? 0.8f : 0.2f;
+
+    EXPECT_GT( LatticePeak::InteriorLaplacian( value, mask, side, side, 4 ), 0.1 )
+         << "a cloud with billows in it measured no texture at all";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
