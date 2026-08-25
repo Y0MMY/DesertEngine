@@ -2602,7 +2602,7 @@ Every one is read by `Engine/Assets/CloudProceduralVolume.cpp` at bake time, is 
 
 | knob | range, default | low | high |
 |---|---|---|---|
-| Cloud Density | 0.25 .. 8, **2.5** | `Shots/RW_knob_density_low.png` | `Shots/RW_knob_density_high.png` |
+| Cloud Density | 0.25 .. 8, **2.5 as this task shipped it; §RW2 moved the default to 1.75 and says why** | `Shots/RW_knob_density_low.png` | `Shots/RW_knob_density_high.png` |
 | Cloud Scatter | 0 .. 4, **1.0** | `Shots/RW_knob_scatter_low.png` | `Shots/RW_knob_scatter_high.png` |
 | Cloud Size Variety | 0 .. 1, **0.75** | `Shots/RW_knob_variety_low.png` | `Shots/RW_knob_variety_high.png` |
 | Weather Patch Strength | 0 .. 1, **0.60** | `Shots/RW_knob_patch_off.png` | `Shots/RW_knob_patch_full.png` |
@@ -2875,7 +2875,13 @@ values on this same binary:
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **density 2.5** | .946 | .664 | .659 | .872 | .961 | .947 | .897 | .720 | .642 | .783 | .786 | .732 | .709 | .909 | .821 | **.803** | **4 of 15** |
 | **old knobs** | .920 | .808 | .822 | .974 | .389 | .956 | .833 | .850 | .927 | .901 | .444 | .204 | .609 | .855 | .982 | **.765** | **6 of 15** |
-| **density 1.75** | *below* | | | | | | | | | | | | | | | | |
+| **density 1.75** (new) | .923 | .706 | .740 | .905 | .360 | .745 | .896 | .751 | .724 | .618 | .634 | .400 | .331 | .656 | .565 | **.663** | **2 of 15** |
+
+**The default this task chose halves it, and that was not what the default was chosen for.** At 1.75 the
+same fifteen positions give a mean of **0.663** and **2 of 15** above 0.90, against 0.803 and 4 of 15 at 2.5.
+Larger, fewer bodies leave larger holes; the sky's cover is the same to three decimals. It is a side effect
+of question 1's answer and it is reported as one — the flooded zenith is still a property of a `Coverage` of
+0.762 and the artist's lever for it is `Coverage` and `Weather Patch Strength`, not the density.
 
 > **The old sky floods the zenith MORE often than §RW's, not less — 6 of 15 against 4 of 15 — and it floods
 > it in an all-or-nothing way** (0.204 to 0.982) because it has no patch modulation, so a whole region is
@@ -2965,3 +2971,63 @@ the dark side of the cloud.
 
 The point that moves most is `zenith away`: contrast 0.251 to 0.354, because the single undifferentiated
 mass §RW's frame showed breaks into bodies with edges and blue between them.
+
+### The whole sweep, and the counts the contract asks for
+
+`CI=true premake5 gmake`, then **every generated makefile built and run with the objects and the binaries
+deleted first**, on a `libDesert.a` rebuilt after the default changed.
+
+| | |
+|---|---|
+| makefiles generated | **79** |
+| excluded as tools and libraries | **16** |
+| suite makefiles | **63** |
+| suite binaries built | **63** |
+| missing binaries | **none** |
+| suites failed | **none** |
+
+The exclusion list is §RW's, `LatticePeak` included — and it is still not the one written in
+`DEV_CONTRACT.md` §2.4 item 5a. **That file is the teamlead's and §1.6 says a foreign file is asked for
+rather than taken, so this task did not edit it either.** The change needed remains one word:
+`LatticePeak` beside `ImageStat|LineJump|SceneMigrator` in the `case`. Without it the next developer's sweep
+runs a tool as a suite and counts 62 binaries against 64 makefiles.
+
+`ComponentReflection` did NOT fail this time, which is the expected outcome and worth saying: no reflected
+field was added, only a default value changed, and a default is not part of the field list that assertion
+pins.
+
+### Three sabotages, three RED
+
+Each applied, the suite's **objects and binary deleted**, rebuilt, run, and reverted — and the numbers above
+come from a binary rebuilt after the last revert, which is the trap §RW's own report names.
+
+| break | result |
+|---|---|
+| the chord census ignores the wrap, so a body across a region face becomes two | **RED** |
+| the span stops at the first gap, which is what the chord already does | **RED** |
+| a lump's height is taken from the placement cell instead of the type's band | **RED** |
+
+The third is the relation the phase exists to state. It passes today at a ratio the report quotes rather
+than at a bound, because the ratio is a defect that is **measured and not fixed** — see below.
+
+### What this task did NOT do, and why it is here rather than in a commit message
+
+* **IT DID NOT FIX THE FLAT LENS, and that is the largest thing left.** The cause is located to the line:
+  a lump is 0.72 km tall because the placement divides the type's band by a constant `6`, and 1.3 to 1.8 km
+  wide because its width is a fraction of the placement CELL — two numbers that have never had to agree —
+  and the lumps are then spread over a disc rather than stacked, so a column meets one of them. The cure is
+  the lobe layout, it changes the silhouette of every one of the nine shipped types, and phase A3 measures
+  every type with a frame per genus. That is a re-calibration of the catalogue with its own ten frames and
+  this task did not shoot them.
+* **`LATTICE 0.0000` DOES NOT MEAN THE CURVE IS FEATURELESS, and this is a caveat on the instrument rather
+  than on the sky.** At every density measured, the strongest bump on the Z axis sits at **5.25 to 5.44 km**
+  — at 2.5 it is 0.0163 at 2.8x the noise, at 2.0 it is 0.0219 at 8.1x — and the `LatticeScore` does not
+  count it, correctly, because it is not within an eighth of a period of any multiple of 3.000 km. It is
+  repeatable, it is on one axis only, and this task did not find out what it is. Whoever takes the shape
+  task should start by asking.
+* **It did not re-shoot §RW's knob frames.** Ten of the twelve are at settings this task did not touch, and
+  the two that are the density's own ends (`RW_knob_density_low/high.png`) are still the ends of the same
+  slider. What moved is where the default sits between them.
+* **It did not touch the march, the erosion, the lighting or the placement's arithmetic.** The only value
+  changed is one default, in the two places that hold it, and the two comments that described the density
+  compensation with the wrong exponent.
