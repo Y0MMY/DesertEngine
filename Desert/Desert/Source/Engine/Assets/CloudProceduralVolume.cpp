@@ -78,10 +78,65 @@ namespace Desert::Assets
         /// more than a twentieth of the sky.
         constexpr float kDensityCompensation = 0.40f;
 
-        /// The lattice is walked in this many blobs per cluster at most. A ceiling rather than a count: the
-        /// stack is shortened whenever the band is too thin to hold that many lumps that the march can
-        /// still find, which is the relation ResolvableChordKm exists for.
-        constexpr uint32_t kMaxBlobsPerCluster = 6u;
+        /// How many lumps one cluster is built from. A COUNT AND NOT A CEILING ANY MORE, and the change is
+        /// the visible half of §SIL.
+        ///
+        /// IT USED TO BE SHORTENED BY THE BAND, and that was the arithmetic behind the flat lens. The old
+        /// rule gave each lump `band / count` of the height and set its vertical radius at 0.6 of that
+        /// spacing, so the lump's height came from the TYPE's altitudes divided by a constant living in
+        /// this file while its width came from the placement CELL — two numbers with no reason to agree,
+        /// measured at 2.1 to 2.5 times wider than tall (CALIBRATION.md §RW2). Now a lump's height is
+        /// derived from its own width (kLumpVerticalOverHorizontal) and the band decides only WHERE the
+        /// stack sits, so there is nothing left for the count to protect: a lump too thin for the march is
+        /// prevented by the per-lump floor at half of ResolvableChordKm, which is where that relation
+        /// belongs.
+        ///
+        /// SIX IS A PROPERTY OF THE DISC AND NOT OF THE BAND. The lobes are spread over a disc one golden
+        /// angle apart as well as up the band, and six is how many a disc needs before its outline reads as
+        /// a lumpy mass rather than as a rosette. A thin type therefore gets six flattened lobes in a
+        /// shallow pile, which is what a thin type IS, instead of two lobes that read as dots.
+        constexpr uint32_t kBlobsPerCluster = 6u;
+
+        /// A LUMP'S HEIGHT OVER ITS OWN WIDTH — the ONE ratio that turns the cluster's single size into
+        /// both of a lump's radii, and the recorded decision of §SIL.
+        ///
+        /// WHAT THE ALTERNATIVE WAS, because the choice had to be made rather than fallen into. The other
+        /// candidate was to make the lump's aspect a PROPERTY OF THE TYPE — a fifteenth number in
+        /// `.decloudtype`, set nine times. It is refused on evidence: a lump is the convective PARCEL, and
+        /// what makes a genus a genus is how the parcels are ARRANGED (a heap, a deck, a downwind band, a
+        /// sheet), not what one parcel looks like. Every reference photograph in the licence record shows
+        /// the same roughly-isotropic turret texture at the small scale under every genus name. Nine
+        /// authored numbers with no independent evidence behind any of them are nine settings that can only
+        /// ever be asserted equal to themselves — dead settings in the sense of DEV_CONTRACT.md §1.3,
+        /// arrived at from the far side. One constant can be asserted: every shipped type's lumps measure
+        /// this ratio, and Desert/Tests/Engine/CloudPlacementSpectrum measures it on the emitted lumps.
+        ///
+        /// THE FLATNESS OF A GENUS SURVIVES ANYWAY, and it survives THROUGH the type rather than beside it:
+        /// the band clamp below caps a lump at half the band it lives in, so a stratus whose band is 400 m
+        /// gets 200 m lumps however wide its cell is, and a congestus whose band is 3.6 km does not. The
+        /// squashing is done by the layer the type declares — which is what squashes a real stratus — and
+        /// not by a number an artist has to keep consistent with the altitudes beside it.
+        ///
+        /// 0.75 AND NOT 1.0, AND THE NUMBER IS MEASURED — see CALIBRATION.md §SIL. At 1.0 the lump is a
+        /// sphere and the cluster's opaque core is as tall as the cluster, which is right about the eye and
+        /// wrong about the count: a sphere of the lump's width leaves the stack with almost no travel
+        /// inside the band, so six lobes pile into one ball and the body loses a fifth of its height. The
+        /// measured ladder on the shipped congestus, at the shipped placement, 8 realisations:
+        ///
+        ///     aspect        0.50    0.75    1.00
+        ///     vert chord    0.836   1.086   1.266 km
+        ///     solidity      0.40    0.52    0.62
+        ///     core aspect   4.4     2.4     1.9  : 1
+        ///     body height   3.05    2.93    2.66 km  (the band is 3.60)
+        ///
+        /// 0.75 is where the core stops reading as a plate — the eye's own bound is about 3:1 — while the
+        /// body still stands 2.93 km of its 3.60 km band. 1.00 buys half a point of core aspect for a
+        /// tenth of the cloud's height, and the height is what the horizon frame shows.
+        constexpr float kLumpVerticalOverHorizontal = 0.75f;
+
+        /// Radians to degrees, written out because a lump's rotation is authored in degrees and the wind
+        /// arrives as a vector. Not `glm::degrees` only so that this file keeps its one glm include.
+        constexpr float kDegreesPerRadian = 57.29577951308232f;
 
         /// The wrap offsets a lump is splatted at, in units of the region's period. NINE and not one,
         /// because the volume must be exactly periodic: a lump near the +X face has to appear at the -X
@@ -474,17 +529,7 @@ namespace Desert::Assets
 
         const float bandKm = shape.TopAltitudeKm - shape.BaseAltitudeKm;
 
-        // HOW TALL A STACK MAY BE, and it is the relation the whole phase is judged on. Each lump of the
-        // stack owns `band / count` of the height, so a stack of many lumps in a thin band makes lumps the
-        // march cannot find. Solving `2 * verticalRadius >= ResolvableChordKm` for the count with the
-        // vertical radius set at 0.6 of the spacing (which is what makes consecutive lumps overlap rather
-        // than sit in a row) gives the bound below.
-        const float    maxCountByChord = 1.2f * bandKm / std::max( params.ResolvableChordKm, 1e-6f );
-        const uint32_t stackCount =
-             std::max( 1u, std::min( kMaxBlobsPerCluster, static_cast<uint32_t>( maxCountByChord ) ) );
-
-        const float spacingKm  = bandKm / static_cast<float>( stackCount );
-        const float verticalKm = std::max( 0.6f * spacingKm, 0.5f * params.ResolvableChordKm );
+        const uint32_t stackCount = kBlobsPerCluster;
 
         // THE WIDEST A CLUSTER'S BASE LUMP GETS, and the number was raised from two fifths of the cell's
         // short side to eleven twentieths by MEASUREMENT: at two fifths a coverage of 0.35 put cloud over
@@ -492,8 +537,39 @@ namespace Desert::Assets
         // A slider documented as "what fraction of the sky is cloud" has to mean it, and it only can if an
         // alive cell is mostly full. Above a half the clusters of two adjacent alive cells OVERLAP, which
         // is the whole point — that is where a bank of cloud comes from rather than a row of cushions.
-        const float baseRadiusKm =
-             std::max( 0.72f * std::min( extent.x, extent.y ), 0.5f * params.ResolvableChordKm );
+        //
+        // THE GEOMETRIC MEAN OF THE CELL'S TWO SIDES AND NOT THE SHORTER OF THEM, and the difference is
+        // §SIL's first defect. `CloudProceduralCellExtentKm` holds the cell's AREA constant under
+        // anisotropy — `cell * root` by `cell / root` — precisely so that stretching the lattice draws a
+        // cluster out into a band instead of emptying the sky. Sizing the cluster by `min(extent)` threw
+        // that away and let the sky empty as the square of the stretch: measured at Coverage 0.5, one
+        // species, everything else shipped, the sky went 0.519 at anisotropy 1, 0.378 at 1.6, 0.143 at 0.2
+        // and 0.089 at 8 — so the shipped cirrus, whose anisotropy IS 8, delivered a fifth of the sky its
+        // own slider asked for. FOUR OF THE NINE SHIPPED TYPES were affected. The geometric mean is exactly
+        // `species.CellKm` again, so the cluster is the size the artist's Placement Scale says whatever the
+        // stretch does, and the stretch is spent on the cluster's SHAPE below instead of on its area.
+        const float cellMeanKm   = std::sqrt( extent.x * extent.y );
+        const float baseRadiusKm = std::max( 0.72f * cellMeanKm, 0.5f * params.ResolvableChordKm );
+
+        // AND THE STRETCH THE CELL NO LONGER SPENDS ON ITS AREA IS SPENT ON THE CLUSTER'S SHAPE. A cluster
+        // is drawn out along the wind by the same factor its cell is, so a cluster covers the same fraction
+        // of its own cell at every anisotropy — which is what makes the Coverage slider mean the sky for a
+        // cirrus as well as for a cumulus, and it is the relation Desert/Tests/Engine/CloudPlacementSpectrum
+        // asserts by measuring the cover at four settings of it.
+        //
+        // TAKEN FROM THE EXTENTS AND NOT FROM `species.Anisotropy`, deliberately: the extents are what the
+        // cell function returned, floors and all, so there is one statement of the stretch rather than two
+        // that have to be kept in step — the defect class §2.3.1 names and the one this phase is fixing.
+        const float stretch = std::sqrt( extent.x / std::max( extent.y, 1e-6f ) );
+
+        // THE LUMPS TURN WITH THE LATTICE. A stretched lump whose axes stayed world-aligned would be a band
+        // pointing east in a sky whose wind blows north-west. The rotation is about Y and is RIGID, so the
+        // distance field stays a true distance field — the property the whole join is built on.
+        //
+        // `glm::quat( radians( 0, yaw, 0 ) )` maps local +X to `( cos yaw, 0, -sin yaw )`, so the yaw that
+        // carries local +X onto the wind is `atan2( -along.z, along.x )`. The sign is pinned by a test that
+        // asks the DISTANCE FIELD which way the lump is long rather than by this comment.
+        const float yawDeg = std::atan2( -along.y, along.x ) * kDegreesPerRadian;
 
         const uint32_t speciesSeed = HashCombine( params.Seed, slot + 0x51ed270bu );
 
@@ -659,25 +735,72 @@ namespace Desert::Assets
                     // not the same cloud rotated into the same place.
                     const float phase = HashUnit( HashCombine( clusterSeed, 0x3u ) ) * 6.2831853f;
 
+                    // ---------------------------------------------------------------------------------
+                    // THE STACK IS LAID OUT BEFORE IT IS EMITTED, because the band decides WHERE
+                    // ---------------------------------------------------------------------------------
+                    //
+                    // The lump's own two radii are one quantity now (kLumpVerticalOverHorizontal), so the
+                    // band has stopped deciding how TALL a lump is and decides instead how far the stack
+                    // may travel: the first lump sits its own radius above the base and the last sits its
+                    // own radius below the top, and the body's vertical envelope is therefore the type's
+                    // band and nothing else. That is the second half of §RW2's finding — the old stack
+                    // stood `band * fullness + 2 * lumpRadius` tall, which is a body that pokes out of the
+                    // altitudes its own asset declares.
+                    const float bandFullKm = bandKm * fullness;
+
+                    float lumpT[kBlobsPerCluster];
+                    float lumpRadiusKm[kBlobsPerCluster];
+                    float lumpVerticalKm[kBlobsPerCluster];
+
+                    const float lumpFloorKm = 0.5f * params.ResolvableChordKm;
+
+                    for ( uint32_t step = 0; step < stackCount; ++step )
+                    {
+                        const float u = ( static_cast<float>( step ) + 0.5f ) / static_cast<float>( stackCount );
+                        const float t = std::pow( u, 1.7f );
+
+                        const float taper  = std::clamp( shape.TopTaper, 0.0f, 1.0f );
+                        const float radius = clusterRadiusKm * ( 0.62f - 0.16f * t ) * ( 1.0f - taper * t * 0.5f );
+
+                        // BASE RAMP FRACTION IS THE THICKNESS OF THE LOWEST LOBE against the ones above it:
+                        // a type whose base fills in slowly has a thin, spreading floor and a fat body over
+                        // it. It is the one authored number that reshapes a single lump, and it reshapes
+                        // exactly one of them.
+                        const float ramp = std::clamp( shape.BaseRampFraction, 0.05f, 1.0f );
+                        const float rampFactor = ( step == 0 ) ? ramp + ( 1.0f - ramp ) * 0.5f : 1.0f;
+
+                        // THE BAND CLAMP IS WHERE A GENUS'S FLATNESS COMES FROM, and it is the reason the
+                        // lump's aspect did not have to become a fifteenth authored number. A lump may not
+                        // be taller than half the band it lives in, so a 400 m stratus deck gets 200 m
+                        // lumps however wide its cell is while a 3.6 km congestus never meets the clamp at
+                        // all. The type squashes its own lumps through the altitudes it already declares.
+                        lumpT[step]          = t;
+                        lumpRadiusKm[step]   = radius;
+                        lumpVerticalKm[step] = std::max(
+                             std::min( kLumpVerticalOverHorizontal * radius * rampFactor, 0.5f * bandFullKm ),
+                             lumpFloorKm );
+                    }
+
+                    // The travel is what is left of the band once both end lumps have been let in, divided
+                    // by the last lump's own parameter so that the top lump's crown lands ON the top rather
+                    // than short of it — `t` is a curve and not a fraction of the band.
+                    const float travelKm =
+                         std::max( bandFullKm - lumpVerticalKm[0] - lumpVerticalKm[stackCount - 1], 0.0f ) /
+                         std::max( lumpT[stackCount - 1], 1e-4f );
+
                     for ( uint32_t step = 0; step < stackCount; ++step )
                     {
                         const uint32_t lumpSeed = HashCombine( clusterSeed, 0x100u + step );
 
-                        // Where up the stack this lump sits, 0 at the base and approaching 1 at the top. The
-                        // band it spans is `bandKm * fullness`, so a short cluster is a whole short cloud
-                        // rather than the bottom slice of a tall one — which is what a low cumulus humilis is.
+                        // Where up the stack this lump sits, 0 at the base and approaching 1 at the top.
                         // BOTTOM-HEAVY, and the exponent is measured rather than chosen. Spread evenly, six
                         // lobes put one or two at the wide base and four up the narrow tower, so the base was
                         // a rosette with holes in it: a full cell measured 48 per cent covered from below when
                         // the geometry says a full cluster should cover it. A cumulus is a WIDE FLOOR with a
                         // turret or two on top, which is the same thing said about the picture and about the
                         // number.
-                        const float u = ( static_cast<float>( step ) + 0.5f ) / static_cast<float>( stackCount );
-                        const float t = std::pow( u, 1.7f );
-
-                        // TOP TAPER IS HOW FAST THE STACK NARROWS. A cumulus is a pile whose lobes shrink as
-                        // they rise; a stratus, whose taper is near zero, is a slab of equal lobes.
-                        const float taper = std::clamp( shape.TopTaper, 0.0f, 1.0f );
+                        const float t      = lumpT[step];
+                        const float radius = lumpRadiusKm[step];
 
                         // THE LOBES ARE SPREAD OVER A DISC AND NOT STACKED CONCENTRICALLY, and this is the line
                         // that decides whether the sky is a cumulus field or a field of dots.
@@ -692,10 +815,8 @@ namespace Desert::Assets
                         // The golden angle spreads them without a pattern, and the disc narrows going up so the
                         // pile is a dome rather than a column: at the base the lobes sit half a cluster-radius
                         // out, at the top they close over the middle.
-                        const float angle  = phase + 2.39996323f * static_cast<float>( step );
-                        const float spread = clusterRadiusKm * 0.48f * ( 1.0f - 0.55f * t );
-
-                        // HOW FAR THE LOBES OVERLAP IS THE WHOLE ARGUMENT OF THE PHASE, so it is arithmetic and
+                        //
+                        // HOW FAR THE LOBES OVERLAP IS THE WHOLE ARGUMENT OF PHASE Э5, so it is arithmetic and
                         // not a feel. Two lobes one golden angle apart on a circle of radius `spread` are
                         // `2 * spread * sin(68.5 deg) = 1.86 * spread` apart; with `spread = 0.42 R` that is
                         // 0.78 R against a sum of radii of 1.20 R, so they interpenetrate by 0.42 R — a third
@@ -703,38 +824,61 @@ namespace Desert::Assets
                         // against 1.00 R, the lobes only TOUCHED, and the top-down projection came out as
                         // clusters of separate dots: fusion is not free just because the join can express it,
                         // the bodies have to be inside one another.
-                        const float radius = clusterRadiusKm * ( 0.62f - 0.16f * t ) * ( 1.0f - taper * t * 0.5f );
-
-                        // BASE RAMP FRACTION IS THE THICKNESS OF THE LOWEST LOBE against the ones above it: a
-                        // type whose base fills in slowly has a thin, spreading floor and a fat body over it.
-                        const float ramp = std::clamp( shape.BaseRampFraction, 0.05f, 1.0f );
-                        const float vertical =
-                             verticalKm * ( ( step == 0 ) ? ramp + ( 1.0f - ramp ) * 0.5f : 1.0f );
+                        const float angle  = phase + 2.39996323f * static_cast<float>( step );
+                        const float spread = clusterRadiusKm * 0.48f * ( 1.0f - 0.55f * t );
 
                         CloudModellingBlob blob;
                         blob.Primitive = CloudModellingPrimitive::Ellipsoid;
 
                         const float wobble = 0.18f * clusterRadiusKm;
 
-                        blob.CentreKm = glm::vec3( clusterXZ.x + std::cos( angle ) * spread +
-                                                        HashSigned( HashCombine( lumpSeed, 0xau ) ) * wobble,
-                                                   shape.BaseAltitudeKm + bandKm * fullness * t,
-                                                   clusterXZ.y + std::sin( angle ) * spread +
-                                                        HashSigned( HashCombine( lumpSeed, 0xbu ) ) * wobble );
+                        // THE DISC IS AN ELLIPSE IN THE WIND'S FRAME, by the same factor the cell is. At an
+                        // anisotropy of 1 `stretch` is 1 and the two axes below are the wind's own frame,
+                        // which for the shipped +X wind is the world's — so an isotropic type's lobes land
+                        // exactly where they always did.
+                        const float offsetAlong  = ( std::cos( angle ) * spread +
+                                                    HashSigned( HashCombine( lumpSeed, 0xau ) ) * wobble ) *
+                                                  stretch;
+                        const float offsetAcross = ( std::sin( angle ) * spread +
+                                                     HashSigned( HashCombine( lumpSeed, 0xbu ) ) * wobble ) /
+                                                   stretch;
+
+                        // WHERE THE LUMP SITS UP THE BAND. Clamped so that it is INSIDE the type's own
+                        // altitudes on both sides — the relation the layout above exists to make true, and
+                        // the one Desert/Tests/Engine/CloudPlacementSpectrum asserts lump by lump. The clamp
+                        // bites only where the resolvable floor has forced a lump taller than half its band,
+                        // which is a type authored thinner than the march can see.
+                        const float halfBandKm = 0.5f * bandFullKm;
+                        const float lowKm      = std::min( lumpVerticalKm[step], halfBandKm );
+                        const float highKm     = std::max( bandFullKm - lumpVerticalKm[step], lowKm );
+                        const float upKm =
+                             std::clamp( lumpVerticalKm[0] + travelKm * t, lowKm, highKm );
+
+                        blob.CentreKm = glm::vec3( clusterXZ.x + along.x * offsetAlong + across.x * offsetAcross,
+                                                   shape.BaseAltitudeKm + upKm,
+                                                   clusterXZ.y + along.y * offsetAlong + across.y * offsetAcross );
 
                         // THE LUMP IS NEVER THINNER THAN THE MARCH CAN FIND, on any axis. It is a clamp and not
                         // an assertion because the inputs are an artist's: a type authored with a 40 m band is
                         // a legal thing to write in a `.decloudtype`, and the honest answer is a lobe the march
                         // can see rather than speckle or a refusal to draw the sky.
-                        const float floorKm = 0.5f * params.ResolvableChordKm;
-                        blob.RadiiKm        = glm::vec3(
-                             std::max( radius * ( 0.85f + 0.3f * HashUnit( HashCombine( lumpSeed, 0xcu ) ) ),
-                                              floorKm ),
-                             std::max( vertical, floorKm ),
-                             std::max( radius * ( 0.85f + 0.3f * HashUnit( HashCombine( lumpSeed, 0xdu ) ) ),
-                                              floorKm ) );
+                        //
+                        // THE WOBBLE SCALES THE LUMP AND DOES NOT RESHAPE IT. Two draws vary the plan-view
+                        // outline, and the vertical radius takes their GEOMETRIC MEAN — so `radii.y` over the
+                        // geometric mean of the two horizontal radii is exactly kLumpVerticalOverHorizontal
+                        // for every lump that the ramp and the band clamp have left alone. A lump has ONE
+                        // size; that is the whole of the decision, and it is stated in a form a test can
+                        // read off the emitted lumps.
+                        const float floorKm      = lumpFloorKm;
+                        const float wobbleAlong  = 0.85f + 0.3f * HashUnit( HashCombine( lumpSeed, 0xcu ) );
+                        const float wobbleAcross = 0.85f + 0.3f * HashUnit( HashCombine( lumpSeed, 0xdu ) );
 
-                        blob.RotationDeg  = glm::vec3( 0.0f );
+                        blob.RadiiKm = glm::vec3(
+                             std::max( radius * wobbleAlong * stretch, floorKm ),
+                             std::max( lumpVerticalKm[step] * std::sqrt( wobbleAlong * wobbleAcross ), floorKm ),
+                             std::max( radius * wobbleAcross / stretch, floorKm ) );
+
+                        blob.RotationDeg  = glm::vec3( 0.0f, yawDeg, 0.0f );
                         blob.Weight       = 1.0f;
                         blob.DetailType   = std::clamp( shape.DetailCharacter, 0.0f, 1.0f );
                         blob.DensityScale = 1.0f;
@@ -758,11 +902,14 @@ namespace Desert::Assets
                                              radiusGain * ( 1.0f + 0.8f * shape.AnvilStrength );
                         const float floorKm = 0.5f * params.ResolvableChordKm;
 
-                        anvil.RadiiKm =
-                             glm::vec3( std::max( spread, floorKm ), std::max( shape.AnvilThicknessKm, floorKm ),
-                                        std::max( spread * 0.9f, floorKm ) );
+                        // THE CANOPY IS DRAWN OUT WITH THE CLUSTER IT CAPS, by the same `stretch`. A storm in
+                        // an anisotropic lattice whose tower was a band and whose anvil was a circle would be
+                        // two bodies, and the anvil's own thickness is the one radius it authors itself.
+                        anvil.RadiiKm = glm::vec3( std::max( spread * stretch, floorKm ),
+                                                   std::max( shape.AnvilThicknessKm, floorKm ),
+                                                   std::max( spread * 0.9f / stretch, floorKm ) );
 
-                        anvil.RotationDeg = glm::vec3( 0.0f );
+                        anvil.RotationDeg = glm::vec3( 0.0f, yawDeg, 0.0f );
                         anvil.Weight      = 1.0f;
                         anvil.DetailType  = std::clamp( shape.DetailCharacter, 0.0f, 1.0f );
                         // The anvil is ice and is THINNER than the tower, and this is the one place a lump's
