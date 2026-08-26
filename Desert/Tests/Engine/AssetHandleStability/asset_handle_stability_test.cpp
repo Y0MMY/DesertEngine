@@ -588,6 +588,40 @@ TEST( AssetHandleStability, KeysThatAreNotFilesystemPathsAreLeftAlone )
     EXPECT_EQ( HandleValue( "procedural://humanoid/Walk" ), underOneProject );
 
     EXPECT_NE( HandleValue( "procedural://humanoid/Walk" ), HandleValue( "procedural://humanoid/Run" ) );
+
+    // The key is the spelling itself, normalized, and nothing else has been glued to it.
+    //
+    // This line and the working-directory test below exist because the first version of this test did
+    // NOT catch its own sabotage: made to absolutize the no-root fallback, the suite stayed green. Both
+    // assertions it had were blind to that -- one used an already-absolute path, where absolutizing is
+    // the identity, and the other only compared two project roots, which does not move the working
+    // directory. A relation that survives its own diversion is not a guard.
+    EXPECT_EQ( Common::AssetHandle::StableKeyForPath( "procedural://humanoid/Walk" ),
+               std::filesystem::path( "procedural://humanoid/Walk" ).lexically_normal().generic_string() );
+}
+
+TEST( AssetHandleStability, ASyntheticKeyDoesNotFollowTheWorkingDirectory )
+{
+    // The property above as a process meets it. A `procedural://` clip is an identity, not a location;
+    // if the derivation resolved it against the working directory then the editor (which runs from
+    // Editor/) and a packaged runtime (which does not) would register the same clip under two handles,
+    // and the animation a scene names would resolve in one and vanish in the other.
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+
+    std::error_code   ec;
+    const std::filesystem::path original = std::filesystem::current_path( ec );
+    ASSERT_FALSE( ec ) << "could not read the working directory";
+
+    const uint64_t here = HandleValue( "procedural://humanoid/Walk" );
+
+    std::filesystem::current_path( std::filesystem::temp_directory_path(), ec );
+    ASSERT_FALSE( ec ) << "could not change the working directory";
+    const uint64_t elsewhere = HandleValue( "procedural://humanoid/Walk" );
+    std::filesystem::current_path( original, ec );
+
+    EXPECT_EQ( here, elsewhere )
+         << "a synthetic key changed identity because the process changed directory";
 }
 
 TEST( AssetHandleStability, AFileOutsideTheProjectKeepsItsOwnSpelling )
