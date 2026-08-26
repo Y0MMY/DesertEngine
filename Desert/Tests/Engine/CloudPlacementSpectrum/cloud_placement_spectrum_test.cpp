@@ -819,6 +819,212 @@ TEST( CloudPlacementSpectrum, TheAnvilIsDrawnOutDownwindWithTheTowerItCaps )
             "stretched lattice is a band with a circular lid on it — two bodies rather than one";
 }
 
+// ---------------------------------------------------------------------------------------------------
+// THE CANOPY AND THE COVERAGE SLIDER, which is CALIBRATION.md §CB
+// ---------------------------------------------------------------------------------------------------
+//
+// THE DEFECT THESE THREE WERE WRITTEN AFTER. The `Coverage` slider is documented as the fraction of the
+// SKY that has cloud in the column, and every genus in the library delivered it to within 0.06 except one:
+// the cumulonimbus returned 0.856 for a setting of 0.5, unchanged through two phases that each named a
+// cause and neither tested it. The cause is the ANVIL — a canopy 1.70 times the tower's own footprint
+// covers 2.9 times the sky and nothing priced it — and it hid for exactly the reason §RW's own sabotage run
+// named about a different line of the same block: only one type in the library HAS an anvil, so a relation
+// asserted on the shipped congestus cannot see it.
+//
+// Two of these three assert the sky and one asserts the lumps, deliberately: the sky is what the slider
+// promises and the lumps are what the promise is made of, and a phase that moved one without the other is
+// exactly what produced the defect.
+
+namespace
+{
+    /// The shipped cumulonimbus' placement numbers, on a layer whose shell is the RENDERER's — the union of
+    /// the tower's band and the canopy above it, `Graphic::CloudTypeSetEnvelopeKm`, and not `Top - Base`.
+    CloudProceduralFieldParams StormParams()
+    {
+        CloudProceduralFieldParams params = ShippedParams();
+
+        Desert::Graphic::CloudTypeShape& shape = params.Species[0].Shape;
+        shape.BaseAltitudeKm                   = 0.9f;
+        shape.TopAltitudeKm                    = 9.0f;
+        shape.EdgeTopFraction                  = 0.12f;
+        shape.BaseRampFraction                 = 0.04f;
+        shape.TopTaper                         = 0.4f;
+        shape.AnvilAltitudeKm                  = 9.5f;
+        shape.AnvilThicknessKm                 = 1.8f;
+        shape.AnvilStrength                    = 0.85f;
+
+        params.LayerBottomKm     = 0.9f;
+        params.LayerThicknessKm  = 10.4f;
+        params.Species[0].CellKm = 6.0f;
+
+        return params;
+    }
+} // namespace
+
+TEST( CloudPlacementSpectrum, ACanopyCostsTheSkyNothingBecauseTheClusterPaysForIt )
+{
+    // THE LAYER IS THE SAME IN BOTH ARMS and it is the one the storm WITH its canopy needs, so the only
+    // thing that differs between them is whether the canopy is there. Giving each arm its own shell would
+    // also change how finely 32 voxels sample the band, and the difference measured would be two things.
+    CloudProceduralFieldParams capped   = StormParams();
+    CloudProceduralFieldParams bare     = StormParams();
+    bare.Species[0].Shape.AnvilStrength = 0.0f;
+
+    for ( const float coverage : { 0.35f, 0.50f, 0.75f } )
+    {
+        capped.Coverage = coverage;
+        bare.Coverage   = coverage;
+
+        const double withCanopy = SkyCover( capped );
+        const double without    = SkyCover( bare );
+
+        ASSERT_GE( withCanopy, 0.0 );
+        ASSERT_GE( without, 0.0 );
+
+        std::printf( "[CloudPlacementSpectrum] coverage %.2f: a storm covers %.4f of the sky with its "
+                     "canopy and %.4f without it\n",
+                     coverage, withCanopy, without );
+
+        // A TWENTIETH, AND IT IS THE RESIDUAL OF A DERIVATION RATHER THAN A TOLERANCE PICKED TO PASS. The
+        // compensation equates the two AREAS exactly; what the two arms then deliver differs by however far
+        // the placement is from the independent-bodies model that turns an area into a cover — the same gap
+        // §RW measured when it tried to derive the packing law and rejected it. Measured at 0.041 of the sky
+        // at its worst of the three settings. Deleting the compensation puts this pair 0.32 apart.
+        EXPECT_NEAR( withCanopy, without, 0.05 )
+             << "a cumulonimbus' canopy is not paid for by the cluster under it, so the Coverage slider "
+                "means one thing for a storm and another for every other genus in the library";
+    }
+}
+
+TEST( CloudPlacementSpectrum, TheCanopysOwnFootprintDoesNotMoveWithItsStrength )
+{
+    // WHAT THIS PINS THAT THE SKY CANNOT. The test above says the canopy is paid for; this says the price
+    // is the RIGHT SHAPE in the strength — `(1 + kAnvilSpreadPerStrength * S)` — because the compensation
+    // divides by exactly what the emission multiplies by. If the two ever stop being the same expression,
+    // the canopy's absolute width starts to depend on a slider that is documented as changing only how far
+    // it spreads BEYOND its tower, and the sky drifts with `AnvilStrength` for no reason a reader could see.
+    const auto canopyRadiusKm = [&]( float strength )
+    {
+        CloudProceduralFieldParams params     = StormParams();
+        params.Species[0].Shape.AnvilStrength = strength;
+
+        const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );
+
+        double total = 0.0;
+        double count = 0.0;
+
+        for ( const CloudModellingBlob& blob : blobs )
+            if ( std::abs( blob.CentreKm.y - params.Species[0].Shape.AnvilAltitudeKm ) < 1e-3f )
+            {
+                // The geometric mean of the canopy's two horizontal radii, which is the radius of the
+                // circle of the same area — the quantity the compensation is written in.
+                total += std::sqrt( static_cast<double>( blob.RadiiKm.x ) * blob.RadiiKm.z );
+                count += 1.0;
+            }
+
+        EXPECT_GT( count, 0.0 ) << "no canopy at strength " << strength << ", so this measured nothing";
+        return total / std::max( count, 1.0 );
+    };
+
+    const double quarter = canopyRadiusKm( 0.25f );
+    const double half    = canopyRadiusKm( 0.50f );
+    const double shipped = canopyRadiusKm( 0.85f );
+    const double full    = canopyRadiusKm( 1.00f );
+
+    std::printf( "[CloudPlacementSpectrum] canopy footprint radius at strength 0.25 / 0.50 / 0.85 / 1.00: "
+                 "%.4f / %.4f / %.4f / %.4f km\n",
+                 quarter, half, shipped, full );
+
+    // A HUNDREDTH. The three arms differ only by a factor that cancels algebraically, so the residual is
+    // the per-lump floor and float rounding; without the compensation the ends of this row are 1.44 apart.
+    EXPECT_NEAR( half, quarter, 0.01 * quarter )
+         << "the canopy's own width follows AnvilStrength, so that slider moves the sky's cover as well as "
+            "the storm's proportions";
+    EXPECT_NEAR( shipped, quarter, 0.01 * quarter );
+    EXPECT_NEAR( full, quarter, 0.01 * quarter );
+}
+
+TEST( CloudPlacementSpectrum, TheTowersFootprintConstantsSayWhatTheLayoutActuallyDoes )
+{
+    // WHY THIS EXISTS: A SABOTAGE FOUND THE HOLE. Dropping the taper term from
+    // CloudClusterTowerFootprintRadii — making the tower's footprint one constant instead of a line
+    // through two — left the whole repository green, because every test above holds `TopTaper` fixed and
+    // an error common to both arms cancels. That is an untested number in the middle of a calibration,
+    // which is the shape DEV_CONTRACT.md §1.3 forbids arrived at from the far side.
+    //
+    // WHAT IT ASSERTS. The two constants are a QUADRATURE over the lobe layout, not a fit, so they are a
+    // prediction about the sky and can be checked as one. With no canopy the gain is exactly 1 and the
+    // constants reach no lump at all — so the bake is a completely independent measurement of the same
+    // quantity. Independently placed footprints cover `1 - exp(-n A)` of the sky, so `-ln(1 - cover)` is
+    // proportional to the footprint AREA whatever the constant of proportionality is, and the ratio of two
+    // tapers cancels it: `(kappa(a) / kappa(b))^2`. Nothing about the placement, the cell or the coverage
+    // survives into that ratio.
+    const auto skyAtTaper = [&]( float taper )
+    {
+        CloudProceduralFieldParams params     = StormParams();
+        params.Species[0].Shape.AnvilStrength = 0.0f;
+        params.Species[0].Shape.TopTaper      = taper;
+        params.Coverage                       = 0.5f;
+        return SkyCover( params );
+    };
+
+    const double flat    = skyAtTaper( 0.4f );
+    const double tapered = skyAtTaper( 1.0f );
+
+    ASSERT_GT( flat, 0.0 );
+    ASSERT_GT( tapered, 0.0 );
+
+    const double measured = std::log( 1.0 - tapered ) / std::log( 1.0 - flat );
+
+    const double a         = CloudClusterTowerFootprintRadii( 1.0f );
+    const double b         = CloudClusterTowerFootprintRadii( 0.4f );
+    const double predicted = ( a * a ) / ( b * b );
+
+    std::printf( "[CloudPlacementSpectrum] tower footprint, taper 1.0 over 0.4: the constants say %.4f, "
+                 "the sky says %.4f (%.4f / %.4f of the sky)\n",
+                 predicted, measured, tapered, flat );
+
+    // A TWENTY-FIFTH, AND BOTH ENDS OF THE WINDOW ARE ACCOUNTED FOR. The two agree to 0.5 per cent as
+    // measured, and the slack is the independent-bodies model this ratio is read through — the same model
+    // §RW rejected as a mapping and which survives here only because it is a RATIO. Dropping the taper term
+    // makes the left-hand side exactly 1 against a measured 0.936, which is seven times outside this.
+    EXPECT_NEAR( measured, predicted, 0.04 * predicted )
+         << "the tower footprint the canopy is priced against is not the footprint the layout produces, so "
+            "the compensation is exact for a tower nobody generates";
+}
+
+TEST( CloudPlacementSpectrum, ACanopyInsideItsOwnTowerIsNotPaidForTwice )
+{
+    Desert::Graphic::CloudTypeShape shape = StormParams().Species[0].Shape;
+
+    // NO CANOPY AT ALL is the case the gain must leave alone: eight of the nine shipped genera are this
+    // row, and a gain other than exactly one on them would move every sky in the project.
+    shape.AnvilStrength = 0.0f;
+    EXPECT_FLOAT_EQ( CloudClusterFootprintGain( shape ), 1.0f );
+
+    shape.AnvilStrength    = 0.85f;
+    shape.AnvilThicknessKm = 0.0f;
+    EXPECT_FLOAT_EQ( CloudClusterFootprintGain( shape ), 1.0f )
+         << "a canopy of no thickness is never emitted, so pricing one shrinks every storm for nothing";
+
+    // AND A CANOPY NARROWER THAN THE TOWER IT CAPS COSTS THE SKY NOTHING, because it sits inside the
+    // tower's own silhouette. The floor is reachable and this is where: a barely-present canopy over an
+    // untapered tower is 0.949 cluster radii against the tower's 0.959.
+    shape.AnvilThicknessKm = 1.8f;
+    shape.AnvilStrength    = 0.0011f;
+    shape.TopTaper         = 0.0f;
+    EXPECT_FLOAT_EQ( CloudClusterFootprintGain( shape ), 1.0f )
+         << "a canopy hidden inside its own tower is being paid for, so the storm is shrunk for cloud that "
+            "was never outside it";
+
+    // The shipped storm, whose canopy is far outside its tower and IS paid for.
+    shape.AnvilStrength = 0.85f;
+    shape.TopTaper      = 0.4f;
+    EXPECT_GT( CloudClusterFootprintGain( shape ), 1.6f );
+    EXPECT_LT( CloudClusterFootprintGain( shape ), 1.8f );
+}
+
 // THE CACHE IS THE OTHER PLACE A LIVE SETTING CAN DIE, and this test exists because a sabotage found it
 // green. Every field is wired from the component to the bake, and the bake reads every one of them — and
 // none of that matters if the renderer's staleness check does not NOTICE the change, because then the
