@@ -4417,3 +4417,216 @@ read the reflection table were rebuilt and re-run in **both** configurations aft
 * **The layout is not per-species-scaled.** `Layout_CloudPerTypeScale` has no counterpart because
   `PlacementScale` and `PlacementAnisotropy` already live on `.decloudtype` (T3). Adding a second scale
   would be two numbers obliged to agree.
+
+## PTP — the panel that makes a painting, and the three things it found in the sky it previews, 2026-08-26
+
+§PT shipped the `.dclayout` format, the engine path, the Details slot and `Tools/CloudLayoutBaker`, and
+named what it had NOT done in its own closing list: *"the thing that BAKES a painting from an image is
+`Tools/CloudLayoutBaker`, not a window"*. The owner had asked about an editor. This phase is the window.
+
+It was started by another developer, whose session ended with the work uncommitted and whose transcript
+did not survive; the teamlead committed what was on disk (`5dde690e`) marked **not verified — no frames,
+no sweep, no format gate**. What follows is the verification that commit owed, and the three defects that
+verification found.
+
+### What was already there, and what it got wrong
+
+The panel existed and worked: a source (a picture, or a `.dclayout` to inspect), a channel mapping, a
+top-down MAP of the sky the painting makes rather than a view of the texture, both of §PT's measured
+facts reported in words, and a bake that calls `Assets::MakeCloudLayoutFromImage` — the tool's own
+function. Those decisions are right and are kept.
+
+**Three things it said were not true of the sky it was previewing**, all found by reading
+`VolumetricCloudRenderer` beside it rather than by looking at the panel:
+
+| what the panel did | what the sky does | the symptom |
+|---|---|---|
+| labelled its four controls "Slot 0..3" | the four **Cloud Type** slots are COMPACTED into species — empty slots skipped, a repeated type dropped — and the painting's channels are indexed by SPECIES | a layer whose only type sits in `Cloud Type 3` is driven by the painting's **RED** channel. Nothing anywhere said so; the symptom is a channel an artist swears they painted that does nothing |
+| used the constant **21 km** for the weather patch tile | reads `PatchTileSize` off the component | 21 km is the component's DEFAULT, so the map agreed in every scene that had never touched the field and disagreed silently in every scene that had. The patch is what decides a cell's coverage whenever the painting is not the source |
+| gave all four species ONE square cell taken from the layer's **finest** type, anisotropy dropped | each species is placed on its own lattice — the layer's, times that type's Placement Scale, stretched by its Placement Anisotropy | a coarse species' map drawn at a fine species' resolution, and the most permissive legibility bound in the layer quoted for every channel: *"every stroke clears the cell"* about a 1.2 km stroke on a 4 km cell |
+
+The third one is the interesting one, because **`ValidateCloudProceduralLayout` is right to take the
+finest and the panel was wrong to copy it.** The validator asks whether one layout TEXEL can tell two
+neighbouring cells apart, which fails first for the species with the SMALLEST cells. Legibility asks
+whether a STROKE survives the lattice, which fails first for the species with the LARGEST. The two bounds
+run in opposite directions, and that is exactly why they must not share a number.
+`BuildCloudLayoutPreview` now takes the mapped slot's own cell; the validator is untouched.
+
+`ECS::ResolveCloudSpecies` is where the compaction now lives — one statement, called by both the renderer
+and the panel, because a panel that compacted the slots for itself would name a different type the day
+the rule moved.
+
+### AND A FOURTH, WHICH IS A CONVENTION NOBODY HAD WRITTEN DOWN
+
+The layout's **v axis runs north** and an image's first row is its **top**, so a picture placed in the
+world stands on its head relative to a north-up map — which is why the panel's two panes differ by a
+vertical flip and why `PTP_LetterP`'s scene carries a `LayoutOffset` of `(-20.20, -24.00)` km: half a
+period, to slide the figure into the middle of the region. None of that was stated anywhere. The panel
+says it under the panes now, and
+`CloudPlacementSpectrum.ThePaintingsFirstRowSitsAtTheOriginAndItsRowsRunNorth` pins it: the world origin
+is texel (0,0) exactly, and a band on rows 1..3 is found NORTH of it.
+
+### THE PICTURES
+
+| file | what it shows |
+|---|---|
+| `Shots/PTP_letter_topdown.png` | a letter of cloud from 90 km — the loop closed: a picture, a `.dclayout`, a slot, a sky |
+| `Shots/PTP_letter_x4_topdown.png` | the same painting at **4 repeats**: the glyph has collapsed into evenly spaced clumps |
+| `Shots/PTP_channels_red_topdown.png` | one picture, `--channels 0,1,2,3`: a **north-south** wall of cloud |
+| `Shots/PTP_channels_green_topdown.png` | **THE SAME PICTURE**, `--channels 1,0,2,3`: the wall turns 90 degrees |
+| `Shots/PTP_panel_letter.png` | the panel on that sky |
+| `Shots/PTP_panel_nomask.png` | the same painting with the mask off |
+| `Shots/PTP_panel_x4.png` | the same painting at 4 repeats |
+
+**The channel pair is the both-ends proof of the convention this phase exists to make visible.** Two
+scenes that differ in nothing but which source channel feeds species 0; the sky turns a quarter turn.
+`PTP_Channels_Bands.png` is 64 squared, red painted over half the columns and green over half the rows —
+each channel's mean is exactly 0.5, so a pattern at full strength empties everything it does not paint
+and the boundary is a wall rather than two shades of overcast. The two layouts are 16 432 B, content
+`4daa0a7c` and `e4778ea5`.
+
+### THE PANEL'S OWN VERDICTS, AT BOTH ENDS OF BOTH
+
+Three scenes, one painting, and the two facts §PT could only state in a protocol now stated to the artist
+in the tool:
+
+| scene | Layout Mask Strength | Layout Repeats | what the panel says about the PATTERN | what it says about the STROKES |
+|---|---|---|---|---|
+| `PTP_Layout_LetterP` | 1.0 | 1 | ⚠ *"does NOTHING here: both ends of it give the same sky, cell for cell"* — **100%** of cells pinned by the clamp | ✓ *"every stroke clears the cell"* — thinnest tenth **5.81 km**, median 6.09, cell 3.00 |
+| `PTP_Layout_LetterP_nomask` | 0.0 | 1 | ✓ *"moves 98% of the cells across its range (252 of 256)"* — **0%** pinned | ✓ same strokes |
+| `PTP_Layout_LetterP_x4` | 1.0 | 4 | ⚠ dead, same cause | ⚠ ***"74% of what you drew on this channel is NARROWER THAN ONE CLOUD CELL"*** — thinnest tenth **1.45 km**, median 1.52, cell 3.00 |
+
+The x4 row is the one to read beside `PTP_letter_x4_topdown.png`: the panel's warning and the sky's
+clumps are the same fact, and until now only §PT's protocol held it. One texel is 0.094 km at one repeat
+and 0.023 km at four — **every texel resolves the cell in both**, which is precisely why the validator
+that checks the texel cannot see this.
+
+### THE BAKE IS THE TOOL'S BAKE — MEASURED, NOT ASSERTED
+
+`Tools/CloudLayoutBaker/Source/main.cpp` promises in its own header that §PTP *"checks by baking one
+picture both ways and comparing the files byte for byte"*. Done:
+
+```
+CloudLayoutBaker --image PTP_LetterP.png --channels 0,1,2,3 --mask   ->  dcf3fae42956e08a83f38df5693bba9a
+Editor/Resources/Assets/Clouds/Layouts/PTP_LetterP.dclayout          ->  dcf3fae42956e08a83f38df5693bba9a
+```
+
+Both paths are `MakeCloudLayoutFromImage` followed by `EncodeCloudLayout` and a write — the panel's
+through `CloudLayoutAsset::Save`, the tool's through `<fstream>`. 1 310 768 bytes, content `35a66984`,
+identical.
+
+> ⚠️ **AND THE HONEST LIMIT OF THAT: THE BUTTON ITSELF WAS NOT PRESSED.** Synthetic input does not work on
+> this machine (no assistive access for System Events), so no control in this panel can be exercised
+> without a hand on the mouse. Everything here was driven through the SCENE — `--open-panel` puts the tool
+> on screen and the open scene decides what it reads — and through the engine functions the controls call.
+> What is therefore NOT verified by this task: that pressing **Bake** writes a file, that the channel
+> combos rebuild the layout when clicked, and that the Sky span and Pane size sliders redraw. They are
+> three lines each and they are read in the diff; they are not measured. Naming it here because the next
+> person should not have to rediscover that the wall exists.
+
+### THE SHIPPED SKY DID NOT MOVE — SIX OF SIX, BYTE FOR BYTE
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, 1280x766, three elevations and both azimuths. Every
+md5 equals §PT's table, which equals the frames committed before §PT existed:
+
+| point | md5 |
+|---|---|
+| zenith away `0,0.9,-1` | `73c7806b04c1c71317e4aba52e3f20dc` |
+| mid away `0,0.45,-1` | `4819e9c0c6dcdfadbf7477bd90a409d7` |
+| horizon away `0,0.12,-1` | `304f4c2b56ea4751f50b6eb7b6351b4e` |
+| zenith sunward `0,0.9,1` | `ada3c729466065ad749a473698b2f903` |
+| mid sunward `0,0.45,1` | `4a2ddc2a6a5bd7637701fd1a3fe7da8b` |
+| horizon sunward `0,0.12,1` | `bfd06fce1094adaa4e538cebba2f66f7` |
+
+That matters more here than it looks: the species resolution MOVED, out of the renderer and into
+`Engine/ECS`. Six identical frames say the compaction that came back out is the compaction that went in.
+Not committed — byte copies of pictures the repository already holds.
+
+**The noise floor was measured rather than quoted.** Three renders of `PTP_letter_topdown`, including the
+first ever run of the editor in this worktree, are one md5 (`d28673ec793789c60b66c1217747cb58`) — and the
+same file is byte-identical to the one the previous developer rendered with a different binary, which git
+noticed by recording the move as a rename.
+
+### THE RELATIONS, AND THE EIGHT SABOTAGES
+
+Seven in `CloudPlacementSpectrum`, one in `SceneCloudLayoutDefault`.
+
+| relation | broken by | result |
+|---|---|---|
+| the painting's first row is at the world origin and its rows run north | negating v in `CloudLayoutUv` | RED |
+| the map is the bake's own coverage, cell for cell | displacing the map's u by 0.4 of a cell | **GREEN — see below**, then RED |
+| the map is sampled on the MAPPED species' cell | taking `Species[0]`'s cell instead | RED |
+| the pattern slider is dead exactly when the mask has pinned every cell | measuring the two "ends" at the same strength | RED |
+| a bar N texels wide measures N | stroke width = max of the two axes instead of min | RED |
+| a bar straddling the edge is ONE stroke | starting the walk at texel 0 | **GREEN — a finding, see below** |
+| " | dropping the modulo so the run stops at the line's end | RED |
+| the type slots compact into species | keeping the duplicate | RED |
+
+> ⚠️ **THE MAP TEST COULD NOT FAIL, AND THE FIXTURE WAS WHY.** Displacing the map's u by four tenths of a
+> cell left all 256 cells identical. The stripe fixture varies along ONE axis, so at a quarter turn it does
+> not depend on u at all — and even at zero turns, with cell centres 3 km apart and one hard edge in the
+> whole period, no cell centre ever crossed it. A fixture with flat places has hiding places. Replaced by a
+> RIPPLE — one sine along u plus one along v, exactly periodic — and run at both rotations; the same
+> sabotage is red at once.
+
+> ⚠️ **AND A COMMENT IN THE STROKE WALK WAS FALSE.** It claimed that starting at texel 0 rather than at an
+> unpainted one would cut a straddling run in two and halve its measured width. It does not: the wrapping
+> run is walked LAST and its write overwrites the half-run left at index 0. Measured, corrected in place,
+> and the search kept — for the single-write invariant it buys, not for a correctness it does not.
+
+> ⚠️ **THE SABOTAGE HARNESS ITSELF WAS THE BIGGEST FINDING.** `make` compares mtimes at ONE-SECOND
+> granularity, so a patch → build → run → restore cycle that fits inside one second leaves the SABOTAGED
+> object linked into the "restored" tree. One sabotage read green because of it, and the poison then stayed
+> in the binary for the next run — the object file and the source carried the identical timestamp, and
+> `make` said "up to date". This is §2.4's "a suite reported PASSED with an old binary" in a new costume,
+> and it is the second time in this programme that a green result was an artefact of the build rather than
+> of the code. **Every sabotage above was re-run with the object deleted before and after the patch.**
+
+### The whole sweep, in both configurations
+
+`build/Bin`, `build/Tests` and `build/Intermediates` deleted first, then `CI=true premake5 gmake`, then
+every `*.make` that is not a third-party library or an aggregate — built, and run if it produced a test
+binary.
+
+| | Debug | Release |
+|---|---|---|
+| BUILD-FAIL | none | none |
+| FAIL | **`SettingConsumers`**, once — see below | none |
+| not-a-suite | `CloudLayoutBaker`, `LatticePeak` | `CloudLayoutBaker`, `LatticePeak` |
+| suites built and run | 66 | 66 |
+
+Release never existed in this worktree before this task, so its whole tree is fresh by construction;
+Debug's `build/Bin`, `build/Tests` and `build/Intermediates` were deleted first.
+
+**THE ONE FAILURE IS THE SWEEP EARNING ITS COST, and it was not this task's code.** `SettingConsumers`
+went red on `WeatherTileSize`: commit `4f63559c` — the previous developer's, and the one the teamlead
+committed unswept — moved "four cells to a tile" into `ECS::CloudLayerLatticeKm` so that the panel and the
+renderer could not spell the ratio differently, and with it went the last textual mention of the field in
+`VolumetricCloudRenderer.cpp`, which the consumer table still named as its reader. `git show` on the three
+commits says exactly when it happened: one mention at `7459012a`, none at `4f63559c`. The row now names
+`Engine/ECS/VolumetricCloudComponent.hpp`, which is where the field is read. Fixed, re-run 10/10 in Debug,
+and green in Release, whose sweep ran after the fix.
+
+The two `not-a-suite` names are both tools — `CloudLayoutBaker` builds `build/Bin/<cfg>/CloudLayoutBaker`
+and no test binary, `LatticePeak` likewise — and this is the same answer §PT derived by hand for
+`CloudLayoutBaker` rather than extending the skip list.
+
+The §2.4 item 5a check — is anything in `build/Bin/Tests` a binary the skip list would have skipped —
+returns nothing in both configurations, so the list has not gone stale again.
+
+### What this task did NOT do
+
+* **The bake button was not pressed** — see the box above. It is the one claim in this document that rests
+  on reading a diff rather than on a measurement, and it is named rather than dressed up.
+* **The v-axis convention was NOT changed.** The map being the picture upside down is a real cost, and
+  flipping the sampler would have been a one-line change — and would have moved every sky in the
+  repository that binds a painting, including §PT's own frames, for a matter of taste. It is DOCUMENTED and
+  pinned by a test instead.
+* **The panel still does not paint.** It points at a picture; the drawing happens in a paint program. A
+  brush in this window was never in scope and there is no evidence anybody wants one.
+* **The "Open" picker lists REGISTERED paintings, not the folder.** With a scene that binds one it lists
+  it; on a scene with no cloud layer at all it says "(no paintings on disk)" while five `.dclayout` files
+  sit in `Resources/Assets/Clouds/Layouts`. That is not this panel's invention — `CloudNoiseVolumePanel`
+  says "(no volumes on disk)" from the identical `FindAllByType` call, and fixing one of the two alone
+  would fork a convention the whole folder shares. It belongs to whoever owns asset discovery, and it is
+  written down here rather than left for the next person to find in a screenshot.
