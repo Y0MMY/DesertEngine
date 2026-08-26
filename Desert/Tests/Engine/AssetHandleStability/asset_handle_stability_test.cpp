@@ -814,9 +814,17 @@ TEST( AssetHandleStability, TwoAssetTypesMayShareOnePathAndStayTwoRecords )
     const auto cloudType = manager.CreateAsset<Desert::Assets::CloudTypeAsset>(
          AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Shared.asset" ), false );
 
-    ASSERT_TRUE( sky != nullptr );
-    ASSERT_TRUE( cloudType != nullptr );
+    // Asserted by TYPE CENSUS, and not by a null check on the returned pointer. The manager casts with
+    // std::static_pointer_cast, so a registry that handed back the skybox record for the cloud type
+    // request would return a perfectly non-null pointer to an object of the wrong class -- which is
+    // worse than a duplicate record, and which the first version of this test could not see. Sabotaging
+    // the key to drop the type left the suite green until these two lines replaced that null check.
     EXPECT_EQ( manager.FindAllByType<Desert::Assets::SkyboxAsset>().size(), 1u );
+    EXPECT_EQ( manager.FindAllByType<Desert::Assets::CloudTypeAsset>().size(), 1u )
+         << "the second asset type at this path got no record of its own, so the registry answered a "
+            "CloudTypeAsset request with a SkyboxAsset reinterpreted as one";
+
+    EXPECT_NE( static_cast<const void*>( sky.get() ), static_cast<const void*>( cloudType.get() ) );
 }
 
 // ---------------------------------------------------------------------------------------------------
