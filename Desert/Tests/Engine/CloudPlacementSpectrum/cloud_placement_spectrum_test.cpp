@@ -962,10 +962,10 @@ TEST( CloudPlacementSpectrum, TheTowersFootprintConstantsSayWhatTheLayoutActuall
     // survives into that ratio.
     const auto skyAtTaper = [&]( float taper )
     {
-        CloudProceduralFieldParams params            = StormParams();
-        params.Species[0].Shape.AnvilStrength        = 0.0f;
-        params.Species[0].Shape.TopTaper             = taper;
-        params.Coverage                              = 0.5f;
+        CloudProceduralFieldParams params     = StormParams();
+        params.Species[0].Shape.AnvilStrength = 0.0f;
+        params.Species[0].Shape.TopTaper      = taper;
+        params.Coverage                       = 0.5f;
         return SkyCover( params );
     };
 
