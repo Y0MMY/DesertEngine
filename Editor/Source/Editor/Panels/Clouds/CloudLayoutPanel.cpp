@@ -102,6 +102,14 @@ namespace Desert::Editor
     {
         LayerContext layer;
 
+        // THE NO-LAYER ANSWER IS FILLED IN, not left blank. With no cloud component in the scene the panel
+        // still draws a map, against the shipped defaults, and the one species it has must have a NAME —
+        // otherwise the channel labels read "-> " and the artist is told nothing by a control that is
+        // trying to tell them everything.
+        layer.SpeciesCount        = 1u;
+        layer.Species[0].BuiltIn  = true;
+        layer.Species[0].TypeName = "the built-in cumulus congestus";
+
         if ( !m_Scene )
             return layer;
 
