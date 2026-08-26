@@ -1,9 +1,9 @@
 #include "NodeGraphPanel.hpp"
 
-#include <Editor/Widgets/AssetThumbnailRenderer.hpp>
-#include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Panels/MaterialPreviewPanel.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Shader/ShaderAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
@@ -11,6 +11,8 @@
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <imgui-node-editor/imgui_node_editor.h>
+
+#include <rflcpp/rfl/json.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -49,9 +51,11 @@ namespace Desert::Editor
             return Common::Constants::Path::SHADERDIR_PATH / "Programs" / "Graph" / ( name + ".shader" );
         }
 
-        std::filesystem::path PreviewPngPath( const std::string& name )
+        // The scratch material a graph's shader is previewed on. One per graph, next to the graph itself,
+        // so it is an ordinary project asset the artist can also drop onto a mesh.
+        std::filesystem::path PreviewMaterialPath( const std::string& name )
         {
-            return Common::Constants::Path::COOKED_PATH / "GraphPreviews" / ( name + ".png" );
+            return Common::Constants::Path::MATERIAL_PATH / ( name + "_Preview.demat" );
         }
 
         // Fills @p doc with a minimal, compiles-as-is starter graph for the domain: Surface gets
@@ -295,7 +299,7 @@ namespace Desert::Editor
             // Already registered: the overwrite is picked up by the shader hot-reload poll.
             m_Status        = m_Doc.Name + ".shader recompiled — hot reload applies it";
             m_StatusIsError = false;
-            m_PreviewRequested = true;
+            PublishToPreview();
             return;
         }
 
@@ -316,7 +320,57 @@ namespace Desert::Editor
         }
         m_Status        = m_Doc.Name + " compiled + registered — pick it in Material \\ Shader";
         m_StatusIsError = false;
-        m_PreviewRequested = true; // render the fresh shader on the preview sphere
+        PublishToPreview();
+    }
+
+    Assets::AssetHandle NodeGraphPanel::EnsurePreviewMaterial()
+    {
+        if ( static_cast<uint64_t>( m_PreviewMaterial ) != 0 )
+            return m_PreviewMaterial;
+        if ( !m_AssetManager )
+            return Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+
+        const auto path = PreviewMaterialPath( m_Doc.Name );
+
+        std::error_code ec;
+        std::filesystem::create_directories( path.parent_path(), ec );
+
+        // Reuse the file if a previous compile already made one for this graph, so recompiling does not
+        // keep minting scratch materials. CreateAsset loads an existing .demat and produces an empty one
+        // otherwise; either way the asset itself is what writes the file, through the material canon,
+        // rather than this panel hand-rolling .demat JSON.
+        auto asset =
+             m_AssetManager->CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::Medium, path );
+        if ( !asset )
+        {
+            LOG_ERROR( "[NodeGraph] preview material '{}' could not be created", path.string() );
+            return Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+        }
+
+        // ShaderName is the ONLY thing that makes this material the graph's; a material left over from an
+        // earlier compile keeps whatever shader it had, so set it every time.
+        asset->Data().ShaderName = m_Doc.Name;
+        if ( !asset->Data().MaterialId.has_value() || asset->Data().MaterialId->IsNull() )
+            asset->Data().MaterialId = Common::UUID::Generate();
+        Common::Utils::FileSystem::WriteContentToFile( path, asset->Save() );
+
+        if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
+            materialService->Register( asset );
+
+        m_PreviewMaterial = asset->GetMetadata().Handle;
+        return m_PreviewMaterial;
+    }
+
+    void NodeGraphPanel::PublishToPreview()
+    {
+        // Tell the preview window to drop the pipelines it built from the OLD modules before showing the
+        // material again. The shader object reloads itself, but pipelines are cached per SceneRenderer and
+        // the hot-reload path only invalidates the main scene's cache — so without this the preview would
+        // keep drawing the previous compile while the viewport drew the new one.
+        MaterialPreviewPanel::RequestShaderRebuilt( m_Doc.Name );
+
+        if ( const auto material = EnsurePreviewMaterial(); static_cast<uint64_t>( material ) != 0 )
+            MaterialPreviewPanel::RequestPreview( material );
     }
 
     void NodeGraphPanel::DrawToolbar()
@@ -586,73 +640,17 @@ namespace Desert::Editor
         ed::SetCurrentEditor( nullptr );
     }
 
-    void NodeGraphPanel::DrawPreviewColumn()
-    {
-        ImGui::TextDisabled( "Preview" );
-        constexpr float kPreviewSize = 128.0f;
-
-        if ( m_PreviewImage && m_UIHelper )
-            m_UIHelper->Image( m_PreviewImage, ImVec2( kPreviewSize, kPreviewSize ) );
-        else
-        {
-            // Placeholder box until the first successful Compile.
-            ImDrawList*  dl = ImGui::GetWindowDrawList();
-            const ImVec2 p0 = ImGui::GetCursorScreenPos();
-            dl->AddRectFilled( p0, ImVec2( p0.x + kPreviewSize, p0.y + kPreviewSize ),
-                               IM_COL32( 30, 30, 34, 255 ), 4.0f );
-            dl->AddRect( p0, ImVec2( p0.x + kPreviewSize, p0.y + kPreviewSize ),
-                         IM_COL32( 255, 255, 255, 25 ), 4.0f );
-            ImGui::Dummy( ImVec2( kPreviewSize, kPreviewSize ) );
-        }
-        if ( m_PreviewWaiting || ( m_PreviewRenderer && m_PreviewRenderer->HasPending() ) )
-            ImGui::TextDisabled( "rendering..." );
-        else if ( !m_PreviewImage )
-            ImGui::TextDisabled( "Compile to render" );
-    }
-
     void NodeGraphPanel::OnUIRender()
     {
         DrawToolbar();
 
-        // Preview pipeline: request after a successful Compile, tick the offscreen render, and
-        // pick up the finished PNG. All lazy — zero cost until the first Compile.
-        if ( m_PreviewRequested )
-        {
-            if ( !m_PreviewRenderer )
-            {
-                m_PreviewRenderer = std::make_unique<AssetThumbnailRenderer>();
-                m_PreviewCache    = std::make_unique<ThumbnailCache>();
-                m_UIHelper        = std::make_unique<UI::UIHelper>();
-                m_UIHelper->Init();
-            }
-            if ( !m_PreviewRenderer->HasPending() )
-            {
-                const auto png = PreviewPngPath( m_Doc.Name );
-                std::error_code ec;
-                std::filesystem::create_directories( png.parent_path(), ec );
-                m_PreviewRenderer->RequestShader( m_Doc.Name, png.string() );
-                m_PreviewRequested = false;
-                m_PreviewWaiting   = true;
-            }
-        }
-        if ( m_PreviewRenderer )
-            m_PreviewRenderer->Tick();
-        if ( m_PreviewWaiting && m_PreviewRenderer && !m_PreviewRenderer->HasPending() )
-        {
-            const auto png = PreviewPngPath( m_Doc.Name ).string();
-            m_PreviewCache->Invalidate( png );
-            m_PreviewImage   = m_PreviewCache->Get( png );
-            m_PreviewWaiting = false;
-        }
-
-        constexpr float kPreviewColumnW = 144.0f;
-        ImGui::BeginChild( "##graphCanvasRegion", ImVec2( -kPreviewColumnW, 0.0f ) );
+        // The canvas gets the whole panel now. The 128 px thumbnail that used to sit beside it is gone,
+        // and not merely moved: it was rendered by AssetThumbnailRenderer through
+        // MaterialComponent::ShaderName — the shader-OVERRIDE route — which is a different path in
+        // MeshRenderer from the one a scene mesh takes. It therefore showed a correct material at times
+        // when the scene showed something else (Docs/MaterialEditor/STAGE1_END_TO_END.md). Compile now
+        // publishes to the Material Preview window, which previews a material ASSET through the same
+        // per-slot route the game uses.
         DrawCanvas();
-        ImGui::EndChild();
-
-        ImGui::SameLine();
-        ImGui::BeginGroup();
-        DrawPreviewColumn();
-        ImGui::EndGroup();
     }
 } // namespace Desert::Editor

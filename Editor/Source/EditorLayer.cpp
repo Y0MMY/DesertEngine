@@ -59,6 +59,7 @@
 #include "Editor/Panels/Logs/LogsPanel.hpp"
 #include "Editor/Panels/Collections/CollectionsPanel.hpp"
 #include "Editor/Panels/NodeGraph/NodeGraphPanel.hpp"
+#include "Editor/Panels/MaterialPreviewPanel.hpp"
 #include "Editor/Panels/Animation/AnimGraphPanel.hpp"
 #include "Editor/Panels/Photogrammetry/PhotogrammetryPanel.hpp"
 #include "Editor/Panels/Particles/ParticleEditorPanel.hpp"
@@ -437,6 +438,10 @@ namespace Desert::Editor
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
         m_Panels.emplace_back( std::make_unique<Editor::NodeGraphPanel>( m_AssetManager ) );
+        // The material editor's live preview window. Hidden by default and costs exactly nothing until it
+        // is opened — it creates its scene, renderer and renderer slot on the first frame it draws and
+        // gives them back the moment it stops.
+        m_Panels.emplace_back( std::make_unique<Editor::MaterialPreviewPanel>( m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::AnimGraphPanel>( m_MainScene, m_AnimationLibrary.get() ) );
         m_Panels.emplace_back(
              std::make_unique<Editor::PhotogrammetryPanel>( m_MainScene, m_AssetManager.get() ) );
