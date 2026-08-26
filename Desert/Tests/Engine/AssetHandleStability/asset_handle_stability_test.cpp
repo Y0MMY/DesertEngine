@@ -765,10 +765,8 @@ TEST( AssetHandleStability, TwoSpellingsOfOneFileRegisterAsOneAsset )
 
     Desert::Assets::AssetManager manager;
 
-    const auto viaAbsolute =
-         manager.CreateAsset<Desert::Assets::SkyboxAsset>( AssetPriority::Medium,
-                                                           Common::Filepath( projectDir / "Content" /
-                                                                             "Sky" / "Dawn.hdr" ) );
+    const auto viaAbsolute = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
+         AssetPriority::Medium, Common::Filepath( projectDir / "Content" / "Sky" / "Dawn.hdr" ) );
     const auto viaRelative = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
          AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Sky/Dawn.hdr" ) );
 
@@ -808,7 +806,7 @@ TEST( AssetHandleStability, TwoAssetTypesMayShareOnePathAndStayTwoRecords )
     Common::Constants::Path::SetProjectRoot( std::filesystem::current_path() / "RegistryProbe", "Content" );
 
     Desert::Assets::AssetManager manager;
-    const auto sky = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
+    const auto                   sky = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
          AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Shared.asset" ) );
     // loadAfterCreate=false: no such file exists, and this test is about the registry key, not parsing.
     const auto cloudType = manager.CreateAsset<Desert::Assets::CloudTypeAsset>(
