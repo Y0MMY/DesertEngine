@@ -353,6 +353,51 @@ namespace Desert::Assets
                                            const CloudProceduralSpecies&     species );
 
     /**
+     * @brief How much of the sky one cluster of unit radius covers, as the radius of the circle of the same
+     *        AREA — for the TOWER alone, with no anvil over it.
+     *
+     * WHAT IT IS AND WHY IT IS NOT A FIT. It is the area of the union of a cluster's six lobes, projected
+     * down, divided by pi and rooted: a pure consequence of the layout constants in
+     * CloudProceduralVolume.cpp (six lobes a golden angle apart on a disc of 0.48 cluster radii that
+     * narrows going up, each 0.62 radii wide at the base, each scaled by a wobble on [0.85, 1.15] and
+     * displaced by up to 0.18 radii). It is computed by quadrature over that layout and NOT fitted to any
+     * sky, so it does not move when the coverage, the cell, the density or the genus does.
+     *
+     * IT DEPENDS ON `TopTaper` AND ON NOTHING ELSE A TYPE AUTHORS, because the taper is the one authored
+     * number that reaches a lobe's WIDTH. The quadrature gives 0.9594 at a taper of 0 and 0.9051 at 1, and
+     * the law between them is linear to 0.2 per cent — which is why two numbers ship rather than a table.
+     *
+     * Desert/Tests/Engine/CloudPlacementSpectrum re-measures it from the EMITTED lumps at three tapers on
+     * every run, so the constants and the layout cannot drift apart in silence.
+     */
+    float CloudClusterTowerFootprintRadii( float topTaper );
+
+    /**
+     * @brief How much wider than the calibrated tower this type's own body reaches, as a factor to divide
+     *        the cluster's radius by so that the `Coverage` slider keeps meaning the sky.
+     *
+     * THE DEFECT IT EXISTS FOR, stated as the two numbers that disagreed. The Coverage mapping — the 0.68
+     * alive exponent and the packing gain beside it — is a statement about the AREA one cluster covers, and
+     * the generator already holds that area still against the three things that could move it: the density
+     * (the count's own compensation), the size spread (a draw uniform in AREA) and the anisotropy (§SIL's
+     * geometric mean). **The fourth was the type's own ANVIL, and nothing compensated it.** A cumulonimbus
+     * canopy is a solid ellipse of `(1 + 0.8 * AnvilStrength)` cluster radii, concentric with the tower and
+     * far wider than it, so a storm covered 2.5 times the sky the mapping had priced — and the slider read
+     * 0.856 for a setting of 0.5, the largest lie left in it (CALIBRATION.md §CB).
+     *
+     * IT IS DERIVED AND NOT FITTED. The canopy's footprint is a closed form — `pi * a * b` of an ellipse
+     * whose radii the emission writes — and the tower's is CloudClusterTowerFootprintRadii above. The gain
+     * is the ratio of the two equivalent radii, floored at 1 because a canopy NARROWER than the tower it
+     * caps is hidden inside it and costs the sky nothing.
+     *
+     * WHY THE WHOLE CLUSTER SHRINKS AND NOT THE CANOPY. `AnvilStrength` is authored as how far the canopy
+     * spreads BEYOND its tower; shrinking the canopy alone would make that number mean something else. A
+     * factor on the cluster leaves the storm's silhouette exactly as its asset describes it and moves only
+     * how much sky one storm is worth.
+     */
+    float CloudClusterFootprintGain( const Graphic::CloudTypeShape& shape );
+
+    /**
      * @brief Do these two sets of parameters bake the same volume?
      *
      * WHAT IT IS FOR. The renderer keeps a baked volume and has to know when it is stale. If this answers
