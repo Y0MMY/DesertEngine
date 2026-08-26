@@ -4723,3 +4723,37 @@ repeated hashes are the six `Clouds_Demo` pairs** — which is the result rather
   layer comes from `Graphic::CloudTypeSetEnvelopeKm` instead of `Top - Base`. It is reported here rather
   than taken quietly, and the argument for making it is that the alternative was to calibrate the sky
   against an instrument that could not see the body being calibrated.
+
+### THE WHOLE SWEEP, WITH THE OBJECTS AND THE BINARIES DELETED FIRST
+
+`CI=true premake5 gmake` on the merged tree, `build/Bin/Tests/<config>` and
+`build/Tests/Intermediates/<config>` **removed entirely** before either run, then every generated makefile
+built and run.
+
+| | Debug |
+|---|---|
+| makefiles generated | **84** |
+| excluded as tools, libraries and aggregates | **14** |
+| makefiles the loop considered | **70** |
+| suite binaries built | **67** |
+| `not-a-suite` lines | **3** |
+| `BUILD-FAIL` | **none** |
+| suites failed | **NONE** |
+
+**The count balances: 70 considered, 3 named as tools, 67 suites, 67 binaries, nothing unexplained.**
+
+**AND THE THREE `not-a-suite` NAMES, READ RATHER THAN ASSUMED:** `ImageStat`, `LineJump`, `SceneMigrator`.
+All three are this programme's own instruments — they land in `build/Bin/<config>/` and link no gtest —
+which is what the loop is supposed to report about them. **None of them is a suite that failed to build.**
+
+> The exclusion list this run used is deliberately SHORTER than §RW's: `ImageStat`, `LineJump` and
+> `SceneMigrator` were left OUT of it so that the loop would have to name them. It did. That is the
+> derived-rather-than-listed behaviour §2.4 item 5a asks for, exercised rather than trusted: a real suite
+> that stopped building would have arrived in the same three lines and been impossible to miss.
+
+**THE RELEASE ARM NEEDED ITS ENGINE STACK BUILT FIRST, AND THE FIRST ATTEMPT IS RECORDED BECAUSE IT LOOKED
+LIKE A CATASTROPHE.** Run straight after the Debug arm, Release reported `BUILD-FAIL` on all seventy and
+built zero binaries. Nothing was wrong with any suite: `libDesert.a` and `libCommon.a` had never been built
+in Release on this worktree, and a suite makefile does not build its own dependencies. The Debug arm had
+concealed the same gap by having those libraries already on disk from the frames. **A sweep that reports
+seventy build failures is reporting one.**
