@@ -4573,3 +4573,52 @@ the direction the placement is not independent: at a low alive fraction the clus
 several a single cell holds, sitting on one site and overlapping each other, so they cover less sky than
 scattered bodies of the same total area would. **The low end is a correlation defect, not a slope defect,
 and it is not fixed here.**
+
+### THE SHIPPED SKY DID NOT MOVE — SIX OF SIX, BYTE FOR BYTE
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, both arms. **The repeat floor is zero and was measured
+on this worktree**: two runs of the same binary at `mid away` are identical, from the SECOND render onward,
+which is §A1's correction reproduced.
+
+| point | md5, before and after |
+|---|---|
+| zenith away `0,0.9,-1` | `73c7806b04c1c71317e4aba52e3f20dc` |
+| mid away `0,0.45,-1` | `4819e9c0c6dcdfadbf7477bd90a409d7` |
+| horizon away `0,0.12,-1` | `304f4c2b56ea4751f50b6eb7b6351b4e` |
+| zenith sunward `0,0.9,1` | `ada3c729466065ad749a473698b2f903` |
+| mid sunward `0,0.45,1` | `4a2ddc2a6a5bd7637701fd1a3fe7da8b` |
+| horizon sunward `0,0.12,1` | `bfd06fce1094adaa4e538cebba2f66f7` |
+
+**All six are the same bytes in both arms**, so the four things the brief says must not be lost — the sky's
+cover of 0.7446, `LATTICE 0.0000` along the wind, the erosion's 1.10x over the march's floor and the
+congestus' 1.8 : 1 core — cannot have moved: they are properties of a file that is identical. The genus
+sweep says the same from the other side: the congestus reads **1.8 : 1** and **0.5122** in both columns.
+
+**THE HASHES WERE CHECKED FOR DUPLICATES AND SIX PAIRS COLLIDE — exactly those six, and no others.** Of the
+28 frames, the only repeated hashes are the six `Clouds_Demo` before/after pairs. The twelve cumulonimbus
+frames and the four hero-scene frames are sixteen distinct files.
+
+### ⚠️ THE PRICE, NAMED: THREE SCENES USE THE CUMULONIMBUS AND ALL THREE MOVE PAST A TENTH
+
+This is decision **D-20's condition NOT met**, it is a trade, and it is the teamlead's rather than this
+task's. Every scene in the project that names `Cumulonimbus.decloudtype`, measured in both arms at its own
+authored `Coverage`, 8 realisations:
+
+| scene | authored `Coverage` | sky before | sky after | the slider was out by | it is out by |
+|---|---|---|---|---|---|
+| `Clouds_HeroTrio` | 0.075 | 0.2489 | **0.1030** | **+0.174** | **+0.028** |
+| `Clouds_HeroMass` | 0.209 | 0.5375 | **0.2441** | **+0.329** | **+0.035** |
+| `SIL_Cumulonimbus` | 0.762 | 0.9856 | **0.7644** | **+0.224** | **+0.002** |
+
+**Every one of the three moves by more than a tenth, and that IS the fix rather than a side effect** — the
+mapping those three scenes were authorised under is the one that was lying. `Shots/CB_before_cb_mid_away.png`
+against `Shots/CB_after_cb_mid_away.png` is what 0.9856 of the sky looks like against 0.7644: a formless
+grey murk with the camera inside the overcast, against storms with blue between them.
+
+**The number of storms does not change and only their width does**, which is worth stating because it
+decides which repair is the cheaper one. The alive fraction is untouched, so `Clouds_HeroTrio` still has
+its trio and `Clouds_HeroMass` still has its mass; each body is 1/1.702 as wide. **Re-authoring the three
+scenes to preserve their old sky would therefore change what they are FOR** — `HeroTrio` would need about
+0.213 instead of 0.075 and would then be a field rather than three bodies.
+
+**The work is stopped here for that decision.** The three scene files are NOT re-saved by this task.
