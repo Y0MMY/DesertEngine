@@ -151,6 +151,21 @@ namespace Desert::Graphic::API::Vulkan
     {
         Release();
 
+        // A shader that never compiled carries no stages, and vkCreateGraphicsPipelines answers
+        // `stageCount = 0` with a validation storm and then a crash — the process dies before the frame
+        // is presented, so the artist sees the editor vanish rather than the typo they made. Refuse here,
+        // by name, and leave the pipeline null: the caller already treats a null pipeline as "skip this
+        // draw", so the rest of the scene keeps rendering. This is the last line of defence — callers are
+        // expected to ask Shader::IsCompiled() and not get this far — but it is the one place EVERY
+        // pipeline in the engine passes through, so it is the one that cannot be forgotten.
+        if ( m_Specification.Shader && !m_Specification.Shader->IsCompiled() )
+        {
+            LOG_ERROR( "[Pipeline] '{}' not created: shader '{}' has no compiled stages (see the shader "
+                       "compilation error above). The draws using it are skipped.",
+                       m_Specification.DebugName, m_Specification.Shader->GetName() );
+            return;
+        }
+
         CreatePipelineLayout();
         CreateVertexInputState();
         CreateInputAssemblyState();
