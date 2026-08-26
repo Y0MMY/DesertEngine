@@ -4758,3 +4758,87 @@ Checked rather than assumed, because a wrong digit under an accepted decision is
    body looks like. The catalogue is not wrong about the genera it describes; it is a description of
    voxels that no longer exist, and re-running `Desert/Tests/Engine/CloudCatalogue` (which prints the table
    itself) is a cheap task for whoever needs it next.
+
+### The frames
+
+Two, and they are the two ends of the cost A/B rather than decoration — a reader can see what +5.78 ms of
+march buys. Checked against every PNG in `Shots/` by md5 before being committed: neither is a duplicate.
+
+| file | what it shows |
+|---|---|
+| `Shots/PR_hero0_none.png` | `PR_Hero0`, all eight hero entities disabled — the procedural cumulonimbus field alone |
+| `Shots/PR_hero8_eight.png` | `PR_Hero8`, all eight enabled — the same sky with the sculpted anvil, its stem, the arch and the congestus standing in it |
+
+The six protocol points are **not** committed as `PR_` frames: they are byte-identical to
+`SIL2_after_*.png`, which the repository already holds, and the md5 table in §PR is the evidence. *(While
+checking, 37 of the 344 PNGs in `Shots/` were found to share a hash with another file in the same
+directory. That predates this task and none of them is mine; it is recorded here because the next person to
+run a duplicate check will otherwise think they caused it.)*
+
+### The six points held across the `dev` merge
+
+`dev` moved to `14ce7610` (MAT stage 1) while this task was in flight. That merge adds five new graph
+shaders and touches no cloud file — but §PT's own finding is that a shader file arriving can reschedule
+SPIR-V and move pixels, so it was checked rather than reasoned about. After the merge and a full rebuild,
+`Clouds_Protocol.desce` renders **all six protocol points byte for byte identical** to the table above. The
+new base survives the merge and is stated against `14ce7610`.
+
+### The whole sweep, in both configurations
+
+Object files and binaries deleted first (`rm -rf build/Tests build/Bin/Tests`), then the contract's own
+loop, in a resumable form that records a verdict per project rather than only the failures.
+
+| | projects walked | suites | passed | failed | build failures |
+|---|---|---|---|---|---|
+| Debug | 73 | 68 | **68** | 0 | 0 |
+| Release | 73 | 68 | **68** | 0 | 0 |
+
+**The five `not-a-suite` names, read rather than counted** — identical in both configurations, and every one
+of them is a directory under `Tools/`: `CloudLayoutBaker`, `ImageStat`, `LatticePeak`, `LineJump`,
+`SceneMigrator`. The first is §PT's baker, the other four are this document's own instruments. None is a
+suite that failed to build.
+
+Release needed `make Desert config=release` first: the test projects link `build/Bin/Release/libReflectCpp.a`
+and the loop's first eight projects reported `BUILD-FAIL` for no other reason. That is a property of the
+loop rather than of the tree, and it is written down because the next person will hit it.
+
+### The relations added, and the breaks that verified them
+
+`Desert/Tests/Engine/CloudProtocolScene`, four assertions, each sabotaged and each RED:
+
+| assertion | sabotage | result |
+|---|---|---|
+| every reflected field of every reflected component is written explicitly | delete `VolumetricCloud.DetailStrength` from `Clouds_Protocol.desce` | **RED** |
+| the settings block is written in full, including `CloudQualityTier` | delete `Settings.CloudQualityTier` | **RED** |
+| nothing migrates on load | stamp the scene at `SceneVersion 5` | **RED** |
+| the three cost legs differ only in `HeroCloud.Enabled` | move `PR_Hero8`'s `Coverage` to 0.5 | **RED** |
+
+All four scenes were restored and the suite is green again; `git status` is clean of them.
+
+**The sabotage that matters most is the first, and it is worth saying what it stands for.** The failure this
+suite exists to catch is somebody adding a *fifty-second* field to `VolumetricCloudData` — at which point
+the protocol scene silently has a default in it again. Adding a field and deleting a key put the file and
+the reflection table into the *same* state, and the assertion walks `type->Fields` against the file's keys,
+so it is one code path reached from two directions. The cheap direction was sabotaged; the expensive one
+(edit the component, rebuild the engine) is the same test.
+
+### What this task did NOT do, and why it is here rather than in a commit message
+
+* **`Clouds_Demo.desce` was not touched, and that is the decision rather than an omission.** It stays the
+  artist's scene, drift and all. Freezing it would have taken a file its owner is entitled to change and
+  quietly made it read-only; copying it into a second file with the same seven keys would have frozen
+  nothing, because the drift was never in the keys the file had.
+* **The eleven older sections were not rewritten.** Every correction above is a note in §PR naming what the
+  old number measured, as §GT does, and §GT's own paragraph on the hero clouds was updated in place only
+  because it said "not re-measured" and now it has been.
+* **The ten-genus catalogue was not re-measured.** It predates §DS's erosion and §SIL's lump, so it
+  describes voxels that no longer exist. `Desert/Tests/Engine/CloudCatalogue` prints the table itself, so
+  regenerating it is a short task — but it is a *task*, with frames of its own, and doing it here would
+  have put two subjects in one section.
+* **The `LineJump` threshold was not moved.** §PR publishes the norm measured on today's sky
+  (0.0014–0.0036) beside the old 0.006/0.010; changing the threshold the other sections are written
+  against is a decision for the owner of those sections, not a side effect of a protocol freeze.
+* **`Desert/Tests/Engine/SceneTonemapMigration`'s `kRepositoryScenes` list was not extended.** It names
+  eleven scenes and the repository ships forty; it is another file's list and another task's call
+  (§1.6). It is named here because "listed by name rather than discovered, so adding one without
+  converting it is a red test" is no longer true of it.
