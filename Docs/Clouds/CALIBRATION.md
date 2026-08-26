@@ -4451,3 +4451,125 @@ it was calibrated at, and this one does.
 **And the library already contained the counter-example.** `stratus` is on a **12.000 km** cell, four times
 the reference and twice as far from it as the cumulonimbus in ratio, and it reads **0.5098** — dead on. The
 row that would have had to be worst is the best in the table.
+
+### AND THE INSTRUMENT WAS CUTTING THE CANOPY OFF, so the shipped lie is BIGGER than either phase recorded
+
+`Tools/LatticePeak --field` built its layer as `TopAltitudeKm - BaseAltitudeKm`. The renderer does not:
+`VolumetricCloudRenderer::BuildProceduralParams` calls `Graphic::CloudTypeSetEnvelopeKm`, whose top is
+`max(TopAltitudeKm, AnvilAltitudeKm + AnvilThicknessKm)` — because a type's second lobe stands ABOVE its
+tower and a shell that stopped at the tower would cut it off.
+
+**For eight of the nine genera the two agree exactly. For the cumulonimbus they are 8.10 km against
+10.40 km**, and the slice the instrument was throwing away is the canopy's WIDEST. It is the same
+two-places-that-must-agree shape the instrument was built to hunt, one level up, and it is fixed by calling
+the shared function rather than by recomputing the shell in the tool.
+
+| the cumulonimbus at `Coverage 0.5` | sky |
+|---|---|
+| as §SIL and §SIL2 measured it, canopy clipped at 9.00 km | 0.8561 (**+0.356**) |
+| the same binary, shell as the renderer builds it | **0.8883** (**+0.388**) |
+
+### FORM BY FORM, ALL NINE, AND EIGHT OF THEM DO NOT MOVE AT ALL
+
+`LatticePeak --field --type <the shipped asset> --coverage 0.5`, **8 realisations**, both arms on the
+envelope-corrected instrument so the two columns are the same measurement. `Coverage` is 0.5, so a column
+that does not read 0.5 is the slider lying by that much.
+
+| genus | cell (km) | sky before | sky after | **slider out by, before → after** |
+|---|---|---|---|---|
+| cumulus humilis | 1.500 x 1.500 | 0.5197 | 0.5197 | +0.020 → +0.020 |
+| cumulus mediocris | 2.400 x 2.400 | 0.5123 | 0.5123 | +0.012 → +0.012 |
+| cumulus congestus | 3.000 x 3.000 | 0.5122 | 0.5122 | +0.012 → +0.012 |
+| **cumulonimbus** | **6.000 x 6.000** | **0.8883** | **0.5445** | **+0.388 → +0.045** |
+| stratocumulus | 1.328 x 0.830 | 0.5228 | 0.5228 | +0.023 → +0.023 |
+| stratus | 12.000 x 12.000 | 0.5098 | 0.5098 | +0.010 → +0.010 |
+| altocumulus | 1.102 x 0.735 | 0.5521 | 0.5521 | +0.052 → +0.052 |
+| cirrus | 5.091 x 0.636 | 0.5124 | 0.5124 | +0.012 → +0.012 |
+| lenticular | 1.073 x 5.367 | 0.5077 | 0.5077 | +0.008 → +0.008 |
+
+**Eight of the nine rows are identical to four decimals, and that is not luck — it is the shape of the
+change.** `CloudClusterFootprintGain` returns exactly 1.0 for a type with no canopy, so the arithmetic those
+eight genera go through is bit-for-bit the arithmetic that shipped. The four genera the brief guards read
+**stratocumulus 0.5228, altocumulus 0.5521, cirrus 0.5124, lenticular 0.5077** in BOTH columns.
+
+**AND THE CELL SPANS 0.90 km TO 12.000 km ACROSS THAT TABLE — THIRTEEN TIMES — WITH EVERY ROW BUT ONE
+INSIDE 0.052.** The genus on the coarsest cell in the library is the second most accurate row in it.
+
+### THE CELL LADDER, ONE GENUS, THE CELL THE ONLY THING THAT CHANGES
+
+The table above still confounds the cell with the genus, so it is asked again of the shipped congestus at
+five settings of its `PlacementScale`, `Coverage 0.5`, 8 realisations, nothing else touched:
+
+| cell | 1.500 km | 2.400 km | 3.000 km | 6.000 km | 12.000 km |
+|---|---|---|---|---|---|
+| sky delivered | 0.5016 | 0.5052 | 0.5122 | 0.5323 | 0.5026 |
+| out by | +0.002 | +0.005 | +0.012 | +0.032 | +0.003 |
+
+**Eight times of cell for a spread of 0.030, and NOT MONOTONE.** There is no cell law to fit: the widest
+cell is the second most accurate setting, and what is left is the estimator's own wobble on a region that
+holds four coarse cells across. **The cell can account for at most +0.032 of the cumulonimbus' +0.388.**
+
+**And it is derivable that it should be so.** The clusters per unit area go as `1/cell²` and one cluster's
+footprint as `cell²`, so the cell cancels out of the expected cover exactly. A cell term added to
+`kPackingCompensation` would have been a constant fitted at a second size — the same mistake one level
+along — and it would have moved all nine genera to buy 0.03 on one.
+
+### WHAT THE CAUSE ACTUALLY IS, AND IT IS A CLOSED FORM
+
+The Coverage mapping is a statement about the AREA one cluster covers, and the generator already holds that
+area still against three of the four things that could move it: the density (`kDensityCompensation`), the
+size spread (a draw uniform in AREA) and the anisotropy (§SIL's geometric mean). **The fourth is the type's
+own anvil, and nothing compensated it.**
+
+* The canopy is ONE solid ellipse of radii `(1 + 0.8 * AnvilStrength) * R * stretch` by
+  `0.9 * (1 + 0.8 * AnvilStrength) * R / stretch`. Its equivalent radius is the geometric mean —
+  `(1 + 0.8 * S) * sqrt(0.9)` cluster radii, **1.5938 R** at the shipped 0.85 — and `stretch` cancels out
+  of it exactly.
+* The tower's footprint is the union of its six lobes in projection. It is a consequence of the layout
+  constants alone and is computed by quadrature over them: **0.9594 R** at `TopTaper` 0 and **0.9051 R** at
+  1, linear between to 0.2 per cent (0.9363 measured at 0.4 against 0.9377 predicted).
+* The two are concentric, so the union is the larger: the canopy's. The gain is their ratio, **1.702** for
+  the shipped storm, and the cluster's radius is divided by it.
+
+**Nothing in that is fitted to a sky.** The check that it is the right law is the sabotage and the frames,
+not the arithmetic: measured, the canopy multiplies `-ln(1 - cover)` by **2.53** against the **2.90** the
+areas predict, and the gap is the placement not being the independent-bodies model that turns an area into
+a cover — the same gap §RW measured when it derived a packing law and rejected it.
+
+**IT IS THE CLUSTER THAT SHRINKS AND NOT THE CANOPY**, because `AnvilStrength` is authored as how far the
+canopy spreads BEYOND its tower: scaling the canopy alone would redefine the artist's number. The storm's
+proportions are exactly what its asset states; what changes is how much sky one storm is worth. Its opaque
+core goes **2.8 : 1 to 1.9 : 1** — a narrower tower under the same overhang, which is what a storm is.
+
+### THE LOW END DID NOT MOVE, TO THE LAST DIGIT
+
+`CloudProceduralField.CoverageIsTheFractionOfSkyThatHasCloudInTheColumn`, this worktree, after the change:
+
+    coverage 0.15 -> 0.120  (-0.030)
+    coverage 0.24 -> 0.215  (-0.025)
+    coverage 0.35 -> 0.318  (-0.032)
+    coverage 0.50 -> 0.522  (+0.022)
+    coverage 0.75 -> 0.759  (+0.009)
+
+**That is §SIL2's published ladder reproduced digit for digit**, and it is bit-identical rather than merely
+close: the fixture authors no anvil, so the gain is exactly 1.0 and not one instruction of the low end's
+arithmetic changed.
+
+**RE-DERIVING IT WAS ATTEMPTED AND IS REPORTED AS A FAILURE RATHER THAN OMITTED.** §SIL2 is right that
+refitting the slope cannot fix it, so the mapping was derived from scratch instead: with the clusters placed
+independently the sky is `1 - exp(-n A)`, and `n A` can be written out in closed form from this file's own
+constants **including the term §RW named as the reason its own attempt failed** — that a cluster's radius
+rises with how deep inside the threshold its cell fell, so `<(0.6 + 0.4 fill)²>` is carried rather than
+assumed constant. Against the measured ladder:
+
+| Coverage | 0.15 | 0.24 | 0.35 | 0.50 | 0.75 |
+|---|---|---|---|---|---|
+| derived | 0.180 | 0.265 | 0.373 | 0.535 | 0.730 |
+| measured | 0.120 | 0.215 | 0.318 | 0.522 | 0.759 |
+
+**It over-predicts the low end by 0.060 and under-predicts the top by 0.029 — worse than the fitted mapping
+at every point, and worst exactly where the fitted one is worst.** The independent-bodies model is wrong in
+the direction the placement is not independent: at a low alive fraction the clusters that exist are the
+several a single cell holds, sitting on one site and overlapping each other, so they cover less sky than
+scattered bodies of the same total area would. **The low end is a correlation defect, not a slope defect,
+and it is not fixed here.**
