@@ -533,6 +533,15 @@ namespace Desert::Editor
             return BOOLSUCCESS;
         }
 
+        // The timestep this frame is driven by. Identical to the wall-clock one the application measured,
+        // EXCEPT under a `--play` capture, where it is the fixed step from ShotOptions.
+        //
+        // Substituted for the whole layer update rather than only for the scene: a capture is reproducible
+        // only if nothing in it integrates a number that came from a clock, and "the scene is deterministic
+        // but the thing above it is not" is the kind of split that holds until the day something above it
+        // starts feeding the scene. Outside `--play` this is `ts` itself, so no existing frame moves.
+        const Common::Timestep frameTs( ShotOptions::Get().FrameSeconds( ts.GetSeconds() ) );
+
         // A scene handed over by a panel (dropped on the viewport, double-clicked in the asset browser).
         // It goes through the SAME deferred load as the menu — but a drag is easy to do by accident, so
         // unsaved work is not thrown away silently: the confirm popup decides, and only then do we queue.
@@ -601,7 +610,7 @@ namespace Desert::Editor
             const auto&     prefs                  = EditorPreferences::Get();
             if ( prefs.AutosaveMinutes > 0 && m_MainScene->GetState() == ::Desert::Core::Scene::SceneState::Edit )
             {
-                s_AutosaveAccum += ts.GetSeconds();
+                s_AutosaveAccum += frameTs.GetSeconds();
                 if ( s_AutosaveAccum >= static_cast<float>( prefs.AutosaveMinutes ) * 60.0f )
                 {
                     s_AutosaveAccum    = 0.0f;
@@ -642,7 +651,7 @@ namespace Desert::Editor
         // Asset hot-reload: pick up edited .demat/.shader files (runs BEFORE scene rendering so
         // a shader-triggered pipeline invalidation never touches an in-recording frame).
         if ( m_AssetManager )
-            m_AssetHotReload.Tick( ts, *m_AssetManager, m_MainScene.get() );
+            m_AssetHotReload.Tick( frameTs, *m_AssetManager, m_MainScene.get() );
 
         // Destroy invalidated runtime materials (shader switched in the editor / hot reload) at
         // the only safe point: before any command recording, behind a device-idle wait. Doing it
@@ -656,6 +665,45 @@ namespace Desert::Editor
         // transfer, and the UI walk later just samples the freshly-updated frame texture.
         if ( auto* videoService = Runtime::ResourceRegistry::GetVideoService() )
             videoService->UpdateAll();
+
+        // Screenshot mode, `--play`: start the world before the first frame that will be counted.
+        //
+        // Through OnScenePlay(), the same entry the toolbar's Play button uses, so a headless run is a Play
+        // session and not a second definition of one — the snapshot it takes is what would let a Stop
+        // restore the authored scene, and a capture that entered Play by some private shortcut would drift
+        // from the editor the day either changed.
+        //
+        // The camera is PINNED first, and that is the whole reason this block is not one line. Play hands
+        // the view to the scene's own CameraComponent (Scene::UpdateActiveCameraSource), which would take
+        // the shot away from `--camera`/`--look` in any scene that has a camera entity — and take it
+        // SILENTLY, because the placement below asks for an EditorCamera and would simply not find one.
+        // Pinning is the engine's existing "this view is driven from outside" mechanism and headless
+        // capture is exactly that case, so `--play` changes what MOVES in the frame and nothing about
+        // where the frame is taken from.
+        if ( auto& shot = ShotOptions::Get(); shot.PlayActive() && !m_SceneLoadRequested && !StartupLoading() &&
+                                              m_MainScene &&
+                                              m_MainScene->GetState() == ::Desert::Core::Scene::SceneState::Edit )
+        {
+            if ( m_MainScene->GetActiveCamera() )
+            {
+                m_MainScene->PinActiveCamera( m_MainScene->GetActiveCamera() );
+                OnScenePlay();
+                LOG_INFO( "[Shot] --play: gameplay running at a fixed {} s step; the {} captured frames are "
+                          "{} s of simulated time",
+                          ShotOptions::PlayStepSeconds, shot.Frames, shot.SimulatedSeconds( shot.Frames ) );
+            }
+            else
+            {
+                // Refused rather than played anyway: with nothing to pin, Play would pick a view of its own
+                // and the capture would answer a question about a pose nobody asked for — while looking
+                // exactly like a legitimate result.
+                LOG_ERROR( "[Shot] --play refused: scene '{}' has no active camera to pin, and Play would "
+                           "choose the view itself. No gameplay time advanced; this capture is a frozen "
+                           "world.",
+                           m_MainScene->GetSceneName() );
+                shot.Play = false;
+            }
+        }
 
         // Screenshot mode, FIRST HALF: place the camera for the frame that is about to be rendered.
         //
@@ -689,10 +737,10 @@ namespace Desert::Editor
         // one is m_MainScene (rebound on viewport focus); RigBuilder / F9 below act on it only. The outline
         // aid + Begin/RegistryRender/OnUpdate/End are folded into UpdateSceneFrame (see below), applied per
         // scene so a secondary viewport is a full, independent render — not a static snapshot.
-        if ( auto r = UpdateSceneFrame( *m_PrimaryScene, m_RenderRegistry.get(), ts ); !r )
+        if ( auto r = UpdateSceneFrame( *m_PrimaryScene, m_RenderRegistry.get(), frameTs ); !r )
             return Common::MakeError( r.GetError() );
         for ( auto& doc : m_ExtraScenes )
-            if ( auto r = UpdateSceneFrame( *doc->Scene, doc->Registry.get(), ts ); !r )
+            if ( auto r = UpdateSceneFrame( *doc->Scene, doc->Registry.get(), frameTs ); !r )
                 return Common::MakeError( r.GetError() );
 
         // Runs a queued "Convert to Skinned" (rig builder) here, outside ImGui component iteration — the swap
