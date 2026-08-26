@@ -4469,6 +4469,13 @@ the shared function rather than by recomputing the shell in the tool.
 | as §SIL and §SIL2 measured it, canopy clipped at 9.00 km | 0.8561 (**+0.356**) |
 | the same binary, shell as the renderer builds it | **0.8883** (**+0.388**) |
 
+> **THE NUMBER OF RECORD FOR THE SHIPPED LIE IS +0.388, NOT THE +0.354 TWO PHASES PUBLISHED**, and what
+> the old figure was is worth naming rather than crossing out: it is the sky of a cumulonimbus **whose
+> canopy has been cut off above 9.00 km** — a real quantity, correctly measured, of a body the engine does
+> not draw. **It is §GT's shape exactly**: an instrument that measured the wrong thing accurately, so every
+> digit of it was reproducible and none of it was the answer. The instrument would have been right for
+> eight of the nine genera and wrong only for the one under test, which is why nothing caught it.
+
 ### FORM BY FORM, ALL NINE, AND EIGHT OF THEM DO NOT MOVE AT ALL
 
 `LatticePeak --field --type <the shipped asset> --coverage 0.5`, **8 realisations**, both arms on the
@@ -4621,7 +4628,27 @@ its trio and `Clouds_HeroMass` still has its mass; each body is 1/1.702 as wide.
 scenes to preserve their old sky would therefore change what they are FOR** — `HeroTrio` would need about
 0.213 instead of 0.075 and would then be a field rather than three bodies.
 
-**The work is stopped here for that decision.** The three scene files are NOT re-saved by this task.
+The work was stopped here and the decision asked for.
+
+### THE RULING: THE SCENES ARE NOT RE-AUTHORED, AND D-20 IS SATISFIED RATHER THAN WAIVED
+
+**Decided by the teamlead on the two frames, 2026-08-26: ship as measured, re-author nothing.** The three
+scene files are unchanged by this task. The argument is recorded here because a later phase will find three
+scenes whose sky moved and no diff explaining it:
+
+1. **The old sky was not a differently-scaled sky, it was a WRONG one.** A scene called `HeroTrio`, authored
+   at `Coverage 0.075`, rendered as 0.249 of closed overcast. Nobody asked for that; the slider lied.
+   Restoring the old picture would be restoring the lie.
+2. **Re-authoring would destroy the scene's intent.** `HeroTrio` would need about 0.213, at which point it
+   is a field and not a trio. When returning to the old appearance requires contradicting the scene's own
+   name, the old appearance was the error.
+3. **D-20 was written against SILENT DRIFT, not against repairing a known lie.** Its condition reads "the
+   mapping holds inside a tenth, therefore nothing needs re-authoring". Here the mapping did not drift on
+   its own — it is being FIXED, and after the fix eight genera of nine do not move at all while the ninth
+   stops lying. That is the outcome D-20 exists to protect.
+4. **And the composition survives.** The alive fraction is untouched, so WHERE the storms stand does not
+   move and HOW MANY there are does not change; only their width does — which is the one quantity that
+   was wrong.
 
 ### SIX SABOTAGES, AND ONE STAYED GREEN — the hole is closed
 
@@ -4653,7 +4680,8 @@ Read through `-ln(1 - cover)`, whose constant of proportionality cancels in a ra
 **A quarter of one per cent**, which is what makes the two numbers a derivation rather than a fit. Re-run,
 the sabotage is RED, and it is seven times outside the window.
 
-**AND THE STALE-OBJECT TRAP CAUGHT THIS TASK TOO**, arriving from §RW's own direction. The first run of the
+**AND THE STALE-OBJECT TRAP CAUGHT THIS TASK TOO — THE FIFTH TIME IN THIS PROGRAMME**, arriving from §RW's
+own direction. The first run of the
 new relation reported "the constants say 1.0000" against a source that plainly said otherwise: the sabotage
 script had reverted the SOURCE, and the suite's incremental build reused the sabotaged
 `CloudProceduralVolume.o`. Every number above is from a suite whose objects were deleted first.
@@ -4675,11 +4703,9 @@ repeated hashes are the six `Clouds_Demo` pairs** — which is the result rather
 
 ### WHAT THIS TASK DID NOT DO, AND THE ONE DECISION IT IS WAITING ON
 
-* **⚠️ IT DID NOT RE-AUTHOR THE THREE STORM SCENES, AND IT IS STOPPED ON THAT.** `Clouds_HeroTrio`,
-  `Clouds_HeroMass` and `SIL_Cumulonimbus` all move past D-20's tenth, priced above. The decision is the
-  teamlead's, and either answer is one commit: leave them (the slider now means the sky in all three, out
-  by 0.028 / 0.035 / 0.002) or re-author them to the sky they had (about 0.213 / 0.49 / above 0.98, which
-  changes how many storms `HeroTrio` has and therefore what it is for).
+* **IT DID NOT RE-AUTHOR THE THREE STORM SCENES, AND THAT IS A RULING RATHER THAN AN OMISSION** — asked
+  for, argued and decided above. Their sky moves; the slider now means it in all three, out by
+  0.028 / 0.035 / 0.002 against the 0.174 / 0.329 / 0.224 it was out by.
 * **IT DID NOT GIVE `kPackingCompensation` A CELL TERM**, which is what the brief asked for, and the reason
   is the measurement above rather than difficulty: the cell moves the slider by at most 0.032 over an
   eightfold range and not monotonically, so a cell term would be a second constant fitted at a second size,
