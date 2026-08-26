@@ -4,6 +4,7 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Core/Serialize/EntitySerializer.hpp>
 #include <Engine/Core/Serialize/SceneMigration.hpp>
+#include <Engine/Core/Serialize/SceneStitchRules.hpp>
 #include <Engine/Runtime/Factory/PrefabFactory.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionSerializer.hpp>
@@ -167,62 +168,54 @@ namespace Desert::Core
                     Reflection::DeserializeReflected( *st, &m_Scene->GetSettings(), obj.value() );
         }
 
-        // Split records: prefab-root entries are instantiated directly from their file;
-        // normal entries follow the standard create-then-deserialize path.
-        std::vector<const Assets::EntityData*> normalData;
-        std::vector<const Assets::EntityData*> prefabData;
+        // WHICH entity each record becomes, which one its payload lands on and what it hangs off is a pure
+        // function of the parsed tree, and it lives in Rules::PlanSceneStitch so a test can call it: this
+        // file cannot be compiled without the renderer, so for as long as the stitch was written out here
+        // it was unreachable by every suite in the repository and a defect planted in it stayed green.
+        // What remains below is the part only the loader can do — make the entities and feed the payloads.
+        const Rules::StitchPlan plan = Rules::PlanSceneStitch( sceneData->Entities, &Common::UUID::Generate );
 
-        for ( const auto& entityData : sceneData->Entities )
+        // DC 1.4: a file that names one id twice, or names a parent that is not in it, loads as a scene
+        // that is quietly missing pieces. Say which, once, instead of leaving it to be found in the viewport.
+        if ( plan.Shadowed > 0 || plan.UnresolvedParents > 0 )
         {
-            if ( entityData.PrefabPath.has_value() )
-                prefabData.push_back( &entityData );
-            else
-                normalData.push_back( &entityData );
+            LOG_WARN( "[SceneSerializer] '{0}': {1} entity record(s) claim an id another record already "
+                      "claimed (their payload is written onto the first claimant and their own entity stays "
+                      "bare), and {2} parent link(s) name an entity this file does not contain. {3} id(s) "
+                      "were minted for records that carried none.",
+                      sceneData->SceneName, plan.Shadowed, plan.UnresolvedParents, plan.Minted );
         }
 
         std::unordered_map<Common::UUID, ECS::Entity> entityMap;
 
-        // The id each normal entity was created under, aligned with normalData.
-        //
-        // It is REMEMBERED rather than recomputed because an entity saved without an `id` needs one minted,
-        // and a mint is not a pure function of the record: the two passes below used to call
-        // `id.value_or(...)` independently and so minted two DIFFERENT ids for such an entity. Pass 2 then
-        // looked the entity up under the second id, missed, and `continue`d — the entity existed in the
-        // scene with nothing but a tag, and no parent link pointing at it ever resolved.
-        std::vector<Common::UUID> normalIds;
-        normalIds.reserve( normalData.size() );
-
         // Pass 1 — create normal entities
-        for ( const auto* entityData : normalData )
+        std::vector<ECS::Entity> created;
+        created.reserve( plan.Created.size() );
+        for ( const auto& plannedEntity : plan.Created )
         {
-            const Common::UUID id     = entityData->id.value_or( Common::UUID::Generate() );
-            ECS::Entity        entity = m_Scene->CreateEntityWithUUID( id, entityData->Tag.value_or( "Entity" ) );
-            normalIds.push_back( id );
-            entityMap.insert( { id, entity } );
+            const Assets::EntityData& entityData = sceneData->Entities[plannedEntity.Record];
+            ECS::Entity               entity =
+                 m_Scene->CreateEntityWithUUID( plannedEntity.Id, entityData.Tag.value_or( "Entity" ) );
+            created.push_back( entity );
+            entityMap.insert( { plannedEntity.Id, entity } );
         }
 
         // Pass 2 — deserialize normal entities and wire up hierarchy
-        for ( size_t i = 0; i < normalData.size(); ++i )
+        for ( const auto& load : plan.Loads )
         {
-            const auto* entityData = normalData[i];
+            ECS::Entity entity = created[load.Target];
+            Serialize::EntitySerializer::DeserializeEntity( sceneData->Entities[load.Record], entity,
+                                                            *m_AssetManager );
 
-            auto it = entityMap.find( normalIds[i] );
-            if ( it == entityMap.end() ) continue;
-
-            ECS::Entity entity = it->second;
-            Serialize::EntitySerializer::DeserializeEntity( *entityData, entity, *m_AssetManager );
-
-            if ( entityData->parent.has_value() && !entityData->parent->IsNull() )
-            {
-                auto parentIt = entityMap.find( *entityData->parent );
-                if ( parentIt != entityMap.end() )
-                    m_Scene->Attach( parentIt->second, entity );
-            }
+            if ( load.Parent != Rules::kNoSlot )
+                m_Scene->Attach( created[load.Parent], entity );
         }
 
         // Pass 3 — instantiate prefab roots and apply their saved transforms
-        for ( const auto* entityData : prefabData )
+        for ( const size_t record : plan.PrefabRecords )
         {
+            const Assets::EntityData* entityData = &sceneData->Entities[record];
+
             auto prefabAsset = m_AssetManager->FindByPath<Assets::PrefabAsset>( *entityData->PrefabPath );
             if ( !prefabAsset )
             {
