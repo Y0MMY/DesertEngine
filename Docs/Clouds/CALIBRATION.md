@@ -4418,6 +4418,768 @@ read the reflection table were rebuilt and re-run in **both** configurations aft
   `PlacementScale` and `PlacementAnisotropy` already live on `.decloudtype` (T3). Adding a second scale
   would be two numbers obliged to agree.
 
+---
+
+## CB — the cumulonimbus' slider was never about its cell, it is the ANVIL, 2026-08-25
+
+The teamlead handed this phase the largest lie left in the `Coverage` slider — **the cumulonimbus delivers
+0.856 of the sky for a slider of 0.5, +0.354, unchanged through §SIL and §SIL2** — together with a stated
+cause: `kPackingCompensation` and the 0.68 alive exponent are both fitted at the 3 km cell and carry no cell
+dependence, and the cumulonimbus is the only type on a 6 km cell. The brief asked for the hypothesis to be
+checked across all nine genera **first**, and said in as many words that refuting it is worth more than
+confirming it.
+
+**IT IS REFUTED, AND ONE PAIR OF RUNS IS ENOUGH TO DO IT.**
+
+### THE CELL IS EXONERATED BY FOUR NUMBERS
+
+`LatticePeak --field --coverage 0.5 --repeats 8`, everything else at the values that ship. The only thing
+that changes between the rows is named in the row.
+
+| arm | cell | sky at `Coverage 0.5` | slider out by |
+|---|---|---|---|
+| cumulonimbus, exactly as it ships | 6.000 km | **0.8561** | **+0.356** |
+| cumulonimbus with `AnvilStrength` 0.85 → 0, **same 6 km cell** | 6.000 km | **0.5351** | **+0.035** |
+| congestus with `PlacementScale` forced to 2.0, **the cumulonimbus' own cell**, no anvil | 6.000 km | **0.5323** | **+0.032** |
+| cumulonimbus with `PlacementScale` forced to 1.0, **the reference 3 km cell**, anvil on | 3.000 km | **0.8334** | **+0.333** |
+
+**The lie follows the anvil and not the cell.** At one and the same 6.000 km cell the error is +0.356 with
+the anvil and +0.035 without it; at the reference 3.000 km cell — the very cell both constants were fitted
+at — the cumulonimbus still lies by **+0.333**. A cell-size defect cannot survive being put back on the size
+it was calibrated at, and this one does.
+
+**And the library already contained the counter-example.** `stratus` is on a **12.000 km** cell, four times
+the reference and twice as far from it as the cumulonimbus in ratio, and it reads **0.5098** — dead on. The
+row that would have had to be worst is the best in the table.
+
+### AND THE INSTRUMENT WAS CUTTING THE CANOPY OFF, so the shipped lie is BIGGER than either phase recorded
+
+`Tools/LatticePeak --field` built its layer as `TopAltitudeKm - BaseAltitudeKm`. The renderer does not:
+`VolumetricCloudRenderer::BuildProceduralParams` calls `Graphic::CloudTypeSetEnvelopeKm`, whose top is
+`max(TopAltitudeKm, AnvilAltitudeKm + AnvilThicknessKm)` — because a type's second lobe stands ABOVE its
+tower and a shell that stopped at the tower would cut it off.
+
+**For eight of the nine genera the two agree exactly. For the cumulonimbus they are 8.10 km against
+10.40 km**, and the slice the instrument was throwing away is the canopy's WIDEST. It is the same
+two-places-that-must-agree shape the instrument was built to hunt, one level up, and it is fixed by calling
+the shared function rather than by recomputing the shell in the tool.
+
+| the cumulonimbus at `Coverage 0.5` | sky |
+|---|---|
+| as §SIL and §SIL2 measured it, canopy clipped at 9.00 km | 0.8561 (**+0.356**) |
+| the same binary, shell as the renderer builds it | **0.8883** (**+0.388**) |
+
+> **THE NUMBER OF RECORD FOR THE SHIPPED LIE IS +0.388, NOT THE +0.354 TWO PHASES PUBLISHED**, and what
+> the old figure was is worth naming rather than crossing out: it is the sky of a cumulonimbus **whose
+> canopy has been cut off above 9.00 km** — a real quantity, correctly measured, of a body the engine does
+> not draw. **It is §GT's shape exactly**: an instrument that measured the wrong thing accurately, so every
+> digit of it was reproducible and none of it was the answer. The instrument would have been right for
+> eight of the nine genera and wrong only for the one under test, which is why nothing caught it.
+
+### FORM BY FORM, ALL NINE, AND EIGHT OF THEM DO NOT MOVE AT ALL
+
+`LatticePeak --field --type <the shipped asset> --coverage 0.5`, **8 realisations**, both arms on the
+envelope-corrected instrument so the two columns are the same measurement. `Coverage` is 0.5, so a column
+that does not read 0.5 is the slider lying by that much.
+
+| genus | cell (km) | sky before | sky after | **slider out by, before → after** |
+|---|---|---|---|---|
+| cumulus humilis | 1.500 x 1.500 | 0.5197 | 0.5197 | +0.020 → +0.020 |
+| cumulus mediocris | 2.400 x 2.400 | 0.5123 | 0.5123 | +0.012 → +0.012 |
+| cumulus congestus | 3.000 x 3.000 | 0.5122 | 0.5122 | +0.012 → +0.012 |
+| **cumulonimbus** | **6.000 x 6.000** | **0.8883** | **0.5445** | **+0.388 → +0.045** |
+| stratocumulus | 1.328 x 0.830 | 0.5228 | 0.5228 | +0.023 → +0.023 |
+| stratus | 12.000 x 12.000 | 0.5098 | 0.5098 | +0.010 → +0.010 |
+| altocumulus | 1.102 x 0.735 | 0.5521 | 0.5521 | +0.052 → +0.052 |
+| cirrus | 5.091 x 0.636 | 0.5124 | 0.5124 | +0.012 → +0.012 |
+| lenticular | 1.073 x 5.367 | 0.5077 | 0.5077 | +0.008 → +0.008 |
+
+**Eight of the nine rows are identical to four decimals, and that is not luck — it is the shape of the
+change.** `CloudClusterFootprintGain` returns exactly 1.0 for a type with no canopy, so the arithmetic those
+eight genera go through is bit-for-bit the arithmetic that shipped. The four genera the brief guards read
+**stratocumulus 0.5228, altocumulus 0.5521, cirrus 0.5124, lenticular 0.5077** in BOTH columns.
+
+**AND THE CELL SPANS 0.90 km TO 12.000 km ACROSS THAT TABLE — THIRTEEN TIMES — WITH EVERY ROW BUT ONE
+INSIDE 0.052.** The genus on the coarsest cell in the library is the second most accurate row in it.
+
+### THE CELL LADDER, ONE GENUS, THE CELL THE ONLY THING THAT CHANGES
+
+The table above still confounds the cell with the genus, so it is asked again of the shipped congestus at
+five settings of its `PlacementScale`, `Coverage 0.5`, 8 realisations, nothing else touched:
+
+| cell | 1.500 km | 2.400 km | 3.000 km | 6.000 km | 12.000 km |
+|---|---|---|---|---|---|
+| sky delivered | 0.5016 | 0.5052 | 0.5122 | 0.5323 | 0.5026 |
+| out by | +0.002 | +0.005 | +0.012 | +0.032 | +0.003 |
+
+**Eight times of cell for a spread of 0.030, and NOT MONOTONE.** There is no cell law to fit: the widest
+cell is the second most accurate setting, and what is left is the estimator's own wobble on a region that
+holds four coarse cells across. **The cell can account for at most +0.032 of the cumulonimbus' +0.388.**
+
+**And it is derivable that it should be so.** The clusters per unit area go as `1/cell²` and one cluster's
+footprint as `cell²`, so the cell cancels out of the expected cover exactly. A cell term added to
+`kPackingCompensation` would have been a constant fitted at a second size — the same mistake one level
+along — and it would have moved all nine genera to buy 0.03 on one.
+
+### WHAT THE CAUSE ACTUALLY IS, AND IT IS A CLOSED FORM
+
+The Coverage mapping is a statement about the AREA one cluster covers, and the generator already holds that
+area still against three of the four things that could move it: the density (`kDensityCompensation`), the
+size spread (a draw uniform in AREA) and the anisotropy (§SIL's geometric mean). **The fourth is the type's
+own anvil, and nothing compensated it.**
+
+* The canopy is ONE solid ellipse of radii `(1 + 0.8 * AnvilStrength) * R * stretch` by
+  `0.9 * (1 + 0.8 * AnvilStrength) * R / stretch`. Its equivalent radius is the geometric mean —
+  `(1 + 0.8 * S) * sqrt(0.9)` cluster radii, **1.5938 R** at the shipped 0.85 — and `stretch` cancels out
+  of it exactly.
+* The tower's footprint is the union of its six lobes in projection. It is a consequence of the layout
+  constants alone and is computed by quadrature over them: **0.9594 R** at `TopTaper` 0 and **0.9051 R** at
+  1, linear between to 0.2 per cent (0.9363 measured at 0.4 against 0.9377 predicted).
+* The two are concentric, so the union is the larger: the canopy's. The gain is their ratio, **1.702** for
+  the shipped storm, and the cluster's radius is divided by it.
+
+**Nothing in that is fitted to a sky.** The check that it is the right law is the sabotage and the frames,
+not the arithmetic: measured, the canopy multiplies `-ln(1 - cover)` by **2.53** against the **2.90** the
+areas predict, and the gap is the placement not being the independent-bodies model that turns an area into
+a cover — the same gap §RW measured when it derived a packing law and rejected it.
+
+**IT IS THE CLUSTER THAT SHRINKS AND NOT THE CANOPY**, because `AnvilStrength` is authored as how far the
+canopy spreads BEYOND its tower: scaling the canopy alone would redefine the artist's number. The storm's
+proportions are exactly what its asset states; what changes is how much sky one storm is worth. Its opaque
+core goes **2.8 : 1 to 1.9 : 1** — a narrower tower under the same overhang, which is what a storm is.
+
+### THE LOW END DID NOT MOVE, TO THE LAST DIGIT
+
+`CloudProceduralField.CoverageIsTheFractionOfSkyThatHasCloudInTheColumn`, this worktree, after the change:
+
+    coverage 0.15 -> 0.120  (-0.030)
+    coverage 0.24 -> 0.215  (-0.025)
+    coverage 0.35 -> 0.318  (-0.032)
+    coverage 0.50 -> 0.522  (+0.022)
+    coverage 0.75 -> 0.759  (+0.009)
+
+**That is §SIL2's published ladder reproduced digit for digit**, and it is bit-identical rather than merely
+close: the fixture authors no anvil, so the gain is exactly 1.0 and not one instruction of the low end's
+arithmetic changed.
+
+**RE-DERIVING IT WAS ATTEMPTED AND IS REPORTED AS A FAILURE RATHER THAN OMITTED.** §SIL2 is right that
+refitting the slope cannot fix it, so the mapping was derived from scratch instead: with the clusters placed
+independently the sky is `1 - exp(-n A)`, and `n A` can be written out in closed form from this file's own
+constants **including the term §RW named as the reason its own attempt failed** — that a cluster's radius
+rises with how deep inside the threshold its cell fell, so `<(0.6 + 0.4 fill)²>` is carried rather than
+assumed constant. Against the measured ladder:
+
+| Coverage | 0.15 | 0.24 | 0.35 | 0.50 | 0.75 |
+|---|---|---|---|---|---|
+| derived | 0.180 | 0.265 | 0.373 | 0.535 | 0.730 |
+| measured | 0.120 | 0.215 | 0.318 | 0.522 | 0.759 |
+
+**It over-predicts the low end by 0.060 and under-predicts the top by 0.029 — worse than the fitted mapping
+at every point, and worst exactly where the fitted one is worst.** The independent-bodies model is wrong in
+the direction the placement is not independent: at a low alive fraction the clusters that exist are the
+several a single cell holds, sitting on one site and overlapping each other, so they cover less sky than
+scattered bodies of the same total area would. **The low end is a correlation defect, not a slope defect,
+and it is not fixed here.**
+
+### THE SHIPPED SKY DID NOT MOVE — SIX OF SIX, BYTE FOR BYTE
+
+`Clouds_Demo`, camera `0,200,0`, `--shot-frames 90`, both arms. **The repeat floor is zero and was measured
+on this worktree**: two runs of the same binary at `mid away` are identical, from the SECOND render onward,
+which is §A1's correction reproduced.
+
+| point | md5, before and after |
+|---|---|
+| zenith away `0,0.9,-1` | `73c7806b04c1c71317e4aba52e3f20dc` |
+| mid away `0,0.45,-1` | `4819e9c0c6dcdfadbf7477bd90a409d7` |
+| horizon away `0,0.12,-1` | `304f4c2b56ea4751f50b6eb7b6351b4e` |
+| zenith sunward `0,0.9,1` | `ada3c729466065ad749a473698b2f903` |
+| mid sunward `0,0.45,1` | `4a2ddc2a6a5bd7637701fd1a3fe7da8b` |
+| horizon sunward `0,0.12,1` | `bfd06fce1094adaa4e538cebba2f66f7` |
+
+**All six are the same bytes in both arms**, so the four things the brief says must not be lost — the sky's
+cover of 0.7446, `LATTICE 0.0000` along the wind, the erosion's 1.10x over the march's floor and the
+congestus' 1.8 : 1 core — cannot have moved: they are properties of a file that is identical. The genus
+sweep says the same from the other side: the congestus reads **1.8 : 1** and **0.5122** in both columns.
+
+**THE HASHES WERE CHECKED FOR DUPLICATES AND SIX PAIRS COLLIDE — exactly those six, and no others.** Of the
+28 frames, the only repeated hashes are the six `Clouds_Demo` before/after pairs. The twelve cumulonimbus
+frames and the four hero-scene frames are sixteen distinct files.
+
+### ⚠️ THE PRICE, NAMED: THREE SCENES USE THE CUMULONIMBUS AND ALL THREE MOVE PAST A TENTH
+
+This is decision **D-20's condition NOT met**, it is a trade, and it is the teamlead's rather than this
+task's. Every scene in the project that names `Cumulonimbus.decloudtype`, measured in both arms at its own
+authored `Coverage`, 8 realisations:
+
+| scene | authored `Coverage` | sky before | sky after | the slider was out by | it is out by |
+|---|---|---|---|---|---|
+| `Clouds_HeroTrio` | 0.075 | 0.2489 | **0.1030** | **+0.174** | **+0.028** |
+| `Clouds_HeroMass` | 0.209 | 0.5375 | **0.2441** | **+0.329** | **+0.035** |
+| `SIL_Cumulonimbus` | 0.762 | 0.9856 | **0.7644** | **+0.224** | **+0.002** |
+
+**Every one of the three moves by more than a tenth, and that IS the fix rather than a side effect** — the
+mapping those three scenes were authorised under is the one that was lying. `Shots/CB_before_cb_mid_away.png`
+against `Shots/CB_after_cb_mid_away.png` is what 0.9856 of the sky looks like against 0.7644: a formless
+grey murk with the camera inside the overcast, against storms with blue between them.
+
+**The number of storms does not change and only their width does**, which is worth stating because it
+decides which repair is the cheaper one. The alive fraction is untouched, so `Clouds_HeroTrio` still has
+its trio and `Clouds_HeroMass` still has its mass; each body is 1/1.702 as wide. **Re-authoring the three
+scenes to preserve their old sky would therefore change what they are FOR** — `HeroTrio` would need about
+0.213 instead of 0.075 and would then be a field rather than three bodies.
+
+The work was stopped here and the decision asked for.
+
+### THE RULING: THE SCENES ARE NOT RE-AUTHORED, AND D-20 IS SATISFIED RATHER THAN WAIVED
+
+**Decided by the teamlead on the two frames, 2026-08-26: ship as measured, re-author nothing.** The three
+scene files are unchanged by this task. The argument is recorded here because a later phase will find three
+scenes whose sky moved and no diff explaining it:
+
+1. **The old sky was not a differently-scaled sky, it was a WRONG one.** A scene called `HeroTrio`, authored
+   at `Coverage 0.075`, rendered as 0.249 of closed overcast. Nobody asked for that; the slider lied.
+   Restoring the old picture would be restoring the lie.
+2. **Re-authoring would destroy the scene's intent.** `HeroTrio` would need about 0.213, at which point it
+   is a field and not a trio. When returning to the old appearance requires contradicting the scene's own
+   name, the old appearance was the error.
+3. **D-20 was written against SILENT DRIFT, not against repairing a known lie.** Its condition reads "the
+   mapping holds inside a tenth, therefore nothing needs re-authoring". Here the mapping did not drift on
+   its own — it is being FIXED, and after the fix eight genera of nine do not move at all while the ninth
+   stops lying. That is the outcome D-20 exists to protect.
+4. **And the composition survives.** The alive fraction is untouched, so WHERE the storms stand does not
+   move and HOW MANY there are does not change; only their width does — which is the one quantity that
+   was wrong.
+
+### EIGHT SABOTAGES, AND ONE STAYED GREEN — the hole is closed
+
+Every one applied to the generator, the suite's **objects AND binary deleted**, rebuilt, run, reverted.
+
+| break | result |
+|---|---|
+| the compensation is deleted from the cluster's radius | RED |
+| `kAnvilSpreadPerStrength` is changed in the EMISSION only | RED |
+| the gain uses the canopy's LONG radius instead of its equivalent one | RED |
+| `kAnvilAcrossOverAlong` is changed in the EMISSION only | RED |
+| the tower's footprint becomes its outer REACH (1.096) instead of the union's equivalent radius | RED |
+| the gain's floor at one is removed | RED |
+| the thickness half of the emission's own guard is dropped from the gain | RED |
+| **the taper term is dropped and the tower's footprint becomes one constant** | **GREEN — a real hole, closed** |
+
+**THE GREEN, AND WHAT IT SAYS ABOUT THE OTHER THREE TESTS.** Every relation written up to that point holds
+`TopTaper` FIXED, and an error common to both arms of a ratio cancels — so a wrong tower footprint was
+invisible while it was wrong by the same amount everywhere. That is an untested number in the middle of a
+calibration.
+
+What is asserted now is that **the quadrature predicts the real bake**, and it is a strong statement
+because the two are completely independent: with no canopy the gain is exactly 1 and neither constant
+reaches a single lump, so the bake measures the layout while the constants merely claim to describe it.
+Read through `-ln(1 - cover)`, whose constant of proportionality cancels in a ratio of two tapers:
+
+    tower footprint, taper 1.0 over taper 0.4 — the constants say 0.9317, the sky says 0.9340
+
+**A quarter of one per cent**, which is what makes the two numbers a derivation rather than a fit. Re-run,
+the sabotage is RED, and it is seven times outside the window.
+
+**AND THE STALE-OBJECT TRAP CAUGHT THIS TASK TOO — THE FIFTH TIME IN THIS PROGRAMME**, arriving from §RW's
+own direction. The first run of the
+new relation reported "the constants say 1.0000" against a source that plainly said otherwise: the sabotage
+script had reverted the SOURCE, and the suite's incremental build reused the sabotaged
+`CloudProceduralVolume.o`. Every number above is from a suite whose objects were deleted first.
+
+### THE FRAMES
+
+All at `--shot-frames 90`, camera `0,200,0`, both azimuths at all three elevations. **28 files, and the only
+repeated hashes are the six `Clouds_Demo` pairs** — which is the result rather than a duplicate.
+
+| file | what it shows |
+|---|---|
+| `Shots/CB_before_cb_mid_away.png` / `CB_after_cb_mid_away.png` | **THE SHOW.** Before: a formless grey murk with the camera inside a 0.986 overcast — no body, no edge, no sky. After: storms with blue between them at the 0.764 the slider asked for |
+| `Shots/CB_before_cb_zenith_away.png` / `CB_after_cb_zenith_away.png` | the zenith, which a closed sky hides completely |
+| `Shots/CB_before_cb_horizon_away.png` / `CB_after_cb_horizon_away.png` | the horizon, where the far field is the test |
+| `Shots/CB_before_cb_*_sun.png` / `CB_after_cb_*_sun.png` | the three sunward points — the canopy's silver lining and the sun disc through a hole, which is what the storm had to not lose |
+| `Shots/CB_before_{zenith,mid,horizon}_{away,sun}.png` / `CB_after_*` | **the six protocol points on `Clouds_Demo`, which are the SAME BYTES in both arms** |
+| `Shots/CB_before_heroTrio_mid_away.png` / `CB_after_heroTrio_mid_away.png` | `Clouds_HeroTrio`, one of the three scenes the trade is about |
+| `Shots/CB_before_heroMass_mid_away.png` / `CB_after_heroMass_mid_away.png` | `Clouds_HeroMass`, the other |
+
+### WHAT THIS TASK DID NOT DO
+
+* **IT DID NOT RE-AUTHOR THE THREE STORM SCENES, AND THAT IS A RULING RATHER THAN AN OMISSION** — asked
+  for, argued and decided above. Their sky moves; the slider now means it in all three, out by
+  0.028 / 0.035 / 0.002 against the 0.174 / 0.329 / 0.224 it was out by.
+* **IT DID NOT GIVE `kPackingCompensation` A CELL TERM**, which is what the brief asked for, and the reason
+  is the measurement above rather than difficulty: the cell moves the slider by at most 0.032 over an
+  eightfold range and not monotonically, so a cell term would be a second constant fitted at a second size,
+  and it would move all nine genera to buy 0.03 on one.
+* **IT DID NOT FIX THE LOW END.** It is unchanged to the last digit, the re-derivation was attempted and
+  the numbers are above: the independent-bodies model is worse than the fitted mapping at every point on
+  the ladder. The defect is that clusters sharing a cell are correlated, which is a change to the
+  PLACEMENT rather than to the mapping.
+* **IT DID NOT RE-SHOOT THE PROTOCOL AGAINST THE MERGED `dev`.** The before/after pair is `7459012a` on
+  both arms, which is what makes it an A/B; `dev` has since landed the material-parameter upload path, and
+  a frame taken on it is a different measurement rather than the other half of this one.
+* **IT DID NOT TOUCH THE MARCH, THE EROSION OR THE LIGHTING.** No shader was read or edited, and no
+  component default moved.
+* **IT DID TOUCH `Tools/LatticePeak`, WHICH IS NOT THIS TASK'S FILE**, and the change is four lines: the
+  layer comes from `Graphic::CloudTypeSetEnvelopeKm` instead of `Top - Base`. It is reported here rather
+  than taken quietly, and the argument for making it is that the alternative was to calibrate the sky
+  against an instrument that could not see the body being calibrated.
+
+### THE WHOLE SWEEP, WITH THE OBJECTS AND THE BINARIES DELETED FIRST
+
+`CI=true premake5 gmake` on the merged tree, `build/Bin/Tests/<config>` and
+`build/Tests/Intermediates/<config>` **removed entirely** before either run, then every generated makefile
+built and run.
+
+| | Debug | Release |
+|---|---|---|
+| makefiles generated | **84** | **84** |
+| excluded as tools, libraries and aggregates | **14** | **14** |
+| makefiles the loop considered | **70** | **70** |
+| suite binaries built | **67** | **67** |
+| `not-a-suite` lines | **3** | **3** |
+| `BUILD-FAIL` | **none** | **none** |
+| suites failed | **NONE** | **NONE** |
+
+**The count balances in both: 70 considered, 3 named as tools, 67 suites, 67 binaries, nothing
+unexplained, and the two configurations agree line for line.**
+
+**AND THE THREE `not-a-suite` NAMES, READ RATHER THAN ASSUMED:** `ImageStat`, `LineJump`, `SceneMigrator`.
+All three are this programme's own instruments — they land in `build/Bin/<config>/` and link no gtest —
+which is what the loop is supposed to report about them. **None of them is a suite that failed to build.**
+
+> The exclusion list this run used is deliberately SHORTER than §RW's: `ImageStat`, `LineJump` and
+> `SceneMigrator` were left OUT of it so that the loop would have to name them. It did. That is the
+> derived-rather-than-listed behaviour §2.4 item 5a asks for, exercised rather than trusted: a real suite
+> that stopped building would have arrived in the same three lines and been impossible to miss.
+
+**THE RELEASE ARM NEEDED ITS ENGINE STACK BUILT FIRST, AND THE FIRST ATTEMPT IS RECORDED BECAUSE IT LOOKED
+LIKE A CATASTROPHE.** Run straight after the Debug arm, Release reported `BUILD-FAIL` on all seventy and
+built zero binaries. Nothing was wrong with any suite: `libDesert.a` and `libCommon.a` had never been built
+in Release on this worktree, and a suite makefile does not build its own dependencies. The Debug arm had
+concealed the same gap by having those libraries already on disk from the frames. **A sweep that reports
+seventy build failures is reporting one.**
+## PR — the protocol scene had two owners and 44 of its 51 cloud parameters were not in it, 2026-08-25
+
+Every phase in this file measures itself at the same six points on the same scene. That makes
+`Clouds_Demo.desce` a **measuring instrument**, and this section is about the instrument rather than about
+the sky. It was written because the file had already been recorded as having drifted, and a drifting ruler
+puts every cross-phase comparison in this document in question.
+
+Two things are established below with git and with the renderer rather than with argument: **what moved and
+when**, and **which recorded numbers it invalidates**. Then the scene is frozen — as a SECOND file, because
+one name cannot carry two jobs — and the six points are re-measured on the frozen one and published as the
+base every later phase is to be read against.
+
+### The scene file moved eight times, and every move is a content move
+
+`git log --follow` on `Editor/Resources/Assets/Scenes/Clouds_Demo.desce`, from the commit that created it
+(`622a01a6`, the rebuild) to `dev` at `7459012a`. The file is one line of JSON, so a numstat of `1 1` says
+nothing; each row below is the diff of the parsed tree.
+
+| commit | date | what changed IN THE FILE |
+|---|---|---|
+| `622a01a6` | 08-19 | created, by renaming `Sky_PhysicalShowcase.desce`. `Coverage` 0.24, layer 3.0–8.0 km, `CloudType` 0.55, `CloudTypeVariance` 0.5 |
+| `c040080f` | 08-19 | `SceneVersion` 1→2, **`Tonemapper: 0` added** — the ACES change, which moves every pixel of every frame |
+| `771088b5` | 08-19 | `SceneVersion` 2→3, no content |
+| `68fcc34e` | 08-19 | **`LayerBottomAltitude` 300000, `LayerThickness` 500000, `CloudType` 0.55, `CloudTypeVariance` 0.5 all DELETED**, replaced by `Species: 2` |
+| `ae485906` | 08-19 | `Species: 2` → `CloudType: ".../Cumulus_Congestus.decloudtype"` |
+| `68facb2c` | 08-19 | `CloudType` → `CloudType1` |
+| `f3c8b24a` | 08-20 | **`Exposure` 0.22 → 0.26, `BloomThreshold` 2.5 → 1.0** |
+| `c97e43a4` | 08-24 | **`Coverage` 0.24 → 0.762** |
+
+Three of those are not book-keeping. The tonemapper changes the mapping from radiance to pixels; the
+exposure changes it again; and the coverage triples. The fourth, `68fcc34e`, is the largest and the
+quietest: it did not change a number, it **deleted the two numbers that said where the cloud layer is**.
+Before it the scene stated a layer from 3.0 km to 8.0 km. After it the layer comes from the type asset, and
+`Cumulus_Congestus.decloudtype` says 2.2 km to 5.8 km. **The deck dropped 800 m and lost 1.4 km of
+thickness, and no line of the scene file records that.**
+
+### The larger channel is not the file at all: 44 of the 51 cloud parameters were never in it
+
+`Clouds_Demo.desce` writes **seven** keys into `VolumetricCloud`. The reflected component has **fifty-one**
+fields. `DeserializeReflected` is explicit about what happens to the rest —
+`// missing key — keep the field's default value` — so forty-four of the layer's parameters are not
+properties of the protocol scene at all. They are properties of whatever `VolumetricCloudComponent.hpp`
+said on the day somebody pressed render.
+
+It is not only the clouds:
+
+| component | reflected fields | written in the file | taken from the C++ default |
+|---|---|---|---|
+| `VolumetricCloud` | 51 | 7 | **44** |
+| `SkyAtmosphere` | 47 | 15 | **32** |
+| `SceneSettings` | 60 | 51 | **9**, and one of them is `CloudQualityTier` |
+| `ExponentialHeightFog` | 14 | 14 | 0 |
+
+`CloudQualityTier` deserves its own line: §QT measured three tiers and the protocol scene names none of
+them. Every six-point table in this document was shot at **whatever the default tier was**, which today is
+`High` and is a C++ literal.
+
+And those defaults were moved, deliberately and repeatedly, by the phases that then measured themselves
+through them. Extracted by walking `VolumetricCloudComponent.hpp` across every commit that touched it:
+
+| commit | phase | default that moved, in a field the scene does NOT pin |
+|---|---|---|
+| `771088b5` | T2 | `WeatherSeed`, `WeatherOctaves`, `DetailSeed`, `DetailOctaves` **deleted** |
+| `f3c8b24a` | OE-FIX | `LightMarchSamples` 6 → **32** |
+| `17d4a4db` | CS | `CastShadows` **added, default true** |
+| `0589eb52` | Э5 | `RegionSize` and `Seed` **added** |
+| `4ba9992c` | DS | `DetailTileSize` 4 km → **1 km**; `DetailStrength` 0.10 → **0.40** |
+| `efc76135` | RW | `PlacementDensity` **2.5**, `PlacementScatter`, `PlacementSizeVariety`, `PatchTileSize`, `PatchStrength` **added** |
+| `5ea347cb` | RW2 | `PlacementDensity` 2.5 → **1.75** |
+| `a21848c6` | SIL2 | `DetailStrength` 0.40 → **0.65** |
+| `155fcc38` | PT | five `Layout*` fields **added** (inert with no painting bound — §PT proved it on the frame) |
+
+**So the scene drifted on twelve commits and its file changed on eight of them, and the two sets barely
+overlap.** An engineer who diffed `Clouds_Demo.desce` between two phases and found nothing would have
+concluded, correctly and uselessly, that the scene had not changed.
+
+### What is invalidated, by name
+
+Not "possibly affected". These are the recorded numbers whose subject is provably not today's subject:
+
+| where | the number | what it was measured on |
+|---|---|---|
+| §T-ACES, "the frame" table | mean/p05/p50/p95/contrast/sat, 6 rows | scene at `622a01a6`→`c040080f`: layer 3.0–8.0 km, analytic cloud-type scalar, Reinhard→ACES |
+| §T-ACES, the eleven-scene table | `Clouds_Demo` 0.369 / 0.319→0.386 / 0.300→0.442 | same |
+| §OE, the knock-out table | linear zenith radiances, 16.81 etc. | scene at `68facb2c`: `LightMarchSamples` 6, `Exposure` 0.22, pre-Э5 producer |
+| §OE-FIX, six points, **before** column | 6 rows | same |
+| §OE-FIX, "the exposure" | 0.2567 / 0.2632 → 0.26 | same |
+| §CS, the sky-band figures | `mean 0.635 / p05 0.503 / p95 0.780 / contrast 0.276` | scene at `f3c8b24a`, pre-Э5 producer |
+| §QT, the tier table | 17.99 / 14.24 / 8.61 ms | scene at `17d4a4db`, pre-Э5 producer; already corrected in method by §GT-3 |
+| §QT, "the sky does not change" | 0 of 980 480 pixels, 553/547 px at horizon | same |
+| the LineJump norm table | rows max 0.006 norm / 0.010 threshold / 0.022 defect | **frames shot 08-20**, rectangles `2 2 1101 480` and `2 2 1278 552`, pre-Э5 sky |
+| the teamlead's baseline at `2804b096` | 6 rows | different resolution (1103x668) AND different rectangle (`0 0 1103 480`) — self-flagged in this file |
+| §A0 | `+3.7 to +5.1 ms` for one hero cloud | pre-Э5 producer |
+| §A2+A3, the price table | **1.39x, +7.33 ms, +0.92 ms/instance** | scene `ZZ_Perf<n>`, **which was never committed**; pre-Э5 producer. Part 2 below |
+| §A2+A3, the catalogue | ten genera, aspect/comps/detail/pocket | pre-DS erosion, pre-SIL lump — the voxels are not these voxels |
+
+**The rectangle drifted too, and by one pixel of height.** §OE-FIX and the LineJump norm are on
+`0 0 1280 552` / `2 2 1278 552`; everything from §DS onward is on `0 0 1280 551` / `2 2 1278 551`. §Э5's
+table quotes §OE-FIX's numbers as its own "before" column while declaring a 551-tall band. One pixel row of
+1280 is 0.23 % of the rectangle and nothing in those tables turns on it, but it is the same defect class as
+everything else here — two numbers obliged to agree, and nothing checking.
+
+### The chain from OE-FIX onward is INTACT, and that is measured rather than assumed
+
+The corollary matters as much as the damage. Every phase since §OE-FIX opened its six-point table by
+re-shooting the previous phase's "after" as its own "before". If the scene had drifted **between** phases,
+those columns would disagree. They do not:
+
+| the "after" of | its zenith-away mean / contrast / sat | the "before" of | agrees |
+|---|---|---|---|
+| §OE-FIX | 0.528 / 0.400 / 0.128 | §Э5 | ✔ |
+| §Э5 | 0.570 / 0.449 / 0.135 | §DS | ✔ |
+| §DS | 0.549 / 0.450 / 0.164 | §RW | ✔ |
+| §RW | 0.600 / 0.251 / 0.068 | §RW2 (the "2.5" column) | ✔ |
+| §RW2 | 0.616 / 0.354 / 0.067 | §SIL | ✔ |
+| §SIL | 0.598 / 0.386 / 0.079 | §SIL2 | ✔ |
+| §SIL2 | 0.570 / 0.415 / 0.098 | §PT (byte for byte, six md5s) | ✔ |
+
+**So the drift is real, it is large, and it is entirely accounted for by the changes each phase declared.**
+What the chain does NOT survive is a comparison that jumps over it — quoting §OE-FIX's contrast beside
+§SIL2's, or reading the LineJump norm of 0.006 (taken on the 08-20 sky, on a 552-tall rectangle) as the
+norm for a §SIL2 frame. §DS and §SIL2 both do exactly that: each quotes "the 0.010 that means something to
+look at" against a sky that threshold was never measured on.
+
+This tree reproduces the end of that chain **exactly**: six renders of `Clouds_Demo` at the six points give
+the six md5s §PT published, digit for digit. The noise floor is zero, and the first render in this fresh
+worktree was discarded per §A1's correction.
+
+### The freeze: `Clouds_Protocol.desce`, and why it is a second file
+
+⚠️ **The demo scene has an owner who is allowed to change it. The protocol scene must not change at all.**
+Today those are one file, which is two meanings on one name — what §4 of the contract forbids for data
+formats, applied to a measuring instrument. `Clouds_Demo.desce` is the artist's scene and stays the
+artist's scene, `c97e43a4` and all.
+
+**`Editor/Resources/Assets/Scenes/Clouds_Protocol.desce` is the ruler.** It is `Clouds_Demo` as `dev` ships
+it at `7459012a`, with one difference that is the whole point:
+
+**Every reflected field of every reflected component is written out explicitly** — 44 added to
+`VolumetricCloud`, 32 to `SkyAtmosphere`, 9 to `SceneSettings` (including `CloudQualityTier: 2`, `High`,
+which the protocol has been implicitly assuming since §QT). A copy of the file would have drifted exactly
+as the original did, because the drift was never in the file. **A scene that states all fifty-one of its
+cloud parameters cannot be moved by a change to a C++ default**, which closes the channel that carried
+eight of the twelve moves above.
+
+It does not close the other channel, and saying so is the point: a change to the SHADER, to the producer in
+`CloudProceduralVolume.cpp`, or to a constant that is not a component field —
+`kCloudLumpVerticalOverHorizontal`, which §SIL moved from 0.45 to 0.75 — still moves this scene, exactly as
+it moves every scene. **That is what phases are FOR, and it is what the after→before chain above already
+handles.** The freeze removes the SILENT channel, not the deliberate one.
+
+**The freeze is verified, not asserted.** `Clouds_Protocol.desce` renders the six protocol points
+**byte for byte identical** to `Clouds_Demo.desce` on the same binary — which simultaneously proves that
+the 85 values written into it are the values the defaults were producing, and that nothing was mistyped:
+
+| point | md5 of `Clouds_Protocol` | equals |
+|---|---|---|
+| zenith away `0,0.9,-1` | `73c7806b04c1c71317e4aba52e3f20dc` | `Clouds_Demo` and `SIL2_after_zenith_away.png` |
+| mid away `0,0.45,-1` | `4819e9c0c6dcdfadbf7477bd90a409d7` | `Clouds_Demo` and `SIL2_after_mid_away.png` |
+| horizon away `0,0.12,-1` | `304f4c2b56ea4751f50b6eb7b6351b4e` | `Clouds_Demo` and `SIL2_after_horizon_away.png` |
+| zenith sunward `0,0.9,1` | `ada3c729466065ad749a473698b2f903` | `Clouds_Demo` and `SIL2_after_zenith_sun.png` |
+| mid sunward `0,0.45,1` | `4a2ddc2a6a5bd7637701fd1a3fe7da8b` | `Clouds_Demo` and `SIL2_after_mid_sun.png` |
+| horizon sunward `0,0.12,1` | `bfd06fce1094adaa4e538cebba2f66f7` | `Clouds_Demo` and `SIL2_after_horizon_sun.png` |
+
+**No `PR_` frame is committed for these six.** They are byte copies of six pictures the repository already
+holds, and a duplicate would be the thing §SIL warned about. The md5s above are the evidence.
+
+### THE NEW BASE — six points on the frozen scene
+
+`Clouds_Protocol.desce`, camera `0,200,0`, `--look` as named, `--shot-frames 90`, 1280x766, Debug,
+MoltenVK. `ImageStat` over **`0 0 1280 551`**, `LineJump` over **`2 2 1278 551`**. Binary built from
+`7459012a`.
+
+**This table replaces `Clouds_Demo` as the thing a later phase re-shoots as its "before". The numbers in it
+are identical to §SIL2's "after" column — that is the acceptance criterion, not a coincidence.**
+
+| point | mean | p05 | p50 | p95 | contrast | sat |
+|---|---|---|---|---|---|---|
+| zenith away `0,0.9,-1` | 0.570 | 0.319 | 0.558 | 0.734 | 0.415 | 0.098 |
+| mid away `0,0.45,-1` | 0.534 | 0.324 | 0.546 | 0.718 | 0.395 | 0.174 |
+| horizon away `0,0.12,-1` | 0.606 | 0.518 | 0.598 | 0.724 | 0.205 | 0.085 |
+| zenith sunward `0,0.9,1` | 0.571 | 0.498 | 0.542 | 0.801 | 0.303 | 0.084 |
+| mid sunward `0,0.45,1` | 0.560 | 0.464 | 0.545 | 0.719 | 0.254 | 0.117 |
+| horizon sunward `0,0.12,1` | 0.590 | 0.494 | 0.573 | 0.743 | 0.248 | 0.113 |
+
+And `LineJump` on the same six, so that the norm this document quotes has a version taken on THIS sky and
+THIS rectangle rather than on the 08-20 sky and a 552-tall one:
+
+| point | rows max | @y | rows mean | cols max | @x |
+|---|---|---|---|---|---|
+| zenith away | 0.00205 | 41 | 0.00049 | 0.00361 | 1151 |
+| mid away | 0.00357 | 363 | 0.00073 | 0.00496 | 425 |
+| horizon away | **0.09684** | **540** | 0.00169 | 0.00547 | 499 |
+| zenith sunward | 0.00138 | 117 | 0.00042 | 0.00141 | 1110 |
+| mid sunward | 0.00288 | 403 | 0.00050 | 0.00346 | 815 |
+| horizon sunward | **0.09482** | **540** | 0.00169 | 0.00354 | 609 |
+
+**The norm on the sky that ships today is a row maximum of 0.0014–0.0036, not 0.006.** The old figure was
+taken on a sky with a different producer, a different erosion and a different rectangle, and it is a
+factor of two loose against this one. The two horizon rows at `y 540` are the checker floor's own edge —
+§DS records the same 0.098 at the same row — and are geometry, not a band in the sky.
+
+### Correction 4 — the hero clouds' 1.39x, which §GT filed and did not re-measure
+
+This is the fourth of the four decisions `Docs/GPU_TIMESTAMPS.md` opens with, and the one §GT left alone.
+It follows §GT's form exactly: what the old number was measuring is named, and the digit is corrected
+rather than quietly replaced.
+
+**What the old number was, and the thing about it that is worse than being wrong.** §A2+A3 records
+**1.39x, +7.33 ms, +0.92 ms per instance** for eight hero clouds against none, from a frame-count slope
+`(t900 - t300) / 600`. The scene is named in that section as **`ZZ_Perf<n>`** — and `ZZ_Perf<n>` is not in
+the repository and never was (`git log --all --diff-filter=A -- '*ZZ_Perf*'` returns nothing). **The number
+could not be reproduced by anyone, ever, because its subject was deleted.** §GT reattributed it to
+`Clouds_HeroMass`, which is a fair reading — that scene was added by the same commit and carries exactly
+eight hero entities of three distinct bodies, three of them enabled — but a reattribution is not a
+rectangle.
+
+So the legs are committed this time. **`PR_Hero0.desce`, `PR_Hero3.desce`, `PR_Hero8.desce`** are
+`Clouds_HeroMass` with every reflected field written out (§PR above) and with `HeroCloud.Enabled` set on
+the first 0, 3 and 8 of the eight entities. They differ from each other **in nothing else**, and
+`Desert/Tests/Engine/CloudProtocolScene` asserts that by normalising the flag away and comparing the rest
+whole. `PR_Hero3` renders **byte-identical** to the shipped `Clouds_HeroMass.desce` at the framing below.
+
+**THE RECTANGLE**, stated with the number rather than beside it:
+
+> `PR_Hero{0,3,8}.desce`, camera `0,200,0`, `--look 0,0.18,-1` (§A2's own framing, so the two are
+> comparable), 1280x766, `--shot-frames 400`, **Debug**, MoltenVK, `CloudQualityTier: High`, binary from
+> `7459012a`. Coverage 0.209, one cumulonimbus type, `SuppressProceduralField` true on every hero entity.
+> Ten interleaved passes; inside each pass all three instance counts are run once, in both instrument
+> modes. **The machine was shared and the load average went from 24 to 101 during the session.**
+
+#### The march's own line, which is what §GT asked for
+
+| pass | `Clouds: March` n=0 | n=3 | n=8 | n8 − n0 |
+|---|---|---|---|---|
+| 1 | 6.116 | 11.983 † | 12.013 | **+5.897** |
+| 3 | 5.997 | 8.881 | 11.668 | **+5.671** |
+| 4 | 6.092 | 8.481 | 11.717 | **+5.625** |
+| 6 | 4.788 | 6.499 | 10.734 | **+5.946** |
+
+† that leg's whole GPU frame read 48.6 ms against 18–26 for its neighbours; it is left in the table and out
+of the arithmetic, and the reason is the machine.
+
+**Eight hero clouds cost the march +5.78 ms — 5.63 to 5.95 across four interleaved passes, a spread of
+2.8 %.** The cloud shadow map costs a further **+0.88 ms** (0.31 / 0.47 / 1.30 / 1.56 — noisy, but positive
+in all four), and the temporal resolve costs **nothing measurable** (−0.035 / −0.020 / +0.014 / +0.168,
+which is zero inside its own spread). §A2's account of where the money goes was never itemised at all; this
+says **the march is where it is, the shadow map takes a fifth of what the march takes, and the resolve is
+free.**
+
+#### And the whole frame, on the denominator §GT says a budget is set against
+
+The per-pass marks cost ~1.24 ms (§GT), so a whole-frame figure taken from a fully-marked run is not the
+frame a player gets. `--gpu-profile --gpu-profile-frame-only` is two timestamps and §GT measured it as
+free, so it is the honest denominator — and it was run as its own leg inside every pass:
+
+| pass | GPU frame n=0 | n=3 | n=8 | n8 − n0 | ratio |
+|---|---|---|---|---|---|
+| 1 | 16.551 | 20.083 | 20.613 | +4.062 | 1.245 |
+| 2 | 18.057 | 18.448 | 22.194 | +4.137 | 1.229 |
+| 3 | 17.288 | 19.584 | 22.160 | +4.872 | 1.282 |
+| 4 | 16.711 | 18.605 | 21.625 | +4.914 | 1.294 |
+| 5 | 16.011 | 18.415 | 20.671 | +4.660 | 1.291 |
+| 6 | 13.966 | 17.401 | 19.536 | +5.570 | 1.399 |
+
+**+4.77 ms and 1.286x, against the recorded +7.33 ms and 1.39x.** The absolute figure is **35 % lower** than
+the record. The ratio is not: **1.39 is the top of the six-pass range** — pass 6 reproduces it to three
+digits — and that is the whole lesson rather than a vindication.
+
+**What the old number measured.** A ratio of two whole frames. Its numerator and its denominator are both
+dominated by everything that is *not* a hero cloud, so its value moves with the baseline and not with the
+change. The table above proves that on one machine in one hour: the *same* eight clouds, measured six
+times, give ratios from 1.229 to 1.399 — a 14 % swing — while the **absolute** cost they add moves by 4.06
+to 5.57 ms and the **march's own line** moves by 5.63 to 5.95 ms. The tighter the instrument, the tighter
+the number. §GT said only the absolute cost transfers between trees; here it does not even transfer between
+*passes* in ratio form.
+
+#### The demonstration this correction is actually worth, and it cost nothing to take
+
+Four more passes (7–10) ran while another agent's editor was on the same GPU and the load average was
+above 100. They are reported rather than dropped, because of what they show:
+
+| quantity | over the six quiet passes | over all ten |
+|---|---|---|
+| `Clouds: March`, n8 − n0 | +5.63 to +5.95 ms | **+4.47 to +6.47 ms** — a factor of 1.45, always positive |
+| whole GPU frame (frame-only), n8 − n0 | +4.06 to +5.57 ms | **−5.11 to +8.70 ms** — a factor of ∞, and the SIGN CHANGES TWICE |
+
+**On a loaded machine the whole-frame delta says that adding eight clouds made the frame five milliseconds
+faster.** The march's own line never once does. That is the argument for §GT's instrument stated as a
+measurement instead of as a principle, and it is why the three earlier corrections were needed: every one
+of the four decisions in `Docs/GPU_TIMESTAMPS.md` was taken with the top instrument in that table.
+
+#### The conclusion §A2 drew SURVIVES, and now it is itemised
+
+§A2's structural claim was that eight instances of three bodies cost about what three instances of three
+bodies do, per instance, because the atlas is one descriptor and one fetch site either way. On the march's
+own line, per instance:
+
+| step | pass 3 | pass 4 | pass 6 |
+|---|---|---|---|
+| 0 → 3 (atlas appears, 3 bodies) | +0.96 ms | +0.80 ms | +0.57 ms |
+| 3 → 8 (five more instances, SAME 3 bodies) | +0.56 ms | +0.65 ms | +0.85 ms |
+
+**0.56 to 0.96 ms per instance on either side of the step where the atlas is built** — the two ranges
+overlap, so the instance count and not the body count is what is being paid for, exactly as §A2 argued. The
+recorded +0.92 ms/instance was a whole-frame figure and lands at the top of that band; **+0.72 ms/instance
+on the march** is the figure to carry forward.
+
+**What is NOT claimed.** These are Debug numbers on a shared machine and they are not comparable with
+§GT's `Clouds_Demo` itemisation — different scene, different camera, different session. §PT made the same
+statement for the same reason. What transfers is the absolute delta and the per-instance figure; the
+ratio does not, and that is the finding.
+
+#### Nothing this correction touches reverses a decision
+
+Checked rather than assumed, because a wrong digit under an accepted decision is a reason to re-open it:
+
+* **The demand-built atlas over a fixed eight-slab one** rests on memory arithmetic (12.00 MiB against
+  32.00 MiB, recomputed in §A0) and not on this figure. Untouched.
+* **"Eight instances cost 1.39x and not 8x"** — the claim the number was quoted for is *sub-linearity*,
+  and sub-linearity is confirmed: 0.72 ms per instance against a march that a single near-field body cost
+  3.7–5.1 ms in §A0. The digit changes; the decision does not.
+* **§QT's tier ladder** was already re-checked by §GT-3 and its conclusion confirmed by the itemisation.
+
+**Two things ARE weaker than they read, and both are recorded here rather than left to be discovered:**
+
+1. **The `LineJump` threshold of 0.010 is about three times the noise floor of the sky it now guards.** It
+   was measured on the 08-20 sky over a 552-tall rectangle; on today's sky over `2 2 1278 551` the six
+   protocol points read **0.0014–0.0036** (§PR's new base above, and §SIL2's own table agrees). §DS and
+   §SIL2 both pass "no banding" against 0.010. The guard is loose, not wrong — a band is one row twenty
+   times the noise — but "under 0.010" on a frame whose rows sit at 0.002 is a much weaker statement than
+   it sounds, and the number to compare against from now on is the one in §PR.
+2. **§A2+A3's catalogue of ten genera** — aspect, components, detail, pocket, all read off the baked
+   voxels — was measured before §DS moved the erosion tile from 4 km to 1 km and its strength from 0.10 to
+   0.40, and before §SIL raised the lump from 0.45 to 0.75. Those are the numbers that decide what a baked
+   body looks like. The catalogue is not wrong about the genera it describes; it is a description of
+   voxels that no longer exist, and re-running `Desert/Tests/Engine/CloudCatalogue` (which prints the table
+   itself) is a cheap task for whoever needs it next.
+
+### The frames
+
+Two, and they are the two ends of the cost A/B rather than decoration — a reader can see what +5.78 ms of
+march buys. Checked against every PNG in `Shots/` by md5 before being committed: neither is a duplicate.
+
+| file | what it shows |
+|---|---|
+| `Shots/PR_hero0_none.png` | `PR_Hero0`, all eight hero entities disabled — the procedural cumulonimbus field alone |
+| `Shots/PR_hero8_eight.png` | `PR_Hero8`, all eight enabled — the same sky with the sculpted anvil, its stem, the arch and the congestus standing in it |
+
+The six protocol points are **not** committed as `PR_` frames: they are byte-identical to
+`SIL2_after_*.png`, which the repository already holds, and the md5 table in §PR is the evidence. *(While
+checking, 37 of the 344 PNGs in `Shots/` were found to share a hash with another file in the same
+directory. That predates this task and none of them is mine; it is recorded here because the next person to
+run a duplicate check will otherwise think they caused it.)*
+
+### The six points held across the `dev` merge
+
+`dev` moved to `14ce7610` (MAT stage 1) while this task was in flight. That merge adds five new graph
+shaders and touches no cloud file — but §PT's own finding is that a shader file arriving can reschedule
+SPIR-V and move pixels, so it was checked rather than reasoned about. After the merge and a full rebuild,
+`Clouds_Protocol.desce` renders **all six protocol points byte for byte identical** to the table above. The
+new base survives the merge and is stated against `14ce7610`.
+
+### The whole sweep, in both configurations
+
+Object files and binaries deleted first (`rm -rf build/Tests build/Bin/Tests`), then the contract's own
+loop, in a resumable form that records a verdict per project rather than only the failures.
+
+| | projects walked | suites | passed | failed | build failures |
+|---|---|---|---|---|---|
+| Debug | 73 | 68 | **68** | 0 | 0 |
+| Release | 73 | 68 | **68** | 0 | 0 |
+
+**The five `not-a-suite` names, read rather than counted** — identical in both configurations, and every one
+of them is a directory under `Tools/`: `CloudLayoutBaker`, `ImageStat`, `LatticePeak`, `LineJump`,
+`SceneMigrator`. The first is §PT's baker, the other four are this document's own instruments. None is a
+suite that failed to build.
+
+Release needed `make Desert config=release` first: the test projects link `build/Bin/Release/libReflectCpp.a`
+and the loop's first eight projects reported `BUILD-FAIL` for no other reason. That is a property of the
+loop rather than of the tree, and it is written down because the next person will hit it.
+
+### The relations added, and the breaks that verified them
+
+`Desert/Tests/Engine/CloudProtocolScene`, four assertions, each sabotaged and each RED:
+
+| assertion | sabotage | result |
+|---|---|---|
+| every reflected field of every reflected component is written explicitly | delete `VolumetricCloud.DetailStrength` from `Clouds_Protocol.desce` | **RED** |
+| the settings block is written in full, including `CloudQualityTier` | delete `Settings.CloudQualityTier` | **RED** |
+| nothing migrates on load | stamp the scene at `SceneVersion 5` | **RED** |
+| the three cost legs differ only in `HeroCloud.Enabled` | move `PR_Hero8`'s `Coverage` to 0.5 | **RED** |
+
+All four scenes were restored and the suite is green again; `git status` is clean of them.
+
+**The sabotage that matters most is the first, and it is worth saying what it stands for.** The failure this
+suite exists to catch is somebody adding a *fifty-second* field to `VolumetricCloudData` — at which point
+the protocol scene silently has a default in it again. Adding a field and deleting a key put the file and
+the reflection table into the *same* state, and the assertion walks `type->Fields` against the file's keys,
+so it is one code path reached from two directions. The cheap direction was sabotaged; the expensive one
+(edit the component, rebuild the engine) is the same test.
+
+### What this task did NOT do, and why it is here rather than in a commit message
+
+* **`Clouds_Demo.desce` was not touched, and that is the decision rather than an omission.** It stays the
+  artist's scene, drift and all. Freezing it would have taken a file its owner is entitled to change and
+  quietly made it read-only; copying it into a second file with the same seven keys would have frozen
+  nothing, because the drift was never in the keys the file had.
+* **The eleven older sections were not rewritten.** Every correction above is a note in §PR naming what the
+  old number measured, as §GT does, and §GT's own paragraph on the hero clouds was updated in place only
+  because it said "not re-measured" and now it has been.
+* **The ten-genus catalogue was not re-measured.** It predates §DS's erosion and §SIL's lump, so it
+  describes voxels that no longer exist. `Desert/Tests/Engine/CloudCatalogue` prints the table itself, so
+  regenerating it is a short task — but it is a *task*, with frames of its own, and doing it here would
+  have put two subjects in one section.
+* **The `LineJump` threshold was not moved.** §PR publishes the norm measured on today's sky
+  (0.0014–0.0036) beside the old 0.006/0.010; changing the threshold the other sections are written
+  against is a decision for the owner of those sections, not a side effect of a protocol freeze.
+* **`Desert/Tests/Engine/SceneTonemapMigration`'s `kRepositoryScenes` list was not extended.** It names
+  eleven scenes and the repository ships forty; it is another file's list and another task's call
+  (§1.6). It is named here because "listed by name rather than discovered, so adding one without
+  converting it is a red test" is no longer true of it.
 ## HV — four checks of Unreal's built, measured and refused, and the one we already have turns out to be inert over open sky, 2026-08-26
 
 Задача: у UE во временной реконструкции облаков четыре проверки истории, которых нет у нас
