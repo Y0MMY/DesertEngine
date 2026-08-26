@@ -945,6 +945,55 @@ TEST( CloudPlacementSpectrum, TheCanopysOwnFootprintDoesNotMoveWithItsStrength )
     EXPECT_NEAR( full, quarter, 0.01 * quarter );
 }
 
+TEST( CloudPlacementSpectrum, TheTowersFootprintConstantsSayWhatTheLayoutActuallyDoes )
+{
+    // WHY THIS EXISTS: A SABOTAGE FOUND THE HOLE. Dropping the taper term from
+    // CloudClusterTowerFootprintRadii — making the tower's footprint one constant instead of a line
+    // through two — left the whole repository green, because every test above holds `TopTaper` fixed and
+    // an error common to both arms cancels. That is an untested number in the middle of a calibration,
+    // which is the shape DEV_CONTRACT.md §1.3 forbids arrived at from the far side.
+    //
+    // WHAT IT ASSERTS. The two constants are a QUADRATURE over the lobe layout, not a fit, so they are a
+    // prediction about the sky and can be checked as one. With no canopy the gain is exactly 1 and the
+    // constants reach no lump at all — so the bake is a completely independent measurement of the same
+    // quantity. Independently placed footprints cover `1 - exp(-n A)` of the sky, so `-ln(1 - cover)` is
+    // proportional to the footprint AREA whatever the constant of proportionality is, and the ratio of two
+    // tapers cancels it: `(kappa(a) / kappa(b))^2`. Nothing about the placement, the cell or the coverage
+    // survives into that ratio.
+    const auto skyAtTaper = [&]( float taper )
+    {
+        CloudProceduralFieldParams params            = StormParams();
+        params.Species[0].Shape.AnvilStrength        = 0.0f;
+        params.Species[0].Shape.TopTaper             = taper;
+        params.Coverage                              = 0.5f;
+        return SkyCover( params );
+    };
+
+    const double flat    = skyAtTaper( 0.4f );
+    const double tapered = skyAtTaper( 1.0f );
+
+    ASSERT_GT( flat, 0.0 );
+    ASSERT_GT( tapered, 0.0 );
+
+    const double measured = std::log( 1.0 - tapered ) / std::log( 1.0 - flat );
+
+    const double a         = CloudClusterTowerFootprintRadii( 1.0f );
+    const double b         = CloudClusterTowerFootprintRadii( 0.4f );
+    const double predicted = ( a * a ) / ( b * b );
+
+    std::printf( "[CloudPlacementSpectrum] tower footprint, taper 1.0 over 0.4: the constants say %.4f, "
+                 "the sky says %.4f (%.4f / %.4f of the sky)\n",
+                 predicted, measured, tapered, flat );
+
+    // A TWENTY-FIFTH, AND BOTH ENDS OF THE WINDOW ARE ACCOUNTED FOR. The two agree to 0.5 per cent as
+    // measured, and the slack is the independent-bodies model this ratio is read through — the same model
+    // §RW rejected as a mapping and which survives here only because it is a RATIO. Dropping the taper term
+    // makes the left-hand side exactly 1 against a measured 0.936, which is seven times outside this.
+    EXPECT_NEAR( measured, predicted, 0.04 * predicted )
+         << "the tower footprint the canopy is priced against is not the footprint the layout produces, so "
+            "the compensation is exact for a tower nobody generates";
+}
+
 TEST( CloudPlacementSpectrum, ACanopyInsideItsOwnTowerIsNotPaidForTwice )
 {
     Desert::Graphic::CloudTypeShape shape = StormParams().Species[0].Shape;
