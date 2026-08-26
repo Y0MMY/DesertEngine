@@ -162,7 +162,11 @@ namespace Desert::Runtime
     {
         if ( ttfPath.empty() )
             return 0;
-        const uint64_t handle = static_cast<uint64_t>( Common::AssetHandle::FromKey( ttfPath ) );
+        // FromCookedPath, not FromKey: a `.ttf` picked from the dropdown arrives as a project-rooted path
+        // while one dropped onto the viewport arrives absolute, and hashing the raw string gave those two
+        // spellings of ONE font two handles -- so a UIText that named the font one way stopped resolving
+        // when the same font was registered the other way.
+        const uint64_t handle = static_cast<uint64_t>( Common::AssetHandle::FromCookedPath( ttfPath ) );
         if ( m_HandleToPath.emplace( handle, ttfPath ).second )
             m_Available.push_back( ttfPath ); // first time we've seen this path -> offer it in the picker
         return handle;

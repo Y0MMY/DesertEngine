@@ -157,9 +157,17 @@ TEST_F( TextureImport, HandleIsDerivedFromTheSourcePathAndIsWrittenIntoTheCooked
     TextureImporter    importer;
     const Common::UUID handle = importer.Import( source );
 
-    const std::string canonical = fs::weakly_canonical( source ).string();
-    EXPECT_EQ( (uint64_t)handle, (uint64_t)Common::AssetHandle::FromKey( canonical ) );
+    // Against FromCookedPath and no longer against FromKey over the canonical ABSOLUTE string. That
+    // absolute form was the last producer of asset identity that keyed on where the project sits, and it
+    // is the one that reached the repository: T_Checker.tex carried FNV-1a of a path beginning
+    // /Users/<a developer>/. Asserted against the shared derivation, so an importer that grew its own
+    // copy would not agree.
+    EXPECT_EQ( (uint64_t)handle, (uint64_t)Common::AssetHandle::FromCookedPath( source ) );
     EXPECT_NE( (uint64_t)handle, 0u );
+
+    // And the key really is the source's place inside the project, with no part of the project root in
+    // it. Asserted on the string because a failure here says WHAT leaked.
+    EXPECT_EQ( Common::AssetHandle::StableKeyForPath( source ), "assets:Textures/T_Test.bmp" );
 
     const fs::path meta = TextureImporter::CookedMetaPath( source );
     ASSERT_TRUE( fs::exists( meta ) );
@@ -189,6 +197,38 @@ TEST_F( TextureImport, HandleSurvivesWipingTheCookedTree )
     const Common::UUID after = second.Import( source );
 
     EXPECT_EQ( (uint64_t)before, (uint64_t)after );
+}
+
+// 2b. THE CROSS-MACHINE PROPERTY, which is what the derivation change bought and what nothing here
+// asserted before. Two developers with the same project at unrelated paths cook the same texture and get
+// the same id -- so the .tex one of them commits, and every .demat that names the texture by that number,
+// still resolve after the other re-cooks. Under the old rule these two differed, which is why the id in
+// this repository had a home directory hashed into it.
+TEST_F( TextureImport, TheHandleIsTheSameForTheSameProjectInTwoDifferentPlaces )
+{
+    const fs::path firstSource = TexturesDir() / "T_Test.bmp";
+    WriteBmp( firstSource, 2, 2, 0x55 );
+
+    TextureImporter    firstImporter;
+    const Common::UUID onOneMachine = firstImporter.Import( firstSource );
+
+    // The same project, checked out somewhere with nothing in common above it.
+    const fs::path elsewhere = fs::temp_directory_path() / "desert_texture_import_other_checkout";
+    fs::remove_all( elsewhere );
+    const fs::path elsewhereTextures = elsewhere / "Resources" / "Assets" / "Textures";
+    WriteBmp( elsewhereTextures / "T_Test.bmp", 2, 2, 0x55 );
+    Common::Constants::Path::SetProjectRoot( elsewhere, "Resources/Assets" );
+
+    TextureImporter    secondImporter;
+    const Common::UUID onAnother = secondImporter.Import( elsewhereTextures / "T_Test.bmp" );
+
+    fs::remove_all( elsewhere );
+    Common::Constants::Path::SetProjectRoot( m_Root, "Resources/Assets" ); // TearDown removes m_Root
+
+    EXPECT_EQ( (uint64_t)onOneMachine, (uint64_t)onAnother )
+         << "one texture, one project, two checkout locations, two ids. A .tex committed by one developer "
+            "then names a different texture than the one the other cooks, and every material slot keyed "
+            "on it empties on the first re-cook.";
 }
 
 // 4a. A .tex at least as new as its source is up to date: the file is left byte for byte alone. Re-cooking

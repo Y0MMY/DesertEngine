@@ -30,7 +30,9 @@ namespace Desert::Runtime
     {
         if ( svgPath.empty() )
             return 0;
-        const uint64_t handle = static_cast<uint64_t>( Common::AssetHandle::FromKey( svgPath ) );
+        // FromCookedPath, not FromKey -- one file is one handle whatever spelling registered it. See the
+        // note in FontService::RegisterFont; the three path-keyed services agree on this.
+        const uint64_t handle = static_cast<uint64_t>( Common::AssetHandle::FromCookedPath( svgPath ) );
         if ( m_HandleToPath.emplace( handle, svgPath ).second )
             m_Available.push_back( svgPath ); // first sighting -> offer it in the picker
         return handle;

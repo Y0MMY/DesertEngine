@@ -748,6 +748,78 @@ TEST( AssetHandleStability, AMaterialsIdComesFromItsFileAndSurvivesTheProjectMov
 }
 
 // ---------------------------------------------------------------------------------------------------
+// The registry deduplicates on the SAME key identity is derived from.
+//
+// Once a handle stopped depending on the spelling, the registry's old raw-path dedup no longer answered
+// the same question: two spellings of one file passed the "is this already registered?" test as two
+// different assets, then both claimed one handle, and the second silently replaced the first in the
+// handle lookup. Two keys that must agree with nothing checking that they do — §2.3.1 exactly.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( AssetHandleStability, TwoSpellingsOfOneFileRegisterAsOneAsset )
+{
+    ProjectRootGuard guard;
+
+    const std::filesystem::path projectDir = std::filesystem::current_path() / "RegistryProbe";
+    Common::Constants::Path::SetProjectRoot( projectDir, "Content" );
+
+    Desert::Assets::AssetManager manager;
+
+    const auto viaAbsolute =
+         manager.CreateAsset<Desert::Assets::SkyboxAsset>( AssetPriority::Medium,
+                                                           Common::Filepath( projectDir / "Content" /
+                                                                             "Sky" / "Dawn.hdr" ) );
+    const auto viaRelative = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
+         AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Sky/Dawn.hdr" ) );
+
+    ASSERT_TRUE( viaAbsolute != nullptr );
+    ASSERT_TRUE( viaRelative != nullptr );
+
+    EXPECT_EQ( viaAbsolute.get(), viaRelative.get() )
+         << "one file registered twice under two spellings produced two records. Both carry the same "
+            "handle now, so the second quietly displaces the first in the handle lookup and whichever "
+            "one a service already holds is the orphan.";
+
+    EXPECT_EQ( manager.FindAllByType<Desert::Assets::SkyboxAsset>().size(), 1u );
+}
+
+TEST( AssetHandleStability, TwoDifferentFilesStillRegisterSeparately )
+{
+    // The companion: a dedup key that answered "yes" to everything would satisfy the test above and
+    // collapse the whole library onto one record.
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( std::filesystem::current_path() / "RegistryProbe", "Content" );
+
+    Desert::Assets::AssetManager manager;
+    manager.CreateAsset<Desert::Assets::SkyboxAsset>( AssetPriority::Medium,
+                                                      Common::Filepath( "RegistryProbe/Content/A.hdr" ) );
+    manager.CreateAsset<Desert::Assets::SkyboxAsset>( AssetPriority::Medium,
+                                                      Common::Filepath( "RegistryProbe/Content/B.hdr" ) );
+
+    EXPECT_EQ( manager.FindAllByType<Desert::Assets::SkyboxAsset>().size(), 2u );
+}
+
+TEST( AssetHandleStability, TwoAssetTypesMayShareOnePathAndStayTwoRecords )
+{
+    // The handle derivation deliberately gives every type at one path the SAME number (asserted at the
+    // top of this file), so the registry's key has to carry the type as well or the second type would be
+    // deduplicated away as a duplicate of the first.
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( std::filesystem::current_path() / "RegistryProbe", "Content" );
+
+    Desert::Assets::AssetManager manager;
+    const auto sky = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
+         AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Shared.asset" ) );
+    // loadAfterCreate=false: no such file exists, and this test is about the registry key, not parsing.
+    const auto cloudType = manager.CreateAsset<Desert::Assets::CloudTypeAsset>(
+         AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Shared.asset" ), false );
+
+    ASSERT_TRUE( sky != nullptr );
+    ASSERT_TRUE( cloudType != nullptr );
+    EXPECT_EQ( manager.FindAllByType<Desert::Assets::SkyboxAsset>().size(), 1u );
+}
+
+// ---------------------------------------------------------------------------------------------------
 // The census: the catalogue above against the enum it claims to cover.
 // ---------------------------------------------------------------------------------------------------
 
