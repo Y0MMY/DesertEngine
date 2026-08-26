@@ -1970,6 +1970,38 @@ namespace
         return std::make_shared<const CloudLayoutData>( made.ExtractValue() );
     }
 
+    /// A painting that varies SMOOTHLY and in BOTH axes, and tiles exactly: one period of a sine along u
+    /// plus one along v. It exists because a stripe cannot catch a small displacement — see the comment on
+    /// TheMapAgreesWithTheBakesOwnCoverageCellForCell, where a sabotage of four tenths of a cell was
+    /// measured GREEN against a stripe because no cell centre ever crossed its one hard edge. A field with
+    /// no flat places has no hiding places.
+    std::shared_ptr<const CloudLayoutData> RippleLayout( uint32_t resolution = 64u )
+    {
+        std::vector<unsigned char> pixels( static_cast<size_t>( resolution ) * resolution * 4u, 0u );
+
+        for ( uint32_t y = 0; y < resolution; ++y )
+            for ( uint32_t x = 0; x < resolution; ++x )
+            {
+                const double u = ( static_cast<double>( x ) + 0.5 ) / resolution;
+                const double v = ( static_cast<double>( y ) + 0.5 ) / resolution;
+                const double f = 0.5 + 0.25 * std::sin( 2.0 * M_PI * u ) + 0.25 * std::sin( 2.0 * M_PI * v );
+
+                const size_t at = ( static_cast<size_t>( y ) * resolution + x ) * 4u;
+                pixels[at + 0]  = static_cast<unsigned char>( std::lround( f * 255.0 ) );
+                pixels[at + 1]  = pixels[at + 0];
+                pixels[at + 2]  = pixels[at + 0];
+                pixels[at + 3]  = 128u;
+            }
+
+        const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+
+        auto made = MakeCloudLayoutFromImage( pixels, resolution, resolution, channels, /*takeMask=*/false );
+        if ( !made )
+            return nullptr;
+
+        return std::make_shared<const CloudLayoutData>( made.ExtractValue() );
+    }
+
     /// A painting carrying one vertical bar @p width texels wide whose left edge is at @p firstColumn,
     /// wrapping past the right edge. The fixture the stroke measure is asked about, because a bar has
     /// exactly one width and it is known before the measurement runs.
@@ -2045,20 +2077,22 @@ TEST( CloudPlacementSpectrum, ThePaintingsFirstRowSitsAtTheOriginAndItsRowsRunNo
 // own, only the sampling grid.
 TEST( CloudPlacementSpectrum, TheMapAgreesWithTheBakesOwnCoverageCellForCell )
 {
-    // BOTH ROTATIONS, AND THAT IS NOT THOROUGHNESS — IT IS WHAT MAKES THE TEST ABLE TO FAIL. The stripe
-    // varies along ONE axis, so at a quarter turn it varies only with world y, and a displaced u would
-    // then land on the identical coverage in all 256 cells. Sabotaging the map's u by four tenths of a
-    // cell was measured GREEN against the single-rotation version of this test, which is a hole and not a
-    // pass. At zero turns the stripe varies with x and the same sabotage goes red.
+    // BOTH ROTATIONS, AND A FIELD WITH NO FLAT PLACES IN IT. Neither is thoroughness; both are what make
+    // the test able to fail. Against a STRIPE the map's u could be displaced by four tenths of a cell and
+    // all 256 cells still came back identical — at a quarter turn the stripe varies only with world y, and
+    // even at zero turns no cell centre ever crossed its single hard edge. That sabotage was measured
+    // GREEN, which is a hole and not a pass. A ripple varies everywhere, and the two rotations put that
+    // variation on both axes in turn.
     for ( const uint32_t turns : { 0u, 1u } )
     {
-        CloudProceduralFieldParams params          = ShippedParams();
-        params.Layout                              = StripeLayout( 64u, /*withMask=*/true );
-        params.LayoutPlacement.RepeatsPerRegion    = 2u;
-        params.LayoutPlacement.QuarterTurns        = turns;
-        params.LayoutPlacement.OffsetKm            = glm::vec2( 3.5f, -1.25f );
-        params.LayoutPlacement.PatternStrength     = 0.35f;
-        params.LayoutPlacement.MaskStrength        = 0.20f;
+        CloudProceduralFieldParams params       = ShippedParams();
+        params.Coverage                         = 0.50f;
+        params.Layout                           = RippleLayout();
+        params.LayoutPlacement.RepeatsPerRegion = 2u;
+        params.LayoutPlacement.QuarterTurns     = turns;
+        params.LayoutPlacement.OffsetKm         = glm::vec2( 3.5f, -1.25f );
+        params.LayoutPlacement.PatternStrength  = 0.35f;
+        params.LayoutPlacement.MaskStrength     = 0.0f;
         ASSERT_TRUE( params.Layout );
 
         const float spanKm = params.RegionSizeKm;

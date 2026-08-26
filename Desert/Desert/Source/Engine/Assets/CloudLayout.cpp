@@ -502,8 +502,17 @@ namespace Desert::Assets
             };
             const auto on = [&]( uint32_t k ) { return alongX ? painted( k, line ) : painted( line, k ); };
 
-            // THE RUNS WRAP, so the walk starts at an UNPAINTED texel: a run that straddles index 0 is one
-            // stroke, and starting at 0 unconditionally would cut it in two and halve its measured width.
+            // THE WALK STARTS AT AN UNPAINTED TEXEL so that every run is met whole and written ONCE.
+            //
+            // The claim this comment used to make — that starting at 0 unconditionally would cut a
+            // straddling run in two and halve its measured width — is FALSE, and a sabotage settled it:
+            // forced to start at 0, the suite's straddling bar still measured 8 texels
+            // (CloudPlacementSpectrum.TheStrokeMeasureJoinsABarThatStraddlesThePaintingsEdge stayed
+            // GREEN). The wrapping run is walked LAST, and its write overwrites the half-run written at
+            // index 0. What actually breaks the wrap is dropping the modulo, which splits the bar into two
+            // runs nothing repairs; the same test goes red at once. Corrected rather than deleted, because
+            // the search is still worth its four lines — it keeps "each texel is written once" an
+            // invariant of the walk rather than a consequence of the order two writes happen to arrive in.
             uint32_t start = n;
             for ( uint32_t k = 0; k < n; ++k )
                 if ( !on( k ) )
