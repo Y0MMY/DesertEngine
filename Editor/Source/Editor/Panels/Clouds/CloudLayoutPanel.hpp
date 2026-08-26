@@ -172,7 +172,7 @@ namespace Desert::Editor
 
         /// Reads an image off disk into the source. Named so the file dialog and the drag-and-drop target
         /// are one operation and cannot decode a picture two different ways.
-        void LoadImage( const std::filesystem::path& path );
+        void LoadSourceImage( const std::filesystem::path& path );
 
         /// Rebuilds m_Layout from the source through Assets::MakeCloudLayoutFromImage — the tool's
         /// function, not a second reading of what a picture means.

@@ -279,7 +279,7 @@ namespace Desert::Editor
     // Source
     // -------------------------------------------------------------------------------------------------
 
-    void CloudLayoutPanel::LoadImage( const std::filesystem::path& path )
+    void CloudLayoutPanel::LoadSourceImage( const std::filesystem::path& path )
     {
         int      width = 0, height = 0, sourceChannels = 0;
         stbi_uc* decoded = stbi_load( path.string().c_str(), &width, &height, &sourceChannels, 4 );
@@ -345,7 +345,7 @@ namespace Desert::Editor
             const std::filesystem::path picked =
                  Common::Utils::FileSystem::OpenFileDialog( "Image\0*.png;*.jpg;*.jpeg;*.tga;*.bmp\0" );
             if ( !picked.empty() )
-                LoadImage( picked );
+                LoadSourceImage( picked );
         }
 
         // The same generic Content Browser payload the Details slot accepts, filtered HERE by extension
@@ -359,7 +359,7 @@ namespace Desert::Editor
                 const std::string dropped( static_cast<const char*>( payload->Data ),
                                            payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
                 if ( !dropped.empty() && LooksLikeAnImage( dropped ) )
-                    LoadImage( dropped );
+                    LoadSourceImage( dropped );
             }
             ImGui::EndDragDropTarget();
         }

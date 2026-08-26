@@ -2190,7 +2190,10 @@ namespace
             {
                 const double u = ( static_cast<double>( x ) + 0.5 ) / resolution;
                 const double v = ( static_cast<double>( y ) + 0.5 ) / resolution;
-                const double f = 0.5 + 0.25 * std::sin( 2.0 * M_PI * u ) + 0.25 * std::sin( 2.0 * M_PI * v );
+                // Spelled out rather than M_PI: that macro is a POSIX extension MSVC does not define
+                // without _USE_MATH_DEFINES, so this line built here and broke both Windows jobs.
+                constexpr double kTwoPi = 6.283185307179586;
+                const double     f      = 0.5 + 0.25 * std::sin( kTwoPi * u ) + 0.25 * std::sin( kTwoPi * v );
 
                 const size_t at = ( static_cast<size_t>( y ) * resolution + x ) * 4u;
                 pixels[at + 0]  = static_cast<unsigned char>( std::lround( f * 255.0 ) );
