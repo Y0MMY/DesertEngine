@@ -4605,7 +4605,8 @@ renderer could not spell the ratio differently, and with it went the last textua
 `VolumetricCloudRenderer.cpp`, which the consumer table still named as its reader. `git show` on the three
 commits says exactly when it happened: one mention at `7459012a`, none at `4f63559c`. The row now names
 `Engine/ECS/VolumetricCloudComponent.hpp`, which is where the field is read. Fixed, re-run 10/10 in Debug,
-and green in Release, whose sweep ran after the fix.
+green in Release whose sweep ran after the fix, and then **all sixty-six Debug binaries were run again from
+the same tree** — no failures, so the green is the whole set's and not one suite's.
 
 The two `not-a-suite` names are both tools — `CloudLayoutBaker` builds `build/Bin/<cfg>/CloudLayoutBaker`
 and no test binary, `LatticePeak` likewise — and this is the same answer §PT derived by hand for
