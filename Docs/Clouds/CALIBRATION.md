@@ -4621,3 +4621,140 @@ THIS rectangle rather than on the 08-20 sky and a 552-tall one:
 taken on a sky with a different producer, a different erosion and a different rectangle, and it is a
 factor of two loose against this one. The two horizon rows at `y 540` are the checker floor's own edge —
 §DS records the same 0.098 at the same row — and are geometry, not a band in the sky.
+
+### Correction 4 — the hero clouds' 1.39x, which §GT filed and did not re-measure
+
+This is the fourth of the four decisions `Docs/GPU_TIMESTAMPS.md` opens with, and the one §GT left alone.
+It follows §GT's form exactly: what the old number was measuring is named, and the digit is corrected
+rather than quietly replaced.
+
+**What the old number was, and the thing about it that is worse than being wrong.** §A2+A3 records
+**1.39x, +7.33 ms, +0.92 ms per instance** for eight hero clouds against none, from a frame-count slope
+`(t900 - t300) / 600`. The scene is named in that section as **`ZZ_Perf<n>`** — and `ZZ_Perf<n>` is not in
+the repository and never was (`git log --all --diff-filter=A -- '*ZZ_Perf*'` returns nothing). **The number
+could not be reproduced by anyone, ever, because its subject was deleted.** §GT reattributed it to
+`Clouds_HeroMass`, which is a fair reading — that scene was added by the same commit and carries exactly
+eight hero entities of three distinct bodies, three of them enabled — but a reattribution is not a
+rectangle.
+
+So the legs are committed this time. **`PR_Hero0.desce`, `PR_Hero3.desce`, `PR_Hero8.desce`** are
+`Clouds_HeroMass` with every reflected field written out (§PR above) and with `HeroCloud.Enabled` set on
+the first 0, 3 and 8 of the eight entities. They differ from each other **in nothing else**, and
+`Desert/Tests/Engine/CloudProtocolScene` asserts that by normalising the flag away and comparing the rest
+whole. `PR_Hero3` renders **byte-identical** to the shipped `Clouds_HeroMass.desce` at the framing below.
+
+**THE RECTANGLE**, stated with the number rather than beside it:
+
+> `PR_Hero{0,3,8}.desce`, camera `0,200,0`, `--look 0,0.18,-1` (§A2's own framing, so the two are
+> comparable), 1280x766, `--shot-frames 400`, **Debug**, MoltenVK, `CloudQualityTier: High`, binary from
+> `7459012a`. Coverage 0.209, one cumulonimbus type, `SuppressProceduralField` true on every hero entity.
+> Ten interleaved passes; inside each pass all three instance counts are run once, in both instrument
+> modes. **The machine was shared and the load average went from 24 to 101 during the session.**
+
+#### The march's own line, which is what §GT asked for
+
+| pass | `Clouds: March` n=0 | n=3 | n=8 | n8 − n0 |
+|---|---|---|---|---|
+| 1 | 6.116 | 11.983 † | 12.013 | **+5.897** |
+| 3 | 5.997 | 8.881 | 11.668 | **+5.671** |
+| 4 | 6.092 | 8.481 | 11.717 | **+5.625** |
+| 6 | 4.788 | 6.499 | 10.734 | **+5.946** |
+
+† that leg's whole GPU frame read 48.6 ms against 18–26 for its neighbours; it is left in the table and out
+of the arithmetic, and the reason is the machine.
+
+**Eight hero clouds cost the march +5.78 ms — 5.63 to 5.95 across four interleaved passes, a spread of
+2.8 %.** The cloud shadow map costs a further **+0.88 ms** (0.31 / 0.47 / 1.30 / 1.56 — noisy, but positive
+in all four), and the temporal resolve costs **nothing measurable** (−0.035 / −0.020 / +0.014 / +0.168,
+which is zero inside its own spread). §A2's account of where the money goes was never itemised at all; this
+says **the march is where it is, the shadow map takes a fifth of what the march takes, and the resolve is
+free.**
+
+#### And the whole frame, on the denominator §GT says a budget is set against
+
+The per-pass marks cost ~1.24 ms (§GT), so a whole-frame figure taken from a fully-marked run is not the
+frame a player gets. `--gpu-profile --gpu-profile-frame-only` is two timestamps and §GT measured it as
+free, so it is the honest denominator — and it was run as its own leg inside every pass:
+
+| pass | GPU frame n=0 | n=3 | n=8 | n8 − n0 | ratio |
+|---|---|---|---|---|---|
+| 1 | 16.551 | 20.083 | 20.613 | +4.062 | 1.245 |
+| 2 | 18.057 | 18.448 | 22.194 | +4.137 | 1.229 |
+| 3 | 17.288 | 19.584 | 22.160 | +4.872 | 1.282 |
+| 4 | 16.711 | 18.605 | 21.625 | +4.914 | 1.294 |
+| 5 | 16.011 | 18.415 | 20.671 | +4.660 | 1.291 |
+| 6 | 13.966 | 17.401 | 19.536 | +5.570 | 1.399 |
+
+**+4.77 ms and 1.286x, against the recorded +7.33 ms and 1.39x.** The absolute figure is **35 % lower** than
+the record. The ratio is not: **1.39 is the top of the six-pass range** — pass 6 reproduces it to three
+digits — and that is the whole lesson rather than a vindication.
+
+**What the old number measured.** A ratio of two whole frames. Its numerator and its denominator are both
+dominated by everything that is *not* a hero cloud, so its value moves with the baseline and not with the
+change. The table above proves that on one machine in one hour: the *same* eight clouds, measured six
+times, give ratios from 1.229 to 1.399 — a 14 % swing — while the **absolute** cost they add moves by 4.06
+to 5.57 ms and the **march's own line** moves by 5.63 to 5.95 ms. The tighter the instrument, the tighter
+the number. §GT said only the absolute cost transfers between trees; here it does not even transfer between
+*passes* in ratio form.
+
+#### The demonstration this correction is actually worth, and it cost nothing to take
+
+Four more passes (7–10) ran while another agent's editor was on the same GPU and the load average was
+above 100. They are reported rather than dropped, because of what they show:
+
+| quantity | over the six quiet passes | over all ten |
+|---|---|---|
+| `Clouds: March`, n8 − n0 | +5.63 to +5.95 ms | **+4.47 to +6.47 ms** — a factor of 1.45, always positive |
+| whole GPU frame (frame-only), n8 − n0 | +4.06 to +5.57 ms | **−5.11 to +8.70 ms** — a factor of ∞, and the SIGN CHANGES TWICE |
+
+**On a loaded machine the whole-frame delta says that adding eight clouds made the frame five milliseconds
+faster.** The march's own line never once does. That is the argument for §GT's instrument stated as a
+measurement instead of as a principle, and it is why the three earlier corrections were needed: every one
+of the four decisions in `Docs/GPU_TIMESTAMPS.md` was taken with the top instrument in that table.
+
+#### The conclusion §A2 drew SURVIVES, and now it is itemised
+
+§A2's structural claim was that eight instances of three bodies cost about what three instances of three
+bodies do, per instance, because the atlas is one descriptor and one fetch site either way. On the march's
+own line, per instance:
+
+| step | pass 3 | pass 4 | pass 6 |
+|---|---|---|---|
+| 0 → 3 (atlas appears, 3 bodies) | +0.96 ms | +0.80 ms | +0.57 ms |
+| 3 → 8 (five more instances, SAME 3 bodies) | +0.56 ms | +0.65 ms | +0.85 ms |
+
+**0.56 to 0.96 ms per instance on either side of the step where the atlas is built** — the two ranges
+overlap, so the instance count and not the body count is what is being paid for, exactly as §A2 argued. The
+recorded +0.92 ms/instance was a whole-frame figure and lands at the top of that band; **+0.72 ms/instance
+on the march** is the figure to carry forward.
+
+**What is NOT claimed.** These are Debug numbers on a shared machine and they are not comparable with
+§GT's `Clouds_Demo` itemisation — different scene, different camera, different session. §PT made the same
+statement for the same reason. What transfers is the absolute delta and the per-instance figure; the
+ratio does not, and that is the finding.
+
+#### Nothing this correction touches reverses a decision
+
+Checked rather than assumed, because a wrong digit under an accepted decision is a reason to re-open it:
+
+* **The demand-built atlas over a fixed eight-slab one** rests on memory arithmetic (12.00 MiB against
+  32.00 MiB, recomputed in §A0) and not on this figure. Untouched.
+* **"Eight instances cost 1.39x and not 8x"** — the claim the number was quoted for is *sub-linearity*,
+  and sub-linearity is confirmed: 0.72 ms per instance against a march that a single near-field body cost
+  3.7–5.1 ms in §A0. The digit changes; the decision does not.
+* **§QT's tier ladder** was already re-checked by §GT-3 and its conclusion confirmed by the itemisation.
+
+**Two things ARE weaker than they read, and both are recorded here rather than left to be discovered:**
+
+1. **The `LineJump` threshold of 0.010 is about three times the noise floor of the sky it now guards.** It
+   was measured on the 08-20 sky over a 552-tall rectangle; on today's sky over `2 2 1278 551` the six
+   protocol points read **0.0014–0.0036** (§PR's new base above, and §SIL2's own table agrees). §DS and
+   §SIL2 both pass "no banding" against 0.010. The guard is loose, not wrong — a band is one row twenty
+   times the noise — but "under 0.010" on a frame whose rows sit at 0.002 is a much weaker statement than
+   it sounds, and the number to compare against from now on is the one in §PR.
+2. **§A2+A3's catalogue of ten genera** — aspect, components, detail, pocket, all read off the baked
+   voxels — was measured before §DS moved the erosion tile from 4 km to 1 km and its strength from 0.10 to
+   0.40, and before §SIL raised the lump from 0.45 to 0.75. Those are the numbers that decide what a baked
+   body looks like. The catalogue is not wrong about the genera it describes; it is a description of
+   voxels that no longer exist, and re-running `Desert/Tests/Engine/CloudCatalogue` (which prints the table
+   itself) is a cheap task for whoever needs it next.

@@ -45,10 +45,10 @@ namespace
     // are guarded for the same reason — a cost number whose scene can be moved by a default is a cost
     // number that will not reproduce.
     const char* const kProtocolScenes[] = {
-        "Clouds_Protocol.desce",
-        "PR_Hero0.desce",
-        "PR_Hero3.desce",
-        "PR_Hero8.desce",
+         "Clouds_Protocol.desce",
+         "PR_Hero0.desce",
+         "PR_Hero3.desce",
+         "PR_Hero8.desce",
     };
 
     // Component key on disk -> reflected type name. Only the REFLECTED components are listed: the others
@@ -61,10 +61,10 @@ namespace
     };
 
     constexpr ReflectedComponent kReflected[] = {
-        { "VolumetricCloud", "VolumetricCloudData" },
-        { "SkyAtmosphere", "SkyAtmosphereData" },
-        { "ExponentialHeightFog", "ExponentialHeightFogData" },
-        { "HeroCloud", "HeroCloudData" },
+         { "VolumetricCloud", "VolumetricCloudData" },
+         { "SkyAtmosphere", "SkyAtmosphereData" },
+         { "ExponentialHeightFog", "ExponentialHeightFogData" },
+         { "HeroCloud", "HeroCloudData" },
     };
 
     // Walks up from the working directory looking for a file only the repository has. Copied in shape
@@ -90,7 +90,7 @@ namespace
 
     std::string ReadAll( const std::string& path )
     {
-        std::ifstream     in( path, std::ios::binary );
+        std::ifstream      in( path, std::ios::binary );
         std::ostringstream buffer;
         buffer << in.rdbuf();
         return buffer.str();
@@ -133,16 +133,16 @@ TEST( CloudProtocolScene, EveryReflectedFieldIsWrittenExplicitlySoNoDefaultCanMo
         {
             for ( const auto& component : kReflected )
             {
-                const auto found = entity.Components.get().find( component.Key );
-                if ( found == entity.Components.get().end() )
+                const auto found = entity.Components.get( component.Key );
+                if ( !found.has_value() )
                     continue;
 
-                const auto payload = found->second.to_object();
+                const auto payload = found.value().to_object();
                 ASSERT_TRUE( payload ) << sceneName << ": '" << component.Key << "' is not an object";
 
                 const TypeInfo* type = Reflected( component.TypeName );
-                ASSERT_NE( type, nullptr )
-                     << component.TypeName << " is not in the reflection registry, so nothing here means "
+                ASSERT_NE( type, nullptr ) << component.TypeName
+                                           << " is not in the reflection registry, so nothing here means "
                                               "anything";
 
                 const std::set<std::string> present = KeysOf( payload.value() );
@@ -232,11 +232,11 @@ TEST( CloudProtocolScene, TheThreeHeroCostLegsDifferOnlyInHowManyHeroCloudsAreEn
         int live = 0;
         for ( auto& entity : scene.Entities )
         {
-            auto found = entity.Components.get().find( "HeroCloud" );
-            if ( found == entity.Components.get().end() )
+            const auto found = entity.Components.get( "HeroCloud" );
+            if ( !found.has_value() )
                 continue;
 
-            auto payload = found->second.to_object();
+            auto payload = found.value().to_object();
             ASSERT_TRUE( payload ) << leg.Scene;
             const auto enabled = payload.value()["Enabled"].to_bool();
             ASSERT_TRUE( enabled ) << leg.Scene << ": HeroCloud.Enabled is not a bool";
@@ -244,8 +244,8 @@ TEST( CloudProtocolScene, TheThreeHeroCostLegsDifferOnlyInHowManyHeroCloudsAreEn
                 ++live;
 
             // Erase the one field the legs are allowed to differ in, so the rest can be compared whole.
-            payload.value()["Enabled"] = false;
-            found->second              = rfl::Generic( payload.value() );
+            payload.value()["Enabled"]     = false;
+            entity.Components["HeroCloud"] = rfl::Generic( payload.value() );
         }
         EXPECT_EQ( live, leg.Expected ) << leg.Scene << " does not carry the instance count its name claims";
         normalised.push_back( rfl::json::write( scene ) );
@@ -255,4 +255,10 @@ TEST( CloudProtocolScene, TheThreeHeroCostLegsDifferOnlyInHowManyHeroCloudsAreEn
         EXPECT_EQ( normalised[0], normalised[i] )
              << "the hero cost legs differ in something other than HeroCloud.Enabled, so their A/B measures "
                 "more than the instance count";
+}
+
+int main( int argc, char** argv )
+{
+    ::testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
 }

@@ -7,7 +7,7 @@ Four decisions in the cloud programme were taken on a number that could not see 
 | shadow ray 6 → 32 samples | ×1.87, 0.230 ms/sample | frame-count slope |
 | cloud shadow map on the world | +4.92 ms, ×1.38 | frame-count slope |
 | the quality tiers | 17.99 / 14.24 / 8.61 ms | frame-count slope |
-| eight hero clouds | 1.39× | frame-count slope |
+| eight hero clouds | 1.39× | frame-count slope — corrected to **+5.78 ms of march / 1.286× of frame**, CALIBRATION.md §PR |
 
 The slope method is honest and the developers kept its discipline — configurations interleaved in one
 session, minimum of N, spread named. But `(t900 - t300) / 600` measures **the whole frame**. It cannot
@@ -202,9 +202,19 @@ The ladder was built by distributing a budget nobody had itemised, and the itemi
 for the right two knobs. Its constants come from the same whole-frame instrument as the two above and
 should be expected to carry the same error.
 
-**The hero clouds' 1.39× was not re-measured** — it belongs to `Clouds_HeroMass`, and this table is
-`Clouds_Demo`. It rests on the same whole-frame instrument as the other three and deserves the same
-re-check.
+**The hero clouds' 1.39× has now been re-measured, and it costs +5.78 ms of march.** The re-check is
+`Docs/Clouds/CALIBRATION.md` §PR, correction 4, on committed scenes (`PR_Hero{0,3,8}.desce`) because the
+scene the original was taken on — `ZZ_Perf<n>` — was never in the repository. Reading the march's own
+line, eight hero clouds cost **+5.78 ms** (5.63–5.95 over four interleaved passes), the cloud shadow map a
+further **+0.88 ms**, and the temporal resolve nothing. The whole uninstrumented frame moves **+4.77 ms,
+1.286×** against the recorded +7.33 ms and 1.39× — the absolute figure is 35 % low and the ratio is the
+*top* of a six-pass range that runs 1.229 to 1.399.
+
+That range is this page's own argument, measured: the same eight clouds on one machine in one hour give a
+whole-frame ratio that swings 14 %, while the march's own line holds to 2.8 %. On four further passes taken
+while another agent held the GPU, the whole-frame delta ran from **−5.11 ms to +8.70 ms — it changed sign
+twice, and said that adding eight clouds made the frame faster.** The march's own line stayed positive in
+every one of the ten.
 
 ## What the instrumentation costs
 
