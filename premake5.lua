@@ -25,6 +25,7 @@ include "Tools/PakTool/"
 include "Tools/SceneMigrator/"
 include "Tools/ImageStat/"
 include "Tools/LineJump/"
+include "Tools/ImageDiff/"
 group ""
 
 include "Desert/"

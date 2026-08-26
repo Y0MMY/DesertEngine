@@ -60,9 +60,39 @@ Shader "CloudTemporalResolve"
         // WHAT UNREAL VALIDATES AND THIS PASS DOES NOT, so that the list above is not read as complete:
         // a minimum reprojection distance (:299), the whole min/max-depth family (:402-427, :480), the
         // eight-neighbour DILATION toward the closest scene depth (:543-558) and the optional
-        // neighbourhood colour box (:570+). The first three of those need per-pixel depth channels this
-        // pass does not carry — a min/max cloud depth and a half-resolution scene depth — so adopting one
-        // is a change to what the march writes, not a change here.
+        // neighbourhood colour box (:570+).
+        //
+        // ALL FOUR WERE BUILT AND MEASURED — task HV, CALIBRATION.md §HV — AND NONE IS ADOPTED. This
+        // paragraph is a result rather than a plan, and the reasons differ from each other:
+        //
+        //   * TWO OF THE FOUR ARE NOT IN OUR CONFIGURATION OF UNREAL AT ALL. :398 and :515 split the
+        //     reconstruct body on PERMUTATION_CLOUD_MIN_AND_MAX_DEPTH; the dilation and the colour box are
+        //     in the #else, and mode 0 with compute — which is exactly what this pass is — takes the #if.
+        //   * THE MIN/MAX IS SCENE DEPTH, NOT CLOUD DEPTH. This comment said "cloud" for two phases and it
+        //     was wrong: VolumetricCloud.usf:594-606 fills it from SceneDepthMinAndMaxTexture, the opaque
+        //     Z-buffer's range over the block one trace texel covers. That family's headline rule (:408,
+        //     "removing cloud over trees") is also unreachable in Unreal itself — the march writes .y and
+        //     .w from one expression, so the second half of :409 reduces to `abs(x) < 0`.
+        //   * THE GATE at :402, the one piece of that family needing no new channel, was implemented and
+        //     is NET NEGATIVE here: it moved 0.486 % of one motion frame and raised the error against
+        //     ground truth from 6.7142 to 6.7189.
+        //   * THE COLOUR BOX costs 0.024 ms of a 0.179 ms pass and changes up to 6.35 % of a shipped still
+        //     frame, while improving one motion path of four and making another worse.
+        //   * THE MINIMUM REPROJECTION DISTANCE is the one with a real artefact behind it: a climb into
+        //     the deck leaves a blocky patch of stale history over the horizon band, and the check removes
+        //     it — the error against ground truth falls a tenth at 2 km and a third at Unreal's suggested
+        //     4 km. It is still not adopted, because it cannot be spent as a constant: 4 km damages a
+        //     tenth of a plain zenith frame, the largest value that costs nothing here (2 km) sits just
+        //     under THIS layer's 2.2 km base, and five of the nine shipped cloud types have bases below
+        //     that. Unreal ships it off for the same trade (cvar default 0.0f,
+        //     VolumetricRenderTarget.cpp:63). What would make it adoptable is a threshold DERIVED from
+        //     the layer rather than a constant, which is one float in CloudResolveParams; that is a
+        //     proposal in §HV, not a plan hidden here.
+        //
+        // The disocclusion test above is, on the same measurements, INERT over open sky — removing it
+        // entirely leaves every motion path byte-identical — and ALIVE at opaque silhouettes, where it
+        // fires on 1.27 % of a pan and improves the frame. That is why it stays and why nothing was built
+        // on top of it.
         //
         // LINEAR HDR IN, LINEAR HDR OUT. Premultiplied radiance in .rgb, TRANSMITTANCE in .a, exactly as
         // the march produced it and the composite expects it. Blending a premultiplied pair componentwise
