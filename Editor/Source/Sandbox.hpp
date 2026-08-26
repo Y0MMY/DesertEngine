@@ -96,6 +96,8 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
                 shot.GpuTiming = false;
             else if ( std::strcmp( argv[i], "--gpu-profile-frame-only" ) == 0 )
                 shot.GpuFrameOnly = true;
+            else if ( hasNext && std::strcmp( argv[i], "--open-panel" ) == 0 )
+                shot.OpenPanels.emplace_back( argv[++i] );
         }
 
         // Applied here, before the renderer exists: the flags have to be in force for the very first

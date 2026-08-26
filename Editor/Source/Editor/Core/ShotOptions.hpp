@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <string>
+#include <vector>
 
 namespace Desert::Editor
 {
@@ -144,6 +145,16 @@ namespace Desert::Editor
         // bracket rather than against nothing, and it is also a legitimate lightweight mode: GPU frame
         // time for almost no cost.
         bool GpuFrameOnly = false;
+
+        // --open-panel <name>, repeatable: panels to open at startup, matched against IPanel::GetName().
+        //
+        // The contract requires every UI change to be LOOKED AT, and until now there was no way to put a
+        // panel on screen without a human clicking the View menu — scripted clicking needs macOS assistive
+        // access, which a build agent does not have. So a panel that defaults to hidden (as a tool panel
+        // should) could be built, shipped and never once seen. This is the mechanism for seeing it, and it
+        // is deliberately not a "test mode": it opens exactly what the View menu opens, so the screenshot
+        // is of the real panel in the real editor.
+        std::vector<std::string> OpenPanels;
 
         // Headless capture mode at all — either flavour of output activates it. `--shot-sequence` alone is
         // a legitimate run: a motion study wants the frames and has no use for a designated last one.

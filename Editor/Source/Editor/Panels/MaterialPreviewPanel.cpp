@@ -34,9 +34,12 @@ namespace Desert::Editor
         {
             switch ( s )
             {
-                case PreviewViewport::Shape::Sphere: return "Sphere";
-                case PreviewViewport::Shape::Cube:   return "Cube";
-                case PreviewViewport::Shape::Plane:  return "Plane";
+                case PreviewViewport::Shape::Sphere:
+                    return "Sphere";
+                case PreviewViewport::Shape::Cube:
+                    return "Cube";
+                case PreviewViewport::Shape::Plane:
+                    return "Plane";
             }
             return "Sphere";
         }
@@ -111,6 +114,26 @@ namespace Desert::Editor
             m_SowPanel           = true;
         }
 
+        // Opened with nothing to show: pick something rather than presenting a blank window. A material on
+        // a CUSTOM shader is preferred because that is what this window exists for — it is the shader
+        // graph's material editor — and only the standard PBR material otherwise. Deterministic, and the
+        // combo is right there to change it.
+        if ( static_cast<uint64_t>( m_Material ) == 0 && m_AssetManager )
+        {
+            const auto materials = m_AssetManager->FindAllByType<Assets::SurfaceMaterialAsset>();
+            for ( const auto& [handle, asset] : materials )
+            {
+                if ( asset && asset->Data().UsesCustomShader() )
+                {
+                    m_Material = handle;
+                    break;
+                }
+            }
+            if ( static_cast<uint64_t>( m_Material ) == 0 && !materials.empty() )
+                m_Material = materials.front().first;
+            m_Applied = false;
+        }
+
         if ( !m_DrewThisFrame )
         {
             // Open but not actually drawn last frame — a collapsed window or a background dock tab. Keep the
@@ -167,8 +190,8 @@ namespace Desert::Editor
         ImGui::SetNextItemWidth( 110.0f );
         if ( ImGui::BeginCombo( "Shape", ShapeName( m_Shape ) ) )
         {
-            for ( auto s : { PreviewViewport::Shape::Sphere, PreviewViewport::Shape::Cube,
-                             PreviewViewport::Shape::Plane } )
+            for ( auto s :
+                  { PreviewViewport::Shape::Sphere, PreviewViewport::Shape::Cube, PreviewViewport::Shape::Plane } )
             {
                 const bool selected = ( s == m_Shape );
                 if ( ImGui::Selectable( ShapeName( s ), selected ) && !selected )
@@ -220,6 +243,16 @@ namespace Desert::Editor
         // MeshRenderer already does every frame — which is why parameters update LIVE while a change to the
         // graph's topology is debounced. Measured: a shader that has to be rebuilt costs ~123 ms per SPIR-V
         // module on this machine, and a Surface graph emits three.
+        // Two columns, label cell then control cell — the same shape the Details panel's material editor
+        // uses. Drawing the label as ImGui's own trailing label instead put it on top of the value: a
+        // colour row came out reading "A255e255 255 255", which is what looking at the panel found and
+        // reading the code did not.
+        if ( !ImGui::BeginTable( "##preview_params", 2,
+                                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )
+            return;
+        ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.45f );
+        ImGui::TableSetupColumn( "control", ImGuiTableColumnFlags_WidthStretch, 0.55f );
+
         for ( const auto& p : schema.Params )
         {
             if ( p.IsTexture )
@@ -228,15 +261,22 @@ namespace Desert::Editor
             using VT = ::Desert::Core::Formats::ShaderValueType;
             using W  = ::Desert::Core::Formats::ShaderParamWidget;
 
-            const char* label = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
-            glm::vec4   value = asset->Data().GetParam( p.Name, p.Default );
-            bool        edited = false;
+            const char*       label    = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
+            const std::string hiddenId = "##pp_" + p.Name; // the label lives in its own cell
+            glm::vec4         value    = asset->Data().GetParam( p.Name, p.Default );
+            bool              edited   = false;
 
-            ImGui::SetNextItemWidth( -140.0f );
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted( label );
+            ImGui::TableNextColumn();
+            ImGui::PushItemWidth( -FLT_MIN );
+
             if ( p.Widget == W::Color )
             {
-                edited = ( p.Type == VT::Float3 ) ? ImGui::ColorEdit3( label, &value.x )
-                                                  : ImGui::ColorEdit4( label, &value.x );
+                edited = ( p.Type == VT::Float3 ) ? ImGui::ColorEdit3( hiddenId.c_str(), &value.x )
+                                                  : ImGui::ColorEdit4( hiddenId.c_str(), &value.x );
             }
             else
             {
@@ -247,24 +287,26 @@ namespace Desert::Editor
                 if ( p.Min.has_value() && p.Max.has_value() )
                 {
                     float mn = *p.Min, mx = *p.Max;
-                    edited = ImGui::SliderScalarN( label, ImGuiDataType_Float, &value.x, comps, &mn, &mx );
+                    edited =
+                         ImGui::SliderScalarN( hiddenId.c_str(), ImGuiDataType_Float, &value.x, comps, &mn, &mx );
                 }
                 else
                 {
-                    edited = ImGui::DragScalarN( label, ImGuiDataType_Float, &value.x, comps, 0.01f );
+                    edited = ImGui::DragScalarN( hiddenId.c_str(), ImGuiDataType_Float, &value.x, comps, 0.01f );
                 }
             }
+            ImGui::PopItemWidth();
 
             if ( edited )
             {
                 asset->Data().SetParam( p.Name, value );
-                // Rebuild the runtime material from the asset. The preview target holds the material in a
-                // SLOT, so clearing the runtime instances is what MeshECSSystem needs to see to re-run
+                // Re-push the material so MeshECSSystem rebuilds the runtime instance through
                 // MaterialFactory against the new values — the same thing the Details panel's Invalidate()
-                // does for a scene mesh.
+                // does for a scene mesh. No recompile: a parameter is a uniform-buffer field.
                 m_Applied = false;
             }
         }
+        ImGui::EndTable();
     }
 
     void MaterialPreviewPanel::OnUIRender()
@@ -272,9 +314,9 @@ namespace Desert::Editor
         DrawToolbar();
         ImGui::Separator();
 
-        const float kParamColumnW = 300.0f;
-        const ImVec2 avail        = ImGui::GetContentRegionAvail();
-        const float  imageSide    = std::max( 64.0f, std::min( avail.x - kParamColumnW, avail.y ) );
+        const float  kParamColumnW = 300.0f;
+        const ImVec2 avail         = ImGui::GetContentRegionAvail();
+        const float  imageSide     = std::max( 64.0f, std::min( avail.x - kParamColumnW, avail.y ) );
 
         if ( static_cast<uint64_t>( m_Material ) == 0 )
         {

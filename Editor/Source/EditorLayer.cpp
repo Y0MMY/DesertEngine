@@ -455,6 +455,23 @@ namespace Desert::Editor
         m_Panels.emplace_back(
              std::make_unique<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::BuildSettingsPanel>() );
+
+        // --open-panel <name>: open a panel from the command line exactly as the View menu would, so a
+        // panel that defaults to hidden can still be looked at unattended. Pinned for the same reason the
+        // View menu pins: explicit intent must never be undone by the contextual auto-close.
+        for ( const auto& wanted : ShotOptions::Get().OpenPanels )
+        {
+            const auto it = std::find_if( m_Panels.begin(), m_Panels.end(),
+                                          [&]( const auto& p ) { return p->GetName() == wanted; } );
+            if ( it == m_Panels.end() )
+            {
+                LOG_ERROR( "[Editor] --open-panel '{}': no panel by that name", wanted );
+                continue;
+            }
+            ( *it )->GetVisibility() = true;
+            ( *it )->Pinned()        = true;
+            LOG_INFO( "[Editor] --open-panel '{}'", wanted );
+        }
 #endif // EBABLE_IMGUI
 
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );

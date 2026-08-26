@@ -64,8 +64,8 @@ namespace Desert::Editor
     private:
         void DrawToolbar();
         void DrawParameters();
-        void EnsurePreview();   // create the viewport + scene + renderer (claims a slot)
-        void ReleasePreview();  // destroy them (returns the slot)
+        void EnsurePreview();  // create the viewport + scene + renderer (claims a slot)
+        void ReleasePreview(); // destroy them (returns the slot)
 
         std::shared_ptr<Assets::AssetManager> m_AssetManager;
 
@@ -74,9 +74,9 @@ namespace Desert::Editor
         std::unique_ptr<PreviewViewport> m_Preview;
         std::unique_ptr<UI::UIHelper>    m_UIHelper;
 
-        Assets::AssetHandle          m_Material{ static_cast<uint64_t>( 0 ) };
-        PreviewViewport::Shape       m_Shape = PreviewViewport::Shape::Sphere;
-        bool                         m_Applied = false; // m_Material has been pushed into the viewport
+        Assets::AssetHandle    m_Material{ static_cast<uint64_t>( 0 ) };
+        PreviewViewport::Shape m_Shape   = PreviewViewport::Shape::Sphere;
+        bool                   m_Applied = false; // m_Material has been pushed into the viewport
 
         // Set in OnUIRender, consumed in OnPreUpdate: the render is only paid for while the window really
         // drew last frame, so a hidden dock tab costs nothing even before the window is closed outright.
