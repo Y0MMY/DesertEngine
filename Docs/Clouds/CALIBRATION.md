@@ -4730,17 +4730,18 @@ repeated hashes are the six `Clouds_Demo` pairs** — which is the result rather
 `build/Tests/Intermediates/<config>` **removed entirely** before either run, then every generated makefile
 built and run.
 
-| | Debug |
-|---|---|
-| makefiles generated | **84** |
-| excluded as tools, libraries and aggregates | **14** |
-| makefiles the loop considered | **70** |
-| suite binaries built | **67** |
-| `not-a-suite` lines | **3** |
-| `BUILD-FAIL` | **none** |
-| suites failed | **NONE** |
+| | Debug | Release |
+|---|---|---|
+| makefiles generated | **84** | **84** |
+| excluded as tools, libraries and aggregates | **14** | **14** |
+| makefiles the loop considered | **70** | **70** |
+| suite binaries built | **67** | **67** |
+| `not-a-suite` lines | **3** | **3** |
+| `BUILD-FAIL` | **none** | **none** |
+| suites failed | **NONE** | **NONE** |
 
-**The count balances: 70 considered, 3 named as tools, 67 suites, 67 binaries, nothing unexplained.**
+**The count balances in both: 70 considered, 3 named as tools, 67 suites, 67 binaries, nothing
+unexplained, and the two configurations agree line for line.**
 
 **AND THE THREE `not-a-suite` NAMES, READ RATHER THAN ASSUMED:** `ImageStat`, `LineJump`, `SceneMigrator`.
 All three are this programme's own instruments — they land in `build/Bin/<config>/` and link no gtest —
