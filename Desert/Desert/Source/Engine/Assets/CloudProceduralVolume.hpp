@@ -512,4 +512,90 @@ namespace Desert::Assets
     /// How many lumps the whole region holds, summed over the species — the quantity the bake's cost is
     /// linear in, exposed so the renderer can log it beside the milliseconds rather than guessing.
     size_t CountCloudProceduralBlobs( const CloudProceduralFieldParams& params, const glm::vec2& regionOriginKm );
+
+    /**
+     * @brief How busy the sky is at one place — the ONE number a painting decides, 0..1.
+     *
+     * THIS IS THE FUNCTION THE BAKE CALLS, exposed rather than re-derived. The cloud layout panel draws a
+     * map of what a painting will do to a sky, and a map computed from the rule written a second time is a
+     * map that agrees with a sky nobody bakes. That is the same argument
+     * EvaluateCloudProceduralProfile carries for the cloud TYPE panel's silhouette, and the same defect
+     * class DEV_CONTRACT.md §2.3.1 names.
+     *
+     * WHAT IT FOLDS IN, in one place and once: the Coverage slider, then EITHER the painted pattern (when
+     * a layout is bound and Layout Pattern Strength is up) OR the procedural weather patch — never both,
+     * because two mechanisms setting one number is the second path §1.3 and §4.2 forbid — and then the
+     * painted mask, which is additive and asymmetric because adding cloud where you paint is what a mask
+     * is for. The result is CLAMPED to 0..1, and that clamp is not a formality: a mask at full strength
+     * can drive a region past both ends of it, and everything the pattern would have said inside that
+     * region is then eaten. CALIBRATION.md §PT measured exactly that as a byte-identical pair of frames.
+     *
+     * @param slot which species slot's channel of the painting to read; it also decorrelates the weather
+     *        patch, so two species in different slots have their busy regions in different places.
+     */
+    float CloudProceduralCellCoverage( const CloudProceduralFieldParams& params, uint32_t slot,
+                                       const glm::vec2& centreKm );
+
+    /**
+     * @brief A TOP-DOWN MAP of the coverage a painting produces, plus the two numbers that map cannot show
+     *        on its own.
+     *
+     * WHY A MAP OF COVERAGE AND NOT A RENDERED SKY. An artist paints a sky, not a texture, so a preview
+     * that shows the texture is honest and useless — CALIBRATION.md §PT's own proof is a TOP-DOWN frame
+     * for exactly that reason. A rendered sky would mean a full bake and a march; this is the quantity in
+     * between, and it is the quantity the painting actually decides. It is sampled on the PLACEMENT CELL
+     * because that is the resolution the sky can express, which is what makes a stroke finer than a cell
+     * visibly fall apart in the picture instead of looking crisp in it.
+     *
+     * @param slot    species slot to map, 0..Species.size()-1.
+     * @param spanKm  world size of the square to map, centred on the world origin. One region span shows
+     *                exactly one period of the painting; two shows that it tiles.
+     * @param maxSide the caller's ceiling on the returned side, so a fine lattice over a wide span cannot
+     *                ask for a million evaluations behind a slider.
+     *
+     * PURE: no GPU, no files, no global state. Errors rather than guesses when the slot does not exist or
+     * the span is not a positive length.
+     */
+    struct CloudLayoutPreview
+    {
+        /// Cells across the mapped square, both axes.
+        uint32_t Side = 0u;
+
+        /// The square's world size, kilometres — the span asked for, unchanged.
+        float SpanKm = 0.0f;
+
+        /// The world size of one sample, kilometres. It is the placement cell unless @p maxSide clipped
+        /// the map, and a caller that reports a legibility bound must use THIS rather than the cell it
+        /// asked for, or it will quote a resolution the picture does not have.
+        float SamplePitchKm = 0.0f;
+
+        /// The MAPPED SLOT'S placement cell, kilometres, on its shorter side — the bound a painted stroke
+        /// has to clear to read as a shape rather than as a row of clumps. The slot's own and not the
+        /// layer's finest: legibility fails first for the species with the LARGEST cells, where
+        /// ValidateCloudProceduralLayout's texel bound fails first for the species with the smallest, and
+        /// two bounds that run in opposite directions must not share a number.
+        float CellKm = 0.0f;
+
+        /// `Side * Side` coverages in 0..1, row-major, x increasing east and y increasing north.
+        std::vector<float> Coverage;
+
+        /// How many of those cells the two ENDS of Layout Pattern Strength disagree about by more than one
+        /// 255th — the quantity that is ZERO when the mask has saturated the clamp and the pattern slider
+        /// can no longer do anything at all. Measured at 0 and at 1 rather than around the current value,
+        /// because that is the pair CALIBRATION.md §PT shot and found byte-identical.
+        uint32_t CellsPatternMoves = 0u;
+        uint32_t Cells             = 0u;
+
+        /// How many cells the clamp pinned at exactly 0 or exactly 1 at the parameters as given. It is the
+        /// EXPLANATION for the number above: a sky most of which is pinned is a sky in which a
+        /// redistribution has nowhere to go.
+        uint32_t CellsClamped = 0u;
+
+        /// The mean of Coverage over the map — what the Coverage slider actually delivers here, as opposed
+        /// to what it asks for.
+        float MeanCoverage = 0.0f;
+    };
+
+    Common::ResultStr<CloudLayoutPreview> BuildCloudLayoutPreview( const CloudProceduralFieldParams& params,
+                                                                   uint32_t slot, float spanKm, uint32_t maxSide );
 } // namespace Desert::Assets

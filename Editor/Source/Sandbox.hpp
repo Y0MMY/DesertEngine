@@ -5,6 +5,7 @@
 
 #include <Editor/Core/ProjectContext.hpp>
 #include <Editor/Core/ShotOptions.hpp>
+#include <Editor/Core/StartupOptions.hpp>
 
 #include <Common/Core/Profiler.hpp>
 
@@ -96,6 +97,10 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
                 shot.GpuTiming = false;
             else if ( std::strcmp( argv[i], "--gpu-profile-frame-only" ) == 0 )
                 shot.GpuFrameOnly = true;
+            // Not a shot option — see Editor/Core/StartupOptions.hpp. Parsed in the same loop because
+            // there is one command line and a second pass over it is a second place to forget a flag.
+            else if ( hasNext && std::strcmp( argv[i], "--open-panel" ) == 0 )
+                Desert::Editor::StartupOptions::Get().PanelsToOpen.emplace_back( argv[++i] );
         }
 
         // Applied here, before the renderer exists: the flags have to be in force for the very first

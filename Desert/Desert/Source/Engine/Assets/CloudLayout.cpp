@@ -448,4 +448,150 @@ namespace Desert::Assets
 
         return DecodeCloudLayout( encoded.GetValue() );
     }
+
+    CloudLayoutStrokeStats MeasureCloudLayoutStrokes( const CloudLayoutData& data, uint32_t slot,
+                                                      float limitTexels )
+    {
+        CloudLayoutStrokeStats stats;
+
+        if ( !data.HasPattern() || slot >= kCloudLayoutChannels || data.Resolution == 0u )
+            return stats;
+
+        const uint32_t n      = data.Resolution;
+        const size_t   texels = static_cast<size_t>( n ) * n;
+
+        if ( data.Pattern.size() != texels * kPatternBytesPerTexel )
+            return stats;
+
+        // THE THRESHOLD IS THE CHANNEL'S OWN MIDPOINT, not a fixed half. A painting that runs from 40 to
+        // 200 was still drawn with strokes, and thresholding it at 128 would measure the ink rather than
+        // the shape — a soft figure would report half its strokes and a dark one none at all.
+        unsigned char least    = 255u;
+        unsigned char greatest = 0u;
+        for ( size_t t = 0; t < texels; ++t )
+        {
+            const unsigned char v = data.Pattern[t * kPatternBytesPerTexel + slot];
+            least                 = std::min( least, v );
+            greatest              = std::max( greatest, v );
+        }
+
+        // A FLAT CHANNEL HAS NO STROKES AT ALL, and that is the honest answer rather than "every texel is
+        // painted". A slot nobody drew on must not produce a legibility verdict.
+        if ( greatest - least < 2u )
+            return stats;
+
+        const unsigned char threshold = static_cast<unsigned char>(
+             ( static_cast<uint32_t>( least ) + static_cast<uint32_t>( greatest ) ) / 2u );
+
+        const auto painted = [&]( uint32_t x, uint32_t y )
+        { return data.Pattern[( static_cast<size_t>( y ) * n + x ) * kPatternBytesPerTexel + slot] > threshold; };
+
+        // uint16 because the side is capped at kCloudLayoutMaxResolution — 1024 fits, and at the ceiling
+        // the two tables are 4 MiB rather than 8.
+        std::vector<uint16_t> runAlongX( texels, 0u );
+        std::vector<uint16_t> runAlongY( texels, 0u );
+
+        // ONE WALK, USED FOR BOTH AXES, parameterised by a fetch and a store. Writing the wrapping run
+        // twice is how the two axes come to disagree about where a stroke ends.
+        const auto walkLine = [&]( uint32_t line, bool alongX, std::vector<uint16_t>& into )
+        {
+            const auto at = [&]( uint32_t k ) -> size_t
+            { return alongX ? static_cast<size_t>( line ) * n + k : static_cast<size_t>( k ) * n + line; };
+            const auto on = [&]( uint32_t k ) { return alongX ? painted( k, line ) : painted( line, k ); };
+
+            // THE WALK STARTS AT AN UNPAINTED TEXEL so that every run is met whole and written ONCE.
+            //
+            // The claim this comment used to make — that starting at 0 unconditionally would cut a
+            // straddling run in two and halve its measured width — is FALSE, and a sabotage settled it:
+            // forced to start at 0, the suite's straddling bar still measured 8 texels
+            // (CloudPlacementSpectrum.TheStrokeMeasureJoinsABarThatStraddlesThePaintingsEdge stayed
+            // GREEN). The wrapping run is walked LAST, and its write overwrites the half-run written at
+            // index 0. What actually breaks the wrap is dropping the modulo, which splits the bar into two
+            // runs nothing repairs; the same test goes red at once. Corrected rather than deleted, because
+            // the search is still worth its four lines — it keeps "each texel is written once" an
+            // invariant of the walk rather than a consequence of the order two writes happen to arrive in.
+            uint32_t start = n;
+            for ( uint32_t k = 0; k < n; ++k )
+                if ( !on( k ) )
+                {
+                    start = k;
+                    break;
+                }
+
+            if ( start == n )
+            {
+                // The whole line is painted: one stroke as wide as the world, because it wraps.
+                for ( uint32_t k = 0; k < n; ++k )
+                    into[at( k )] = static_cast<uint16_t>( n );
+                return;
+            }
+
+            uint32_t k = 0;
+            while ( k < n )
+            {
+                const uint32_t index = ( start + k ) % n;
+                if ( !on( index ) )
+                {
+                    ++k;
+                    continue;
+                }
+
+                uint32_t length = 0;
+                while ( length < n && on( ( start + k + length ) % n ) )
+                    ++length;
+
+                for ( uint32_t i = 0; i < length; ++i )
+                    into[at( ( start + k + i ) % n )] = static_cast<uint16_t>( length );
+
+                k += length;
+            }
+        };
+
+        for ( uint32_t y = 0; y < n; ++y )
+            walkLine( y, /*alongX=*/true, runAlongX );
+        for ( uint32_t x = 0; x < n; ++x )
+            walkLine( x, /*alongX=*/false, runAlongY );
+
+        // Histogram over widths 1..n, so the percentiles below are exact counts rather than a sort of a
+        // million floats.
+        std::vector<uint64_t> histogram( static_cast<size_t>( n ) + 1u, 0u );
+        uint64_t              belowLimit = 0u;
+
+        for ( size_t t = 0; t < texels; ++t )
+        {
+            const uint16_t width = std::min( runAlongX[t], runAlongY[t] );
+            if ( width == 0u )
+                continue;
+
+            ++stats.PaintedTexels;
+            ++histogram[width];
+
+            if ( limitTexels > 0.0f && static_cast<float>( width ) < limitTexels )
+                ++belowLimit;
+        }
+
+        if ( stats.PaintedTexels == 0u )
+            return stats;
+
+        const auto percentile = [&]( double fraction )
+        {
+            const uint64_t wanted = static_cast<uint64_t>(
+                 std::max( 1.0, std::ceil( fraction * static_cast<double>( stats.PaintedTexels ) ) ) );
+            uint64_t seen = 0u;
+            for ( uint32_t width = 1; width <= n; ++width )
+            {
+                seen += histogram[width];
+                if ( seen >= wanted )
+                    return static_cast<float>( width );
+            }
+            return static_cast<float>( n );
+        };
+
+        stats.ThinnestTenthTexels = percentile( 0.10 );
+        stats.MedianTexels        = percentile( 0.50 );
+        stats.FractionBelowLimit =
+             static_cast<float>( static_cast<double>( belowLimit ) / static_cast<double>( stats.PaintedTexels ) );
+
+        return stats;
+    }
 } // namespace Desert::Assets

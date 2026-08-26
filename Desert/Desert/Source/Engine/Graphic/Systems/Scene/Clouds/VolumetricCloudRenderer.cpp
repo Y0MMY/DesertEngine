@@ -145,46 +145,41 @@ namespace Desert::Graphic::System
     uint32_t VolumetricCloudRenderer::ResolveSpecies( CloudTypeShape ( &shapes )[kCloudSpeciesSlots],
                                                       Assets::AssetHandle ( &handles )[kCloudSpeciesSlots] ) const
     {
+        // The component has four type fields and the payload has four species channels, and this is the
+        // one place both are indexed by the same number. If they ever part, every array below overflows
+        // by exactly as much as they differ.
+        static_assert( ECS::kCloudTypeSlots == kCloudSpeciesSlots,
+                       "a layer's cloud type slots and the payload's species slots are indexed together" );
+
         auto* types = Runtime::ResourceRegistry::GetCloudTypeService();
 
-        // The panel's four slots, in the order they are drawn. The one statement of that order.
-        const Assets::AssetHandle authored[kCloudSpeciesSlots] = { m_Data.CloudType1, m_Data.CloudType2,
-                                                                   m_Data.CloudType3, m_Data.CloudType4 };
+        // WHICH SLOTS BECOME SPECIES IS STATED ONCE, IN ECS::ResolveCloudSpecies, and it stopped being the
+        // renderer's private business the moment a painted layout indexed its channels by SPECIES: the
+        // Cloud Layout panel has to name the type behind channel 2, and a panel that compacted the slots
+        // for itself would name a different one the day this rule moved. Empty slots are skipped and a
+        // repeated type is dropped there, for the reason given there.
+        const ECS::CloudSpeciesResolution resolved = ECS::ResolveCloudSpecies( m_Data );
 
-        uint32_t count = 0;
-        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
-        {
-            if ( authored[slot] == Assets::AssetHandle::Null() )
-                continue;
-
-            // DUPLICATES ARE DROPPED, and this is not tidiness. The same type twice is the same placement
-            // field twice — same scale, same anisotropy — differing only by the slot's decorrelation
-            // offset, so it is two independent skies of one kind of cloud laid over each other at twice
-            // the cost of one and for no visible gain but a denser sky the Coverage slider no longer
-            // describes. An artist who wants two of a kind wants two TYPES with different scales, and the
-            // slot they freed is there for it.
-            bool seen = false;
-            for ( uint32_t taken = 0; taken < count; ++taken )
-                seen = seen || handles[taken] == authored[slot];
-            if ( seen )
-                continue;
-
-            handles[count] = authored[slot];
-            shapes[count]  = types->GetShape( authored[slot] );
-            ++count;
-        }
-
-        if ( count == 0 )
+        if ( resolved.BuiltInDefault )
         {
             // ALL FOUR EMPTY IS A DOCUMENTED ANSWER, and it is the SAME answer an empty single slot gave
             // before there were four: one built-in cumulus congestus. A scene nobody has authored a type
             // for still has to have a sky.
             handles[0] = Assets::AssetHandle::Null();
             shapes[0]  = Assets::CloudTypeDefaultShape();
-            count      = 1;
+            return 1;
         }
 
-        return count;
+        const Assets::AssetHandle authored[ECS::kCloudTypeSlots] = { m_Data.CloudType1, m_Data.CloudType2,
+                                                                     m_Data.CloudType3, m_Data.CloudType4 };
+
+        for ( uint32_t species = 0; species < resolved.Count; ++species )
+        {
+            handles[species] = authored[resolved.AuthoredSlot[species]];
+            shapes[species]  = types->GetShape( handles[species] );
+        }
+
+        return resolved.Count;
     }
 
     Assets::CloudProceduralFieldParams
@@ -232,7 +227,9 @@ namespace Desert::Graphic::System
         // that dilation under 200 m while still fusing lobes that already overlap, which is where the
         // fusion comes from. An artist who wants softer clouds has Detail Strength, which is the knob that
         // means it.
-        const float latticeKm = std::max( m_Data.WeatherTileSize, 1.0f ) / kCloudWorldUnitsPerKm / 4.0f;
+        // ONE STATEMENT OF "four cells to a tile", shared with the Cloud Layout panel, which measures a
+        // painting's strokes against the cell and must not compute the ratio a second time.
+        const float latticeKm = ECS::CloudLayerLatticeKm( m_Data );
 
         params.BlendRadiusKm  = std::max( 0.02f * latticeKm, 1e-3f );
         params.ProfileDepthKm = std::max( 0.12f * latticeKm, 1e-3f );

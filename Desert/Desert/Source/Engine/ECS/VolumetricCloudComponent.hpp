@@ -401,8 +401,8 @@ namespace Desert::ECS
         // The march reads the volume it already read.
 
         PROPERTY( DisplayName( "Cloud Layout" ), Category( "Layout" ), Summary, Asset<CloudLayoutAsset>,
-                  Tooltip( "A PAINTED sky — drag a .dclayout from the Content Browser. Bake one from a picture "
-                           "with Tools/CloudLayoutBaker. Its four channels say where each of this "
+                  Tooltip( "A PAINTED sky — drag a .dclayout from the Content Browser, or make one from an "
+                           "image in View > Cloud Layout. Its four channels say where each of this "
                            "layer's four cloud type slots lives, and its mask adds or removes cloud in "
                            "regions you paint. EMPTY IS THE NORMAL STATE: with no layout the sky is placed "
                            "procedurally exactly as before, and Weather Patch Strength decides which parts "
@@ -892,6 +892,91 @@ namespace Desert::ECS
                            "seamless." ) )
         float WindSpeed = 3000.0f; // 30 m/s
     };
+
+    /**
+     * @brief The layer's PLACEMENT LATTICE in kilometres — Weather Tile Size divided by four.
+     *
+     * FOUR CELLS TO A TILE is a ratio the component's own tooltip has stated since phase T1 ("12 km ->
+     * 3 km cells, a cumulus field") and that Graphic::System::VolumetricCloudRenderer turns into
+     * `CloudProceduralSpecies::CellKm`. It is stated HERE, once, because a second reader appeared: the
+     * Cloud Layout panel measures a painting's strokes against the cell, and a panel that computed the
+     * ratio for itself would quote a resolution the sky does not have the day somebody changes it.
+     *
+     * A TYPE'S Placement Scale STILL MULTIPLIES IT — this is the layer's own lattice, before the kind of
+     * cloud in a slot says how much coarser or finer than the layer it is.
+     */
+    inline float CloudLayerLatticeKm( const VolumetricCloudData& data )
+    {
+        // 100 000 world units to the kilometre, the project-wide centimetre convention. Written out
+        // rather than taken from Graphic::kCloudWorldUnitsPerKm because Engine/ECS must not depend on
+        // Engine/Graphic, and the number is the unit of the whole project rather than the renderer's.
+        constexpr float unitsPerKm = 100000.0f;
+        return ( data.WeatherTileSize > 1.0f ? data.WeatherTileSize : 1.0f ) / unitsPerKm / 4.0f;
+    }
+
+    /// The four cloud type fields of a layer, in the order the Details panel draws them. One statement of
+    /// that order, so nobody spells `{ CloudType1, CloudType2, CloudType3, CloudType4 }` a second time.
+    constexpr uint32_t kCloudTypeSlots = 4u;
+
+    /**
+     * @brief Which of a layer's four cloud type slots become SPECIES, and in what order.
+     *
+     * WHY THIS IS NOT THE IDENTITY, AND WHY THAT MATTERS OUTSIDE THE RENDERER. The four slots an artist
+     * fills in Details are COMPACTED before they reach the field: an empty slot is skipped, and the same
+     * type twice is dropped, because two identical placement fields are two skies of one kind of cloud at
+     * twice the cost. So a layer whose only authored type sits in `Cloud Type 3` has exactly ONE species,
+     * and that species is number ZERO.
+     *
+     * THAT RENUMBERING IS A CONVENTION THE ARTIST CAN SEE THE CONSEQUENCES OF. A painted layout's channels
+     * are indexed by SPECIES, so in the layer above it is the painting's RED channel that decides where
+     * `Cloud Type 3` goes — not its blue one. The Cloud Layout panel names the type behind each channel
+     * rather than leaving the artist to discover it from a sky, and it can only do that because the rule
+     * lives here instead of inside the renderer that used to own it.
+     */
+    struct CloudSpeciesResolution
+    {
+        /// How many species the layer has, 1..kCloudTypeSlots. Never zero: see BuiltInDefault.
+        uint32_t Count = 0u;
+
+        /// For each species, which of the four Details slots it came from. Meaningless when
+        /// BuiltInDefault, which is why that flag exists rather than a sentinel slot index.
+        uint32_t AuthoredSlot[kCloudTypeSlots] = { 0u, 0u, 0u, 0u };
+
+        /// True when NO slot is authored. The layer then has one species — the engine's built-in cumulus
+        /// congestus — because a scene nobody has chosen a type for still has to have a sky.
+        bool BuiltInDefault = false;
+    };
+
+    inline CloudSpeciesResolution ResolveCloudSpecies( const VolumetricCloudData& data )
+    {
+        const Assets::AssetHandle authored[kCloudTypeSlots] = { data.CloudType1, data.CloudType2, data.CloudType3,
+                                                                data.CloudType4 };
+
+        CloudSpeciesResolution resolved;
+
+        for ( uint32_t slot = 0; slot < kCloudTypeSlots; ++slot )
+        {
+            if ( authored[slot] == Assets::AssetHandle::Null() )
+                continue;
+
+            bool seen = false;
+            for ( uint32_t taken = 0; taken < resolved.Count; ++taken )
+                seen = seen || authored[resolved.AuthoredSlot[taken]] == authored[slot];
+            if ( seen )
+                continue;
+
+            resolved.AuthoredSlot[resolved.Count] = slot;
+            ++resolved.Count;
+        }
+
+        if ( resolved.Count == 0u )
+        {
+            resolved.Count          = 1u;
+            resolved.BuiltInDefault = true;
+        }
+
+        return resolved;
+    }
 
     struct VolumetricCloudComponent
     {

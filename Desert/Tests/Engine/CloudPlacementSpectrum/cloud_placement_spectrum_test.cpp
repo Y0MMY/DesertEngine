@@ -2140,6 +2140,337 @@ TEST( CloudPlacementSpectrum, TheInteriorLaplacianReadsOnlyWhatTheMaskCallsCloud
          << "a cloud with billows in it measured no texture at all";
 }
 
+// =====================================================================================================
+// THE AUTHORING PANEL'S TWO QUANTITIES — CALIBRATION.md §PTP
+//
+// The Cloud Layout panel shows an artist a top-down MAP of the sky a painting makes and a measure of the
+// painting's own STROKES. Both are pure functions of the same parameters the bake takes, and both exist to
+// carry facts §PT could only measure with a renderer and a protocol. What follows pins the relations they
+// are made of — not their values, which are pictures.
+// =====================================================================================================
+
+namespace
+{
+    /// A painting with a single horizontal BAND on chosen rows and a single vertical BAR on chosen columns,
+    /// so a test can ask "where in the world did row 3 end up" and get an answer with a side to it.
+    std::shared_ptr<const CloudLayoutData> BandLayout( uint32_t resolution, uint32_t firstRow, uint32_t rows )
+    {
+        std::vector<unsigned char> pixels( static_cast<size_t>( resolution ) * resolution * 4u, 0u );
+
+        for ( uint32_t y = firstRow; y < firstRow + rows; ++y )
+            for ( uint32_t x = 0; x < resolution; ++x )
+            {
+                const size_t at = ( static_cast<size_t>( y % resolution ) * resolution + x ) * 4u;
+                pixels[at + 0]  = 255u;
+                pixels[at + 1]  = 255u;
+                pixels[at + 2]  = 255u;
+                pixels[at + 3]  = 128u;
+            }
+
+        const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+
+        auto made = MakeCloudLayoutFromImage( pixels, resolution, resolution, channels, /*takeMask=*/false );
+        if ( !made )
+            return nullptr;
+
+        return std::make_shared<const CloudLayoutData>( made.ExtractValue() );
+    }
+
+    /// A painting that varies SMOOTHLY and in BOTH axes, and tiles exactly: one period of a sine along u
+    /// plus one along v. It exists because a stripe cannot catch a small displacement — see the comment on
+    /// TheMapAgreesWithTheBakesOwnCoverageCellForCell, where a sabotage of four tenths of a cell was
+    /// measured GREEN against a stripe because no cell centre ever crossed its one hard edge. A field with
+    /// no flat places has no hiding places.
+    std::shared_ptr<const CloudLayoutData> RippleLayout( uint32_t resolution = 64u )
+    {
+        std::vector<unsigned char> pixels( static_cast<size_t>( resolution ) * resolution * 4u, 0u );
+
+        for ( uint32_t y = 0; y < resolution; ++y )
+            for ( uint32_t x = 0; x < resolution; ++x )
+            {
+                const double u = ( static_cast<double>( x ) + 0.5 ) / resolution;
+                const double v = ( static_cast<double>( y ) + 0.5 ) / resolution;
+                const double f = 0.5 + 0.25 * std::sin( 2.0 * M_PI * u ) + 0.25 * std::sin( 2.0 * M_PI * v );
+
+                const size_t at = ( static_cast<size_t>( y ) * resolution + x ) * 4u;
+                pixels[at + 0]  = static_cast<unsigned char>( std::lround( f * 255.0 ) );
+                pixels[at + 1]  = pixels[at + 0];
+                pixels[at + 2]  = pixels[at + 0];
+                pixels[at + 3]  = 128u;
+            }
+
+        const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+
+        auto made = MakeCloudLayoutFromImage( pixels, resolution, resolution, channels, /*takeMask=*/false );
+        if ( !made )
+            return nullptr;
+
+        return std::make_shared<const CloudLayoutData>( made.ExtractValue() );
+    }
+
+    /// A painting carrying one vertical bar @p width texels wide whose left edge is at @p firstColumn,
+    /// wrapping past the right edge. The fixture the stroke measure is asked about, because a bar has
+    /// exactly one width and it is known before the measurement runs.
+    CloudLayoutData BarLayout( uint32_t resolution, uint32_t firstColumn, uint32_t width )
+    {
+        std::vector<unsigned char> pixels( static_cast<size_t>( resolution ) * resolution * 4u, 0u );
+
+        for ( uint32_t y = 0; y < resolution; ++y )
+            for ( uint32_t k = 0; k < width; ++k )
+            {
+                const uint32_t x  = ( firstColumn + k ) % resolution;
+                const size_t   at = ( static_cast<size_t>( y ) * resolution + x ) * 4u;
+                pixels[at + 0]    = 255u;
+                pixels[at + 1]    = 255u;
+                pixels[at + 2]    = 255u;
+                pixels[at + 3]    = 128u;
+            }
+
+        const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+
+        auto made = MakeCloudLayoutFromImage( pixels, resolution, resolution, channels, /*takeMask=*/false );
+        return made ? made.ExtractValue() : CloudLayoutData{};
+    }
+} // namespace
+
+// WHICH WAY UP A PAINTING GOES INTO THE WORLD, pinned because the panel now STATES it to the artist and a
+// statement nobody checks is a caption. The layout's v axis runs NORTH and its first row sits at the world
+// origin — which together are why the panel's north-up map is the artist's picture mirrored top to bottom,
+// and why Layout Offset is the control that slides a figure into the middle of a region.
+TEST( CloudPlacementSpectrum, ThePaintingsFirstRowSitsAtTheOriginAndItsRowsRunNorth )
+{
+    CloudLayoutPlacement placement;
+    placement.RepeatsPerRegion = 1u;
+    placement.QuarterTurns     = 0u;
+    placement.OffsetKm         = glm::vec2( 0.0f );
+
+    const float region = 48.0f;
+
+    // The world origin is texel (0,0) exactly. Everything below is a statement about where that is.
+    const glm::vec2 atOrigin = CloudLayoutUv( placement, region, glm::vec2( 0.0f, 0.0f ) );
+    EXPECT_FLOAT_EQ( atOrigin.x, 0.0f );
+    EXPECT_FLOAT_EQ( atOrigin.y, 0.0f );
+
+    // A band on the first four rows. If v ran SOUTH it would be found north of the origin instead.
+    auto north = BandLayout( 64u, /*firstRow=*/1u, /*rows=*/3u );
+    ASSERT_TRUE( north );
+
+    const float period    = region; // one repeat
+    const float texelKm   = period / 64.0f;
+    const float insideKm  = 2.0f * texelKm; // the middle of the band
+    const float outsideKm = -2.0f * texelKm;
+
+    const float toTheNorth =
+         SampleCloudLayoutPattern( *north, 0u, CloudLayoutUv( placement, region, glm::vec2( 0.0f, insideKm ) ) );
+    const float toTheSouth =
+         SampleCloudLayoutPattern( *north, 0u, CloudLayoutUv( placement, region, glm::vec2( 0.0f, outsideKm ) ) );
+
+    EXPECT_GT( toTheNorth, 0.9f ) << "rows 1..3 of the painting were not found just NORTH of the origin, so "
+                                     "the layout's v axis does not run north and the panel's caption under "
+                                     "the two panes is wrong";
+    EXPECT_LT( toTheSouth, 0.1f ) << "the band was found on BOTH sides of the origin, so this measures "
+                                     "nothing about direction";
+
+    // And the same claim on the other axis, so that a swap of u and v cannot pass the test above.
+    const float toTheEast =
+         SampleCloudLayoutPattern( *north, 0u, CloudLayoutUv( placement, region, glm::vec2( insideKm, 0.0f ) ) );
+    EXPECT_LT( toTheEast, 0.1f ) << "a band drawn across the painting's ROWS was found by walking east, so "
+                                    "u and v are swapped somewhere between here and the sampler";
+}
+
+// THE MAP IS THE BAKE'S OWN ANSWER, cell for cell. This is the relation that makes the panel a preview
+// rather than a second opinion: BuildCloudLayoutPreview must contain no arithmetic about coverage of its
+// own, only the sampling grid.
+TEST( CloudPlacementSpectrum, TheMapAgreesWithTheBakesOwnCoverageCellForCell )
+{
+    // BOTH ROTATIONS, AND A FIELD WITH NO FLAT PLACES IN IT. Neither is thoroughness; both are what make
+    // the test able to fail. Against a STRIPE the map's u could be displaced by four tenths of a cell and
+    // all 256 cells still came back identical — at a quarter turn the stripe varies only with world y, and
+    // even at zero turns no cell centre ever crossed its single hard edge. That sabotage was measured
+    // GREEN, which is a hole and not a pass. A ripple varies everywhere, and the two rotations put that
+    // variation on both axes in turn.
+    for ( const uint32_t turns : { 0u, 1u } )
+    {
+        CloudProceduralFieldParams params       = ShippedParams();
+        params.Coverage                         = 0.50f;
+        params.Layout                           = RippleLayout();
+        params.LayoutPlacement.RepeatsPerRegion = 2u;
+        params.LayoutPlacement.QuarterTurns     = turns;
+        params.LayoutPlacement.OffsetKm         = glm::vec2( 3.5f, -1.25f );
+        params.LayoutPlacement.PatternStrength  = 0.35f;
+        params.LayoutPlacement.MaskStrength     = 0.0f;
+        ASSERT_TRUE( params.Layout );
+
+        const float spanKm = params.RegionSizeKm;
+
+        auto mapped = BuildCloudLayoutPreview( params, 0u, spanKm, 256u );
+        ASSERT_TRUE( mapped ) << mapped.GetError();
+
+        const CloudLayoutPreview& preview = mapped.GetValue();
+        ASSERT_GT( preview.Side, 1u );
+
+        double sum = 0.0;
+        for ( uint32_t iv = 0; iv < preview.Side; ++iv )
+            for ( uint32_t iu = 0; iu < preview.Side; ++iu )
+            {
+                const glm::vec2 centre(
+                     ( ( static_cast<float>( iu ) + 0.5f ) / static_cast<float>( preview.Side ) - 0.5f ) * spanKm,
+                     ( ( static_cast<float>( iv ) + 0.5f ) / static_cast<float>( preview.Side ) - 0.5f ) *
+                          spanKm );
+
+                const float fromTheBake = CloudProceduralCellCoverage( params, 0u, centre );
+                const float fromTheMap  = preview.Coverage[static_cast<size_t>( iv ) * preview.Side + iu];
+
+                ASSERT_FLOAT_EQ( fromTheMap, fromTheBake )
+                     << "at " << turns << " quarter turns the map and the function the bake calls disagree "
+                     << "at cell (" << iu << ", " << iv
+                     << "), so the picture an artist judges a painting by is not the sky they will get";
+                sum += static_cast<double>( fromTheBake );
+            }
+
+        EXPECT_NEAR( preview.MeanCoverage,
+                     static_cast<float>( sum / ( static_cast<double>( preview.Side ) * preview.Side ) ), 1e-5f );
+    }
+}
+
+// EVERY SPECIES ON ITS OWN LATTICE. The first draft of the panel drew every channel's map on the FINEST
+// cell in the layer, which shows detail a coarse species cannot place and quotes the most permissive
+// legibility bound in the layer for a channel that has to clear its own.
+TEST( CloudPlacementSpectrum, TheMapIsSampledOnTheMappedSpeciesOwnCellAndNotTheLayersFinest )
+{
+    CloudProceduralFieldParams params = ShippedParams();
+    params.Layout                     = StripeLayout();
+    ASSERT_TRUE( params.Layout );
+
+    // A second species FOUR TIMES coarser. Both ends of the same knob: mapping the fine one and mapping
+    // the coarse one must not produce the same lattice.
+    CloudProceduralSpecies coarse;
+    coarse.Shape      = Congestus();
+    coarse.CellKm     = 12.0f;
+    coarse.Anisotropy = 1.0f;
+    params.Species.push_back( coarse );
+
+    // The patch tile has to clear three of the COARSEST cell or the parameters are illegal; the panel
+    // floors it the same way for the same reason.
+    params.PatchTileKm = 48.0f;
+
+    const float spanKm = params.RegionSizeKm;
+
+    auto fine = BuildCloudLayoutPreview( params, 0u, spanKm, 256u );
+    ASSERT_TRUE( fine ) << fine.GetError();
+    auto broad = BuildCloudLayoutPreview( params, 1u, spanKm, 256u );
+    ASSERT_TRUE( broad ) << broad.GetError();
+
+    EXPECT_FLOAT_EQ( fine.GetValue().CellKm, 3.0f );
+    EXPECT_FLOAT_EQ( broad.GetValue().CellKm, 12.0f )
+         << "the coarse species' map quoted a cell that is not its own, so an artist is told a stroke "
+            "clears a lattice it does not clear";
+
+    EXPECT_EQ( fine.GetValue().Side, 16u );
+    EXPECT_EQ( broad.GetValue().Side, 4u )
+         << "the coarse species was mapped at the fine one's resolution, so the picture shows structure the "
+            "sky cannot place";
+
+    EXPECT_FLOAT_EQ( fine.GetValue().SamplePitchKm, 3.0f );
+    EXPECT_FLOAT_EQ( broad.GetValue().SamplePitchKm, 12.0f );
+}
+
+// §PT'S BYTE-IDENTICAL PAIR, AS A RELATION. Two frames across the whole pattern slider came back identical
+// because the mask alone had driven the figure past both ends of the clamp. The panel says so out loud, and
+// what it says has to be true in both directions or it is a superstition with a percentage attached.
+TEST( CloudPlacementSpectrum, ThePatternSliderIsDeadExactlyWhenTheMaskHasSaturatedTheClamp )
+{
+    CloudProceduralFieldParams params      = ShippedParams();
+    params.Coverage                        = 0.50f;
+    params.Layout                          = StripeLayout( 64u, /*withMask=*/true );
+    params.LayoutPlacement.PatternStrength = 0.30f;
+    ASSERT_TRUE( params.Layout );
+
+    // MASK OFF: the pattern is the only source, and it has to move the sky.
+    params.LayoutPlacement.MaskStrength = 0.0f;
+
+    auto loose = BuildCloudLayoutPreview( params, 0u, params.RegionSizeKm, 256u );
+    ASSERT_TRUE( loose ) << loose.GetError();
+
+    EXPECT_EQ( loose.GetValue().CellsClamped, 0u )
+         << "a gentle pattern on a half-covered sky pinned cells at the clamp, so the fixture cannot "
+            "distinguish the two ends of this test";
+    EXPECT_GT( loose.GetValue().CellsPatternMoves, 0u )
+         << "with no mask at all the pattern slider moved nothing, which would make the panel's warning "
+            "fire on a sky where the pattern is perfectly alive";
+
+    // MASK AT FULL STRENGTH: the mask adds a whole unit of coverage on one side and takes one away on the
+    // other, so every cell is pinned and the pattern has nowhere left to speak.
+    params.LayoutPlacement.MaskStrength = 1.0f;
+
+    auto saturated = BuildCloudLayoutPreview( params, 0u, params.RegionSizeKm, 256u );
+    ASSERT_TRUE( saturated ) << saturated.GetError();
+
+    EXPECT_EQ( saturated.GetValue().CellsClamped, saturated.GetValue().Cells )
+         << "a mask at full strength on a signed stripe failed to pin the sky at both ends of the clamp, so "
+            "the explanation the panel offers for a dead slider is not the mechanism";
+    EXPECT_EQ( saturated.GetValue().CellsPatternMoves, 0u )
+         << "the pattern slider still moved cells under a saturating mask, so §PT's byte-identical pair of "
+            "frames had some other cause and the panel names the wrong one";
+}
+
+// THE STROKE MEASURE IS A RULER, and a ruler is tested against something whose width is known before it is
+// measured. A bar is that thing.
+TEST( CloudPlacementSpectrum, TheStrokeMeasureReportsTheWidthOfABarAtBothEnds )
+{
+    for ( const uint32_t width : { 4u, 16u } )
+    {
+        const CloudLayoutData bar = BarLayout( 64u, /*firstColumn=*/8u, width );
+        ASSERT_TRUE( bar.HasPattern() );
+
+        const CloudLayoutStrokeStats stats = MeasureCloudLayoutStrokes( bar, 0u, /*limitTexels=*/0.0f );
+
+        EXPECT_EQ( stats.PaintedTexels, static_cast<uint64_t>( width ) * 64u )
+             << "the painted area of a " << width << "-texel bar was not counted";
+        EXPECT_FLOAT_EQ( stats.MedianTexels, static_cast<float>( width ) )
+             << "a bar " << width << " texels wide measured " << stats.MedianTexels;
+        EXPECT_FLOAT_EQ( stats.ThinnestTenthTexels, static_cast<float>( width ) );
+    }
+
+    // A CHANNEL NOBODY DREW ON HAS NO STROKES, which must not be read as infinitely thin ones.
+    const CloudLayoutData flat = BarLayout( 64u, 0u, 64u );
+    ASSERT_TRUE( flat.HasPattern() );
+    EXPECT_EQ( MeasureCloudLayoutStrokes( flat, 0u, 0.0f ).PaintedTexels, 0u )
+         << "a channel with the same value everywhere reported strokes, so a flat slot would be given a "
+            "legibility verdict about nothing";
+}
+
+// THE RUNS WRAP, because the painting tiles the world. A band that leaves the right edge and returns at the
+// left is ONE stroke; measured as two it would report half its real width and the panel would warn about a
+// figure that is perfectly legible.
+TEST( CloudPlacementSpectrum, TheStrokeMeasureJoinsABarThatStraddlesThePaintingsEdge )
+{
+    const CloudLayoutData straddling = BarLayout( 64u, /*firstColumn=*/62u, /*width=*/8u );
+    ASSERT_TRUE( straddling.HasPattern() );
+
+    const CloudLayoutStrokeStats stats = MeasureCloudLayoutStrokes( straddling, 0u, 0.0f );
+
+    EXPECT_FLOAT_EQ( stats.MedianTexels, 8.0f )
+         << "a bar split across the edge measured " << stats.MedianTexels
+         << " texels, so the runs are not wrapping and every figure that touches an edge is slandered";
+}
+
+// AND THE FRACTION AN ARTIST ACTS ON MOVES WITH THE LIMIT, in both directions. A number that answered the
+// same either side of the cell would be the dead setting §1.3 forbids wearing a percentage.
+TEST( CloudPlacementSpectrum, TheStrokeFractionBelowTheLimitAnswersOnBothSidesOfTheCell )
+{
+    const CloudLayoutData bar = BarLayout( 64u, 8u, /*width=*/4u );
+    ASSERT_TRUE( bar.HasPattern() );
+
+    EXPECT_FLOAT_EQ( MeasureCloudLayoutStrokes( bar, 0u, /*limitTexels=*/5.0f ).FractionBelowLimit, 1.0f )
+         << "a 4-texel stroke was not counted as finer than a 5-texel cell";
+    EXPECT_FLOAT_EQ( MeasureCloudLayoutStrokes( bar, 0u, /*limitTexels=*/3.0f ).FractionBelowLimit, 0.0f )
+         << "a 4-texel stroke was counted as finer than a 3-texel cell";
+
+    // A limit of nothing means nothing is below it — the state the panel is in before a layer is read.
+    EXPECT_FLOAT_EQ( MeasureCloudLayoutStrokes( bar, 0u, 0.0f ).FractionBelowLimit, 0.0f );
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

@@ -63,33 +63,32 @@ namespace Desert::Editor
 
     void CloudNoiseVolumePanel::OnUIRender()
     {
-        if ( !m_SowPanel )
-            return;
+        // NO ImGui::Begin HERE, and it is not an omission. EditorLayer's panel loop already wraps
+        // OnUIRender in Begin/End for this panel's name, and it owns the p_open bool the title-bar X
+        // writes to. A Begin for the SAME name nested inside that one is not appending -- ImGui only
+        // supports appending between Begin/End PAIRS -- and the window comes out with its title bar
+        // and nothing else. Every panel in this folder had it and drew nothing; no panel outside it
+        // does. See CALIBRATION.md §PTP.
+        ImGui::TextWrapped(
+             "The 3D noise the cloud shape is eroded with. Four channels, following Nubis Cubed "
+             "(SIGGRAPH 2023, slide 96): R and G are low- and high-frequency Curly-Alligator (wispy), "
+             "B and A are low- and high-frequency Alligator (billowy)." );
+        ImGui::Separator();
 
-        if ( ImGui::Begin( m_PanelName.c_str(), &m_SowPanel ) )
+        DrawGenerateSection();
+        ImGui::Separator();
+        DrawPreviewSection();
+        ImGui::Separator();
+        DrawSaveSection();
+
+        if ( !m_Status.empty() )
         {
-            ImGui::TextWrapped(
-                 "The 3D noise the cloud shape is eroded with. Four channels, following Nubis Cubed "
-                 "(SIGGRAPH 2023, slide 96): R and G are low- and high-frequency Curly-Alligator (wispy), "
-                 "B and A are low- and high-frequency Alligator (billowy)." );
             ImGui::Separator();
-
-            DrawGenerateSection();
-            ImGui::Separator();
-            DrawPreviewSection();
-            ImGui::Separator();
-            DrawSaveSection();
-
-            if ( !m_Status.empty() )
-            {
-                ImGui::Separator();
-                if ( m_StatusIsError )
-                    ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", m_Status.c_str() );
-                else
-                    ImGui::TextWrapped( "%s", m_Status.c_str() );
-            }
+            if ( m_StatusIsError )
+                ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", m_Status.c_str() );
+            else
+                ImGui::TextWrapped( "%s", m_Status.c_str() );
         }
-        ImGui::End();
     }
 
     void CloudNoiseVolumePanel::DrawGenerateSection()
@@ -142,14 +141,14 @@ namespace Desert::Editor
         ImGui::DragFloat( "Curl Strength", &m_Params.CurlStrength, 0.005f, 0.0f, 0.5f, "%.3f" );
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "How far the divergence-free flow shears the wispy channels, in lattice "
-                               "cells. 0 leaves plain inverted Alligator — a web with no hooks in it." );
+                               "cells. 0 leaves plain inverted Alligator - a web with no hooks in it." );
 
         ImGui::DragFloat( "Wispy Period LF", &m_Params.WispyPeriodLowFrequency, 1.0f, 1.0f, 32.0f, "%.0f" );
         ImGui::DragFloat( "Wispy Period HF", &m_Params.WispyPeriodHighFrequency, 1.0f, 1.0f, 32.0f, "%.0f" );
         ImGui::DragFloat( "Billow Period LF", &m_Params.BillowPeriodLowFrequency, 1.0f, 1.0f, 32.0f, "%.0f" );
         ImGui::DragFloat( "Billow Period HF", &m_Params.BillowPeriodHighFrequency, 1.0f, 1.0f, 32.0f, "%.0f" );
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Lattice cells across the volume. Whole numbers only — a fractional period "
+            ImGui::SetTooltip( "Lattice cells across the volume. Whole numbers only - a fractional period "
                                "does not tile, and the seam runs the length of the sky." );
 
         ImGui::EndDisabled();
@@ -198,7 +197,7 @@ namespace Desert::Editor
                         m_SourceName    = name;
                         m_SliceIndex    = static_cast<int>( m_Volume.Params.Resolution ) / 2;
                         m_SliceDirty    = true;
-                        m_Status        = "Opened '" + name + "' — its parameters are above, ready to re-roll.";
+                        m_Status        = "Opened '" + name + "' - its parameters are above, ready to re-roll.";
                         m_StatusIsError = false;
                     }
                 }
@@ -315,7 +314,7 @@ namespace Desert::Editor
 
         const uint32_t n = m_Volume.Params.Resolution;
 
-        ImGui::Text( "%s — %u^3 RGBA8, %.2f MiB, seed %u", m_SourceName.c_str(), n,
+        ImGui::Text( "%s - %u^3 RGBA8, %.2f MiB, seed %u", m_SourceName.c_str(), n,
                      static_cast<double>( m_Volume.Voxels.size() ) / ( 1024.0 * 1024.0 ), m_Volume.Params.Seed );
 
         int axis = static_cast<int>( m_Axis );
@@ -329,7 +328,7 @@ namespace Desert::Editor
             m_SliceDirty = true;
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "A 3D field has no picture, only slices. Scrub this to see how the structure "
-                               "continues through the volume — a field that changes abruptly between "
+                               "continues through the volume - a field that changes abruptly between "
                                "neighbouring slices will read as noise rather than as cloud." );
 
         int view = static_cast<int>( m_ChannelView );
