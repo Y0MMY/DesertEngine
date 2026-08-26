@@ -121,6 +121,13 @@ namespace Desert::Editor
 
         m_ApplyPositions = true;
         m_Status.clear();
+
+        // A graph that was just loaded or created has not been EDITED, so it must not look dirty to the
+        // auto-compile. Seeding the fingerprint here is what makes the debounce fire on a change rather
+        // than on merely opening the panel — which cost a ~370 ms rebuild for nothing, and was visible as
+        // a GraphShader.shader written the moment the window appeared.
+        m_LastFingerprint = StructuralFingerprint( m_Doc );
+        m_DirtySince      = {};
     }
 
     void NodeGraphPanel::ChangeDomain( SG::Domain domain )
@@ -233,6 +240,10 @@ namespace Desert::Editor
         m_ApplyPositions = true;
         m_Status         = "Loaded " + std::filesystem::path( fullPath ).filename().string();
         m_StatusIsError  = false;
+
+        // Loaded, not edited — see the note in NewGraph.
+        m_LastFingerprint = StructuralFingerprint( m_Doc );
+        m_DirtySince      = {};
     }
 
     std::string NodeGraphPanel::CreateNewGraphFile( const std::string& directory, SG::Domain domain )
@@ -271,11 +282,90 @@ namespace Desert::Editor
 
     void NodeGraphPanel::OnPreUpdate()
     {
-        if ( s_PendingOpenRequest.empty() )
+        if ( !s_PendingOpenRequest.empty() )
+        {
+            LoadGraphFromPath( s_PendingOpenRequest );
+            s_PendingOpenRequest.clear();
+            GetVisibility()   = true; // double-click opens the panel even if it was hidden
+            m_LastFingerprint = StructuralFingerprint( m_Doc );
+            m_DirtySince      = {};
+        }
+
+        AutoCompileIfSettled();
+    }
+
+    // A cheap structural signature of the graph: what it MEANS, not where it sits. Node positions are
+    // excluded deliberately -- dragging a node around changes no generated GLSL, and recompiling for it
+    // would burn ~370 ms of shaderc to produce byte-identical output.
+    uint64_t NodeGraphPanel::StructuralFingerprint( const ShaderGraph::Document& doc )
+    {
+        uint64_t   h   = 1469598103934665603ull; // FNV-1a
+        const auto mix = [&h]( uint64_t v )
+        {
+            h ^= v;
+            h *= 1099511628211ull;
+        };
+        const auto mixStr = [&mix]( const std::string& s )
+        {
+            for ( const char c : s )
+                mix( static_cast<uint64_t>( static_cast<unsigned char>( c ) ) );
+        };
+
+        mixStr( doc.Name );
+        mix( static_cast<uint64_t>( doc.DomainEnum() ) );
+        for ( const auto& n : doc.Nodes )
+        {
+            mix( n.Id );
+            mixStr( n.Kind );
+            mixStr( n.ParamName );
+            for ( const float v : n.Value )
+                mix( static_cast<uint64_t>( static_cast<int64_t>( v * 100000.0f ) ) );
+            // n.X / n.Y deliberately absent — see the note above.
+        }
+        for ( const auto& l : doc.Links )
+        {
+            mix( l.From );
+            mix( l.To );
+        }
+        return h;
+    }
+
+    // Recompile once the artist has STOPPED editing, not on every touch.
+    //
+    // The constant comes from a measurement rather than a guess. A cold editor start costs ~15.1 s more
+    // than a warm one and writes 123 SPIR-V modules, so a module is ~123 ms here, and a Surface graph emits
+    // three (vertex + fragment, plus the depth pass) -- call it ~370 ms per rebuild. The SPIR-V cache does
+    // not help: its key is the compiled text, and a preview recompile happens precisely BECAUSE that text
+    // just changed, so every one is a miss. Compiling on each keystroke would therefore queue rebuilds
+    // faster than they complete and the editor would never catch up.
+    //
+    // The delay is set at the cost of one rebuild, so a settled graph is on screen in about the time a
+    // rebuild takes and a dragged slider produces exactly one compile at the end instead of a dozen.
+    // PARAMETER values are not in this path at all -- they are uniform-buffer fields, edited live in the
+    // preview window with no recompile whatsoever.
+    void NodeGraphPanel::AutoCompileIfSettled()
+    {
+        if ( !m_AutoCompile )
             return;
-        LoadGraphFromPath( s_PendingOpenRequest );
-        s_PendingOpenRequest.clear();
-        GetVisibility() = true; // double-click opens the panel even if it was hidden
+
+        const uint64_t fingerprint = StructuralFingerprint( m_Doc );
+        const auto     now         = std::chrono::steady_clock::now();
+
+        if ( fingerprint != m_LastFingerprint )
+        {
+            m_LastFingerprint = fingerprint;
+            m_DirtySince      = now; // the clock restarts on every edit: this is a debounce, not a timer
+            return;
+        }
+
+        if ( m_DirtySince == std::chrono::steady_clock::time_point{} )
+            return; // nothing pending
+
+        if ( now - m_DirtySince < kAutoCompileDelay )
+            return;
+
+        m_DirtySince = {};
+        Compile();
     }
 
     void NodeGraphPanel::Compile()

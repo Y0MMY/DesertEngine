@@ -5,6 +5,7 @@
 
 #include <Engine/Assets/Common.hpp>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -83,5 +84,18 @@ namespace Desert::Editor
         // The material this graph's shader is previewed on, created on the first successful Compile and
         // reused after that (a new asset per compile would litter the project with scratch materials).
         Assets::AssetHandle m_PreviewMaterial{ static_cast<uint64_t>( 0 ) };
+
+        // Recompile once editing has SETTLED. See AutoCompileIfSettled for where the number comes from:
+        // a graph rebuild costs roughly one of these, measured, so a settled graph reaches the preview in
+        // about the time a rebuild takes while a dragged edit produces one compile instead of a dozen.
+        static constexpr std::chrono::milliseconds kAutoCompileDelay{ 400 };
+
+        // A signature of what the graph MEANS — node kinds, constant values and links, never positions.
+        static uint64_t StructuralFingerprint( const ShaderGraph::Document& doc );
+        void            AutoCompileIfSettled();
+
+        bool                                  m_AutoCompile     = true;
+        uint64_t                              m_LastFingerprint = 0;
+        std::chrono::steady_clock::time_point m_DirtySince{}; // default = nothing pending
     };
 } // namespace Desert::Editor
