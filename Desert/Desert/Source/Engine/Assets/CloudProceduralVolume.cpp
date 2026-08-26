@@ -1388,12 +1388,11 @@ namespace Desert::Assets
     }
 
     Common::ResultStr<CloudLayoutPreview> BuildCloudLayoutPreview( const CloudProceduralFieldParams& params,
-                                                                   uint32_t slot, float spanKm,
-                                                                   uint32_t maxSide )
+                                                                   uint32_t slot, float spanKm, uint32_t maxSide )
     {
         if ( slot >= params.Species.size() )
-            return Common::MakeFormattedError<CloudLayoutPreview>(
-                 "cannot map slot {}: this layer has {} species", slot, params.Species.size() );
+            return Common::MakeFormattedError<CloudLayoutPreview>( "cannot map slot {}: this layer has {} species",
+                                                                   slot, params.Species.size() );
 
         if ( !std::isfinite( spanKm ) || spanKm <= 0.0f )
             return Common::MakeFormattedError<CloudLayoutPreview>( "the mapped span must be a positive length, "
@@ -1435,10 +1434,10 @@ namespace Desert::Assets
         // The two ends of the pattern slider, evaluated on the same lattice as the picture. Copies rather
         // than a flag inside the coverage function: the function under test must be the one the bake calls,
         // unchanged, or the measurement would be of a different function than the sky.
-        CloudProceduralFieldParams atZero              = params;
-        atZero.LayoutPlacement.PatternStrength         = 0.0f;
-        CloudProceduralFieldParams atOne               = params;
-        atOne.LayoutPlacement.PatternStrength          = 1.0f;
+        CloudProceduralFieldParams atZero      = params;
+        atZero.LayoutPlacement.PatternStrength = 0.0f;
+        CloudProceduralFieldParams atOne       = params;
+        atOne.LayoutPlacement.PatternStrength  = 1.0f;
 
         const size_t cells = static_cast<size_t>( preview.Side ) * preview.Side;
         preview.Coverage.resize( cells, 0.0f );

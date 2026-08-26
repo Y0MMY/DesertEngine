@@ -2109,7 +2109,8 @@ TEST( CloudPlacementSpectrum, TheMapAgreesWithTheBakesOwnCoverageCellForCell )
             {
                 const glm::vec2 centre(
                      ( ( static_cast<float>( iu ) + 0.5f ) / static_cast<float>( preview.Side ) - 0.5f ) * spanKm,
-                     ( ( static_cast<float>( iv ) + 0.5f ) / static_cast<float>( preview.Side ) - 0.5f ) * spanKm );
+                     ( ( static_cast<float>( iv ) + 0.5f ) / static_cast<float>( preview.Side ) - 0.5f ) *
+                          spanKm );
 
                 const float fromTheBake = CloudProceduralCellCoverage( params, 0u, centre );
                 const float fromTheMap  = preview.Coverage[static_cast<size_t>( iv ) * preview.Side + iu];
@@ -2173,10 +2174,10 @@ TEST( CloudPlacementSpectrum, TheMapIsSampledOnTheMappedSpeciesOwnCellAndNotTheL
 // what it says has to be true in both directions or it is a superstition with a percentage attached.
 TEST( CloudPlacementSpectrum, ThePatternSliderIsDeadExactlyWhenTheMaskHasSaturatedTheClamp )
 {
-    CloudProceduralFieldParams params       = ShippedParams();
-    params.Coverage                         = 0.50f;
-    params.Layout                           = StripeLayout( 64u, /*withMask=*/true );
-    params.LayoutPlacement.PatternStrength  = 0.30f;
+    CloudProceduralFieldParams params      = ShippedParams();
+    params.Coverage                        = 0.50f;
+    params.Layout                          = StripeLayout( 64u, /*withMask=*/true );
+    params.LayoutPlacement.PatternStrength = 0.30f;
     ASSERT_TRUE( params.Layout );
 
     // MASK OFF: the pattern is the only source, and it has to move the sky.

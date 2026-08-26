@@ -949,8 +949,8 @@ namespace Desert::ECS
 
     inline CloudSpeciesResolution ResolveCloudSpecies( const VolumetricCloudData& data )
     {
-        const Assets::AssetHandle authored[kCloudTypeSlots] = { data.CloudType1, data.CloudType2,
-                                                                data.CloudType3, data.CloudType4 };
+        const Assets::AssetHandle authored[kCloudTypeSlots] = { data.CloudType1, data.CloudType2, data.CloudType3,
+                                                                data.CloudType4 };
 
         CloudSpeciesResolution resolved;
 

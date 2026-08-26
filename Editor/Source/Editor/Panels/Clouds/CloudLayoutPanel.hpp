@@ -27,7 +27,7 @@ namespace Desert::Editor
 {
     /**
      * @brief The artist's tool for a PAINTED SKY: point at a picture, say which of its channels feeds
-     *        which slot, look at the SKY it makes, bake it to a `.dclayout`.
+     *        which cloud SPECIES, look at the SKY it makes, bake it to a `.dclayout`.
      *
      * WHY IT EXISTS. Phase PT shipped the format, the engine path, the Details slot with its picker and
      * its drag-and-drop target, and `Tools/CloudLayoutBaker`. That closes half the loop: an artist could
@@ -46,9 +46,10 @@ namespace Desert::Editor
      * Showing the painting is honest and nearly useless: an artist draws a sky, and §PT's own proof that
      * the feature works is a TOP-DOWN frame rather than a texture viewer. So the right-hand pane is a
      * top-down map of the coverage the painting produces, built by `Assets::BuildCloudLayoutPreview` —
-     * which calls the very function the bake calls — sampled on the PLACEMENT CELL, because that is the
-     * resolution the sky can express. The painting is shown beside it at its own resolution, and the
-     * difference between the two panes is the whole of what an artist needs to learn.
+     * which calls the very function the bake calls — sampled on the MAPPED SPECIES' OWN PLACEMENT CELL,
+     * because that is the resolution that species of cloud can be placed at. The painting is shown beside
+     * it at its own resolution, and the difference between the two panes is the whole of what an artist
+     * needs to learn.
      *
      * THE LAYER IS READ FROM THE SCENE AND NEVER EDITED HERE. Region Size, Weather Tile Size, Coverage,
      * Seed, Weather Patch Strength and the five Layout fields live on the cloud component, and the panel
@@ -58,7 +59,8 @@ namespace Desert::Editor
      * frame. With no cloud layer in the scene the panel says so and previews against the shipped defaults,
      * printed rather than assumed.
      *
-     * AND IT SHOWS THE TWO THINGS §PT MEASURED AND ONLY THE PROTOCOL KNEW:
+     * AND IT SHOWS FOUR THINGS THE SKY KNEW AND NOTHING SAID — the first two measured by §PT and left in
+     * its protocol, the last two found by reading VolumetricCloudRenderer beside this panel (§PTP):
      *
      *   1. PATTERN STRENGTH AND MASK STRENGTH ARE NOT INDEPENDENT. With the mask at full strength a pair
      *      of frames across the whole pattern slider came back byte for byte identical, because the mask
@@ -185,14 +187,14 @@ namespace Desert::Editor
         Assets::CloudProceduralFieldParams BuildParams( const LayerContext& layer ) const;
 
         std::shared_ptr<::Desert::Core::Scene> m_Scene;
-        Assets::AssetManager*        m_Assets = nullptr;
+        Assets::AssetManager*                  m_Assets = nullptr;
 
         // ---- source -----------------------------------------------------------------------------------
 
         std::vector<unsigned char> m_SourcePixels; // RGBA8, x fastest, exactly as stbi_load returns it
         uint32_t                   m_SourceWidth  = 0u;
         uint32_t                   m_SourceHeight = 0u;
-        std::string                m_SourceName;   // the picture's file name, or the .dclayout's
+        std::string                m_SourceName; // the picture's file name, or the .dclayout's
 
         /// Which SOURCE channel feeds each species slot. THE CONVENTION IS A CONTROL AND NOT AN
         /// ASSUMPTION: a painting is usually greyscale, and without this an artist wanting one drawing on

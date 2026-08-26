@@ -552,6 +552,5 @@ namespace Desert::Assets
     };
 
     Common::ResultStr<CloudLayoutPreview> BuildCloudLayoutPreview( const CloudProceduralFieldParams& params,
-                                                                   uint32_t slot, float spanKm,
-                                                                   uint32_t maxSide );
+                                                                   uint32_t slot, float spanKm, uint32_t maxSide );
 } // namespace Desert::Assets

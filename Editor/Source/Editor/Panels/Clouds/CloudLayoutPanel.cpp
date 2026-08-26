@@ -56,8 +56,8 @@ namespace Desert::Editor
             std::transform( extension.begin(), extension.end(), extension.begin(),
                             []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
 
-            return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
-                   extension == ".tga" || extension == ".bmp";
+            return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".tga" ||
+                   extension == ".bmp";
         }
 
         const ImVec4 kErrorColour( 0.95f, 0.45f, 0.40f, 1.0f );
@@ -66,7 +66,7 @@ namespace Desert::Editor
     } // namespace
 
     CloudLayoutPanel::CloudLayoutPanel( std::shared_ptr<::Desert::Core::Scene> scene,
-                                        Assets::AssetManager*                    assets )
+                                        Assets::AssetManager*                  assets )
          : IPanel( "Cloud Layout", /*showPanel=*/false ), m_Scene( std::move( scene ) ), m_Assets( assets )
     {
     }
@@ -77,8 +77,8 @@ namespace Desert::Editor
 
     bool CloudLayoutPanel::LayerContext::Matches( const LayerContext& other ) const
     {
-        if ( FromScene != other.FromScene || RegionSizeKm != other.RegionSizeKm ||
-             LatticeKm != other.LatticeKm || PatchTileKm != other.PatchTileKm || Coverage != other.Coverage ||
+        if ( FromScene != other.FromScene || RegionSizeKm != other.RegionSizeKm || LatticeKm != other.LatticeKm ||
+             PatchTileKm != other.PatchTileKm || Coverage != other.Coverage ||
              PatchStrength != other.PatchStrength || ResolvableChordKm != other.ResolvableChordKm ||
              Seed != other.Seed || SpeciesCount != other.SpeciesCount )
             return false;
@@ -111,9 +111,9 @@ namespace Desert::Editor
 
         const ECS::VolumetricCloudData& data = view.get<ECS::VolumetricCloudComponent>( *view.begin() ).Data;
 
-        layer.FromScene    = true;
-        layer.RegionSizeKm = std::max( data.RegionSize, 1.0f ) / Graphic::kCloudWorldUnitsPerKm;
-        layer.Coverage     = std::clamp( data.Coverage, 0.0f, 1.0f );
+        layer.FromScene     = true;
+        layer.RegionSizeKm  = std::max( data.RegionSize, 1.0f ) / Graphic::kCloudWorldUnitsPerKm;
+        layer.Coverage      = std::clamp( data.Coverage, 0.0f, 1.0f );
         layer.PatchStrength = std::clamp( data.PatchStrength, 0.0f, 1.0f );
         layer.Seed          = static_cast<uint32_t>( std::max( data.Seed, 0 ) );
         layer.ResolvableChordKm =
@@ -216,8 +216,8 @@ namespace Desert::Editor
             m_AdoptedLayout = layer.BoundLayout;
             if ( layer.BoundLayout != 0u && m_Assets )
             {
-                if ( auto painting = m_Assets->FindByHandle<Assets::CloudLayoutAsset>(
-                          Common::UUID( layer.BoundLayout ) );
+                if ( auto painting =
+                          m_Assets->FindByHandle<Assets::CloudLayoutAsset>( Common::UUID( layer.BoundLayout ) );
                      painting && painting->IsReadyForUse() )
                 {
                     m_Layout    = painting->GetLayout();
@@ -230,7 +230,7 @@ namespace Desert::Editor
                     m_PreviewDirty   = true;
                     m_Status         = "Showing the painting this scene's cloud layer has bound. Point at a "
                                        "picture to author a new one.";
-                    m_StatusIsError = false;
+                    m_StatusIsError  = false;
                 }
             }
         }
@@ -279,8 +279,7 @@ namespace Desert::Editor
         {
             // NAMED, WITH THE REASON stb gives. A picture that silently failed to load would leave the
             // previous painting on screen and the artist would bake the wrong file.
-            m_Status = "'" + path.filename().string() +
-                       "' could not be read as an image: " +
+            m_Status = "'" + path.filename().string() + "' could not be read as an image: " +
                        ( stbi_failure_reason() ? stbi_failure_reason() : "unknown" );
             m_StatusIsError = true;
             LOG_ERROR( "[CloudLayout] {}", m_Status );
@@ -295,9 +294,8 @@ namespace Desert::Editor
         m_SourceName     = path.filename().string();
         m_LayoutFromFile = false;
 
-        m_Status = "Read '" + m_SourceName + "': " + std::to_string( width ) + "x" +
-                   std::to_string( height ) + ", " + std::to_string( sourceChannels ) +
-                   " channels in the file.";
+        m_Status = "Read '" + m_SourceName + "': " + std::to_string( width ) + "x" + std::to_string( height ) +
+                   ", " + std::to_string( sourceChannels ) + " channels in the file.";
         m_StatusIsError = false;
 
         RebuildLayout();
@@ -371,8 +369,7 @@ namespace Desert::Editor
         {
             const auto paintings = m_Assets->FindAllByType<Assets::CloudLayoutAsset>();
             ImGui::BeginDisabled( paintings.empty() );
-            if ( ImGui::BeginCombo( "Open",
-                                    paintings.empty() ? "(no paintings on disk)" : "Pick a .dclayout" ) )
+            if ( ImGui::BeginCombo( "Open", paintings.empty() ? "(no paintings on disk)" : "Pick a .dclayout" ) )
             {
                 for ( const auto& [handle, painting] : paintings )
                 {
@@ -446,10 +443,9 @@ namespace Desert::Editor
             if ( slot < layer.SpeciesCount )
             {
                 const LayerContext::SpeciesSlot& species = layer.Species[slot];
-                label = "-> " + species.TypeName +
+                label                                    = "-> " + species.TypeName +
                         ( species.BuiltIn ? std::string()
-                                          : " (Cloud Type " +
-                                                 std::to_string( species.AuthoredSlot + 1u ) + ")" );
+                                          : " (Cloud Type " + std::to_string( species.AuthoredSlot + 1u ) + ")" );
             }
             else
             {
@@ -488,14 +484,14 @@ namespace Desert::Editor
             }
         }
 
-        if ( ImGui::Button( "One drawing on every slot" ) )
+        if ( ImGui::Button( "One drawing on every channel" ) )
         {
             for ( uint32_t slot = 0; slot < Assets::kCloudLayoutChannels; ++slot )
                 m_ChannelForSlot[slot] = 0u;
             remap = true;
         }
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Red into all four slots - what a greyscale painting usually wants, and "
+            ImGui::SetTooltip( "Red into all four channels - what a greyscale painting usually wants, and "
                                "the tool's `--channels 0,0,0,0`." );
 
         ImGui::SameLine();
@@ -576,11 +572,10 @@ namespace Desert::Editor
             }
         }
         ImGui::Text( "Layout Repeats %u      Rotation %u quarter turns      Offset (%.2f, %.2f) km",
-                     layer.Placement.RepeatsPerRegion, layer.Placement.QuarterTurns,
-                     layer.Placement.OffsetKm.x, layer.Placement.OffsetKm.y );
+                     layer.Placement.RepeatsPerRegion, layer.Placement.QuarterTurns, layer.Placement.OffsetKm.x,
+                     layer.Placement.OffsetKm.y );
         ImGui::Text( "Layout Pattern Strength %.2f      Layout Mask Strength %.2f",
                      layer.Placement.PatternStrength, layer.Placement.MaskStrength );
-
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -638,7 +633,7 @@ namespace Desert::Editor
             return;
 
         const Assets::CloudProceduralFieldParams params = BuildParams( layer );
-        const uint32_t                          slot =
+        const uint32_t                           slot =
              static_cast<uint32_t>( std::clamp( m_PreviewSlot, 0, static_cast<int>( layer.SpeciesCount ) - 1 ) );
 
         const float spanKm = params.RegionSizeKm * static_cast<float>( std::clamp( m_SpanRegions, 1, 4 ) );
@@ -861,19 +856,17 @@ namespace Desert::Editor
             return;
         }
 
-        ImGui::Text( "Coverage asks for %.2f and this painting delivers %.2f over the map.",
-                     m_LastLayer.Coverage, m_Preview.MeanCoverage );
+        ImGui::Text( "Coverage asks for %.2f and this painting delivers %.2f over the map.", m_LastLayer.Coverage,
+                     m_Preview.MeanCoverage );
 
         // ---- 1. the pattern and the mask are not independent -------------------------------------
 
-        const float clampedFraction =
-             m_Preview.Cells > 0u
-                  ? static_cast<float>( m_Preview.CellsClamped ) / static_cast<float>( m_Preview.Cells )
-                  : 0.0f;
-        const float movedFraction =
-             m_Preview.Cells > 0u
-                  ? static_cast<float>( m_Preview.CellsPatternMoves ) / static_cast<float>( m_Preview.Cells )
-                  : 0.0f;
+        const float clampedFraction = m_Preview.Cells > 0u ? static_cast<float>( m_Preview.CellsClamped ) /
+                                                                  static_cast<float>( m_Preview.Cells )
+                                                           : 0.0f;
+        const float movedFraction   = m_Preview.Cells > 0u ? static_cast<float>( m_Preview.CellsPatternMoves ) /
+                                                                static_cast<float>( m_Preview.Cells )
+                                                           : 0.0f;
 
         if ( m_Layout.HasPattern() && m_Preview.CellsPatternMoves == 0u )
         {
@@ -908,14 +901,13 @@ namespace Desert::Editor
 
         // ---- 2. legibility is bounded by the STROKE, and the validator checks the TEXEL ----------
 
-        ImGui::Text( "One texel is %.3f km; the cell of %s is %.2f km; one period of your painting is "
-                     "%.1f km.",
-                     m_TexelKm,
-                     m_LastLayer
-                          .Species[std::clamp( m_PreviewSlot, 0,
-                                               static_cast<int>( m_LastLayer.SpeciesCount ) - 1 )]
-                          .TypeName.c_str(),
-                     m_Preview.CellKm, m_PeriodKm );
+        ImGui::Text(
+             "One texel is %.3f km; the cell of %s is %.2f km; one period of your painting is "
+             "%.1f km.",
+             m_TexelKm,
+             m_LastLayer.Species[std::clamp( m_PreviewSlot, 0, static_cast<int>( m_LastLayer.SpeciesCount ) - 1 )]
+                  .TypeName.c_str(),
+             m_Preview.CellKm, m_PeriodKm );
 
         if ( m_Strokes.PaintedTexels == 0u )
         {
@@ -928,8 +920,7 @@ namespace Desert::Editor
             const float thinKm   = m_Strokes.ThinnestTenthTexels * m_TexelKm;
             const float medianKm = m_Strokes.MedianTexels * m_TexelKm;
 
-            ImGui::Text( "Your strokes: the thinnest tenth is %.2f km, the median is %.2f km.", thinKm,
-                         medianKm );
+            ImGui::Text( "Your strokes: the thinnest tenth is %.2f km, the median is %.2f km.", thinKm, medianKm );
 
             if ( m_Strokes.FractionBelowLimit > 0.02f )
             {
@@ -1005,12 +996,11 @@ namespace Desert::Editor
                         if ( painting )
                         {
                             if ( const auto registered =
-                                      Runtime::ResourceRegistry::GetCloudLayoutService()->Register(
-                                           painting );
+                                      Runtime::ResourceRegistry::GetCloudLayoutService()->Register( painting );
                                  !registered )
                             {
-                                m_Status = "Baked, but the painting could not be registered: " +
-                                           registered.GetError();
+                                m_Status =
+                                     "Baked, but the painting could not be registered: " + registered.GetError();
                                 m_StatusIsError = true;
                             }
                         }
@@ -1021,8 +1011,7 @@ namespace Desert::Editor
         ImGui::EndDisabled();
 
         ImGui::SameLine();
-        ImGui::TextDisabled( "Paintings live in %s",
-                             Common::Constants::Path::CLOUD_LAYOUT_PATH.string().c_str() );
+        ImGui::TextDisabled( "Paintings live in %s", Common::Constants::Path::CLOUD_LAYOUT_PATH.string().c_str() );
 
         ImGui::TextDisabled( "Then drag it onto a cloud layer's Cloud Layout slot in Details." );
     }

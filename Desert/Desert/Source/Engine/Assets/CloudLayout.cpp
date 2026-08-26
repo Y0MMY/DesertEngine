@@ -480,9 +480,8 @@ namespace Desert::Assets
         if ( greatest - least < 2u )
             return stats;
 
-        const unsigned char threshold = static_cast<unsigned char>( ( static_cast<uint32_t>( least ) +
-                                                                      static_cast<uint32_t>( greatest ) ) /
-                                                                    2u );
+        const unsigned char threshold = static_cast<unsigned char>(
+             ( static_cast<uint32_t>( least ) + static_cast<uint32_t>( greatest ) ) / 2u );
 
         const auto painted = [&]( uint32_t x, uint32_t y )
         { return data.Pattern[( static_cast<size_t>( y ) * n + x ) * kPatternBytesPerTexel + slot] > threshold; };
@@ -497,9 +496,7 @@ namespace Desert::Assets
         const auto walkLine = [&]( uint32_t line, bool alongX, std::vector<uint16_t>& into )
         {
             const auto at = [&]( uint32_t k ) -> size_t
-            {
-                return alongX ? static_cast<size_t>( line ) * n + k : static_cast<size_t>( k ) * n + line;
-            };
+            { return alongX ? static_cast<size_t>( line ) * n + k : static_cast<size_t>( k ) * n + line; };
             const auto on = [&]( uint32_t k ) { return alongX ? painted( k, line ) : painted( line, k ); };
 
             // THE WALK STARTS AT AN UNPAINTED TEXEL so that every run is met whole and written ONCE.
