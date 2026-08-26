@@ -4650,7 +4650,7 @@ scenes whose sky moved and no diff explaining it:
    move and HOW MANY there are does not change; only their width does — which is the one quantity that
    was wrong.
 
-### SIX SABOTAGES, AND ONE STAYED GREEN — the hole is closed
+### EIGHT SABOTAGES, AND ONE STAYED GREEN — the hole is closed
 
 Every one applied to the generator, the suite's **objects AND binary deleted**, rebuilt, run, reverted.
 
@@ -4701,7 +4701,7 @@ repeated hashes are the six `Clouds_Demo` pairs** — which is the result rather
 | `Shots/CB_before_heroTrio_mid_away.png` / `CB_after_heroTrio_mid_away.png` | `Clouds_HeroTrio`, one of the three scenes the trade is about |
 | `Shots/CB_before_heroMass_mid_away.png` / `CB_after_heroMass_mid_away.png` | `Clouds_HeroMass`, the other |
 
-### WHAT THIS TASK DID NOT DO, AND THE ONE DECISION IT IS WAITING ON
+### WHAT THIS TASK DID NOT DO
 
 * **IT DID NOT RE-AUTHOR THE THREE STORM SCENES, AND THAT IS A RULING RATHER THAN AN OMISSION** — asked
   for, argued and decided above. Their sky moves; the slider now means it in all three, out by
