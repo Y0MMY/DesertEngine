@@ -674,6 +674,81 @@ TEST( AssetHandleStability, EveryAssetTypeAgreesAcrossProjectRoots )
 }
 
 // ---------------------------------------------------------------------------------------------------
+// WHY THE RE-STAMP NEEDED NO MIGRATION.
+//
+// Making the derivation project-relative changes the number every path-derived handle takes. That is
+// only safe because no file in the repository refers to a path-derived handle BY NUMBER, and the two
+// classes whose numbers ARE written down — Texture2D and Material — do not take theirs from the path at
+// all: they read an id out of the file and overwrite what AssetBase installed. The audit behind the
+// first half of that claim found exactly five persisted path-derived ids in committed assets, and all
+// five were texture references, i.e. the second half.
+//
+// So the migration is the absence of one, and these two tests are what makes that an assertion rather
+// than a hope: if either class ever stopped carrying its own id, the re-stamp WOULD move a number that a
+// `.demat` has written down, and this suite says so before a material silently loses its textures.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( AssetHandleStability, ATexturesIdComesFromItsFileAndSurvivesTheProjectMoving )
+{
+    // A real cooked `.tex`, because the claim is about what Load does with the file's Handle field.
+    const auto scratch = std::filesystem::temp_directory_path() / "desert_assethandlestability_rooted.tex";
+    constexpr uint64_t kIdInTheFile = 16135626166276358966ull; // the value T_Checker.tex actually carries
+    {
+        std::ofstream out( scratch );
+        ASSERT_TRUE( out.is_open() ) << "could not write the fixture at " << scratch.string();
+        out << R"({"Handle":16135626166276358966,"SourcePath":"","CookedPath":"","Width":4,"Height":4,)"
+            << R"("Channels":4,"Format":"RGBA8F"})";
+    }
+
+    ProjectRootGuard guard;
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    Desert::Assets::TextureAsset underOneRoot( AssetPriority::Medium, Common::Filepath( scratch ) );
+    ASSERT_TRUE( underOneRoot.Load().IsSuccess() );
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Game", "Assets" );
+    Desert::Assets::TextureAsset underAnother( AssetPriority::Medium, Common::Filepath( scratch ) );
+    ASSERT_TRUE( underAnother.Load().IsSuccess() );
+
+    std::filesystem::remove( scratch );
+
+    EXPECT_EQ( static_cast<uint64_t>( underOneRoot.GetMetadata().Handle ), kIdInTheFile );
+    EXPECT_EQ( static_cast<uint64_t>( underAnother.GetMetadata().Handle ), kIdInTheFile )
+         << "a texture stopped taking its identity from its own file. Every `.demat` in the repository "
+            "names its textures by that number, so the moment it becomes path-derived a change to the "
+            "derivation silently empties every texture slot.";
+}
+
+TEST( AssetHandleStability, AMaterialsIdComesFromItsFileAndSurvivesTheProjectMoving )
+{
+    // The same claim for the other class that carries its own id. `MaterialId` is what a mesh's
+    // surface and a scene's material override both key on.
+    const auto scratch = std::filesystem::temp_directory_path() / "desert_assethandlestability_rooted.demat";
+    constexpr uint64_t kIdInTheFile = 6418972230554417713ull; // M_CheckerFloor.demat's actual MaterialId
+    {
+        std::ofstream out( scratch );
+        ASSERT_TRUE( out.is_open() ) << "could not write the fixture at " << scratch.string();
+        out << R"({"Params":[],"Textures":[],"MaterialId":6418972230554417713})";
+    }
+
+    ProjectRootGuard guard;
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    Desert::Assets::SurfaceMaterialAsset underOneRoot( AssetPriority::Medium, Common::Filepath( scratch ) );
+    ASSERT_TRUE( underOneRoot.Load().IsSuccess() );
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Game", "Assets" );
+    Desert::Assets::SurfaceMaterialAsset underAnother( AssetPriority::Medium, Common::Filepath( scratch ) );
+    ASSERT_TRUE( underAnother.Load().IsSuccess() );
+
+    std::filesystem::remove( scratch );
+
+    EXPECT_EQ( static_cast<uint64_t>( underOneRoot.GetMetadata().Handle ), kIdInTheFile );
+    EXPECT_EQ( static_cast<uint64_t>( underAnother.GetMetadata().Handle ), kIdInTheFile );
+    EXPECT_EQ( static_cast<uint64_t>( underAnother.GetMaterialUUID() ), kIdInTheFile );
+}
+
+// ---------------------------------------------------------------------------------------------------
 // The census: the catalogue above against the enum it claims to cover.
 // ---------------------------------------------------------------------------------------------------
 
