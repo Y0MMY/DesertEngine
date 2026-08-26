@@ -219,14 +219,20 @@ cd Editor && ../build/Bin/Debug/Editor --project Desert.deproj \
    **Теперь принадлежность выводится, а не перечисляется:** наши инструменты gtest не линкуют и
    кладутся в `build/Bin/Debug/`, а сюиты — в `build/Bin/Tests/Debug/`, поэтому цикл сам называет
    каждое имя, не давшее тестового бинарника. Расхождения больше нет — есть поимённый список, и он
-   обязан быть в отчёте. В `case` остаются только чужие библиотеки и агрегаты: они не наши и не
-   меняются. Сквозные стражи падают
+   обязан быть в отчёте. **В `case` остаются ТОЛЬКО чужие библиотеки и два агрегата** — ничего
+   нашего, включая `Desert`, `Common`, `Editor`, `Runtime` и все инструменты в `Tools/`. Они
+   собираются как всё остальное, не дают тестового бинарника и потому называются циклом сами.
+   Устареть больше нечему: записи, которая могла бы протухнуть, не осталось.
+   *(К этой форме независимо пришли две работы — компенсация наковальни и окно материалов, — и
+   вторая до того потратила прогон на проверку «не спрятал ли мой список сюиту». Проверка была
+   нужна, пока список был; теперь свойство структурное, а не измеренное, и это строго лучше.)*
+   Сквозные стражи падают
    от изменений далеко от своего названия — перепись полей, реестр потребителей, счётчик
    дескрипторов. Тестовые `*.make` не существуют, пока не выполнить `CI=true premake5 gmake`
    (без `CI` тестовые проекты не генерируются вовсе). Одной строкой:
 
    ```
-   for f in *.make; do t="${f%.make}"; case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|PakTool|CloudVolumeBaker|BuildAllTests|RunAllTests) continue;; esac; make -f "$f" config=debug -j8 >/dev/null 2>&1 || echo "BUILD-FAIL $t"; if [ -x "build/Bin/Tests/Debug/$t" ]; then ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"; else echo "not-a-suite $t"; fi; done
+   for f in *.make; do t="${f%.make}"; case "$t" in GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|Dlib|ReflectCpp|BuildAllTests|RunAllTests) continue;; esac; make -f "$f" config=debug -j8 >/dev/null 2>&1 || echo "BUILD-FAIL $t"; if [ -x "build/Bin/Tests/Debug/$t" ]; then ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"; else echo "not-a-suite $t"; fi; done
    ```
 
    Каждая строка `not-a-suite` — это имя, которое цикл посчитал инструментом. **Прочти их.** Если
