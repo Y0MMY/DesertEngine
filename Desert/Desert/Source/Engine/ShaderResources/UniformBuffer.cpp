@@ -9,10 +9,6 @@
 namespace Desert::ShaderResources
 {
 
-    UniformBuffer::UniformBuffer( const ShaderLayout::UniformBuffer& uniform ) : m_UniformModel( uniform )
-    {
-    }
-
     std::shared_ptr<UniformBuffer> UniformBuffer::Create( const ShaderLayout::UniformBuffer& uniform )
     {
         switch ( Graphic::RendererAPI::GetAPIType() )

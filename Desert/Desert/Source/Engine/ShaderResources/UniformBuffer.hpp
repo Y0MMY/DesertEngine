@@ -10,7 +10,13 @@ namespace Desert::ShaderResources
     class UniformBuffer : public BaseBuffer
     {
     public:
-        explicit UniformBuffer( const ShaderLayout::UniformBuffer& uniform );
+        // Inline on purpose: this was the type's ONLY out-of-line symbol, and its .cpp pulls in
+        // RendererAPI and VulkanUniformBuffer for Create(). A test that wants a device-free buffer to
+        // drive UniformBufferProperty had to link that whole chain for a member-wise copy. Create() stays
+        // where it is — the backend choice genuinely belongs to the .cpp.
+        explicit UniformBuffer( const ShaderLayout::UniformBuffer& uniform ) : m_UniformModel( uniform )
+        {
+        }
         virtual ~UniformBuffer() = default;
 
         virtual const uint32_t GetBinding() const override final

@@ -90,7 +90,7 @@ namespace Desert::Graphic
         void ApplyDefaults()
         {
             m_MappedParamCount = 0;
-            std::unordered_set<UniformBufferProperty*> touched;
+            m_ParamBuffers.clear();
             for ( const auto& p : m_Schema.Params )
             {
                 if ( p.IsTexture )
@@ -105,15 +105,42 @@ namespace Desert::Graphic
                     sz = sizeof( glm::vec4 ); // params are scalars/vectors (<= 16 bytes)
                 field->SetRawBytes( &p.Default, sz );
                 if ( ub )
-                    touched.insert( ub );
+                    m_ParamBuffers.insert( ub );
             }
-            for ( auto* ub : touched )
+            for ( auto* ub : m_ParamBuffers )
                 ub->UpdateFields();
+        }
+
+        // Re-push the parameter values this material already holds into the uniform-buffer copy the
+        // CURRENT (frame x renderer slot) will read. Every generic draw calls this.
+        //
+        // UpdateFields() writes exactly ONE copy — whichever pair is recording (see
+        // ShaderResources::BufferCopyIndex). The per-slot dirty counter is standing permission to keep
+        // writing until every copy has been served, but permission is not the write: somebody has to come
+        // back on the following frames and perform it. Materials bound through a MaterialInstance get that
+        // from Material::Bind. Generic draws submit an executor and never Bind, so a per-slot material —
+        // whose parameters are applied once, when its asset loads — reached a single frame-in-flight copy
+        // and the mesh rendered BLACK on the other two, the unwritten copies being zero-filled.
+        //
+        // ONLY the buffers that carry schema parameters, and that restriction is load-bearing. The
+        // engine-filled blocks (CameraUB, TimeUB, DirectionLightsUB) are written whole by
+        // UniformBufferProperty::SetRawData, which does not go through FieldProperty at all — their field
+        // local data is never initialised. Flushing those would memcpy uninitialised bytes over the camera
+        // matrices the renderer had just written, which empties the frame. Measured, not imagined: the
+        // first version of this fix flushed every buffer and the probe scene rendered as bare sky.
+        void FlushParameterBuffers()
+        {
+            for ( auto* ub : m_ParamBuffers )
+                if ( ub->HasDirtyFields() )
+                    ub->UpdateFields();
         }
 
     private:
         std::string                      m_ShaderName;
         Core::Formats::ShaderProgramMeta m_Schema;
         uint32_t                         m_MappedParamCount = 0;
+        // The UBs that schema parameters map to — the only ones whose FieldProperty local data is a
+        // source of truth. Recomputed by ApplyDefaults; stable for the life of the material.
+        std::unordered_set<UniformBufferProperty*> m_ParamBuffers;
     };
 } // namespace Desert::Graphic

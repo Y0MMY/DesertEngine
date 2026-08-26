@@ -264,7 +264,10 @@ namespace Desert::Graphic::System
             }
 
             auto shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( shaderName );
-            if ( !shader || !g.Mesh || ( g.SlotMaterial && !material ) )
+            // A shader whose first compile failed is still registered under its name, so GetByName hands
+            // it back like any other. Skip its draws silently: the compilation error was already logged
+            // once, with the file and line, and repeating it every frame for every mesh would bury it.
+            if ( !shader || !shader->IsCompiled() || !g.Mesh || ( g.SlotMaterial && !material ) )
                 continue;
 
             if ( !material )
@@ -325,6 +328,12 @@ namespace Desert::Graphic::System
                 }
             }
 
+            // A shader-override draw does not own its material: m_GenericMaterials keys one material
+            // per SHADER, so several entities share it within a frame and each draw has to restate its
+            // own values before recording. A per-slot draw is the opposite — the material IS the asset,
+            // its values were applied when the asset loaded, and restating them here would overwrite
+            // them with schema defaults. So only this step is conditional; getting those values onto
+            // the GPU is not, and is done below for both.
             if ( !g.SlotMaterial )
             {
                 material->ApplyDefaults();
@@ -351,6 +360,15 @@ namespace Desert::Graphic::System
                 if ( g.DirectTexture && !g.DirectTextureSampler.empty() )
                     material->SetTexture( g.DirectTextureSampler, g.DirectTexture );
             }
+
+            // THE single route the parameters take to the GPU, for both producers. Generic draws submit
+            // an executor rather than binding through a MaterialInstance, so Material::Bind — where every
+            // other material in the engine gets this — never runs for them. The override branch above
+            // used to supply it by accident, because SetParamRaw calls UpdateFields as a side effect;
+            // per-slot draws call neither, and their parameters reached exactly one of the three
+            // frame-in-flight copies. Unconditional and self-limiting: once every copy has been served
+            // the fields go clean and this does nothing.
+            material->FlushParameterBuffers();
 
             Renderer::GetInstance().RenderMesh( pipeline.get(), g.Mesh, g.Transform,
                                                 material->GetMaterialExecutor(), 1, 0, ~g.VisibleSubmeshMask,

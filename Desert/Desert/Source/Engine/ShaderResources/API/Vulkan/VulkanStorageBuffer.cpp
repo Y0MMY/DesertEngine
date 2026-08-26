@@ -3,6 +3,7 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Core/EngineContext.hpp>
+#include <Engine/ShaderResources/BufferCopyLayout.hpp>
 
 #include <cstring>
 
@@ -65,12 +66,15 @@ namespace Desert::ShaderResources::API::Vulkan
         // Otherwise one buffer per (frame in flight x renderer slot): the frame dimension keeps the GPU from
         // reading a buffer being rewritten, and the SLOT dimension keeps a second view from overwriting the
         // per-object material array or the pose the first view's draws reference.
-        const uint32_t copies = m_Persistent ? 1u : framesInFlight * slots;
+        const uint32_t copies = m_Persistent ? 1u : BufferCopyCount( framesInFlight, slots );
 
         m_Buffers.resize( copies, VK_NULL_HANDLE );
         m_MemoryAllocs.resize( copies, nullptr );
         m_MappedMemories.resize( copies, nullptr );
-        m_DescriptorInfos.resize( framesInFlight * slots );
+        // Always the FULL matrix, even when persistent collapses the buffers to one: descriptors are
+        // indexed by (frame x slot) regardless, so this array is sized by the layout, not by the buffers.
+        const uint32_t descriptorCount = BufferCopyCount( framesInFlight, slots );
+        m_DescriptorInfos.resize( descriptorCount );
 
         auto vulkanContext = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
                                       EngineContext::GetInstance().GetRendererContext() );
@@ -96,7 +100,7 @@ namespace Desert::ShaderResources::API::Vulkan
         }
 
         // Point every (frame x slot) descriptor at its buffer (persistent: all at buffer 0).
-        for ( uint32_t i = 0; i < framesInFlight * slots; ++i )
+        for ( uint32_t i = 0; i < descriptorCount; ++i )
         {
             const uint32_t idx          = m_Persistent ? 0u : i;
             m_DescriptorInfos[i].buffer = ( idx < m_Buffers.size() ) ? m_Buffers[idx] : VK_NULL_HANDLE;
@@ -133,9 +137,8 @@ namespace Desert::ShaderResources::API::Vulkan
 
     uint32_t VulkanStorageBuffer::CopyIndex()
     {
-        const uint32_t slots = Engine::kMaxRendererSlots;
-        const uint32_t slot  = EngineContext::GetInstance().GetActiveRendererSlot();
-        return EngineContext::GetInstance().GetCurrentFrameIndex() * slots + ( slot < slots ? slot : 0 );
+        return BufferCopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex(),
+                                EngineContext::GetInstance().GetActiveRendererSlot(), Engine::kMaxRendererSlots );
     }
 
     void VulkanStorageBuffer::UnmapMemory()
