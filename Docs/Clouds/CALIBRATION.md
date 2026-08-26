@@ -4622,3 +4622,38 @@ scenes to preserve their old sky would therefore change what they are FOR** — 
 0.213 instead of 0.075 and would then be a field rather than three bodies.
 
 **The work is stopped here for that decision.** The three scene files are NOT re-saved by this task.
+
+### SIX SABOTAGES, AND ONE STAYED GREEN — the hole is closed
+
+Every one applied to the generator, the suite's **objects AND binary deleted**, rebuilt, run, reverted.
+
+| break | result |
+|---|---|
+| the compensation is deleted from the cluster's radius | RED |
+| `kAnvilSpreadPerStrength` is changed in the EMISSION only | RED |
+| the gain uses the canopy's LONG radius instead of its equivalent one | RED |
+| `kAnvilAcrossOverAlong` is changed in the EMISSION only | RED |
+| the tower's footprint becomes its outer REACH (1.096) instead of the union's equivalent radius | RED |
+| the gain's floor at one is removed | RED |
+| the thickness half of the emission's own guard is dropped from the gain | RED |
+| **the taper term is dropped and the tower's footprint becomes one constant** | **GREEN — a real hole, closed** |
+
+**THE GREEN, AND WHAT IT SAYS ABOUT THE OTHER THREE TESTS.** Every relation written up to that point holds
+`TopTaper` FIXED, and an error common to both arms of a ratio cancels — so a wrong tower footprint was
+invisible while it was wrong by the same amount everywhere. That is an untested number in the middle of a
+calibration.
+
+What is asserted now is that **the quadrature predicts the real bake**, and it is a strong statement
+because the two are completely independent: with no canopy the gain is exactly 1 and neither constant
+reaches a single lump, so the bake measures the layout while the constants merely claim to describe it.
+Read through `-ln(1 - cover)`, whose constant of proportionality cancels in a ratio of two tapers:
+
+    tower footprint, taper 1.0 over taper 0.4 — the constants say 0.9317, the sky says 0.9340
+
+**A quarter of one per cent**, which is what makes the two numbers a derivation rather than a fit. Re-run,
+the sabotage is RED, and it is seven times outside the window.
+
+**AND THE STALE-OBJECT TRAP CAUGHT THIS TASK TOO**, arriving from §RW's own direction. The first run of the
+new relation reported "the constants say 1.0000" against a source that plainly said otherwise: the sabotage
+script had reverted the SOURCE, and the suite's incremental build reused the sabotaged
+`CloudProceduralVolume.o`. Every number above is from a suite whose objects were deleted first.
