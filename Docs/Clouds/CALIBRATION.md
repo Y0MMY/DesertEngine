@@ -4657,3 +4657,18 @@ the sabotage is RED, and it is seven times outside the window.
 new relation reported "the constants say 1.0000" against a source that plainly said otherwise: the sabotage
 script had reverted the SOURCE, and the suite's incremental build reused the sabotaged
 `CloudProceduralVolume.o`. Every number above is from a suite whose objects were deleted first.
+
+### THE FRAMES
+
+All at `--shot-frames 90`, camera `0,200,0`, both azimuths at all three elevations. **28 files, and the only
+repeated hashes are the six `Clouds_Demo` pairs** — which is the result rather than a duplicate.
+
+| file | what it shows |
+|---|---|
+| `Shots/CB_before_cb_mid_away.png` / `CB_after_cb_mid_away.png` | **THE SHOW.** Before: a formless grey murk with the camera inside a 0.986 overcast — no body, no edge, no sky. After: storms with blue between them at the 0.764 the slider asked for |
+| `Shots/CB_before_cb_zenith_away.png` / `CB_after_cb_zenith_away.png` | the zenith, which a closed sky hides completely |
+| `Shots/CB_before_cb_horizon_away.png` / `CB_after_cb_horizon_away.png` | the horizon, where the far field is the test |
+| `Shots/CB_before_cb_*_sun.png` / `CB_after_cb_*_sun.png` | the three sunward points — the canopy's silver lining and the sun disc through a hole, which is what the storm had to not lose |
+| `Shots/CB_before_{zenith,mid,horizon}_{away,sun}.png` / `CB_after_*` | **the six protocol points on `Clouds_Demo`, which are the SAME BYTES in both arms** |
+| `Shots/CB_before_heroTrio_mid_away.png` / `CB_after_heroTrio_mid_away.png` | `Clouds_HeroTrio`, one of the three scenes the trade is about |
+| `Shots/CB_before_heroMass_mid_away.png` / `CB_after_heroMass_mid_away.png` | `Clouds_HeroMass`, the other |
