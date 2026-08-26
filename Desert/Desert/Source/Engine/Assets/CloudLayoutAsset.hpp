@@ -53,8 +53,9 @@ namespace Desert::Assets
         /**
          * @brief Writes a layout to disk in the container format, creating the directory if needed.
          *
-         * Static because saving is what CREATES an asset — Tools/CloudLayoutBaker builds a layout from a
-         * picture and writes it, and only then does the AssetManager get asked to load it back.
+         * Static because saving is what CREATES an asset — the Cloud Layout panel (View > Cloud Layout)
+         * and Tools/CloudLayoutBaker both build a layout from a picture and write it, and only then does
+         * the AssetManager get asked to load it back.
          */
         static Common::BoolResultStr Save( const Common::Filepath& filepath, const CloudLayoutData& layout );
 

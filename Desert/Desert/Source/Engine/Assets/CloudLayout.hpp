@@ -189,8 +189,8 @@ namespace Desert::Assets
 
     bool CloudLayoutPlacementEqual( const CloudLayoutPlacement& a, const CloudLayoutPlacement& b );
 
-    /// Rejects a placement the bake cannot honour, naming the offending number. Pure, so a caller can refuse for
-    /// the same reason the bake refuses rather than the two disagreeing about what is legal.
+    /// Rejects a placement the bake cannot honour, naming the offending number. Pure, so the Cloud Layout
+    /// panel greys out for the same reason the bake refuses rather than the two disagreeing.
     Common::BoolResultStr ValidateCloudLayoutPlacement( const CloudLayoutPlacement& placement );
 
     /// Rejects a decoded layout that cannot be sampled: no resolution, both tables absent, a table whose
@@ -284,4 +284,67 @@ namespace Desert::Assets
     Common::ResultStr<CloudLayoutData>
     MakeCloudLayoutFromImage( const std::vector<unsigned char>& pixels, uint32_t width, uint32_t height,
                               const uint32_t channelForSlot[kCloudLayoutChannels], bool takeMask );
+
+    /**
+     * @brief How wide the THINNEST parts of one painted channel are, in texels.
+     *
+     * WHY THIS EXISTS, AND IT IS A HOLE A VALIDATOR STRUCTURALLY CANNOT COVER.
+     * `ValidateCloudProceduralLayout` compares one layout TEXEL against the placement cell, and that is
+     * the right bound for "can the painting tell two neighbouring cells apart". It is NOT the bound for
+     * LEGIBILITY, which is the painting's thinnest STROKE against the cell: at four repeats the letter of
+     * CALIBRATION.md §PT has a 12 km world period and a 1.2 km stroke, so every texel still resolves a
+     * cell and the glyph still collapses into evenly spaced clumps. The knob's ceiling of sixteen is
+     * honest about periods and silent about pictures, and §PT reported that silence rather than guarding
+     * it, because guessing a stroke width is an opinion about somebody's painting.
+     *
+     * SO IT IS MEASURED RATHER THAN GUESSED. A stroke width is a property of the pixels and nothing else,
+     * and once measured it can be REPORTED — which is what the authoring panel does with it. Nothing here
+     * refuses anything; the bake is untouched.
+     *
+     * HOW A TEXEL'S STROKE WIDTH IS DEFINED. A texel counts as painted when it is above the midpoint
+     * between the channel's own least and greatest value — its own midpoint rather than a fixed 0.5, so a
+     * soft painting that never reaches white is measured on the shape the artist drew rather than on the
+     * ink they used. Its stroke width is the SHORTER of the two runs of painted texels it lies in,
+     * horizontal and vertical. That is exact for a straight bar of any orientation-aligned width and
+     * generous for a diagonal one (a diagonal bar's axis-aligned runs are longer than its true width by
+     * up to sqrt(2)), which is the safe direction: it never claims a stroke is thinner than it is.
+     *
+     * THE RUNS WRAP, because the painting tiles the world. A band that leaves the right edge and returns
+     * at the left is one stroke and not two, and measuring it as two would report half its real width.
+     */
+    struct CloudLayoutStrokeStats
+    {
+        /// How many texels of this channel counted as painted. ZERO means the channel is flat — nothing
+        /// was drawn on it — and every field below is then zero as well, which a caller must read as "no
+        /// strokes" rather than as "infinitely thin ones".
+        uint64_t PaintedTexels = 0u;
+
+        /// The width at or below which the thinnest TENTH of the painted texels lie, in texels. Reported
+        /// as a percentile rather than as a minimum because a minimum is the corner of one curve: any
+        /// rounded shape has a few texels one wide, and a figure would be judged by its worst four pixels.
+        float ThinnestTenthTexels = 0.0f;
+
+        /// The median painted texel's stroke width, in texels — what the bulk of the drawing measures.
+        float MedianTexels = 0.0f;
+
+        /// Fraction of the painted texels whose stroke is narrower than the limit handed to the measure,
+        /// 0..1. This is the number an artist acts on: "this much of what you drew is finer than the sky
+        /// can express".
+        float FractionBelowLimit = 0.0f;
+    };
+
+    /**
+     * @brief Measures one pattern channel's strokes, and how much of it falls under @p limitTexels.
+     *
+     * @param slot species slot, 0..kCloudLayoutChannels-1. A layout with no pattern, or a slot out of
+     *        range, measures as an empty result — no strokes, rather than an error, because "you have not
+     *        painted this slot" is an ordinary state and not a fault.
+     * @param limitTexels the width the caller cares about, in texels of THIS table — normally the
+     *        placement cell converted through the painting's own world period. Non-positive means nothing
+     *        is below it, and FractionBelowLimit is then 0.
+     *
+     * PURE and allocation-bounded: two byte-wide run tables and a histogram the side of the image.
+     */
+    CloudLayoutStrokeStats MeasureCloudLayoutStrokes( const CloudLayoutData& data, uint32_t slot,
+                                                      float limitTexels );
 } // namespace Desert::Assets

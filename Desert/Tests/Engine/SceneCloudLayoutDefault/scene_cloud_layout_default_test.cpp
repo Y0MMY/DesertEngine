@@ -253,6 +253,79 @@ TEST( SceneCloudLayoutDefault, ThePaintedLayoutDidNotMoveTheSchemaVersion )
             "only adds fields, it needs neither, and it needs a test like the two above instead.";
 }
 
+// WHICH TYPE SLOT IS WHICH PAINTED CHANNEL — CALIBRATION.md §PTP.
+//
+// A painted layout's four channels are indexed by SPECIES, and the species are the layer's four type slots
+// COMPACTED: empty slots skipped, a repeated type dropped. So the numbering an artist sees in Details is
+// not the numbering the painting uses, and the symptom of not knowing that is a channel somebody swears
+// they painted that does nothing at all. The Cloud Layout panel names the type behind every channel, and
+// it can only do that because ECS::ResolveCloudSpecies states the rule once — the renderer resolves the
+// same call.
+//
+// These are the cases the panel's labels are wrong about if the rule ever moves.
+TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsFollowThem )
+{
+    const Desert::Assets::AssetHandle cumulus( 0x11u );
+    const Desert::Assets::AssetHandle cirrus( 0x22u );
+
+    // A LAYER WITH ONE TYPE IN THE THIRD SLOT IS DRIVEN BY THE PAINTING'S FIRST CHANNEL. This is the case
+    // that reads as a broken feature: an artist paints blue for "Cloud Type 3" and the sky ignores it.
+    {
+        Desert::ECS::VolumetricCloudData data;
+        data.CloudType3 = cumulus;
+
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+
+        EXPECT_EQ( resolved.Count, 1u );
+        EXPECT_FALSE( resolved.BuiltInDefault );
+        EXPECT_EQ( resolved.AuthoredSlot[0], 2u )
+             << "the only authored type was not reported as channel 0's, so the panel names the wrong cloud "
+                "beside the channel that actually places it";
+    }
+
+    // ORDER IS THE ORDER OF THE SLOTS, not of anything else, and a gap does not reserve a channel.
+    {
+        Desert::ECS::VolumetricCloudData data;
+        data.CloudType2 = cirrus;
+        data.CloudType4 = cumulus;
+
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+
+        EXPECT_EQ( resolved.Count, 2u );
+        EXPECT_EQ( resolved.AuthoredSlot[0], 1u );
+        EXPECT_EQ( resolved.AuthoredSlot[1], 3u );
+    }
+
+    // THE SAME TYPE TWICE IS ONE SPECIES, because two identical placement fields are two skies of one kind
+    // of cloud at twice the cost. The second slot's channel therefore drives NOTHING, and an artist who
+    // painted it is owed that sentence rather than a shrug.
+    {
+        Desert::ECS::VolumetricCloudData data;
+        data.CloudType1 = cumulus;
+        data.CloudType2 = cumulus;
+        data.CloudType3 = cirrus;
+
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+
+        EXPECT_EQ( resolved.Count, 2u );
+        EXPECT_EQ( resolved.AuthoredSlot[0], 0u );
+        EXPECT_EQ( resolved.AuthoredSlot[1], 2u )
+             << "the duplicate was kept, so a layer's channels are numbered differently from the sky it "
+                "actually places";
+    }
+
+    // ALL FOUR EMPTY IS ONE BUILT-IN SPECIES and never zero, which is what keeps a scene nobody has
+    // authored a type for from having no sky — and what keeps the panel's channel slider from having an
+    // empty range.
+    {
+        const Desert::ECS::VolumetricCloudData    data;
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+
+        EXPECT_EQ( resolved.Count, 1u );
+        EXPECT_TRUE( resolved.BuiltInDefault );
+    }
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

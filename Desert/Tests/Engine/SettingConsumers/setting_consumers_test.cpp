@@ -233,7 +233,15 @@ namespace
          // the right reason - the read WAS removed - and it did.
          { "Coverage", kCloudRenderer },
          { "CoverageContrast", kCloudRenderer },
-         { "WeatherTileSize", kCloudRenderer },
+
+         // WEATHER TILE SIZE IS READ IN THE COMPONENT'S OWN HEADER NOW, and this suite is what noticed.
+         // `ECS::CloudLayerLatticeKm` states "four cells to a tile" ONCE, because a second reader appeared
+         // — the Cloud Layout panel measures a painting's strokes against the cell — and the renderer calls
+         // it instead of spelling the ratio out a second time. The field's last textual mention in
+         // VolumetricCloudRenderer.cpp went with it, and the row pointing there went red. That is this
+         // suite failing for exactly the reason it exists: the named consumer stopped reading the field.
+         { "WeatherTileSize", "Desert/Desert/Source/Engine/ECS/VolumetricCloudComponent.hpp" },
+
          { "RegionSize", kCloudRenderer },
          { "Seed", kCloudRenderer },
 

@@ -348,6 +348,21 @@ namespace Desert::Assets
         ///     Unreal's own arrangement unchanged — the mask is summed into the assembled shape, and it
         ///     subtracts by carrying a negative weight rather than by multiplying
         ///     (Docs/Clouds/RESEARCH_LAYOUT_TEXTURES.md §3).
+        ///
+        /// THE SEEDS ARE DERIVED IN ONE PLACE, and it is not tidiness. The public
+        /// CloudProceduralCellCoverage has to reach the same weather patch the bake's own loop reaches, or
+        /// the panel's map and the baked sky would differ everywhere the painting is not the source — and
+        /// they would differ SILENTLY, because both would look like plausible weather.
+        uint32_t CloudSpeciesSeed( const CloudProceduralFieldParams& params, uint32_t slot )
+        {
+            return HashCombine( params.Seed, slot + 0x51ed270bu );
+        }
+
+        uint32_t CloudPatchSeed( uint32_t speciesSeed )
+        {
+            return HashCombine( speciesSeed, 0x9a71c4u );
+        }
+
         float CloudCellCoverage( const CloudProceduralFieldParams& params, uint32_t slot, uint32_t patchSeed,
                                  const glm::vec2& centreKm )
         {
@@ -834,7 +849,7 @@ namespace Desert::Assets
         // asks the DISTANCE FIELD which way the lump is long rather than by this comment.
         const float yawDeg = std::atan2( -along.y, along.x ) * kDegreesPerRadian;
 
-        const uint32_t speciesSeed = HashCombine( params.Seed, slot + 0x51ed270bu );
+        const uint32_t speciesSeed = CloudSpeciesSeed( params, slot );
 
         // ---------------------------------------------------------------------------------------------
         // WHAT FRACTION OF THE CELLS IS ALIVE, WHICH IS NOT THE SLIDER
@@ -868,7 +883,7 @@ namespace Desert::Assets
         const float scatter = std::max( params.PlacementScatter, 0.0f );
         const float variety = std::clamp( params.PlacementSizeVariety, 0.0f, 1.0f );
 
-        const uint32_t patchSeed = HashCombine( speciesSeed, 0x9a71c4u );
+        const uint32_t patchSeed = CloudPatchSeed( speciesSeed );
 
         for ( int32_t iv = firstV; iv <= lastV; ++iv )
         {
@@ -1455,5 +1470,100 @@ namespace Desert::Assets
         }
 
         return Common::MakeSuccess( std::move( voxels ) );
+    }
+
+    float CloudProceduralCellCoverage( const CloudProceduralFieldParams& params, uint32_t slot,
+                                       const glm::vec2& centreKm )
+    {
+        return CloudCellCoverage( params, slot, CloudPatchSeed( CloudSpeciesSeed( params, slot ) ), centreKm );
+    }
+
+    Common::ResultStr<CloudLayoutPreview> BuildCloudLayoutPreview( const CloudProceduralFieldParams& params,
+                                                                   uint32_t slot, float spanKm, uint32_t maxSide )
+    {
+        if ( slot >= params.Species.size() )
+            return Common::MakeFormattedError<CloudLayoutPreview>( "cannot map slot {}: this layer has {} species",
+                                                                   slot, params.Species.size() );
+
+        if ( !std::isfinite( spanKm ) || spanKm <= 0.0f )
+            return Common::MakeFormattedError<CloudLayoutPreview>( "the mapped span must be a positive length, "
+                                                                   "got {} km",
+                                                                   spanKm );
+
+        if ( maxSide == 0u )
+            return Common::MakeFormattedError<CloudLayoutPreview>( "the map's side ceiling must be at least 1" );
+
+        CloudLayoutPreview preview;
+        preview.SpanKm = spanKm;
+
+        // THE MAPPED SLOT'S OWN CELL, and it is deliberately NOT the finest cell in the layer.
+        //
+        // A channel of the painting decides where ONE species goes, and the lattice that species is placed
+        // on is its own — a type's Placement Scale says how much coarser or finer than the layer it is.
+        // Drawing slot 2's map on slot 0's finer cell would show detail slot 2 cannot place, and the
+        // legibility bound quoted beside it would be the most permissive one in the layer rather than the
+        // one this channel has to clear: a 1.2 km stroke reads on a 1 km cell and breaks into clumps on a
+        // 4 km one, so an artist told the finest number is told the wrong number about their own channel.
+        //
+        // ValidateCloudProceduralLayout still takes the FINEST, and that is a different question with a
+        // different right answer: it asks whether one layout texel can tell two neighbouring cells apart,
+        // which fails first for the species with the smallest cells. Legibility fails first for the
+        // species with the LARGEST. The two bounds run in opposite directions, which is exactly why they
+        // must not share a number.
+        //
+        // The SHORTER side, because an anisotropic cell is long along the wind and it is across the stretch
+        // that a stroke has to survive.
+        const glm::vec2 extent = CloudProceduralCellExtentKm( params, params.Species[slot] );
+        const float     cellKm = std::min( extent.x, extent.y );
+        preview.CellKm         = cellKm;
+
+        const uint32_t wanted =
+             static_cast<uint32_t>( std::max( 1.0f, std::ceil( spanKm / std::max( cellKm, 1e-3f ) ) ) );
+        preview.Side          = std::min( wanted, maxSide );
+        preview.SamplePitchKm = spanKm / static_cast<float>( preview.Side );
+
+        // The two ends of the pattern slider, evaluated on the same lattice as the picture. Copies rather
+        // than a flag inside the coverage function: the function under test must be the one the bake calls,
+        // unchanged, or the measurement would be of a different function than the sky.
+        CloudProceduralFieldParams atZero      = params;
+        atZero.LayoutPlacement.PatternStrength = 0.0f;
+        CloudProceduralFieldParams atOne       = params;
+        atOne.LayoutPlacement.PatternStrength  = 1.0f;
+
+        const size_t cells = static_cast<size_t>( preview.Side ) * preview.Side;
+        preview.Coverage.resize( cells, 0.0f );
+        preview.Cells = static_cast<uint32_t>( cells );
+
+        double sum = 0.0;
+
+        for ( uint32_t iv = 0; iv < preview.Side; ++iv )
+        {
+            for ( uint32_t iu = 0; iu < preview.Side; ++iu )
+            {
+                const glm::vec2 centre(
+                     ( ( static_cast<float>( iu ) + 0.5f ) / static_cast<float>( preview.Side ) - 0.5f ) * spanKm,
+                     ( ( static_cast<float>( iv ) + 0.5f ) / static_cast<float>( preview.Side ) - 0.5f ) *
+                          spanKm );
+
+                const float coverage = CloudProceduralCellCoverage( params, slot, centre );
+
+                preview.Coverage[static_cast<size_t>( iv ) * preview.Side + iu] = coverage;
+                sum += static_cast<double>( coverage );
+
+                // ONE 255TH IS THE FLOOR OF WHAT CAN SHOW. The volume is quantised to bytes, so a coverage
+                // difference below that reaches neither the picture nor the sky, and counting it would
+                // report a live knob where the frames come back byte-identical.
+                if ( std::fabs( CloudProceduralCellCoverage( atOne, slot, centre ) -
+                                CloudProceduralCellCoverage( atZero, slot, centre ) ) > 1.0f / 255.0f )
+                    ++preview.CellsPatternMoves;
+
+                if ( coverage <= 0.0f || coverage >= 1.0f )
+                    ++preview.CellsClamped;
+            }
+        }
+
+        preview.MeanCoverage = static_cast<float>( sum / static_cast<double>( cells ) );
+
+        return Common::MakeSuccess( std::move( preview ) );
     }
 } // namespace Desert::Assets
