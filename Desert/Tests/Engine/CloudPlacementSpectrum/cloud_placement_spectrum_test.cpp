@@ -866,8 +866,8 @@ TEST( CloudPlacementSpectrum, ACanopyCostsTheSkyNothingBecauseTheClusterPaysForI
     // THE LAYER IS THE SAME IN BOTH ARMS and it is the one the storm WITH its canopy needs, so the only
     // thing that differs between them is whether the canopy is there. Giving each arm its own shell would
     // also change how finely 32 voxels sample the band, and the difference measured would be two things.
-    CloudProceduralFieldParams capped = StormParams();
-    CloudProceduralFieldParams bare   = StormParams();
+    CloudProceduralFieldParams capped   = StormParams();
+    CloudProceduralFieldParams bare     = StormParams();
     bare.Species[0].Shape.AnvilStrength = 0.0f;
 
     for ( const float coverage : { 0.35f, 0.50f, 0.75f } )
@@ -905,8 +905,8 @@ TEST( CloudPlacementSpectrum, TheCanopysOwnFootprintDoesNotMoveWithItsStrength )
     // it spreads BEYOND its tower, and the sky drifts with `AnvilStrength` for no reason a reader could see.
     const auto canopyRadiusKm = [&]( float strength )
     {
-        CloudProceduralFieldParams params        = StormParams();
-        params.Species[0].Shape.AnvilStrength    = strength;
+        CloudProceduralFieldParams params     = StormParams();
+        params.Species[0].Shape.AnvilStrength = strength;
 
         const glm::vec2                       origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
         const std::vector<CloudModellingBlob> blobs  = GenerateCloudProceduralBlobs( params, 0u, origin );

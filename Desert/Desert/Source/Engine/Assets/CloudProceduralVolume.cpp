@@ -453,8 +453,7 @@ namespace Desert::Assets
         // therefore cancels out of it exactly — which is why an anisotropic storm needs no second term
         // here, and is the same argument §SIL made for sizing a cluster by the cell's geometric mean.
         const float strength = std::clamp( shape.AnvilStrength, 0.0f, 1.0f );
-        const float anvil =
-             ( 1.0f + kAnvilSpreadPerStrength * strength ) * std::sqrt( kAnvilAcrossOverAlong );
+        const float anvil    = ( 1.0f + kAnvilSpreadPerStrength * strength ) * std::sqrt( kAnvilAcrossOverAlong );
 
         const float tower = CloudClusterTowerFootprintRadii( shape.TopTaper );
 
@@ -811,10 +810,9 @@ namespace Desert::Assets
         //
         // ABOVE THE MARCH'S FLOOR, still: the floor is what keeps a cluster findable by the ray, and a
         // compensation that pushed a body under it would trade a lying slider for speckle.
-        const float cellMeanKm     = std::sqrt( extent.x * extent.y );
-        const float footprintGain  = CloudClusterFootprintGain( shape );
-        const float baseRadiusKm =
-             std::max( 0.72f * cellMeanKm / footprintGain, 0.5f * params.ResolvableChordKm );
+        const float cellMeanKm    = std::sqrt( extent.x * extent.y );
+        const float footprintGain = CloudClusterFootprintGain( shape );
+        const float baseRadiusKm = std::max( 0.72f * cellMeanKm / footprintGain, 0.5f * params.ResolvableChordKm );
 
         // AND THE STRETCH THE CELL NO LONGER SPENDS ON ITS AREA IS SPENT ON THE CLUSTER'S SHAPE. A cluster
         // is drawn out along the wind by the same factor its cell is, so a cluster covers the same fraction
@@ -1173,17 +1171,15 @@ namespace Desert::Assets
                         // Wider than the tower and much flatter, which is what spreading against a stable layer
                         // looks like. The strength decides how far it spreads and how much matter is in it.
                         const float spread = baseRadiusKm * ( 0.60f + 0.40f * fill ) * size * densityScale *
-                                             radiusGain *
-                                             ( 1.0f + kAnvilSpreadPerStrength * shape.AnvilStrength );
+                                             radiusGain * ( 1.0f + kAnvilSpreadPerStrength * shape.AnvilStrength );
                         const float floorKm = 0.5f * params.ResolvableChordKm;
 
                         // THE CANOPY IS DRAWN OUT WITH THE CLUSTER IT CAPS, by the same `stretch`. A storm in
                         // an anisotropic lattice whose tower was a band and whose anvil was a circle would be
                         // two bodies, and the anvil's own thickness is the one radius it authors itself.
-                        anvil.RadiiKm =
-                             glm::vec3( std::max( spread * stretch, floorKm ),
-                                        std::max( shape.AnvilThicknessKm, floorKm ),
-                                        std::max( spread * kAnvilAcrossOverAlong / stretch, floorKm ) );
+                        anvil.RadiiKm = glm::vec3( std::max( spread * stretch, floorKm ),
+                                                   std::max( shape.AnvilThicknessKm, floorKm ),
+                                                   std::max( spread * kAnvilAcrossOverAlong / stretch, floorKm ) );
 
                         anvil.RotationDeg = glm::vec3( 0.0f, yawDeg, 0.0f );
                         anvil.Weight      = 1.0f;
