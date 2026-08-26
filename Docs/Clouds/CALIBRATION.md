@@ -4672,3 +4672,28 @@ repeated hashes are the six `Clouds_Demo` pairs** — which is the result rather
 | `Shots/CB_before_{zenith,mid,horizon}_{away,sun}.png` / `CB_after_*` | **the six protocol points on `Clouds_Demo`, which are the SAME BYTES in both arms** |
 | `Shots/CB_before_heroTrio_mid_away.png` / `CB_after_heroTrio_mid_away.png` | `Clouds_HeroTrio`, one of the three scenes the trade is about |
 | `Shots/CB_before_heroMass_mid_away.png` / `CB_after_heroMass_mid_away.png` | `Clouds_HeroMass`, the other |
+
+### WHAT THIS TASK DID NOT DO, AND THE ONE DECISION IT IS WAITING ON
+
+* **⚠️ IT DID NOT RE-AUTHOR THE THREE STORM SCENES, AND IT IS STOPPED ON THAT.** `Clouds_HeroTrio`,
+  `Clouds_HeroMass` and `SIL_Cumulonimbus` all move past D-20's tenth, priced above. The decision is the
+  teamlead's, and either answer is one commit: leave them (the slider now means the sky in all three, out
+  by 0.028 / 0.035 / 0.002) or re-author them to the sky they had (about 0.213 / 0.49 / above 0.98, which
+  changes how many storms `HeroTrio` has and therefore what it is for).
+* **IT DID NOT GIVE `kPackingCompensation` A CELL TERM**, which is what the brief asked for, and the reason
+  is the measurement above rather than difficulty: the cell moves the slider by at most 0.032 over an
+  eightfold range and not monotonically, so a cell term would be a second constant fitted at a second size,
+  and it would move all nine genera to buy 0.03 on one.
+* **IT DID NOT FIX THE LOW END.** It is unchanged to the last digit, the re-derivation was attempted and
+  the numbers are above: the independent-bodies model is worse than the fitted mapping at every point on
+  the ladder. The defect is that clusters sharing a cell are correlated, which is a change to the
+  PLACEMENT rather than to the mapping.
+* **IT DID NOT RE-SHOOT THE PROTOCOL AGAINST THE MERGED `dev`.** The before/after pair is `7459012a` on
+  both arms, which is what makes it an A/B; `dev` has since landed the material-parameter upload path, and
+  a frame taken on it is a different measurement rather than the other half of this one.
+* **IT DID NOT TOUCH THE MARCH, THE EROSION OR THE LIGHTING.** No shader was read or edited, and no
+  component default moved.
+* **IT DID TOUCH `Tools/LatticePeak`, WHICH IS NOT THIS TASK'S FILE**, and the change is four lines: the
+  layer comes from `Graphic::CloudTypeSetEnvelopeKm` instead of `Top - Base`. It is reported here rather
+  than taken quietly, and the argument for making it is that the alternative was to calibrate the sky
+  against an instrument that could not see the body being calibrated.
