@@ -233,8 +233,12 @@ namespace Desert::Editor
 
         int          m_PreviewSlot  = 0;
         PaintingView m_PaintingView = PaintingView::Slot0;
-        int          m_SpanRegions  = 1;   // region periods the sky map covers, so tiling is visible
-        int          m_PreviewSide  = 220; // pixels each pane is drawn at
+        int          m_SpanRegions  = 1; // region periods the sky map covers, so tiling is visible
+
+        /// Pixels each pane is drawn at. 180 AND NOT MORE BY DEFAULT: at 220 the verdict under the panes —
+        /// which is the part of this panel an artist opens it for — fell below the window's bottom edge on
+        /// a 1289-point screen. The slider goes to 512 for anyone who wants to study the map itself.
+        int m_PreviewSide = 180;
 
         Assets::CloudLayoutPreview     m_Preview;
         bool                           m_HasPreview = false;

@@ -235,11 +235,10 @@ namespace Desert::Editor
             }
         }
 
-        ImGui::TextWrapped(
-             "A PAINTED SKY. Point at a picture, say which of its channels feeds which of the layer's "
-             "four cloud type slots, and bake it to a .dclayout the cloud component's Cloud Layout "
-             "slot accepts. The painting is read when the clouds are PLACED, not while they are "
-             "drawn, so it costs the frame nothing." );
+        ImGui::TextWrapped( "A PAINTED SKY. Point at a picture, say which of its channels feeds which of "
+                            "this layer's cloud species, and bake it to a .dclayout the cloud component's "
+                            "Cloud Layout slot accepts. The painting is read when the clouds are PLACED, "
+                            "so it costs the frame nothing." );
         ImGui::Separator();
 
         DrawSourceSection();
@@ -462,6 +461,12 @@ namespace Desert::Editor
             // mapped to one unfilled slot would be one control wearing two labels.
             label += "##slot" + std::to_string( slot );
 
+            // A THIRD OF THE ROW FOR THE COMBO, because the LABEL is the part that carries the answer here
+            // and ImGui draws it after the widget. At the default full width the type name ran off the
+            // panel's right edge and read "(Cloud Type" — found by looking at the panel, which is the only
+            // way this class of defect is ever found.
+            ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x * 0.33f );
+
             int channel = static_cast<int>( m_ChannelForSlot[slot] );
             if ( ImGui::Combo( label.c_str(), &channel, "Red\0Green\0Blue\0Alpha\0" ) )
             {
@@ -524,18 +529,33 @@ namespace Desert::Editor
 
     void CloudLayoutPanel::DrawLayerSection()
     {
-        if ( !Utils::ImGuiUtilities::SectionHeader( "The layer this hangs in" ) )
-            return;
-
         const LayerContext& layer = m_LastLayer;
+
+        // THE TWO THINGS THAT MUST NOT FOLD AWAY ARE DRAWN OUTSIDE THE SECTION. A map built against the
+        // shipped defaults instead of the artist's layer, and a placement the bake will refuse, are both
+        // reasons not to trust the picture below — and a reason not to trust a picture that is only
+        // visible when a header happens to be open is a reason nobody reads.
+        if ( !layer.FromScene )
+            ImGui::TextColored( kWarnColour, "This scene has NO cloud layer, so the map below is drawn "
+                                             "against the shipped defaults." );
+
+        // The SAME validator the bake runs, so the panel refuses for the same reason the bake refuses
+        // rather than the two disagreeing about what is legal.
+        if ( const auto valid = Assets::ValidateCloudLayoutPlacement( layer.Placement ); !valid )
+            ImGui::TextColored( kErrorColour, "%s", valid.GetError().c_str() );
+
+        // CLOSED UNTIL ASKED FOR, and the reason is a screenshot: with it open the verdict under the two
+        // panes — the part of this panel an artist opens it for — fell below the window's bottom edge on a
+        // 1289-point display. These numbers are reference and the map is the tool, so the reference is the
+        // one that folds away. Nothing here is editable, so nothing is hidden that could be changed by
+        // accident.
+        if ( !Utils::ImGuiUtilities::SectionHeader( "The layer this hangs in", /*defaultOpen=*/false ) )
+            return;
 
         if ( layer.FromScene )
             ImGui::TextWrapped( "Read from this scene's cloud layer. Change any of it in Details and the "
                                 "map below follows on the same frame - there is deliberately no copy of "
                                 "these numbers here." );
-        else
-            ImGui::TextColored( kWarnColour, "This scene has NO cloud layer, so the map below is drawn "
-                                             "against the shipped defaults printed here." );
 
         ImGui::Text( "Region Size %.1f km      placement lattice %.2f km      weather patch tile %.1f km",
                      layer.RegionSizeKm, layer.LatticeKm, layer.PatchTileKm );
@@ -561,10 +581,6 @@ namespace Desert::Editor
         ImGui::Text( "Layout Pattern Strength %.2f      Layout Mask Strength %.2f",
                      layer.Placement.PatternStrength, layer.Placement.MaskStrength );
 
-        // The SAME validator the bake runs, so the panel refuses for the same reason the bake refuses
-        // rather than the two disagreeing about what is legal.
-        if ( const auto valid = Assets::ValidateCloudLayoutPlacement( layer.Placement ); !valid )
-            ImGui::TextColored( kErrorColour, "%s", valid.GetError().c_str() );
     }
 
     // -------------------------------------------------------------------------------------------------
