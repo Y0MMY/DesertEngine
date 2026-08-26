@@ -25,6 +25,17 @@ namespace Desert::Editor
     // neighbourhood clamp. `--camera-to` / `--look-to` interpolate the camera across the warm-up frames and
     // `--shot-sequence` writes the frames out instead of only the last, which is what turns those into
     // things that can be measured rather than predicted.
+    //
+    // MOTION OF THE WORLD, which is a second thing entirely and was missing until `--play`. Moving the
+    // camera moves the camera; it does not move the sky. `Scene::OnUpdate` hands the gameplay systems a ZERO
+    // timestep outside Play (Engine/Core/Scene.cpp), so in every headless capture this programme has ever
+    // taken the wind had advanced by exactly nothing — measured, not assumed: 90 frames against 900 differed
+    // by 12.9 % of pixels at max 10/255, which is the noise floor of temporal convergence and not the 810 m
+    // of drift 27 seconds at the default 3000 units/s would produce. Everything whose mechanism is "the
+    // world moves under a temporal buffer" — cloud advection, particles, foliage, animation, physics —
+    // therefore never reached a verification frame at all. `--play` runs the gameplay clock during the
+    // capture; the frame is then taken after N seconds of SIMULATED time rather than after N frames of a
+    // frozen one.
 
     // A camera pose along the shot path: where the eye is and where it points. Not normalized — the
     // consumer normalizes, exactly as it does for the `--look` it replaces.
@@ -49,10 +60,11 @@ namespace Desert::Editor
     {
         // The endpoints come back EXACTLY as they were given, ahead of any arithmetic that could move them
         // in the last bit. This is not tidiness: a still shot places its camera at t = 0, and `--look`
-        // must reach `SnapToDirection` bit for bit as it did before this path existed. A shot is not
-        // bit-reproducible for other reasons — the timestep is wall-clock, so the wind has advanced by a
-        // different amount by frame 90 on every run — and the pose is the one part of it that CAN be held
-        // exact, so it is.
+        // must reach `SnapToDirection` bit for bit as it did before this path existed. The rest of a shot
+        // is reproducible too — measured, three runs to one md5 — but for a reason that had nothing to do
+        // with care: gameplay time did not advance at all, so there was no wall clock in the picture to be
+        // exact about. `--play` is the run where there IS one, and it answers with a fixed step for this
+        // same reason.
         if ( t <= 0.0f )
             return from;
         if ( t >= 1.0f )
@@ -145,11 +157,64 @@ namespace Desert::Editor
         // time for almost no cost.
         bool GpuFrameOnly = false;
 
+        // --play: run the scene in Play during the capture, so gameplay time advances and the world moves
+        // under the camera instead of standing still (see the header comment).
+        //
+        // OFF by default and that is load-bearing: every frame this programme has captured, and every
+        // byte-for-byte comparison taken against one, was taken on a frozen world. A flag that changed
+        // what a plain `--shot` does would invalidate the whole existing corpus at once.
+        bool Play = false;
+
+        // The gameplay step a `--play` capture advances by PER RENDERED FRAME. Fixed, and a constant rather
+        // than a flag, for two separate reasons:
+        //
+        //   * DETERMINISM. The wall-clock step the editor normally runs on makes the simulated duration a
+        //     function of how fast the machine happened to draw; two runs of one command would put the wind
+        //     in different places and no capture could be compared with another. A verification tool that
+        //     does not repeat is not a verification tool. With this constant, N rendered frames are N/60
+        //     seconds of world on any machine, under any load.
+        //   * The step must stay REALISTIC, and a knob invites the opposite. Fast-forwarding by taking
+        //     bigger steps would reach 30 seconds cheaply and destroy the very thing being looked at: a
+        //     temporal resolve reprojects between consecutive frames, so a tenth-of-a-second step rejects
+        //     its history every frame and the capture converges to nothing. 60 Hz is what the world it is
+        //     imitating runs at. Simulate longer by rendering more frames — `--shot-frames`, whose meaning
+        //     ("how many frames are drawn") is left exactly as it was.
+        static constexpr float PlayStepSeconds = 1.0f / 60.0f;
+
         // Headless capture mode at all — either flavour of output activates it. `--shot-sequence` alone is
         // a legitimate run: a motion study wants the frames and has no use for a designated last one.
         bool Active() const
         {
             return !Output.empty() || !Sequence.empty();
+        }
+
+        // Whether THIS run advances gameplay time. `--play` outside a capture is not a mode: the editor's
+        // own Play button is that, and honouring the flag in a headful session would mean a second way into
+        // Play that the toolbar does not know about.
+        bool PlayActive() const
+        {
+            return Play && Active();
+        }
+
+        // The world time a capture of @p frames frames has advanced by, in seconds. The relation that makes
+        // the flag usable — "the shot is taken after N seconds" is `--shot-frames N*60` — and the one a
+        // report quotes, so it is computed in one place rather than multiplied out by each caller.
+        float SimulatedSeconds( int frames ) const
+        {
+            if ( !PlayActive() || frames <= 0 )
+                return 0.0f;
+            return static_cast<float>( frames ) * PlayStepSeconds;
+        }
+
+        // The timestep the frame should be driven by, given the wall-clock one the application measured.
+        //
+        // A one-line function so that the rule the whole tool rests on is a pure one and can be asserted
+        // instead of argued: under `--play` the answer does not depend on the clock AT ALL — that is what
+        // makes two runs of one command the same frame — and otherwise it is the measured value returned on
+        // the exact float, which is what makes every capture taken before this flag existed still valid.
+        float FrameSeconds( float wallClockSeconds ) const
+        {
+            return PlayActive() ? PlayStepSeconds : wallClockSeconds;
         }
 
         // Whether the camera MOVES. False is the whole of the existing behaviour: the pose is placed once

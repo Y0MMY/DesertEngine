@@ -97,6 +97,11 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
                 shot.GpuTiming = false;
             else if ( std::strcmp( argv[i], "--gpu-profile-frame-only" ) == 0 )
                 shot.GpuFrameOnly = true;
+            // --play: let gameplay time run during the capture (see ShotOptions.hpp). No argument on
+            // purpose — how LONG the world runs is `--shot-frames`, at the fixed 1/60 s step, so there is
+            // one place that decides how many frames are drawn instead of two that must agree.
+            else if ( std::strcmp( argv[i], "--play" ) == 0 )
+                shot.Play = true;
             // Not a shot option — see Editor/Core/StartupOptions.hpp. Parsed in the same loop because
             // there is one command line and a second pass over it is a second place to forget a flag.
             else if ( hasNext && std::strcmp( argv[i], "--open-panel" ) == 0 )
