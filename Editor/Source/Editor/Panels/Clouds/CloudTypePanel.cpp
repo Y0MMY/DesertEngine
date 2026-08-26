@@ -61,37 +61,36 @@ namespace Desert::Editor
 
     void CloudTypePanel::OnUIRender()
     {
-        if ( !m_SowPanel )
-            return;
+        // NO ImGui::Begin HERE, and it is not an omission. EditorLayer's panel loop already wraps
+        // OnUIRender in Begin/End for this panel's name, and it owns the p_open bool the title-bar X
+        // writes to. A Begin for the SAME name nested inside that one is not appending -- ImGui only
+        // supports appending between Begin/End PAIRS -- and the window comes out with its title bar
+        // and nothing else. Every panel in this folder had it and drew nothing; no panel outside it
+        // does. See CALIBRATION.md §PTP.
+        ImGui::TextWrapped(
+             "A cloud TYPE is twelve numbers plus the noise its edge is cut from. They generate the "
+             "vertical profile table the march samples (256 x 64), so a type is small, readable and "
+             "editable - there is no baked texture here to go stale against the maths." );
+        ImGui::Separator();
 
-        if ( ImGui::Begin( m_PanelName.c_str(), &m_SowPanel ) )
+        DrawLibrarySection();
+        ImGui::Separator();
+        DrawShapeSection();
+        ImGui::Separator();
+        DrawNoiseSection();
+        ImGui::Separator();
+        DrawPreviewSection();
+        ImGui::Separator();
+        DrawSaveSection();
+
+        if ( !m_Status.empty() )
         {
-            ImGui::TextWrapped(
-                 "A cloud TYPE is twelve numbers plus the noise its edge is cut from. They generate the "
-                 "vertical profile table the march samples (256 x 64), so a type is small, readable and "
-                 "editable — there is no baked texture here to go stale against the maths." );
             ImGui::Separator();
-
-            DrawLibrarySection();
-            ImGui::Separator();
-            DrawShapeSection();
-            ImGui::Separator();
-            DrawNoiseSection();
-            ImGui::Separator();
-            DrawPreviewSection();
-            ImGui::Separator();
-            DrawSaveSection();
-
-            if ( !m_Status.empty() )
-            {
-                ImGui::Separator();
-                if ( m_StatusIsError )
-                    ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", m_Status.c_str() );
-                else
-                    ImGui::TextWrapped( "%s", m_Status.c_str() );
-            }
+            if ( m_StatusIsError )
+                ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", m_Status.c_str() );
+            else
+                ImGui::TextWrapped( "%s", m_Status.c_str() );
         }
-        ImGui::End();
     }
 
     void CloudTypePanel::OpenType( const Common::Filepath& path )
@@ -105,7 +104,7 @@ namespace Desert::Editor
 
         if ( !asset || !asset->IsReadyForUse() )
         {
-            m_Status        = "'" + path.string() + "' could not be opened — the log says why.";
+            m_Status        = "'" + path.string() + "' could not be opened - the log says why.";
             m_StatusIsError = true;
             return;
         }
@@ -177,7 +176,7 @@ namespace Desert::Editor
 
         ImGui::SliderFloat( "Base Altitude (km)", &s.BaseAltitudeKm, 0.0f, 14.0f, "%.2f" );
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Where this kind of cloud's base sits — its lifting condensation level. "
+            ImGui::SetTooltip( "Where this kind of cloud's base sits - its lifting condensation level. "
                                "ABSOLUTE, not a fraction of a layer: the shell the march intersects is "
                                "computed from this and the top, so moving it moves the clouds." );
 
@@ -188,7 +187,7 @@ namespace Desert::Editor
         ImGui::SliderFloat( "Edge Top Fraction", &s.EdgeTopFraction, 0.0f, 1.0f, "%.2f" );
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "How much of its full height it reaches where a patch has only just begun. "
-                               "Near 1 is a sheet — the same everywhere. Near 0.1 is a cumulus field: a "
+                               "Near 1 is a sheet - the same everywhere. Near 0.1 is a cumulus field: a "
                                "flat pad at the rim of a patch and a tower in its middle." );
 
         ImGui::SliderFloat( "Base Ramp", &s.BaseRampFraction, 0.001f, 1.0f, "%.3f" );
@@ -202,7 +201,7 @@ namespace Desert::Editor
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "A SECOND lobe of cloud, above the tower and spreading wider than it. Zero "
                                "means this kind has none. It is what makes a cumulonimbus recognisable, and "
-                               "it is the reason the profile is a table rather than a curve — no "
+                               "it is the reason the profile is a table rather than a curve - no "
                                "single-humped curve has two maxima." );
 
         ImGui::BeginDisabled( s.AnvilStrength <= 0.0f );
@@ -230,8 +229,8 @@ namespace Desert::Editor
         ImGui::SliderFloat( "Placement Scale", &s.PlacementScale, 0.05f, 8.0f, "%.2f" );
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "How big this kind's patches are, as a MULTIPLE of the layer's Weather Tile "
-                               "Size. Below 1 gives many small cells — a stratocumulus deck of one-kilometre "
-                               "lumps; above 1 gives few large ones — a storm cell, or a sheet that never "
+                               "Size. Below 1 gives many small cells - a stratocumulus deck of one-kilometre "
+                               "lumps; above 1 gives few large ones - a storm cell, or a sheet that never "
                                "ends. Each kind of cloud in the layer has its own, which is why a low deck "
                                "and a tall tower can be different sizes in the same sky." );
 
@@ -240,7 +239,7 @@ namespace Desert::Editor
             ImGui::SetTooltip( "How much longer the patches are along the wind than across it. 1 is round. "
                                "Above 1 combs them out downwind, which is what makes cirrus fibrous instead "
                                "of blotchy; BELOW 1 stretches them ACROSS the wind, which is what a wave "
-                               "cloud is — a lenticular's crest lies perpendicular to the flow." );
+                               "cloud is - a lenticular's crest lies perpendicular to the flow." );
     }
 
     void CloudTypePanel::DrawNoiseSection()

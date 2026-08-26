@@ -74,42 +74,41 @@ namespace Desert::Editor
 
     void CloudModellingVolumePanel::OnUIRender()
     {
-        if ( !m_SowPanel )
-            return;
+        // NO ImGui::Begin HERE, and it is not an omission. EditorLayer's panel loop already wraps
+        // OnUIRender in Begin/End for this panel's name, and it owns the p_open bool the title-bar X
+        // writes to. A Begin for the SAME name nested inside that one is not appending -- ImGui only
+        // supports appending between Begin/End PAIRS -- and the window comes out with its title bar
+        // and nothing else. Every panel in this folder had it and drew nothing; no panel outside it
+        // does. See CALIBRATION.md §PTP.
+        ImGui::TextWrapped(
+             "The body of a hero cloud: smooth lumps fused by an exponential smooth minimum, baked into "
+             "a 128 x 64 x 128 volume the cloud march reads directly. This is the half of the sky the "
+             "procedural field cannot make - its lobes are separated by a zero on every bisector, so "
+             "they never merge; these do." );
+        ImGui::Separator();
 
-        if ( ImGui::Begin( m_PanelName.c_str(), &m_SowPanel ) )
+        // Collected before anything is drawn, so the frame a bake ends is already the frame that says
+        // so. A future nobody polls is a thread whose result is thrown away at shutdown.
+        PollBake();
+
+        DrawRecipeSection();
+        ImGui::Separator();
+        DrawLumpListSection();
+        ImGui::Separator();
+        DrawSelectedLumpSection();
+        ImGui::Separator();
+        DrawPreviewSection();
+        ImGui::Separator();
+        DrawBakeSection();
+
+        if ( !m_Status.empty() )
         {
-            ImGui::TextWrapped(
-                 "The body of a hero cloud: smooth lumps fused by an exponential smooth minimum, baked into "
-                 "a 128 x 64 x 128 volume the cloud march reads directly. This is the half of the sky the "
-                 "procedural field cannot make — its lobes are separated by a zero on every bisector, so "
-                 "they never merge; these do." );
             ImGui::Separator();
-
-            // Collected before anything is drawn, so the frame a bake ends is already the frame that says
-            // so. A future nobody polls is a thread whose result is thrown away at shutdown.
-            PollBake();
-
-            DrawRecipeSection();
-            ImGui::Separator();
-            DrawLumpListSection();
-            ImGui::Separator();
-            DrawSelectedLumpSection();
-            ImGui::Separator();
-            DrawPreviewSection();
-            ImGui::Separator();
-            DrawBakeSection();
-
-            if ( !m_Status.empty() )
-            {
-                ImGui::Separator();
-                if ( m_StatusIsError )
-                    ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", m_Status.c_str() );
-                else
-                    ImGui::TextWrapped( "%s", m_Status.c_str() );
-            }
+            if ( m_StatusIsError )
+                ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", m_Status.c_str() );
+            else
+                ImGui::TextWrapped( "%s", m_Status.c_str() );
         }
-        ImGui::End();
     }
 
     void CloudModellingVolumePanel::PollBake()
@@ -197,7 +196,7 @@ namespace Desert::Editor
                     m_Selected   = m_Recipe.Blobs.empty() ? -1 : 0;
                     m_SourceName = Assets::CloudModellingSpeciesName( species );
                     m_Status     = std::string( "Loaded the catalogue's " ) +
-                               Assets::CloudModellingSpeciesName( species ) + " — " +
+                               Assets::CloudModellingSpeciesName( species ) + " - " +
                                std::to_string( m_Recipe.Blobs.size() ) + " lumps. Bake & Save As... to keep it.";
                     InvalidateSlice();
                 }
@@ -218,7 +217,7 @@ namespace Desert::Editor
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "The world box the body is sculpted in, before the entity's own scale. The "
                                "volume is always 128 x 64 x 128 voxels, so this is what sets how big a "
-                               "voxel is — the short axis is the VERTICAL one, because a cloud is wider "
+                               "voxel is - the short axis is the VERTICAL one, because a cloud is wider "
                                "than it is tall." );
 
         // THE KNOB THE WHOLE PHASE IS ABOUT, and it is first among the four for that reason.
@@ -378,7 +377,7 @@ namespace Desert::Editor
         }
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "A capsule holds its cross-section along its length where an ellipsoid "
-                               "tapers to a point — which is what a spreading cumulus base and an "
+                               "tapers to a point - which is what a spreading cumulus base and an "
                                "elongated growth actually are. Rotate it to lay it down." );
 
         if ( ImGui::DragFloat3( "Centre (km)", &blob.CentreKm.x, 0.005f, -4.0f, 4.0f, "%.3f" ) )
@@ -432,7 +431,7 @@ namespace Desert::Editor
             InvalidateSlice();
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "How hard this lump pulls in the union. It is exactly a dilation of "
-                               "BlendRadius * ln(weight) — at the current blend radius, a weight of 2 grows "
+                               "BlendRadius * ln(weight) - at the current blend radius, a weight of 2 grows "
                                "this lump by about %.0f m and a weight of 0.5 shrinks it by the same. Use "
                                "it to move the CREASE between neighbours without moving either centre.",
                                m_Recipe.BlendRadiusKm * 0.6931f * 1000.0f );
@@ -440,7 +439,7 @@ namespace Desert::Editor
         if ( ImGui::SliderFloat( "Detail Type", &blob.DetailType, 0.0f, 1.0f, "%.2f" ) )
             InvalidateSlice();
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "0 wispy, 1 billowy — which erosion the up-rez noise cuts into this lump's "
+            ImGui::SetTooltip( "0 wispy, 1 billowy - which erosion the up-rez noise cuts into this lump's "
                                "part of the body. The join spreads it across the creases for free, using "
                                "the same weights that fused the shapes." );
 
@@ -578,7 +577,7 @@ namespace Desert::Editor
             InvalidateSlice();
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "A 3D body has no picture, only slices. Scrub this to check that the lumps "
-                               "fuse the whole way through — two lobes can meet in the middle slice and "
+                               "fuse the whole way through - two lobes can meet in the middle slice and "
                                "still be separate above and below it." );
 
         int view = static_cast<int>( m_ChannelView );
@@ -609,7 +608,7 @@ namespace Desert::Editor
             ImGui::TextDisabled( "No preview: the recipe below is not bakeable yet." );
         }
 
-        ImGui::TextDisabled( "%s — slice %d of %d", Assets::CloudModellingAxisName( m_Axis ), m_SliceIndex,
+        ImGui::TextDisabled( "%s - slice %d of %d", Assets::CloudModellingAxisName( m_Axis ), m_SliceIndex,
                              extent );
     }
 
@@ -714,7 +713,7 @@ namespace Desert::Editor
                         m_Selected   = m_Recipe.Blobs.empty() ? -1 : 0;
                         m_SourceName = source.filename().string();
                         m_SliceIndex = static_cast<int>( Assets::CloudModellingAxisExtent( m_Axis ) / 2u );
-                        m_Status = "Opened '" + m_SourceName + "' — " + std::to_string( m_Recipe.Blobs.size() ) +
+                        m_Status = "Opened '" + m_SourceName + "' - " + std::to_string( m_Recipe.Blobs.size() ) +
                                    " lumps, ready to revise.";
                         m_StatusIsError = false;
                         InvalidateSlice();

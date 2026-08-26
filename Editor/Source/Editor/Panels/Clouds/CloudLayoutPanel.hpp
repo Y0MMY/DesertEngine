@@ -84,7 +84,10 @@ namespace Desert::Editor
 
         ImVec2 GetDefaultSize() const override
         {
-            return ImVec2( 720.0f, 900.0f );
+            // TALL, and the number came from looking at it. The panel carries two square panes and a
+            // paragraph of verdict under them; at 900 the map was cut off by the window's own bottom
+            // edge, which is the one part an artist opens this panel FOR.
+            return ImVec2( 760.0f, 1120.0f );
         }
 
         void OnUIRender() override;
@@ -193,7 +196,7 @@ namespace Desert::Editor
         int          m_PreviewSlot  = 0;
         PaintingView m_PaintingView = PaintingView::Slot0;
         int          m_SpanRegions  = 1;   // region periods the sky map covers, so tiling is visible
-        int          m_PreviewSide  = 280; // pixels each pane is drawn at
+        int          m_PreviewSide  = 220; // pixels each pane is drawn at
 
         Assets::CloudLayoutPreview     m_Preview;
         bool                           m_HasPreview = false;

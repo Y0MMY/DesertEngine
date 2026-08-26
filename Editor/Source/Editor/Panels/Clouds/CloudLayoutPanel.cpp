@@ -129,9 +129,12 @@ namespace Desert::Editor
 
     void CloudLayoutPanel::OnUIRender()
     {
-        if ( !m_SowPanel )
-            return;
-
+        // NO ImGui::Begin HERE, and it is not an omission. EditorLayer's panel loop already wraps
+        // OnUIRender in Begin/End for this panel's name, and it owns the p_open bool the title-bar X
+        // writes to. A Begin for the SAME name nested inside that one is not appending -- ImGui only
+        // supports appending between Begin/End PAIRS -- and the window comes out with its title bar
+        // and nothing else. Every panel in this folder had it and drew nothing; no panel outside it
+        // does. See CALIBRATION.md §PTP.
         const LayerContext layer = ReadLayer();
 
         // THE LAYER IS COMPARED FIELD BY FIELD rather than by a dirty flag somebody has to set: the
@@ -176,41 +179,37 @@ namespace Desert::Editor
             }
         }
 
-        if ( ImGui::Begin( m_PanelName.c_str(), &m_SowPanel ) )
+        ImGui::TextWrapped(
+             "A PAINTED SKY. Point at a picture, say which of its channels feeds which of the layer's "
+             "four cloud type slots, and bake it to a .dclayout the cloud component's Cloud Layout "
+             "slot accepts. The painting is read when the clouds are PLACED, not while they are "
+             "drawn, so it costs the frame nothing." );
+        ImGui::Separator();
+
+        DrawSourceSection();
+        ImGui::Separator();
+        DrawChannelSection();
+        ImGui::Separator();
+        DrawLayerSection();
+        ImGui::Separator();
+
+        if ( m_PreviewDirty )
+            RefreshPreview( layer );
+
+        DrawPreviewSection();
+        ImGui::Separator();
+        DrawVerdictSection();
+        ImGui::Separator();
+        DrawSaveSection();
+
+        if ( !m_Status.empty() )
         {
-            ImGui::TextWrapped(
-                 "A PAINTED SKY. Point at a picture, say which of its channels feeds which of the layer's "
-                 "four cloud type slots, and bake it to a .dclayout the cloud component's Cloud Layout "
-                 "slot accepts. The painting is read when the clouds are PLACED, not while they are "
-                 "drawn, so it costs the frame nothing." );
             ImGui::Separator();
-
-            DrawSourceSection();
-            ImGui::Separator();
-            DrawChannelSection();
-            ImGui::Separator();
-            DrawLayerSection();
-            ImGui::Separator();
-
-            if ( m_PreviewDirty )
-                RefreshPreview( layer );
-
-            DrawPreviewSection();
-            ImGui::Separator();
-            DrawVerdictSection();
-            ImGui::Separator();
-            DrawSaveSection();
-
-            if ( !m_Status.empty() )
-            {
-                ImGui::Separator();
-                if ( m_StatusIsError )
-                    ImGui::TextColored( kErrorColour, "%s", m_Status.c_str() );
-                else
-                    ImGui::TextWrapped( "%s", m_Status.c_str() );
-            }
+            if ( m_StatusIsError )
+                ImGui::TextColored( kErrorColour, "%s", m_Status.c_str() );
+            else
+                ImGui::TextWrapped( "%s", m_Status.c_str() );
         }
-        ImGui::End();
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -277,7 +276,8 @@ namespace Desert::Editor
 
     void CloudLayoutPanel::DrawSourceSection()
     {
-        Utils::ImGuiUtilities::SectionHeader( "Source" );
+        if ( !Utils::ImGuiUtilities::SectionHeader( "Source" ) )
+            return;
 
         if ( ImGui::Button( "Image...", ImVec2( 120.0f, 0.0f ) ) )
         {
@@ -304,7 +304,7 @@ namespace Desert::Editor
         }
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "A SQUARE picture, 4 to 1024 a side. Non-square and oversized sources are "
-                               "refused by name rather than resampled — resampling would be an opinion "
+                               "refused by name rather than resampled - resampling would be an opinion "
                                "about your painting, and one taken silently is the worst kind." );
 
         ImGui::SameLine();
@@ -334,7 +334,7 @@ namespace Desert::Editor
                         m_PreviewDirty   = true;
                         m_Status         = "Opened '" + name +
                                    "'. It has no source picture here, so the channel mapping below is "
-                                   "what it was baked with and cannot be changed — point at the picture "
+                                   "what it was baked with and cannot be changed - point at the picture "
                                    "again to re-map it.";
                         m_StatusIsError = false;
                     }
@@ -346,7 +346,7 @@ namespace Desert::Editor
 
         if ( m_HasLayout )
         {
-            ImGui::Text( "%s — %ux%u, pattern %s, mask %s, content %08x", m_SourceName.c_str(),
+            ImGui::Text( "%s - %ux%u, pattern %s, mask %s, content %08x", m_SourceName.c_str(),
                          m_Layout.Resolution, m_Layout.Resolution, m_Layout.HasPattern() ? "yes" : "no",
                          m_Layout.HasMask() ? "yes" : "no", m_Layout.ContentHash );
             ImGui::TextDisabled( "channel means %.4f %.4f %.4f %.4f", m_Layout.PatternMean[0],
@@ -369,11 +369,12 @@ namespace Desert::Editor
 
     void CloudLayoutPanel::DrawChannelSection()
     {
-        Utils::ImGuiUtilities::SectionHeader( "Channels" );
+        if ( !Utils::ImGuiUtilities::SectionHeader( "Channels" ) )
+            return;
 
         ImGui::TextWrapped( "Which channel of the picture feeds which of the layer's four cloud type "
                             "slots. A slot's channel is its own field of 'is there cloud of this kind "
-                            "here' — the four overlap freely and the sky takes whichever wins." );
+                            "here' - the four overlap freely and the sky takes whichever wins." );
 
         ImGui::BeginDisabled( m_LayoutFromFile || m_SourcePixels.empty() );
 
@@ -396,7 +397,7 @@ namespace Desert::Editor
             remap = true;
         }
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Red into all four slots — what a greyscale painting usually wants, and "
+            ImGui::SetTooltip( "Red into all four slots - what a greyscale painting usually wants, and "
                                "the tool's `--channels 0,0,0,0`." );
 
         ImGui::SameLine();
@@ -418,7 +419,7 @@ namespace Desert::Editor
         ImGui::EndDisabled();
 
         if ( m_LayoutFromFile )
-            ImGui::TextDisabled( "Opened from a .dclayout — the mapping is already baked into its pixels." );
+            ImGui::TextDisabled( "Opened from a .dclayout - the mapping is already baked into its pixels." );
 
         if ( remap )
             RebuildLayout();
@@ -430,13 +431,14 @@ namespace Desert::Editor
 
     void CloudLayoutPanel::DrawLayerSection()
     {
-        Utils::ImGuiUtilities::SectionHeader( "The layer this hangs in" );
+        if ( !Utils::ImGuiUtilities::SectionHeader( "The layer this hangs in" ) )
+            return;
 
         const LayerContext& layer = m_LastLayer;
 
         if ( layer.FromScene )
             ImGui::TextWrapped( "Read from this scene's cloud layer. Change any of it in Details and the "
-                                "map below follows on the same frame — there is deliberately no copy of "
+                                "map below follows on the same frame - there is deliberately no copy of "
                                 "these numbers here." );
         else
             ImGui::TextColored( kWarnColour, "This scene has NO cloud layer, so the map below is drawn "
@@ -626,7 +628,8 @@ namespace Desert::Editor
 
     void CloudLayoutPanel::DrawPreviewSection()
     {
-        Utils::ImGuiUtilities::SectionHeader( "Preview" );
+        if ( !Utils::ImGuiUtilities::SectionHeader( "Preview" ) )
+            return;
 
         if ( !m_HasLayout )
         {
@@ -669,7 +672,7 @@ namespace Desert::Editor
         if ( m_PaintingImage )
         {
             ImGui::BeginGroup();
-            ImGui::TextDisabled( "What you drew — %u texels", m_Layout.Resolution );
+            ImGui::TextDisabled( "What you drew - %u texels", m_Layout.Resolution );
             LayoutPreviewHelper()->Image( m_PaintingImage, ImVec2( pane, pane ) );
             ImGui::EndGroup();
         }
@@ -678,14 +681,14 @@ namespace Desert::Editor
         {
             ImGui::SameLine();
             ImGui::BeginGroup();
-            ImGui::TextDisabled( "The sky from above — %u cells, %.2f km each", m_Preview.Side,
+            ImGui::TextDisabled( "The sky from above - %u cells, %.2f km each", m_Preview.Side,
                                  m_Preview.SamplePitchKm );
             LayoutPreviewHelper()->Image( m_SkyImage, ImVec2( pane, pane ) );
             ImGui::EndGroup();
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Looking straight DOWN on the layer, north up. White is cloud, blue is "
                                    "clear. It is drawn one PLACEMENT CELL per pixel because that is the "
-                                   "resolution the sky has — a stroke finer than a cell cannot survive it, "
+                                   "resolution the sky has - a stroke finer than a cell cannot survive it, "
                                    "and this is where you see that happen." );
         }
     }
@@ -696,7 +699,8 @@ namespace Desert::Editor
 
     void CloudLayoutPanel::DrawVerdictSection()
     {
-        Utils::ImGuiUtilities::SectionHeader( "What the sky says" );
+        if ( !Utils::ImGuiUtilities::SectionHeader( "What the sky says" ) )
+            return;
 
         if ( !m_HasPreview )
         {
@@ -723,7 +727,7 @@ namespace Desert::Editor
             ImGui::TextColored( kWarnColour,
                                 "Layout Pattern Strength does NOTHING here: both ends of it give the same "
                                 "sky, cell for cell." );
-            ImGui::TextWrapped( "It is not a dead knob — the mask has saturated it. %.0f%% of the cells "
+            ImGui::TextWrapped( "It is not a dead knob - the mask has saturated it. %.0f%% of the cells "
                                 "are already pinned at empty or full by the clamp, and a redistribution "
                                 "about the painting's own mean has nowhere left to go. Turn Layout Mask "
                                 "Strength down and the pattern comes back.",
@@ -744,7 +748,7 @@ namespace Desert::Editor
         else
         {
             ImGui::TextDisabled( "This layout carries no pattern, so Layout Pattern Strength has nothing "
-                                 "to apply — only the mask acts." );
+                                 "to apply - only the mask acts." );
         }
 
         ImGui::Spacing();
@@ -757,7 +761,7 @@ namespace Desert::Editor
 
         if ( m_Strokes.PaintedTexels == 0u )
         {
-            ImGui::TextDisabled( "Slot %d is flat — nothing was drawn on it, so there is no stroke to "
+            ImGui::TextDisabled( "Slot %d is flat - nothing was drawn on it, so there is no stroke to "
                                  "measure.",
                                  m_PreviewSlot );
         }
@@ -776,7 +780,7 @@ namespace Desert::Editor
                                     "CELL.",
                                     100.0f * m_Strokes.FractionBelowLimit );
                 ImGui::TextWrapped( "Those strokes will break into evenly spaced clumps rather than read "
-                                    "as a shape — the sky cannot place a cloud finer than a cell. Lower "
+                                    "as a shape - the sky cannot place a cloud finer than a cell. Lower "
                                     "Layout Repeats, paint thicker, or give the layer a finer Weather "
                                     "Tile Size." );
             }
@@ -790,7 +794,7 @@ namespace Desert::Editor
         // the cell, which is the right bound for "can the painting tell two cells apart" and says nothing
         // about whether a letter still looks like a letter. That gap is the reason this section exists,
         // and an artist who never sees the warning still has to know which question was answered.
-        ImGui::TextDisabled( "The engine checks one TEXEL against the cell — that a painting can tell two "
+        ImGui::TextDisabled( "The engine checks one TEXEL against the cell - that a painting can tell two "
                              "cells apart. Legibility is your thinnest STROKE against the cell, which no "
                              "validator can know, so it is measured here and reported rather than "
                              "refused." );
@@ -802,7 +806,8 @@ namespace Desert::Editor
 
     void CloudLayoutPanel::DrawSaveSection()
     {
-        Utils::ImGuiUtilities::SectionHeader( "Bake" );
+        if ( !Utils::ImGuiUtilities::SectionHeader( "Bake" ) )
+            return;
 
         ImGui::BeginDisabled( !m_HasLayout );
         if ( ImGui::Button( "Bake to .dclayout...", ImVec2( 180.0f, 0.0f ) ) )
