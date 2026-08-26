@@ -60,10 +60,11 @@ namespace Desert::Editor
     {
         // The endpoints come back EXACTLY as they were given, ahead of any arithmetic that could move them
         // in the last bit. This is not tidiness: a still shot places its camera at t = 0, and `--look`
-        // must reach `SnapToDirection` bit for bit as it did before this path existed. A shot is not
-        // bit-reproducible for other reasons — the timestep is wall-clock, so the wind has advanced by a
-        // different amount by frame 90 on every run — and the pose is the one part of it that CAN be held
-        // exact, so it is.
+        // must reach `SnapToDirection` bit for bit as it did before this path existed. The rest of a shot
+        // is reproducible too — measured, three runs to one md5 — but for a reason that had nothing to do
+        // with care: gameplay time did not advance at all, so there was no wall clock in the picture to be
+        // exact about. `--play` is the run where there IS one, and it answers with a fixed step for this
+        // same reason.
         if ( t <= 0.0f )
             return from;
         if ( t >= 1.0f )
@@ -203,6 +204,17 @@ namespace Desert::Editor
             if ( !PlayActive() || frames <= 0 )
                 return 0.0f;
             return static_cast<float>( frames ) * PlayStepSeconds;
+        }
+
+        // The timestep the frame should be driven by, given the wall-clock one the application measured.
+        //
+        // A one-line function so that the rule the whole tool rests on is a pure one and can be asserted
+        // instead of argued: under `--play` the answer does not depend on the clock AT ALL — that is what
+        // makes two runs of one command the same frame — and otherwise it is the measured value returned on
+        // the exact float, which is what makes every capture taken before this flag existed still valid.
+        float FrameSeconds( float wallClockSeconds ) const
+        {
+            return PlayActive() ? PlayStepSeconds : wallClockSeconds;
         }
 
         // Whether the camera MOVES. False is the whole of the existing behaviour: the pose is placed once

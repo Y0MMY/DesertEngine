@@ -19,12 +19,12 @@ namespace
 
 // ── The relation the static-shot evidence rests on ───────────────────────────────────────────────
 //
-// Every shot in the repository so far was taken with --camera/--look and no path. A shot is not
-// bit-reproducible even from the same binary — the timestep is wall-clock, so the wind has advanced
-// by a different amount by frame 90 on every run, and that README measures the resulting noise — so
-// the POSE is the one thing that can be pinned, and it is the only thing standing between the old
-// commands and a different picture. The claim is therefore not "close": it is EQ, on the exact
-// float, at the exact parameter the layer uses.
+// Every shot in the repository so far was taken with --camera/--look and no path. Such a shot IS
+// bit-reproducible from the same binary (measured: three runs, one md5) — but only because gameplay
+// time did not advance, so there was no clock in the picture; under `--play` a fixed step is what
+// keeps that true. Either way the POSE is the thing standing between the old commands and a different
+// picture. The claim is therefore not "close": it is EQ, on the exact float, at the exact parameter
+// the layer uses.
 TEST( ShotPath, WithoutMotionFlagsThePoseIsTheStaticOneExactly )
 {
     ShotOptions shot;
@@ -213,6 +213,121 @@ TEST( ShotPath, EitherOutputActivatesHeadlessCapture )
     ShotOptions sequence;
     sequence.Sequence = "/tmp/seq";
     EXPECT_TRUE( sequence.Active() );
+}
+
+// ── --play: the relations the moving-world capture rests on ──────────────────────────────────────
+//
+// The flag lets gameplay time run during a capture, which is how anything driven by the world moving
+// (cloud advection, particles, foliage, animation, physics) can reach a verification frame at all. Three
+// separate things have to hold for it to be a measuring instrument rather than a demo, and each is a
+// relation between two places that would otherwise only be checked by someone remembering.
+
+// 1. THE DEFAULT DOES NOT MOVE. Every frame and every md5 in Docs/Clouds/CALIBRATION.md was captured on a
+//    frozen world; a flag that leaked into a plain `--shot` would invalidate the whole corpus at once. The
+//    frame evidence for this is six protocol points byte-for-byte, but the property itself is one line of
+//    logic and is asserted here so a future edit cannot pass tests while breaking it.
+TEST( ShotPath, GameplayTimeIsOffUnlessAskedFor )
+{
+    ShotOptions shot;
+    shot.Output = "/tmp/out.png";
+    EXPECT_FALSE( shot.Play );
+    EXPECT_FALSE( shot.PlayActive() );
+    EXPECT_FLOAT_EQ( shot.SimulatedSeconds( 90 ), 0.0f );
+
+    // And the timestep is the measured one, on the exact float — not "close to", because a capture from
+    // before this flag existed has to be the same capture.
+    for ( float wall : { 0.0f, 1.0f / 60.0f, 0.013913f, 0.5f } )
+        EXPECT_EQ( shot.FrameSeconds( wall ), wall );
+}
+
+// 2. `--play` OUTSIDE A CAPTURE IS NOT A MODE. The editor's Play button is that. Honouring the flag in a
+//    headful session would be a second, invisible way into Play that the toolbar does not know about.
+TEST( ShotPath, PlayNeedsACaptureToMeanAnything )
+{
+    ShotOptions headful;
+    headful.Play = true;
+    EXPECT_FALSE( headful.Active() );
+    EXPECT_FALSE( headful.PlayActive() );
+    EXPECT_EQ( headful.FrameSeconds( 0.031f ), 0.031f );
+    EXPECT_FLOAT_EQ( headful.SimulatedSeconds( 1800 ), 0.0f );
+
+    ShotOptions capture;
+    capture.Play   = true;
+    capture.Output = "/tmp/out.png";
+    EXPECT_TRUE( capture.PlayActive() );
+
+    // A sequence-only run is a capture too, and a motion study is exactly the run that wants this flag.
+    ShotOptions sequence;
+    sequence.Play     = true;
+    sequence.Sequence = "/tmp/seq";
+    EXPECT_TRUE( sequence.PlayActive() );
+}
+
+// 3. THE STEP DOES NOT COME FROM A CLOCK. This is the whole difference between a tool and a curiosity: the
+//    wall-clock step the editor normally runs on makes the simulated duration a function of how fast the
+//    machine drew, so two runs of one command would put the wind in different places and no capture could
+//    be compared with another.
+TEST( ShotPath, UnderPlayTheStepIsFixedAndIgnoresTheWallClock )
+{
+    ShotOptions shot;
+    shot.Play   = true;
+    shot.Output = "/tmp/out.png";
+
+    // Every wall-clock value a loaded machine could hand us — a fast frame, a slow one, a stall, a
+    // zero-length one — produces the SAME step.
+    for ( float wall : { 0.0f, 0.001f, 1.0f / 60.0f, 0.25f, 3.0f } )
+        EXPECT_EQ( shot.FrameSeconds( wall ), ShotOptions::PlayStepSeconds );
+
+    // And the step is 60 Hz specifically. Not a taste: every "N seconds" quoted in a report is
+    // `--shot-frames` divided by this number, so moving it silently rewrites the recorded measurements.
+    EXPECT_EQ( ShotOptions::PlayStepSeconds, 1.0f / 60.0f );
+}
+
+// The relation a report quotes: frames and seconds are the same statement. "Take the shot after 30
+// seconds" is `--play --shot-frames 1800`, and nothing else in the command line decides it.
+TEST( ShotPath, SimulatedSecondsIsFramesTimesTheStep )
+{
+    ShotOptions shot;
+    shot.Play   = true;
+    shot.Output = "/tmp/out.png";
+
+    EXPECT_NEAR( shot.SimulatedSeconds( 1800 ), 30.0f, 1e-4f );
+    EXPECT_NEAR( shot.SimulatedSeconds( 90 ), 1.5f, 1e-5f );
+    EXPECT_NEAR( shot.SimulatedSeconds( 60 ), 1.0f, 1e-6f );
+
+    // A capture with no frames is no time, rather than a negative amount of it.
+    EXPECT_FLOAT_EQ( shot.SimulatedSeconds( 0 ), 0.0f );
+    EXPECT_FLOAT_EQ( shot.SimulatedSeconds( -10 ), 0.0f );
+}
+
+// The two halves of the shot are INDEPENDENT: `--play` moves the world, the path flags move the camera,
+// and neither may quietly become the other. A still `--play` capture is the one this task exists for —
+// the camera fixed, so that whatever moves in the frame is the world and nothing else.
+TEST( ShotPath, PlayDoesNotDisturbTheCameraPath )
+{
+    ShotOptions shot;
+    shot.Output   = "/tmp/out.png";
+    shot.Position = glm::vec3( 0.0f, 200.0f, 0.0f );
+    shot.Forward  = glm::vec3( 0.0f, 0.45f, -1.0f );
+    shot.Frames   = 1800;
+
+    const ShotCamera still = shot.CameraAt( shot.Parameter( 0 ) );
+    const ShotCamera last  = shot.CameraAt( shot.Parameter( shot.Frames - 1 ) );
+
+    shot.Play = true;
+    EXPECT_FALSE( shot.HasMotion() );
+    EXPECT_EQ( shot.CameraAt( shot.Parameter( 0 ) ).Position, still.Position );
+    EXPECT_EQ( shot.CameraAt( shot.Parameter( 0 ) ).Forward, still.Forward );
+    EXPECT_EQ( shot.CameraAt( shot.Parameter( shot.Frames - 1 ) ).Position, last.Position );
+    EXPECT_EQ( shot.CameraAt( shot.Parameter( shot.Frames - 1 ) ).Forward, last.Forward );
+
+    // The converse too: a moving path does not switch the world on.
+    ShotOptions moving;
+    moving.Output        = "/tmp/out.png";
+    moving.HasPositionTo = true;
+    moving.PositionTo    = glm::vec3( 30000.0f, 200.0f, 0.0f );
+    EXPECT_TRUE( moving.HasMotion() );
+    EXPECT_FALSE( moving.PlayActive() );
 }
 
 int main( int argc, char** argv )

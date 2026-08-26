@@ -540,8 +540,7 @@ namespace Desert::Editor
         // only if nothing in it integrates a number that came from a clock, and "the scene is deterministic
         // but the thing above it is not" is the kind of split that holds until the day something above it
         // starts feeding the scene. Outside `--play` this is `ts` itself, so no existing frame moves.
-        const Common::Timestep frameTs =
-             ShotOptions::Get().PlayActive() ? Common::Timestep( ShotOptions::PlayStepSeconds ) : ts;
+        const Common::Timestep frameTs( ShotOptions::Get().FrameSeconds( ts.GetSeconds() ) );
 
         // A scene handed over by a panel (dropped on the viewport, double-clicked in the asset browser).
         // It goes through the SAME deferred load as the menu — but a drag is easy to do by accident, so
