@@ -1406,19 +1406,29 @@ namespace Desert::Assets
         CloudLayoutPreview preview;
         preview.SpanKm = spanKm;
 
-        // THE FINEST CELL IN THE LAYER, because it is the one that loses most to a thin stroke and because
-        // it is the same quantity ValidateCloudProceduralLayout measures its texel against. Quoting a
-        // coarser one would understate what the painting has to clear.
-        float finestCellKm = std::numeric_limits<float>::max();
-        for ( const CloudProceduralSpecies& species : params.Species )
-        {
-            const glm::vec2 extent = CloudProceduralCellExtentKm( params, species );
-            finestCellKm           = std::min( finestCellKm, std::min( extent.x, extent.y ) );
-        }
-        preview.CellKm = finestCellKm;
+        // THE MAPPED SLOT'S OWN CELL, and it is deliberately NOT the finest cell in the layer.
+        //
+        // A channel of the painting decides where ONE species goes, and the lattice that species is placed
+        // on is its own — a type's Placement Scale says how much coarser or finer than the layer it is.
+        // Drawing slot 2's map on slot 0's finer cell would show detail slot 2 cannot place, and the
+        // legibility bound quoted beside it would be the most permissive one in the layer rather than the
+        // one this channel has to clear: a 1.2 km stroke reads on a 1 km cell and breaks into clumps on a
+        // 4 km one, so an artist told the finest number is told the wrong number about their own channel.
+        //
+        // ValidateCloudProceduralLayout still takes the FINEST, and that is a different question with a
+        // different right answer: it asks whether one layout texel can tell two neighbouring cells apart,
+        // which fails first for the species with the smallest cells. Legibility fails first for the
+        // species with the LARGEST. The two bounds run in opposite directions, which is exactly why they
+        // must not share a number.
+        //
+        // The SHORTER side, because an anisotropic cell is long along the wind and it is across the stretch
+        // that a stroke has to survive.
+        const glm::vec2 extent = CloudProceduralCellExtentKm( params, params.Species[slot] );
+        const float     cellKm = std::min( extent.x, extent.y );
+        preview.CellKm         = cellKm;
 
         const uint32_t wanted =
-             static_cast<uint32_t>( std::max( 1.0f, std::ceil( spanKm / std::max( finestCellKm, 1e-3f ) ) ) );
+             static_cast<uint32_t>( std::max( 1.0f, std::ceil( spanKm / std::max( cellKm, 1e-3f ) ) ) );
         preview.Side          = std::min( wanted, maxSide );
         preview.SamplePitchKm = spanKm / static_cast<float>( preview.Side );
 

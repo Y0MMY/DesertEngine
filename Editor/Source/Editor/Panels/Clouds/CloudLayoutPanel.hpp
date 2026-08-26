@@ -73,6 +73,18 @@ namespace Desert::Editor
      *      cloud cell. Reported and never refused, because a stroke width is a fact about a picture and a
      *      threshold on it would be an opinion about somebody's art.
      *
+     *   3. A CHANNEL DOES NOT DRIVE "CLOUD TYPE N". The four type slots an artist fills in Details are
+     *      COMPACTED into species — an empty slot is skipped, a repeated type is dropped
+     *      (`ECS::ResolveCloudSpecies`) — and the painting's channels are indexed by SPECIES. So in a
+     *      layer whose only authored type sits in Cloud Type 3, it is the painting's RED channel that
+     *      decides where that cloud goes. Nothing in Details says so, and the symptom of not knowing it is
+     *      a painted channel that appears to do nothing. The panel names the TYPE behind every channel.
+     *
+     *   4. THE MAP IS THE PAINTING FLIPPED TOP TO BOTTOM, because the layout's v runs NORTH and an image's
+     *      first row is its top. Both panes are drawn in the orientation their own reader expects — the
+     *      painting as it was authored, the map north up — so the flip between them is real, and it is
+     *      stated under them rather than left for an artist to find in a rendered sky.
+     *
      * NO BACKGROUND WORK, unlike the noise volume panel: building a 512-square layout from an image is
      * one pass over a million texels and the map is a few thousand evaluations of a closed-form
      * expression, so both are recomputed when something changes and never per frame.
@@ -104,20 +116,46 @@ namespace Desert::Editor
         /// drawn against numbers that are not the artist's is worse than no preview.
         struct LayerContext
         {
+            /// One SPECIES of the layer: the thing a channel of the painting actually decides the
+            /// placement of. It is NOT "Cloud Type N" — see ECS::ResolveCloudSpecies for why the two are
+            /// numbered differently, and why this panel has to say so out loud.
+            struct SpeciesSlot
+            {
+                uint32_t AuthoredSlot = 0u;    // which "Cloud Type N" in Details this came from, 0-based
+                bool     BuiltIn      = false; // the engine's cumulus congestus, because no slot is filled
+                float    Scale        = 1.0f;  // the type's Placement Scale — how much coarser than the layer
+                float    Anisotropy   = 1.0f;  // the type's Placement Anisotropy — the stretch along the wind
+
+                /// The `.decloudtype`'s file name, so the artist reads a name rather than a slot number.
+                std::string TypeName;
+            };
+
             bool  FromScene         = false;
             float RegionSizeKm      = 48.0f;
-            float CellKm            = 3.0f;
+            float LatticeKm         = 3.0f;
+            float PatchTileKm       = 21.0f;
             float Coverage          = 0.45f;
             float PatchStrength     = 0.60f;
             float ResolvableChordKm = 0.125f;
 
             uint32_t Seed = 1u;
 
+            /// How many species the layer has, 1..kCloudLayoutChannels. Channels past this drive nothing
+            /// in THIS scene, and the panel says so rather than offering a slot that goes nowhere.
+            uint32_t    SpeciesCount = 1u;
+            SpeciesSlot Species[Assets::kCloudLayoutChannels];
+
             Assets::CloudLayoutPlacement Placement;
 
             /// The painting the layer has bound, or a null handle. It is what the panel adopts when it
             /// opens with nothing loaded: the tool starts on the sky you are looking at.
             uint64_t BoundLayout = 0u;
+
+            /// Field by field, because these numbers live on a component the Details panel edits and there
+            /// is no notification — comparing is what makes moving Layout Repeats in Details redraw the
+            /// map on the same frame. A method rather than a loose expression so that a field added above
+            /// has one obvious place to be missed from.
+            bool Matches( const LayerContext& other ) const;
         };
 
         void DrawSourceSection();

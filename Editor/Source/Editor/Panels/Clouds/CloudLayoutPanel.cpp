@@ -6,6 +6,7 @@
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/CloudLayoutAsset.hpp>
+#include <Engine/Assets/CloudTypeAsset.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
@@ -74,6 +75,29 @@ namespace Desert::Editor
     // The layer
     // -------------------------------------------------------------------------------------------------
 
+    bool CloudLayoutPanel::LayerContext::Matches( const LayerContext& other ) const
+    {
+        if ( FromScene != other.FromScene || RegionSizeKm != other.RegionSizeKm ||
+             LatticeKm != other.LatticeKm || PatchTileKm != other.PatchTileKm || Coverage != other.Coverage ||
+             PatchStrength != other.PatchStrength || ResolvableChordKm != other.ResolvableChordKm ||
+             Seed != other.Seed || SpeciesCount != other.SpeciesCount )
+            return false;
+
+        // THE SPECIES ARE COMPARED TOO, and they are the ones that moved most often in practice: dropping a
+        // .decloudtype into a free slot renumbers every channel after it, and a map that did not redraw
+        // would go on describing the sky the layer had a type ago.
+        for ( uint32_t species = 0; species < SpeciesCount; ++species )
+        {
+            if ( Species[species].AuthoredSlot != other.Species[species].AuthoredSlot ||
+                 Species[species].BuiltIn != other.Species[species].BuiltIn ||
+                 Species[species].Scale != other.Species[species].Scale ||
+                 Species[species].Anisotropy != other.Species[species].Anisotropy )
+                return false;
+        }
+
+        return Assets::CloudLayoutPlacementEqual( Placement, other.Placement );
+    }
+
     CloudLayoutPanel::LayerContext CloudLayoutPanel::ReadLayer() const
     {
         LayerContext layer;
@@ -95,25 +119,56 @@ namespace Desert::Editor
         layer.ResolvableChordKm =
              Graphic::CloudFinestResolvableChordKm( static_cast<float>( std::clamp( data.MaxSteps, 8, 512 ) ) );
 
-        // THE CELL IS THE LAYER'S LATTICE TIMES THE FINEST TYPE'S Placement Scale, and the finest is the
-        // right one because it is the species a thin stroke loses first — the same species
-        // ValidateCloudProceduralLayout measures its texel against.
-        float finestScale = 0.0f;
-        if ( auto* types = Runtime::ResourceRegistry::GetCloudTypeService() )
-        {
-            const Assets::AssetHandle bound[] = { data.CloudType1, data.CloudType2, data.CloudType3,
-                                                  data.CloudType4 };
-            for ( const Assets::AssetHandle& handle : bound )
-            {
-                if ( handle == Assets::AssetHandle::Null() )
-                    continue;
-                const float scale = types->GetShape( handle ).PlacementScale;
-                if ( scale > 1e-3f && ( finestScale <= 0.0f || scale < finestScale ) )
-                    finestScale = scale;
-            }
-        }
+        layer.LatticeKm = ECS::CloudLayerLatticeKm( data );
 
-        layer.CellKm = ECS::CloudLayerLatticeKm( data ) * ( finestScale > 0.0f ? finestScale : 1.0f );
+        // THE LAYER'S OWN WEATHER PATCH TILE, and not a constant. It used to be a hard-coded 21 km here,
+        // which is the component's DEFAULT — so the map agreed with the sky in every scene that had never
+        // touched the field and disagreed silently in every scene that had. The patch is what decides a
+        // cell's coverage whenever the painting is not the source (no layout bound, or Layout Pattern
+        // Strength at zero), so getting it wrong draws a plausible sky that is not this layer's.
+        layer.PatchTileKm = std::max( data.PatchTileSize, 1.0f ) / Graphic::kCloudWorldUnitsPerKm;
+
+        // WHICH SLOT IS WHICH SPECIES IS ASKED OF THE ENGINE, never worked out here — the renderer resolves
+        // the same call, so a channel this panel labels "Cirrus" is the channel the sky gives to cirrus.
+        const ECS::CloudSpeciesResolution resolved = ECS::ResolveCloudSpecies( data );
+        layer.SpeciesCount                         = resolved.Count;
+
+        auto* types = Runtime::ResourceRegistry::GetCloudTypeService();
+
+        const Assets::AssetHandle authored[ECS::kCloudTypeSlots] = { data.CloudType1, data.CloudType2,
+                                                                     data.CloudType3, data.CloudType4 };
+
+        for ( uint32_t species = 0; species < resolved.Count; ++species )
+        {
+            LayerContext::SpeciesSlot& slot = layer.Species[species];
+
+            slot.BuiltIn      = resolved.BuiltInDefault;
+            slot.AuthoredSlot = resolved.AuthoredSlot[species];
+
+            const Assets::AssetHandle handle =
+                 resolved.BuiltInDefault ? Assets::AssetHandle::Null() : authored[slot.AuthoredSlot];
+
+            if ( types )
+            {
+                const Graphic::CloudTypeShape& shape = types->GetShape( handle );
+                slot.Scale                           = std::max( shape.PlacementScale, 1e-3f );
+                slot.Anisotropy                      = std::max( shape.PlacementAnisotropy, 1e-3f );
+            }
+
+            if ( slot.BuiltIn )
+                slot.TypeName = "the built-in cumulus congestus";
+            else if ( m_Assets )
+            {
+                if ( auto type = m_Assets->FindByHandle<Assets::CloudTypeAsset>( handle ) )
+                    slot.TypeName = type->GetMetadata().Filepath.stem().string();
+            }
+
+            // NAMED BY ITS HANDLE WHEN NOTHING CLAIMS IT, rather than left blank: a slot whose type the
+            // asset manager does not know is a scene pointing at a file that is not there, and a blank
+            // label would read as an empty slot — which is the one thing it is not.
+            if ( slot.TypeName.empty() )
+                slot.TypeName = "an unregistered type " + std::to_string( static_cast<uint64_t>( handle ) );
+        }
 
         layer.Placement.RepeatsPerRegion = static_cast<uint32_t>( std::clamp( data.LayoutRepeats, 1, 16 ) );
         layer.Placement.QuarterTurns     = static_cast<uint32_t>( std::clamp( data.LayoutRotation, 0, 3 ) );
@@ -139,18 +194,19 @@ namespace Desert::Editor
 
         // THE LAYER IS COMPARED FIELD BY FIELD rather than by a dirty flag somebody has to set: the
         // numbers live on a component the Details panel edits, and there is no notification. Comparing is
-        // eleven floats a frame and it is what makes moving Layout Repeats in Details redraw this map.
-        const bool layerMoved = layer.FromScene != m_LastLayer.FromScene ||
-                                layer.RegionSizeKm != m_LastLayer.RegionSizeKm ||
-                                layer.CellKm != m_LastLayer.CellKm || layer.Coverage != m_LastLayer.Coverage ||
-                                layer.PatchStrength != m_LastLayer.PatchStrength ||
-                                layer.ResolvableChordKm != m_LastLayer.ResolvableChordKm ||
-                                layer.Seed != m_LastLayer.Seed ||
-                                !Assets::CloudLayoutPlacementEqual( layer.Placement, m_LastLayer.Placement );
-
-        if ( layerMoved )
+        // a few dozen floats a frame and it is what makes moving Layout Repeats in Details redraw this map.
+        if ( !layer.Matches( m_LastLayer ) )
             m_PreviewDirty = true;
         m_LastLayer = layer;
+
+        // A SLOT THIS LAYER DOES NOT HAVE CANNOT BE MAPPED. Dropping a type out of Details shortens the
+        // species list under the panel's feet, and BuildCloudLayoutPreview refuses a slot past the end —
+        // correctly, and as an error the artist would have to read rather than a map they could look at.
+        if ( m_PreviewSlot >= static_cast<int>( layer.SpeciesCount ) )
+        {
+            m_PreviewSlot  = static_cast<int>( layer.SpeciesCount ) - 1;
+            m_PreviewDirty = true;
+        }
 
         // THE PANEL OPENS ON THE SKY YOU ARE LOOKING AT. A layer with a painting bound hands it to the
         // panel once, when it changes — once and not every frame, so that an artist who then opens a
@@ -372,21 +428,58 @@ namespace Desert::Editor
         if ( !Utils::ImGuiUtilities::SectionHeader( "Channels" ) )
             return;
 
-        ImGui::TextWrapped( "Which channel of the picture feeds which of the layer's four cloud type "
-                            "slots. A slot's channel is its own field of 'is there cloud of this kind "
-                            "here' - the four overlap freely and the sky takes whichever wins." );
+        ImGui::TextWrapped( "Which channel of the picture feeds which of the layer's cloud SPECIES. A "
+                            "species' channel is its own field of 'is there cloud of this kind here' - "
+                            "they overlap freely and the sky takes whichever wins." );
+
+        // THE RENUMBERING, SAID OUT LOUD. Details has four type slots; the layer has as many SPECIES as it
+        // has distinct filled ones, and the painting's channels are indexed by species. So a layer whose
+        // only type sits in Cloud Type 3 is driven by the painting's RED channel, and nothing in Details
+        // hints at it — the symptom is a channel an artist swears they painted that does nothing.
+        const LayerContext& layer = m_LastLayer;
 
         ImGui::BeginDisabled( m_LayoutFromFile || m_SourcePixels.empty() );
 
         bool remap = false;
         for ( uint32_t slot = 0; slot < Assets::kCloudLayoutChannels; ++slot )
         {
-            const std::string label   = "Slot " + std::to_string( slot ) + " takes";
-            int               channel = static_cast<int>( m_ChannelForSlot[slot] );
+            std::string label;
+            if ( slot < layer.SpeciesCount )
+            {
+                const LayerContext::SpeciesSlot& species = layer.Species[slot];
+                label = "-> " + species.TypeName +
+                        ( species.BuiltIn ? std::string()
+                                          : " (Cloud Type " +
+                                                 std::to_string( species.AuthoredSlot + 1u ) + ")" );
+            }
+            else
+            {
+                label = "-> nothing in this scene";
+            }
+
+            // The visible text is a TYPE NAME and two slots can hold the same words, so the widget's
+            // identity is the slot number after `##` rather than the label. Without it two channels
+            // mapped to one unfilled slot would be one control wearing two labels.
+            label += "##slot" + std::to_string( slot );
+
+            int channel = static_cast<int>( m_ChannelForSlot[slot] );
             if ( ImGui::Combo( label.c_str(), &channel, "Red\0Green\0Blue\0Alpha\0" ) )
             {
                 m_ChannelForSlot[slot] = static_cast<uint32_t>( channel );
                 remap                  = true;
+            }
+            if ( ImGui::IsItemHovered() )
+            {
+                if ( slot < layer.SpeciesCount )
+                    ImGui::SetTooltip( "Species %u of this layer. Details calls it Cloud Type %u; the "
+                                       "painting calls it channel %u, because empty and repeated type "
+                                       "slots are dropped before the sky is placed.",
+                                       slot, layer.Species[slot].AuthoredSlot + 1u, slot );
+                else
+                    ImGui::SetTooltip( "This layer has %u species, so channel %u is carried in the file and "
+                                       "placed by nothing. Fill another Cloud Type slot in Details and it "
+                                       "comes alive - the painting does not have to be baked again.",
+                                       layer.SpeciesCount, slot );
             }
         }
 
@@ -444,9 +537,24 @@ namespace Desert::Editor
             ImGui::TextColored( kWarnColour, "This scene has NO cloud layer, so the map below is drawn "
                                              "against the shipped defaults printed here." );
 
-        ImGui::Text( "Region Size %.1f km      placement cell %.2f km", layer.RegionSizeKm, layer.CellKm );
+        ImGui::Text( "Region Size %.1f km      placement lattice %.2f km      weather patch tile %.1f km",
+                     layer.RegionSizeKm, layer.LatticeKm, layer.PatchTileKm );
         ImGui::Text( "Coverage %.2f      Weather Patch Strength %.2f      Seed %u", layer.Coverage,
                      layer.PatchStrength, layer.Seed );
+
+        // THE CELL PER SPECIES, because the lattice above is the layer's and every type multiplies it by
+        // its own Placement Scale. A stroke has to clear the cell of the species it is painted for, and
+        // these are the numbers that differ between them.
+        for ( uint32_t species = 0; species < layer.SpeciesCount; ++species )
+        {
+            ImGui::Text( "  channel %u -> %s: cell %.2f km", species, layer.Species[species].TypeName.c_str(),
+                         layer.LatticeKm * layer.Species[species].Scale );
+            if ( layer.Species[species].Anisotropy != 1.0f )
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled( "stretched %.2fx along the wind", layer.Species[species].Anisotropy );
+            }
+        }
         ImGui::Text( "Layout Repeats %u      Rotation %u quarter turns      Offset (%.2f, %.2f) km",
                      layer.Placement.RepeatsPerRegion, layer.Placement.QuarterTurns,
                      layer.Placement.OffsetKm.x, layer.Placement.OffsetKm.y );
@@ -474,21 +582,29 @@ namespace Desert::Editor
         params.ResolvableChordKm = layer.ResolvableChordKm;
         params.LayoutPlacement   = layer.Placement;
 
-        // THE PATCH TILE IS FLOORED AGAINST THE CELL exactly as the renderer floors it, because a
-        // modulation finer than three cells decides cells one at a time and reads as a checkerboard. A
-        // preview drawn with an unfloored tile would show a sky the layer cannot produce.
-        params.PatchTileKm = std::max( 21.0f, 3.0f * layer.CellKm );
-
         if ( m_HasLayout )
             params.Layout = std::make_shared<const Assets::CloudLayoutData>( m_Layout );
 
-        // Four slots of one size, because the map answers "what does this picture do to a sky whose cells
-        // are this big". The layer's own per-type scales are already folded into LayerContext::CellKm.
-        params.Species.resize( Assets::kCloudLayoutChannels );
-        for ( auto& species : params.Species )
+        // EACH SPECIES ON ITS OWN LATTICE, exactly as VolumetricCloudRenderer builds them: the layer's
+        // lattice times the type's Placement Scale, stretched by its Placement Anisotropy. The first draft
+        // gave all four one square cell taken from the FINEST type, which draws a coarse species' map at a
+        // resolution it does not have and quotes the most permissive legibility bound in the layer for
+        // every channel — the artist is then told a 1.2 km stroke is safe on a 4 km cell.
+        params.Species.resize( layer.SpeciesCount );
+        for ( uint32_t species = 0; species < layer.SpeciesCount; ++species )
         {
-            species.CellKm     = std::max( layer.CellKm, 1e-3f );
-            species.Anisotropy = 1.0f;
+            params.Species[species].CellKm     = std::max( layer.LatticeKm * layer.Species[species].Scale, 1e-3f );
+            params.Species[species].Anisotropy = std::max( layer.Species[species].Anisotropy, 1e-3f );
+        }
+
+        // THE PATCH TILE IS THE LAYER'S OWN, THEN FLOORED AGAINST THE CELL exactly as the renderer floors
+        // it, because a modulation finer than three cells decides cells one at a time and reads as a
+        // checkerboard. A preview drawn with an unfloored tile would show a sky the layer cannot produce.
+        params.PatchTileKm = layer.PatchTileKm;
+        for ( const Assets::CloudProceduralSpecies& species : params.Species )
+        {
+            const glm::vec2 extent = Assets::CloudProceduralCellExtentKm( params, species );
+            params.PatchTileKm     = std::max( params.PatchTileKm, 3.0f * std::max( extent.x, extent.y ) );
         }
 
         return params;
@@ -506,7 +622,8 @@ namespace Desert::Editor
             return;
 
         const Assets::CloudProceduralFieldParams params = BuildParams( layer );
-        const uint32_t slot = static_cast<uint32_t>( std::clamp( m_PreviewSlot, 0, 3 ) );
+        const uint32_t                          slot =
+             static_cast<uint32_t>( std::clamp( m_PreviewSlot, 0, static_cast<int>( layer.SpeciesCount ) - 1 ) );
 
         const float spanKm = params.RegionSizeKm * static_cast<float>( std::clamp( m_SpanRegions, 1, 4 ) );
 
@@ -637,26 +754,37 @@ namespace Desert::Editor
             return;
         }
 
-        if ( ImGui::SliderInt( "Slot to map", &m_PreviewSlot, 0, 3, "slot %d" ) )
+        // BOUNDED BY THE SPECIES THIS LAYER HAS, not by the four a file can carry: a slider that offers a
+        // slot the layer cannot place would answer with an error message where a map should be.
+        const int lastSlot = static_cast<int>( m_LastLayer.SpeciesCount ) - 1;
+        ImGui::BeginDisabled( lastSlot == 0 );
+        if ( ImGui::SliderInt( "Channel to map", &m_PreviewSlot, 0, lastSlot, "channel %d" ) )
         {
             m_PaintingView = static_cast<PaintingView>( m_PreviewSlot );
             m_PreviewDirty = true;
         }
+        ImGui::EndDisabled();
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Which of the layer's four cloud type slots to map. Each slot is its own "
-                               "channel of the painting and its own field of clouds." );
+            ImGui::SetTooltip( "Which of this layer's %u species to map - %s. Each is its own channel of "
+                               "the painting, its own lattice and its own field of clouds.",
+                               m_LastLayer.SpeciesCount,
+                               m_LastLayer.Species[std::clamp( m_PreviewSlot, 0, lastSlot )].TypeName.c_str() );
 
         int view = static_cast<int>( m_PaintingView );
         if ( ImGui::Combo( "Painting shows", &view,
-                           "Slot 0's channel\0"
-                           "Slot 1's channel\0"
-                           "Slot 2's channel\0"
-                           "Slot 3's channel\0"
+                           "Channel 0\0"
+                           "Channel 1\0"
+                           "Channel 2\0"
+                           "Channel 3\0"
                            "The add/remove mask\0" ) )
         {
             m_PaintingView = static_cast<PaintingView>( view );
             m_PreviewDirty = true;
         }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Which table of the FILE the left pane draws. All four channels are carried "
+                               "whatever the layer uses them for, so a channel this scene has no species "
+                               "for can still be inspected here." );
 
         if ( ImGui::SliderInt( "Sky span", &m_SpanRegions, 1, 4, "%d regions" ) )
             m_PreviewDirty = true;
@@ -681,15 +809,24 @@ namespace Desert::Editor
         {
             ImGui::SameLine();
             ImGui::BeginGroup();
-            ImGui::TextDisabled( "The sky from above - %u cells, %.2f km each", m_Preview.Side,
+            ImGui::TextDisabled( "The sky from above, north up - %u cells, %.2f km each", m_Preview.Side,
                                  m_Preview.SamplePitchKm );
             LayoutPreviewHelper()->Image( m_SkyImage, ImVec2( pane, pane ) );
             ImGui::EndGroup();
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Looking straight DOWN on the layer, north up. White is cloud, blue is "
-                                   "clear. It is drawn one PLACEMENT CELL per pixel because that is the "
-                                   "resolution the sky has - a stroke finer than a cell cannot survive it, "
-                                   "and this is where you see that happen." );
+                                   "clear. One sample per PLACEMENT CELL where the span allows it - that is "
+                                   "the resolution the sky has, and a stroke finer than a cell cannot "
+                                   "survive it. Over a wide span the map is coarser still, and the pitch "
+                                   "printed above it is always the one drawn." );
+
+            // THE FLIP IS STATED RATHER THAN DISCOVERED. The layout's v runs NORTH and an image's first row
+            // is its TOP, so a picture placed in the world stands on its head relative to a north-up map.
+            // Both panes are honest to their own reader and the difference between them is real; an artist
+            // who does not know it paints a letter and finds it upside down in a rendered sky.
+            ImGui::TextWrapped( "The map is your picture FLIPPED TOP TO BOTTOM: the painting's first row "
+                                "lies to the SOUTH, because the layout's v axis runs north and an image's "
+                                "first row is its top." );
         }
     }
 
@@ -755,13 +892,18 @@ namespace Desert::Editor
 
         // ---- 2. legibility is bounded by the STROKE, and the validator checks the TEXEL ----------
 
-        ImGui::Text( "One texel is %.3f km; the placement cell is %.2f km; one period of your painting is "
+        ImGui::Text( "One texel is %.3f km; the cell of %s is %.2f km; one period of your painting is "
                      "%.1f km.",
-                     m_TexelKm, m_Preview.CellKm, m_PeriodKm );
+                     m_TexelKm,
+                     m_LastLayer
+                          .Species[std::clamp( m_PreviewSlot, 0,
+                                               static_cast<int>( m_LastLayer.SpeciesCount ) - 1 )]
+                          .TypeName.c_str(),
+                     m_Preview.CellKm, m_PeriodKm );
 
         if ( m_Strokes.PaintedTexels == 0u )
         {
-            ImGui::TextDisabled( "Slot %d is flat - nothing was drawn on it, so there is no stroke to "
+            ImGui::TextDisabled( "Channel %d is flat - nothing was drawn on it, so there is no stroke to "
                                  "measure.",
                                  m_PreviewSlot );
         }
@@ -776,7 +918,7 @@ namespace Desert::Editor
             if ( m_Strokes.FractionBelowLimit > 0.02f )
             {
                 ImGui::TextColored( kWarnColour,
-                                    "%.0f%% of what you drew on this slot is NARROWER THAN ONE CLOUD "
+                                    "%.0f%% of what you drew on this channel is NARROWER THAN ONE CLOUD "
                                     "CELL.",
                                     100.0f * m_Strokes.FractionBelowLimit );
                 ImGui::TextWrapped( "Those strokes will break into evenly spaced clumps rather than read "

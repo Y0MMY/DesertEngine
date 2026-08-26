@@ -524,8 +524,11 @@ namespace Desert::Assets
         /// asked for, or it will quote a resolution the picture does not have.
         float SamplePitchKm = 0.0f;
 
-        /// The finest placement cell in the layer, kilometres — the bound a painted stroke has to clear to
-        /// read as a shape rather than as a row of clumps.
+        /// The MAPPED SLOT'S placement cell, kilometres, on its shorter side — the bound a painted stroke
+        /// has to clear to read as a shape rather than as a row of clumps. The slot's own and not the
+        /// layer's finest: legibility fails first for the species with the LARGEST cells, where
+        /// ValidateCloudProceduralLayout's texel bound fails first for the species with the smallest, and
+        /// two bounds that run in opposite directions must not share a number.
         float CellKm = 0.0f;
 
         /// `Side * Side` coverages in 0..1, row-major, x increasing east and y increasing north.
