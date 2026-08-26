@@ -609,7 +609,7 @@ TEST( AssetHandleStability, ASyntheticKeyDoesNotFollowTheWorkingDirectory )
     ProjectRootGuard guard;
     Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
 
-    std::error_code   ec;
+    std::error_code             ec;
     const std::filesystem::path original = std::filesystem::current_path( ec );
     ASSERT_FALSE( ec ) << "could not read the working directory";
 
@@ -620,8 +620,7 @@ TEST( AssetHandleStability, ASyntheticKeyDoesNotFollowTheWorkingDirectory )
     const uint64_t elsewhere = HandleValue( "procedural://humanoid/Walk" );
     std::filesystem::current_path( original, ec );
 
-    EXPECT_EQ( here, elsewhere )
-         << "a synthetic key changed identity because the process changed directory";
+    EXPECT_EQ( here, elsewhere ) << "a synthetic key changed identity because the process changed directory";
 }
 
 TEST( AssetHandleStability, AFileOutsideTheProjectKeepsItsOwnSpelling )
@@ -691,7 +690,7 @@ TEST( AssetHandleStability, EveryAssetTypeAgreesAcrossProjectRoots )
 TEST( AssetHandleStability, ATexturesIdComesFromItsFileAndSurvivesTheProjectMoving )
 {
     // A real cooked `.tex`, because the claim is about what Load does with the file's Handle field.
-    const auto scratch = std::filesystem::temp_directory_path() / "desert_assethandlestability_rooted.tex";
+    const auto         scratch = std::filesystem::temp_directory_path() / "desert_assethandlestability_rooted.tex";
     constexpr uint64_t kIdInTheFile = 16135626166276358966ull; // the value T_Checker.tex actually carries
     {
         std::ofstream out( scratch );
