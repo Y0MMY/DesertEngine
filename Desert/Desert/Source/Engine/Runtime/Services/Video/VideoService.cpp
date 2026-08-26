@@ -100,7 +100,9 @@ namespace Desert::Runtime
     {
         if ( path.empty() )
             return 0;
-        const uint64_t handle = static_cast<uint64_t>( Common::AssetHandle::FromKey( path ) );
+        // FromCookedPath, not FromKey -- one file is one handle whatever spelling registered it. See the
+        // note in FontService::RegisterFont; the two services key their registries the same way.
+        const uint64_t handle = static_cast<uint64_t>( Common::AssetHandle::FromCookedPath( path ) );
         m_HandleToPath.emplace( handle, path );
         return handle;
     }

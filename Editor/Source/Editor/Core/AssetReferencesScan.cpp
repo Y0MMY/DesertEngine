@@ -80,11 +80,17 @@ namespace Desert::Editor
             e.Path = fs::relative( p, assetsRoot, ec ).generic_string();
             e.Ext  = Lower( p.extension().string() );
 
-            // Every way a referencer might name this asset: handle over a few path forms, the
-            // project-relative path string, and the file name.
+            // Every way a referencer might name this asset: its handle, the project-relative path string,
+            // and the file name.
+            //
+            // ONE handle token, not three. This used to hash the project-relative, assets-relative and
+            // absolute spellings, because the derivation keyed on the string it was handed and each
+            // spelling produced a different number. It no longer does: an asset's handle is a function of
+            // its place in the project, so the absolute form below IS the handle, and the other two were
+            // not merely redundant -- absolutized against the working directory, the assets-relative
+            // spelling lands outside every root and hashes to a value no producer in the engine can mint.
+            // A token that matches nothing is a token that hides the one that matches.
             const std::string projectRel = fs::relative( p, projectDir, ec ).generic_string();
-            e.Tokens.push_back( HandleToken( projectRel ) );
-            e.Tokens.push_back( HandleToken( e.Path ) );
             e.Tokens.push_back( HandleToken( p.lexically_normal() ) );
             e.Tokens.push_back( projectRel );
             e.Tokens.push_back( p.filename().generic_string() );

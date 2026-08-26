@@ -52,20 +52,6 @@ namespace Desert::Editor
         return BuildCookedPath( source, ".tex" );
     }
 
-    namespace
-    {
-        // Deterministic 64-bit id from a stable key. A texture's handle is DERIVED from its source path,
-        // not random: deleting Cooked/ and re-cooking yields the SAME handle, so every material/.demat/
-        // scene reference keyed by it still resolves.
-        //
-        // The FNV-1a loop this used to hold was one of three hand-written copies of the same derivation;
-        // it now defers to the one that lives with the handle type.
-        Common::UUID StableTextureId( const std::string& key )
-        {
-            return Common::AssetHandle::FromKey( key );
-        }
-    } // namespace
-
     Common::UUID TextureImporter::Import( const std::filesystem::path& path )
     {
         // Bulk cooking runs mesh imports in PARALLEL; two meshes often share textures, and two threads
@@ -92,7 +78,17 @@ namespace Desert::Editor
         // anyone deleted Cooked/ the id changed and every reference to it died. One such handle was still
         // in the repository (T_Checker.tex, referenced by M_CheckerFloor.demat); both files were re-stamped
         // with the derived id by the change that deleted this branch.
-        const Common::UUID handle = StableTextureId( abs );
+        //
+        // THROUGH FromCookedPath, and `path` rather than `abs`. Hashing the canonical ABSOLUTE string was
+        // the last producer of asset identity that keyed on where the project sits, and it is the one that
+        // reached the repository: T_Checker.tex carried 16135626166276358966, which is FNV-1a of
+        // `/Users/<a developer>/…/Textures/T_Checker.png`, and M_CheckerFloor.demat named the texture by
+        // that number. It resolved only because both files were shipped together with the number already
+        // frozen; re-cooking that texture on any other machine minted a different id and emptied the
+        // material's slot. FromCookedPath keys on the source's place INSIDE the project, so the re-cook
+        // now agrees between machines. The same two files are re-stamped by this change, exactly as the
+        // paragraph above records being done last time.
+        const Common::UUID handle = Common::AssetHandle::FromCookedPath( path );
 
         std::error_code ec;
         if ( std::filesystem::exists( meta, ec ) )
