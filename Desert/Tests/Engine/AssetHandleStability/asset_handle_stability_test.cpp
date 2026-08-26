@@ -27,6 +27,7 @@
 #include <gtest/gtest.h>
 
 #include <Common/Core/AssetHandle.hpp>
+#include <Common/Core/Constants.hpp>
 
 #include <Engine/Assets/AssetBase.hpp>
 #include <Engine/Assets/AssetManager.hpp>
@@ -110,6 +111,78 @@ namespace
     // derivation would make two different assets at one path collide, which the last test here catches.
     const std::string kPathA = "Assets/Library/Subject.asset";
     const std::string kPathB = "Assets/Library/Other.asset";
+
+    // Restores every content root SetProjectRoot rewrites. The roots are process-wide mutable globals, so
+    // a test that opens a project and walks away leaves every test after it measuring that project.
+    class ProjectRootGuard
+    {
+    public:
+        ProjectRootGuard()
+             : m_Assets( Common::Constants::Path::ASSETS_PATH ), m_Mesh( Common::Constants::Path::MESH_PATH ),
+               m_Material( Common::Constants::Path::MATERIAL_PATH ),
+               m_TextureDir( Common::Constants::Path::TEXTUREDIR_PATH ),
+               m_TextureDirEnv( Common::Constants::Path::TEXTUREDIRENV_PATH ),
+               m_Skybox( Common::Constants::Path::SKYBOX_PATH ), m_Scene( Common::Constants::Path::SCENE_PATH ),
+               m_Prefab( Common::Constants::Path::PREFAB_PATH ), m_Script( Common::Constants::Path::SCRIPT_PATH ),
+               m_Collections( Common::Constants::Path::COLLECTIONS_PATH ),
+               m_CloudNoise( Common::Constants::Path::CLOUD_NOISE_PATH ),
+               m_CloudType( Common::Constants::Path::CLOUD_TYPE_PATH ),
+               m_CloudVolume( Common::Constants::Path::CLOUD_VOLUME_PATH ),
+               m_CloudLayout( Common::Constants::Path::CLOUD_LAYOUT_PATH ),
+               m_Cooked( Common::Constants::Path::COOKED_PATH ),
+               m_MeshCooked( Common::Constants::Path::MESH_PATH_COOKED ),
+               m_TextureCooked( Common::Constants::Path::TEXTURE_PATH_COOKED )
+        {
+        }
+
+        ~ProjectRootGuard()
+        {
+            Common::Constants::Path::ASSETS_PATH         = m_Assets;
+            Common::Constants::Path::MESH_PATH           = m_Mesh;
+            Common::Constants::Path::MATERIAL_PATH       = m_Material;
+            Common::Constants::Path::TEXTUREDIR_PATH     = m_TextureDir;
+            Common::Constants::Path::TEXTUREDIRENV_PATH  = m_TextureDirEnv;
+            Common::Constants::Path::SKYBOX_PATH         = m_Skybox;
+            Common::Constants::Path::SCENE_PATH          = m_Scene;
+            Common::Constants::Path::PREFAB_PATH         = m_Prefab;
+            Common::Constants::Path::SCRIPT_PATH         = m_Script;
+            Common::Constants::Path::COLLECTIONS_PATH    = m_Collections;
+            Common::Constants::Path::CLOUD_NOISE_PATH    = m_CloudNoise;
+            Common::Constants::Path::CLOUD_TYPE_PATH     = m_CloudType;
+            Common::Constants::Path::CLOUD_VOLUME_PATH   = m_CloudVolume;
+            Common::Constants::Path::CLOUD_LAYOUT_PATH   = m_CloudLayout;
+            Common::Constants::Path::COOKED_PATH         = m_Cooked;
+            Common::Constants::Path::MESH_PATH_COOKED    = m_MeshCooked;
+            Common::Constants::Path::TEXTURE_PATH_COOKED = m_TextureCooked;
+        }
+
+        ProjectRootGuard( const ProjectRootGuard& )            = delete;
+        ProjectRootGuard& operator=( const ProjectRootGuard& ) = delete;
+
+    private:
+        std::filesystem::path m_Assets;
+        std::filesystem::path m_Mesh;
+        std::filesystem::path m_Material;
+        std::filesystem::path m_TextureDir;
+        std::filesystem::path m_TextureDirEnv;
+        std::filesystem::path m_Skybox;
+        std::filesystem::path m_Scene;
+        std::filesystem::path m_Prefab;
+        std::filesystem::path m_Script;
+        std::filesystem::path m_Collections;
+        std::filesystem::path m_CloudNoise;
+        std::filesystem::path m_CloudType;
+        std::filesystem::path m_CloudVolume;
+        std::filesystem::path m_CloudLayout;
+        std::filesystem::path m_Cooked;
+        std::filesystem::path m_MeshCooked;
+        std::filesystem::path m_TextureCooked;
+    };
+
+    uint64_t HandleValue( const std::filesystem::path& path )
+    {
+        return static_cast<uint64_t>( Common::AssetHandle::FromCookedPath( path ) );
+    }
 
     std::string Trimmed( const std::string& text )
     {
@@ -377,6 +450,301 @@ TEST( AssetHandleStability, AHandleFromNoAssetStillFailsToResolve )
     const std::string verdict = ResolveInAnIndependentProcess( kPathA, 12345ull );
     ASSERT_FALSE( verdict.empty() );
     EXPECT_EQ( verdict, "MISSED" );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE RELATION THIS SUITE EXISTS FOR: identity is a property of the asset's PLACE IN THE PROJECT, not
+// of where the project happens to sit on somebody's disk.
+//
+// The tests above establish that one path gives one handle in runs that share nothing. They were all
+// satisfied by hashing the path the caller held, and that is precisely what was wrong: every content
+// root turns ABSOLUTE the moment a `.deproj` is opened (Constants::Path::SetProjectRoot), so the string
+// being hashed began with a developer's home directory. Measured on the derivation as it stood:
+// `Assets/Clouds/X.dcnv` -> 122788169303960361, the same file spelled absolutely -> 868888776058461864,
+// and the absolute form is the one that reached the hash in a real session. Stable in two runs on ONE
+// machine; a different number on every other machine, and a rename of the checkout directory was enough
+// to change it here.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( AssetHandleStability, OneAssetKeepsOneHandleUnderTwoUnrelatedProjectRoots )
+{
+    // THE guard of this task. Two developers, two checkouts that share no directory above the project,
+    // and an assets folder that is not even called the same thing. Same asset, same handle, or a handle
+    // is not a reference anyone can write down and send to another machine.
+    ProjectRootGuard guard;
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    const uint64_t fromAnnsMachine = HandleValue( "/ann/work/Game/Content/Clouds/Cumulus.dcnv" );
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Game", "Assets" );
+    const uint64_t fromTheBuildAgent = HandleValue( "/opt/ci/checkout/Game/Assets/Clouds/Cumulus.dcnv" );
+
+    EXPECT_EQ( fromAnnsMachine, fromTheBuildAgent )
+         << "the same asset derived two different handles under two project roots. A handle written into "
+            "a file on one machine then names nothing on the other, which is the defect this suite is "
+            "named after, one level up: stable per machine, meaningless between them.";
+}
+
+TEST( AssetHandleStability, TheHashedKeyCarriesNoPartOfTheProjectRoot )
+{
+    // The relation above stated positively, and the reason it holds: the string that reaches the hash is
+    // the asset's place in the project and nothing else. Asserted on the key rather than on the number
+    // because a failure here says WHAT leaked, where a mismatched uint64 only says that something did.
+    ProjectRootGuard guard;
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    EXPECT_EQ( Common::AssetHandle::StableKeyForPath( "/ann/work/Game/Content/Clouds/Cumulus.dcnv" ),
+               "assets:Clouds/Cumulus.dcnv" );
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Game", "Assets" );
+    EXPECT_EQ( Common::AssetHandle::StableKeyForPath( "/opt/ci/checkout/Game/Assets/Clouds/Cumulus.dcnv" ),
+               "assets:Clouds/Cumulus.dcnv" );
+
+    // And the cooked tree, which moves with the project the same way.
+    EXPECT_EQ( Common::AssetHandle::StableKeyForPath( "/opt/ci/checkout/Game/Cooked/Textures/T.tex" ),
+               "cooked:Textures/T.tex" );
+}
+
+TEST( AssetHandleStability, AnAbsoluteAndARelativeSpellingOfOneAssetAgree )
+{
+    // The second required relation. It is not hypothetical: with a project open the roots are absolute
+    // and most callers pass absolute paths, but shaders never do (SHADERDIR_PATH is const and is never
+    // remapped), the prefab save box hardcodes a relative literal while the instantiate box defaults to
+    // the absolute root, and .dpak entries arrive relative. One file under two spellings was two assets.
+    ProjectRootGuard guard;
+
+    const std::filesystem::path projectDir = std::filesystem::current_path() / "SpellingProbe";
+    Common::Constants::Path::SetProjectRoot( projectDir, "Content" );
+
+    const uint64_t absolute = HandleValue( projectDir / "Content" / "Clouds" / "Cumulus.dcnv" );
+    const uint64_t relative = HandleValue( "SpellingProbe/Content/Clouds/Cumulus.dcnv" );
+
+    EXPECT_EQ( absolute, relative )
+         << "one file spelled absolutely and relatively derived two handles, so the editor and the "
+            "preloader can disagree about which asset a slot points at";
+
+    // The same claim once more with a `..` in the middle, because normalization and relativization are
+    // two steps and only one of them used to happen.
+    EXPECT_EQ( HandleValue( "SpellingProbe/Content/Types/../Clouds/Cumulus.dcnv" ), absolute );
+}
+
+TEST( AssetHandleStability, TheCookedTwinOfAnAssetIsNotTheSameAsset )
+{
+    // Why the key is tagged with its root. `Cooked/Textures/T.tex` and `Content/Textures/T.tex` both
+    // reduce to `Textures/T.tex`, so an untagged relative key would hand one handle to two files -- a
+    // collision that the old absolute-path hash could not produce and that a naive fix introduces.
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+
+    EXPECT_NE( HandleValue( "/ann/work/Game/Content/Textures/T.tex" ),
+               HandleValue( "/ann/work/Game/Cooked/Textures/T.tex" ) )
+         << "a content asset and a cooked asset at mirrored offsets collided onto one handle";
+}
+
+TEST( AssetHandleStability, EngineResourcesAreKeyedOnTheirOwnRootAndDoNotMoveWithTheProject )
+{
+    // Shaders live under RESOURCE_PATH, which is const and is never remapped, so their identity must not
+    // change when a project is opened or swapped. This is the one asset family whose handle was already
+    // portable before this change, and it has to stay that way.
+    ProjectRootGuard guard;
+
+    const uint64_t beforeAnyProject = HandleValue( "Resources/Shaders/Programs/PBR.shader" );
+    EXPECT_EQ( Common::AssetHandle::StableKeyForPath( "Resources/Shaders/Programs/PBR.shader" ),
+               "engine:Shaders/Programs/PBR.shader" );
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    EXPECT_EQ( HandleValue( "Resources/Shaders/Programs/PBR.shader" ), beforeAnyProject )
+         << "opening a project moved the shaders, which are not project content";
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Other", "Assets" );
+    EXPECT_EQ( HandleValue( "Resources/Shaders/Programs/PBR.shader" ), beforeAnyProject );
+}
+
+TEST( AssetHandleStability, TheDefaultSandboxNestsAssetsInsideResourcesAndAssetsStillWins )
+{
+    // With no project open ASSETS_PATH is `Resources/Assets/` -- INSIDE RESOURCE_PATH (`Resources/`).
+    // Both roots contain the file, so the answer must not depend on which one the code happens to test
+    // first. Longest match is what makes that true, and this is the case that proves it.
+    ProjectRootGuard guard;
+    Common::Constants::Path::ASSETS_PATH = "Resources/Assets/";
+
+    EXPECT_EQ( Common::AssetHandle::StableKeyForPath( "Resources/Assets/Clouds/Cumulus.dcnv" ),
+               "assets:Clouds/Cumulus.dcnv" )
+         << "a content asset was keyed as an engine resource because a shorter root matched first";
+}
+
+TEST( AssetHandleStability, KeysThatAreNotFilesystemPathsAreLeftAlone )
+{
+    // Procedural animation clips and sequencer clips register under `procedural://` / `memory://` keys.
+    // They are identities already, not locations, and relativizing them would be meaningless -- worse,
+    // absolutizing them would make them depend on the process's working directory, which is a
+    // regression this change must not introduce.
+    ProjectRootGuard guard;
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    const uint64_t underOneProject = HandleValue( "procedural://humanoid/Walk" );
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Other", "Assets" );
+    EXPECT_EQ( HandleValue( "procedural://humanoid/Walk" ), underOneProject );
+
+    EXPECT_NE( HandleValue( "procedural://humanoid/Walk" ), HandleValue( "procedural://humanoid/Run" ) );
+
+    // The key is the spelling itself, normalized, and nothing else has been glued to it.
+    //
+    // This line and the working-directory test below exist because the first version of this test did
+    // NOT catch its own sabotage: made to absolutize the no-root fallback, the suite stayed green. Both
+    // assertions it had were blind to that -- one used an already-absolute path, where absolutizing is
+    // the identity, and the other only compared two project roots, which does not move the working
+    // directory. A relation that survives its own diversion is not a guard.
+    EXPECT_EQ( Common::AssetHandle::StableKeyForPath( "procedural://humanoid/Walk" ),
+               std::filesystem::path( "procedural://humanoid/Walk" ).lexically_normal().generic_string() );
+}
+
+TEST( AssetHandleStability, ASyntheticKeyDoesNotFollowTheWorkingDirectory )
+{
+    // The property above as a process meets it. A `procedural://` clip is an identity, not a location;
+    // if the derivation resolved it against the working directory then the editor (which runs from
+    // Editor/) and a packaged runtime (which does not) would register the same clip under two handles,
+    // and the animation a scene names would resolve in one and vanish in the other.
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+
+    std::error_code             ec;
+    const std::filesystem::path original = std::filesystem::current_path( ec );
+    ASSERT_FALSE( ec ) << "could not read the working directory";
+
+    const uint64_t here = HandleValue( "procedural://humanoid/Walk" );
+
+    std::filesystem::current_path( std::filesystem::temp_directory_path(), ec );
+    ASSERT_FALSE( ec ) << "could not change the working directory";
+    const uint64_t elsewhere = HandleValue( "procedural://humanoid/Walk" );
+    std::filesystem::current_path( original, ec );
+
+    EXPECT_EQ( here, elsewhere ) << "a synthetic key changed identity because the process changed directory";
+}
+
+TEST( AssetHandleStability, AFileOutsideTheProjectKeepsItsOwnSpelling )
+{
+    // An asset a user picked from a save dialog somewhere else on disk has no place in the project, so
+    // there is no project-relative identity to give it. It keeps the spelling it came with, which is
+    // what ComponentRegistry does in the same situation and says so in the same words. The alternative
+    // -- inventing a `../../..` key relative to the assets root -- would encode the distance between two
+    // unrelated directories, which is machine-specific in exactly the way this change is removing.
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+
+    EXPECT_EQ( Common::AssetHandle::StableKeyForPath( "/elsewhere/scratch/Hand.dcnv" ),
+               "/elsewhere/scratch/Hand.dcnv" );
+    EXPECT_EQ( HandleValue( "/elsewhere/scratch/Hand.dcnv" ),
+               static_cast<uint64_t>( Common::AssetHandle::FromKey( "/elsewhere/scratch/Hand.dcnv" ) ) );
+}
+
+TEST( AssetHandleStability, TwoAssetsUnderOneRootStillDiffer )
+{
+    // The companion every stability assertion needs: a derivation that ignored the relative part
+    // entirely and hashed only the tag would satisfy every test above and collapse the whole library
+    // onto three handles.
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+
+    EXPECT_NE( HandleValue( "/ann/work/Game/Content/Clouds/Cumulus.dcnv" ),
+               HandleValue( "/ann/work/Game/Content/Clouds/Stratus.dcnv" ) );
+    EXPECT_NE( HandleValue( "/ann/work/Game/Content/A/X.dcnv" ),
+               HandleValue( "/ann/work/Game/Content/B/X.dcnv" ) );
+}
+
+TEST( AssetHandleStability, EveryAssetTypeAgreesAcrossProjectRoots )
+{
+    // The relation applied to the catalogue rather than to one call, because the point of deriving
+    // identity in AssetBase is that no type gets to have its own answer.
+    ProjectRootGuard guard;
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    std::vector<uint64_t> first;
+    for ( const auto& kind : Catalogue() )
+        first.push_back( kind.Handle( "/ann/work/Game/Content/Library/Subject.asset" ) );
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Game", "Assets" );
+    for ( size_t i = 0; i < Catalogue().size(); ++i )
+    {
+        EXPECT_EQ( Catalogue()[i].Handle( "/opt/ci/checkout/Game/Assets/Library/Subject.asset" ), first[i] )
+             << Catalogue()[i].Name << " changed identity when the project moved";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// WHY THE RE-STAMP NEEDED NO MIGRATION.
+//
+// Making the derivation project-relative changes the number every path-derived handle takes. That is
+// only safe because no file in the repository refers to a path-derived handle BY NUMBER, and the two
+// classes whose numbers ARE written down — Texture2D and Material — do not take theirs from the path at
+// all: they read an id out of the file and overwrite what AssetBase installed. The audit behind the
+// first half of that claim found exactly five persisted path-derived ids in committed assets, and all
+// five were texture references, i.e. the second half.
+//
+// So the migration is the absence of one, and these two tests are what makes that an assertion rather
+// than a hope: if either class ever stopped carrying its own id, the re-stamp WOULD move a number that a
+// `.demat` has written down, and this suite says so before a material silently loses its textures.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( AssetHandleStability, ATexturesIdComesFromItsFileAndSurvivesTheProjectMoving )
+{
+    // A real cooked `.tex`, because the claim is about what Load does with the file's Handle field.
+    const auto         scratch = std::filesystem::temp_directory_path() / "desert_assethandlestability_rooted.tex";
+    constexpr uint64_t kIdInTheFile = 16135626166276358966ull; // the value T_Checker.tex actually carries
+    {
+        std::ofstream out( scratch );
+        ASSERT_TRUE( out.is_open() ) << "could not write the fixture at " << scratch.string();
+        out << R"({"Handle":16135626166276358966,"SourcePath":"","CookedPath":"","Width":4,"Height":4,)"
+            << R"("Channels":4,"Format":"RGBA8F"})";
+    }
+
+    ProjectRootGuard guard;
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    Desert::Assets::TextureAsset underOneRoot( AssetPriority::Medium, Common::Filepath( scratch ) );
+    ASSERT_TRUE( underOneRoot.Load().IsSuccess() );
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Game", "Assets" );
+    Desert::Assets::TextureAsset underAnother( AssetPriority::Medium, Common::Filepath( scratch ) );
+    ASSERT_TRUE( underAnother.Load().IsSuccess() );
+
+    std::filesystem::remove( scratch );
+
+    EXPECT_EQ( static_cast<uint64_t>( underOneRoot.GetMetadata().Handle ), kIdInTheFile );
+    EXPECT_EQ( static_cast<uint64_t>( underAnother.GetMetadata().Handle ), kIdInTheFile )
+         << "a texture stopped taking its identity from its own file. Every `.demat` in the repository "
+            "names its textures by that number, so the moment it becomes path-derived a change to the "
+            "derivation silently empties every texture slot.";
+}
+
+TEST( AssetHandleStability, AMaterialsIdComesFromItsFileAndSurvivesTheProjectMoving )
+{
+    // The same claim for the other class that carries its own id. `MaterialId` is what a mesh's
+    // surface and a scene's material override both key on.
+    const auto scratch = std::filesystem::temp_directory_path() / "desert_assethandlestability_rooted.demat";
+    constexpr uint64_t kIdInTheFile = 6418972230554417713ull; // M_CheckerFloor.demat's actual MaterialId
+    {
+        std::ofstream out( scratch );
+        ASSERT_TRUE( out.is_open() ) << "could not write the fixture at " << scratch.string();
+        out << R"({"Params":[],"Textures":[],"MaterialId":6418972230554417713})";
+    }
+
+    ProjectRootGuard guard;
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    Desert::Assets::SurfaceMaterialAsset underOneRoot( AssetPriority::Medium, Common::Filepath( scratch ) );
+    ASSERT_TRUE( underOneRoot.Load().IsSuccess() );
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Game", "Assets" );
+    Desert::Assets::SurfaceMaterialAsset underAnother( AssetPriority::Medium, Common::Filepath( scratch ) );
+    ASSERT_TRUE( underAnother.Load().IsSuccess() );
+
+    std::filesystem::remove( scratch );
+
+    EXPECT_EQ( static_cast<uint64_t>( underOneRoot.GetMetadata().Handle ), kIdInTheFile );
+    EXPECT_EQ( static_cast<uint64_t>( underAnother.GetMetadata().Handle ), kIdInTheFile );
+    EXPECT_EQ( static_cast<uint64_t>( underAnother.GetMaterialUUID() ), kIdInTheFile );
 }
 
 // ---------------------------------------------------------------------------------------------------
