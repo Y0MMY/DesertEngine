@@ -372,7 +372,7 @@ TEST_F( ShaderRootFixture, TheDistantSkyLightDeclaresFourDescriptorsInSetZero )
     EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // multi-scatter LUT
 }
 
-TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresSixDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresNineDescriptorsInSetZero )
 {
     // THE PRODUCER OF THE CLOUD SHADOW MAP, and the reason it is pinned here rather than trusted: its
     // inputs are bound by NUMBER and not by reflection (ComputePipeline::SetInput takes the binding
@@ -383,13 +383,26 @@ TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresSixDescriptorsInSetZero )
     // The inputs are DELIBERATELY the march's own slot numbers — one vocabulary for one field — which is
     // why 3, 7, 8 and 9 are occupied and 1, 2, 4, 5, 6 are not.
     //
-    // SIX SINCE SLOT A, and the last two are the ones a reader would not expect on a SHADOW pass: a hero
+    // SIX SINCE SLOT A, and two of those are the ones a reader would not expect on a SHADOW pass: a hero
     // cloud shades the ground under it because it IS the cloud field, so the shadow march samples the
     // sculpted body through the same instance buffer and the same volume the view march does. Nothing was
     // added to the deferred pass to make that happen.
+    //
+    // NINE SINCE PHASE NV, and the three that arrived are noise volumes 1, 2 and 3. A layer carries four
+    // cloud types and a type names its own volume; binding one of them was the programme's last recorded
+    // debt and a dead setting in three slots of four. THE SHADOW PASS TAKES ALL FOUR TOO, and that is the
+    // relation worth pinning here rather than the count: a cirrus eroded by the fine volume for the eye
+    // and by the default one for the shadow map would be two different clouds in one frame.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudShadowMap.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 6u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 9u );
+
+    for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+    {
+        EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowNoiseBindings[slot],
+                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
+             << "the shadow pass does not declare noise volume " << slot;
+    }
 
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowOutputBinding,
                              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) ); // the triple it writes
@@ -405,7 +418,7 @@ TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresSixDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
 }
 
-TEST_F( ShaderRootFixture, TheCloudMarchDeclaresTenDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheCloudMarchDeclaresThirteenDescriptorsInSetZero )
 {
     // THE VIEW MARCH, pinned on the same terms and for the same reason, and it was NOT pinned before slot
     // A landed — which is precisely why it is worth doing now: two of its ten descriptors are new, both
@@ -413,9 +426,31 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresTenDescriptorsInSetZero )
     // it. An unbound sampler is an invalid descriptor set, and this backend answers an invalid set by
     // silently skipping the dispatch: every cloud in the frame would vanish with nothing in the log.
     // That failure has happened in this subsystem before, which is what makes a count a useful assertion.
+    //
+    // THIRTEEN SINCE PHASE NV. The three that arrived are noise volumes 1, 2 and 3, and they are bound on
+    // exactly the terms the note above describes: ALWAYS, even when the layer needs one volume, because
+    // Graphic::ResolveCloudNoiseVolumes fills the unused slots with slot 0's image rather than leaving
+    // them empty. They cost nothing in memory — Assets::AssetPreloader uploads every `.dcnv` in the
+    // project whatever any scene names — and they are what makes a type's own volume reach the frame.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 10u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 13u );
+
+    for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+    {
+        EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudNoiseBindings[slot],
+                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
+             << "the march does not declare noise volume " << slot;
+    }
+
+    // AND THE TWO PASSES USE ONE VOCABULARY FOR ONE FIELD. Stated as an assertion rather than as an alias
+    // in a header nobody re-reads: the shadow map binds by number too, and a march that read volume 2 from
+    // descriptor 11 while the shadow pass read it from 12 would give a cloud a shadow cut from a different
+    // noise, which is not an error anywhere — it is a shadow that does not fit its cloud.
+    for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+    {
+        EXPECT_EQ( Desert::Graphic::kCloudNoiseBindings[slot], Desert::Graphic::kCloudShadowNoiseBindings[slot] );
+    }
 
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudOutputBinding,
                              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) ); // the scatter target

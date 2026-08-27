@@ -4,6 +4,8 @@
 #include <Engine/Graphic/AtmosphereEnv.hpp>
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 
+#include <Common/Core/AssetHandle.hpp>
+
 #include <glm/glm.hpp>
 
 #include <algorithm>
@@ -24,9 +26,9 @@ namespace Desert::Graphic
      * Units: KILOMETRES throughout. This packer is where the component's world-unit distances are
      * converted, exactly once.
      *
-     * EVERY SLOT IS READ. The block is 79 floats with no reserved field, and that is a deliberate
+     * EVERY SLOT IS READ. The block is 67 floats with no reserved field, and that is a deliberate
      * constraint rather than an accident of packing: a spare slot is where a future parameter gets quietly
-     * stashed without a name, a range or a tooltip. It is 79 rather than 80 because the last member is a
+     * stashed without a name, a range or a tooltip. It is 67 rather than 68 because the last member is a
      * vec3 — when the domain warp came out, the slot it had occupied came out with it rather than staying
      * behind as somewhere to put things.
      *
@@ -72,12 +74,26 @@ namespace Desert::Graphic
         // is MADE OF. The winner of the union at a sample takes all four; nothing is averaged.
         glm::vec4 SpeciesEdge[kCloudSpeciesSlots];
 
+        // WHICH NOISE VOLUME EACH SPECIES' EDGE IS CUT FROM — x for species 0, y for 1, z for 2, w for 3,
+        // each of them an index into the four `sampler3D` slots the march binds. Four floats and four
+        // consumers, which is the same discipline the array above is held to.
+        //
+        // IT IS A DEDUPLICATED INDEX AND NOT THE SPECIES NUMBER, and the difference is the whole reason
+        // this vec4 exists rather than the march simply reading `sampler[speciesIndex]`. Eight of the nine
+        // shipped types name no volume of their own, so the ordinary four-species sky reads ONE volume
+        // through four descriptors — and a fetch selected by a value that varies across a wave costs the
+        // wave every branch it takes, whether or not the branches land on the same image. Deduplicated,
+        // that sky sends {0,0,0,0}, the compare chain is uniformly false, and the march does exactly what
+        // it did before this field existed. Graphic::ResolveCloudNoiseVolumes computes it, once, and the
+        // renderer binds the images in the same order it numbers them.
+        glm::vec4 SpeciesNoise;
+
         // A vec3 AND LAST, which is the only shape in which three values can be three values. It was a
         // vec4 whose fourth slot carried the cloud type's variance, and then briefly the domain warp's
         // amount; the warp was measured and taken out again (Common/CloudField.glslh has the numbers), and
         // a float nobody reads is where the next parameter gets stashed without a name, a range or a
         // tooltip. Moving it to the end is what lets it shrink: std430 aligns it to 16 and the block ends
-        // at 252 bytes rather than at 256.
+        // at 268 bytes rather than at 272.
         glm::vec3 Aerial; // x AP far extent (km), y AP view-distance scale, z AP gate
     };
 
@@ -98,18 +114,27 @@ namespace Desert::Graphic
     // steps. Both sides of the layout move together in one commit and the offsets below are what makes a
     // half-move a build error rather than a frame read from the wrong place.
     static_assert( offsetof( CloudGpuPayload, SpeciesEdge ) == 176 );
-    static_assert( offsetof( CloudGpuPayload, Aerial ) == 240 );
-    // 252, NOT 256, and the difference is the point. std430 rounds a block's STRIDE up to a multiple of
+    // The noise index array sits between the species array and the trailing vec3 for the reason the
+    // species array itself sits there: std430 aligns a vec4 to 16, and after a vec3 that ends at 252 it
+    // would start at 256 and leave four bytes nobody wrote.
+    static_assert( offsetof( CloudGpuPayload, SpeciesNoise ) == 240 );
+    static_assert( offsetof( CloudGpuPayload, Aerial ) == 256 );
+    // 268, NOT 272, and the difference is the point. std430 rounds a block's STRIDE up to a multiple of
     // 16, but a stride only exists for an ARRAY of blocks and this is a single one — the shader never
-    // reads past the last member, so the block ends at 252 and so does this. glm::vec3 aligns to 4 rather
+    // reads past the last member, so the block ends at 268 and so does this. glm::vec3 aligns to 4 rather
     // than to 16, so the C++ struct ends there too and there is no trailing padding to explain. Same
     // arrangement, and the same reasoning, as CloudResolveParams below.
     //
     // THE BLOCK SHRANK BY 64 BYTES, which is the four vec4s of the per-species placement basis. Nothing
     // was appended to replace them: the region took the weather settings' slot, and the settings that
     // moved to the bake left the block rather than travelling to a march that would not read them.
-    static_assert( sizeof( CloudGpuPayload ) == 252,
-                   "Eleven vec4s, a vec4[4] and a vec3 — the shader reads exactly this and nothing more." );
+    //
+    // AND IT GREW BY SIXTEEN, ONCE, for SpeciesNoise. That is the price of a type's noise volume reaching
+    // the march at all: until it was paid, three of a layer's four slots could name a volume the frame
+    // never read.
+    static_assert( sizeof( CloudGpuPayload ) == 268,
+                   "Eleven vec4s, a vec4[4], a vec4 and a vec3 — the shader reads exactly this and nothing "
+                   "more." );
 
     inline constexpr uint32_t kCloudPayloadBytes = sizeof( CloudGpuPayload );
 
@@ -141,6 +166,29 @@ namespace Desert::Graphic
     // one binding went out and one came in, so the descriptor set's shape is unchanged and every
     // consumer's slot list stayed where it was.
     inline constexpr uint32_t kCloudModellingBinding = 7;
+
+    /**
+     * @brief The FOUR noise volumes a layer can bind, by descriptor number, in the order CloudGpuPayload::
+     *        SpeciesNoise indexes them.
+     *
+     * SEPARATE BINDINGS AND NOT AN ARRAY OF SAMPLERS, and the reason is not preference: this engine's
+     * reflection refuses one in so many words — VulkanShaderReflection.cpp, "arrays of descriptors are not
+     * supported — declare separate bindings" — because every layout it builds hardcodes descriptorCount 1.
+     * Common/CloudAuthored.glslh met the same wall and answered it with an ATLAS, which is the better
+     * answer THERE and the wrong one here: an atlas is addressed by arithmetic on a clamped coordinate,
+     * and the erosion's coordinate is unbounded and relies on the sampler's own REPEAT to tile. Stacking
+     * the volumes would put the neighbour's texels under every wrap, which is a seam in the sky at every
+     * period of the erosion rather than a saving.
+     *
+     * FOUR AND NOT MORE, because a layer has four species and therefore at most four distinct volumes.
+     * THEY COST NOTHING IN MEMORY: Assets::AssetPreloader uploads every `.dcnv` in the project at startup
+     * whatever any scene names, so the images are already resident and this is four descriptors pointing
+     * at bytes that were paid for either way.
+     *
+     * SLOT 0 KEEPS BINDING 3 so that the number the whole subsystem has always meant by "the cloud noise"
+     * is unchanged, and the three that follow take the first free numbers after the authored atlas.
+     */
+    inline constexpr uint32_t kCloudNoiseBindings[kCloudSpeciesSlots] = { kCloudNoiseBinding, 10, 11, 12 };
 
     // The TEMPORAL RESOLVE pass (Programs/Clouds/CloudTemporalResolve.shader). Same rule as above: these
     // numbers are handed to SetInput / SetOutput / SetStorageBuffer verbatim and must equal the ones
@@ -378,6 +426,14 @@ namespace Desert::Graphic
      *                        the tier's floor under the transmittance the march stops at
      *                        (Graphic::CloudQualityScale::StopTransmittanceFloor). Its identity is ZERO,
      *                        which floors nothing, for the reason given on that field.
+     * @param noise           which of the four bound noise volumes each species reads, as
+     *                        Graphic::ResolveCloudNoiseVolumes computed it from the layer's types. ITS
+     *                        IDENTITY IS THE DEFAULT-CONSTRUCTED VALUE — every species on slot 0 — which
+     *                        is what a layer whose types name one volume between them genuinely resolves
+     *                        to, and what every layer in the repository resolved to before a type could
+     *                        name one at all. It is an identity and not a fallback for a failure: the
+     *                        renderer always states it, and the suites that drive this packer directly are
+     *                        asserting the component's behaviour rather than the renderer's binding.
      *
      * THE TWO ATMOSPHERE COUPLINGS follow the sky model, gated on the same handle the height fog uses —
      * a non-null AtmosphereEnv::DistantSkyLight, published in SkyModel::PhysicalAtmosphere and nowhere
@@ -412,12 +468,97 @@ namespace Desert::Graphic
         float     SideKm = 1.0f;    ///< its horizontal side, and the period the volume tiles with
     };
 
+    /**
+     * @brief Which noise volumes a layer actually needs, and which of them each species reads.
+     *
+     * ONE STATEMENT OF A MAPPING THAT TWO PLACES CONSUME. The renderer binds the images and the packer
+     * numbers them, and if those two disagreed by one the erosion of every cloud in the sky would be cut
+     * from the wrong volume with nothing in the log — which is the two-statements-of-one-fact class this
+     * subsystem has already paid for four times over (DEV_CONTRACT.md section 2.3.1). So the mapping is
+     * computed here, once, and both sides read the same struct.
+     *
+     * PURE, and driven directly by Desert/Tests/Engine/CloudPayload: in, the volume handle of each
+     * species; out, the deduplicated list and the index each species takes. No service, no device.
+     */
+    struct CloudNoiseResolution
+    {
+        /// How many DISTINCT volumes the layer needs, 1..kCloudSpeciesSlots. Never zero: a layer with no
+        /// species still binds one volume, because a declared sampler with no image is an invalid
+        /// descriptor set and this backend answers one by skipping the dispatch.
+        uint32_t DistinctCount = 1;
+
+        /// For species k, which of the DistinctCount volumes its edge is cut from. Slots at or past the
+        /// species count are 0 — they are never read, and 0 is the one index that is always bound.
+        uint32_t SlotOfSpecies[kCloudSpeciesSlots] = { 0u, 0u, 0u, 0u };
+
+        /// The volume each of the DistinctCount slots holds, in slot order. Entries at or past
+        /// DistinctCount repeat Volume[0], so every one of the four descriptors has a valid image
+        /// whatever the layer names — see the note on kCloudNoiseBindings.
+        Assets::AssetHandle Volume[kCloudSpeciesSlots] = {};
+    };
+
+    /**
+     * @brief Deduplicate the layer's per-species noise volumes into the four slots the march binds.
+     *
+     * @param perSpecies   the volume handle of species 0..speciesCount-1. A null handle means "the
+     *                     built-in default volume", which is what eight of the nine shipped types name —
+     *                     and null is a VALUE here rather than a missing one, so two species that both
+     *                     name nothing share a slot exactly as two that name the same file do.
+     * @param speciesCount how many of @p perSpecies are filled, 0..kCloudSpeciesSlots. Above the ceiling
+     *                     it is clamped rather than read past; zero gives one slot holding the null
+     *                     handle, which the noise service resolves to the default.
+     */
+    inline CloudNoiseResolution ResolveCloudNoiseVolumes( const Assets::AssetHandle* perSpecies,
+                                                          uint32_t                   speciesCount )
+    {
+        CloudNoiseResolution resolved;
+
+        const uint32_t species = perSpecies ? std::min( speciesCount, kCloudSpeciesSlots ) : 0u;
+
+        // Slot 0 always exists and always holds species 0's volume — or the null handle when the layer has
+        // no species at all, which the service turns into the default. That is what makes DistinctCount a
+        // count of one rather than of zero in the degenerate case, and it is why the loop below starts at
+        // the second species rather than at the first.
+        resolved.Volume[0] = species > 0u ? perSpecies[0] : Assets::AssetHandle::Null();
+
+        for ( uint32_t k = 1; k < species; ++k )
+        {
+            uint32_t slot = resolved.DistinctCount;
+            for ( uint32_t taken = 0; taken < resolved.DistinctCount; ++taken )
+            {
+                if ( resolved.Volume[taken] == perSpecies[k] )
+                {
+                    slot = taken;
+                    break;
+                }
+            }
+
+            if ( slot == resolved.DistinctCount )
+            {
+                resolved.Volume[resolved.DistinctCount] = perSpecies[k];
+                ++resolved.DistinctCount;
+            }
+
+            resolved.SlotOfSpecies[k] = slot;
+        }
+
+        // Every unused descriptor repeats slot 0's image rather than being left unbound. An unbound
+        // sampler is an INVALID descriptor set, not an unused one, and this backend answers an invalid set
+        // by skipping the whole dispatch — the clouds would vanish with nothing in the log, which is a
+        // failure this subsystem has shipped before.
+        for ( uint32_t slot = resolved.DistinctCount; slot < kCloudSpeciesSlots; ++slot )
+            resolved.Volume[slot] = resolved.Volume[0];
+
+        return resolved;
+    }
+
     inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const CloudTypeShape* shapes,
                                             uint32_t speciesCount, const AtmosphereEnv& atmosphere,
                                             const glm::vec3&          windOffsetWorld,
-                                            const CloudRegionBinding& region = CloudRegionBinding{},
-                                            int32_t lightMarchSampleCeiling  = ECS::kCloudLightMarchMaxSamples,
-                                            float   stopTransmittanceFloor   = 0.0f )
+                                            const CloudRegionBinding& region  = CloudRegionBinding{},
+                                            int32_t lightMarchSampleCeiling   = ECS::kCloudLightMarchMaxSamples,
+                                            float   stopTransmittanceFloor    = 0.0f,
+                                            const CloudNoiseResolution& noise = CloudNoiseResolution{} )
     {
         const bool     physical = atmosphere.Valid && atmosphere.DistantSkyLight != nullptr;
         const uint32_t species  = std::min( speciesCount, kCloudSpeciesSlots );
@@ -502,6 +643,18 @@ namespace Desert::Graphic
             p.SpeciesEdge[slot] =
                  glm::vec4( std::clamp( shape.DetailCharacter, 0.0f, 1.0f ), std::max( shape.DetailFactor, 0.0f ),
                             std::max( shape.DensityFactor, 0.0f ), std::max( shape.ExtinctionFactor, 0.0f ) );
+        }
+
+        // THE INDEX IS CLAMPED TO A BOUND DESCRIPTOR, and not because the resolver can produce a bad one —
+        // it cannot, by construction. It is clamped because this is the last point at which a number that
+        // reaches a fetch selector can be checked at all: past here it is four floats in a buffer, and a
+        // slot of 4 in the march is a branch chain that falls through to slot 0 silently. One clamp turns
+        // "somebody widened kCloudSpeciesSlots on one side only" into a sky cut from the wrong volume in
+        // ONE place rather than into a shader that reads a descriptor nobody wrote.
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+        {
+            const uint32_t index = std::min( noise.SlotOfSpecies[slot], kCloudSpeciesSlots - 1u );
+            p.SpeciesNoise[static_cast<int>( slot )] = static_cast<float>( index );
         }
 
         p.Wind    = glm::vec4( windOffsetWorld / kCloudWorldUnitsPerKm, std::clamp( data.PhaseG, -0.9f, 0.9f ) );

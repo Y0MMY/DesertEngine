@@ -1512,6 +1512,58 @@ TEST( CloudAtlas, EightBodiesFitTheBudgetAndNineDoNot )
     EXPECT_EQ( static_cast<double>( Assets::kCloudModellingVoxelBytes ) / ( 1024.0 * 1024.0 ), kBodyMiB );
 }
 
+TEST( CloudSeam, TheSculptedBodyIsErodedByTheFirstSpeciesVolume )
+{
+    // A HERO CLOUD IS NOT A SPECIES. It has no `.decloudtype` and therefore names no noise volume, so when
+    // phase NV gave every species a volume of its own the sculpted producer had to be given SOME answer —
+    // and the answer chosen was the one it already had. Before NV the layer bound one volume, the first
+    // filled slot's, which is species 0's; after NV a body still reads species 0's. So this test asserts
+    // that a decision was made and stayed made, rather than that a number is pretty.
+    //
+    // IT IS ASSERTED BY WATCHING THE CALLBACK, not by reading the seam's source. CloudFieldReference's
+    // opposite number records every slot the seam asks for; if the sculpted producer ever started
+    // carrying an instance's own slot, or the union began leaking the procedural winner's into an
+    // authored sample, this set would gain a second entry.
+    NoiseSlotsAsked().clear();
+
+    CloudFieldParams params = DefaultParams();
+
+    // A body in the sky, and the ordinary erosion path over it — the same walk the union tests take.
+    ClearInstances();
+    AddInstance( MakeInstance( glm::vec3( 0.0f, 1.4f, 0.0f ) ) );
+
+    int inside = 0;
+
+    for ( int iz = 0; iz < 24; ++iz )
+    {
+        for ( int ix = 0; ix < 24; ++ix )
+        {
+            for ( int ih = 0; ih < 6; ++ih )
+            {
+                const float fraction = ( ih + 0.5f ) / 6.0f;
+                const vec3  at( -1.0f + 2.0f * ( ix + 0.5f ) / 24.0f, fraction * 2.8f,
+                                -1.0f + 2.0f * ( iz + 0.5f ) / 24.0f );
+
+                const CloudFieldSample sample = SampleCloudField( params, fraction, at );
+                if ( sample.Profile <= 0.0f )
+                    continue;
+
+                ++inside;
+                (void)CloudSampleDensity( params, sample, at );
+            }
+        }
+    }
+
+    std::printf( "[CloudSeam] %d samples eroded; the seam asked for %zu distinct noise slot(s)\n", inside,
+                 NoiseSlotsAsked().size() );
+
+    ASSERT_GT( inside, 0 ) << "no sample reached the erosion, so no slot was ever asked for";
+    ASSERT_EQ( NoiseSlotsAsked().size(), 1u ) << "the seam asked for more than one noise volume in a layer "
+                                                 "that binds one";
+    EXPECT_EQ( *NoiseSlotsAsked().begin(), 0 ) << "a sculpted body was eroded by a volume that is not the "
+                                                  "first species' — which is a change of what A0 shipped";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

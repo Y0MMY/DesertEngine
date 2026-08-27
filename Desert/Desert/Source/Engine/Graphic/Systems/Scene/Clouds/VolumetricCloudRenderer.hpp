@@ -160,10 +160,22 @@ namespace Desert::Graphic::System
         // freshly created image mean nothing. Returns false having logged the reason and latched the
         // failure.
         bool EnsureTraceTargets( uint32_t halfWidth, uint32_t halfHeight );
-        // Points m_NoiseVolume at the volume this layer's FIRST cloud type names, through
-        // Runtime::CloudTypeService and then Runtime::CloudNoiseService. Returns false having logged the
-        // reason when there is not even a default to fall back on.
-        bool EnsureNoiseVolume();
+        /**
+         * Fills m_NoiseVolume with the images the layer's FOUR species name, deduplicated, and
+         * m_NoiseSlots with the mapping the packed block sends.
+         *
+         * ONE VOLUME PER SPECIES AND NOT ONE PER LAYER, which is what this function was rewritten from.
+         * The character of a cloud's edge is a property of the KIND of cloud — the shipped Cirrus names
+         * the finer of the two volumes and the panel's own tooltip promises that it travels with the type
+         * — and until this took four handles rather than the first non-empty one, three of a layer's four
+         * slots could name a volume the frame never read.
+         *
+         * @param handles      the species' cloud type handles, as ResolveSpecies packed them.
+         * @param speciesCount how many of them are filled.
+         * @return false, having logged the reason, when there is not even a default to fall back on.
+         */
+        bool EnsureNoiseVolumes( const Assets::AssetHandle ( &handles )[kCloudSpeciesSlots],
+                                 uint32_t speciesCount );
         // Allocates the shadow map the first frame the layer actually casts, and REALLOCATES it when the
         // quality tier changes its size. Separate from EnsureTraceTargets because its size is not a
         // property of the view: a viewport resize must not throw it away, where every one of the six trace
@@ -286,7 +298,21 @@ namespace Desert::Graphic::System
         // renderer has a say in the image's lifetime and would keep an unloaded volume alive on the device.
         // Refreshed from the service every frame, so a hot reload swaps the image under it with no state of
         // its own to go stale.
-        Image3D* m_NoiseVolume = nullptr;
+        //
+        // FOUR OF THEM, one per DISTINCT volume the layer's species name, and entries at or past
+        // m_NoiseNeeded repeat the first — every descriptor is written every frame, because an unbound
+        // sampler is an invalid descriptor set and this backend answers one by skipping the dispatch.
+        Image3D* m_NoiseVolume[kCloudSpeciesSlots] = {};
+
+        // How many of the four are DISTINCT, 1..kCloudSpeciesSlots. It is the number of images the frame
+        // has to transition for reading — the barrier is per image, and transitioning the same one four
+        // times is four barriers on one resource rather than a no-op.
+        uint32_t m_NoiseNeeded = 1;
+
+        // Which of the four each species reads, exactly as it travels to the march in
+        // CloudGpuPayload::SpeciesNoise. Kept beside the images so the two cannot be filled from different
+        // resolutions of the same question.
+        CloudNoiseResolution m_NoiseSlots{};
 
         // SLOT A. The instance buffer is doubled for the same reason the parameter buffer is — the shadow
         // map dispatches before the render graph and the march after it, and one non-persistent buffer

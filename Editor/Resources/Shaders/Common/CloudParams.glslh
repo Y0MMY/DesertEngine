@@ -72,6 +72,12 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     // Slots at or past u_CloudDetail.w are zero and are never read: the loop stops at the count, and the
     // modelling volume's channel for an empty slot is zero everywhere anyway.
     vec4  u_CloudSpeciesEdge[4];
+    // WHICH NOISE VOLUME EACH SPECIES' EDGE IS CUT FROM — x for species 0, y for 1, z for 2, w for 3,
+    // each an index into the four `sampler3D` slots this pass binds. It is a DEDUPLICATED index and not
+    // the species number: eight of the nine shipped types name no volume of their own, so the ordinary
+    // sky sends {0,0,0,0}, the four-way select in the march is uniform across the wave, and it costs
+    // exactly what one sampler cost. Graphic::ResolveCloudNoiseVolumes decides it.
+    vec4  u_CloudSpeciesNoise;
     // x = aerial-perspective volume far extent (km), y = its read-side view-distance scale,
     // z = 1 when the volume exists and must be sampled.
     //
@@ -84,7 +90,7 @@ layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuff
     vec3  u_CloudAerial;
 };
 
-// The block is ELEVEN vec4s, a vec4[4] and a vec3, and it stops there. Seeds and octave counts are absent
+// The block is ELEVEN vec4s, a vec4[4], one more vec4 and a vec3, and it stops there. Seeds and octave counts are absent
 // on purpose: they decide what the baked volumes CONTAIN, not how the march reads them, so they belong to
 // the generators and would be four values copied into every dispatch here for nothing.
 
@@ -112,7 +118,15 @@ CloudFieldParams CloudUnpackFieldParams()
     p.SpeciesCount   = int( clamp( u_CloudDetail.w, 0.0f, float( CLOUD_SPECIES_SLOTS ) ) );
 
     for ( int slot = 0; slot < CLOUD_SPECIES_SLOTS; ++slot )
+    {
         p.SpeciesEdge[slot] = u_CloudSpeciesEdge[slot];
+        // CLAMPED ON THE WAY IN, and the bound is the number of samplers this pass actually declares.
+        // The packer clamps too; this is the other end of the same wire, and it is here because an index
+        // out of range does not fault in the select below — it falls through to slot 0 and cuts the whole
+        // sky from the wrong volume with nothing in the log.
+        p.SpeciesNoise[slot] =
+             int( clamp( u_CloudSpeciesNoise[slot], 0.0f, float( CLOUD_SPECIES_SLOTS - 1 ) ) );
+    }
 
     p.RegionOriginKm  = vec2( u_CloudRegion.x, u_CloudRegion.y );
     p.InvRegionSizeKm = u_CloudRegion.z;

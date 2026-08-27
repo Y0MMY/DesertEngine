@@ -40,6 +40,7 @@
 #include <cstring>
 #include <algorithm>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace Desert::Tests::CloudAuthoredRef
@@ -91,8 +92,22 @@ namespace Desert::Tests::CloudAuthoredRef
             return cache;
         }
 
-        vec4 CloudSampleBakedVolumeCached( vec3 texturePosition )
+        /// Every noise slot the seam has asked this suite for, in a set. THE SLOT IS RECORDED RATHER THAN
+        /// IGNORED, and the difference is a test: a hero cloud is not a species and names no volume of its
+        /// own, so the seam gives every sculpted body species 0's slot — and
+        /// TheSculptedBodyIsErodedByTheFirstSpeciesVolume asserts that this set holds nothing else. A
+        /// parameter accepted and thrown away would have let the seam start reading whichever volume it
+        /// liked with nothing to notice.
+        std::set<int>& NoiseSlotsAsked()
         {
+            static std::set<int> asked;
+            return asked;
+        }
+
+        vec4 CloudSampleBakedVolumeCached( int slot, vec3 texturePosition )
+        {
+            NoiseSlotsAsked().insert( slot );
+
             NoiseKey key{};
             std::memcpy( key.data(), &texturePosition.x, sizeof( float ) );
             std::memcpy( key.data() + 1, &texturePosition.y, sizeof( float ) );
@@ -110,7 +125,7 @@ namespace Desert::Tests::CloudAuthoredRef
             return value;
         }
 
-#define CLOUD_SAMPLE_NOISE( p ) CloudSampleBakedVolumeCached( p )
+#define CLOUD_SAMPLE_NOISE( s, p ) CloudSampleBakedVolumeCached( ( s ), ( p ) )
 
         // ------------------------------------------------------------------------------------------
         // The procedural producer's modelling volume, which this suite needs bound and does not measure
@@ -454,7 +469,13 @@ namespace Desert::Tests::CloudAuthoredRef
             params.WindOffsetKm   = vec3( 0.0f );
 
             for ( int slot = 0; slot < CLOUD_SPECIES_SLOTS; ++slot )
+            {
                 params.SpeciesEdge[slot] = vec4( 0.0f );
+                // One species and therefore one volume, which is what a layer of one type resolves to and
+                // what every scene in the repository is in. The point of the assertion this suite adds is
+                // that the SCULPTED side asks for this slot too.
+                params.SpeciesNoise[slot] = 0;
+            }
 
             params.SpeciesEdge[0] =
                  vec4( shape.DetailCharacter, shape.DetailFactor, shape.DensityFactor, shape.ExtinctionFactor );

@@ -43,7 +43,29 @@ Shader "CloudShadowMap"
         // The noise volume and the procedural modelling volume, at the march's own binding numbers (see
         // Graphic::kCloudShadowNoiseBinding). One vocabulary for one field.
         Uniform(3) sampler3D u_CloudNoise;
+        // ALL FOUR OF THE MARCH'S NOISE SLOTS, at the march's own numbers. A cloud shades the ground with
+        // the edge it actually has: a cirrus eroded by the fine volume for the eye and by the default one
+        // for the shadow map would be two different clouds in one frame, and the disagreement would show
+        // as a shadow that does not fit its cloud.
+        Uniform(10) sampler3D u_CloudNoise1;
+        Uniform(11) sampler3D u_CloudNoise2;
+        Uniform(12) sampler3D u_CloudNoise3;
         Uniform(7) sampler3D u_CloudModelling;
+
+        // The same four-way select the march declares, for the same reason and at the same cost. Repeated
+        // rather than shared because Common/CloudField.glslh must stay free of samplers to remain
+        // compilable as C++ by its tests — which is the same reason the three callbacks below are declared
+        // in each shader rather than in the header they feed.
+        vec4 CloudFetchNoise( int slot, vec3 p )
+        {
+            if ( slot == 1 )
+                return texture( u_CloudNoise1, p );
+            if ( slot == 2 )
+                return texture( u_CloudNoise2, p );
+            if ( slot == 3 )
+                return texture( u_CloudNoise3, p );
+            return texture( u_CloudNoise, p );
+        }
 
         // The sculpted hero-cloud body, at the march's own slot too — one vocabulary for one field, and
         // the reason the shadow map needs it at all is that a hero cloud is a cloud: it shades the ground
@@ -53,7 +75,7 @@ Shader "CloudShadowMap"
 
         // The seam's three callbacks, exactly as CloudRaymarch.shader declares them: Common/CloudField.glslh
         // must stay free of samplers to remain compilable as C++ by its tests.
-        #define CLOUD_SAMPLE_NOISE(p) texture(u_CloudNoise, (p))
+        #define CLOUD_SAMPLE_NOISE(s, p) CloudFetchNoise((s), (p))
         #define CLOUD_SAMPLE_MODELLING(p) textureLod(u_CloudModelling, (p), 0.0f)
         #define CLOUD_SAMPLE_AUTHORED(p) textureLod(u_CloudAuthoredAtlas, (p), 0.0f)
 
