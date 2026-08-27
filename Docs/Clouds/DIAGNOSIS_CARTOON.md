@@ -653,6 +653,25 @@ load should fail rather than photograph something else.
   an authored field or nothing. **One rebuild with `HalfExtent` applied once instead of twice at
   `VolumetricCloudRenderer.cpp:1094` would settle it in two frames**, and it is the single most valuable
   follow-up measurement in this document.
+
+  > **ANSWERED, 2026-08-28, by Р6 — and the answer is no.** Two corrections and one result.
+  >
+  > The two applications are **not** at one site and are **not** an accident: `:1094` produces the HALF
+  > extent the composite upsamples from, and `EnsureTraceTargets` applies it again at **`:915`** for the
+  > QUARTER extent the march writes. Removing either does not undo a doubling — it raises the whole
+  > pyramid an octave. The design was already stated twice in the tree.
+  >
+  > Р6 then built the strongest form of this hypothesis — trace at half, reconstruction at **native**, so
+  > every displayed pixel gets its own traced ray and no resolution deficit remains — and it closes
+  > **1.3 % and 3.4 %** of a gap short by about half. Contrast moves under 0.001 at all six points; the
+  > frame moves 0.12–0.51/255, *less than doubling `MaxSteps` moved it*, for **2.83×** the cost
+  > (march 12.695 → 35.907 ms; 71.2 MiB at 1920×1080, over D-9's whole subsystem budget by itself).
+  >
+  > **The signature in §4.5 was misread, and that is the useful part.** Our frames surviving a 4× round
+  > trip better than the reference barely moves at native resolution either (58.7 → 58.2 %, 60.8 →
+  > 59.4 %, against the reference's 45.7 / 53.8 %). It was reading the smoothness of the cloud itself,
+  > not the sampling grid. What limits the surface is still open, and it is not sampling — it needs a
+  > mechanism that ADDS surface. See the recorded refusal at `VolumetricCloudRenderer.cpp:36-42`.
 * **Anything costing time.** By the lead's ruling, and the machine's load average ran from 9 to 88 while
   these frames were taken. No conclusion here depends on a slope.
 * **The interactive editor.** Everything is headless `--shot`; the temporal stage was exercised with
