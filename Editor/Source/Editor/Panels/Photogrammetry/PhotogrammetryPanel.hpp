@@ -59,6 +59,9 @@ namespace Desert::Editor
             return ImVec2( 1040.0f, 660.0f );
         }
         void OnUIRender() override;
+        // Runs for EVERY panel, hidden ones included — which is what makes it the right place to give the
+        // renderer slot back. A panel that merely stopped drawing would still hold one of the six.
+        void OnPreUpdate() override;
 
     private:
         enum class Job
@@ -83,8 +86,15 @@ namespace Desert::Editor
 
         // --- live mesh preview (own offscreen scene, mirrors AssetThumbnailRenderer) ---
         void EnsurePreview();
+        // Destroys the preview scene and renderer — which is what returns the renderer slot. Idles the device
+        // and releases the scene before the renderer, the order ~PreviewViewport established. The mesh handle
+        // is KEPT, so reopening the panel rebuilds the same preview instead of showing an empty pane.
+        void ReleasePreview();
         void RenderPreview( uint32_t w, uint32_t h );
         void SetPreviewMesh( const Assets::AssetHandle& mesh );
+        // Puts m_PreviewMesh on the (freshly created) preview target and frames it. Separate from
+        // SetPreviewMesh so EnsurePreview can restore the view after a release without recursing into it.
+        void ApplyPreviewMesh();
 
         // --- ui sections ---
         void DrawToolbar( bool running );

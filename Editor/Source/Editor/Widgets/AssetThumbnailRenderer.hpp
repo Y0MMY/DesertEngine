@@ -20,6 +20,12 @@ namespace Desert::Editor
     class AssetThumbnailRenderer
     {
     public:
+        // Waits for the GPU before releasing the scene, then the renderer that owns its passes. The same
+        // order and the same reason as ~PreviewViewport: this is destroyed when the thumbnail queue has been
+        // idle for a while (so the renderer slot goes back), which can happen while the last frame this
+        // recorded into is still executing against its pipelines and descriptor pools.
+        ~AssetThumbnailRenderer();
+
         // Queue a material to be captured to outPng. No-op if a capture is already in flight (see HasPending).
         // `flatPreview` previews on a camera-facing PLANE/card instead of a sphere — right for foliage/cutout
         // materials (a grass card atlas wraps/garbles on a sphere). Drives forward via Tick().

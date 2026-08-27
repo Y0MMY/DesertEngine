@@ -75,12 +75,19 @@ namespace Desert::Editor
         // Shared by both Request* entry points: decides whether the work is needed at all.
         bool ShouldQueue( const std::string& assetPath, const std::string& png );
 
-        std::unique_ptr<AssetThumbnailRenderer> m_Renderer; // created lazily — a session may never preview
+        // Created lazily — a session may never preview — and RELEASED again once the queue has been idle
+        // for a while, because it owns a full SceneRenderer and therefore one of the six renderer slots
+        // (Engine/Core/RendererSlotPool.hpp). Holding it for the rest of the session after one thumbnail
+        // meant an editor that had ever shown the asset browser had five slots, not six, for the surfaces
+        // the user actually opens; past six, a scene view records into slot 0 and shares the main
+        // viewport's camera with no error message at all.
+        std::unique_ptr<AssetThumbnailRenderer> m_Renderer;
         std::vector<Request>                    m_Queue;
         std::unordered_set<std::string>         m_Queued;  // asset paths currently queued or in flight
         std::unordered_set<std::string>         m_Failed;  // gave up: do not retry every frame
         std::string                             m_InFlight;      // asset path being captured
         std::string                             m_InFlightPng;   // its target PNG, checked on completion
         int                                     m_InFlightTicks = 0;
+        int                                     m_IdleTicks     = 0; // consecutive frames with no work at all
     };
 } // namespace Desert::Editor

@@ -177,7 +177,6 @@ namespace Desert::Editor
         }
 
         EnsureInit();
-        RequestRender(); // content changed -> the cached image is stale
 
         auto& smc = m_Target.GetComponent<ECS::StaticMeshComponent>();
         smc.RuntimeMesh.reset();
@@ -292,8 +291,6 @@ namespace Desert::Editor
     void PreviewViewport::SetMaterial( const Assets::AssetHandle& material, Shape shape )
     {
         EnsureInit();
-
-        RequestRender(); // content changed -> the cached image is stale
 
         auto& smc      = m_Target.GetComponent<ECS::StaticMeshComponent>();
         smc.MeshHandle = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
@@ -421,10 +418,7 @@ namespace Desert::Editor
         // A mesh requested before the MeshService had it: keep trying so it gets framed the frame it lands.
         if ( !m_Framed && static_cast<uint64_t>( m_MeshHandle ) != 0 )
         {
-            const bool framedNow = TryFrameMesh();
-            if ( framedNow && !m_Framed )
-                RequestRender(); // the view just became correct — draw it
-            m_Framed = framedNow;
+            m_Framed = TryFrameMesh();
         }
 
         // Resize recreates framebuffers and idles the GPU, so only on an actual change.
@@ -433,7 +427,6 @@ namespace Desert::Editor
             m_Scene->Resize( width, height );
             m_Width  = width;
             m_Height = height;
-            RequestRender(); // new framebuffers: whatever they hold is not this preview
         }
 
         ApplyCamera( width, height );

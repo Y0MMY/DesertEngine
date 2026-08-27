@@ -6,6 +6,7 @@
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 #include "Editor/Panels/IPanel.hpp"
 #include "Editor/Core/CommandPalette.hpp"
+#include "Editor/Core/SceneViewIdentity.hpp"
 #include "Editor/RenderSystems/RenderRigistry.hpp"
 
 #include <filesystem>
@@ -108,9 +109,20 @@ namespace Desert::Editor
         // Opens a new, empty scene alongside the main one — its own SceneRenderer + RenderRegistry + a live
         // dockable viewport. Work on a UI/main-menu scene next to the game scene without switching.
         void AddSceneView();
+        // Destroys the document named @p id: its viewport panel, render registry, scene and renderer, in that
+        // order and behind a device-idle wait. Called from OnUpdate (between frames) when the user closes a
+        // scene-view window; a no-op for an id that is already gone. This is what gives the renderer slot
+        // back — see Engine/Core/RendererSlotPool.hpp.
+        void CloseSceneView( uint64_t id );
+        // Closes every scene view whose window the user dismissed since the last frame. One pass at the top
+        // of OnUpdate, because a close destroys GPU resources and removes a panel from m_Panels — neither is
+        // legal from inside the ImGui pass that is iterating it.
+        void CloseDismissedSceneViews();
         // Rebinds the editor to a focused document: m_MainScene (and thus every play/save/gizmo call site)
-        // points at it, Commands + the scene-bound panels follow. index < 0 = the primary/main scene.
-        void SetActiveScene( int index );
+        // points at it, Commands + the scene-bound panels follow. kPrimarySceneViewId = the primary/main
+        // scene. An id whose document has been closed rebinds nothing and says so — see SceneViewIdentity.hpp
+        // for why the viewports name their document instead of numbering it.
+        void SetActiveScene( uint64_t id );
         // Runs one render frame for a scene (outline aid + Begin/RegistryRender/OnUpdate/End). Called for
         // every open document each frame so all viewports stay live.
         Common::BoolResultStr UpdateSceneFrame( Desert::Core::Scene& scene, Render::RenderRegistry* registry,
@@ -165,6 +177,10 @@ namespace Desert::Editor
         // editor render-registry and a live ViewportPanel (non-owning ptr; the panel lives in m_Panels).
         struct SceneDocument
         {
+            // The document's name for as long as it exists, and the ONLY thing a viewport's activation
+            // callback captures. Not its position: see Editor/Core/SceneViewIdentity.hpp for why an index
+            // silently activates the wrong document the moment a view in front of it is closed.
+            uint64_t                                Id = kPrimarySceneViewId;
             std::string                             Name;
             std::shared_ptr<Desert::Core::Scene>    Scene;
             std::unique_ptr<Graphic::SceneRenderer> Renderer;
@@ -172,7 +188,8 @@ namespace Desert::Editor
             ViewportPanel*                          Viewport = nullptr;
         };
         std::vector<std::unique_ptr<SceneDocument>> m_ExtraScenes;
-        int                                         m_ActiveSceneIndex = -1; // -1 = primary; else m_ExtraScenes[i]
+        SceneViewIdSource                           m_SceneViewIds;
+        uint64_t m_ActiveSceneId = kPrimarySceneViewId; // which document the editor is bound to
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;

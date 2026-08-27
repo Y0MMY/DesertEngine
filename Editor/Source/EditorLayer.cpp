@@ -416,8 +416,8 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
         {
             auto primaryViewport = std::make_unique<Editor::ViewportPanel>( m_MainScene, m_AssetManager.get() );
-            // Focusing the main viewport rebinds the editor back to the primary scene (index -1).
-            primaryViewport->SetOnActivate( [this] { SetActiveScene( -1 ); } );
+            // Focusing the main viewport rebinds the editor back to the primary scene.
+            primaryViewport->SetOnActivate( [this] { SetActiveScene( kPrimarySceneViewId ); } );
             m_Panels.emplace_back( std::move( primaryViewport ) );
         }
         {
@@ -586,6 +586,12 @@ namespace Desert::Editor
             m_AddSceneViewRequested = false;
             AddSceneView();
         }
+
+        // ...and closing one destroys the same resources, so it is deferred to the same place. It must also
+        // run BEFORE the OnPreUpdate loop below and before UpdateSceneFrame: a document whose window the user
+        // dismissed last frame would otherwise get one more full scene render, and — until this existed at
+        // all — every subsequent frame for the rest of the session, holding one of the six renderer slots.
+        CloseDismissedSceneViews();
 
         // Stop is deferred here (between frames) so it never destroys/recreates render resources while a
         // command buffer that references them is in flight — see m_PendingSceneStop.
@@ -917,9 +923,13 @@ namespace Desert::Editor
 
     void EditorLayer::AddSceneView()
     {
-        auto      doc = std::make_unique<SceneDocument>();
-        const int idx = static_cast<int>( m_ExtraScenes.size() );
-        doc->Name     = "Scene " + std::to_string( idx + 2 ); // the main scene reads as "Scene 1"
+        auto           doc = std::make_unique<SceneDocument>();
+        const uint64_t id  = m_SceneViewIds.Next();
+        doc->Id            = id;
+        // Numbered by the id, not by the current count: with closing implemented, "Scene 3" reappearing as
+        // the name of a fourth view after the third was closed would put two different documents under one
+        // label across a session, and the log lines below are how a slot leak is read.
+        doc->Name = "Scene " + std::to_string( id + 1 ); // the main scene reads as "Scene 1"
 
         doc->Renderer = std::make_unique<Graphic::SceneRenderer>();
         doc->Scene    = std::make_shared<Desert::Core::Scene>( std::string( doc->Name ), doc->Renderer.get() );
@@ -928,24 +938,109 @@ namespace Desert::Editor
         doc->Registry = std::make_unique<Render::RenderRegistry>( doc->Scene );
 
         // Unique ImGui id per viewport — two windows sharing an id would merge into a single dockable window.
-        const std::string title = doc->Name + "###sceneview" + std::to_string( idx );
+        // Keyed on the document id so a closed window's saved imgui.ini entry (position, dock node, size) is
+        // never inherited by an unrelated later view.
+        const std::string title = doc->Name + "###sceneview" + std::to_string( id );
         auto              vp = std::make_unique<Editor::ViewportPanel>( doc->Scene, m_AssetManager.get(), title );
-        vp->SetOnActivate( [this, idx] { SetActiveScene( idx ); } );
+        // Captures the ID, never the index. See Editor/Core/SceneViewIdentity.hpp.
+        vp->SetOnActivate( [this, id] { SetActiveScene( id ); } );
         vp->GetVisibility() = true;
         doc->Viewport       = vp.get();
         m_Panels.emplace_back( std::move( vp ) );
 
         m_ExtraScenes.emplace_back( std::move( doc ) );
-        LOG_INFO( "[Editor] Opened a new scene view (now {} scenes open)", m_ExtraScenes.size() + 1 );
+        LOG_INFO( "[Editor] Opened scene view #{} (now {} scenes open, {}/{} renderer slots in use)", id,
+                  m_ExtraScenes.size() + 1, Graphic::SceneRenderer::GetLiveRendererCount(),
+                  EngineContext::kMaxRendererSlots );
     }
 
-    void EditorLayer::SetActiveScene( int index )
+    void EditorLayer::CloseDismissedSceneViews()
     {
-        if ( index == m_ActiveSceneIndex || index >= static_cast<int>( m_ExtraScenes.size() ) )
+        // Collect first, close after: CloseSceneView erases from both m_ExtraScenes and m_Panels, so deciding
+        // and mutating in one pass over either would be iterating a container while emptying it.
+        std::vector<uint64_t> dismissed;
+        for ( const auto& doc : m_ExtraScenes )
+            if ( doc->Viewport && !doc->Viewport->GetVisibility() )
+                dismissed.push_back( doc->Id );
+
+        for ( const uint64_t id : dismissed )
+            CloseSceneView( id );
+    }
+
+    void EditorLayer::CloseSceneView( uint64_t id )
+    {
+        const auto index = IndexOfSceneView(
+             m_ExtraScenes, []( const std::unique_ptr<SceneDocument>& doc ) { return doc->Id; }, id );
+        if ( !index )
+            return; // already closed — a second X on the same window in the same frame, or a stale request
+
+        // Closing the document that is PLAYING ends play mode with it. The snapshot Stop would restore is a
+        // snapshot of a scene that is about to cease existing, and OnSceneStop acts on whatever document is
+        // active — so leaving the state alone would strand the editor in Play with an Edit-mode scene under
+        // it: the Stop button would early-return and never come back up.
+        if ( m_EditorState == EditorState::Play && m_ActiveSceneId == id )
+        {
+            LOG_INFO( "[Editor] Scene view #{} was playing when it was closed — play mode ends with it and "
+                      "its snapshot is discarded.",
+                      id );
+            m_EditorState      = EditorState::Paused;
+            m_PendingSceneStop = false;
+            m_PlaySnapshot.clear();
+        }
+
+        // The editor must not stay bound to a scene that is about to stop existing. Rebinding BEFORE the
+        // teardown, not after, so no panel is holding the dying scene when its registry is destroyed.
+        if ( const uint64_t next = ActiveSceneViewAfterClose( m_ActiveSceneId, id ); next != m_ActiveSceneId )
+            SetActiveScene( next );
+
+        auto&             doc  = m_ExtraScenes[*index];
+        const std::string name = doc->Name;
+
+        // The destruction order is the one ~PreviewViewport established and it is not interchangeable: the
+        // last submitted frame may still be executing against this document's pipelines, framebuffers and
+        // descriptor pools. Idle the device; then drop the PANEL (its UIHelper holds descriptor sets that
+        // reference the scene's images); then the registry, which holds render commands built from the
+        // scene; then the scene, which owns the passes; and only then the renderer that owns them all —
+        // whose destructor is what hands the renderer slot back.
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+
+        IPanel* panel = doc->Viewport;
+        m_ContextualShown.erase( panel );
+        std::erase_if( m_Panels, [panel]( const std::unique_ptr<IPanel>& p ) { return p.get() == panel; } );
+        doc->Viewport = nullptr;
+
+        doc->Registry.reset();
+        doc->Scene.reset();
+        doc->Renderer.reset();
+        m_ExtraScenes.erase( m_ExtraScenes.begin() + static_cast<ptrdiff_t>( *index ) );
+
+        // The count is printed, not left to be derived: a surface that fails to return its slot produces no
+        // error at all, and this line beside the one in AddSceneView is what makes the leak readable.
+        LOG_INFO( "[Editor] Closed scene view #{} '{}' ({} scenes open, {}/{} renderer slots in use)", id, name,
+                  m_ExtraScenes.size() + 1, Graphic::SceneRenderer::GetLiveRendererCount(),
+                  EngineContext::kMaxRendererSlots );
+    }
+
+    void EditorLayer::SetActiveScene( uint64_t id )
+    {
+        if ( id == m_ActiveSceneId )
             return;
 
-        m_ActiveSceneIndex = index;
-        m_MainScene        = ( index < 0 ) ? m_PrimaryScene : m_ExtraScenes[index]->Scene;
+        const auto index = IndexOfSceneView(
+             m_ExtraScenes, []( const std::unique_ptr<SceneDocument>& doc ) { return doc->Id; }, id );
+        if ( id != kPrimarySceneViewId && !index )
+        {
+            // NAMED rather than ignored. An id that resolves to nothing means a viewport outlived its
+            // document, which is a lifetime bug in this file — and the whole reason activation is keyed on an
+            // id is that this case can be SEEN. An index would have silently activated a neighbour.
+            LOG_ERROR( "[Editor] Scene view #{} asked to become active but no such document is open — the "
+                       "active scene is unchanged ('{}').",
+                       id, m_MainScene ? m_MainScene->GetSceneName() : "<none>" );
+            return;
+        }
+
+        m_ActiveSceneId = id;
+        m_MainScene     = index ? m_ExtraScenes[*index]->Scene : m_PrimaryScene;
 
         // Structural undo/redo context + the scene-bound editing panels follow the active document, so the
         // Outliner / Details / Settings / Particle editor all show whichever viewport you are working in.
@@ -956,7 +1051,7 @@ namespace Desert::Editor
         // Selection is per-scene (entity UUIDs belong to one registry) — don't carry a stale one across.
         Core::SelectionManager::ClearSelection();
 
-        LOG_INFO( "[Editor] Active scene -> '{}'", m_MainScene->GetSceneName() );
+        LOG_INFO( "[Editor] Active scene -> '{}' (view #{})", m_MainScene->GetSceneName(), id );
     }
 
     Common::BoolResultStr EditorLayer::OnImGuiRender()
@@ -2510,7 +2605,19 @@ namespace Desert::Editor
         if ( ImGui::MenuItem( ICON_MDI_PLUS_BOX_MULTIPLE " New Scene View" ) )
             m_AddSceneViewRequested = true; // deferred to OnUpdate (allocates GPU resources) — see there
         if ( !m_ExtraScenes.empty() )
+        {
             ImGui::TextDisabled( "%d scene view(s) open + main", static_cast<int>( m_ExtraScenes.size() ) );
+            // Closing from here does exactly what the window's X does — clear the panel's visibility — rather
+            // than tearing the document down inside the ImGui pass. One close path, one place that owns the
+            // ordering (CloseSceneView, from OnUpdate); a second mechanism here would be a second chance to
+            // get the destruction order wrong.
+            for ( const auto& doc : m_ExtraScenes )
+            {
+                const std::string item = std::string( ICON_MDI_CLOSE " Close " ) + doc->Name;
+                if ( ImGui::MenuItem( item.c_str() ) && doc->Viewport )
+                    doc->Viewport->GetVisibility() = false;
+            }
+        }
 
         if ( !m_RecentScenes.empty() )
         {
@@ -3001,6 +3108,18 @@ namespace Desert::Editor
         m_ImGuiLayer->OnDetach();
         m_ImGuiLayer.reset();
 #endif
+
+        // Extra documents in the same order CloseSceneView uses (their panels went with m_Panels above):
+        // registry, then scene, then renderer. Explicit rather than left to ~EditorLayer, which runs after
+        // the layer stack has moved on and would destroy renderers at an unspecified point relative to it.
+        for ( auto& doc : m_ExtraScenes )
+        {
+            doc->Registry.reset();
+            doc->Scene.reset();
+            doc->Renderer.reset();
+        }
+        m_ExtraScenes.clear();
+
         return BOOLSUCCESS;
     }
 
