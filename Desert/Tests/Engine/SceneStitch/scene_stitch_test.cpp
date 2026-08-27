@@ -18,20 +18,33 @@
 //      what the loader does, and is the difference between a documented limitation and a surprise.
 //   6. Two records claiming one id load as the map makes them load (first claimant wins) and are counted.
 //   7. The relation between the three lists: every record is either created or a prefab root, exactly once.
+//   8. The two policy decisions are ONE decision - the same for a scene file, a prefab body and an editor
+//      snapshot - and the single argument the function takes changes nothing but what a PrefabPath record
+//      is. This is the part that was four hand-written copies disagreeing with each other.
+//   9. THE CORPUS: every .desce the repository ships, planned by the same function, so that "no file on
+//      disk can see this decision" is a thing that stays checked instead of a thing measured once.
 //
-// No Scene, no renderer, no filesystem: the whole point of the split.
+// No Scene, no renderer: the whole point of the split. Section 9 reads files, and only files - it parses
+// them with the loader's own parser and plans over the result, with no asset manager and no scene graph.
 
+#include <Engine/Core/Serialize/SceneMigration.hpp> // SceneSerialized - the corpus block at the bottom
 #include <Engine/Core/Serialize/SceneStitchRules.hpp>
+
+#include <rflcpp/rfl/json.hpp>
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
 using Desert::Assets::EntityData;
 using Desert::Core::Rules::kNoSlot;
 using Desert::Core::Rules::PlanSceneStitch;
+using Desert::Core::Rules::PrefabRecordPolicy;
 using Desert::Core::Rules::StitchPlan;
 
 namespace
@@ -93,7 +106,7 @@ TEST( SceneStitch, AuthoredIdIsKept )
     const std::vector<EntityData> records = { Plain( 11, "A" ), Plain( 22, "B" ) };
     CountingMint                  mint;
 
-    const StitchPlan plan = PlanSceneStitch( records, mint );
+    const StitchPlan plan = PlanSceneStitch( records, mint, PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.Created.size(), 2u );
     EXPECT_EQ( (uint64_t)plan.Created[0].Id, 11u );
@@ -113,7 +126,7 @@ TEST( SceneStitch, RecordWithoutIdIsMintedOnceAndStillReceivesItsPayload )
     const std::vector<EntityData> records = { Anonymous( "NoId" ) };
     CountingMint                  mint;
 
-    const StitchPlan plan = PlanSceneStitch( records, mint );
+    const StitchPlan plan = PlanSceneStitch( records, mint, PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.Created.size(), 1u );
     EXPECT_TRUE( plan.Created[0].IdMinted );
@@ -132,7 +145,7 @@ TEST( SceneStitch, MintIsCalledOncePerIdlessRecord )
                                               Anonymous( "d" ) };
     CountingMint                  mint;
 
-    const StitchPlan plan = PlanSceneStitch( records, mint );
+    const StitchPlan plan = PlanSceneStitch( records, mint, PrefabRecordPolicy::InstantiatedLater );
 
     EXPECT_EQ( mint.Calls(), 3 );
     EXPECT_EQ( plan.Minted, 3u );
@@ -145,7 +158,7 @@ TEST( SceneStitch, ParentLinkResolvesToTheNamedEntity )
 {
     const std::vector<EntityData> records = { Plain( 11, "Parent" ), Child( 22, 11, "Child" ) };
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.Loads.size(), 2u );
     EXPECT_EQ( plan.Loads[0].Parent, kNoSlot );
@@ -159,7 +172,7 @@ TEST( SceneStitch, ParentLinkResolvesWhenTheParentComesLaterInTheFile )
 {
     const std::vector<EntityData> records = { Child( 22, 11, "Child" ), Plain( 11, "Parent" ) };
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.Loads.size(), 2u );
     EXPECT_EQ( plan.Loads[0].Parent, 1u );
@@ -173,7 +186,7 @@ TEST( SceneStitch, ParentThatIsNotInTheFileIsCountedAndLeavesTheChildUnattached 
 {
     const std::vector<EntityData> records = { Child( 22, 999, "Orphan" ) };
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.Loads.size(), 1u );
     EXPECT_EQ( plan.Loads[0].Parent, kNoSlot );
@@ -186,7 +199,7 @@ TEST( SceneStitch, NullParentIsNoParentAndIsNotCountedAsUnresolved )
 {
     std::vector<EntityData> records = { Plain( 0, "IdZero" ), Child( 22, 0, "Loose" ) };
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.Loads.size(), 2u );
     EXPECT_EQ( plan.Loads[1].Parent, kNoSlot );
@@ -200,10 +213,11 @@ TEST( SceneStitch, PrefabRootsAreListedAndNotCreated )
     const std::vector<EntityData> records = { Plain( 11, "A" ), PrefabRoot( 33, "Prefabs/Tree.deprefab" ),
                                               Plain( 22, "B" ) };
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.PrefabRecords.size(), 1u );
-    EXPECT_EQ( plan.PrefabRecords[0], 1u );
+    EXPECT_EQ( plan.PrefabRecords[0].Record, 1u );
+    EXPECT_EQ( plan.PrefabRecords[0].Slot, kNoSlot ); // listed, so it is in no slot
     ASSERT_EQ( plan.Created.size(), 2u );
     EXPECT_EQ( plan.Created[0].Record, 0u );
     EXPECT_EQ( plan.Created[1].Record, 2u );
@@ -217,7 +231,7 @@ TEST( SceneStitch, PlainEntityParentedToAPrefabRootDoesNotResolveInPassTwo )
     const std::vector<EntityData> records = { PrefabRoot( 33, "Prefabs/Tree.deprefab" ),
                                               Child( 22, 33, "HangsOffThePrefab" ) };
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.Loads.size(), 1u );
     EXPECT_EQ( plan.Loads[0].Parent, kNoSlot );
@@ -231,7 +245,7 @@ TEST( SceneStitch, DuplicateIdLoadsOntoTheFirstClaimantAndIsCounted )
 {
     const std::vector<EntityData> records = { Plain( 11, "First" ), Plain( 11, "Second" ) };
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.Created.size(), 2u ); // both entities are still created
     ASSERT_EQ( plan.Loads.size(), 2u );
@@ -246,7 +260,7 @@ TEST( SceneStitch, ChildOfADuplicatedIdAttachesToTheClaimant )
     const std::vector<EntityData> records = { Plain( 11, "First" ), Plain( 11, "Second" ),
                                               Child( 22, 11, "Child" ) };
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     ASSERT_EQ( plan.Loads.size(), 3u );
     EXPECT_EQ( plan.Loads[2].Parent, 0u );
@@ -260,7 +274,7 @@ TEST( SceneStitch, EveryRecordIsAccountedForExactlyOnce )
                                               PrefabRoot( 33, "Prefabs/Tree.deprefab" ), Child( 22, 11, "C" ),
                                               PrefabRoot( 44, "Prefabs/Rock.deprefab" ) };
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     EXPECT_EQ( plan.Created.size() + plan.PrefabRecords.size(), records.size() );
     EXPECT_EQ( plan.Loads.size(), plan.Created.size() );
@@ -268,8 +282,8 @@ TEST( SceneStitch, EveryRecordIsAccountedForExactlyOnce )
     std::vector<int> seen( records.size(), 0 );
     for ( const auto& created : plan.Created )
         ++seen[created.Record];
-    for ( const size_t record : plan.PrefabRecords )
-        ++seen[record];
+    for ( const auto& prefab : plan.PrefabRecords )
+        ++seen[prefab.Record];
     for ( const int count : seen )
         EXPECT_EQ( count, 1 );
 
@@ -286,7 +300,7 @@ TEST( SceneStitch, EmptyTreePlansNothing )
 {
     const std::vector<EntityData> records;
 
-    const StitchPlan plan = PlanSceneStitch( records, CountingMint() );
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
 
     EXPECT_TRUE( plan.Created.empty() );
     EXPECT_TRUE( plan.Loads.empty() );
@@ -294,6 +308,302 @@ TEST( SceneStitch, EmptyTreePlansNothing )
     EXPECT_EQ( plan.Minted, 0u );
     EXPECT_EQ( plan.Shadowed, 0u );
     EXPECT_EQ( plan.UnresolvedParents, 0u );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 8. THE POLICY IS ONE DECISION, NOT FOUR.
+//
+// This stitch was written out by hand four times — the scene loader, PrefabFactory, PrefabAsset and the
+// editor's snapshot restore — and no suite compiled any of the four, so each copy answered the two
+// questions below however its author's container happened to answer them. The tests here state the
+// answers, and they state them for BOTH kinds of caller, because "the same everywhere" is the property
+// that was missing and not merely "correct here".
+// ---------------------------------------------------------------------------------------------------
+
+// 8a. A record with no id is minted one, so two of them are two entities. The editor's snapshot restore
+// keyed its map with `id.value_or( Null() )`: every idless record collided on the key 0, so the FIRST
+// anonymous entity received the second's components on top of its own and the second was created and left
+// bare. It is not a policy any more, it is arithmetic — two mints cannot collide.
+TEST( SceneStitch, TwoRecordsWithoutIdsDoNotCollapseOntoOneEntity )
+{
+    const std::vector<EntityData> records = { Anonymous( "first" ), Anonymous( "second" ) };
+
+    for ( const PrefabRecordPolicy policy :
+          { PrefabRecordPolicy::InstantiatedLater, PrefabRecordPolicy::CreatedInPlace } )
+    {
+        const StitchPlan plan = PlanSceneStitch( records, CountingMint(), policy );
+
+        ASSERT_EQ( plan.Created.size(), 2u );
+        ASSERT_EQ( plan.Loads.size(), 2u );
+        EXPECT_EQ( plan.Loads[0].Target, 0u );
+        EXPECT_EQ( plan.Loads[1].Target, 1u ); // NOT 0 - this is the defect
+        EXPECT_EQ( plan.Shadowed, 0u );
+        EXPECT_NE( (uint64_t)plan.Created[0].Id, (uint64_t)plan.Created[1].Id );
+    }
+}
+
+// 8b. A duplicated id goes to the FIRST claimant whichever kind of file the records came from.
+// PrefabFactory registered with `entityMap[id] = e` — last writer wins — while the scene loader and
+// PrefabAsset used `insert` — first claimant wins. One prefab, two answers, depending only on which
+// function you reached it through.
+TEST( SceneStitch, TheDuplicateIdRuleIsTheSameWhicheverKindOfFileTheRecordsCameFrom )
+{
+    const std::vector<EntityData> records = { Plain( 11, "First" ), Plain( 11, "Second" ),
+                                              Child( 22, 11, "Child" ) };
+
+    for ( const PrefabRecordPolicy policy :
+          { PrefabRecordPolicy::InstantiatedLater, PrefabRecordPolicy::CreatedInPlace } )
+    {
+        const StitchPlan plan = PlanSceneStitch( records, CountingMint(), policy );
+
+        ASSERT_EQ( plan.Loads.size(), 3u );
+        EXPECT_EQ( plan.Loads[1].Target, 0u ); // first claimant, not last writer
+        EXPECT_EQ( plan.Loads[2].Parent, 0u );
+        EXPECT_EQ( plan.Shadowed, 1u );
+    }
+}
+
+// 8c. CreatedInPlace: inside a prefab body (or an editor snapshot) a PrefabPath record is an entity of
+// THIS file that has another prefab nested under it. So it is created, it is stitched, it answers parent
+// links — and it is still listed, with the slot it landed in, because whoever instantiates the nested body
+// has to know what to hang it off.
+TEST( SceneStitch, APrefabRecordIsCreatedInPlaceAndAnswersParentLinks )
+{
+    const std::vector<EntityData> records = { Plain( 11, "Body" ), PrefabRoot( 33, "Prefabs/Tree.deprefab" ),
+                                              Child( 22, 33, "UnderTheNestedOne" ) };
+
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::CreatedInPlace );
+
+    ASSERT_EQ( plan.Created.size(), 3u );
+    ASSERT_EQ( plan.PrefabRecords.size(), 1u );
+    EXPECT_EQ( plan.PrefabRecords[0].Record, 1u );
+    EXPECT_EQ( plan.PrefabRecords[0].Slot, 1u ); // the slot, so the caller does not re-derive it
+    ASSERT_EQ( plan.Loads.size(), 3u );
+    EXPECT_EQ( plan.Loads[2].Parent, 1u ); // and it answers a parent link, unlike a listed one
+    EXPECT_EQ( plan.UnresolvedParents, 0u );
+}
+
+// 8d. THE RELATION between the two policies: they differ on records that name a prefab, and on NOTHING
+// else. Stated as a test because it is the whole justification for there being an argument at all — if a
+// policy could change the plan for an ordinary record, it would be a second stitch wearing an enum.
+TEST( SceneStitch, ThePoliciesDifferOnlyOnRecordsThatNameAPrefab )
+{
+    const std::vector<EntityData> records = { Plain( 11, "A" ), Anonymous( "B" ), Child( 22, 11, "C" ),
+                                              Child( 33, 999, "Orphan" ), Plain( 11, "DuplicateOfA" ) };
+
+    const StitchPlan listed  = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
+    const StitchPlan inPlace = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::CreatedInPlace );
+
+    ASSERT_EQ( listed.Created.size(), inPlace.Created.size() );
+    for ( size_t slot = 0; slot < listed.Created.size(); ++slot )
+    {
+        EXPECT_EQ( listed.Created[slot].Record, inPlace.Created[slot].Record );
+        EXPECT_EQ( (uint64_t)listed.Created[slot].Id, (uint64_t)inPlace.Created[slot].Id );
+        EXPECT_EQ( listed.Created[slot].IdMinted, inPlace.Created[slot].IdMinted );
+        EXPECT_EQ( listed.Loads[slot].Record, inPlace.Loads[slot].Record );
+        EXPECT_EQ( listed.Loads[slot].Target, inPlace.Loads[slot].Target );
+        EXPECT_EQ( listed.Loads[slot].Parent, inPlace.Loads[slot].Parent );
+    }
+    EXPECT_EQ( listed.Minted, inPlace.Minted );
+    EXPECT_EQ( listed.Shadowed, inPlace.Shadowed );
+    EXPECT_EQ( listed.UnresolvedParents, inPlace.UnresolvedParents );
+    EXPECT_TRUE( listed.PrefabRecords.empty() );
+    EXPECT_TRUE( inPlace.PrefabRecords.empty() );
+}
+
+// 8e. WHEN THE POLICY IS INVISIBLE. First-claimant and last-writer answer the same for any file whose ids
+// are distinct, and that is the whole argument that changing PrefabFactory's rule cannot move an existing
+// prefab or scene: a well-formed file cannot tell which rule is in force. The corpus block below is what
+// checks that the files on disk are in fact of that shape.
+TEST( SceneStitch, WithDistinctIdsNothingIsShadowedAndEveryPayloadLandsOnItsOwnEntity )
+{
+    const std::vector<EntityData> records = { Plain( 11, "A" ), Child( 22, 11, "B" ), Child( 33, 22, "C" ) };
+
+    const StitchPlan plan = PlanSceneStitch( records, CountingMint(), PrefabRecordPolicy::CreatedInPlace );
+
+    ASSERT_EQ( plan.Loads.size(), 3u );
+    for ( size_t slot = 0; slot < plan.Loads.size(); ++slot )
+        EXPECT_EQ( plan.Loads[slot].Target, slot );
+    EXPECT_EQ( plan.Shadowed, 0u );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 9. THE CORPUS. Everything above is a hand-written tree; this is every scene the repository actually
+// ships, parsed by the loader's own parser and planned by the loader's own stitch.
+//
+// WHY IT IS HERE. The argument for changing PrefabFactory's duplicate rule is "no file on disk can see the
+// difference". That was a measurement somebody took once, by hand, and a measurement taken once is a
+// comment: the day a scene is committed with a duplicated id, or with a record carrying no id, the
+// argument silently stops being true and nothing says so. Asserted instead, over the whole corpus, so that
+// such a file turns this suite red on the commit that adds it.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // Walks up from the working directory looking for a file only the repository has — the test runner's
+    // working directory is not fixed. Same shape as Desert/Tests/Engine/CloudProtocolScene.
+    std::string RepoRoot()
+    {
+        std::string prefix = "./";
+        for ( int up = 0; up < 6; ++up )
+        {
+            std::ifstream probe( prefix + "Desert/Desert/Source/Engine/Core/SceneSettings.hpp" );
+            if ( probe )
+                return prefix;
+            prefix += "../";
+        }
+        return {};
+    }
+
+    std::vector<std::filesystem::path> RepositoryScenes()
+    {
+        std::vector<std::filesystem::path> scenes;
+        std::error_code                    ec;
+        const std::filesystem::path        root = RepoRoot() + "Editor/Resources/Assets/Scenes";
+        for ( const auto& entry : std::filesystem::recursive_directory_iterator( root, ec ) )
+        {
+            if ( entry.is_regular_file() && entry.path().extension() == ".desce" )
+                scenes.push_back( entry.path() );
+        }
+        return scenes;
+    }
+
+    std::string ReadAll( const std::filesystem::path& path )
+    {
+        std::ifstream      in( path, std::ios::binary );
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        return buffer.str();
+    }
+} // namespace
+
+// 9a. The corpus exists and this suite found it. Without this, a wrong working directory turns every
+// assertion below into a vacuous pass over zero files - the exact failure mode that lets a corpus test
+// report "green" while checking nothing.
+TEST( SceneStitchCorpus, TheScenesAreWhereThisSuiteThinksTheyAre )
+{
+    EXPECT_GE( RepositoryScenes().size(), 40u );
+}
+
+// 9b. Every scene in the repository stitches cleanly: no record claims an id another record already
+// claimed, no record arrives without one, and every parent link names an entity the file contains. The
+// first two are why the duplicate-id and idless-record decisions cannot move any scene we ship; the third
+// is a load-time warning nobody should be seeing.
+TEST( SceneStitchCorpus, EverySceneStitchesWithNothingShadowedMintedOrUnresolved )
+{
+    for ( const auto& path : RepositoryScenes() )
+    {
+        const auto parsed = rfl::json::read<Desert::Core::SceneSerialized>( ReadAll( path ) );
+        ASSERT_TRUE( parsed.has_value() ) << path.string();
+
+        const StitchPlan plan =
+             PlanSceneStitch( parsed->Entities, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
+
+        EXPECT_EQ( plan.Shadowed, 0u ) << path.string();
+        EXPECT_EQ( plan.Minted, 0u ) << path.string();
+        EXPECT_EQ( plan.UnresolvedParents, 0u ) << path.string();
+        EXPECT_EQ( plan.Created.size() + plan.PrefabRecords.size(), parsed->Entities.size() ) << path.string();
+    }
+}
+
+// 9c. And the plan is the IDENTITY stitch on every one of them: record i becomes entity i and its payload
+// lands on itself. This is the round trip the change had to leave untouched, stated over the real files -
+// if any decision taken in SceneStitchRules.hpp moved a scene, it would move it here.
+TEST( SceneStitchCorpus, EverySceneRecordBecomesItsOwnEntityInFileOrder )
+{
+    for ( const auto& path : RepositoryScenes() )
+    {
+        const auto parsed = rfl::json::read<Desert::Core::SceneSerialized>( ReadAll( path ) );
+        ASSERT_TRUE( parsed.has_value() ) << path.string();
+
+        const StitchPlan plan =
+             PlanSceneStitch( parsed->Entities, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
+
+        for ( size_t slot = 0; slot < plan.Created.size(); ++slot )
+        {
+            EXPECT_EQ( plan.Created[slot].Record, slot ) << path.string();
+            EXPECT_EQ( plan.Loads[slot].Target, slot ) << path.string();
+            EXPECT_FALSE( plan.Created[slot].IdMinted ) << path.string();
+        }
+    }
+}
+
+// 9d. And no scene on disk can tell the two policies apart, because no scene names a prefab. Measured
+// rather than remembered: the day one does, the loader's pass 3 starts mattering to this corpus and
+// somebody should have to look at it.
+TEST( SceneStitchCorpus, NoSceneOnDiskCanTellTheTwoPoliciesApart )
+{
+    for ( const auto& path : RepositoryScenes() )
+    {
+        const auto parsed = rfl::json::read<Desert::Core::SceneSerialized>( ReadAll( path ) );
+        ASSERT_TRUE( parsed.has_value() ) << path.string();
+
+        const StitchPlan listed =
+             PlanSceneStitch( parsed->Entities, CountingMint(), PrefabRecordPolicy::InstantiatedLater );
+        const StitchPlan inPlace =
+             PlanSceneStitch( parsed->Entities, CountingMint(), PrefabRecordPolicy::CreatedInPlace );
+
+        ASSERT_EQ( listed.Created.size(), inPlace.Created.size() ) << path.string();
+        for ( size_t slot = 0; slot < listed.Created.size(); ++slot )
+        {
+            EXPECT_EQ( listed.Loads[slot].Target, inPlace.Loads[slot].Target ) << path.string();
+            EXPECT_EQ( listed.Loads[slot].Parent, inPlace.Loads[slot].Parent ) << path.string();
+        }
+    }
+}
+
+// 9e. And the records everything above is planned over are the records the FILE has - checked against the
+// same file read with no type at all (rfl::Generic: whatever JSON is actually in there).
+//
+// WHY THIS IS NEEDED. 9b..9d assert things about `parsed->Entities`, which is what SURVIVED the typed
+// read. If EntityData had no home for a field, or dropped a record, the plan would be clean and this suite
+// would report the corpus clean - about a corpus it had never seen. So the three inputs the stitch
+// actually decides on - how many records there are, the id each one claims, and the parent it names - are
+// compared against the untyped read, which cannot have dropped anything because it has no schema to drop
+// things against.
+//
+// The comparison is deliberately NOT `write(typed) == write(raw)` over the whole file. Ids are written as
+// UNSIGNED 64-bit and every scene has some above INT64_MAX, so a schema-free reader hands them back as
+// negative numbers: identical bits, different spelling, and forty-six failures that mean nothing. The bits
+// are what is compared here.
+TEST( SceneStitchCorpus, EveryRecordTheFileHasIsARecordTheStitchSees )
+{
+    for ( const auto& path : RepositoryScenes() )
+    {
+        const std::string source = ReadAll( path );
+
+        const auto typed = rfl::json::read<Desert::Core::SceneSerialized>( source );
+        ASSERT_TRUE( typed.has_value() ) << path.string();
+
+        const auto raw = rfl::json::read<rfl::Generic>( source );
+        ASSERT_TRUE( raw.has_value() ) << path.string();
+        const auto rawObject = raw->to_object();
+        ASSERT_TRUE( rawObject.has_value() ) << path.string();
+        const auto rawEntities = rawObject.value().get( "Entities" ).value().to_array();
+        ASSERT_TRUE( rawEntities.has_value() ) << path.string();
+
+        ASSERT_EQ( rawEntities.value().size(), typed->Entities.size() ) << path.string();
+
+        for ( size_t record = 0; record < typed->Entities.size(); ++record )
+        {
+            const auto rawRecord = rawEntities.value()[record].to_object();
+            ASSERT_TRUE( rawRecord.has_value() ) << path.string();
+
+            const auto rawId = rawRecord.value().get( "id" );
+            ASSERT_EQ( rawId.has_value(), typed->Entities[record].id.has_value() ) << path.string();
+            if ( rawId.has_value() )
+            {
+                const auto bits = static_cast<uint64_t>( rawId.value().to_int64().value() );
+                EXPECT_EQ( bits, (uint64_t)*typed->Entities[record].id ) << path.string();
+            }
+
+            const auto rawParent = rawRecord.value().get( "parent" );
+            EXPECT_EQ( rawParent.has_value(), typed->Entities[record].parent.has_value() ) << path.string();
+
+            const auto rawPrefab = rawRecord.value().get( "PrefabPath" );
+            EXPECT_EQ( rawPrefab.has_value(), typed->Entities[record].PrefabPath.has_value() ) << path.string();
+        }
+    }
 }
 
 int main( int argc, char** argv )

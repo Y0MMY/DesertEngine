@@ -173,7 +173,10 @@ namespace Desert::Core
         // file cannot be compiled without the renderer, so for as long as the stitch was written out here
         // it was unreachable by every suite in the repository and a defect planted in it stayed green.
         // What remains below is the part only the loader can do — make the entities and feed the payloads.
-        const Rules::StitchPlan plan = Rules::PlanSceneStitch( sceneData->Entities, &Common::UUID::Generate );
+        // InstantiatedLater: in a .desce a PrefabPath record names another FILE, and the entity it becomes
+        // is made by pass 3 below out of that file - so it is listed here, not created.
+        const Rules::StitchPlan plan = Rules::PlanSceneStitch( sceneData->Entities, &Common::UUID::Generate,
+                                                               Rules::PrefabRecordPolicy::InstantiatedLater );
 
         // DC 1.4: a file that names one id twice, or names a parent that is not in it, loads as a scene
         // that is quietly missing pieces. Say which, once, instead of leaving it to be found in the viewport.
@@ -212,9 +215,9 @@ namespace Desert::Core
         }
 
         // Pass 3 — instantiate prefab roots and apply their saved transforms
-        for ( const size_t record : plan.PrefabRecords )
+        for ( const auto& plannedPrefab : plan.PrefabRecords )
         {
-            const Assets::EntityData* entityData = &sceneData->Entities[record];
+            const Assets::EntityData* entityData = &sceneData->Entities[plannedPrefab.Record];
 
             auto prefabAsset = m_AssetManager->FindByPath<Assets::PrefabAsset>( *entityData->PrefabPath );
             if ( !prefabAsset )

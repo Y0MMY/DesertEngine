@@ -2,6 +2,7 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Core/Serialize/EntitySerializer.hpp>
+#include <Engine/Core/Serialize/SceneStitchRules.hpp>
 
 namespace Desert::Runtime::Factory
 {
@@ -22,57 +23,74 @@ namespace Desert::Runtime::Factory
 
         stack.insert( prefabID );
 
-        std::unordered_map<Common::UUID, ECS::Entity> entityMap; // original prefab UUID → new entity
-        ECS::Entity rootEntity = {};
+        const std::vector<Assets::EntityData>& records = prefab.GetEntities();
 
-        // The entity each prefab record became, aligned with GetEntities().
+        // The identity stitch is Rules::PlanSceneStitch, the same function the scene loader plans with —
+        // this used to be a hand-written copy of it, and the copy had drifted: it registered records with
+        // `entityMap[id] = e`, so when two records in one prefab claimed one id the LAST one silently took
+        // it over, while the scene loader's copy gave it to the FIRST. Nothing compiled either file, so
+        // neither answer was ever anybody's decision. It is one decision now, and it is documented where
+        // it is taken.
         //
-        // Pass 2 used to re-derive the map key from the record and index `entityMap` with it. For a record
-        // with no `id` that key was a fresh value each time, so the lookup missed AND `operator[]` inserted
-        // a null entity, which the deserializer then wrote components into. Holding the entity directly
-        // removes both the second derivation and the accidental insert; `entityMap` is left to do the one
-        // job it is actually for, resolving `parent` links between records that DO carry ids.
+        // CreatedInPlace: unlike a .desce, a record here that carries a PrefabPath is still an entity of
+        // THIS prefab — one with another prefab nested underneath it — so it is created and stitched like
+        // any other, and the nested body is hung off it below.
+        const Core::Rules::StitchPlan plan = Core::Rules::PlanSceneStitch(
+             records, &Common::UUID::Generate, Core::Rules::PrefabRecordPolicy::CreatedInPlace );
+
+        // DC §1.4: no silent fallback. Two records of one prefab claiming one id means the second one's
+        // components land on the first one's entity and its own entity stays bare — say which prefab and
+        // how many, once.
+        //
+        // UnresolvedParents is deliberately NOT reported: a prefab's first record keeps the `parent` it had
+        // in the scene it was cut from, and that entity is by definition not in the prefab. Here "the
+        // parent is not in this file" is the normal spelling of "this record is a root of the instance",
+        // and warning about it would fire on every well-formed prefab in existence.
+        if ( plan.Shadowed > 0 )
+        {
+            LOG_WARN( "[PrefabFactory] '{0}': {1} record(s) claim an id another record in the same prefab "
+                      "already claimed. Their components are applied to the first claimant and their own "
+                      "entities are left bare.",
+                      prefab.GetMetadata().Filepath.string(), plan.Shadowed );
+        }
+
+        // 1. Create all entities with FRESH UUIDs to avoid collisions when multiple instances exist. The id
+        // the record carries is a LINK KEY inside this file only — PlannedEntity::Id is what resolved the
+        // parent links above, and it never reaches the scene.
         std::vector<ECS::Entity> created;
-        created.reserve( prefab.GetEntities().size() );
-
-        // 1. Create all entities with FRESH UUIDs to avoid collisions when multiple instances exist
-        for ( const auto& data : prefab.GetEntities() )
+        created.reserve( plan.Created.size() );
+        for ( const auto& plannedEntity : plan.Created )
         {
-            ECS::Entity e =
-                 scene.CreateEntityWithUUID( Common::UUID::Generate(), data.Tag.value_or( "PrefabEntity" ) );
-            created.push_back( e );
-
-            if ( data.id.has_value() && !data.id->IsNull() )
-                entityMap[*data.id] = e;
-
-            if ( !rootEntity ) rootEntity = e;
+            created.push_back( scene.CreateEntityWithUUID(
+                 Common::UUID::Generate(), records[plannedEntity.Record].Tag.value_or( "PrefabEntity" ) ) );
         }
 
-        // 2. Apply components and setup hierarchy
-        for ( size_t i = 0; i < prefab.GetEntities().size(); ++i )
+        // 2. Nested prefab bodies, hung off the entity the nesting record became.
+        for ( const auto& plannedPrefab : plan.PrefabRecords )
         {
-            const auto& data = prefab.GetEntities()[i];
-            ECS::Entity e    = created[i];
+            const Assets::EntityData& data = records[plannedPrefab.Record];
 
-            if ( data.PrefabPath.has_value() )
-            {
-                auto nested = assetManager.FindByPath<Assets::PrefabAsset>( *data.PrefabPath );
-                if ( nested )
-                {
-                    ECS::Entity nestedRoot = Instantiate( *nested, scene, assetManager, stack );
-                    scene.Attach( e, nestedRoot );
-                }
-            }
+            auto nested = assetManager.FindByPath<Assets::PrefabAsset>( *data.PrefabPath );
+            if ( !nested )
+                continue;
 
-            Core::Serialize::EntitySerializer::DeserializeEntity( data, e, assetManager );
-
-            if ( data.parent.has_value() && !data.parent->IsNull() )
-            {
-                // parent lookup uses original prefab UUIDs as keys
-                if ( entityMap.contains( *data.parent ) )
-                    scene.Attach( entityMap[*data.parent], e );
-            }
+            ECS::Entity nestedRoot = Instantiate( *nested, scene, assetManager, stack );
+            scene.Attach( created[plannedPrefab.Slot], nestedRoot );
         }
+
+        // 3. Apply components and set up hierarchy.
+        for ( const auto& load : plan.Loads )
+        {
+            ECS::Entity entity = created[load.Target];
+            Core::Serialize::EntitySerializer::DeserializeEntity( records[load.Record], entity, assetManager );
+
+            if ( load.Parent != Core::Rules::kNoSlot )
+                scene.Attach( created[load.Parent], entity );
+        }
+
+        // The root is the FIRST record, because PrefabAsset::CreateFromEntity writes the subtree pre-order
+        // and so the first record is the entity the prefab was cut from.
+        ECS::Entity rootEntity = created.front();
 
         // Ensure the root entity is tagged as a prefab instance
         if ( rootEntity && prefabID )
