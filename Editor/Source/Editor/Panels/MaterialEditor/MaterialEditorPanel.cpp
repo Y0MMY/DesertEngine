@@ -2,12 +2,28 @@
 
 #include "MaterialShaderRebuild.hpp"
 
+#include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Import/TextureDnD.hpp>
+#include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailService.hpp>
+
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
+#include <Engine/Assets/TextureAsset.hpp>
+#include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
+#include <Engine/Graphic/Materials/MaterialFactory.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/Material/MaterialService.hpp>
+#include <Engine/Runtime/Services/Shader/ShaderService.hpp>
+
+#include <Common/Core/Logger.hpp>
+#include <Common/Utilities/FileSystem.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
+#include <system_error>
 
 namespace Desert::Editor
 {
@@ -150,7 +166,7 @@ namespace Desert::Editor
         m_Preview->Update( kPreviewRenderSize, kPreviewRenderSize );
     }
 
-    void MaterialEditorPanel::DrawToolbar()
+    void MaterialEditorPanel::DrawToolbar( Assets::SurfaceMaterialAsset* asset, bool isInstance )
     {
         // No material combo: this window IS one material. Picking a different one is opening a different
         // document, which is the whole point of the change that deleted the combo.
@@ -173,69 +189,198 @@ namespace Desert::Editor
         ImGui::SameLine();
         if ( ImGui::Button( "Reset View" ) && m_Preview )
             m_Preview->ResetView();
+
+        if ( !asset )
+            return;
+
+        // Save came here with the parameters it persists. It used to sit on the Details slot row, where it
+        // was the only way to write a `.demat` at all — but Details no longer edits a material, so a save
+        // button there would be an action with nothing to save, and this window would be an editor whose
+        // edits die with the session.
+        ImGui::SameLine();
+        if ( ImGui::Button( "Save" ) )
+            SaveSubject( *asset );
+
+        if ( isInstance )
+        {
+            ImGui::SameLine();
+            if ( ImGui::Button( "Reset Overrides" ) )
+            {
+                asset->Data().Params.clear();
+                asset->Data().Textures.clear();
+                PropagateEdit( *asset, /*isInstance=*/true );
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Drop every override — back to the parent's values" );
+        }
     }
 
-    void MaterialEditorPanel::DrawParameters()
+    std::shared_ptr<Assets::SurfaceMaterialAsset>
+    MaterialEditorPanel::ResolveParent( const Assets::SurfaceMaterialAsset& asset ) const
     {
-        if ( !m_AssetManager )
-            return;
+        if ( !m_AssetManager || !asset.Data().IsInstance() )
+            return nullptr;
 
-        auto asset = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() );
-        if ( !asset )
-        {
-            ImGui::TextDisabled( "This material is no longer loaded" );
-            return;
-        }
+        // The child references its parent by the parent's STABLE in-file id, not by an asset handle — that
+        // is what survives the file being moved — so the service's external->internal map is the only way
+        // back to a loaded asset.
+        auto* materialService = Runtime::ResourceRegistry::GetMaterialService();
+        if ( !materialService )
+            return nullptr;
 
+        const auto parentHandle = materialService->GetAssetHandleByExternal( *asset.Data().ParentMaterialId );
+        if ( parentHandle.IsNull() )
+            return nullptr;
+        return m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( parentHandle );
+    }
+
+    bool MaterialEditorPanel::DrawShaderPicker( Assets::SurfaceMaterialAsset& asset )
+    {
         auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
-        auto  shader = shaderService ? shaderService->GetByName( asset->Data().EffectiveShaderName() ) : nullptr;
+        if ( !shaderService )
+            return false;
+
+        // No hardcoded entries: the picker lists every Surface-domain shader from the service —
+        // StaticMeshPBR (the standard shader with the batched backend) included, like any other.
+        const std::string current = asset.Data().EffectiveShaderName();
+
+        bool shaderChanged = false;
+        ImGui::SetNextItemWidth( -FLT_MIN );
+        if ( ImGui::BeginCombo( "##shader", current.c_str() ) )
+        {
+            for ( const auto& name : shaderService->GetAllNames() )
+            {
+                auto candidate = shaderService->GetByName( name );
+                if ( !candidate ||
+                     candidate->GetProgramMeta().Domain != ::Desert::Core::Formats::ShaderDomain::Surface )
+                    continue;
+
+                const bool selected = ( name == current );
+                if ( ImGui::Selectable( name.c_str(), selected ) && !selected )
+                {
+                    // Params always belong to a shader's schema — a switch clears them; the
+                    // schema editor reseeds defaults on the next draw.
+                    asset.Data().ShaderName = name;
+                    asset.Data().Params.clear();
+                    asset.Data().Textures.clear();
+                    shaderChanged = true;
+                }
+                if ( selected )
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        return shaderChanged;
+    }
+
+    bool MaterialEditorPanel::DrawParameters( Assets::SurfaceMaterialAsset& asset,
+                                              const Assets::MaterialData* parentData, bool isInstance )
+    {
+        auto*             shaderService = Runtime::ResourceRegistry::GetShaderService();
+        const std::string shaderName =
+             parentData ? parentData->EffectiveShaderName() : asset.Data().EffectiveShaderName();
+        auto shader = shaderService ? shaderService->GetByName( shaderName ) : nullptr;
         if ( !shader )
         {
-            ImGui::TextDisabled( "Shader '%s' is not loaded", asset->Data().EffectiveShaderName().c_str() );
-            return;
+            ImGui::TextDisabled( "Shader '%s' is not loaded", shaderName.c_str() );
+            return false;
         }
 
         const auto& schema = shader->GetProgramMeta();
         if ( schema.Params.empty() )
         {
             ImGui::TextDisabled( "This shader exposes no parameters" );
-            return;
+            return false;
         }
+
+        auto& data    = asset.Data();
+        bool  changed = false;
 
         // Editing a value writes it into the material asset and nothing else: no recompile, no pipeline
         // rebuild. A parameter is a uniform-buffer field, so the cost of dragging this slider is the memcpy
         // MeshRenderer already does every frame — which is why parameters update LIVE while a change to the
         // graph's topology is debounced. Measured: a shader that has to be rebuilt costs ~123 ms per SPIR-V
         // module on this machine, and a Surface graph emits three.
-        // Two columns, label cell then control cell — the same shape the Details panel's material editor
-        // uses. Drawing the label as ImGui's own trailing label instead put it on top of the value: a
-        // colour row came out reading "A255e255 255 255", which is what looking at the panel found and
-        // reading the code did not.
+        // Two columns, label cell then control cell. Drawing the label as ImGui's own trailing label instead
+        // put it on top of the value: a colour row came out reading "A255e255 255 255", which is what
+        // looking at the panel found and reading the code did not.
         if ( !ImGui::BeginTable( "##material_params", 2,
                                  ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )
-            return;
+            return false;
         ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.45f );
         ImGui::TableSetupColumn( "control", ImGuiTableColumnFlags_WidthStretch, 0.55f );
 
         for ( const auto& p : schema.Params )
         {
-            if ( p.IsTexture )
-                continue;
-
-            using VT = ::Desert::Core::Formats::ShaderValueType;
             using W  = ::Desert::Core::Formats::ShaderParamWidget;
+            using VT = ::Desert::Core::Formats::ShaderValueType;
 
             const char*       label    = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
-            const std::string hiddenId = "##mp_" + p.Name; // the label lives in its own cell
-            glm::vec4         value    = asset->Data().GetParam( p.Name, p.Default );
-            bool              edited   = false;
+            const std::string hiddenId = "##mp_" + p.Name; // control id; the label lives in its own cell
+
+            // Instance mode: a row with its own entry in the child IS an override — mark it.
+            const bool overridden = isInstance && !p.IsTexture && data.FindParam( p.Name ) != nullptr;
 
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted( label );
+            if ( overridden )
+                ImGui::TextColored( ImVec4( 1.0f, 0.85f, 0.4f, 1.0f ), "%s *", label );
+            else
+                ImGui::TextUnformatted( label );
             ImGui::TableNextColumn();
             ImGui::PushItemWidth( -FLT_MIN );
+
+            if ( p.IsTexture )
+            {
+                if ( isInstance )
+                {
+                    // v1: textures always come from the parent (per-instance texture overrides
+                    // need their own descriptor sets — the batched SSBO path can't carry them).
+                    ImGui::TextDisabled( "from parent material" );
+                    ImGui::PopItemWidth();
+                    continue;
+                }
+                std::string disp = "<drop texture>";
+                if ( const uint64_t h = data.GetTexture( p.Name ); h != 0 && m_AssetManager )
+                {
+                    if ( auto tex = m_AssetManager->FindByHandle<Assets::TextureAsset>( Common::UUID( h ) ) )
+                    {
+                        const auto& src  = tex->GetSourcePath();
+                        const auto  path = !src.empty() ? src : tex->GetMetadata().Filepath.string();
+                        disp             = std::filesystem::path( path ).filename().string();
+                    }
+                }
+
+                ImGui::Button( ( disp + hiddenId ).c_str(), ImVec2( -FLT_MIN, 0.0f ) );
+                if ( ImGui::BeginDragDropTarget() )
+                {
+                    if ( const ImGuiPayload* pl =
+                              ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::TextureAsset ) )
+                    {
+                        const std::string path( static_cast<const char*>( pl->Data ),
+                                                pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                        if ( m_AssetManager )
+                        {
+                            const auto resolved =
+                                 ::Desert::Editor::TextureDnD::ResolveOrImport( *m_AssetManager, path );
+                            if ( static_cast<uint64_t>( resolved ) != 0 )
+                            {
+                                data.SetTexture( p.Name, static_cast<uint64_t>( resolved ) );
+                                changed = true;
+                            }
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+                ImGui::PopItemWidth();
+                continue;
+            }
+
+            // Seed with: child override -> parent's effective value (instance mode) -> schema default.
+            const glm::vec4 fallback = parentData ? parentData->GetParam( p.Name, p.Default ) : p.Default;
+            glm::vec4       value    = data.GetParam( p.Name, fallback );
+            bool            edited   = false;
 
             if ( p.Widget == W::Color )
             {
@@ -250,7 +395,8 @@ namespace Desert::Editor
                                                              : 1;
                 if ( p.Min.has_value() && p.Max.has_value() )
                 {
-                    float mn = *p.Min, mx = *p.Max;
+                    float mn = *p.Min;
+                    float mx = *p.Max;
                     edited =
                          ImGui::SliderScalarN( hiddenId.c_str(), ImGuiDataType_Float, &value.x, comps, &mn, &mx );
                 }
@@ -259,23 +405,96 @@ namespace Desert::Editor
                     edited = ImGui::DragScalarN( hiddenId.c_str(), ImGuiDataType_Float, &value.x, comps, 0.01f );
                 }
             }
-            ImGui::PopItemWidth();
 
             if ( edited )
             {
-                asset->Data().SetParam( p.Name, value );
-                // Re-push the material so MeshECSSystem rebuilds the runtime instance through
-                // MaterialFactory against the new values — the same thing the Details panel's Invalidate()
-                // does for a scene mesh. No recompile: a parameter is a uniform-buffer field.
-                m_Applied = false;
+                data.SetParam( p.Name, value );
+                changed = true;
             }
+            ImGui::PopItemWidth();
         }
+
         ImGui::EndTable();
+        return changed;
+    }
+
+    void MaterialEditorPanel::PropagateEdit( Assets::SurfaceMaterialAsset& asset, bool isInstance )
+    {
+        auto* materialService = Runtime::ResourceRegistry::GetMaterialService();
+        if ( !materialService )
+            return;
+
+        // ONE propagation path for both audiences. This window's preview target is an ordinary
+        // StaticMeshComponent holding this material in a SLOT, exactly like a mesh in the level, so
+        // whatever reaches the scene reaches the preview by the same wire — which is the only way the two
+        // can be guaranteed to agree (Docs/MaterialEditor/STAGE1_END_TO_END.md).
+        if ( isInstance )
+        {
+            // An instance has no runtime Material of its own — its overrides are re-applied when a cached
+            // instance set is rebuilt, so the stamp is the whole mechanism here.
+            materialService->BumpInvalidationVersion();
+            return;
+        }
+
+        // The runtime Material is built ONCE and cached by the service; rebuilding an instance of it would
+        // faithfully reproduce the old values. Apply* is what pushes the new ones in — and it is also what
+        // re-binds textures, which is why binding a texture here shows on the mesh without a reload.
+        if ( auto* runtime = materialService->Get( asset.GetMetadata().Handle ) )
+        {
+            if ( auto* pbr = dynamic_cast<Graphic::StaticMaterialPBR*>( runtime ) )
+                Graphic::MaterialFactory::ApplyPBRAsset( *pbr, asset );
+            else if ( auto* ddm = dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) )
+                Graphic::MaterialFactory::ApplyShaderAsset( *ddm, asset );
+        }
+
+        // ...and the stamp, because entities rendering through CHILD instances of this material cache
+        // their own override sets and would otherwise keep the values from before.
+        materialService->BumpInvalidationVersion();
+    }
+
+    void MaterialEditorPanel::SaveSubject( Assets::SurfaceMaterialAsset& asset )
+    {
+        const auto        path = asset.GetMetadata().Filepath;
+        const std::string text = asset.Save();
+        Common::Utils::FileSystem::WriteContentToFile( path, text );
+
+        // WriteContentToFile reports nothing, so the write is confirmed by looking at the result. Without
+        // this a read-only file or a missing directory would leave the user with a Save button that appears
+        // to work and a material whose edits die with the session — and the thumbnail below would be
+        // discarded for a change that never landed.
+        std::error_code      sizeEc;
+        const std::uintmax_t written = std::filesystem::file_size( path, sizeEc );
+        if ( sizeEc || written != text.size() )
+        {
+            LOG_ERROR( "[MaterialEditor] '{}' was not written ({} bytes on disk, {} expected) — this "
+                       "material's edits are still only in memory.",
+                       path.generic_string(), sizeEc ? 0ull : static_cast<uint64_t>( written ), text.size() );
+            return;
+        }
+
+        // Drop ONLY this material's rendered thumbnail so every panel showing it re-renders with the new
+        // look immediately. Deleted rather than left to the browser's modtime check: that check ignores a
+        // source newer by less than three seconds (coarse filesystem timestamps otherwise report a PNG as
+        // stale the moment it is written), so a material saved shortly after its thumbnail was captured
+        // would keep showing the old one for the rest of the session.
+        std::error_code   ec;
+        const std::string png = ThumbnailCache::DiskPath( path.generic_string() );
+        std::filesystem::remove( png, ec );
+        ThumbnailService::Get().Invalidate( path.generic_string() );
     }
 
     void MaterialEditorPanel::OnUIRender()
     {
-        DrawToolbar();
+        // Resolved ONCE per frame and handed to everything below. The subject is a handle, not a pointer, so
+        // the asset can go away under an open window (deleted on disk, project reloaded); every part of the
+        // window then has to agree about that, and re-looking it up per section is how two halves of one
+        // window come to disagree.
+        auto asset =
+             m_AssetManager ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() ) : nullptr;
+        auto       parent     = asset ? ResolveParent( *asset ) : nullptr;
+        const bool isInstance = asset && asset->Data().IsInstance();
+
+        DrawToolbar( asset.get(), isInstance );
         ImGui::Separator();
 
         const float  kParamColumnW = 300.0f;
@@ -300,9 +519,44 @@ namespace Desert::Editor
 
         ImGui::SameLine();
         ImGui::BeginGroup();
-        ImGui::TextDisabled( "Parameters" );
-        ImGui::Separator();
-        DrawParameters();
+        if ( !asset )
+        {
+            ImGui::TextDisabled( "This material is no longer loaded" );
+        }
+        else
+        {
+            // Instance parenting is stated where the overrides are edited, and only here: a starred row in
+            // the table below means "this child overrides the parent", which is unreadable without knowing
+            // there is a parent at all.
+            if ( isInstance )
+            {
+                const std::string parentName =
+                     parent ? std::filesystem::path( parent->GetMetadata().Filepath ).stem().string()
+                            : std::string( "<missing parent>" );
+                ImGui::TextDisabled( "Instance of %s", parentName.c_str() );
+                ImGui::Separator();
+            }
+            else
+            {
+                // The shader lives INSIDE the material (Unity's model, and ours). An instance never gets a
+                // picker: it always renders with its parent chain's shader.
+                ImGui::TextDisabled( "Shader" );
+                if ( DrawShaderPicker( *asset ) )
+                {
+                    // A different shader means a different runtime material CLASS — the cached one cannot be
+                    // re-valued, it has to be dropped so the next Get rebuilds it from the asset. Invalidate
+                    // bumps the stamp itself, so every mesh rebuilds its instances with it.
+                    if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
+                        materialService->Invalidate( asset->GetMetadata().Handle );
+                }
+                ImGui::Separator();
+            }
+
+            ImGui::TextDisabled( "Parameters" );
+            ImGui::Separator();
+            if ( DrawParameters( *asset, parent ? &parent->Data() : nullptr, isInstance ) )
+                PropagateEdit( *asset, isInstance );
+        }
         ImGui::EndGroup();
 
         // Claim the render for next frame's OnPreUpdate. Re-affirmed every frame on purpose: stop drawing

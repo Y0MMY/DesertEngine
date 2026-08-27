@@ -13,6 +13,8 @@
 namespace Desert::Assets
 {
     class AssetManager;
+    class SurfaceMaterialAsset;
+    struct MaterialData;
 }
 
 namespace Desert::Editor
@@ -59,13 +61,46 @@ namespace Desert::Editor
         }
 
     private:
-        void DrawToolbar();
-        void DrawParameters();
+        // @p asset is null while the material is not loaded — the toolbar still draws its view controls,
+        // but the actions that write the asset are not offered rather than offered and doing nothing.
+        void DrawToolbar( Assets::SurfaceMaterialAsset* asset, bool isInstance );
+
+        // Unity-style shader picker inside the material. Base assets only: an instance always renders with
+        // its parent chain's shader, so a picker on one would be a control with nothing behind it.
+        // Returns true when the shader changed (the runtime material is a different CLASS and must be
+        // rebuilt, not merely re-valued).
+        bool DrawShaderPicker( Assets::SurfaceMaterialAsset& asset );
+
+        // The schema-driven parameter editor — every parameter the shader declares, TEXTURES INCLUDED.
+        // Moved here from the Details panel's material fold (Docs/MaterialEditor/
+        // PLAN_STAGE3_ASSET_DOCUMENTS.md, M2): authoring a material is this window's job, and until the
+        // move a texture could only be bound in Details because the window's own table skipped texture
+        // params. Returns true when anything changed.
+        //
+        // @p parentData / @p isInstance: material-INSTANCE mode — the schema comes from the parent's
+        // shader, non-overridden rows display the PARENT's value, edits write overrides into the child,
+        // and texture rows are read-only (per-instance texture descriptors are a v2).
+        bool DrawParameters( Assets::SurfaceMaterialAsset& asset, const Assets::MaterialData* parentData,
+                             bool isInstance );
+
+        // The parent of an instance subject, or null for a base material (and for an instance whose parent
+        // no longer resolves — the caller shows the schema defaults rather than inventing values).
+        [[nodiscard]] std::shared_ptr<Assets::SurfaceMaterialAsset>
+        ResolveParent( const Assets::SurfaceMaterialAsset& asset ) const;
+
+        // Push an edit of the subject at everything already rendering it — this window's preview AND every
+        // mesh in every open scene — without either side knowing about the other. See the implementation
+        // for why both halves are needed.
+        void PropagateEdit( Assets::SurfaceMaterialAsset& asset, bool isInstance );
+
+        // Write the subject back to its `.demat` and drop the thumbnail rendered from the old values.
+        void SaveSubject( Assets::SurfaceMaterialAsset& asset );
+
         void EnsurePreview();  // create the viewport + scene + renderer (claims a slot)
         void ReleasePreview(); // destroy them (returns the slot)
 
         // The name of the shader this document's material actually draws with, or empty if the material is
-        // gone. Recomputed rather than cached: the shader a material names is editable (Details' shader
+        // gone. Recomputed rather than cached: the shader a material names is editable (this window's own
         // picker, and the Node Graph rewriting its scratch material), so a cached copy would leave the
         // window watching rebuilds of a shader it no longer uses.
         [[nodiscard]] std::string EffectiveShaderName() const;
