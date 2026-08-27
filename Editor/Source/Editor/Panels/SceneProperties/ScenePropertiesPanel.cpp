@@ -103,66 +103,98 @@ namespace Desert::Editor
         }
     } // namespace
 
+    void ScenePropertiesPanel::EnsurePreview()
+    {
+        if ( !m_Preview )
+            m_Preview = std::make_unique<PreviewViewport>();
+    }
+
+    void ScenePropertiesPanel::ReleasePreview()
+    {
+        if ( !m_Preview )
+            return;
+
+        // ~PreviewViewport idles the device and releases the scene before the renderer, which is what
+        // returns the renderer slot. The UIHelper goes too: its descriptor sets reference images that
+        // belonged to the framebuffers just destroyed.
+        m_Preview.reset();
+        m_ThumbnailUI.reset();
+        m_PreviewKey    = 0;
+        m_PreviewActive = false;
+    }
+
     void ScenePropertiesPanel::OnPreUpdate()
     {
         // Everything GPU-side for the preview happens HERE: recording a scene render from inside
         // OnUIRender() destroys descriptor pools whose sets are bound to the frame's command buffer.
+        //
+        // OnPreUpdate runs for EVERY panel, including hidden ones, while OnUIRender does not — which is
+        // exactly what makes this the right place to give the slot back. A closed Details panel that only
+        // stopped rendering would still hold one of the six for the rest of the session.
         if ( !m_SowPanel || !m_Scene )
+        {
+            ReleasePreview();
             return;
+        }
 
         const auto selectedOpt = Core::SelectionManager::GetSelected();
         if ( !selectedOpt )
         {
-            m_PreviewKey = 0;
-            m_Preview.Clear();
+            ReleasePreview();
             return;
         }
 
         const auto& entityOpt = m_Scene->FindEntityByID( *selectedOpt );
         if ( !entityOpt )
         {
-            m_PreviewKey = 0;
-            m_Preview.Clear();
+            ReleasePreview();
             return;
         }
 
         const auto&    entity = entityOpt->get();
         const uint64_t key    = PreviewKeyOf( entity, static_cast<uint64_t>( *selectedOpt ) );
+        // Nothing previewable on this entity: hold no renderer for it. Selecting a light and leaving it
+        // selected is the common case, and it used to keep a whole SceneRenderer alive showing nothing.
+        if ( key == 0 )
+        {
+            ReleasePreview();
+            return;
+        }
+
+        EnsurePreview();
+
         if ( key != m_PreviewKey )
         {
-            m_PreviewKey = key;
-            if ( key == 0 )
+            m_PreviewKey    = key;
+            const auto& smc = entity.GetComponent<ECS::StaticMeshComponent>();
+            if ( static_cast<uint64_t>( smc.MeshHandle ) != 0 )
             {
-                m_Preview.Clear();
+                m_Preview->SetMesh( smc.MeshHandle, smc.MaterialSlots );
             }
             else
             {
-                const auto& smc = entity.GetComponent<ECS::StaticMeshComponent>();
-                if ( static_cast<uint64_t>( smc.MeshHandle ) != 0 )
-                {
-                    m_Preview.SetMesh( smc.MeshHandle, smc.MaterialSlots );
-                }
-                else
-                {
-                    // A primitive: preview the shape itself with its own material, not a stand-in sphere.
-                    const auto shape = *smc.Primitive == Geometry::PrimitiveType::Plane
-                                            ? PreviewViewport::Shape::Plane
-                                            : ( *smc.Primitive == Geometry::PrimitiveType::Sphere
-                                                     ? PreviewViewport::Shape::Sphere
-                                                     : PreviewViewport::Shape::Cube );
-                    m_Preview.SetMaterial( smc.MaterialSlots.empty()
-                                                ? Assets::AssetHandle( static_cast<uint64_t>( 0 ) )
-                                                : smc.MaterialSlots.front(),
-                                           shape );
-                }
+                // A primitive: preview the shape itself with its own material, not a stand-in sphere.
+                const auto shape =
+                     *smc.Primitive == Geometry::PrimitiveType::Plane
+                          ? PreviewViewport::Shape::Plane
+                          : ( *smc.Primitive == Geometry::PrimitiveType::Sphere ? PreviewViewport::Shape::Sphere
+                                                                                : PreviewViewport::Shape::Cube );
+                m_Preview->SetMaterial( smc.MaterialSlots.empty()
+                                             ? Assets::AssetHandle( static_cast<uint64_t>( 0 ) )
+                                             : smc.MaterialSlots.front(),
+                                        shape );
             }
         }
 
         // Only pay for the render while a component actually DREW the thumbnail last UI frame. The flag is
         // consumed here and must be re-affirmed every frame, so a collapsed component, a hidden dock tab or
         // a closed panel all stop the GPU work by simply not drawing it.
+        //
+        // This gates the RENDER, not the slot: a collapsed component is one click from being reopened, so
+        // it keeps its viewport (and its slot) exactly as the material window does. What gives the slot
+        // back is having nothing to show at all, handled above.
         if ( m_PreviewActive )
-            m_Preview.Update( kPreviewRenderSize, kPreviewRenderSize );
+            m_Preview->Update( kPreviewRenderSize, kPreviewRenderSize );
         m_PreviewActive = false;
     }
 
@@ -380,7 +412,15 @@ namespace Desert::Editor
             m_ThumbnailUI = std::make_unique<UI::UIHelper>();
             m_ThumbnailUI->Init();
         }
-        m_ComponentEditor->SetPreview( &m_Preview, m_ThumbnailUI.get(), &m_PreviewActive );
+        // Selection happens in ANOTHER panel's OnUIRender, which can run after this frame's OnPreUpdate
+        // already decided there was nothing to preview. Constructing the viewport here costs nothing and
+        // claims no slot — PreviewViewport builds its scene and renderer lazily, on the first Update() —
+        // so a freshly selected mesh shows the live preview on the same frame instead of falling back to
+        // the PNG thumbnail for one frame and jumping the row's layout. Keyed off the SAME function
+        // OnPreUpdate uses, so the two can never disagree about what is previewable.
+        if ( PreviewKeyOf( selectedEntity, static_cast<uint64_t>( *selectedOpt ) ) != 0 )
+            EnsurePreview();
+        m_ComponentEditor->SetPreview( m_Preview.get(), m_ThumbnailUI.get(), &m_PreviewActive );
         m_ComponentEditor->Render( const_cast<ECS::Entity&>( selectedEntity ), m_Scene.get(),
                                    m_FieldSearch.c_str() );
         ImGui::EndChild();
