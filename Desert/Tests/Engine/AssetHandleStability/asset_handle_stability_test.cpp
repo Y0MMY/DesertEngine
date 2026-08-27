@@ -876,6 +876,42 @@ TEST( AssetHandleStability, ATypedLookupRefusesARecordOfAnotherType )
     EXPECT_NE( static_cast<const void*>( reinterpreted.get() ), static_cast<const void*>( sky.get() ) );
 }
 
+TEST( AssetHandleStability, ATypedLookupRefusesAnotherClassUnderTheSameTypeId )
+{
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( std::filesystem::current_path() / "RegistryProbe", "Content" );
+
+    Desert::Assets::AssetManager manager;
+
+    // AssetTypeID is COARSER than the C++ class in exactly one place: StaticMeshAsset and SkinnedMeshAsset
+    // both report AssetTypeID::Mesh, because neither declares a GetTypeID() of its own and both inherit
+    // MeshAsset's. The catalogue at the top of this file lists them under one id for that reason.
+    ASSERT_EQ( Desert::Assets::StaticMeshAsset::GetTypeID(), Desert::Assets::SkinnedMeshAsset::GetTypeID() );
+
+    const auto staticMesh = manager.CreateAsset<Desert::Assets::StaticMeshAsset>(
+         AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Rigged.stmesh" ), false );
+    ASSERT_NE( staticMesh, nullptr );
+
+    const Common::AssetHandle handle = staticMesh->GetMetadata().Handle;
+
+    // The control, and the reason this test is not a duplicate of the one above: an id compare PASSES here.
+    // Both sides say "Mesh". A lookup that verified only the stored AssetTypeID would hand this record over
+    // and static_pointer_cast would reinterpret a StaticMeshAsset as a SkinnedMeshAsset — which is why the
+    // check is a dynamic_pointer_cast and why the RTTI it costs was measured rather than argued about.
+    //
+    // Reachable, not hypothetical: the editor's static mesh picker lists FindAllByType<MeshAsset>(), i.e.
+    // every mesh including the skinned ones, and StaticMeshComponent resolves the chosen handle as
+    // StaticMeshAsset.
+    EXPECT_NE( manager.FindByHandle<Desert::Assets::StaticMeshAsset>( handle ), nullptr );
+    EXPECT_NE( manager.FindByHandle<Desert::Assets::MeshAsset>( handle ), nullptr )
+         << "a lookup for the BASE class must still succeed — refusing that would break every caller that "
+            "asks for a mesh without caring which kind";
+
+    EXPECT_EQ( manager.FindByHandle<Desert::Assets::SkinnedMeshAsset>( handle ), nullptr )
+         << "a StaticMeshAsset was handed back as a SkinnedMeshAsset because the two share one "
+            "AssetTypeID — the collision the type id is too coarse to see";
+}
+
 TEST( AssetHandleStability, EveryAssetTypeIdNamesItselfDistinctly )
 {
     // AssetManager's refusal above logs the two type NAMES, because "type 4 was requested as type 10" is a
