@@ -974,6 +974,20 @@ namespace Desert::Editor
         if ( !index )
             return; // already closed — a second X on the same window in the same frame, or a stale request
 
+        // Closing the document that is PLAYING ends play mode with it. The snapshot Stop would restore is a
+        // snapshot of a scene that is about to cease existing, and OnSceneStop acts on whatever document is
+        // active — so leaving the state alone would strand the editor in Play with an Edit-mode scene under
+        // it: the Stop button would early-return and never come back up.
+        if ( m_EditorState == EditorState::Play && m_ActiveSceneId == id )
+        {
+            LOG_INFO( "[Editor] Scene view #{} was playing when it was closed — play mode ends with it and "
+                      "its snapshot is discarded.",
+                      id );
+            m_EditorState      = EditorState::Paused;
+            m_PendingSceneStop = false;
+            m_PlaySnapshot.clear();
+        }
+
         // The editor must not stay bound to a scene that is about to stop existing. Rebinding BEFORE the
         // teardown, not after, so no panel is holding the dying scene when its registry is destroyed.
         if ( const uint64_t next = ActiveSceneViewAfterClose( m_ActiveSceneId, id ); next != m_ActiveSceneId )
@@ -990,8 +1004,8 @@ namespace Desert::Editor
         // whose destructor is what hands the renderer slot back.
         Graphic::Renderer::GetInstance().WaitDeviceIdle();
 
-        const IPanel* panel = doc->Viewport;
-        m_ContextualShown.erase( const_cast<IPanel*>( panel ) );
+        IPanel* panel = doc->Viewport;
+        m_ContextualShown.erase( panel );
         std::erase_if( m_Panels, [panel]( const std::unique_ptr<IPanel>& p ) { return p.get() == panel; } );
         doc->Viewport = nullptr;
 
