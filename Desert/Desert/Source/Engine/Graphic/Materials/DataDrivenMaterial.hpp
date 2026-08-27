@@ -48,10 +48,9 @@ namespace Desert::Graphic
         bool SetParam( const std::string& name, const glm::vec4& value, uint32_t numComponents )
         {
             auto [ub, field] = FindFieldInAnyUB( name );
-            if ( !field )
+            if ( !ub || !field )
                 return false;
-            field->SetRawBytes( &value, numComponents * sizeof( float ) );
-            return true;
+            return ub->WriteField( field, &value, numComponents * sizeof( float ) );
         }
 
         // Write a param by name using the UB field's own size (no component count needed). Used to apply
@@ -60,14 +59,14 @@ namespace Desert::Graphic
         bool SetParamRaw( const std::string& name, const glm::vec4& value )
         {
             auto [ub, field] = FindFieldInAnyUB( name );
-            if ( !field )
+            if ( !ub || !field )
                 return false;
             size_t sz = field->GetFieldInfo().Size;
             if ( sz > sizeof( glm::vec4 ) )
                 sz = sizeof( glm::vec4 );
-            field->SetRawBytes( &value, sz );
-            if ( ub )
-                ub->UpdateFields();
+            if ( !ub->WriteField( field, &value, sz ) )
+                return false;
+            ub->UpdateFields();
             return true;
         }
 
@@ -85,30 +84,26 @@ namespace Desert::Graphic
             return false;
         }
 
-        // Seed every numeric param with its `#pragma param ... default(...)` value, then flush the touched
-        // UBs so the defaults reach the GPU (see SetParamRaw note on UpdateFields()).
+        // Seed every numeric param with its `#pragma param ... default(...)` value, then flush so the
+        // defaults reach the GPU (see SetParamRaw note on UpdateFields()).
         void ApplyDefaults()
         {
             m_MappedParamCount = 0;
-            m_ParamBuffers.clear();
             for ( const auto& p : m_Schema.Params )
             {
                 if ( p.IsTexture )
                     continue;
                 auto [ub, field] = FindFieldInAnyUB( p.Name );
-                if ( !field )
+                if ( !ub || !field )
                     continue;
 
                 ++m_MappedParamCount;
                 size_t sz = field->GetFieldInfo().Size;
                 if ( sz > sizeof( glm::vec4 ) )
                     sz = sizeof( glm::vec4 ); // params are scalars/vectors (<= 16 bytes)
-                field->SetRawBytes( &p.Default, sz );
-                if ( ub )
-                    m_ParamBuffers.insert( ub );
+                ub->WriteField( field, &p.Default, sz );
             }
-            for ( auto* ub : m_ParamBuffers )
-                ub->UpdateFields();
+            FlushFieldFilledUniformBuffers();
         }
 
         // Re-push the parameter values this material already holds into the uniform-buffer copy the
@@ -128,19 +123,21 @@ namespace Desert::Graphic
         // local data is never initialised. Flushing those would memcpy uninitialised bytes over the camera
         // matrices the renderer had just written, which empties the frame. Measured, not imagined: the
         // first version of this fix flushed every buffer and the probe scene rendered as bare sky.
+        //
+        // The restriction used to live in a member set rebuilt by ApplyDefaults, which meant this class
+        // had to keep remembering a fact about buffers it does not own. It is now the buffer's own
+        // answer: a whole-filled UB reports no dirty fields and refuses UpdateFields by name. That is
+        // why this method is a plain call to the base — and why it stays a method rather than becoming
+        // one at the call site: MeshRenderer's generic draws ask for exactly this, and the name is what
+        // says the parameters, not the engine blocks, are what they are asking for.
         void FlushParameterBuffers()
         {
-            for ( auto* ub : m_ParamBuffers )
-                if ( ub->HasDirtyFields() )
-                    ub->UpdateFields();
+            FlushFieldFilledUniformBuffers();
         }
 
     private:
         std::string                      m_ShaderName;
         Core::Formats::ShaderProgramMeta m_Schema;
         uint32_t                         m_MappedParamCount = 0;
-        // The UBs that schema parameters map to — the only ones whose FieldProperty local data is a
-        // source of truth. Recomputed by ApplyDefaults; stable for the life of the material.
-        std::unordered_set<UniformBufferProperty*> m_ParamBuffers;
     };
 } // namespace Desert::Graphic
