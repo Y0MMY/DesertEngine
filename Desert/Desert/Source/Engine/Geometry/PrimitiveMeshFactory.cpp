@@ -43,13 +43,15 @@ namespace Desert::Geometry
         }
     }
 
+    // One shared, GPU-ready mesh per primitive type, created lazily on first use and kept alive until
+    // ReleaseShared(). Single-threaded engine, so no synchronization needed. At file scope rather than
+    // inside GetShared() so that ReleaseShared() can reach it: as a function-local static it would only
+    // ever have been destroyed at __cxa_finalize, which is after the device it holds buffers from.
+    static std::unordered_map<PrimitiveType, std::shared_ptr<DynamicMesh>> s_SharedPrimitives;
+
     DynamicMesh* PrimitiveMeshFactory::GetShared( PrimitiveType type )
     {
-        // One shared, GPU-ready mesh per primitive type, created lazily on first use and kept alive for the
-        // process. Single-threaded engine, so no synchronization needed.
-        static std::unordered_map<PrimitiveType, std::shared_ptr<DynamicMesh>> s_Cache;
-
-        auto& mesh = s_Cache[type];
+        auto& mesh = s_SharedPrimitives[type];
         if ( !mesh )
         {
             mesh = Create( type );
@@ -57,6 +59,11 @@ namespace Desert::Geometry
                 mesh->Invalidate(); // build the GPU vertex/index buffers once
         }
         return mesh.get();
+    }
+
+    void PrimitiveMeshFactory::ReleaseShared()
+    {
+        s_SharedPrimitives.clear();
     }
 
     std::shared_ptr<DynamicMesh> PrimitiveMeshFactory::CreateCube()

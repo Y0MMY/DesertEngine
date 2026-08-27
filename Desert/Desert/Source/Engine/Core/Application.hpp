@@ -38,7 +38,9 @@ namespace Desert::Engine
     {
     public:
         Application( const ApplicationInfo& appInfo );
-        ~Application() = default;
+        // Virtual because main owns the concrete app through a std::unique_ptr<Application> (see
+        // EntryPoint.hpp): a non-virtual destructor there would destroy the base and leak the derived part.
+        virtual ~Application();
 
         const auto& GetEngineStats() const
         {
@@ -61,9 +63,20 @@ namespace Desert::Engine
     public:
         // Ends the run loop after the current frame. Used by the editor's screenshot mode, which renders a
         // fixed number of frames and leaves.
-        void Close()
+        //
+        // @p exitCode becomes the process exit status (see EntryPoint.hpp). It exists because a capture
+        // that could not write its PNG used to log the error and then exit 0: a caller reading the exit
+        // code was told the shot succeeded. A false success is worse than a false failure — it is the one
+        // a script cannot notice.
+        void Close( int exitCode = 0 )
         {
             m_IsRunningApplication = false;
+            m_ExitCode             = exitCode;
+        }
+
+        NO_DISCARD int ExitCode() const
+        {
+            return m_ExitCode;
         }
 
     private:
@@ -80,23 +93,31 @@ namespace Desert::Engine
 
         void ProcessImGui();
 
+        // MEMBER ORDER IS LOAD-BEARING. Members die in REVERSE declaration order, and the window owns the
+        // swapchain, its framebuffers and their images — device-owned objects that must be released while
+        // the device and the context's VMA allocator are still alive. Declared in the order below they are
+        // destroyed window -> device -> context, which is the only order that holds.
+        //
+        // It used to be the exact opposite -- window declared first, context last -- and that is where the
+        // exit-time SEGFAULT came from: VulkanImage2D::Release() dereferenced an already-expired renderer
+        // context to reach the allocator. VulkanFramebuffer::Release() carries an `if (allocator)` guard
+        // written to survive the same window; that guard is still load-bearing for the editor's
+        // process-lifetime thumbnail caches, which are not released deterministically yet.
     private:
         ApplicationInfo m_ApplicationInfo;
 
-    protected:
-        std::shared_ptr<Window> m_Window;
+        bool m_IsRunningApplication = true;
+        bool m_Minimized            = false;
+        int  m_ExitCode             = 0;
 
-    private:
+        std::shared_ptr<Graphic::RendererContext> m_RendererContext;
+        std::shared_ptr<Device>                   m_Device;
+
         Common::LayerStack m_LayerStack;
         EngineStats        m_EngineStats;
 
-        bool m_IsRunningApplication = true;
-        bool m_Minimized            = false;
-
-        std::shared_ptr<Device>                   m_Device;
-        std::shared_ptr<Graphic::RendererContext> m_RendererContext;
-
-    public:
+    protected:
+        std::shared_ptr<Window> m_Window;
     };
 
     Application* CreateApplicaton( int argc, char** argv );

@@ -243,6 +243,8 @@ namespace Desert::Editor
         // Screenshot mode counters (see Editor/Core/ShotOptions.hpp).
         int  m_ShotFrame        = 0;
         bool m_ShotCameraPlaced = false;
+        // Set when any PNG of this capture could not be written; becomes the process exit status.
+        bool m_ShotFailed = false;
 
         std::optional<Common::Filepath> m_SceneLoadRequested;
         // Stop tears down + recreates GPU render resources (framebuffers / render graph). It must run

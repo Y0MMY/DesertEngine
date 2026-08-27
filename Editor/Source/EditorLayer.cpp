@@ -316,9 +316,18 @@ namespace Desert::Editor
                 LOG_ERROR( "[Shot] --scene '{}' does not exist (looked from '{}'); refusing to capture a "
                            "different scene under that name.",
                            shot.Scene, std::filesystem::current_path().string() );
-                std::exit( 2 );
+                // NOT std::exit(). The job system's workers are already running by the time this line is
+                // reached, and exit() runs static destructors under them: nine threads threw
+                // "recursive_mutex lock failed: Invalid argument" and the process aborted with 134. A
+                // status of 134 says "the engine crashed", not "the scene you asked for is missing" — the
+                // caller reading it learns the wrong thing. Ask for an ordered close with the real status;
+                // Run() then draws no frames and teardown happens exactly as on a normal quit.
+                const_cast<Engine::Application*>( m_Application )->Close( 2 );
             }
-            LoadScene( Common::Filepath( shot.Scene ) );
+            else
+            {
+                LoadScene( Common::Filepath( shot.Scene ) );
+            }
         }
         else if ( ProjectContext::HasProject() )
         {
@@ -776,16 +785,24 @@ namespace Desert::Editor
                 std::snprintf( name, sizeof( name ), "/frame_%05d.png", m_ShotFrame );
                 const std::string path = shot.Sequence + name;
                 if ( !WriteViewportPng( path ) )
+                {
                     LOG_ERROR( "[Shot] sequence frame {} not written to '{}'", m_ShotFrame, path );
+                    m_ShotFailed = true;
+                }
             }
 
             if ( m_ShotFrame >= shot.Frames )
             {
                 if ( !shot.Output.empty() && !WriteViewportPng( shot.Output ) )
+                {
                     LOG_ERROR( "[Shot] the final frame was not captured to '{}'", shot.Output );
+                    m_ShotFailed = true;
+                }
                 if ( shot.GpuProfile )
                     DumpProfilerToLog();
-                const_cast<Engine::Application*>( m_Application )->Close();
+                // A capture that wrote no PNG must not leave a zero exit status behind: the whole value of
+                // an exit code is that a script can trust it, and this one used to say "fine" either way.
+                const_cast<Engine::Application*>( m_Application )->Close( m_ShotFailed ? 1 : 0 );
             }
         }
 

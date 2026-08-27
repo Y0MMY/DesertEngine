@@ -57,8 +57,9 @@
 
 namespace Desert::Player
 {
-    RuntimeLayer::RuntimeLayer( std::string scenePathOverride )
-         : Common::Layer( "RuntimeLayer" ), m_ScenePathOverride( std::move( scenePathOverride ) )
+    RuntimeLayer::RuntimeLayer( std::string scenePathOverride, Engine::Application* application )
+         : Common::Layer( "RuntimeLayer" ), m_ScenePathOverride( std::move( scenePathOverride ) ),
+           m_Application( application )
     {
         m_AssetManager     = std::make_shared<Assets::AssetManager>();
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
@@ -384,7 +385,11 @@ namespace Desert::Player
             else if ( clicked == "quit" )
             {
                 LOG_INFO( "[Runtime] UI quit requested" );
-                std::exit( 0 );
+                // NOT std::exit(). This runs inside the frame, with the job system's workers live and the
+                // device alive: exit() runs the static destructors under them and the process aborts on
+                // destroyed mutexes instead of quitting. Close() ends the loop after this frame and the
+                // game shuts down exactly as it does when the window is closed.
+                m_Application->Close( 0 );
             }
             else if ( clicked.rfind( kUrl, 0 ) == 0 )
             {

@@ -21,6 +21,8 @@ namespace Desert::Runtime
 
     void SkyboxService::Clear()
     {
+        // Was an empty body. A skybox material owns its cubemap images and descriptor sets.
+        m_Skyboxes.clear();
     }
 
 } // namespace Desert::Runtime

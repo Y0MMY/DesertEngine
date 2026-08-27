@@ -47,6 +47,10 @@ namespace Desert::Runtime
 
     void TextureService::Clear()
     {
+        // Was an empty body. Every other service's Clear() drops its maps, and this one is the service
+        // that holds the built GPU Texture2Ds — so the one that had to work is the one that did nothing.
+        m_Textures.clear();
+        m_TextureAssets.clear();
     }
 
 } // namespace Desert::Runtime

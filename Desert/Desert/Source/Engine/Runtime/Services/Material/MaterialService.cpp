@@ -110,6 +110,12 @@ namespace Desert::Runtime
 
     void MaterialService::Clear()
     {
+        // Was an empty body. The graveyard goes with the rest: at shutdown there is no next frame to
+        // collect it, and its materials own descriptor pools that must not outlive the device.
+        m_Materials.clear();
+        m_MaterialAssets.clear();
+        m_ExternalToInternal.clear();
+        m_Graveyard.clear();
     }
 
     void MaterialService::Invalidate( const Assets::AssetHandle& handle )

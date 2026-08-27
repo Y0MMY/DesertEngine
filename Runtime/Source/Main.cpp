@@ -39,7 +39,7 @@ namespace Desert::Player
 
         void OnCreate() override
         {
-            PushLayer( new RuntimeLayer( s_SceneOverride ) );
+            PushLayer( new RuntimeLayer( s_SceneOverride, this ) );
         }
 
         void OnDestroy() override
@@ -79,7 +79,7 @@ static std::filesystem::path FindBasePak( const std::filesystem::path& dir, cons
     return {};
 }
 
-Desert::Engine::Application* CreateApplication( int argc, char** argv )
+std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char** argv )
 {
     using namespace Desert::Engine;
     namespace fs = std::filesystem;
@@ -147,5 +147,5 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
     appInfo.VSync = true; // a game default: tear-free presentation
     // Width/Height left as std::nullopt -> fullscreen at the monitor's native resolution.
 
-    return &Common::Singleton<Desert::Player::RuntimeApp>::CreateInstance( appInfo );
+    return std::make_unique<Desert::Player::RuntimeApp>( appInfo );
 }
