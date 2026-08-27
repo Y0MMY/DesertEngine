@@ -142,11 +142,27 @@ compatibility, which is what `MaterialsPanelComponent.cpp:96-98` already claims 
 The second author, `AssetThumbnailRenderer.cpp:187-192`, is in scope too: it is the exact route that
 produced the Stage-1 defect where a thumbnail showed a correct material while the scene showed black.
 
-Terrain has no mesh material slots today — that is the stated reason it went the override way. So this
-task carries a real design decision, and it is mine to make before the task starts: **either** Terrain
-gains a slot vector like `StaticMeshComponent::MaterialSlots`, **or** it gains a single
-`Assets::AssetHandle TerrainMaterial`. I lean to the second — one surface, one material — but I want
-the terrain shader's schema in front of me first.
+Terrain has no mesh material slots today — that is the stated reason it went the override way. The
+design question was mine to settle before the task starts, and the shader settles it.
+
+**Decided: a single `Assets::AssetHandle TerrainMaterial`, not a slot vector.**
+
+`Editor/Resources/Shaders/Programs/Terrain/Terrain.shader` is one program of domain `Terrain` whose
+`Properties` block is `Tint`, `DetailTiling`, and **three splat textures** — `u_GrassTex`, `u_RockTex`,
+`u_SnowTex`. The layers are **texture parameters of one material**, blended inside the single program
+by `LayerModes` (`0=Auto, 1=Manual, 2=Off` per layer). They are not three materials.
+
+A slot vector would therefore assert a structure that does not exist — one material per layer — and the
+first person to read it would try to assign a different `.demat` per splat layer and find that nothing
+downstream can consume it. One surface, one shader, one material.
+
+Two consequences the task inherits:
+
+- The shader picker in the terrain widget currently iterates every shader of domain `Terrain`, and
+  there is exactly **one**. It becomes a normal material asset field; the combo goes.
+- The three splat textures stop being `MaterialComponent::Textures` overrides and become ordinary
+  texture params of a `.demat`, edited in the Material Editor window like any other material. That is
+  the whole point: after M3 there is one way to edit a material, not two.
 
 **Owns:** `ComponentEditorRegistrations.cpp`, `ECS/Components.hpp` (terrain component only),
 `Widgets/AssetThumbnailRenderer.{hpp,cpp}`, terrain scene migration.
