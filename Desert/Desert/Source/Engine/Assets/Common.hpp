@@ -56,4 +56,51 @@ namespace Desert::Assets
         // asserts is exactly how five types kept a random per-launch identity for as long as they did.
         Count,
     };
+
+    // The enumerator's name, for the one caller that has to say WHICH types disagreed: AssetManager's
+    // typed lookup, when a record turns out to hold something other than what was asked for. "type 4 was
+    // requested as type 10" is a number the reader then has to go and decode; "Skybox was requested as
+    // CloudType" is the defect itself, spelled out.
+    //
+    // Deliberately a switch with NO `default:` label: -Wswitch then reports a new enumerator here, at the
+    // point of the omission. A `default:` would swallow it and put the wrong name in the one message whose
+    // whole job is to be trusted — and a name table that quietly falls behind its enum is exactly the
+    // two-places-must-agree defect this subsystem keeps paying for. The trailing return is NOT that
+    // default: it is reached only by a value no enumerator names (an enum's underlying type admits those),
+    // and every named one is handled above. AssetHandleStability asserts that claim over the whole enum.
+    constexpr const char* AssetTypeName( const AssetTypeID type )
+    {
+        switch ( type )
+        {
+            case AssetTypeID::Unknown:
+                return "Unknown";
+            case AssetTypeID::Mesh:
+                return "Mesh";
+            case AssetTypeID::Material:
+                return "Material";
+            case AssetTypeID::Texture2D:
+                return "Texture2D";
+            case AssetTypeID::Skybox:
+                return "Skybox";
+            case AssetTypeID::Shader:
+                return "Shader";
+            case AssetTypeID::Skeleton:
+                return "Skeleton";
+            case AssetTypeID::Animation:
+                return "Animation";
+            case AssetTypeID::Prefab:
+                return "Prefab";
+            case AssetTypeID::CloudNoiseVolume:
+                return "CloudNoiseVolume";
+            case AssetTypeID::CloudType:
+                return "CloudType";
+            case AssetTypeID::CloudModellingVolume:
+                return "CloudModellingVolume";
+            case AssetTypeID::CloudLayout:
+                return "CloudLayout";
+            case AssetTypeID::Count:
+                return "Count";
+        }
+        return "Unknown";
+    }
 } // namespace Desert::Assets

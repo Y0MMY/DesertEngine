@@ -19,6 +19,7 @@
 
 #include <Engine/Animation/Skeleton.hpp>
 
+#include <Editor/Import/CookPaths.hpp>
 #include <Editor/Import/ImportManager.hpp>
 #include <Editor/Import/ImportResult.hpp>
 
@@ -214,9 +215,10 @@ namespace Desert::Editor
 
     // Extract every source material into the unified, reflected PBRSurfaceParams (the .demat schema). Recovers
     // NORMAL + OPACITY maps the old MaterialAssetData path silently dropped, and stamps a stable MaterialId.
-    static std::vector<ImportedMaterial>
-    ExtractMaterials( const aiScene* scene, const std::filesystem::path& basePath, ImportManager& manager,
-                      const std::string& assetName )
+    static std::vector<ImportedMaterial> ExtractMaterials( const aiScene*               scene,
+                                                           const std::filesystem::path& basePath,
+                                                           ImportManager&               manager,
+                                                           const std::filesystem::path& sourcePath )
     {
         std::vector<ImportedMaterial> result;
 
@@ -230,7 +232,9 @@ namespace Desert::Editor
             out.Name = name.length > 0 ? std::string( name.C_Str() ) : ( "Material_" + std::to_string( i ) );
 
             auto& d      = out.Data;
-            d.MaterialId = StableMaterialId( assetName + "::" + out.Name + "#" + std::to_string( i ) );
+            // Keyed on the mesh's place in the project, NOT on its file stem — see CookPaths::MaterialKey
+            // for what the stem-only key merged and why the repository is one same-named file away from it.
+            d.MaterialId = StableMaterialId( CookPaths::MaterialKey( sourcePath, out.Name, i ) );
 
             // Locate a material's texture FILE on disk. FBX/glTF often store an unusable path (the author's
             // absolute build path, relativized to a long "../../.../mnt/prod/.../foo.jpg" that escapes the
@@ -321,10 +325,8 @@ namespace Desert::Editor
 
         // Resolve the material's texture references RELATIVE TO THE SOURCE FILE's own folder (how FBX/glTF
         // store them, e.g. Poly Haven's "textures/<name>.jpg" sits next to the .fbx). The old code looked in
-        // a hardcoded Resources/Assets/Textures/<assetName>/ and never found them. assetName (the file stem)
-        // is still the stable key for the material id.
-        const std::string assetName = sourcePath.stem().string();
-        const auto materialData = ExtractMaterials( scene, sourcePath.parent_path(), manager, assetName );
+        // a hardcoded Resources/Assets/Textures/<stem>/ and never found them.
+        const auto materialData = ExtractMaterials( scene, sourcePath.parent_path(), manager, sourcePath );
 
         std::unordered_map<std::string, uint32_t> boneMapping;
 

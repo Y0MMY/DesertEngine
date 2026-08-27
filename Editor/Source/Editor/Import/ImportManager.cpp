@@ -271,15 +271,19 @@ namespace Desert::Editor
                                                 const std::filesystem::path& sourcePath )
     {
         // Imported materials are EDITABLE CONTENT, not cooked intermediates -> write them into the content
-        // tree at Resources/Assets/Materials/<meshStem>/<materialName>.demat (browsable + editable in the
-        // asset browser, reusable), like UE. Per-mesh subfolder avoids name collisions across imports.
+        // tree at Resources/Assets/Materials/<meshRelativeId>/<materialName>.demat (browsable + editable in
+        // the asset browser, reusable), like UE.
         // Meaningful name, NO handle in it (stable identity lives in the file: PBRSurfaceParams::MaterialId).
         // Unified .demat schema (legacy ".mat" cooker output is gone; SurfaceMaterialAsset::Load still READS old).
+        //
+        // The per-mesh subfolder is CookPaths::MaterialFolder and not `MATERIAL_PATH / stem` spelled here.
+        // The stem alone put two same-named meshes from different folders in one folder, where the
+        // "only write if MISSING" rule below turns a collision into a silent adoption: the second mesh's
+        // materials are never written and it inherits the first mesh's instead.
         static const std::regex illegal( R"([<>:"/\\|?*\s])" );
         const std::string       safeName = std::regex_replace( material.Name, illegal, "_" );
-        const std::filesystem::path path =
-             Common::Constants::Path::MATERIAL_PATH / sourcePath.stem() /
-             ( safeName + Common::Constants::Extensions::MATERIAL_EXTENSION );
+        const std::filesystem::path path     = CookPaths::MaterialFolder( sourcePath ) /
+                                           ( safeName + Common::Constants::Extensions::MATERIAL_EXTENSION );
 
         // Only write if MISSING: re-importing a mesh must NOT clobber the user's edits to its material (UE
         // behaviour — re-import updates geometry, keeps the material asset). Delete the .demat to regenerate.

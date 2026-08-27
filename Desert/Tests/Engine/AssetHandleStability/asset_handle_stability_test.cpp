@@ -826,6 +826,114 @@ TEST( AssetHandleStability, TwoAssetTypesMayShareOnePathAndStayTwoRecords )
 }
 
 // ---------------------------------------------------------------------------------------------------
+// The FAILURE MODE, which is a different subject from the collision above.
+//
+// The test above closed one collision by putting the type into the registry key. This section is about
+// what a typed lookup DOES when a record and a request disagree, whatever the reason — and the answer
+// used to be "reinterpret it", because every Find* ended in std::static_pointer_cast. That answer is
+// wrong for every cause of disagreement, not only for the one the key now prevents, and it is wrong in
+// the worst available way: the caller gets a non-null pointer and cannot tell.
+//
+// So the assets here are deliberately put into ONE handle slot on purpose. This is not a scenario the
+// engine produces today; it is the shape of every scenario that would, and the requirement is that the
+// lookup refuses rather than answers.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( AssetHandleStability, ATypedLookupRefusesARecordOfAnotherType )
+{
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( std::filesystem::current_path() / "RegistryProbe", "Content" );
+
+    Desert::Assets::AssetManager manager;
+
+    // One SkyboxAsset, and nothing else in the registry. Its handle is derived from its path, and the
+    // derivation is type-blind by design (asserted at the top of this file), so this same number is what a
+    // CloudTypeAsset at this path would carry — which is exactly how a request for the wrong type arrives
+    // at a real record: a saved scene stores a bare 64-bit number with no type beside it.
+    const auto sky = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
+         AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Impostor.asset" ) );
+    ASSERT_NE( sky, nullptr );
+
+    const Common::AssetHandle handle = sky->GetMetadata().Handle;
+
+    // The control: asking for what is actually stored still works. Without this line a lookup that
+    // returned null unconditionally would satisfy the assertion below.
+    EXPECT_NE( manager.FindByHandle<Desert::Assets::SkyboxAsset>( handle ), nullptr );
+
+    // The subject. This handle resolves to a record; that record is a SkyboxAsset; the request is for a
+    // CloudTypeAsset. There is no CloudTypeAsset to hand back, so the only honest answers are "no" and a
+    // logged reason. std::static_pointer_cast gave a third answer: a non-null CloudTypeAsset* aimed at a
+    // SkyboxAsset's bytes, which every `if (!asset)` in the engine accepts and then dereferences.
+    const auto reinterpreted = manager.FindByHandle<Desert::Assets::CloudTypeAsset>( handle );
+    EXPECT_EQ( reinterpreted, nullptr )
+         << "the registry answered a CloudTypeAsset request with the SkyboxAsset stored under that "
+            "handle, reinterpreted as one — a pointer that is non-null, wrong, and indistinguishable "
+            "from success at every call site";
+
+    // And it is the SAME OBJECT that came back, not some unrelated one: this is what makes the previous
+    // assertion about reinterpretation rather than about an accidental miss. Written as a pointer
+    // comparison against the skybox so the failure message names the object that was handed over.
+    EXPECT_NE( static_cast<const void*>( reinterpreted.get() ), static_cast<const void*>( sky.get() ) );
+}
+
+TEST( AssetHandleStability, ATypedLookupRefusesAnotherClassUnderTheSameTypeId )
+{
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( std::filesystem::current_path() / "RegistryProbe", "Content" );
+
+    Desert::Assets::AssetManager manager;
+
+    // AssetTypeID is COARSER than the C++ class in exactly one place: StaticMeshAsset and SkinnedMeshAsset
+    // both report AssetTypeID::Mesh, because neither declares a GetTypeID() of its own and both inherit
+    // MeshAsset's. The catalogue at the top of this file lists them under one id for that reason.
+    ASSERT_EQ( Desert::Assets::StaticMeshAsset::GetTypeID(), Desert::Assets::SkinnedMeshAsset::GetTypeID() );
+
+    const auto staticMesh = manager.CreateAsset<Desert::Assets::StaticMeshAsset>(
+         AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Rigged.stmesh" ), false );
+    ASSERT_NE( staticMesh, nullptr );
+
+    const Common::AssetHandle handle = staticMesh->GetMetadata().Handle;
+
+    // The control, and the reason this test is not a duplicate of the one above: an id compare PASSES here.
+    // Both sides say "Mesh". A lookup that verified only the stored AssetTypeID would hand this record over
+    // and static_pointer_cast would reinterpret a StaticMeshAsset as a SkinnedMeshAsset — which is why the
+    // check is a dynamic_pointer_cast and why the RTTI it costs was measured rather than argued about.
+    //
+    // Reachable, not hypothetical: the editor's static mesh picker lists FindAllByType<MeshAsset>(), i.e.
+    // every mesh including the skinned ones, and StaticMeshComponent resolves the chosen handle as
+    // StaticMeshAsset.
+    EXPECT_NE( manager.FindByHandle<Desert::Assets::StaticMeshAsset>( handle ), nullptr );
+    EXPECT_NE( manager.FindByHandle<Desert::Assets::MeshAsset>( handle ), nullptr )
+         << "a lookup for the BASE class must still succeed — refusing that would break every caller that "
+            "asks for a mesh without caring which kind";
+
+    EXPECT_EQ( manager.FindByHandle<Desert::Assets::SkinnedMeshAsset>( handle ), nullptr )
+         << "a StaticMeshAsset was handed back as a SkinnedMeshAsset because the two share one "
+            "AssetTypeID — the collision the type id is too coarse to see";
+}
+
+TEST( AssetHandleStability, EveryAssetTypeIdNamesItselfDistinctly )
+{
+    // AssetManager's refusal above logs the two type NAMES, because "type 4 was requested as type 10" is a
+    // number the reader then has to decode by hand — in the middle of diagnosing a wrong asset. A name
+    // table beside an enum is two places that must agree, which is the defect class this suite exists for,
+    // so the agreement is asserted rather than assumed: every enumerator up to Count must produce a name
+    // of its own, and a new type added without a name would land on the fallback and collide with Unknown.
+    std::set<std::string> names;
+    for ( int i = 0; i <= static_cast<int>( AssetTypeID::Count ); ++i )
+    {
+        const auto        type = static_cast<AssetTypeID>( i );
+        const std::string name = Desert::Assets::AssetTypeName( type );
+
+        EXPECT_FALSE( name.empty() ) << "AssetTypeID " << i << " has an empty name";
+        EXPECT_TRUE( names.insert( name ).second )
+             << "AssetTypeID " << i << " reports the name '" << name
+             << "', which another enumerator already uses — a new asset type was added without an entry "
+                "in AssetTypeName, so it fell through to the value meant for an unnamed one";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
 // The census: the catalogue above against the enum it claims to cover.
 // ---------------------------------------------------------------------------------------------------
 

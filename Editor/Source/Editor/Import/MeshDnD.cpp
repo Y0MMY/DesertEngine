@@ -70,13 +70,19 @@ namespace Desert::Editor::MeshDnD
         // (PBRSurfaceParams::MaterialId, baked into each submesh) resolves in MaterialService THIS session.
         // Without this the materials would only register on the NEXT launch (AssetPreloader scan) and a
         // just-imported mesh shows "Unassigned material slot". Import writes them as editable content at
-        // Resources/Assets/Materials/<meshStem>/*.demat (see ImportManager::SerializeMaterialAsset).
+        // CookPaths::MaterialFolder(source) (see ImportManager::SerializeMaterialAsset).
         // Idempotent (skips already-registered).
-        void RegisterCookedMaterials( Assets::AssetManager& mgr, const std::filesystem::path& cookedMeshPath )
+        //
+        // Takes the SOURCE path and asks CookPaths, rather than rebuilding the folder from the cooked
+        // path's stem. The old spelling here, `MATERIAL_PATH / cookedMeshPath.stem()`, was a second copy
+        // of the writer's formula that happened to agree with it only because both discarded the
+        // directory — so making the writer directory-aware without this would have left the reader looking
+        // in a folder nothing is written to, and every freshly imported mesh unassigned until relaunch.
+        void RegisterCookedMaterials( Assets::AssetManager& mgr, const std::filesystem::path& sourcePath )
         {
             namespace fs = std::filesystem;
             std::error_code ec;
-            const fs::path  dir = Common::Constants::Path::MATERIAL_PATH / cookedMeshPath.stem();
+            const fs::path  dir = CookPaths::MaterialFolder( sourcePath );
             if ( !fs::exists( dir, ec ) )
                 return;
 
@@ -125,7 +131,7 @@ namespace Desert::Editor::MeshDnD
         // UE-style: a just-imported mesh's materials + textures are immediately available (no restart/Save).
         // Order matters: textures FIRST (materials bind them eagerly at register time), then materials.
         RegisterCookedTextures( mgr );
-        RegisterCookedMaterials( mgr, cookedStr );
+        RegisterCookedMaterials( mgr, sourcePath );
         return created->GetMetadata().Handle;
     }
 
@@ -135,16 +141,16 @@ namespace Desert::Editor::MeshDnD
         // → its skeleton signature was 0 when ResolveDependencies first ran, so the skeleton is UNRESOLVED.
         // Load it (fills the signature), re-resolve the skeleton, then (re)Register so MeshFactory::CreateSkinned
         // builds with the skeleton in place — otherwise Get() returns null and the character never renders.
-        Assets::AssetHandle FinalizeSkinned( Assets::AssetManager&                      mgr,
-                                             const std::shared_ptr<Assets::MeshAsset>&  asset,
-                                             const std::string&                         skinnedStr )
+        Assets::AssetHandle FinalizeSkinned( Assets::AssetManager&                     mgr,
+                                             const std::shared_ptr<Assets::MeshAsset>& asset,
+                                             const std::string&                        sourcePath )
         {
             if ( !asset->IsReadyForUse() )
                 asset->Load();
             asset->ResolveDependencies( mgr );
             Runtime::ResourceRegistry::GetMeshService()->Register( asset ); // rebuild with the resolved skeleton
             RegisterCookedTextures( mgr );
-            RegisterCookedMaterials( mgr, skinnedStr );
+            RegisterCookedMaterials( mgr, sourcePath );
             return asset->GetMetadata().Handle;
         }
     } // namespace
@@ -157,7 +163,7 @@ namespace Desert::Editor::MeshDnD
         // Already cooked + registered? Reuse it — but a skinned shell from the preloader is lazy + has an
         // UNRESOLVED skeleton, so finalize it (load + resolve + rebuild) instead of returning it raw.
         if ( auto existing = mgr.FindByPath<Assets::MeshAsset>( skinnedStr ) )
-            return { FinalizeSkinned( mgr, existing, skinnedStr ), true };
+            return { FinalizeSkinned( mgr, existing, sourcePath ), true };
         if ( auto existing = mgr.FindByPath<Assets::MeshAsset>( staticStr ) )
             return { existing->GetMetadata().Handle, false };
 
@@ -175,7 +181,7 @@ namespace Desert::Editor::MeshDnD
             auto created = mgr.CreateAsset<Assets::SkinnedMeshAsset>( Assets::AssetPriority::High, skinnedStr );
             if ( !created )
                 return { Common::UUID::Null(), false };
-            return { FinalizeSkinned( mgr, created, skinnedStr ), true };
+            return { FinalizeSkinned( mgr, created, sourcePath ), true };
         }
 
         auto created = mgr.CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, staticStr );
@@ -184,7 +190,7 @@ namespace Desert::Editor::MeshDnD
 
         Runtime::ResourceRegistry::GetMeshService()->Register( created );
         RegisterCookedTextures( mgr );
-        RegisterCookedMaterials( mgr, staticStr );
+        RegisterCookedMaterials( mgr, sourcePath );
         return { created->GetMetadata().Handle, false };
     }
 
