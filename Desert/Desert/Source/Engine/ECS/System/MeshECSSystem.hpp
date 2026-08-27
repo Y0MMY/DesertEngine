@@ -1,6 +1,7 @@
 #pragma once
 
 #include "System.hpp"
+#include "SystemRules.hpp"
 
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -253,11 +254,21 @@ namespace Desert::ECS
                                  for ( const auto& t : matc.Textures )
                                      texOverrides.emplace_back( t.Name, t.TextureHandle );
 
+                                 // This draw REPLACES the entity's PBR draw (note the return), so it is
+                                 // the only draw that could carry the caster — and before it did, a
+                                 // Shader Override mesh cast no shadow at all.
+                                 const bool overrideCasts =
+                                      Rules::RouteMeshShadowCaster( mesh.CastShadows, /*shaderOverride*/ true,
+                                                                    /*slotDrawCount*/ 0,
+                                                                    /*pbrDrawEmitted*/ false ) ==
+                                      Rules::MeshShadowCaster::ShaderOverride;
+
                                  renderCommandBuffer.Emplace<Graphic::Render::DrawGenericMeshCommand>(
                                       targetMesh, worldTransform, matc.ShaderName,
                                       Graphic::MaterialOverrides{ std::move( overrides ),
                                                                   std::move( texOverrides ) },
-                                      outlined );
+                                      outlined, /*directTexture*/ nullptr, /*directTextureSampler*/ std::string{},
+                                      overrideCasts );
                                  return; // skip the PBR path for this entity
                              }
                          }
@@ -300,23 +311,40 @@ namespace Desert::ECS
                                  slotDraws.push_back( { parent, 1ull << si } );
                          }
 
+                         // Decided BEFORE anything is emitted, because the caster belongs to the ENTITY:
+                         // the shadow pass draws a mesh whole, so the PBR draw and the slot draws are
+                         // candidates for the same silhouette and only one of them may record it.
+                         const uint64_t allMask = submeshCount >= 64 ? ~0ull : ( ( 1ull << submeshCount ) - 1ull );
+                         const uint64_t pbrHidden      = mesh.HiddenSubmeshes | customMask;
+                         const bool     pbrDrawEmitted = submeshCount == 0 || ( ~pbrHidden & allMask ) != 0;
+
+                         const auto shadowRoute = Rules::RouteMeshShadowCaster(
+                              mesh.CastShadows, /*shaderOverride*/ false, slotDraws.size(), pbrDrawEmitted );
+
+                         bool slotCasterPlaced = false;
                          for ( const auto& d : slotDraws )
                          {
                              const uint64_t visible = d.Mask & ~mesh.HiddenSubmeshes;
-                             if ( visible )
-                                 renderCommandBuffer.Emplace<Graphic::Render::DrawSlotMaterialMeshCommand>(
-                                      targetMesh, worldTransform, d.Mat, visible, outlined );
+                             if ( !visible )
+                                 continue;
+
+                             // "First slot draw" means the first one actually EMITTED — a leading slot
+                             // whose submeshes are all hidden emits nothing, and routing the caster to it
+                             // would drop the entity's shadow instead of moving it.
+                             const bool casts =
+                                  !slotCasterPlaced && shadowRoute == Rules::MeshShadowCaster::FirstSlotDraw;
+                             slotCasterPlaced = slotCasterPlaced || casts;
+
+                             renderCommandBuffer.Emplace<Graphic::Render::DrawSlotMaterialMeshCommand>(
+                                  targetMesh, worldTransform, d.Mat, visible, outlined, casts );
                          }
 
                          // PBR path draws the remaining submeshes (skip entirely when every
                          // submesh went custom).
-                         const uint64_t allMask =
-                              submeshCount >= 64 ? ~0ull : ( ( 1ull << submeshCount ) - 1ull );
-                         const uint64_t pbrHidden = mesh.HiddenSubmeshes | customMask;
-                         if ( submeshCount == 0 || ( ~pbrHidden & allMask ) != 0 )
+                         if ( pbrDrawEmitted )
                              renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
-                                  targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, outlined,
-                                  pbrHidden, mesh.ForcedLOD, mesh.LODBias, mesh.CastShadows,
+                                  targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, outlined, pbrHidden,
+                                  mesh.ForcedLOD, mesh.LODBias, shadowRoute == Rules::MeshShadowCaster::PbrDraw,
                                   mesh.ReceiveShadows );
                      } );
             }

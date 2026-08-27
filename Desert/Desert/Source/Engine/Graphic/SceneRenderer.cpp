@@ -1127,7 +1127,7 @@ namespace Desert::Graphic
     void SceneRenderer::SubmitGenericMesh( const Mesh* mesh, const glm::mat4& transform,
                                            const std::string& shaderName, const MaterialOverrides& overrides,
                                            bool outlined, Image2D* directTexture,
-                                           const std::string& directTextureSampler )
+                                           const std::string& directTextureSampler, bool castShadows )
     {
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SubmitGenericMesh( { .Mesh                 = const_cast<Mesh*>( mesh ),
@@ -1135,17 +1135,19 @@ namespace Desert::Graphic
                                     .ShaderName           = shaderName,
                                     .Overrides            = overrides,
                                     .Outlined             = outlined,
+                                    .CastShadows          = castShadows,
                                     .DirectTexture        = directTexture,
                                     .DirectTextureSampler = directTextureSampler } );
     }
 
     void SceneRenderer::SubmitSlotMaterialMesh( const Mesh* mesh, const glm::mat4& transform, Material* material,
-                                                uint64_t visibleSubmeshMask, bool outlined )
+                                                uint64_t visibleSubmeshMask, bool outlined, bool castShadows )
     {
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SubmitGenericMesh( { .Mesh               = const_cast<Mesh*>( mesh ),
                                     .Transform          = transform,
                                     .Outlined           = outlined,
+                                    .CastShadows        = castShadows,
                                     .SlotMaterial       = material,
                                     .VisibleSubmeshMask = visibleSubmeshMask } );
     }

@@ -23,16 +23,21 @@ namespace Desert::Graphic::Render
         uint64_t           VisibleSubmeshMask;
         bool               Outlined = false;
 
-        DrawSlotMaterialMeshCommand( Desert::Mesh* mesh, const glm::mat4& transform,
-                                     Graphic::Material* material, uint64_t visibleSubmeshMask, bool outlined )
+        // Set on AT MOST ONE of an entity's slot draws, and only when no PBR draw was emitted for it —
+        // the shadow pass draws the mesh whole, so a second caster would be the same silhouette twice.
+        bool CastShadows = false;
+
+        DrawSlotMaterialMeshCommand( Desert::Mesh* mesh, const glm::mat4& transform, Graphic::Material* material,
+                                     uint64_t visibleSubmeshMask, bool outlined, bool castShadows = false )
              : Mesh( mesh ), Transform( transform ), SlotMaterial( material ),
-               VisibleSubmeshMask( visibleSubmeshMask ), Outlined( outlined )
+               VisibleSubmeshMask( visibleSubmeshMask ), Outlined( outlined ), CastShadows( castShadows )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
-            renderer.SubmitSlotMaterialMesh( Mesh, Transform, SlotMaterial, VisibleSubmeshMask, Outlined );
+            renderer.SubmitSlotMaterialMesh( Mesh, Transform, SlotMaterial, VisibleSubmeshMask, Outlined,
+                                             CastShadows );
         }
     };
 } // namespace Desert::Graphic::Render
