@@ -3,8 +3,9 @@
 #include "../IPanel.hpp"
 #include "ShaderGraph.hpp"
 
-#include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
+#include <Engine/Assets/Common.hpp>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,17 +18,6 @@ namespace ax::NodeEditor
 namespace Desert::Assets
 {
     class AssetManager;
-}
-
-namespace Desert::Editor
-{
-    class AssetThumbnailRenderer;
-    class ThumbnailCache;
-}
-
-namespace Desert::Graphic
-{
-    class Image2D;
 }
 
 namespace Desert::Editor
@@ -75,7 +65,13 @@ namespace Desert::Editor
         const ShaderGraph::Pin* FindPin( uint64_t id ) const;
         bool                    IsInputPin( uint64_t id ) const;
 
-        void DrawPreviewColumn();
+        // Makes sure a material asset exists that uses this graph's shader, and returns its handle. The
+        // preview window is a MATERIAL editor, so a bare shader is not something it can show.
+        Assets::AssetHandle EnsurePreviewMaterial();
+
+        // Hand the freshly compiled shader to the Material Preview window: invalidate the pipelines it
+        // cached from the old modules, then point it at this graph's material.
+        void PublishToPreview();
 
         std::shared_ptr<Assets::AssetManager> m_AssetManager;
         ax::NodeEditor::EditorContext*        m_Context = nullptr;
@@ -85,14 +81,21 @@ namespace Desert::Editor
         std::string           m_Status;                // last save/compile result line
         bool                  m_StatusIsError = false;
 
-        // Live preview: after a successful Compile the shader is rendered on a sphere by the
-        // thumbnail renderer (own offscreen scene, lazily created on first use) and shown beside
-        // the canvas.
-        std::unique_ptr<AssetThumbnailRenderer> m_PreviewRenderer;
-        std::unique_ptr<ThumbnailCache>         m_PreviewCache;
-        std::shared_ptr<Graphic::Image2D>       m_PreviewImage;
-        std::unique_ptr<UI::UIHelper>           m_UIHelper;
-        bool                                    m_PreviewRequested = false; // compile succeeded -> queue render
-        bool                                    m_PreviewWaiting   = false; // render in flight -> collect PNG
+        // The material this graph's shader is previewed on, created on the first successful Compile and
+        // reused after that (a new asset per compile would litter the project with scratch materials).
+        Assets::AssetHandle m_PreviewMaterial{ static_cast<uint64_t>( 0 ) };
+
+        // Recompile once editing has SETTLED. See AutoCompileIfSettled for where the number comes from:
+        // a graph rebuild costs roughly one of these, measured, so a settled graph reaches the preview in
+        // about the time a rebuild takes while a dragged edit produces one compile instead of a dozen.
+        static constexpr std::chrono::milliseconds kAutoCompileDelay{ 400 };
+
+        // A signature of what the graph MEANS — node kinds, constant values and links, never positions.
+        static uint64_t StructuralFingerprint( const ShaderGraph::Document& doc );
+        void            AutoCompileIfSettled();
+
+        bool                                  m_AutoCompile     = true;
+        uint64_t                              m_LastFingerprint = 0;
+        std::chrono::steady_clock::time_point m_DirtySince{}; // default = nothing pending
     };
 } // namespace Desert::Editor

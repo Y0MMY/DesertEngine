@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <string>
+#include <vector>
 
 namespace Desert::Editor
 {
@@ -180,7 +181,6 @@ namespace Desert::Editor
         //     imitating runs at. Simulate longer by rendering more frames — `--shot-frames`, whose meaning
         //     ("how many frames are drawn") is left exactly as it was.
         static constexpr float PlayStepSeconds = 1.0f / 60.0f;
-
         // Headless capture mode at all — either flavour of output activates it. `--shot-sequence` alone is
         // a legitimate run: a motion study wants the frames and has no use for a designated last one.
         bool Active() const

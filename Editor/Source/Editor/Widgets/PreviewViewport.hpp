@@ -77,6 +77,17 @@ namespace Desert::Editor
         // Re-frame on the current content's bounds (what double-click does).
         void ResetView();
 
+        // Drop the pipelines THIS preview cached from @p shader, so the next frame rebuilds them against
+        // the shader's new modules.
+        //
+        // Needed because a recompile is only half-published: the Shader object is shared and reloads
+        // itself, but pipelines are cached PER SceneRenderer, and AssetHotReload::PollShaders invalidates
+        // only the cache of the scene handed to Tick — the main one. A preview that never heard about the
+        // rebuild would go on drawing the old modules while the viewport drew the new ones, which is a
+        // preview disagreeing with the game: the precise failure Docs/MaterialEditor/STAGE1_END_TO_END.md
+        // was written about, in different clothes. Safe to call with a shader this preview never used.
+        void InvalidatePipelines( const void* shader );
+
     private:
         void EnsureInit();
         void ApplyCamera( uint32_t width, uint32_t height );

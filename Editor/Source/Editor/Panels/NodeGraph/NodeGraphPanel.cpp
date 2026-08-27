@@ -1,9 +1,9 @@
 #include "NodeGraphPanel.hpp"
 
-#include <Editor/Widgets/AssetThumbnailRenderer.hpp>
-#include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Panels/MaterialPreviewPanel.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Shader/ShaderAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
@@ -11,6 +11,8 @@
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <imgui-node-editor/imgui_node_editor.h>
+
+#include <rflcpp/rfl/json.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -49,9 +51,11 @@ namespace Desert::Editor
             return Common::Constants::Path::SHADERDIR_PATH / "Programs" / "Graph" / ( name + ".shader" );
         }
 
-        std::filesystem::path PreviewPngPath( const std::string& name )
+        // The scratch material a graph's shader is previewed on. One per graph, next to the graph itself,
+        // so it is an ordinary project asset the artist can also drop onto a mesh.
+        std::filesystem::path PreviewMaterialPath( const std::string& name )
         {
-            return Common::Constants::Path::COOKED_PATH / "GraphPreviews" / ( name + ".png" );
+            return Common::Constants::Path::MATERIAL_PATH / ( name + "_Preview.demat" );
         }
 
         // Fills @p doc with a minimal, compiles-as-is starter graph for the domain: Surface gets
@@ -117,6 +121,13 @@ namespace Desert::Editor
 
         m_ApplyPositions = true;
         m_Status.clear();
+
+        // A graph that was just loaded or created has not been EDITED, so it must not look dirty to the
+        // auto-compile. Seeding the fingerprint here is what makes the debounce fire on a change rather
+        // than on merely opening the panel — which cost a ~370 ms rebuild for nothing, and was visible as
+        // a GraphShader.shader written the moment the window appeared.
+        m_LastFingerprint = StructuralFingerprint( m_Doc );
+        m_DirtySince      = {};
     }
 
     void NodeGraphPanel::ChangeDomain( SG::Domain domain )
@@ -229,6 +240,10 @@ namespace Desert::Editor
         m_ApplyPositions = true;
         m_Status         = "Loaded " + std::filesystem::path( fullPath ).filename().string();
         m_StatusIsError  = false;
+
+        // Loaded, not edited — see the note in NewGraph.
+        m_LastFingerprint = StructuralFingerprint( m_Doc );
+        m_DirtySince      = {};
     }
 
     std::string NodeGraphPanel::CreateNewGraphFile( const std::string& directory, SG::Domain domain )
@@ -267,11 +282,90 @@ namespace Desert::Editor
 
     void NodeGraphPanel::OnPreUpdate()
     {
-        if ( s_PendingOpenRequest.empty() )
+        if ( !s_PendingOpenRequest.empty() )
+        {
+            LoadGraphFromPath( s_PendingOpenRequest );
+            s_PendingOpenRequest.clear();
+            GetVisibility()   = true; // double-click opens the panel even if it was hidden
+            m_LastFingerprint = StructuralFingerprint( m_Doc );
+            m_DirtySince      = {};
+        }
+
+        AutoCompileIfSettled();
+    }
+
+    // A cheap structural signature of the graph: what it MEANS, not where it sits. Node positions are
+    // excluded deliberately -- dragging a node around changes no generated GLSL, and recompiling for it
+    // would burn ~370 ms of shaderc to produce byte-identical output.
+    uint64_t NodeGraphPanel::StructuralFingerprint( const ShaderGraph::Document& doc )
+    {
+        uint64_t   h   = 1469598103934665603ull; // FNV-1a
+        const auto mix = [&h]( uint64_t v )
+        {
+            h ^= v;
+            h *= 1099511628211ull;
+        };
+        const auto mixStr = [&mix]( const std::string& s )
+        {
+            for ( const char c : s )
+                mix( static_cast<uint64_t>( static_cast<unsigned char>( c ) ) );
+        };
+
+        mixStr( doc.Name );
+        mix( static_cast<uint64_t>( doc.DomainEnum() ) );
+        for ( const auto& n : doc.Nodes )
+        {
+            mix( n.Id );
+            mixStr( n.Kind );
+            mixStr( n.ParamName );
+            for ( const float v : n.Value )
+                mix( static_cast<uint64_t>( static_cast<int64_t>( v * 100000.0f ) ) );
+            // n.X / n.Y deliberately absent — see the note above.
+        }
+        for ( const auto& l : doc.Links )
+        {
+            mix( l.From );
+            mix( l.To );
+        }
+        return h;
+    }
+
+    // Recompile once the artist has STOPPED editing, not on every touch.
+    //
+    // The constant comes from a measurement rather than a guess. A cold editor start costs ~15.1 s more
+    // than a warm one and writes 123 SPIR-V modules, so a module is ~123 ms here, and a Surface graph emits
+    // three (vertex + fragment, plus the depth pass) -- call it ~370 ms per rebuild. The SPIR-V cache does
+    // not help: its key is the compiled text, and a preview recompile happens precisely BECAUSE that text
+    // just changed, so every one is a miss. Compiling on each keystroke would therefore queue rebuilds
+    // faster than they complete and the editor would never catch up.
+    //
+    // The delay is set at the cost of one rebuild, so a settled graph is on screen in about the time a
+    // rebuild takes and a dragged slider produces exactly one compile at the end instead of a dozen.
+    // PARAMETER values are not in this path at all -- they are uniform-buffer fields, edited live in the
+    // preview window with no recompile whatsoever.
+    void NodeGraphPanel::AutoCompileIfSettled()
+    {
+        if ( !m_AutoCompile )
             return;
-        LoadGraphFromPath( s_PendingOpenRequest );
-        s_PendingOpenRequest.clear();
-        GetVisibility() = true; // double-click opens the panel even if it was hidden
+
+        const uint64_t fingerprint = StructuralFingerprint( m_Doc );
+        const auto     now         = std::chrono::steady_clock::now();
+
+        if ( fingerprint != m_LastFingerprint )
+        {
+            m_LastFingerprint = fingerprint;
+            m_DirtySince      = now; // the clock restarts on every edit: this is a debounce, not a timer
+            return;
+        }
+
+        if ( m_DirtySince == std::chrono::steady_clock::time_point{} )
+            return; // nothing pending
+
+        if ( now - m_DirtySince < kAutoCompileDelay )
+            return;
+
+        m_DirtySince = {};
+        Compile();
     }
 
     void NodeGraphPanel::Compile()
@@ -295,7 +389,7 @@ namespace Desert::Editor
             // Already registered: the overwrite is picked up by the shader hot-reload poll.
             m_Status        = m_Doc.Name + ".shader recompiled — hot reload applies it";
             m_StatusIsError = false;
-            m_PreviewRequested = true;
+            PublishToPreview();
             return;
         }
 
@@ -316,7 +410,57 @@ namespace Desert::Editor
         }
         m_Status        = m_Doc.Name + " compiled + registered — pick it in Material \\ Shader";
         m_StatusIsError = false;
-        m_PreviewRequested = true; // render the fresh shader on the preview sphere
+        PublishToPreview();
+    }
+
+    Assets::AssetHandle NodeGraphPanel::EnsurePreviewMaterial()
+    {
+        if ( static_cast<uint64_t>( m_PreviewMaterial ) != 0 )
+            return m_PreviewMaterial;
+        if ( !m_AssetManager )
+            return Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+
+        const auto path = PreviewMaterialPath( m_Doc.Name );
+
+        std::error_code ec;
+        std::filesystem::create_directories( path.parent_path(), ec );
+
+        // Reuse the file if a previous compile already made one for this graph, so recompiling does not
+        // keep minting scratch materials. CreateAsset loads an existing .demat and produces an empty one
+        // otherwise; either way the asset itself is what writes the file, through the material canon,
+        // rather than this panel hand-rolling .demat JSON.
+        auto asset =
+             m_AssetManager->CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::Medium, path );
+        if ( !asset )
+        {
+            LOG_ERROR( "[NodeGraph] preview material '{}' could not be created", path.string() );
+            return Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+        }
+
+        // ShaderName is the ONLY thing that makes this material the graph's; a material left over from an
+        // earlier compile keeps whatever shader it had, so set it every time.
+        asset->Data().ShaderName = m_Doc.Name;
+        if ( !asset->Data().MaterialId.has_value() || asset->Data().MaterialId->IsNull() )
+            asset->Data().MaterialId = Common::UUID::Generate();
+        Common::Utils::FileSystem::WriteContentToFile( path, asset->Save() );
+
+        if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
+            materialService->Register( asset );
+
+        m_PreviewMaterial = asset->GetMetadata().Handle;
+        return m_PreviewMaterial;
+    }
+
+    void NodeGraphPanel::PublishToPreview()
+    {
+        // Tell the preview window to drop the pipelines it built from the OLD modules before showing the
+        // material again. The shader object reloads itself, but pipelines are cached per SceneRenderer and
+        // the hot-reload path only invalidates the main scene's cache — so without this the preview would
+        // keep drawing the previous compile while the viewport drew the new one.
+        MaterialPreviewPanel::RequestShaderRebuilt( m_Doc.Name );
+
+        if ( const auto material = EnsurePreviewMaterial(); static_cast<uint64_t>( material ) != 0 )
+            MaterialPreviewPanel::RequestPreview( material );
     }
 
     void NodeGraphPanel::DrawToolbar()
@@ -586,73 +730,17 @@ namespace Desert::Editor
         ed::SetCurrentEditor( nullptr );
     }
 
-    void NodeGraphPanel::DrawPreviewColumn()
-    {
-        ImGui::TextDisabled( "Preview" );
-        constexpr float kPreviewSize = 128.0f;
-
-        if ( m_PreviewImage && m_UIHelper )
-            m_UIHelper->Image( m_PreviewImage, ImVec2( kPreviewSize, kPreviewSize ) );
-        else
-        {
-            // Placeholder box until the first successful Compile.
-            ImDrawList*  dl = ImGui::GetWindowDrawList();
-            const ImVec2 p0 = ImGui::GetCursorScreenPos();
-            dl->AddRectFilled( p0, ImVec2( p0.x + kPreviewSize, p0.y + kPreviewSize ),
-                               IM_COL32( 30, 30, 34, 255 ), 4.0f );
-            dl->AddRect( p0, ImVec2( p0.x + kPreviewSize, p0.y + kPreviewSize ),
-                         IM_COL32( 255, 255, 255, 25 ), 4.0f );
-            ImGui::Dummy( ImVec2( kPreviewSize, kPreviewSize ) );
-        }
-        if ( m_PreviewWaiting || ( m_PreviewRenderer && m_PreviewRenderer->HasPending() ) )
-            ImGui::TextDisabled( "rendering..." );
-        else if ( !m_PreviewImage )
-            ImGui::TextDisabled( "Compile to render" );
-    }
-
     void NodeGraphPanel::OnUIRender()
     {
         DrawToolbar();
 
-        // Preview pipeline: request after a successful Compile, tick the offscreen render, and
-        // pick up the finished PNG. All lazy — zero cost until the first Compile.
-        if ( m_PreviewRequested )
-        {
-            if ( !m_PreviewRenderer )
-            {
-                m_PreviewRenderer = std::make_unique<AssetThumbnailRenderer>();
-                m_PreviewCache    = std::make_unique<ThumbnailCache>();
-                m_UIHelper        = std::make_unique<UI::UIHelper>();
-                m_UIHelper->Init();
-            }
-            if ( !m_PreviewRenderer->HasPending() )
-            {
-                const auto png = PreviewPngPath( m_Doc.Name );
-                std::error_code ec;
-                std::filesystem::create_directories( png.parent_path(), ec );
-                m_PreviewRenderer->RequestShader( m_Doc.Name, png.string() );
-                m_PreviewRequested = false;
-                m_PreviewWaiting   = true;
-            }
-        }
-        if ( m_PreviewRenderer )
-            m_PreviewRenderer->Tick();
-        if ( m_PreviewWaiting && m_PreviewRenderer && !m_PreviewRenderer->HasPending() )
-        {
-            const auto png = PreviewPngPath( m_Doc.Name ).string();
-            m_PreviewCache->Invalidate( png );
-            m_PreviewImage   = m_PreviewCache->Get( png );
-            m_PreviewWaiting = false;
-        }
-
-        constexpr float kPreviewColumnW = 144.0f;
-        ImGui::BeginChild( "##graphCanvasRegion", ImVec2( -kPreviewColumnW, 0.0f ) );
+        // The canvas gets the whole panel now. The 128 px thumbnail that used to sit beside it is gone,
+        // and not merely moved: it was rendered by AssetThumbnailRenderer through
+        // MaterialComponent::ShaderName — the shader-OVERRIDE route — which is a different path in
+        // MeshRenderer from the one a scene mesh takes. It therefore showed a correct material at times
+        // when the scene showed something else (Docs/MaterialEditor/STAGE1_END_TO_END.md). Compile now
+        // publishes to the Material Preview window, which previews a material ASSET through the same
+        // per-slot route the game uses.
         DrawCanvas();
-        ImGui::EndChild();
-
-        ImGui::SameLine();
-        ImGui::BeginGroup();
-        DrawPreviewColumn();
-        ImGui::EndGroup();
     }
 } // namespace Desert::Editor
