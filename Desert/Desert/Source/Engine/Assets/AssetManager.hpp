@@ -35,7 +35,8 @@ namespace Desert::Assets
 
             if ( const auto it = m_PathLookup.find( cacheKey ); it != m_PathLookup.end() )
             {
-                return sp_cast<AssetType>( m_AssetsCache[it->second].second );
+                return AsRequestedType<AssetType>( m_AssetsCache[it->second].second, "CreateAsset",
+                                                   cacheKey );
             }
 
             // NOTE:Perhaps the creation of an asset via the Create() method should be defined for each type
@@ -73,7 +74,8 @@ namespace Desert::Assets
         {
             if ( auto it = m_HandleLookup.find( handle ); it != m_HandleLookup.end() )
             {
-                return sp_cast<TypeAsset>( m_AssetsCache[it->second].second );
+                return AsRequestedType<TypeAsset>( m_AssetsCache[it->second].second, "FindByHandle",
+                                                   std::to_string( static_cast<uint64_t>( handle ) ) );
             }
             return nullptr;
         }
@@ -91,7 +93,7 @@ namespace Desert::Assets
 
             if ( it != m_AssetsCache.end() )
             {
-                return sp_cast<TypeAsset>( it->second );
+                return AsRequestedType<TypeAsset>( it->second, "FindByPath", path.generic_string() );
             }
             return nullptr;
         }
@@ -106,7 +108,11 @@ namespace Desert::Assets
             {
                 if ( metadata.AssetType == typeId )
                 {
-                    if ( auto casted = sp_cast<TypeAsset>( asset ) )
+                    // Filtered on the REGISTRY's copy of the type, then checked against the ASSET's own:
+                    // the two are written at different moments and a census that trusted only the copy
+                    // would count a record the copy mislabels. AsRequestedType refuses and says so.
+                    if ( auto casted = AsRequestedType<TypeAsset>( asset, "FindAllByType",
+                                                                   metadata.Filepath.generic_string() ) )
                     {
                         result.emplace_back( metadata.Handle, casted );
                     }
@@ -117,6 +123,57 @@ namespace Desert::Assets
         }
 
     private:
+        // A TYPED LOOKUP ANSWERS OR REFUSES. It never reinterprets.
+        //
+        // Every Find* above used to end in `sp_cast`, i.e. `std::static_pointer_cast`, and that is not a
+        // question — it is an ASSERTION that the record holds the requested class. When the assertion was
+        // wrong the caller got a perfectly non-null pointer to an object of another class, so every `if
+        // (!asset)` downstream waved it through and the code read a stranger's memory as its own. It was
+        // observed: a `SkyboxAsset` came back from a `CloudTypeAsset` request, non-null, in the
+        // AssetHandleStability suite. A wrong answer that is indistinguishable from a right one is the
+        // worst thing a lookup can return, and no caller can defend against it.
+        //
+        // Today's key carries the type, so nothing collides today. This exists because the FAILURE MODE,
+        // not the collision, is the defect: any future collision — a hash meeting, an id read out of a
+        // file, an importer key too coarse to separate two assets — would again produce a plausible
+        // pointer instead of an error.
+        //
+        // The check needs no RTTI. `AssetBase` stamps its own `AssetTypeID` at construction and
+        // `GetMetadata()` is `final`, so a record can be ASKED what it is: one integer compare against
+        // `TypeAsset::GetTypeID()`. `dynamic_pointer_cast` answers the same question and was measured
+        // rather than guessed, because this sits on the preload path where the neighbouring lookup already
+        // cost 56.9 s on 2000 assets when it was written the naive way — see the developer's report for
+        // the numbers.
+        //
+        // The mismatch is NAMED, not merely turned into null: `who` is the entry point and `subject` the
+        // key that was asked about, so the log line says which question produced a stranger and which
+        // record the stranger was.
+        template <typename TypeAsset>
+        static Asset<TypeAsset> AsRequestedType( const Asset<AssetBase>& stored, const char* who,
+                                                 const std::string& subject )
+        {
+            static_assert( std::is_base_of_v<AssetBase, TypeAsset>,
+                           "TypeAsset must inherit from AssetBase" );
+
+            if ( !stored )
+            {
+                return nullptr;
+            }
+
+            const AssetTypeID wanted = TypeAsset::GetTypeID();
+            const AssetTypeID actual = stored->GetMetadata().AssetType;
+            if ( actual != wanted )
+            {
+                LOG_ERROR( "AssetManager::{}: '{}' holds a {} asset (type id {}) but was requested as {} "
+                           "(type id {}). Refusing to reinterpret it; returning null.",
+                           who, subject, AssetTypeName( actual ), static_cast<int>( actual ),
+                           AssetTypeName( wanted ), static_cast<int>( wanted ) );
+                return nullptr;
+            }
+
+            return sp_cast<TypeAsset>( stored );
+        }
+
         // "Which file is this, and as what type?" — the asset's identity key with its type appended,
         // because two asset classes are allowed to sit on one path (the handle derivation deliberately
         // gives them the same number) and they are still two records.
