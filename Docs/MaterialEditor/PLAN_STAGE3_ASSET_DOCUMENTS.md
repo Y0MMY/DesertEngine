@@ -38,9 +38,15 @@ is its first consumer. Build the seam with one real consumer, never on its own �
 There are **six** renderer slots (`one-scenerenderer-per-frame`, keyed by frame × slot). Today they are
 claimed by: the main scene, each extra scene view, the Details preview, and the preview window.
 
-`STAGE2_PREVIEW_WINDOW.md:115-118` records the live defect: **the Details panel's preview never gives
-its slot back.** `PreviewViewport::EnsureInit` is lazy, but once shown it holds a slot for the session.
-N material-editor windows on top of that is how we run out.
+**Corrected 2026-08-27, during M1.** This section first said the Details panel's preview never gives
+its slot back, citing `STAGE2_PREVIEW_WINDOW.md:115-118`. That was true when Stage 2 was written and
+is not true now: **`808168af` fixed it and added `Engine/Core/RendererSlotPool.hpp` plus a
+`RendererSlots` suite.** The developer on M1 checked the claim against the tree instead of taking the
+brief's word for it, which is the behaviour this contract asks for — a plan that describes a repaired
+defect as live invites the next person to repair it twice.
+
+What survives the correction is the arithmetic, and it is the part that mattered: Details still holds
+a slot whenever something is selected, and N material-editor windows on top of that is how we run out.
 
 Stage 3 therefore owns two rules, and M1 does not ship without them:
 
@@ -83,7 +89,8 @@ closing a window releases its scene, renderer and slot.
   `AssetHotReload::PollShaders` only invalidates the main scene's. Losing that reintroduces the
   Stage-1 disease exactly as `STAGE2_PREVIEW_WINDOW.md:26-32` describes.
 - `NodeGraphPanel::PublishToPreview` (`NodeGraphPanel.cpp:453-464`) is repointed at the registry.
-- `ScenePropertiesPanel`'s preview gains the same release path, fixing the recorded defect.
+- `ScenePropertiesPanel` exposes whether it is currently holding a slot, so the census can name it.
+  (It already releases correctly — see the correction in §1.)
 - `FileExplorerPanel.cpp:1996-2001` gains the `FileType::Material` branch.
 - The dead declaration `ScenePropertiesPanel.hpp:36` `DrawMaterialEntity` — declared, never defined,
   never called — goes.

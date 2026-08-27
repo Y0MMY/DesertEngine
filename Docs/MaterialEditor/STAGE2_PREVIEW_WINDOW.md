@@ -112,10 +112,13 @@ access, which a build agent does not have. It opens exactly what the View menu o
 
 ## Left undone, deliberately
 
-* **The Details panel's own preview never gives its slot back.** `PreviewViewport::EnsureInit` is lazy, so
-  nothing exists until something is selected — but once shown it holds a renderer slot for the rest of the
-  session. There are six. Not touched here because it is a different panel, but it is now the largest
-  remaining consumer of a scarce resource.
+* ~~**The Details panel's own preview never gives its slot back.**~~ **FIXED since — `808168af`, "slots:
+  the Details preview leased one of six and never gave it back", which also added
+  `Engine/Core/RendererSlotPool.hpp` and the `RendererSlots` suite.** Left here rather than deleted
+  because the entry was cited as a live defect by the Stage 3 plan a week later, and the developer who
+  caught that checked the tree instead of the document. An item in a "left undone" list has no expiry
+  stamped on it, and that is how it outlived its own repair. Details still *takes* a slot while
+  something is selected — it now gives it back.
 * **The preview's shape and orbit are not persisted.** Reopening the window starts at the default angle.
 * **The window previews one material at a time**, chosen in its combo or pushed by Compile. No side-by-side.
 * **`AutoCompileIfSettled` polls a fingerprint** rather than being told the graph changed. It is cheap
