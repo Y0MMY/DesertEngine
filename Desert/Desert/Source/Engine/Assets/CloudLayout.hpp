@@ -347,4 +347,194 @@ namespace Desert::Assets
      */
     CloudLayoutStrokeStats MeasureCloudLayoutStrokes( const CloudLayoutData& data, uint32_t slot,
                                                       float limitTexels );
+
+    // ---------------------------------------------------------------------------------------------------
+    // THE BRUSH — the second way a painting comes into existence, and the reason it is HERE
+    // ---------------------------------------------------------------------------------------------------
+    //
+    // WHAT THE BRUSH PRODUCES IS A PICTURE, not a layout. Everything below fills an RGBA8 buffer of exactly
+    // the shape `MakeCloudLayoutFromImage` already takes, and the panel and the tool then hand that buffer
+    // to that one function. So there is still ONE statement in this tree of what a picture means, and
+    // painting and importing cannot come to differ about a channel mapping, a mask or a mean. It is the
+    // same discipline `Tools/CloudLayoutBaker`'s own header claims for the import path, extended to the
+    // path the artist actually draws on.
+    //
+    // AND IT LIVES IN THE ENGINE RATHER THAN IN THE PANEL because a brush the editor owns is a brush no
+    // test can run and no command can reproduce. The panel drives it from a mouse; the command-line baker
+    // drives the identical function from a figure; and Desert/Tests/Engine/CloudPlacementSpectrum measures
+    // its strokes with the very ruler the panel quotes at the artist. A figure whose provenance is
+    // "somebody clicked" is what §PT already refused once.
+
+    /**
+     * @brief One RGBA8 painting surface, plus the one bit about it that is not a pixel.
+     *
+     * THE ALPHA PLANE DOES DOUBLE DUTY AND THAT IS INHERITED, NOT INVENTED. `MakeCloudLayoutFromImage`
+     * takes four source channels and takes the MASK from alpha, so a single canvas can carry four painted
+     * pattern channels OR three plus a mask — never four plus a mask. The layout FILE can hold both; a
+     * one-image source cannot express it. @ref TakeMask records which of the two the surface means, so the
+     * question is answered by the canvas rather than by whoever is looking at it.
+     */
+    struct CloudLayoutCanvas
+    {
+        /// Side in texels. Square, for the reason CloudLayoutData::Resolution is square.
+        uint32_t Side = 0u;
+
+        /// RGBA8, `4 * Side * Side`, x fastest — the exact layout stbi_load returns and
+        /// MakeCloudLayoutFromImage expects.
+        std::vector<unsigned char> Pixels;
+
+        /// Whether the alpha plane is the add/remove mask. A blank canvas says NO: alpha starts at the
+        /// mask's neutral 128, and a mask of uniform neutral is a mask that does nothing, so claiming one
+        /// would be a table carried for no reason.
+        bool TakeMask = false;
+    };
+
+    /**
+     * @brief A blank canvas: no cloud painted anywhere, and an alpha at the mask's NEUTRAL rather than at
+     *        opaque white.
+     *
+     * WHY ALPHA STARTS AT 128 AND NOT AT 255. The mask is signed about 128 — above adds cloud, below
+     * removes it — so a canvas flooded with opaque white would, the moment somebody ticked the mask box,
+     * be a mask that adds cloud to the entire sky. That is the exact silent-uniform-wrong-answer
+     * `MakeCloudLayoutFromImage`'s own `takeMask` parameter exists to refuse, and a fresh canvas must not
+     * walk into it from the other side.
+     */
+    Common::ResultStr<CloudLayoutCanvas> MakeCloudLayoutCanvas( uint32_t side );
+
+    /**
+     * @brief Recovers the canvas a layout could have been painted on, or says why this one could not.
+     *
+     * REFUSES RATHER THAN DROPS SOMETHING. A layout whose mask differs from its fourth pattern channel
+     * needs five planes and a canvas has four; opening it for painting would have to discard one of them,
+     * and a table silently discarded is a sky that changes for no reason the artist can see. The check is
+     * a byte comparison, so the answer is exact rather than a guess about provenance.
+     */
+    Common::ResultStr<CloudLayoutCanvas> MakeCloudLayoutCanvasFromLayout( const CloudLayoutData& data );
+
+    /**
+     * @brief The brush itself: three numbers, each of which changes the pixels.
+     *
+     * THERE IS NO "FLOW" AND ITS ABSENCE IS A DECISION. A flow that builds up over repeated dabs makes a
+     * stroke's width depend on how SLOWLY the mouse moved through it, and the one thing this brush has to
+     * guarantee is that a stroke is as wide as it was asked to be — that is the number the placement cell
+     * is compared against. Ink already expresses everything a partial flow could: a stroke that deposits
+     * less cloud. So the stroke is laid ONCE, at its strongest, and its width is a property of the brush
+     * rather than of the drag.
+     */
+    struct CloudLayoutBrush
+    {
+        /// Half the stroke's width at full hardness, in texels of the canvas.
+        float RadiusTexels = 24.0f;
+
+        /// 0..1. At 1 the dab is a disc with no ramp at all; at 0 it ramps linearly from the centre to
+        /// nothing at the rim. It is what makes a coastline soft and a letter crisp, and it moves the width
+        /// the stroke MEASURES at — see CloudLayoutBrushWidthTexels, which states that relation once.
+        float Hardness = 1.0f;
+
+        /// 0..1, the value the stroke moves the channel TOWARD. On a pattern channel 1 is "as much of this
+        /// species as the slider allows" and 0 is "none"; on the mask 1 adds cloud, 0 removes it and 0.5 is
+        /// the neutral an eraser returns to. One number for painting and for erasing, because an eraser
+        /// that is not just "ink at the rest value" is a second code path doing one thing.
+        float Ink = 1.0f;
+    };
+
+    /**
+     * @brief How wide a stroke of @p brush comes out under `MeasureCloudLayoutStrokes`, in texels.
+     *
+     * THIS IS THE RELATION THE WHOLE PANEL RESTS ON, so it is stated once here rather than assumed in two
+     * places. The measure calls a texel painted when it is above the channel's own midpoint; the dab's
+     * profile is flat out to `Hardness * Radius` and ramps linearly to nothing at `Radius`; so the profile
+     * crosses the midpoint at `Radius * (1 + Hardness) / 2` from the axis and the stroke measures
+     * `Radius * (1 + Hardness)` across. At full hardness that is exactly the diameter, which is why the
+     * panel's advice — "paint at least one placement cell wide" — is a statement about the radius slider
+     * and not a hope about it.
+     *
+     * Independent of Ink on purpose: a fainter stroke is not a thinner one, and the measure's own
+     * per-channel midpoint is what makes that true.
+     */
+    float CloudLayoutBrushWidthTexels( const CloudLayoutBrush& brush );
+
+    /**
+     * @brief One continuous drag, held open between mouse-down and mouse-up.
+     *
+     * WHY A STROKE HAS STATE AT ALL. A texel takes the STRONGEST coverage the stroke laid on it, once —
+     * not one deposit per frame. Without that, a drag that paused would burn through a soft edge, the same
+     * figure would come out different on a slow machine, and the width the panel promises would be a
+     * function of the frame rate. The two tables below are what make "laid once" true: @ref Base is the
+     * channel as it stood when the drag began, and @ref Coverage is the strongest dab seen so far.
+     *
+     * It carries the side and the channel so that they are validated ONCE, at BeginCloudLayoutStroke, and
+     * the per-segment call that runs on every mouse move cannot fail at all.
+     */
+    struct CloudLayoutStroke
+    {
+        uint32_t Side    = 0u;
+        uint32_t Channel = 0u;
+
+        /// `Side * Side`, the channel's value before this drag.
+        std::vector<unsigned char> Base;
+
+        /// `Side * Side`, the strongest dab alpha this drag has laid, 0..255.
+        std::vector<unsigned char> Coverage;
+
+        bool IsOpen() const
+        {
+            return Side > 0u && Base.size() == static_cast<size_t>( Side ) * Side;
+        }
+    };
+
+    /**
+     * @brief Opens a stroke on one channel of @p canvas, snapshotting it.
+     *
+     * @param channel 0..3 — R, G, B, A of the canvas. The mask is alpha, per CloudLayoutCanvas::TakeMask.
+     *
+     * Refuses a canvas whose length disagrees with its side, a side outside the layout's bounds and a
+     * channel an RGBA image does not have — each by name, because the alternative is a brush that paints
+     * into the wrong plane and an artist who cannot see why.
+     */
+    Common::BoolResultStr BeginCloudLayoutStroke( CloudLayoutStroke&                stroke,
+                                                  const std::vector<unsigned char>& canvas, uint32_t side,
+                                                  uint32_t channel );
+
+    /**
+     * @brief Extends an open stroke by one straight segment and writes the result into @p canvas.
+     *
+     * THE SEGMENT IS A CAPSULE, NOT A ROW OF DABS. Every texel's coverage comes from its distance to the
+     * SEGMENT rather than to the nearest of a series of stamps, so there is no spacing constant, no
+     * scalloped edge, and no way for a fast mouse to leave gaps a slow one would not. It also removes the
+     * one number a dab-spacing brush has that nobody can choose correctly.
+     *
+     * AND THE FOOTPRINT WRAPS. The painting tiles the world, so a stroke laid against the left edge must
+     * come out of the right one — otherwise every figure that touches an edge is cut in half at the region
+     * face, which is the one discontinuity the whole `.dclayout` design exists to avoid.
+     *
+     * @return how many texels changed value. Zero means there is nothing to re-upload, which is what keeps
+     *         a stationary cursor from restaging a megabyte every frame.
+     */
+    uint64_t ExtendCloudLayoutStroke( CloudLayoutStroke& stroke, std::vector<unsigned char>& canvas,
+                                      const glm::vec2& fromTexels, const glm::vec2& toTexels,
+                                      const CloudLayoutBrush& brush );
+
+    /**
+     * @brief Paints a whole polyline as ONE stroke — a drag, replayed from a script.
+     *
+     * It is what `Tools/CloudLayoutBaker` draws its brush figures with, and it exists so that a frame
+     * showing "a letter painted with the brush" is showing THIS brush rather than a second one that
+     * resembles it. Fewer than two points paint nothing and say so.
+     */
+    Common::BoolResultStr PaintCloudLayoutPolyline( std::vector<unsigned char>& canvas, uint32_t side,
+                                                    uint32_t channel, const std::vector<glm::vec2>& pointsTexels,
+                                                    const CloudLayoutBrush& brush );
+
+    /**
+     * @brief Floods one channel of a canvas — the "start again" of the panel and the ground a figure is
+     *        drawn on.
+     */
+    Common::BoolResultStr FillCloudLayoutCanvasChannel( std::vector<unsigned char>& canvas, uint32_t side,
+                                                        uint32_t channel, unsigned char value );
+
+    /// The mask's neutral byte, exposed because the panel has to offer it as an eraser's ink and the tool
+    /// has to lay it down as a background. One constant, so "neutral" cannot be spelt 127 in one place and
+    /// 128 in another.
+    inline constexpr unsigned char kCloudLayoutMaskNeutral = 128u;
 } // namespace Desert::Assets

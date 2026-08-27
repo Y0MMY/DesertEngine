@@ -12,9 +12,12 @@ namespace Desert::Assets
     {
         constexpr uint32_t kPatternBytesPerTexel = 4u;
 
-        /// What the mask's neutral byte is. 128 rather than 0 because the stored table is UNSIGNED and an
-        /// artist floods a painting with mid-grey, not with black — see the note on CloudLayoutData::Mask.
-        constexpr float kMaskNeutral = 128.0f;
+        /// What the mask's neutral byte is, as a float for the arithmetic below. 128 rather than 0 because
+        /// the stored table is UNSIGNED and an artist floods a painting with mid-grey, not with black — see
+        /// the note on CloudLayoutData::Mask. DERIVED from the public constant rather than written again:
+        /// the brush lays this byte down as an eraser's ink, and a neutral spelt twice is a mask that reads
+        /// as very slightly positive everywhere it was erased.
+        constexpr float kMaskNeutral = static_cast<float>( kCloudLayoutMaskNeutral );
 
         /// Which way the two table-presence bits sit in the header's flag word. Written out rather than
         /// implied so that a reader from another build cannot disagree about which bit is which.
@@ -593,5 +596,285 @@ namespace Desert::Assets
              static_cast<float>( static_cast<double>( belowLimit ) / static_cast<double>( stats.PaintedTexels ) );
 
         return stats;
+    }
+
+    // -----------------------------------------------------------------------------------------------------
+    // The brush
+    // -----------------------------------------------------------------------------------------------------
+
+    namespace
+    {
+        /// The dab's radial profile, 0..1. Flat out to `hardness * radius`, then a straight ramp to nothing
+        /// at `radius`. Linear rather than a smoothstep on purpose: the width the stroke measures at is
+        /// wanted in closed form (CloudLayoutBrushWidthTexels), and a curve whose half-value point needs a
+        /// root-finder is a relation nobody can state.
+        float BrushFalloff( float distance, float radius, float hardness )
+        {
+            if ( distance >= radius )
+                return 0.0f;
+
+            const float core = hardness * radius;
+            if ( distance <= core )
+                return 1.0f;
+
+            // radius - core > 0 here: distance < radius and distance > core together forbid core == radius.
+            return ( radius - distance ) / ( radius - core );
+        }
+
+        /// Distance from a point to a segment, with the degenerate segment (a click that never moved)
+        /// falling out as the distance to the point rather than as a division by zero.
+        float DistanceToSegment( const glm::vec2& p, const glm::vec2& a, const glm::vec2& b )
+        {
+            const glm::vec2 ab       = b - a;
+            const float     lengthSq = ab.x * ab.x + ab.y * ab.y;
+
+            float t = 0.0f;
+            if ( lengthSq > 1e-12f )
+            {
+                t = ( ( p.x - a.x ) * ab.x + ( p.y - a.y ) * ab.y ) / lengthSq;
+                t = std::clamp( t, 0.0f, 1.0f );
+            }
+
+            const glm::vec2 closest = a + ab * t;
+            const float     dx      = p.x - closest.x;
+            const float     dy      = p.y - closest.y;
+            return std::sqrt( dx * dx + dy * dy );
+        }
+
+        Common::BoolResultStr CheckCanvas( const std::vector<unsigned char>& canvas, uint32_t side,
+                                           uint32_t channel )
+        {
+            if ( side < kCloudLayoutMinResolution || side > kCloudLayoutMaxResolution )
+                return Common::MakeFormattedError<bool>( "canvas side {} lies outside [{}, {}]", side,
+                                                         kCloudLayoutMinResolution, kCloudLayoutMaxResolution );
+
+            const size_t wanted = static_cast<size_t>( side ) * side * kPatternBytesPerTexel;
+            if ( canvas.size() != wanted )
+                return Common::MakeFormattedError<bool>( "canvas is {} bytes, expected {} for {}x{} RGBA8",
+                                                         canvas.size(), wanted, side, side );
+
+            if ( channel >= kPatternBytesPerTexel )
+                return Common::MakeFormattedError<bool>( "channel {} does not exist; an RGBA canvas has four",
+                                                         channel );
+
+            return Common::MakeSuccess( true );
+        }
+    } // namespace
+
+    Common::ResultStr<CloudLayoutCanvas> MakeCloudLayoutCanvas( uint32_t side )
+    {
+        if ( side < kCloudLayoutMinResolution || side > kCloudLayoutMaxResolution )
+            return Common::MakeFormattedError<CloudLayoutCanvas>( "canvas side {} lies outside [{}, {}]", side,
+                                                                  kCloudLayoutMinResolution,
+                                                                  kCloudLayoutMaxResolution );
+
+        CloudLayoutCanvas canvas;
+        canvas.Side     = side;
+        canvas.TakeMask = false;
+        canvas.Pixels.assign( static_cast<size_t>( side ) * side * kPatternBytesPerTexel, 0u );
+
+        for ( size_t t = 3u; t < canvas.Pixels.size(); t += kPatternBytesPerTexel )
+            canvas.Pixels[t] = kCloudLayoutMaskNeutral;
+
+        return Common::MakeSuccess( std::move( canvas ) );
+    }
+
+    Common::ResultStr<CloudLayoutCanvas> MakeCloudLayoutCanvasFromLayout( const CloudLayoutData& data )
+    {
+        if ( auto valid = ValidateCloudLayoutData( data ); !valid )
+            return Common::MakeFormattedError<CloudLayoutCanvas>( "this painting cannot be opened for "
+                                                                  "painting: {}",
+                                                                  valid.GetError() );
+
+        const uint32_t side   = data.Resolution;
+        const size_t   texels = static_cast<size_t>( side ) * side;
+
+        auto made = MakeCloudLayoutCanvas( side );
+        if ( !made )
+            return made;
+
+        CloudLayoutCanvas canvas = made.ExtractValue();
+
+        if ( data.HasPattern() )
+            for ( size_t t = 0; t < texels; ++t )
+                for ( uint32_t channel = 0; channel < kPatternBytesPerTexel; ++channel )
+                    canvas.Pixels[t * kPatternBytesPerTexel + channel] =
+                         data.Pattern[t * kPatternBytesPerTexel + channel];
+
+        if ( data.HasMask() )
+        {
+            // FIVE PLANES DO NOT FIT IN FOUR, and the refusal names the two that collided. A layout whose
+            // mask happens to EQUAL its fourth pattern channel is the ordinary case — that is what
+            // `--mask` and the panel's checkbox produce, both of which copy the source's alpha into both —
+            // so it opens. One that carries a mask drawn independently of channel 3 cannot be expressed as
+            // one RGBA source at all, and quietly keeping whichever plane the code happened to write last
+            // would change somebody's sky for a reason nothing on screen could explain.
+            bool masksAgree = data.HasPattern();
+            if ( masksAgree )
+                for ( size_t t = 0; t < texels; ++t )
+                    if ( data.Mask[t] != data.Pattern[t * kPatternBytesPerTexel + 3u] )
+                    {
+                        masksAgree = false;
+                        break;
+                    }
+
+            if ( !masksAgree && data.HasPattern() )
+                return Common::MakeError<CloudLayoutCanvas>(
+                     "this painting's add/remove mask differs from its fourth pattern channel, and one RGBA "
+                     "canvas has a single alpha plane to hold both. It can be previewed and bound, but "
+                     "painting on it would have to discard one of the two tables" );
+
+            for ( size_t t = 0; t < texels; ++t )
+                canvas.Pixels[t * kPatternBytesPerTexel + 3u] = data.Mask[t];
+
+            canvas.TakeMask = true;
+        }
+
+        return Common::MakeSuccess( std::move( canvas ) );
+    }
+
+    float CloudLayoutBrushWidthTexels( const CloudLayoutBrush& brush )
+    {
+        const float radius   = std::max( brush.RadiusTexels, 0.0f );
+        const float hardness = std::clamp( brush.Hardness, 0.0f, 1.0f );
+        return radius * ( 1.0f + hardness );
+    }
+
+    Common::BoolResultStr BeginCloudLayoutStroke( CloudLayoutStroke&                stroke,
+                                                  const std::vector<unsigned char>& canvas, uint32_t side,
+                                                  uint32_t channel )
+    {
+        if ( auto valid = CheckCanvas( canvas, side, channel ); !valid )
+            return valid;
+
+        const size_t texels = static_cast<size_t>( side ) * side;
+
+        stroke.Side    = side;
+        stroke.Channel = channel;
+        stroke.Base.resize( texels );
+        stroke.Coverage.assign( texels, 0u );
+
+        for ( size_t t = 0; t < texels; ++t )
+            stroke.Base[t] = canvas[t * kPatternBytesPerTexel + channel];
+
+        return Common::MakeSuccess( true );
+    }
+
+    uint64_t ExtendCloudLayoutStroke( CloudLayoutStroke& stroke, std::vector<unsigned char>& canvas,
+                                      const glm::vec2& fromTexels, const glm::vec2& toTexels,
+                                      const CloudLayoutBrush& brush )
+    {
+        if ( !stroke.IsOpen() )
+            return 0u;
+
+        const uint32_t side   = stroke.Side;
+        const size_t   texels = static_cast<size_t>( side ) * side;
+        if ( canvas.size() != texels * kPatternBytesPerTexel || stroke.Coverage.size() != texels )
+            return 0u;
+
+        const float radius = std::max( brush.RadiusTexels, 0.0f );
+        if ( radius <= 0.0f )
+            return 0u;
+
+        const float hardness = std::clamp( brush.Hardness, 0.0f, 1.0f );
+        const float inkByte  = std::clamp( brush.Ink, 0.0f, 1.0f ) * 255.0f;
+
+        // THE BOX IS THE SEGMENT INFLATED BY THE RADIUS, then wrapped. Walking the whole canvas would be a
+        // million distance evaluations for a stroke that touches a thousand texels, on every mouse move.
+        const float minXf = std::min( fromTexels.x, toTexels.x ) - radius;
+        const float maxXf = std::max( fromTexels.x, toTexels.x ) + radius;
+        const float minYf = std::min( fromTexels.y, toTexels.y ) - radius;
+        const float maxYf = std::max( fromTexels.y, toTexels.y ) + radius;
+
+        int32_t x0 = static_cast<int32_t>( std::floor( minXf ) );
+        int32_t x1 = static_cast<int32_t>( std::ceil( maxXf ) );
+        int32_t y0 = static_cast<int32_t>( std::floor( minYf ) );
+        int32_t y1 = static_cast<int32_t>( std::ceil( maxYf ) );
+
+        // A footprint wider than the canvas would visit some texels twice. Harmless under the max below,
+        // but pointless, so it is clipped to exactly one period.
+        if ( x1 - x0 + 1 > static_cast<int32_t>( side ) )
+        {
+            x0 = 0;
+            x1 = static_cast<int32_t>( side ) - 1;
+        }
+        if ( y1 - y0 + 1 > static_cast<int32_t>( side ) )
+        {
+            y0 = 0;
+            y1 = static_cast<int32_t>( side ) - 1;
+        }
+
+        uint64_t changed = 0u;
+
+        for ( int32_t iy = y0; iy <= y1; ++iy )
+        {
+            const uint32_t wy = WrapTexel( iy, side );
+
+            for ( int32_t ix = x0; ix <= x1; ++ix )
+            {
+                const glm::vec2 centre( static_cast<float>( ix ) + 0.5f, static_cast<float>( iy ) + 0.5f );
+                const float     alpha =
+                     BrushFalloff( DistanceToSegment( centre, fromTexels, toTexels ), radius, hardness );
+                if ( alpha <= 0.0f )
+                    continue;
+
+                const unsigned char coverage = static_cast<unsigned char>( std::lround( alpha * 255.0f ) );
+                if ( coverage == 0u )
+                    continue;
+
+                const uint32_t wx    = WrapTexel( ix, side );
+                const size_t   texel = static_cast<size_t>( wy ) * side + wx;
+
+                // LAID ONCE, AT ITS STRONGEST. A dab weaker than what this drag has already put here must
+                // not darken it back down, or dragging back over a stroke's soft rim would carve a groove
+                // through the middle of it.
+                if ( coverage <= stroke.Coverage[texel] )
+                    continue;
+                stroke.Coverage[texel] = coverage;
+
+                const float         base  = static_cast<float>( stroke.Base[texel] );
+                const unsigned char value = static_cast<unsigned char>(
+                     std::lround( base + ( inkByte - base ) * ( static_cast<float>( coverage ) / 255.0f ) ) );
+
+                unsigned char& target = canvas[texel * kPatternBytesPerTexel + stroke.Channel];
+                if ( target != value )
+                {
+                    target = value;
+                    ++changed;
+                }
+            }
+        }
+
+        return changed;
+    }
+
+    Common::BoolResultStr PaintCloudLayoutPolyline( std::vector<unsigned char>& canvas, uint32_t side,
+                                                    uint32_t channel, const std::vector<glm::vec2>& pointsTexels,
+                                                    const CloudLayoutBrush& brush )
+    {
+        if ( pointsTexels.size() < 2u )
+            return Common::MakeFormattedError<bool>( "a stroke needs at least two points, got {}",
+                                                     pointsTexels.size() );
+
+        CloudLayoutStroke stroke;
+        if ( auto opened = BeginCloudLayoutStroke( stroke, canvas, side, channel ); !opened )
+            return opened;
+
+        for ( size_t i = 1; i < pointsTexels.size(); ++i )
+            ExtendCloudLayoutStroke( stroke, canvas, pointsTexels[i - 1u], pointsTexels[i], brush );
+
+        return Common::MakeSuccess( true );
+    }
+
+    Common::BoolResultStr FillCloudLayoutCanvasChannel( std::vector<unsigned char>& canvas, uint32_t side,
+                                                        uint32_t channel, unsigned char value )
+    {
+        if ( auto valid = CheckCanvas( canvas, side, channel ); !valid )
+            return valid;
+
+        for ( size_t t = channel; t < canvas.size(); t += kPatternBytesPerTexel )
+            canvas[t] = value;
+
+        return Common::MakeSuccess( true );
     }
 } // namespace Desert::Assets

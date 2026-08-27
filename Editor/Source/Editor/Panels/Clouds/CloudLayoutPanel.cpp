@@ -243,10 +243,10 @@ namespace Desert::Editor
             }
         }
 
-        ImGui::TextWrapped( "A PAINTED SKY. Point at a picture, say which of its channels feeds which of "
-                            "this layer's cloud species, and bake it to a .dclayout the cloud component's "
-                            "Cloud Layout slot accepts. The painting is read when the clouds are PLACED, "
-                            "so it costs the frame nothing." );
+        ImGui::TextWrapped( "A PAINTED SKY. Draw the layout with the brush, or point at a picture and say "
+                            "which of its channels feeds which of this layer's cloud species, then bake it "
+                            "to a .dclayout the cloud component's Cloud Layout slot accepts. The painting "
+                            "is read when the clouds are PLACED, so it costs the frame nothing." );
         ImGui::Separator();
 
         DrawSourceSection();
@@ -258,6 +258,13 @@ namespace Desert::Editor
 
         if ( m_PreviewDirty )
             RefreshPreview( layer );
+
+        // AFTER THE REFRESH, and that placement is the whole reason the section sits here rather than
+        // directly under Source. The canvas draws the placement CELL, and the cell it draws has to be the
+        // one the verdict below quotes — so it is read out of the map that was just built rather than
+        // worked out a second time from the layer.
+        DrawBrushSection();
+        ImGui::Separator();
 
         DrawPreviewSection();
         ImGui::Separator();
@@ -302,6 +309,11 @@ namespace Desert::Editor
         m_SourceName     = path.filename().string();
         m_LayoutFromFile = false;
 
+        // A NEW SURFACE MEANS A NEW DEVICE IMAGE. Left alone, the canvas pane would go on showing the
+        // previous picture's channel until something else happened to move, which reads as an import that
+        // did nothing.
+        m_CanvasImageDirty = true;
+
         m_Status = "Read '" + m_SourceName + "': " + std::to_string( width ) + "x" + std::to_string( height ) +
                    ", " + std::to_string( sourceChannels ) + " channels in the file.";
         m_StatusIsError = false;
@@ -340,6 +352,35 @@ namespace Desert::Editor
         if ( !Utils::ImGuiUtilities::SectionHeader( "Source" ) )
             return;
 
+        // THE BLANK CANVAS COMES FIRST because it is the answer to the request this panel was extended
+        // for: the designer CREATES the texture rather than brings one. Importing is the other button,
+        // unchanged and beside it, and the two produce the identical kind of surface — so an artist can
+        // start from a picture and paint on it without either path knowing about the other.
+        if ( ImGui::Button( "New canvas", ImVec2( 120.0f, 0.0f ) ) )
+            StartCanvas( static_cast<uint32_t>( m_NewCanvasSide ) );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "A blank square to draw on. Nothing painted anywhere, and the alpha plane "
+                               "at the mask's NEUTRAL 128 - so ticking the mask box on an untouched canvas "
+                               "gives a mask that does nothing rather than one that fills the sky." );
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth( 140.0f );
+        int sideChoice = m_NewCanvasSide == 128 ? 0 : m_NewCanvasSide == 256 ? 1 : m_NewCanvasSide == 512 ? 2 : 3;
+        if ( ImGui::Combo( "##canvasside", &sideChoice,
+                           "128\0"
+                           "256\0"
+                           "512\0"
+                           "1024\0" ) )
+        {
+            const int sides[] = { 128, 256, 512, 1024 };
+            m_NewCanvasSide   = sides[std::clamp( sideChoice, 0, 3 )];
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Texels a side. At the shipped 48 km region and one repeat, 512 puts a "
+                               "texel at 94 m and 128 puts it at 375 m - and a texel coarser than a "
+                               "placement cell cannot tell two clouds apart at all." );
+
+        ImGui::SameLine();
         if ( ImGui::Button( "Image...", ImVec2( 120.0f, 0.0f ) ) )
         {
             const std::filesystem::path picked =
@@ -416,11 +457,443 @@ namespace Desert::Editor
                                    "around the sky rather than adding it and Coverage keeps meaning the "
                                    "fraction of sky it delivers. A mean near 0 or near 1 leaves very "
                                    "little room to redistribute anything." );
+
+            // A FINISHED PAINTING CAN BE PICKED BACK UP, which is what makes this a tool rather than a
+            // one-way bake. It reconstructs the RGBA source the file could have been painted on, and
+            // REFUSES by name when it could not have been — a layout whose mask was drawn independently of
+            // its fourth pattern channel needs five planes and a canvas has four.
+            if ( m_LayoutFromFile )
+            {
+                if ( ImGui::Button( "Edit this painting", ImVec2( 180.0f, 0.0f ) ) )
+                {
+                    auto canvas = Assets::MakeCloudLayoutCanvasFromLayout( m_Layout );
+                    if ( !canvas )
+                    {
+                        m_Status        = canvas.GetError();
+                        m_StatusIsError = true;
+                    }
+                    else
+                    {
+                        const Assets::CloudLayoutCanvas& opened = canvas.GetValue();
+
+                        m_SourcePixels = opened.Pixels;
+                        m_SourceWidth  = opened.Side;
+                        m_SourceHeight = opened.Side;
+                        m_TakeMask     = opened.TakeMask;
+
+                        // STRAIGHT RGBA AND NOTHING ELSE. The canvas was rebuilt FROM the pattern planes,
+                        // so channel k already holds slot k; any other mapping would rearrange the
+                        // painting on the way back in and the artist would watch their species swap.
+                        for ( uint32_t slot = 0; slot < Assets::kCloudLayoutChannels; ++slot )
+                            m_ChannelForSlot[slot] = slot;
+
+                        m_LayoutFromFile   = false;
+                        m_CanvasImageDirty = true;
+                        m_Status           = "'" + m_SourceName +
+                                   "' is on the canvas. Baking will write a new file "
+                                   "unless you pick the same name.";
+                        m_StatusIsError = false;
+
+                        RebuildLayout();
+                    }
+                }
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Puts this .dclayout back on the canvas so the brush can change it. "
+                                       "The channel mapping is reset to straight RGBA, because the canvas "
+                                       "is rebuilt from the pattern planes themselves." );
+            }
         }
         else
         {
-            ImGui::TextDisabled( "Nothing loaded yet." );
+            ImGui::TextDisabled( "Nothing loaded yet - start a canvas, or point at a picture." );
         }
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // The brush
+    // -------------------------------------------------------------------------------------------------
+
+    bool CloudLayoutPanel::CanPaint() const
+    {
+        return !m_SourcePixels.empty() && m_SourceWidth == m_SourceHeight &&
+               m_SourceWidth >= Assets::kCloudLayoutMinResolution &&
+               m_SourceWidth <= Assets::kCloudLayoutMaxResolution &&
+               m_SourcePixels.size() == static_cast<size_t>( m_SourceWidth ) * m_SourceHeight * 4u;
+    }
+
+    void CloudLayoutPanel::StartCanvas( uint32_t side )
+    {
+        auto made = Assets::MakeCloudLayoutCanvas( side );
+        if ( !made )
+        {
+            m_Status        = made.GetError();
+            m_StatusIsError = true;
+            LOG_ERROR( "[CloudLayout] {}", m_Status );
+            return;
+        }
+
+        const Assets::CloudLayoutCanvas& canvas = made.GetValue();
+
+        m_SourcePixels     = canvas.Pixels;
+        m_SourceWidth      = canvas.Side;
+        m_SourceHeight     = canvas.Side;
+        m_SourceName       = "a canvas " + std::to_string( canvas.Side ) + " a side";
+        m_TakeMask         = canvas.TakeMask;
+        m_LayoutFromFile   = false;
+        m_Painting         = false;
+        m_Stroke           = Assets::CloudLayoutStroke{};
+        m_CanvasImageDirty = true;
+
+        m_Status        = "A blank canvas. Draw on it below, then bake.";
+        m_StatusIsError = false;
+
+        RebuildLayout();
+    }
+
+    float CloudLayoutPanel::CellTexels() const
+    {
+        // ONE DERIVATION, TAKEN OUT OF THE MAP. The verdict section reports a percentage against exactly
+        // this number; a grid computed a second way from the layer would drift from it the first time
+        // BuildCloudLayoutPreview clipped a span, and the artist would be shown a cell the sky does not
+        // have.
+        if ( !m_HasPreview || m_TexelKm <= 0.0f )
+            return 0.0f;
+
+        return m_Preview.CellKm / m_TexelKm;
+    }
+
+    void CloudLayoutPanel::RefreshCanvasImage()
+    {
+        if ( !CanPaint() )
+            return;
+
+        const uint32_t side   = m_SourceWidth;
+        const size_t   texels = static_cast<size_t>( side ) * side;
+
+        std::vector<unsigned char> grey( texels * 4u, 255u );
+        for ( size_t t = 0; t < texels; ++t )
+        {
+            const unsigned char value = m_SourcePixels[t * 4u + static_cast<size_t>( m_PaintChannel )];
+            grey[t * 4u + 0]          = value;
+            grey[t * 4u + 1]          = value;
+            grey[t * 4u + 2]          = value;
+            grey[t * 4u + 3]          = 255u;
+        }
+
+        // STREAMED WHEN IT CAN BE. A drag reaches here every frame it moves, and rebuilding the VkImage
+        // each time churns a descriptor set for a picture that is one buffer copy. The image is recreated
+        // only when its SHAPE changed — a new canvas side — because SetData refuses a size that disagrees.
+        //
+        // AND IT IS GUARDED BY A DIRTY FLAG BECAUSE THE UPLOAD IS EXPENSIVE, which was MEASURED rather
+        // than assumed. Forced to stream every frame, the panel's own profiler scope read 36.5 ms at a 512
+        // canvas and 23.8 ms at 128 — sixteen times less data for a third less time, so the cost is the
+        // SYNCHRONOUS FLUSH inside SetData (staging allocation, submit, wait, destroy) and not the bytes.
+        // Shrinking the canvas would therefore buy almost nothing. Left alone, the same scope reads
+        // 0.15-0.22 ms, so the flag is worth a factor of two hundred, and a drag pays the flush only on
+        // the frames it actually changed a texel. Debug, validation layers on, machine shared with another
+        // agent's renders — the absolute figures are not a budget, the RATIO between them is the finding.
+        if ( m_CanvasImage && m_CanvasImageSide == side )
+        {
+            if ( const auto streamed = m_CanvasImage->SetData( Core::Formats::ImagePixelData( grey ) ); !streamed )
+            {
+                m_Status        = "The canvas could not be updated on the device: " + streamed.GetError();
+                m_StatusIsError = true;
+                LOG_ERROR( "[CloudLayout] {}", m_Status );
+                return;
+            }
+
+            m_CanvasImageChannel = m_PaintChannel;
+            m_CanvasImageDirty   = false;
+            return;
+        }
+
+        const Core::Formats::Image2DSpecification spec{
+             .Tag        = "CloudLayoutCanvas",
+             .Width      = side,
+             .Height     = side,
+             .Format     = Core::Formats::ImageFormat::RGBA8F,
+             .Mips       = 1,
+             .Data       = std::move( grey ),
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Sample,
+        };
+
+        m_CanvasImage = Graphic::Image2D::Create( spec, nullptr );
+        if ( !m_CanvasImage )
+        {
+            m_Status        = "The canvas image could not be created on the device.";
+            m_StatusIsError = true;
+            LOG_ERROR( "[CloudLayout] {}", m_Status );
+            return;
+        }
+
+        m_CanvasImageSide    = side;
+        m_CanvasImageChannel = m_PaintChannel;
+        m_CanvasImageDirty   = false;
+    }
+
+    void CloudLayoutPanel::DrawBrushSection()
+    {
+        if ( !Utils::ImGuiUtilities::SectionHeader( "Brush" ) )
+            return;
+
+        if ( !CanPaint() )
+        {
+            // The device image is dropped rather than kept warm: a canvas nobody can draw on is a megabyte
+            // of GPU memory showing a picture that is not the one on screen.
+            m_CanvasImage.reset();
+            m_CanvasImageSide    = 0u;
+            m_CanvasImageChannel = -1;
+            m_Painting           = false;
+
+            if ( m_LayoutFromFile )
+                ImGui::TextDisabled( "This is a finished .dclayout. Press 'Edit this painting' above to put "
+                                     "it back on the canvas." );
+            else
+                ImGui::TextDisabled( "Start a canvas, or open a SQUARE picture, and the brush appears here." );
+            return;
+        }
+
+        const float side = static_cast<float>( m_SourceWidth );
+
+        // ---- what the stroke lands in ------------------------------------------------------------
+
+        ImGui::SetNextItemWidth( 220.0f );
+        if ( ImGui::Combo( "Painting on", &m_PaintChannel,
+                           "Channel 0 (red)\0"
+                           "Channel 1 (green)\0"
+                           "Channel 2 (blue)\0"
+                           "Channel 3 / the mask (alpha)\0" ) )
+            m_CanvasImageDirty = true;
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Which plane of the canvas the brush writes. Channels 0..2 are always "
+                               "pattern - a species' own field of 'is there cloud of this kind here'. "
+                               "Alpha is the ADD/REMOVE MASK when the box in Channels is ticked and species "
+                               "slot 3's pattern when it is not: one image has four planes and a layout has "
+                               "five tables, so those two share." );
+
+        const bool paintingAlpha = m_PaintChannel == 3;
+        const bool paintingMask  = paintingAlpha && m_TakeMask;
+
+        if ( paintingAlpha )
+        {
+            if ( paintingMask )
+                ImGui::TextColored( kGoodColour, "Alpha is the add/remove mask: 128 is neutral, brighter "
+                                                 "ADDS cloud, darker REMOVES it." );
+            else
+            {
+                ImGui::TextColored( kWarnColour, "Alpha is species slot 3's PATTERN here - this canvas "
+                                                 "carries no mask at all." );
+                if ( ImGui::Button( "Make alpha the add/remove mask" ) )
+                {
+                    m_TakeMask = true;
+                    RebuildLayout();
+                }
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Ticks the same box the Channels section has. Painting a mask that "
+                                       "the bake is not told to take would be a drawing that reaches "
+                                       "nothing." );
+            }
+        }
+
+        // ---- the three numbers -------------------------------------------------------------------
+        //
+        // NOTHING IS REBUILT WHEN THEY MOVE, and that is not an omission: they describe the NEXT stroke.
+        // The canvas already holds what earlier strokes left, so a brush slider has nothing to recompute —
+        // which is the same property that lets a stroke's width be promised at all.
+
+        ImGui::SetNextItemWidth( 240.0f );
+        ImGui::SliderFloat( "Radius", &m_Brush.RadiusTexels, 1.0f, std::max( 4.0f, side * 0.25f ), "%.1f texels" );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Half the stroke's width at full hardness. This is the number the placement "
+                               "cell has to be held against." );
+
+        ImGui::SetNextItemWidth( 240.0f );
+        ImGui::SliderFloat( "Hardness", &m_Brush.Hardness, 0.0f, 1.0f, "%.2f" );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "1 is a crisp disc, 0 ramps from the centre to nothing at the rim. A soft "
+                               "brush lays a NARROWER stroke than a hard one of the same radius, and the "
+                               "width printed below already accounts for it." );
+
+        ImGui::SetNextItemWidth( 240.0f );
+        ImGui::SliderFloat( "Ink", &m_Brush.Ink, 0.0f, 1.0f, "%.2f" );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( paintingMask ? "On the mask: 1 adds cloud, 0 removes it, 0.5 is the neutral "
+                                              "an eraser returns to. Right-drag erases."
+                                            : "How much of this species the stroke leaves behind. "
+                                              "Right-drag erases back to nothing." );
+
+        // ---- the width rule, in the units the artist has to act in -------------------------------
+
+        const float widthTexels = Assets::CloudLayoutBrushWidthTexels( m_Brush );
+        const float cellTexels  = CellTexels();
+
+        if ( m_TexelKm > 0.0f )
+            ImGui::Text( "Stroke %.1f texels = %.2f km wide.", widthTexels, widthTexels * m_TexelKm );
+        else
+            ImGui::Text( "Stroke %.1f texels wide.", widthTexels );
+
+        ImGui::SameLine();
+        if ( cellTexels <= 0.0f )
+            ImGui::TextDisabled( "(no map yet, so no cell to hold it against)" );
+        else if ( widthTexels >= cellTexels )
+            ImGui::TextColored( kGoodColour, "Clears the %.2f km placement cell.", m_Preview.CellKm );
+        else
+            ImGui::TextColored( kWarnColour,
+                                "NARROWER than the %.2f km placement cell - it will break into clumps.",
+                                m_Preview.CellKm );
+
+        // ---- the canvas --------------------------------------------------------------------------
+
+        if ( m_CanvasImageDirty || m_CanvasImageChannel != m_PaintChannel )
+            RefreshCanvasImage();
+
+        if ( !m_CanvasImage )
+            return;
+
+        ImGui::SetNextItemWidth( 240.0f );
+        ImGui::SliderInt( "Canvas size", &m_CanvasPane, 192, 640, "%d px" );
+
+        ImGui::SameLine();
+        ImGui::Checkbox( "Show the placement cell", &m_ShowCellGrid );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "The sky cannot place a cloud finer than one cell, so a stroke narrower than "
+                               "a square of this grid does not survive to the sky - it comes out as evenly "
+                               "spaced clumps. The engine's own validator checks one TEXEL against the "
+                               "cell, which is a different and weaker question." );
+
+        const float  pane   = static_cast<float>( m_CanvasPane );
+        const float  scale  = pane / side;
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+
+        // THE INVISIBLE BUTTON IS SUBMITTED FIRST AND THE PICTURE IS DRAWN INTO THE DRAW LIST, rather than
+        // an ImGui::Image with a button laid over it. Two overlapping items would leave which one owns the
+        // hover to submission order; one item that happens to have a picture under it cannot.
+        ImGui::InvisibleButton( "##cloudlayoutcanvas", ImVec2( pane, pane ),
+                                ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight );
+
+        const bool active  = ImGui::IsItemActive();
+        const bool started = ImGui::IsItemActivated();
+        const bool hovered = ImGui::IsItemHovered();
+
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        draw->AddImage( reinterpret_cast<ImTextureID>(
+                             const_cast<void*>( LayoutPreviewHelper()->GetTextureID( m_CanvasImage ) ) ),
+                        origin, ImVec2( origin.x + pane, origin.y + pane ) );
+
+        bool cellTooFine = false;
+        if ( m_ShowCellGrid && cellTexels > 0.0f )
+        {
+            const float step = cellTexels * scale;
+            if ( step >= 4.0f )
+            {
+                const ImU32 line  = IM_COL32( 255, 210, 90, 90 );
+                const int   count = static_cast<int>( pane / step );
+                for ( int i = 0; i <= count; ++i )
+                {
+                    const float at = static_cast<float>( i ) * step;
+                    draw->AddLine( ImVec2( origin.x + at, origin.y ), ImVec2( origin.x + at, origin.y + pane ),
+                                   line );
+                    draw->AddLine( ImVec2( origin.x, origin.y + at ), ImVec2( origin.x + pane, origin.y + at ),
+                                   line );
+                }
+            }
+            else
+            {
+                cellTooFine = true;
+            }
+        }
+
+        draw->AddRect( origin, ImVec2( origin.x + pane, origin.y + pane ), IM_COL32( 130, 130, 130, 255 ) );
+
+        // ---- the drag ----------------------------------------------------------------------------
+        //
+        // THE ADAPTER IS THIS AND NOTHING MORE: a screen point becomes a texel, and the segment between
+        // the last one and this one is handed to the engine's stroke. Every decision about what a stroke
+        // IS - its profile, its width, its wrap, that it is laid once at its strongest - lives in
+        // Engine/Assets/CloudLayout.cpp, where a test can reach it and a command can reproduce it.
+        const ImVec2    mouse = ImGui::GetIO().MousePos;
+        const glm::vec2 texel( ( mouse.x - origin.x ) / scale, ( mouse.y - origin.y ) / scale );
+
+        if ( started )
+        {
+            Assets::CloudLayoutStroke opened;
+            if ( const auto began = Assets::BeginCloudLayoutStroke( opened, m_SourcePixels, m_SourceWidth,
+                                                                    static_cast<uint32_t>( m_PaintChannel ) );
+                 !began )
+            {
+                m_Status        = began.GetError();
+                m_StatusIsError = true;
+                LOG_ERROR( "[CloudLayout] {}", m_Status );
+            }
+            else
+            {
+                m_Stroke         = std::move( opened );
+                m_Painting       = true;
+                m_LastPaintTexel = texel;
+            }
+        }
+
+        if ( m_Painting && active )
+        {
+            Assets::CloudLayoutBrush stroke = m_Brush;
+
+            // RIGHT-DRAG IS THE SAME BRUSH WITH THE REST VALUE AS ITS INK. An eraser that is anything else
+            // is a second code path doing one thing — and the rest value differs per plane, because the
+            // mask is signed about neutral and a pattern channel is not.
+            if ( ImGui::IsMouseDown( ImGuiMouseButton_Right ) && !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
+                stroke.Ink = paintingMask ? static_cast<float>( Assets::kCloudLayoutMaskNeutral ) / 255.0f : 0.0f;
+
+            if ( Assets::ExtendCloudLayoutStroke( m_Stroke, m_SourcePixels, m_LastPaintTexel, texel, stroke ) >
+                 0u )
+                m_CanvasImageDirty = true;
+
+            m_LastPaintTexel = texel;
+        }
+        else if ( m_Painting )
+        {
+            // THE LAYOUT IS REBUILT WHEN THE DRAG ENDS, not on every frame of it. A rebuild encodes a
+            // megabyte, hashes it and decodes it again; per frame that turns a brush into a slideshow and
+            // tells the artist nothing they could not wait one stroke for.
+            m_Painting = false;
+            m_Stroke   = Assets::CloudLayoutStroke{};
+            RebuildLayout();
+        }
+
+        // ---- the cursor, against the grid --------------------------------------------------------
+
+        if ( hovered || m_Painting )
+        {
+            const ImVec2 at( origin.x + texel.x * scale, origin.y + texel.y * scale );
+
+            // TWO CIRCLES AND THEY MEAN DIFFERENT THINGS. The bright one is the width the stroke MEASURES
+            // at, which is the one to hold against a square of the grid; the faint one is how far any ink
+            // at all reaches. At full hardness they are the same circle, which is itself the point.
+            draw->AddCircle( at, 0.5f * widthTexels * scale, IM_COL32( 255, 255, 255, 220 ), 0, 2.0f );
+            if ( m_Brush.Hardness < 0.999f )
+                draw->AddCircle( at, m_Brush.RadiusTexels * scale, IM_COL32( 255, 255, 255, 80 ) );
+        }
+
+        if ( cellTooFine )
+            ImGui::TextDisabled( "One placement cell is %.1f screen pixels here - too fine to draw. Make the "
+                                 "canvas bigger, or lower Layout Repeats.",
+                                 cellTexels * scale );
+
+        ImGui::TextDisabled( "Left-drag paints, right-drag erases. The canvas is drawn as AUTHORED - the "
+                             "map below is it flipped top to bottom." );
+
+        // WHY A BLANK CANVAS MAKES THE SKY FLAT, said where the surprise happens. A cell's coverage has
+        // exactly ONE modulator: the painting when one is bound and turned up, the procedural weather
+        // patch otherwise. So pressing New Canvas does not leave the sky alone and then add to it — it
+        // takes the weather away and hands the sky to a drawing with nothing on it yet. The symptom
+        // without this line is an artist reporting that the panel "flattened my clouds".
+        if ( m_LastLayer.FromScene && m_LastLayer.PatchStrength > 0.0f &&
+             m_LastLayer.Placement.PatternStrength > 0.0f )
+            ImGui::TextDisabled( "While a painting is bound with Layout Pattern Strength above zero, it "
+                                 "REPLACES this layer's Weather Patch Strength of %.2f - one modulator per "
+                                 "cell, never two. An empty canvas is therefore a flat sky at the Coverage "
+                                 "slider, not the sky you had.",
+                                 m_LastLayer.PatchStrength );
     }
 
     // -------------------------------------------------------------------------------------------------
