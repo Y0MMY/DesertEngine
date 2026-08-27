@@ -40,6 +40,39 @@ namespace Desert::Graphic::System
         // invariant the jitter depends on is "the trace grid covers the HALF grid in 2x2 blocks". Chaining
         // the same function states that invariant; a separate QuarterExtent would be a second expression
         // that has to keep agreeing with this one.
+        //
+        // THE TWO APPLICATIONS ARE NOT A DOUBLE-APPLICATION, and the difference has now cost one
+        // measurement, so it is written down. The call at ExecuteInFrame produces the HALF extent — the
+        // reconstruction the composite upsamples from. EnsureTraceTargets applies it again to produce the
+        // QUARTER extent — the trace the march writes. They are two targets at two sizes, both bound at
+        // their own size, and the march is told the half size explicitly through CloudPush::Trace.zw
+        // because imageSize() reports only the quarter one. Removing either call does not "undo a
+        // doubling"; it moves the whole pyramid up an octave.
+        //
+        // AND THAT OCTAVE WAS MEASURED AND REFUSED. Р0 (Docs/Clouds/DIAGNOSIS_CARTOON.md §4.5, §8) found
+        // that over cloud pixels our fine-scale energy is about half the UE reference's and named the
+        // quarter-resolution trace as the last un-eliminated suspect. Р6 raised the pyramid one octave —
+        // trace at half, reconstruction at native, so EVERY displayed pixel gets its own traced ray and
+        // no resolution deficit remains — and shot the six protocol points at 90 and 3 frames on a
+        // measured zero noise floor (Clouds_Protocol, 1280x766, --play, Debug/MoltenVK):
+        //
+        //     E1 over cloud pixels    quarter (shipped)   half     UE reference
+        //     zenith away, 42 deg          0.00165       0.00167      0.00318
+        //     mid away, 24 deg             0.00198       0.00204      0.00375
+        //
+        // +1.2 % and +3.0 % of a quantity short by ~48 %, contrast unchanged to 0.001 at all six points,
+        // and the frames are indistinguishable except for a marginal crispening of the far-field band at
+        // 7 deg. The price, per-pass GPU self time, minimum of six interleaved runs on a SHARED machine:
+        // Clouds: March 12.695 -> 35.907 ms (2.83x, +23.2 ms); pass memory 8.42 -> 33.66 MiB, which at
+        // 1920x1080 is 71.2 MiB and exceeds decision D-9's whole 64 MB subsystem budget on its own.
+        //
+        // So the quarter is a budget and not a defect, and the fine-scale deficit is NOT resolution — a
+        // native-resolution march does not close it. What limits the surface is still open; §4.5's
+        // signature (our frames surviving a 4x round trip better than the reference) barely moves at
+        // native resolution too, 58.7 -> 58.2 % and 60.8 -> 59.4 % against the reference's 45.7 / 53.8 %,
+        // so that statistic was reading the smoothness of the cloud itself, not the sampling grid.
+        // What would change the answer: a subject-matched reference (§8's near cumulus deck), or a
+        // mechanism that adds surface rather than sampling it more finely.
         constexpr uint32_t HalfExtent( uint32_t extent )
         {
             return ( extent + 1u ) / 2u;
