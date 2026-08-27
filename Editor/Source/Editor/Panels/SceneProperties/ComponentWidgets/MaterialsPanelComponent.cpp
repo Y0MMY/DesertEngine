@@ -1,13 +1,14 @@
 #include "MaterialsPanelComponent.hpp"
 #include <Editor/Core/DragPayloads.hpp>
-#include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Texture.hpp>
 #include <ImGui/imgui.h>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/Logger.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 
+#include <Editor/Panels/MaterialEditor/MaterialDocumentOpen.hpp>
 #include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
@@ -18,14 +19,9 @@
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Geometry/LODSelection.hpp>
 #include <Engine/Assets/AssetManager.hpp>
-#include <Engine/Graphic/Materials/MaterialFactory.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Material/MaterialService.hpp>
 #include <Engine/Runtime/Services/Shader/ShaderService.hpp>
-#include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
-#include <Editor/Import/TextureDnD.hpp>
-#include <Engine/Assets/TextureAsset.hpp>
 
 // rfl serialization environment (same as SurfaceMaterialAsset.cpp) — used to write a fresh
 // material file with its stable GUID before the asset is created/registered.
@@ -369,186 +365,26 @@ namespace Desert::Editor
         host.Invalidate();
     }
 
-    bool MaterialComponentWidget::DrawShaderPicker( Assets::SurfaceMaterialAsset& asset )
+    void MaterialComponentWidget::OpenMaterialEditor( const Assets::SurfaceMaterialAsset& asset ) const
     {
-        auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
-        if ( !shaderService )
-            return false;
+        if ( !m_AssetManager )
+            return;
 
-        // No hardcoded entries: the picker lists every Surface-domain shader from the service —
-        // StaticMeshPBR (the standard shader with the batched backend) included, like any other.
-        const std::string current = asset.Data().EffectiveShaderName();
-
-        bool shaderChanged = false;
-        if ( ImGui::BeginCombo( "Shader", current.c_str() ) )
+        const std::string path = asset.GetMetadata().Filepath.generic_string();
+        switch ( RequestMaterialDocument( &const_cast<Assets::AssetManager&>( *m_AssetManager ), path ) )
         {
-            for ( const auto& name : shaderService->GetAllNames() )
-            {
-                auto candidate = shaderService->GetByName( name );
-                if ( !candidate ||
-                     candidate->GetProgramMeta().Domain != ::Desert::Core::Formats::ShaderDomain::Surface )
-                    continue;
-
-                const bool selected = ( name == current );
-                if ( ImGui::Selectable( name.c_str(), selected ) && !selected )
-                {
-                    // Params always belong to a shader's schema — a switch clears them; the
-                    // schema editor reseeds defaults on the next draw.
-                    asset.Data().ShaderName = name;
-                    asset.Data().Params.clear();
-                    asset.Data().Textures.clear();
-                    shaderChanged = true;
-                }
-                if ( selected )
-                    ImGui::SetItemDefaultFocus();
-            }
-            ImGui::EndCombo();
+            case MaterialDocumentRequest::Requested:
+                break;
+            case MaterialDocumentRequest::Failed:
+                break; // already reported, with the path, by the opener
+            case MaterialDocumentRequest::NotAMaterialPath:
+                // A slot resolved to a material asset whose file is not on disk (deleted under the editor,
+                // or an in-memory asset that was never written). Silence here would read as a dead button.
+                LOG_ERROR( "[MaterialEditor] the material in this slot has no `.demat` on disk ('{}') — "
+                           "no window was opened. Save it first, or reassign the slot.",
+                           path );
+                break;
         }
-        return shaderChanged;
-    }
-
-    // Schema-driven editor for ANY material (PBR included — its schema lives in
-    // StaticMeshPBR.shader like every other shader's). Two-column rows: the label cell never
-    // overlaps the control, controls stretch to the full remaining width.
-    // parentData/isInstance: material-INSTANCE mode — the schema comes from the parent's shader,
-    // non-overridden rows display the PARENT's value, edits write overrides into the child, and
-    // texture rows are read-only (per-instance texture descriptors are a v2).
-    bool MaterialComponentWidget::DrawCustomShaderMaterial( Assets::SurfaceMaterialAsset& asset,
-                                                            const Assets::MaterialData*   parentData,
-                                                            bool                          isInstance )
-    {
-        auto*             shaderService = Runtime::ResourceRegistry::GetShaderService();
-        const std::string shaderName    = parentData ? parentData->EffectiveShaderName()
-                                                     : asset.Data().EffectiveShaderName();
-        auto              shader        = shaderService ? shaderService->GetByName( shaderName ) : nullptr;
-        if ( !shader )
-        {
-            ImGui::TextDisabled( "Shader '%s' not found", shaderName.c_str() );
-            return false;
-        }
-
-        const auto& schema = shader->GetProgramMeta();
-        if ( schema.Params.empty() )
-        {
-            ImGui::TextDisabled( "Shader exposes no properties" );
-            return false;
-        }
-
-        auto& data = asset.Data();
-
-        bool changed = false;
-
-        if ( !ImGui::BeginTable( "##material_params", 2,
-                                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )
-            return false;
-        ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.38f );
-        ImGui::TableSetupColumn( "control", ImGuiTableColumnFlags_WidthStretch, 0.62f );
-
-        for ( const auto& p : schema.Params )
-        {
-            using W  = ::Desert::Core::Formats::ShaderParamWidget;
-            using VT = ::Desert::Core::Formats::ShaderValueType;
-
-            const char*       label    = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
-            const std::string hiddenId = "##mp_" + p.Name; // control id; label lives in its own cell
-
-            // Instance mode: a row with its own entry in the child IS an override — mark it.
-            const bool overridden = isInstance && !p.IsTexture && asset.Data().FindParam( p.Name ) != nullptr;
-
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::AlignTextToFramePadding();
-            if ( overridden )
-                ImGui::TextColored( ImVec4( 1.0f, 0.85f, 0.4f, 1.0f ), "%s *", label );
-            else
-                ImGui::TextUnformatted( label );
-            ImGui::TableNextColumn();
-            ImGui::PushItemWidth( -FLT_MIN );
-
-            if ( p.IsTexture )
-            {
-                if ( isInstance )
-                {
-                    // v1: textures always come from the parent (per-instance texture overrides
-                    // need their own descriptor sets — the batched SSBO path can't carry them).
-                    ImGui::TextDisabled( "from parent material" );
-                    ImGui::PopItemWidth();
-                    continue;
-                }
-                std::string disp = "<drop texture>";
-                if ( const uint64_t h = data.GetTexture( p.Name ); h != 0 && m_AssetManager )
-                {
-                    if ( auto tex = m_AssetManager->FindByHandle<Assets::TextureAsset>( Common::UUID( h ) ) )
-                    {
-                        const auto& src  = tex->GetSourcePath();
-                        const auto  path = !src.empty() ? src : tex->GetMetadata().Filepath.string();
-                        disp             = std::filesystem::path( path ).filename().string();
-                    }
-                }
-
-                ImGui::Button( ( disp + hiddenId ).c_str(), ImVec2( -FLT_MIN, 0.0f ) );
-                if ( ImGui::BeginDragDropTarget() )
-                {
-                    if ( const ImGuiPayload* pl =
-                              ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::TextureAsset ) )
-                    {
-                        const std::string path( static_cast<const char*>( pl->Data ),
-                                                pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
-                        if ( m_AssetManager )
-                        {
-                            const auto resolved = ::Desert::Editor::TextureDnD::ResolveOrImport(
-                                 const_cast<Assets::AssetManager&>( *m_AssetManager ), path );
-                            if ( static_cast<uint64_t>( resolved ) != 0 )
-                            {
-                                data.SetTexture( p.Name, static_cast<uint64_t>( resolved ) );
-                                changed = true;
-                            }
-                        }
-                    }
-                    ImGui::EndDragDropTarget();
-                }
-                ImGui::PopItemWidth();
-                continue;
-            }
-
-            // Seed with: child override -> parent's effective value (instance mode) -> schema default.
-            const glm::vec4 fallback = parentData ? parentData->GetParam( p.Name, p.Default ) : p.Default;
-            glm::vec4       value    = data.GetParam( p.Name, fallback );
-            bool            edited   = false;
-
-            if ( p.Widget == W::Color )
-            {
-                edited = ( p.Type == VT::Float3 ) ? ImGui::ColorEdit3( hiddenId.c_str(), &value.x )
-                                                  : ImGui::ColorEdit4( hiddenId.c_str(), &value.x );
-            }
-            else
-            {
-                const int comps = ( p.Type == VT::Float2 )   ? 2
-                                  : ( p.Type == VT::Float3 ) ? 3
-                                  : ( p.Type == VT::Float4 ) ? 4
-                                                             : 1;
-                if ( p.Min.has_value() && p.Max.has_value() )
-                {
-                    float mn = *p.Min, mx = *p.Max;
-                    edited = ImGui::SliderScalarN( hiddenId.c_str(), ImGuiDataType_Float, &value.x, comps,
-                                                   &mn, &mx );
-                }
-                else
-                {
-                    edited = ImGui::DragScalarN( hiddenId.c_str(), ImGuiDataType_Float, &value.x, comps, 0.01f );
-                }
-            }
-
-            if ( edited )
-            {
-                data.SetParam( p.Name, value );
-                changed = true;
-            }
-            ImGui::PopItemWidth();
-        }
-
-        ImGui::EndTable();
-        return changed;
     }
 
     MaterialComponentWidget::SlotSwatch
@@ -616,7 +452,20 @@ namespace Desert::Editor
                 }
             }
             if ( haveFresh )
+            {
+                // The PNG on disk moved since this panel decoded it — drop the decoded copy or the slot
+                // keeps showing the OLD render. The regeneration is no longer ours to know about: the
+                // Material Editor window edits and saves the material now, and it cannot reach this cache.
+                const auto stamp = std::filesystem::last_write_time( png, ec );
+                if ( !ec )
+                {
+                    const auto seen = m_ThumbnailStamps.find( png );
+                    if ( seen != m_ThumbnailStamps.end() && seen->second != stamp )
+                        m_Thumbnails.Invalidate( png );
+                    m_ThumbnailStamps[png] = stamp;
+                }
                 thumb = m_Thumbnails.Get( png );
+            }
         }
 
         // An InvisibleButton rather than a Dummy: the preview is the row's drag-drop target, and a drop
@@ -746,8 +595,8 @@ namespace Desert::Editor
 
         if ( asset && hasOwnSlot )
         {
-            if ( iconButton( ICON_MDI_PENCIL, "Edit this material's parameters", row.Editing ) )
-                action = SlotAction::ToggleEdit;
+            if ( iconButton( ICON_MDI_PENCIL, "Open this material in the Material Editor", false ) )
+                action = SlotAction::OpenEditor;
         }
         if ( !hasOwnSlot && asset )
         {
@@ -765,17 +614,6 @@ namespace Desert::Editor
             if ( iconButton( ICON_MDI_CONTENT_DUPLICATE,
                              "New child instance — override parameters without touching the parent", false ) )
                 action = SlotAction::CreateInstance;
-        }
-        if ( asset && hasOwnSlot && row.IsInstance )
-        {
-            if ( iconButton( ICON_MDI_BACKUP_RESTORE, "Drop every override — back to the parent's values",
-                             false ) )
-                action = SlotAction::ResetOverrides;
-        }
-        if ( asset && hasOwnSlot )
-        {
-            if ( iconButton( ICON_MDI_CONTENT_SAVE, "Save this material asset", false ) )
-                action = SlotAction::Save;
         }
 
         // Always submitted, so the trailing SameLine of the strip never dangles into the group's end.
@@ -896,12 +734,6 @@ namespace Desert::Editor
                                                                      : asset->Data().EffectiveShaderName() )
                                                      : std::string( "Engine default material" );
 
-                // Whether this row's parameter editor is folded open is UI state of the row — it lives in
-                // ImGui's per-window storage, not in the component, which would carry it into the scene file.
-                ImGuiStorage* storage = ImGui::GetStateStorage();
-                const ImGuiID editId  = ImGui::GetID( "##editing" );
-                bool          editing = storage->GetBool( editId, false );
-
                 SlotRow row;
                 row.Index      = i;
                 row.Asset      = asset.get();
@@ -911,7 +743,6 @@ namespace Desert::Editor
                 row.ParentName = parentName;
                 row.HasOwnSlot = hasOwnSlot;
                 row.IsInstance = isInstanceAsset;
-                row.Editing    = editing;
 
                 std::string      dropped;
                 const SlotAction action = DrawSlotRow( row, dropped );
@@ -930,10 +761,17 @@ namespace Desert::Editor
                         ImGui::OpenPopup( "material_picker" );
                         break;
                     }
-                    case SlotAction::ToggleEdit:
+                    case SlotAction::OpenEditor:
                     {
-                        editing = !editing;
-                        storage->SetBool( editId, editing );
+                        // Routed by PATH through the shared opener rather than by queueing the handle here.
+                        // The handle is in hand and the request only carries a handle, so this looks like the
+                        // longer way round — but the opener is also what guarantees the asset is LOADED and
+                        // registered with the material service before a window binds to it, and a slot can
+                        // legitimately hold a handle whose asset was only ever a record (a scene that named a
+                        // material nothing has drawn yet). Re-deriving those three steps here is precisely the
+                        // two-implementations-of-one-quantity shape this engine keeps paying for.
+                        if ( asset )
+                            OpenMaterialEditor( *asset );
                         break;
                     }
                     case SlotAction::MakeExplicit:
@@ -961,34 +799,6 @@ namespace Desert::Editor
                                 ( *host.Slots )[i] = h;
                                 host.Invalidate();
                             }
-                        }
-                        break;
-                    }
-                    case SlotAction::ResetOverrides:
-                    {
-                        if ( asset )
-                        {
-                            asset->Data().Params.clear();
-                            asset->Data().Textures.clear();
-                            Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
-                        }
-                        break;
-                    }
-                    case SlotAction::Save:
-                    {
-                        if ( asset )
-                        {
-                            Common::Utils::FileSystem::WriteContentToFile( asset->GetMetadata().Filepath,
-                                                                           asset->Save() );
-                            // Drop ONLY this material's cached thumbnail so the asset browser re-renders it
-                            // with the new look immediately (no waiting on the modtime check; others untouched).
-                            std::error_code   ec;
-                            const std::string png =
-                                 ThumbnailCache::DiskPath( asset->GetMetadata().Filepath.generic_string() );
-                            std::filesystem::remove( png, ec );
-                            // ...and the copy this panel already decoded, or the slot preview would keep
-                            // showing the old look after the PNG is regenerated.
-                            m_Thumbnails.Invalidate( png );
                         }
                         break;
                     }
@@ -1030,52 +840,7 @@ namespace Desert::Editor
                     ImGui::EndPopup();
                 }
 
-                // The parameter editor, folded under the row it belongs to (UE opens a separate Material
-                // Editor window; a fold keeps the slot LIST readable without one). Inherited rows have no
-                // editor on purpose — the material is authored on the row that owns it.
-                if ( editing && asset && hasOwnSlot )
-                {
-                    ImGui::Indent( 12.0f );
-
-                    // ── Unity-style: the shader lives inside the material (base assets only — an
-                    // instance always renders with its parent chain's shader) ────────────
-                    if ( !isInstanceAsset && DrawShaderPicker( *asset ) )
-                    {
-                        // A different shader means a different runtime material CLASS —
-                        // rebuild it from the asset and refresh the entity's instances.
-                        Runtime::ResourceRegistry::GetMaterialService()->Invalidate( handle );
-                        host.Invalidate();
-                    }
-
-                    // ONE schema-driven editor for every shader — the PBR schema lives in
-                    // StaticMeshPBR.shader like any other shader's (single material protocol).
-                    const bool changed = DrawCustomShaderMaterial(
-                         *asset, parentAsset ? &parentAsset->Data() : nullptr, isInstanceAsset );
-
-                    // Live edit -> viewport.
-                    if ( changed )
-                    {
-                        if ( isInstanceAsset )
-                        {
-                            // An instance has no runtime Material of its own — bump the stamp so
-                            // every cached instance set rebuilds with the new overrides next tick.
-                            Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
-                        }
-                        else if ( auto* runtime = Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
-                        {
-                            if ( auto* pbr = dynamic_cast<Graphic::StaticMaterialPBR*>( runtime ) )
-                                Graphic::MaterialFactory::ApplyPBRAsset( *pbr, *asset );
-                            else if ( auto* ddm = dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) )
-                                Graphic::MaterialFactory::ApplyShaderAsset( *ddm, *asset );
-                            // Base edits must also reach entities rendering through CHILD
-                            // instances of this material (their instances cache override sets).
-                            Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
-                        }
-                    }
-
-                    ImGui::Unindent( 12.0f );
-                }
-                else if ( hasOwnSlot && !asset )
+                if ( hasOwnSlot && !asset )
                 {
                     // Slot exists but its asset can't be resolved (deleted/missing file). Not a styling
                     // question: the row would otherwise look like an ordinary empty slot.

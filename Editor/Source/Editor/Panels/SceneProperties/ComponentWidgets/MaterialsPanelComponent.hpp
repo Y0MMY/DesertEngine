@@ -9,6 +9,9 @@
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 #include <Editor/Widgets/ThumbnailCache.hpp>
 
+#include <filesystem>
+#include <unordered_map>
+
 namespace Desert::Core
 {
     class Scene;
@@ -55,17 +58,10 @@ namespace Desert::Editor
         void RenderMaterialProperties( ECS::Entity& entity, const MaterialHost& host,
                                        const std::string& overriddenByShader );
 
-        // Unity-style shader picker inside the material (PBR (Standard) + Surface-domain DSL shaders).
-        // Returns true when the shader changed (the runtime material must be rebuilt).
-        bool DrawShaderPicker( Assets::SurfaceMaterialAsset& asset );
+        // Asks for a Material Editor window on @p asset — the one place Details answers "what IS this
+        // material", and it answers it by handing the question to the window that owns it.
+        void OpenMaterialEditor( const Assets::SurfaceMaterialAsset& asset ) const;
 
-        // Schema-driven parameter editor for a custom-shader material; edits are persisted in the
-        // asset's ShaderParams/ShaderTextures. Returns true when anything changed. In material-
-        // INSTANCE mode (parentData/isInstance) the schema comes from the parent's shader,
-        // non-overridden rows show the parent's values and edits write child overrides.
-        bool DrawCustomShaderMaterial( Assets::SurfaceMaterialAsset& asset,
-                                       const Assets::MaterialData* parentData = nullptr,
-                                       bool                        isInstance = false );
         // Creates a child material-instance asset (.demat with ParentMaterialId) next to the other
         // materials and registers its shell (lazy — instances have no runtime Material of their own).
         Assets::AssetHandle CreateAndRegisterMaterialInstance( const Assets::SurfaceMaterialAsset& parent );
@@ -100,6 +96,11 @@ namespace Desert::Editor
 
         // What the user asked for on an element row this frame. The row only REPORTS; the caller owns
         // the component and the asset manager and is the only place allowed to change a slot.
+        //
+        // Every one of these answers "WHICH material does this element use" — which is the entity's
+        // question. "What IS this material" is the Material Editor window's, and the actions that asked it
+        // here (the parameter fold, Save, Reset Overrides) went there with the editor
+        // (Docs/MaterialEditor/PLAN_STAGE3_ASSET_DOCUMENTS.md, M2).
         enum class SlotAction
         {
             None,
@@ -107,9 +108,7 @@ namespace Desert::Editor
             MakeExplicit,   // give an inherited element its own slot
             CreateMaterial, // fresh material asset for an empty slot
             CreateInstance, // child instance of the slot's material
-            Save,
-            ResetOverrides, // instance only: drop every override
-            ToggleEdit,     // fold the parameter editor open/closed
+            OpenEditor,     // open the Material Editor window on this slot's material
         };
 
         // Everything one element row needs to draw itself. A struct rather than nine parameters: the row
@@ -124,7 +123,6 @@ namespace Desert::Editor
             std::string ParentName; // instance parent; empty for a base material
             bool        HasOwnSlot = false;
             bool        IsInstance = false;
-            bool        Editing    = false; // its parameter editor is folded open
         };
 
         // The UE-style element row: "Element N" in the label column; in the value column a framed
@@ -146,6 +144,12 @@ namespace Desert::Editor
         const Assets::AssetManager*           m_AssetManager;
         // Decoded rendered-thumbnail PNGs (the shared on-disk cache the asset browser fills).
         ThumbnailCache m_Thumbnails;
+        // The write time each of those PNGs had when it was decoded. ThumbnailCache is keyed by path only,
+        // so a PNG regenerated on disk keeps serving the copy decoded from the old one — invisible while
+        // Details was also the thing that edited materials (it dropped its own entry on Save), and a stale
+        // swatch the moment the editing moved to a window that cannot reach this cache. Compared per frame
+        // rather than invalidated by whoever wrote the file: any regeneration counts, not just ours.
+        std::unordered_map<std::string, std::filesystem::file_time_type> m_ThumbnailStamps;
     };
 
 } // namespace Desert::Editor
