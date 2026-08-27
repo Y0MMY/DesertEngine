@@ -255,7 +255,11 @@ namespace Desert::Editor::ShaderGraph
                     decl = std::format( "float {} = timeUB.TimeData.x;", var );
                 else
                 {
-                    error = std::format( "unknown node kind '{}'", node.Kind );
+                    // ValidateGraph has already rejected kinds that are not in the catalogue, so
+                    // reaching here means the OPPOSITE: a NodeSpec was added without an emitter
+                    // branch. Saying so beats emitting a silent black.
+                    error = std::format( "node kind '{}' is in the palette but has no compiler rule",
+                                         node.Kind );
                     decl  = std::format( "vec4 {} = vec4( 0.0 );", var );
                 }
 
@@ -273,6 +277,176 @@ namespace Desert::Editor::ShaderGraph
             return std::all_of( s.begin(), s.end(),
                                 []( unsigned char c ) { return std::isalnum( c ) || c == '_'; } );
         }
+
+        // ------------------------------------------------------------ validation ---------------
+        // The GLSL type a pin carries. This is the whole point of the checks below: the compiler
+        // emits `float`/`vec2`/`vec4` declarations straight from the node kind, so two pins that
+        // disagree here become a GLSL type error in generated code.
+        const char* GlslTypeName( ValueType t )
+        {
+            switch ( t )
+            {
+                case ValueType::Float:
+                    return "float";
+                case ValueType::Vec2:
+                    return "vec2";
+                case ValueType::Color:
+                    return "vec4";
+            }
+            return "<unknown>";
+        }
+
+        const char* DomainName( Domain d )
+        {
+            return d == Domain::PostProcess ? "Post Process" : "Surface";
+        }
+
+        // How the node reads on the canvas — its palette title, plus the parameter name when it has
+        // one. Every diagnostic below is phrased in these terms so the artist is pointed at a node
+        // they can see and click, not at a line of a file they never wrote.
+        std::string NodeLabel( const Node& node )
+        {
+            const NodeSpec*   spec  = FindSpec( node.Kind );
+            const std::string title = spec ? spec->Title : node.Kind;
+            return node.ParamName.empty() ? std::format( "'{}'", title )
+                                          : std::format( "'{}' ('{}')", title, node.ParamName );
+        }
+
+        // Where a pin id lives. Built once so a link can be resolved to (node, side, index) and
+        // reported by name.
+        struct PinRef
+        {
+            const Node* Owner = nullptr;
+            bool        Input = false;
+            size_t      Index = 0;
+            ValueType   Type  = ValueType::Float;
+        };
+
+        // Full structural + type check of a graph document, run BEFORE a single line is emitted.
+        //
+        // The canvas already refuses a mismatched link while the artist drags it (NodeGraphPanel's
+        // ed::QueryNewLink compares Pin::Type), but a .dgraph is plain JSON: one written by hand, by
+        // a script, or by an older build reaches the compiler with none of that enforcement. Until
+        // this function existed such a graph compiled happily and the mismatch surfaced from shaderc
+        // as e.g. "MatBroken.shader:25: error: '=' : cannot convert from 'vec2' to 'vec4'" — a line
+        // number in GENERATED code, naming neither the node nor the link that caused it.
+        //
+        // Node identity only exists at this level; by the time the text is emitted the nodes have
+        // become n0, n1, n2. So this is the last place an error can name what the artist drew.
+        //
+        // Returns an empty string when the document is well-formed.
+        std::string ValidateGraph( const Document& doc, Domain domain )
+        {
+            // ---- nodes: known kind, offered in this domain, pins agreeing with the catalogue ----
+            for ( const auto& node : doc.Nodes )
+            {
+                const NodeSpec* spec = FindSpec( node.Kind );
+                if ( !spec )
+                    return std::format( "node id {} has unknown kind '{}'", node.Id, node.Kind );
+
+                if ( !SpecInDomain( *spec, domain ) )
+                    return std::format( "node {} is not available in the {} domain", NodeLabel( node ),
+                                        DomainName( domain ) );
+
+                // A node whose pin list disagrees with its kind is the crash case, not just a bad
+                // message: the emitter indexes node.Inputs[i] positionally for every kind it knows,
+                // so a hand-trimmed "Inputs": [] on a Multiply used to read off the end of the vector.
+                if ( node.Inputs.size() != spec->Inputs.size() ||
+                     node.Outputs.size() != spec->Outputs.size() )
+                    return std::format(
+                         "node {} has {} input(s) and {} output(s), but kind '{}' declares {} and {}",
+                         NodeLabel( node ), node.Inputs.size(), node.Outputs.size(), node.Kind,
+                         spec->Inputs.size(), spec->Outputs.size() );
+
+                // Pin::Type in the file is a serialized MIRROR of the catalogue, and the canvas
+                // type-checks against that mirror. If the two disagree the file can make the canvas
+                // accept a link the compiler cannot emit, so the mirror is checked rather than trusted.
+                for ( size_t i = 0; i < node.Inputs.size(); ++i )
+                    if ( node.Inputs[i].Type != static_cast<int>( spec->Inputs[i].Type ) )
+                        return std::format(
+                             "node {}: input '{}' is stored as {} but kind '{}' declares it {}",
+                             NodeLabel( node ), node.Inputs[i].Name,
+                             GlslTypeName( static_cast<ValueType>( node.Inputs[i].Type ) ), node.Kind,
+                             GlslTypeName( spec->Inputs[i].Type ) );
+
+                for ( size_t i = 0; i < node.Outputs.size(); ++i )
+                    if ( node.Outputs[i].Type != static_cast<int>( spec->Outputs[i].Type ) )
+                        return std::format(
+                             "node {}: output '{}' is stored as {} but kind '{}' declares it {}",
+                             NodeLabel( node ), node.Outputs[i].Name,
+                             GlslTypeName( static_cast<ValueType>( node.Outputs[i].Type ) ), node.Kind,
+                             GlslTypeName( spec->Outputs[i].Type ) );
+            }
+
+            // ---- pin index, rejecting duplicate ids ----
+            std::unordered_map<uint64_t, PinRef> pins;
+            for ( const auto& node : doc.Nodes )
+            {
+                const NodeSpec* spec = FindSpec( node.Kind );
+                const auto      add  = [&]( const Pin& pin, bool input, size_t index ) -> std::string
+                {
+                    if ( pin.Id == 0 )
+                        return std::format( "node {}: pin '{}' has no id", NodeLabel( node ), pin.Name );
+                    const ValueType type = input ? spec->Inputs[index].Type : spec->Outputs[index].Type;
+                    auto [it, fresh] = pins.emplace( pin.Id, PinRef{ &node, input, index, type } );
+                    if ( !fresh )
+                        return std::format( "pin id {} is used by both node {} and node {}", pin.Id,
+                                            NodeLabel( *it->second.Owner ), NodeLabel( node ) );
+                    return {};
+                };
+                for ( size_t i = 0; i < node.Inputs.size(); ++i )
+                    if ( std::string err = add( node.Inputs[i], true, i ); !err.empty() )
+                        return err;
+                for ( size_t i = 0; i < node.Outputs.size(); ++i )
+                    if ( std::string err = add( node.Outputs[i], false, i ); !err.empty() )
+                        return err;
+            }
+
+            // ---- links: both ends real, output -> input, one link per input, types equal ----
+            std::unordered_set<uint64_t> takenInputs;
+            for ( const auto& link : doc.Links )
+            {
+                auto from = pins.find( link.From );
+                auto to   = pins.find( link.To );
+                if ( from == pins.end() )
+                    return std::format( "link {} starts at pin id {}, which no node owns", link.Id,
+                                        link.From );
+                if ( to == pins.end() )
+                    return std::format( "link {} ends at pin id {}, which no node owns", link.Id, link.To );
+
+                if ( from->second.Input )
+                    return std::format( "link {} starts at input '{}' of node {} — a link must start at "
+                                        "an output",
+                                        link.Id, from->second.Owner->Inputs[from->second.Index].Name,
+                                        NodeLabel( *from->second.Owner ) );
+                if ( !to->second.Input )
+                    return std::format( "link {} ends at output '{}' of node {} — a link must end at an "
+                                        "input",
+                                        link.Id, to->second.Owner->Outputs[to->second.Index].Name,
+                                        NodeLabel( *to->second.Owner ) );
+
+                // Two links into one input: the emitter keeps whichever the map saw last, so the
+                // artist's picture and the generated code disagree with nothing to show for it.
+                if ( !takenInputs.insert( link.To ).second )
+                    return std::format( "input '{}' of node {} has more than one link into it",
+                                        to->second.Owner->Inputs[to->second.Index].Name,
+                                        NodeLabel( *to->second.Owner ) );
+
+                // The rule is exactly the canvas's: equal types, no implicit conversion. Stating it
+                // twice in two places is the risk here, so both sides compare the SAME catalogue
+                // types — the canvas via Pin::Type, checked against the catalogue above.
+                if ( from->second.Type != to->second.Type )
+                    return std::format(
+                         "cannot link output '{}' of node {} ({}) into input '{}' of node {} ({}): "
+                         "types do not match",
+                         from->second.Owner->Outputs[from->second.Index].Name,
+                         NodeLabel( *from->second.Owner ), GlslTypeName( from->second.Type ),
+                         to->second.Owner->Inputs[to->second.Index].Name,
+                         NodeLabel( *to->second.Owner ), GlslTypeName( to->second.Type ) );
+            }
+
+            return {};
+        }
     } // namespace
 
     Common::ResultStr<std::string> CompileToDShader( const Document& doc )
@@ -284,6 +458,11 @@ namespace Desert::Editor::ShaderGraph
         const Domain      domain   = doc.DomainEnum();
         const char* const outKind  = OutputKind( domain );
         const char* const outTitle = domain == Domain::PostProcess ? "Post Process Output" : "Surface Output";
+
+        // Structure and types first: everything below indexes pins positionally and emits typed GLSL
+        // declarations, both of which assume a well-formed document.
+        if ( std::string err = ValidateGraph( doc, domain ); !err.empty() )
+            return Common::MakeError<std::string>( std::move( err ) );
 
         const Node* output = nullptr;
         for ( const auto& node : doc.Nodes )

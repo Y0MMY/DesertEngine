@@ -159,6 +159,192 @@ TEST( ShaderGraphCompiler, PaletteIsFilteredByDomain )
     EXPECT_TRUE( SG::SpecInDomain( *multiply, SG::Domain::PostProcess ) );
 }
 
+// ===================================================================== link type checking =====
+//
+// The canvas refuses a mismatched link interactively, but a .dgraph is plain JSON. Every test below
+// builds a document the canvas could never have produced and asserts the COMPILER rejects it — and
+// that the message names the node, because the whole point is that shaderc could only name a line
+// of generated code.
+
+namespace
+{
+    // The shipped reproduction fixture, in code: UV (vec2) wired into Albedo (vec4).
+    SG::Document TypeMismatchDoc()
+    {
+        SG::Document doc;
+        doc.Name = "TypeMismatch";
+
+        auto uv     = SG::MakeNode( doc, "UV" );
+        auto output = SG::MakeNode( doc, "SurfaceOutput" );
+
+        doc.Links.push_back( { doc.NextId++, uv.Outputs[0].Id, output.Inputs[0].Id } );
+        doc.Nodes.push_back( std::move( uv ) );
+        doc.Nodes.push_back( std::move( output ) );
+        return doc;
+    }
+} // namespace
+
+TEST( ShaderGraphCompiler, MismatchedLinkIsRejectedAndNamesBothNodes )
+{
+    const auto compiled = SG::CompileToDShader( TypeMismatchDoc() );
+    ASSERT_FALSE( compiled.IsSuccess() ) << "a vec2 -> vec4 link must not reach shaderc";
+
+    const std::string& err = compiled.GetError();
+    // Named by their palette titles, with the offending types spelled in GLSL terms.
+    EXPECT_NE( err.find( "UV" ), std::string::npos ) << err;
+    EXPECT_NE( err.find( "Surface Output" ), std::string::npos ) << err;
+    EXPECT_NE( err.find( "Albedo" ), std::string::npos ) << err;
+    EXPECT_NE( err.find( "vec2" ), std::string::npos ) << err;
+    EXPECT_NE( err.find( "vec4" ), std::string::npos ) << err;
+}
+
+// The check must not fire on a graph the canvas would have accepted.
+TEST( ShaderGraphCompiler, WellTypedGraphsStillCompile )
+{
+    EXPECT_TRUE( SG::CompileToDShader( SurfaceDoc() ).IsSuccess() );
+    EXPECT_TRUE( SG::CompileToDShader( PostProcessDoc() ).IsSuccess() );
+}
+
+// Float -> Color and Color -> Float are both rejected: the rule is equality, exactly as on the
+// canvas, not "whatever GLSL happens to accept" (vec4*vec4 compiles and is silently wrong).
+TEST( ShaderGraphCompiler, TypeRuleIsEqualityInBothDirections )
+{
+    {
+        SG::Document doc;
+        doc.Name    = "FloatIntoColor";
+        auto f      = SG::MakeNode( doc, "FloatConst" );
+        auto scale  = SG::MakeNode( doc, "Scale" );
+        auto output = SG::MakeNode( doc, "SurfaceOutput" );
+        // FloatConst (float) into Scale's "Color" input (vec4).
+        doc.Links.push_back( { doc.NextId++, f.Outputs[0].Id, scale.Inputs[0].Id } );
+        doc.Links.push_back( { doc.NextId++, scale.Outputs[0].Id, output.Inputs[0].Id } );
+        doc.Nodes.push_back( std::move( f ) );
+        doc.Nodes.push_back( std::move( scale ) );
+        doc.Nodes.push_back( std::move( output ) );
+        EXPECT_FALSE( SG::CompileToDShader( doc ).IsSuccess() );
+    }
+    {
+        SG::Document doc;
+        doc.Name    = "ColorIntoFloat";
+        auto c      = SG::MakeNode( doc, "ColorConst" );
+        auto scale  = SG::MakeNode( doc, "Scale" );
+        auto output = SG::MakeNode( doc, "SurfaceOutput" );
+        // ColorConst (vec4) into Scale's "Factor" input (float).
+        doc.Links.push_back( { doc.NextId++, c.Outputs[0].Id, scale.Inputs[1].Id } );
+        doc.Links.push_back( { doc.NextId++, scale.Outputs[0].Id, output.Inputs[0].Id } );
+        doc.Nodes.push_back( std::move( c ) );
+        doc.Nodes.push_back( std::move( scale ) );
+        doc.Nodes.push_back( std::move( output ) );
+        EXPECT_FALSE( SG::CompileToDShader( doc ).IsSuccess() );
+    }
+}
+
+// TextureSample has two outputs of different types; the check must resolve the type PER PIN, not
+// per node, or the R (float) output would be judged as the RGBA (vec4) one.
+TEST( ShaderGraphCompiler, MultiOutputNodeIsTypedPerPin )
+{
+    const auto build = []( size_t outputIndex )
+    {
+        SG::Document doc;
+        doc.Name    = "TexPin";
+        auto tex    = SG::MakeNode( doc, "TextureSample" );
+        auto output = SG::MakeNode( doc, "SurfaceOutput" );
+        // Albedo is vec4: RGBA (output 0) fits, R (output 1) does not.
+        doc.Links.push_back( { doc.NextId++, tex.Outputs[outputIndex].Id, output.Inputs[0].Id } );
+        doc.Nodes.push_back( std::move( tex ) );
+        doc.Nodes.push_back( std::move( output ) );
+        return SG::CompileToDShader( doc );
+    };
+
+    EXPECT_TRUE( build( 0 ).IsSuccess() );  // RGBA -> Albedo
+    EXPECT_FALSE( build( 1 ).IsSuccess() ); // R    -> Albedo
+}
+
+// A node whose pin list was trimmed by hand used to read off the end of the vector: the emitter
+// indexes node.Inputs[i] positionally for every kind it knows.
+TEST( ShaderGraphCompiler, NodeWithPinsNotMatchingItsKindIsRejected )
+{
+    SG::Document doc;
+    doc.Name       = "TrimmedPins";
+    auto mul       = SG::MakeNode( doc, "Multiply" );
+    auto output    = SG::MakeNode( doc, "SurfaceOutput" );
+    doc.Links.push_back( { doc.NextId++, mul.Outputs[0].Id, output.Inputs[0].Id } );
+    mul.Inputs.clear(); // "Inputs": [] in the file
+    doc.Nodes.push_back( std::move( mul ) );
+    doc.Nodes.push_back( std::move( output ) );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_FALSE( compiled.IsSuccess() );
+    EXPECT_NE( compiled.GetError().find( "Multiply" ), std::string::npos ) << compiled.GetError();
+}
+
+// Pin::Type in the file is a mirror of the catalogue. If it lies, the canvas type-checks against
+// the lie and accepts a link the compiler cannot emit.
+TEST( ShaderGraphCompiler, PinTypeDisagreeingWithTheCatalogueIsRejected )
+{
+    SG::Document doc = SurfaceDoc();
+    for ( auto& node : doc.Nodes )
+        if ( node.Kind == "ColorParam" )
+            node.Outputs[0].Type = static_cast<int>( SG::ValueType::Float );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_FALSE( compiled.IsSuccess() );
+    EXPECT_NE( compiled.GetError().find( "Color Param" ), std::string::npos ) << compiled.GetError();
+}
+
+// A link whose endpoint id belongs to no node was silently treated as "unlinked" — the input
+// quietly took its default and the artist saw a graph that did not do what it drew.
+TEST( ShaderGraphCompiler, DanglingLinkIsRejected )
+{
+    SG::Document doc = SurfaceDoc();
+    doc.Links[0].From = 999999; // no node owns this pin
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_FALSE( compiled.IsSuccess() );
+    EXPECT_NE( compiled.GetError().find( "999999" ), std::string::npos ) << compiled.GetError();
+}
+
+// Direction matters: output -> input, never the reverse.
+TEST( ShaderGraphCompiler, BackwardsLinkIsRejected )
+{
+    SG::Document doc = SurfaceDoc();
+    std::swap( doc.Links[0].From, doc.Links[0].To );
+    EXPECT_FALSE( SG::CompileToDShader( doc ).IsSuccess() );
+}
+
+// Two links into one input: the emitter kept whichever the map saw last, so the picture and the
+// generated code disagreed with nothing to show for it.
+TEST( ShaderGraphCompiler, TwoLinksIntoOneInputAreRejected )
+{
+    SG::Document doc = SurfaceDoc();
+
+    auto second      = SG::MakeNode( doc, "ColorConst" );
+    uint64_t albedo  = 0;
+    for ( const auto& node : doc.Nodes )
+        if ( node.Kind == "SurfaceOutput" )
+            albedo = node.Inputs[0].Id;
+    ASSERT_NE( albedo, 0u );
+
+    doc.Links.push_back( { doc.NextId++, second.Outputs[0].Id, albedo } );
+    doc.Nodes.push_back( std::move( second ) );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_FALSE( compiled.IsSuccess() );
+    EXPECT_NE( compiled.GetError().find( "Albedo" ), std::string::npos ) << compiled.GetError();
+}
+
+// A node the palette does not offer in this domain would emit GLSL referring to declarations the
+// domain's stage never writes (SceneColor -> u_SceneTexture, absent from a Surface fragment).
+TEST( ShaderGraphCompiler, OutOfDomainNodeIsRejected )
+{
+    SG::Document doc = SurfaceDoc();
+    doc.Nodes.push_back( SG::MakeNode( doc, "SceneColor" ) );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_FALSE( compiled.IsSuccess() );
+    EXPECT_NE( compiled.GetError().find( "Scene Color" ), std::string::npos ) << compiled.GetError();
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
