@@ -30,7 +30,12 @@ namespace Desert::Editor
             return s;
         }
 
-        /// `--open-panel <name>`, repeatable. Matched against IPanel::GetName() exactly.
+        /// `--open-panel <name-or-asset-path>`, repeatable. Matched against IPanel::GetName() exactly; a
+        /// value that names no panel is then tried as a path to an asset with a document editor (a `.demat`
+        /// opens the Material Editor on it). An asset DOCUMENT cannot be named at boot the way a tool can —
+        /// it does not exist until something opens the asset — and this flag is the only way to put one on
+        /// screen unattended, which is what every capture of one depends on. See
+        /// EditorLayer::OnAttach for the resolution order and the error that names both kinds.
         std::vector<std::string> PanelsToOpen;
     };
 } // namespace Desert::Editor

@@ -7,6 +7,7 @@
 #include "Editor/Panels/IPanel.hpp"
 #include "Editor/Core/CommandPalette.hpp"
 #include "Editor/Core/SceneViewIdentity.hpp"
+#include "Editor/Core/AssetEditorRegistry.hpp"
 #include "Editor/RenderSystems/RenderRigistry.hpp"
 
 #include <filesystem>
@@ -118,6 +119,28 @@ namespace Desert::Editor
         // of OnUpdate, because a close destroys GPU resources and removes a panel from m_Panels — neither is
         // legal from inside the ImGui pass that is iterating it.
         void CloseDismissedSceneViews();
+
+        // ===== Asset documents (one window per asset, opened from the browser) =====
+        // Drains Core::AssetOpenRequests and, per request, focuses the document already open on that subject
+        // or builds a new one through m_AssetEditors. Runs from OnUpdate (between frames) because it adds to
+        // m_Panels, and REFUSES past the six renderer slots with the census printed by name — a seventh
+        // consumer would otherwise be handed slot 0 to share, which fails silently and days later.
+        void ServiceAssetOpenRequests();
+        // Destroys every asset document whose window the user dismissed, behind a device-idle wait. This is
+        // what returns the document's Scene, SceneRenderer and renderer slot: unlike a tool panel, a
+        // document cannot be "closed" by a visibility flag, because a hidden panel still owns its renderer.
+        void CloseDismissedAssetDocuments();
+
+        // Who is holding a renderer slot right now, by name. Printed when an open is refused — "no free
+        // slot" without the list leaves the user with nothing to close. The main viewport and every extra
+        // scene view hold one for as long as they exist; the Details preview and each asset document are
+        // demand-driven and may be open while holding nothing.
+        struct RendererSlotConsumer
+        {
+            std::string Name;
+            bool        HoldsSlot = false;
+        };
+        [[nodiscard]] std::vector<RendererSlotConsumer> RendererSlotCensus() const;
         // Rebinds the editor to a focused document: m_MainScene (and thus every play/save/gizmo call site)
         // points at it, Commands + the scene-bound panels follow. kPrimarySceneViewId = the primary/main
         // scene. An id whose document has been closed rebinds nothing and says so — see SceneViewIdentity.hpp
@@ -190,6 +213,11 @@ namespace Desert::Editor
         std::vector<std::unique_ptr<SceneDocument>> m_ExtraScenes;
         SceneViewIdSource                           m_SceneViewIds;
         uint64_t m_ActiveSceneId = kPrimarySceneViewId; // which document the editor is bound to
+
+        // AssetTypeID -> the editor that opens it. Holds factories only; the documents it builds live in
+        // m_Panels like every other panel, which is what makes them dockable and torn down by OnDetach with
+        // no extra code. See Editor/Core/AssetEditorRegistry.hpp for why there is no second container.
+        AssetEditorRegistry m_AssetEditors;
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;

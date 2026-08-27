@@ -59,7 +59,8 @@
 #include "Editor/Panels/Logs/LogsPanel.hpp"
 #include "Editor/Panels/Collections/CollectionsPanel.hpp"
 #include "Editor/Panels/NodeGraph/NodeGraphPanel.hpp"
-#include "Editor/Panels/MaterialPreviewPanel.hpp"
+#include "Editor/Panels/MaterialEditor/MaterialEditorPanel.hpp"
+#include "Editor/Panels/MaterialEditor/MaterialDocumentOpen.hpp"
 #include "Editor/Panels/Animation/AnimGraphPanel.hpp"
 #include "Editor/Panels/Photogrammetry/PhotogrammetryPanel.hpp"
 #include "Editor/Panels/Particles/ParticleEditorPanel.hpp"
@@ -77,6 +78,8 @@
 #include "Editor/Panels/Clouds/CloudTypePanel.hpp"
 #include "Editor/Panels/Animation/AnimLayersPanel.hpp"
 #include "Editor/Core/ToastManager.hpp"
+#include "Editor/Core/AssetEditorRegistry.hpp"
+#include "Editor/Core/AssetOpenRequest.hpp"
 
 // 4. Misc
 #include <glm/gtx/matrix_decompose.hpp>
@@ -450,10 +453,6 @@ namespace Desert::Editor
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
         m_Panels.emplace_back( std::make_unique<Editor::NodeGraphPanel>( m_AssetManager ) );
-        // The material editor's live preview window. Hidden by default and costs exactly nothing until it
-        // is opened — it creates its scene, renderer and renderer slot on the first frame it draws and
-        // gives them back the moment it stops.
-        m_Panels.emplace_back( std::make_unique<Editor::MaterialPreviewPanel>( m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::AnimGraphPanel>( m_MainScene, m_AnimationLibrary.get() ) );
         m_Panels.emplace_back(
              std::make_unique<Editor::PhotogrammetryPanel>( m_MainScene, m_AssetManager.get() ) );
@@ -467,6 +466,15 @@ namespace Desert::Editor
         m_Panels.emplace_back(
              std::make_unique<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::BuildSettingsPanel>() );
+
+        // Which editor opens which kind of asset. The Material Editor is the first entry and, today, the
+        // only one: double-clicking a `.demat` in the browser opens ONE window bound to THAT material, and a
+        // second material is a second window. Adding the next asset kind is another line here rather than
+        // another branch in FileExplorerPanel and another file-static inbox beside it — see
+        // Editor/Core/AssetEditorRegistry.hpp.
+        m_AssetEditors.Register(
+             Assets::AssetTypeID::Material, [this]( const Assets::AssetHandle& material )
+             { return std::make_unique<Editor::MaterialEditorPanel>( material, m_AssetManager ); } );
 
         // `--open-panel <name>`: put a tool on screen at boot, by the name the View menu shows. See
         // Editor/Core/StartupOptions.hpp for why it is an argument rather than a click. A CONTEXTUAL
@@ -486,15 +494,35 @@ namespace Desert::Editor
                 break;
             }
 
-            if ( !found )
+            if ( found )
+                continue;
+
+            // Not a panel name — try it as an ASSET PATH, and open that asset's document.
+            //
+            // WHY THE SAME FLAG RATHER THAN A SECOND ONE. `--open-panel` exists because a tool window
+            // rightly defaults to hidden and there was no way to put one on screen unattended; the editor
+            // cannot be driven by synthetic input on macOS, so a capture of a tool needs a flag. An asset
+            // DOCUMENT has exactly that problem and one more: it does not exist until somebody opens an
+            // asset, so no name can name it at boot. What the flag means is "put this on screen", and a
+            // document is a thing on screen; a second flag would be the same request spelled twice.
+            //
+            // Only a value that was NEVER a material path falls through to the error below: a `.demat` that
+            // failed to resolve has already been reported here by name, and repeating it as "names no panel"
+            // would be a second message contradicting the first.
+            if ( RequestMaterialDocument( m_AssetManager.get(), wanted ) !=
+                 MaterialDocumentRequest::NotAMaterialPath )
             {
-                // NAMED, WITH THE LIST. A flag that quietly did nothing is indistinguishable from a panel
-                // that failed to draw, and this argument exists precisely for runs nobody is watching.
-                std::string known;
-                for ( auto& panel : m_Panels )
-                    known += ( known.empty() ? "" : ", " ) + panel->GetName();
-                LOG_ERROR( "[Editor] --open-panel '{}' names no panel. Known panels: {}", wanted, known );
+                continue;
             }
+
+            // NAMED, WITH THE LIST. A flag that quietly did nothing is indistinguishable from a panel
+            // that failed to draw, and this argument exists precisely for runs nobody is watching.
+            std::string known;
+            for ( auto& panel : m_Panels )
+                known += ( known.empty() ? "" : ", " ) + panel->GetName();
+            LOG_ERROR( "[Editor] --open-panel '{}' names neither a panel nor an openable asset. Known "
+                       "panels: {}",
+                       wanted, known );
         }
 #endif // EBABLE_IMGUI
 
@@ -601,6 +629,13 @@ namespace Desert::Editor
         // dismissed last frame would otherwise get one more full scene render, and — until this existed at
         // all — every subsequent frame for the rest of the session, holding one of the six renderer slots.
         CloseDismissedSceneViews();
+
+        // Asset documents follow the scene views exactly, and for the same reason: closing one destroys a
+        // Scene, a SceneRenderer and a panel in m_Panels, none of which is legal from inside the ImGui pass
+        // that noticed the click. Closes run BEFORE opens so a slot handed back this frame is available to
+        // whatever the user is opening in it.
+        CloseDismissedAssetDocuments();
+        ServiceAssetOpenRequests();
 
         // Stop is deferred here (between frames) so it never destroys/recreates render resources while a
         // command buffer that references them is in flight — see m_PendingSceneStop.
@@ -1038,6 +1073,139 @@ namespace Desert::Editor
                   EngineContext::kMaxRendererSlots );
     }
 
+    std::vector<EditorLayer::RendererSlotConsumer> EditorLayer::RendererSlotCensus() const
+    {
+        std::vector<RendererSlotConsumer> census;
+        census.push_back( { "main viewport", true } ); // the primary scene's renderer exists for the session
+
+        for ( const auto& doc : m_ExtraScenes )
+            census.push_back( { "scene view '" + doc->Name + "'", true } );
+
+        for ( const auto& panel : m_Panels )
+        {
+            if ( const auto* details = dynamic_cast<const ScenePropertiesPanel*>( panel.get() ) )
+                census.push_back( { "Details preview", details->HoldsRendererSlot() } );
+            else if ( const auto* document = dynamic_cast<const IAssetEditorPanel*>( panel.get() ) )
+            {
+                // The VISIBLE half of the name. The census tells a user what to close, and they close a
+                // window titled "MP_GreenTint", not one titled "MP_GreenTint###assetdoc3333333333333333333".
+                std::string label = document->GetName();
+                if ( const auto pos = label.find( "###" ); pos != std::string::npos )
+                    label.erase( pos );
+
+                census.push_back( { std::string( Assets::AssetTypeName( document->SubjectType() ) ) +
+                                         " document '" + label + "'",
+                                    document->HoldsRendererSlot() } );
+            }
+        }
+
+        return census;
+    }
+
+    void EditorLayer::ServiceAssetOpenRequests()
+    {
+        for ( const auto& request : Core::AssetOpenRequests::Drain() )
+        {
+            // OPEN-OR-FOCUS, keyed by the subject. Asked of the panel list itself rather than of a map kept
+            // beside it, so there is no second answer to "which documents are open" to fall out of step —
+            // see the note in AssetEditorRegistry.hpp.
+            if ( IAssetEditorPanel* open = FindOpenAssetDocument( m_Panels, request.Subject ) )
+            {
+                open->GetVisibility() = true;
+                m_FocusPanel          = open->GetName(); // brings it forward in whatever dock it lives
+                continue;
+            }
+
+            // Checked BEFORE the slot arithmetic below, so a type with no editor is reported as the missing
+            // editor it is rather than as a resource shortage it had nothing to do with.
+            if ( !m_AssetEditors.HasEditorFor( request.Type ) )
+            {
+                LOG_WARN( "[Editor] Nothing edits asset type '{}' (handle {}) — no window opened.",
+                          Assets::AssetTypeName( request.Type ), static_cast<uint64_t>( request.Subject ) );
+                continue;
+            }
+
+            // THE SEVENTH CONSUMER IS REFUSED, OUT LOUD. There are six renderer slots. A document admitted
+            // past the cap would not fail — SceneRenderer would hand it slot 0 to share with the main view,
+            // and the symptom is two surfaces quietly trading each other's per-frame camera some minutes
+            // later, with no error anywhere. So the count is checked here and the census is printed with
+            // names, because a bare "no slots" leaves the user with nothing to close.
+            //
+            // Pending demand is counted separately and it is not pedantry: a document that is open but has
+            // not drawn yet holds NO slot and has a claim coming, so the live-renderer count alone would
+            // admit a document there is no slot for and discover it a frame later.
+            const uint32_t live    = Graphic::SceneRenderer::GetLiveRendererCount();
+            uint32_t       pending = 0;
+            for ( const auto& panel : m_Panels )
+            {
+                const auto* document = dynamic_cast<const IAssetEditorPanel*>( panel.get() );
+                if ( document && !document->HoldsRendererSlot() )
+                    ++pending;
+            }
+
+            if ( live + pending >= EngineContext::kMaxRendererSlots )
+            {
+                std::string census;
+                for ( const auto& consumer : RendererSlotCensus() )
+                {
+                    const char* state = consumer.HoldsSlot ? "holds a slot"
+                                                           : "no slot right now, but will "
+                                                             "claim one when it draws";
+                    census += "\n    " + consumer.Name + " — " + state;
+                }
+                LOG_ERROR( "[Editor] Refusing to open a '{}' document (handle {}): {} of {} renderer slots are "
+                           "in use and {} more are already committed. Close one of these first:{}",
+                           Assets::AssetTypeName( request.Type ), static_cast<uint64_t>( request.Subject ), live,
+                           EngineContext::kMaxRendererSlots, pending, census );
+                continue;
+            }
+
+            auto document = m_AssetEditors.Create( request.Subject, request.Type );
+            if ( !document )
+                continue; // the registry already said why
+
+            const std::string name = document->GetName();
+            m_Panels.emplace_back( std::move( document ) );
+            m_FocusPanel = name;
+            LOG_INFO( "[Editor] Opened a '{}' document '{}' ({}/{} renderer slots in use, {} committed).",
+                      Assets::AssetTypeName( request.Type ), name, Graphic::SceneRenderer::GetLiveRendererCount(),
+                      EngineContext::kMaxRendererSlots, pending + 1 );
+        }
+    }
+
+    void EditorLayer::CloseDismissedAssetDocuments()
+    {
+        // Collect first, erase after: deciding and mutating in one pass over m_Panels would be iterating a
+        // container while emptying it — the same reason CloseDismissedSceneViews is written this way.
+        std::vector<IPanel*> dismissed;
+        for ( const auto& panel : m_Panels )
+        {
+            auto* document = dynamic_cast<IAssetEditorPanel*>( panel.get() );
+            if ( document && !document->GetVisibility() )
+                dismissed.push_back( panel.get() );
+        }
+
+        if ( dismissed.empty() )
+            return;
+
+        // Destroying the panel is what destroys its PreviewViewport, and with it the scene, the renderer and
+        // the renderer slot. The last submitted frame may still be executing against that renderer's
+        // pipelines, framebuffers and descriptor pools, so the device is idled first — the ordering
+        // ~PreviewViewport and CloseSceneView both established, not a precaution invented here.
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+
+        for ( IPanel* panel : dismissed )
+        {
+            const std::string name = panel->GetName();
+            m_ContextualShown.erase( panel );
+            std::erase_if( m_Panels, [panel]( const std::unique_ptr<IPanel>& p ) { return p.get() == panel; } );
+            // Printed rather than derived: a document that failed to return its slot produces no error at
+            // all, and this line beside the one in ServiceAssetOpenRequests is what makes the leak readable.
+            LOG_INFO( "[Editor] Closed asset document '{}' ({}/{} renderer slots in use after release).", name,
+                      Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots );
+        }
+    }
+
     void EditorLayer::SetActiveScene( uint64_t id )
     {
         if ( id == m_ActiveSceneId )
@@ -1324,6 +1492,13 @@ namespace Desert::Editor
             }
         }
 
+        // Asset documents CASCADE instead of stacking. Every panel with a default size is centred on the
+        // main viewport, which is right for a tool the user opens one of — and wrong the moment there are
+        // several of one kind: two Material Editor windows would open at the same place at the same size,
+        // and the second would hide the first exactly. Each document is stepped down-right from the last, as
+        // every application that has more than one document window does.
+        int documentIndex = 0;
+
         for ( const auto& panel : m_Panels )
         {
             if ( !panel->GetVisibility() )
@@ -1341,7 +1516,14 @@ namespace Desert::Editor
             if ( const ImVec2 defSize = panel->GetDefaultSize(); defSize.x > 0.0f && defSize.y > 0.0f )
             {
                 ImGui::SetNextWindowSize( defSize, ImGuiCond_FirstUseEver );
-                const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+                ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+                if ( dynamic_cast<const IAssetEditorPanel*>( panel.get() ) )
+                {
+                    constexpr float kCascadeStep = 32.0f;
+                    center.x += kCascadeStep * static_cast<float>( documentIndex );
+                    center.y += kCascadeStep * static_cast<float>( documentIndex );
+                    ++documentIndex;
+                }
                 ImGui::SetNextWindowPos( center, ImGuiCond_FirstUseEver, ImVec2( 0.5f, 0.5f ) );
             }
 
