@@ -258,8 +258,7 @@ namespace Desert::Editor::ShaderGraph
                     // ValidateGraph has already rejected kinds that are not in the catalogue, so
                     // reaching here means the OPPOSITE: a NodeSpec was added without an emitter
                     // branch. Saying so beats emitting a silent black.
-                    error = std::format( "node kind '{}' is in the palette but has no compiler rule",
-                                         node.Kind );
+                    error = std::format( "node kind '{}' is in the palette but has no compiler rule", node.Kind );
                     decl  = std::format( "vec4 {} = vec4( 0.0 );", var );
                 }
 
@@ -351,8 +350,7 @@ namespace Desert::Editor::ShaderGraph
                 // A node whose pin list disagrees with its kind is the crash case, not just a bad
                 // message: the emitter indexes node.Inputs[i] positionally for every kind it knows,
                 // so a hand-trimmed "Inputs": [] on a Multiply used to read off the end of the vector.
-                if ( node.Inputs.size() != spec->Inputs.size() ||
-                     node.Outputs.size() != spec->Outputs.size() )
+                if ( node.Inputs.size() != spec->Inputs.size() || node.Outputs.size() != spec->Outputs.size() )
                     return std::format(
                          "node {} has {} input(s) and {} output(s), but kind '{}' declares {} and {}",
                          NodeLabel( node ), node.Inputs.size(), node.Outputs.size(), node.Kind,
@@ -363,19 +361,17 @@ namespace Desert::Editor::ShaderGraph
                 // accept a link the compiler cannot emit, so the mirror is checked rather than trusted.
                 for ( size_t i = 0; i < node.Inputs.size(); ++i )
                     if ( node.Inputs[i].Type != static_cast<int>( spec->Inputs[i].Type ) )
-                        return std::format(
-                             "node {}: input '{}' is stored as {} but kind '{}' declares it {}",
-                             NodeLabel( node ), node.Inputs[i].Name,
-                             GlslTypeName( static_cast<ValueType>( node.Inputs[i].Type ) ), node.Kind,
-                             GlslTypeName( spec->Inputs[i].Type ) );
+                        return std::format( "node {}: input '{}' is stored as {} but kind '{}' declares it {}",
+                                            NodeLabel( node ), node.Inputs[i].Name,
+                                            GlslTypeName( static_cast<ValueType>( node.Inputs[i].Type ) ),
+                                            node.Kind, GlslTypeName( spec->Inputs[i].Type ) );
 
                 for ( size_t i = 0; i < node.Outputs.size(); ++i )
                     if ( node.Outputs[i].Type != static_cast<int>( spec->Outputs[i].Type ) )
-                        return std::format(
-                             "node {}: output '{}' is stored as {} but kind '{}' declares it {}",
-                             NodeLabel( node ), node.Outputs[i].Name,
-                             GlslTypeName( static_cast<ValueType>( node.Outputs[i].Type ) ), node.Kind,
-                             GlslTypeName( spec->Outputs[i].Type ) );
+                        return std::format( "node {}: output '{}' is stored as {} but kind '{}' declares it {}",
+                                            NodeLabel( node ), node.Outputs[i].Name,
+                                            GlslTypeName( static_cast<ValueType>( node.Outputs[i].Type ) ),
+                                            node.Kind, GlslTypeName( spec->Outputs[i].Type ) );
             }
 
             // ---- pin index, rejecting duplicate ids ----
@@ -388,7 +384,7 @@ namespace Desert::Editor::ShaderGraph
                     if ( pin.Id == 0 )
                         return std::format( "node {}: pin '{}' has no id", NodeLabel( node ), pin.Name );
                     const ValueType type = input ? spec->Inputs[index].Type : spec->Outputs[index].Type;
-                    auto [it, fresh] = pins.emplace( pin.Id, PinRef{ &node, input, index, type } );
+                    auto [it, fresh]     = pins.emplace( pin.Id, PinRef{ &node, input, index, type } );
                     if ( !fresh )
                         return std::format( "pin id {} is used by both node {} and node {}", pin.Id,
                                             NodeLabel( *it->second.Owner ), NodeLabel( node ) );
@@ -409,8 +405,7 @@ namespace Desert::Editor::ShaderGraph
                 auto from = pins.find( link.From );
                 auto to   = pins.find( link.To );
                 if ( from == pins.end() )
-                    return std::format( "link {} starts at pin id {}, which no node owns", link.Id,
-                                        link.From );
+                    return std::format( "link {} starts at pin id {}, which no node owns", link.Id, link.From );
                 if ( to == pins.end() )
                     return std::format( "link {} ends at pin id {}, which no node owns", link.Id, link.To );
 
@@ -436,13 +431,12 @@ namespace Desert::Editor::ShaderGraph
                 // twice in two places is the risk here, so both sides compare the SAME catalogue
                 // types — the canvas via Pin::Type, checked against the catalogue above.
                 if ( from->second.Type != to->second.Type )
-                    return std::format(
-                         "cannot link output '{}' of node {} ({}) into input '{}' of node {} ({}): "
-                         "types do not match",
-                         from->second.Owner->Outputs[from->second.Index].Name,
-                         NodeLabel( *from->second.Owner ), GlslTypeName( from->second.Type ),
-                         to->second.Owner->Inputs[to->second.Index].Name,
-                         NodeLabel( *to->second.Owner ), GlslTypeName( to->second.Type ) );
+                    return std::format( "cannot link output '{}' of node {} ({}) into input '{}' of node {} ({}): "
+                                        "types do not match",
+                                        from->second.Owner->Outputs[from->second.Index].Name,
+                                        NodeLabel( *from->second.Owner ), GlslTypeName( from->second.Type ),
+                                        to->second.Owner->Inputs[to->second.Index].Name,
+                                        NodeLabel( *to->second.Owner ), GlslTypeName( to->second.Type ) );
             }
 
             return {};
@@ -617,15 +611,16 @@ namespace Desert::Editor::ShaderGraph
                  "            o_Color = vec4( albedo.rgb + ( {} ).rgb, albedo.a * ( {} ) );\n", emission,
                  alpha );
         }
-        out << "        }\n    }\n\n";
-
-        // Depth-only variant for shadow rendering, addressable as "<Name>/Depth".
-        out << "    Pass \"Depth\"\n    {\n";
-        out << "        State\n        {\n            Cull Front\n        }\n\n";
-        out << "        Vertex\n        {\n";
-        out << "            #define GRAPH_DEPTH_ONLY 1\n";
-        out << "            #include <Common/GraphVertex.glslh>\n";
         out << "        }\n    }\n";
+
+        // NO depth-only pass is emitted. There used to be one, named "Depth" and described as the
+        // shadow variant, and nothing in the engine ever asked for it: no C++ names "<shader>/Depth",
+        // and the shadow pass binds its own pipeline. It could not have served even if something had —
+        // it declared no fragment stage at all, while a cascade target is a colour R32F attachment that
+        // a shader must WRITE (Shadow.shader writes gl_FragCoord.z), and its vertex read cameraUB, the
+        // camera, rather than the light's matrix. Shadow casting for these materials is handled where it
+        // belongs, by the engine's shadow pipeline over the generic queue (MeshRenderer::RegisterShadowPass);
+        // depth is material-independent, so a per-material depth shader has nothing to contribute.
         out << "}\n";
 
         return Common::MakeSuccess( out.str() );

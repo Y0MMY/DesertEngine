@@ -3,7 +3,11 @@
 //
 // The including stage configures it with defines BEFORE the #include:
 //   #define GRAPH_LIT 1        — also pass the world-space normal (location 1)
-//   #define GRAPH_DEPTH_ONLY 1 — no varyings at all (shadow/depth pass)
+//
+// There was a GRAPH_DEPTH_ONLY variant here, for a generated "Depth" pass meant to be the shadow
+// caster. It is gone with that pass: this stage transforms by cameraUB, the CAMERA, so it could
+// never have rendered a light-space cascade whatever stage list was wrapped around it. Graph
+// materials cast through the engine's own shadow pipeline instead.
 
 In(0) vec3 a_Position;
 In(1) vec3 a_Normal;
@@ -19,20 +23,16 @@ PushConstant PushConstants
 }
 m_PushConstants;
 
-#ifndef GRAPH_DEPTH_ONLY
 Out(0) vec2 v_UV;
 #ifdef GRAPH_LIT
 Out(1) vec3 v_Normal;
 #endif
-#endif
 
 void main()
 {
-#ifndef GRAPH_DEPTH_ONLY
     v_UV = a_TextureCoord;
 #ifdef GRAPH_LIT
     v_Normal = mat3( m_PushConstants.Transform ) * a_Normal;
-#endif
 #endif
     gl_Position = cameraUB.Projection * cameraUB.View * m_PushConstants.Transform * vec4( a_Position, 1.0 );
 }

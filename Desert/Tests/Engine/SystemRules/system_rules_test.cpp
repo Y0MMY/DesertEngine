@@ -22,6 +22,8 @@ using Desert::ECS::Rules::DecomposeTransform;
 using Desert::ECS::Rules::FallbackAtmosphereSunDirection;
 using Desert::ECS::Rules::IsSunDirectionValid;
 using Desert::ECS::Rules::LocomotionClipFor;
+using Desert::ECS::Rules::MeshShadowCaster;
+using Desert::ECS::Rules::RouteMeshShadowCaster;
 using Desert::ECS::Rules::SelectAtmosphereSun;
 using Desert::ECS::Rules::SocketLocalTransform;
 using Desert::ECS::Rules::SunCandidate;
@@ -303,6 +305,97 @@ TEST( AtmosphereSunRules, DirectionValidityUsesOneEpsilon )
     // The documented no-light fallback points ABOVE the horizon, so an empty scene is lit, not black.
     EXPECT_NEAR( glm::length( FallbackAtmosphereSunDirection() ), 1.0f, 1e-5f );
     EXPECT_GT( FallbackAtmosphereSunDirection().y, 0.0f );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Which draw carries the shadow caster
+// ---------------------------------------------------------------------------------------------------
+//
+// The shadow pass draws a mesh WHOLE (no submesh mask — depth is material-independent), so the caster
+// belongs to the entity and exactly one of its draws may carry it. These tests are the double-caster
+// guard: a mesh split across a custom slot and a PBR slot must appear in a cascade ONCE.
+
+TEST( MeshShadowCasterRules, CastShadowsOffMeansNobodyCasts )
+{
+    // Every shape of entity, all silent when the flag is off — including the ones that have no PBR
+    // draw at all, which is exactly where a "well, SOMEBODY should cast" fallback would creep in.
+    EXPECT_EQ( RouteMeshShadowCaster( false, false, 0, true ), MeshShadowCaster::None );
+    EXPECT_EQ( RouteMeshShadowCaster( false, true, 0, false ), MeshShadowCaster::None );
+    EXPECT_EQ( RouteMeshShadowCaster( false, false, 3, false ), MeshShadowCaster::None );
+    EXPECT_EQ( RouteMeshShadowCaster( false, false, 2, true ), MeshShadowCaster::None );
+}
+
+TEST( MeshShadowCasterRules, PlainPbrMeshStillCastsFromItsPbrDraw )
+{
+    // The pre-existing behaviour, pinned: introducing generic casters must not move the caster of an
+    // ordinary mesh, or every all-PBR scene in the corpus shifts under us.
+    EXPECT_EQ( RouteMeshShadowCaster( true, false, 0, true ), MeshShadowCaster::PbrDraw );
+}
+
+TEST( MeshShadowCasterRules, ShaderOverrideCastsBecauseItReplacedThePbrDraw )
+{
+    // A MaterialComponent naming a non-PBR shader takes the WHOLE entity off the PBR path
+    // (MeshECSSystem returns early), so before this rule such a mesh cast no shadow at all — the defect.
+    EXPECT_EQ( RouteMeshShadowCaster( true, true, 0, false ), MeshShadowCaster::ShaderOverride );
+
+    // And it stays the caster even if the other flags are set: the override draw is the entity's only
+    // draw, so nothing else could carry it.
+    EXPECT_EQ( RouteMeshShadowCaster( true, true, 4, true ), MeshShadowCaster::ShaderOverride );
+}
+
+TEST( MeshShadowCasterRules, MixedMeshCastsOnceFromThePbrDrawNotFromBoth )
+{
+    // THE double-caster case: submesh 0 on a custom slot material, submesh 1 still PBR. Both draws
+    // exist and either could rasterize the mesh into the cascade — the rule picks one, and it picks
+    // the one that was already casting.
+    EXPECT_EQ( RouteMeshShadowCaster( true, false, 1, true ), MeshShadowCaster::PbrDraw );
+    EXPECT_EQ( RouteMeshShadowCaster( true, false, 7, true ), MeshShadowCaster::PbrDraw );
+}
+
+TEST( MeshShadowCasterRules, AllSlotsCustomFallsToTheFirstSlotDrawOnly )
+{
+    // Every submesh went custom, so no PBR draw was emitted and the slot draws are all there is.
+    // ONE of them casts — the first — however many there are.
+    EXPECT_EQ( RouteMeshShadowCaster( true, false, 1, false ), MeshShadowCaster::FirstSlotDraw );
+    EXPECT_EQ( RouteMeshShadowCaster( true, false, 5, false ), MeshShadowCaster::FirstSlotDraw );
+}
+
+TEST( MeshShadowCasterRules, NoDrawAtAllCastsNothing )
+{
+    // Nothing was emitted for this entity (a mesh with no submeshes and no materials). There is no
+    // draw to hang a caster on, and inventing one would mean recording a draw the frame never makes.
+    EXPECT_EQ( RouteMeshShadowCaster( true, false, 0, false ), MeshShadowCaster::None );
+}
+
+// The property the whole rule exists for, stated as a count rather than as four separate equalities:
+// over every combination of the inputs, the number of draws that carry a caster is never more than one.
+TEST( MeshShadowCasterRules, NeverMoreThanOneCasterForAnyEntityShape )
+{
+    for ( int castShadows = 0; castShadows <= 1; ++castShadows )
+        for ( int shaderOverride = 0; shaderOverride <= 1; ++shaderOverride )
+            for ( size_t slotDraws = 0; slotDraws <= 4; ++slotDraws )
+                for ( int pbrEmitted = 0; pbrEmitted <= 1; ++pbrEmitted )
+                {
+                    const MeshShadowCaster route = RouteMeshShadowCaster( castShadows != 0, shaderOverride != 0,
+                                                                          slotDraws, pbrEmitted != 0 );
+
+                    // Count the draws that would set CastShadows on their render data.
+                    int casters = 0;
+                    casters += ( route == MeshShadowCaster::PbrDraw ) ? 1 : 0;
+                    casters += ( route == MeshShadowCaster::ShaderOverride ) ? 1 : 0;
+                    casters += ( route == MeshShadowCaster::FirstSlotDraw ) ? 1 : 0;
+
+                    EXPECT_LE( casters, 1 ) << "cast=" << castShadows << " override=" << shaderOverride
+                                            << " slots=" << slotDraws << " pbr=" << pbrEmitted;
+
+                    // And a caster is never routed to a draw that was not emitted.
+                    if ( route == MeshShadowCaster::PbrDraw )
+                        EXPECT_TRUE( pbrEmitted != 0 );
+                    if ( route == MeshShadowCaster::ShaderOverride )
+                        EXPECT_TRUE( shaderOverride != 0 );
+                    if ( route == MeshShadowCaster::FirstSlotDraw )
+                        EXPECT_GT( slotDraws, 0u );
+                }
 }
 
 int main( int argc, char** argv )

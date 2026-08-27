@@ -26,20 +26,24 @@ namespace Desert::Graphic::Render
         Graphic::Image2D* DirectTexture = nullptr;
         std::string       DirectTextureSampler;
 
+        // Off by default: the text system draws its SDF glyph quads through this command too, and the
+        // shadow pass has no alpha test. Mesh producers opt in.
+        bool CastShadows = false;
+
         DrawGenericMeshCommand( Desert::Mesh* mesh, const glm::mat4& transform, std::string shaderName,
                                 Graphic::MaterialOverrides overrides, bool outlined,
-                                Graphic::Image2D* directTexture = nullptr,
-                                std::string       directTextureSampler = {} )
+                                Graphic::Image2D* directTexture = nullptr, std::string directTextureSampler = {},
+                                bool castShadows = false )
              : Mesh( mesh ), Transform( transform ), ShaderName( std::move( shaderName ) ),
                Overrides( std::move( overrides ) ), Outlined( outlined ), DirectTexture( directTexture ),
-               DirectTextureSampler( std::move( directTextureSampler ) )
+               DirectTextureSampler( std::move( directTextureSampler ) ), CastShadows( castShadows )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
             renderer.SubmitGenericMesh( Mesh, Transform, ShaderName, Overrides, Outlined, DirectTexture,
-                                        DirectTextureSampler );
+                                        DirectTextureSampler, CastShadows );
         }
     };
 } // namespace Desert::Graphic::Render

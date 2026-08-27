@@ -97,6 +97,14 @@ namespace Desert::Graphic::System
             Graphic::MaterialOverrides Overrides;
             bool                      Outlined = false; // selected -> JFA outline
 
+            // Whether this record rasterizes into the shadow cascades. DEFAULT OFF, unlike the PBR
+            // queue's flag: a generic draw is not necessarily a solid object. The text system submits
+            // its SDF glyph quads through this same queue, and the shadow pass has no alpha test — a
+            // default of true would hang an opaque rectangle in the cascade behind every 3D label.
+            // The producers that ARE meshes opt in; ECS::Rules::RouteMeshShadowCaster decides which
+            // single draw of an entity does so, because the shadow pass draws a mesh WHOLE.
+            bool CastShadows = false;
+
             Graphic::Material*        SlotMaterial      = nullptr; // owned by MaterialService (stable)
             uint64_t                  VisibleSubmeshMask = ~0ull;  // bit i = submesh i drawn
 

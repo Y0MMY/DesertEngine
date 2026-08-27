@@ -36,18 +36,4 @@ Shader "MatLitConst"
             o_Color = vec4( shaded + ( vec4( 0.0 ) ).rgb, albedo.a * ( 1.0 ) );
         }
     }
-
-    Pass "Depth"
-    {
-        State
-        {
-            Cull Front
-        }
-
-        Vertex
-        {
-            #define GRAPH_DEPTH_ONLY 1
-            #include <Common/GraphVertex.glslh>
-        }
-    }
 }

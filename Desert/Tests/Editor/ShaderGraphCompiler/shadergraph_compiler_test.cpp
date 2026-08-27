@@ -51,7 +51,7 @@ namespace
 } // namespace
 
 // The compiler must emit the domain from the document, and the engine parser must read it back.
-TEST( ShaderGraphCompiler, SurfaceEmitsSurfaceDomainAndDepthPass )
+TEST( ShaderGraphCompiler, SurfaceEmitsSurfaceDomainAndOneLitPass )
 {
     const auto compiled = SG::CompileToDShader( SurfaceDoc() );
     ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
@@ -64,10 +64,35 @@ TEST( ShaderGraphCompiler, SurfaceEmitsSurfaceDomainAndDepthPass )
     EXPECT_EQ( p.Meta.Domain, ShaderDomain::Surface );
     EXPECT_TRUE( p.Stages.count( ShaderStage::Vertex ) );
     EXPECT_TRUE( p.Stages.count( ShaderStage::Fragment ) );
-    // Surface graphs carry a shadow/depth variant.
-    EXPECT_TRUE( HasPass( p.Meta.PassNames, "Depth" ) );
     // Mesh vertex contract.
     EXPECT_NE( compiled.GetValue().find( "GraphVertex.glslh" ), std::string::npos );
+}
+
+// This test used to assert the OPPOSITE — that a Surface graph "carries a shadow/depth variant".
+// It carried a pass named "Depth" that nothing could consume: no C++ anywhere asks for
+// "<shader>/Depth", and it could not have served as a shadow caster if something had. A cascade
+// target is a colour R32F attachment a fragment shader must write, and that pass declared NO
+// fragment stage; its vertex transformed by cameraUB — the camera, not the light. So it was three
+// SPIR-V modules per rebuild that rendered nothing anywhere, and asserting its presence pinned the
+// wrong thing. Graph materials cast shadows through the engine's shadow pipeline instead.
+TEST( ShaderGraphCompiler, NoDepthPassIsEmittedForAnyDomain )
+{
+    for ( const SG::Document& doc : { SurfaceDoc(), PostProcessDoc() } )
+    {
+        const auto compiled = SG::CompileToDShader( doc );
+        ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+        const std::string& src = compiled.GetValue();
+
+        auto parsed = DShaderParser::Parse( src );
+        ASSERT_TRUE( parsed.IsSuccess() ) << parsed.GetError();
+
+        EXPECT_FALSE( HasPass( parsed.GetValue().Meta.PassNames, "Depth" ) )
+             << "a pass no consumer names, and one that could not write a cascade if it had";
+        // Not merely absent from the pass list — the text that configured it is gone too, so the
+        // shared vertex include has no dead branch left to keep alive.
+        EXPECT_EQ( src.find( "GRAPH_DEPTH_ONLY" ), std::string::npos );
+        EXPECT_EQ( src.find( "Pass \"Depth\"" ), std::string::npos );
+    }
 }
 
 TEST( ShaderGraphCompiler, PostProcessEmitsPostProcessDomainAndFullscreenTriangle )
@@ -122,9 +147,13 @@ TEST( ShaderGraphCompiler, LegacyGraphWithoutDomainDefaultsToSurface )
     EXPECT_TRUE( SG::Deserialize( json ).IsSuccess() );
 }
 
-TEST( ShaderGraphCompiler, WrongOutputForDomainIsAnError )
+// A post-process document holding a Surface Output is wrong TWICE — it has a node its domain does
+// not offer, and it lacks the output its domain requires. This used to be reported only as the
+// second, because the missing-output check was the first thing that ran. Structural validation now
+// runs before it, so the error names the node that is actually in the document and the domain it
+// does not belong to; a message about a node the artist never placed sends them looking for it.
+TEST( ShaderGraphCompiler, OutputFromTheWrongDomainNamesTheOffendingNode )
 {
-    // Post-process document that (wrongly) contains only a Surface Output node.
     SG::Document doc;
     doc.Domain  = static_cast<int>( SG::Domain::PostProcess );
     doc.Name    = "Broken";
@@ -133,7 +162,24 @@ TEST( ShaderGraphCompiler, WrongOutputForDomainIsAnError )
 
     const auto compiled = SG::CompileToDShader( doc );
     EXPECT_FALSE( compiled.IsSuccess() );
-    EXPECT_NE( compiled.GetError().find( "Post Process Output" ), std::string::npos );
+    EXPECT_NE( compiled.GetError().find( "Surface Output" ), std::string::npos )
+         << "names the node that IS there: " << compiled.GetError();
+    EXPECT_NE( compiled.GetError().find( "Post Process" ), std::string::npos )
+         << "and the domain it is not offered in: " << compiled.GetError();
+}
+
+// The missing-output check is still reachable and still says what is missing — it is what a
+// well-formed document with no output node at all hits.
+TEST( ShaderGraphCompiler, DomainWithNoOutputNodeAtAllNamesTheMissingOutput )
+{
+    SG::Document doc;
+    doc.Domain = static_cast<int>( SG::Domain::PostProcess );
+    doc.Name   = "Headless";
+    doc.Nodes.push_back( SG::MakeNode( doc, "SceneColor" ) );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    EXPECT_FALSE( compiled.IsSuccess() );
+    EXPECT_NE( compiled.GetError().find( "Post Process Output" ), std::string::npos ) << compiled.GetError();
 }
 
 // The palette split: core nodes live everywhere; output/special nodes are domain-scoped.
@@ -265,9 +311,9 @@ TEST( ShaderGraphCompiler, MultiOutputNodeIsTypedPerPin )
 TEST( ShaderGraphCompiler, NodeWithPinsNotMatchingItsKindIsRejected )
 {
     SG::Document doc;
-    doc.Name       = "TrimmedPins";
-    auto mul       = SG::MakeNode( doc, "Multiply" );
-    auto output    = SG::MakeNode( doc, "SurfaceOutput" );
+    doc.Name    = "TrimmedPins";
+    auto mul    = SG::MakeNode( doc, "Multiply" );
+    auto output = SG::MakeNode( doc, "SurfaceOutput" );
     doc.Links.push_back( { doc.NextId++, mul.Outputs[0].Id, output.Inputs[0].Id } );
     mul.Inputs.clear(); // "Inputs": [] in the file
     doc.Nodes.push_back( std::move( mul ) );
@@ -296,7 +342,7 @@ TEST( ShaderGraphCompiler, PinTypeDisagreeingWithTheCatalogueIsRejected )
 // quietly took its default and the artist saw a graph that did not do what it drew.
 TEST( ShaderGraphCompiler, DanglingLinkIsRejected )
 {
-    SG::Document doc = SurfaceDoc();
+    SG::Document doc  = SurfaceDoc();
     doc.Links[0].From = 999999; // no node owns this pin
 
     const auto compiled = SG::CompileToDShader( doc );
@@ -318,8 +364,8 @@ TEST( ShaderGraphCompiler, TwoLinksIntoOneInputAreRejected )
 {
     SG::Document doc = SurfaceDoc();
 
-    auto second      = SG::MakeNode( doc, "ColorConst" );
-    uint64_t albedo  = 0;
+    auto     second = SG::MakeNode( doc, "ColorConst" );
+    uint64_t albedo = 0;
     for ( const auto& node : doc.Nodes )
         if ( node.Kind == "SurfaceOutput" )
             albedo = node.Inputs[0].Id;

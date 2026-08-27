@@ -105,14 +105,19 @@ namespace Desert::Graphic
         // Submit a mesh drawn with a generic data-driven material (MaterialComponent with a non-PBR shader).
         // directTexture (optional): a runtime-owned Image2D bound to `directTextureSampler`, for
         // procedural textures with no TextureAsset handle (the text SDF atlas).
+        // castShadows: rasterize this draw into the shadow cascades. Off by default — see the note on
+        // GenericMeshRenderData::CastShadows; only a producer that knows the draw is a solid mesh, and
+        // that no OTHER draw of the same entity is already casting, may turn it on.
         void SubmitGenericMesh( const Mesh* mesh, const glm::mat4& transform, const std::string& shaderName,
                                 const MaterialOverrides& overrides, bool outlined = false,
-                                Image2D* directTexture = nullptr, const std::string& directTextureSampler = {} );
+                                Image2D* directTexture = nullptr, const std::string& directTextureSampler = {},
+                                bool castShadows = false );
 
         // v3 per-slot custom shaders: draw only @p visibleSubmeshMask submeshes of the mesh with the
         // slot's own runtime material (a MaterialService-owned DataDrivenMaterial).
         void SubmitSlotMaterialMesh( const Mesh* mesh, const glm::mat4& transform, Material* material,
-                                     uint64_t visibleSubmeshMask, bool outlined = false );
+                                     uint64_t visibleSubmeshMask, bool outlined = false,
+                                     bool castShadows = false );
 
         // UE-style Instanced Static Mesh: one mesh + one PBR material drawn for every transform in
         // @p transforms (a pointer to the component's stable per-frame array — not copied).

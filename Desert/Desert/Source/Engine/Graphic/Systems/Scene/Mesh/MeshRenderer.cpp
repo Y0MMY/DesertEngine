@@ -1426,6 +1426,29 @@ namespace Desert::Graphic::System
                                               ComputeLOD( rd->Transform, rd->Mesh, rd->ForcedLOD,
                                                           rd->LODBias ) );
 
+                     // Meshes drawn with a data-driven material (shader graph, Shader Override, per-slot
+                     // custom materials) cast through the SAME pipeline as everything else: a caster is
+                     // depth, and depth does not care which shader would have coloured the surface. They
+                     // used to be absent from the cascades entirely, because this pass only ever walked
+                     // the PBR queues — a shader-graph object was lit like a solid and shadowed like a
+                     // hole in the world.
+                     //
+                     // Per-object only, no instanced batching: the batching above keys on StaticMesh*,
+                     // and this queue holds Mesh* (it also carries skinned and procedurally-built
+                     // meshes). Casters here are counted in ones and twos, not in the hundreds the
+                     // batching exists for.
+                     //
+                     // The whole mesh is drawn, VisibleSubmeshMask ignored — deliberately, and the
+                     // reason exactly one draw per entity may set CastShadows: the mask splits an
+                     // entity's submeshes between this queue and the PBR one, but a caster is not
+                     // split, so honouring the mask here would carve the PBR half out of the silhouette
+                     // while the PBR record was already casting the whole of it.
+                     for ( const auto& g : m_GenericQueue )
+                         if ( g.Mesh && g.CastShadows )
+                             renderer.RenderMesh( m_ShadowPipeline.get(), g.Mesh, g.Transform,
+                                                  m_ShadowMaterial[c]->GetMaterialExecutor(), 1, 0, 0,
+                                                  ComputeLOD( g.Transform, g.Mesh, /*forced*/ -1 ) );
+
                      // Instanced path.
                      if ( instancingOn && !batches.empty() )
                      {
