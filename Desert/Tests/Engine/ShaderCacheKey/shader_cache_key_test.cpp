@@ -186,6 +186,36 @@ namespace
                                                      : ShaderReflection::BuildLayoutBindings( it->second );
     }
 
+    /**
+     * The DECLARED SIZE of a storage block, in bytes, as the compiled SPIR-V says it is.
+     *
+     * WHY THIS EXISTS BESIDE ComputeSetZero, which already reflects the same module: the descriptor list
+     * says a storage buffer is bound at a slot and says NOTHING about what is inside it. A parameter block
+     * has two statements — a `struct` in C++ and a `layout(std430)` in GLSL — and every member after a
+     * divergence is read from the wrong offset. That does not look like a bug; it looks like the clouds
+     * being badly tuned, which is the sentence CloudPayload.hpp opens with.
+     *
+     * Returns 0 when the block is absent, which every caller treats as a failure rather than as a size.
+     */
+    uint32_t ComputeStorageBlockBytes( const std::filesystem::path& shaderFile, uint32_t binding )
+    {
+        const std::string source = StageSource( shaderFile, ShaderStage::Compute );
+        const auto        spirv  = CompileStage( source, shaderFile, shaderc_compute_shader );
+        if ( spirv.empty() )
+            return 0u;
+
+        ShaderResource::ReflectionData data;
+        const auto diagnostics = ShaderReflection::ReflectStage( spirv, ShaderStage::Compute, data );
+        EXPECT_TRUE( diagnostics.empty() ) << ( diagnostics.empty() ? "" : diagnostics.front() );
+
+        const auto set = data.ShaderDescriptorSets.find( 0 );
+        if ( set == data.ShaderDescriptorSets.end() )
+            return 0u;
+
+        const auto block = set->second.StorageBuffers.find( binding );
+        return block == set->second.StorageBuffers.end() ? 0u : block->second.Size;
+    }
+
     bool HasBinding( const std::vector<VkDescriptorSetLayoutBinding>& bindings, uint32_t binding,
                      VkDescriptorType type )
     {
@@ -471,6 +501,34 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresThirteenDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the hero cloud instances
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAuthoredAtlasBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
+}
+
+TEST_F( ShaderRootFixture, TheCloudParameterBlockIsTheSameNumberOfBytesOnBothSidesOfTheWire )
+{
+    // THE RELATION THE static_asserts IN CloudPayload.hpp CANNOT REACH. They pin the C++ struct's offsets
+    // against themselves, which catches half a move inside one file and nothing at all about the GLSL
+    // block that reads those bytes — and the two are edited in different files, in different languages, by
+    // whoever adds a parameter. A member added on one side only shifts every member after it, and the
+    // symptom is not an error: it is a sky that looks badly tuned.
+    //
+    // IT IS THE SIZE AND NOT THE OFFSETS, and the difference is what spirv-cross gives for a STORAGE block
+    // — VulkanShaderReflection fills member offsets for uniform buffers and only the declared size for
+    // storage buffers, and this block is a storage buffer. The size is the weaker statement of the two and
+    // it is the one available without changing the engine's reflection, which is another task's file. It
+    // catches exactly the failure this phase could have introduced: SpeciesNoise added to one side only.
+    //
+    // BOTH PASSES, because both include Common/CloudParams.glslh and both are handed the SAME bytes by
+    // VolumetricCloudRenderer — the shadow map's block and the march's block are one struct written twice.
+    for ( const char* shader : { "Clouds/CloudRaymarch.shader", "Clouds/CloudShadowMap.shader" } )
+    {
+        const uint32_t bytes = ComputeStorageBlockBytes( ShaderPath( shader ), Desert::Graphic::kCloudParamsBinding );
+
+        EXPECT_GT( bytes, 0u ) << shader << " declares no storage block at the cloud parameter binding";
+        EXPECT_EQ( bytes, sizeof( Desert::Graphic::CloudGpuPayload ) )
+             << shader << " reads a parameter block of " << bytes << " bytes where Graphic::CloudGpuPayload "
+             << "is " << sizeof( Desert::Graphic::CloudGpuPayload )
+             << " — every member after the divergence is read from the wrong offset";
+    }
 }
 
 TEST_F( ShaderRootFixture, TheDeferredLightingPassDeclaresSeventeenDescriptorsInSetZero )
