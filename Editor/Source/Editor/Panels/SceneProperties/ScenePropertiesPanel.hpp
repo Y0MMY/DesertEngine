@@ -38,6 +38,9 @@ namespace Desert::Editor
         // UE-style property search, drawn above the scrolling component list.
         void DrawSearchBox();
 
+        void EnsurePreview();  // create the viewport (its renderer, and the slot, come on first Update)
+        void ReleasePreview(); // destroy it, which is what returns the slot
+
     private:
         std::shared_ptr<Desert::Core::Scene>        m_Scene;
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;
@@ -59,7 +62,13 @@ namespace Desert::Editor
         // A second live renderer used to corrupt the viewport, because per-frame scene state lived in the
         // shared material. It no longer does: every such resource is stored per (frame x renderer slot),
         // and this panel's renderer holds its own slot (Docs/RENDERER_FRAME_STATE.md, shape B).
-        PreviewViewport               m_Preview;
+        //
+        // Null whenever there is nothing to preview — no selection, or the panel closed. There are only
+        // six slots, and this used to be a VALUE member: once a single selection had shown a thumbnail it
+        // held one of the six until the editor quit, even with the panel closed. Destroying it is the
+        // mechanism, not an optimisation on top of one — a viewport that is merely told to stop drawing
+        // still owns its SceneRenderer. Same shape as MaterialPreviewPanel::m_Preview, deliberately.
+        std::unique_ptr<PreviewViewport> m_Preview;
         std::unique_ptr<UI::UIHelper> m_ThumbnailUI;           // texture ids for the preview image + cached PNGs
         uint64_t                      m_PreviewKey    = 0;     // what it shows; a change re-points and re-frames
         bool                          m_PreviewActive = false; // a component drew it during the last UI frame

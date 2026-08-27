@@ -1,7 +1,5 @@
 #include "MaterialTonemap.hpp"
 
-#include <unordered_set>
-
 namespace Desert::Graphic
 {
     MaterialTonemap::MaterialTonemap() : Material( "MaterialTonemap", "SceneComposite" )
@@ -45,17 +43,11 @@ namespace Desert::Graphic
         SetLightShaftTintIntensity( glm::vec4( params.LightShaftTint, params.LightShaftIntensity ) );
         SetLensFlareTintIntensity( glm::vec4( params.LensFlareTint, params.LensFlareIntensity ) );
 
-        std::unordered_set<UniformBufferProperty*> dirtyUBs;
-        UploadRegisteredProperties( dirtyUBs );
+        UploadRegisteredProperties();
 
-        // Flush EVERY UB with dirty fields (not just the ones touched this frame) so each per-frame-in-
-        // flight copy receives the value — same reason as MaterialJFAComposite (TProperty::Set skips
-        // unchanged values, which would otherwise leave other frame copies uninitialized → flicker).
-        for ( const auto& [ubName, idx] : m_MaterialExecutor->GetUniformBufferProperties() )
-        {
-            auto ubProp = m_MaterialExecutor->GetUniformBufferProperty( ubName );
-            if ( ubProp && ubProp->HasDirtyFields() )
-                ubProp->UpdateFields();
-        }
+        // EVERY UB with dirty fields (not just the ones touched this frame) so each per-frame-in-flight
+        // copy receives the value — same reason as MaterialJFAComposite (TProperty::Set skips unchanged
+        // values, which would otherwise leave other frame copies uninitialized → flicker).
+        FlushFieldFilledUniformBuffers();
     }
 } // namespace Desert::Graphic

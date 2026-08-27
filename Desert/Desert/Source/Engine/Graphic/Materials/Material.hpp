@@ -69,15 +69,30 @@ namespace Desert::Graphic
     protected:
         // Uploads all dirty TProperty members to the matching FieldProperty/Texture slot.
         // Exposed as protected so non-instance Bind() overrides (JFA, etc.) can flush manually.
-        void UploadRegisteredProperties( std::unordered_set<UniformBufferProperty*>& outDirtyUBs );
+        //
+        // It used to hand back the set of uniform buffers it had touched, and all four callers threw
+        // that set away -- an out-parameter nobody read, which is a dead parameter by any reading of
+        // the contract. It is gone rather than plumbed: the flush below deliberately does NOT use "the
+        // buffers touched this frame" (TProperty::Set skips unchanged values, so a constant parameter
+        // would stop being reported and its other frame copies would go stale -- that was the outline
+        // flicker), so the set had no possible consumer.
+        void UploadRegisteredProperties();
+
+        // Push every FIELD-FILLED uniform buffer that still owes a copy into that copy. The one
+        // implementation of a loop that existed in four copies (here, tonemap, JFA composite, deferred
+        // lighting) and had to be right about which buffers were safe to flush in each of them.
+        //
+        // Whole-filled buffers are skipped, and not by a list: they answer false to HasDirtyFields()
+        // because their field shadow copies are not a source of truth. See
+        // ShaderResources::BufferFillKind.hpp for what flushing one of them did to a frame.
+        void FlushFieldFilledUniformBuffers();
 
         // Searches all UniformBufferProperties in the executor for a field named fieldName.
         std::pair<UniformBufferProperty*, FieldProperty*> FindFieldInAnyUB( std::string_view fieldName ) const;
 
     private:
         // Applies MaterialInstance overrides on top of TProperty defaults.
-        void ApplyInstanceOverrides( const MaterialInstance*                    instance,
-                                     std::unordered_set<UniformBufferProperty*>& outDirtyUBs );
+        void ApplyInstanceOverrides( const MaterialInstance* instance );
 
     protected:
         void RegisterProperty( IProperty* prop ) override;

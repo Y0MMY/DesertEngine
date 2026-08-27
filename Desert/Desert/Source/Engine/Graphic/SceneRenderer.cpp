@@ -5,6 +5,7 @@
 #include <Engine/Graphic/PostProcessing/LightShaftRules.hpp>
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.hpp>
+#include <Engine/Core/RendererSlotPool.hpp>
 #include <Common/Core/Units.hpp>
 
 #include <Common/Core/Profiler.hpp>
@@ -12,7 +13,6 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
-#include <bit>
 #include <chrono>
 #include <cmath>
 
@@ -259,61 +259,56 @@ namespace Desert::Graphic
 
     namespace
     {
-        // Which renderer slots are taken RIGHT NOW. A slot is a place to keep per-frame GPU state, so it
-        // is only owed to renderers that exist: the editor creates and destroys them freely (a scene view
-        // is opened and closed, a thumbnail renderer comes and goes), and a counter that only ever went up
-        // ran out after five of those — every renderer after that folded onto slot 0 and shared the main
-        // viewport's camera, which is precisely "the preview moves when I move the scene camera".
-        uint32_t s_SlotsInUse = 0; // bit i = slot i taken
-
-        uint32_t ClaimRendererSlot()
+        // The one lease register for the process. The accounting itself lives in a pure header so a test
+        // can drive it without a GPU (Engine/Core/RendererSlotPool.hpp); this is only where it is kept.
+        Engine::RendererSlotPool& SlotPool()
         {
-            for ( uint32_t slot = 0; slot < EngineContext::kMaxRendererSlots; ++slot )
-            {
-                const uint32_t bit = 1u << slot;
-                if ( ( s_SlotsInUse & bit ) == 0 )
-                {
-                    s_SlotsInUse |= bit;
-                    return slot;
-                }
-            }
-
-            // More live renderers than slots: the newcomer shares slot 0 and says so, because the symptom
-            // (two views borrowing each other's camera) is otherwise a mystery.
-            LOG_WARN( "[SceneRenderer] No free renderer slot ({} in use) — this renderer shares slot 0 and "
-                      "will trade per-frame state with the main view.",
-                      EngineContext::kMaxRendererSlots );
-            return 0;
-        }
-
-        void ReleaseRendererSlot( uint32_t slot )
-        {
-            if ( slot < EngineContext::kMaxRendererSlots )
-                s_SlotsInUse &= ~( 1u << slot );
+            static Engine::RendererSlotPool pool;
+            return pool;
         }
     } // namespace
 
     uint32_t SceneRenderer::GetLiveRendererCount()
     {
-        // The lease bitmask is already the answer — a separate counter would be a second source of truth
-        // for the same fact, and the two would disagree the first time a renderer overflowed the slots.
-        return static_cast<uint32_t>( std::popcount( s_SlotsInUse ) );
+        return SlotPool().InUseCount();
     }
 
-    SceneRenderer::SceneRenderer() : m_RendererSlot( ClaimRendererSlot() )
+    SceneRenderer::SceneRenderer() : m_SlotLease( SlotPool() )
     {
+        if ( !m_SlotLease.IsValid() )
+        {
+            // More live renderers than slots: the newcomer records into slot 0 and says so, because the
+            // symptom (two views borrowing each other's camera) is otherwise a mystery.
+            LOG_WARN( "[SceneRenderer] No free renderer slot ({} in use) — this renderer shares slot 0 and "
+                      "will trade per-frame state with the main view.",
+                      EngineContext::kMaxRendererSlots );
+            return;
+        }
+
+        // Occupancy is logged on BOTH edges, with the resulting count, because the failure this guards
+        // against is silent by construction: a surface that never returns its slot produces no error at
+        // all, only two panels quietly sharing a camera some minutes later. Counting slots is the only way
+        // to see it, so the count is printed rather than left for a reader to derive.
+        LOG_INFO( "[SceneRenderer] Claimed renderer slot {} ({}/{} in use).", m_SlotLease.RecordingSlot(),
+                  SlotPool().InUseCount(), EngineContext::kMaxRendererSlots );
     }
 
     SceneRenderer::~SceneRenderer()
     {
-        ReleaseRendererSlot( m_RendererSlot );
+        if ( !m_SlotLease.IsValid() )
+            return;
+
+        // Logged BEFORE the lease's destructor runs, so the slot number is still readable; the count it
+        // prints is therefore the one that includes this renderer, minus itself.
+        LOG_INFO( "[SceneRenderer] Releasing renderer slot {} ({}/{} in use after release).",
+                  m_SlotLease.RecordingSlot(), SlotPool().InUseCount() - 1, EngineContext::kMaxRendererSlots );
     }
 
     NO_DISCARD Common::BoolResultStr SceneRenderer::BeginScene( const Desert::Core::Scene& scene )
     {
         // Which renderer is recording, alongside which frame is in flight — see
         // EngineContext::GetActiveRendererSlot. Set FIRST, before anything writes a per-frame resource.
-        EngineContext::GetInstance().SetActiveRendererSlot( m_RendererSlot );
+        EngineContext::GetInstance().SetActiveRendererSlot( m_SlotLease.RecordingSlot() );
 
         const auto& mainCamera   = scene.GetMainCamera().lock();
         m_SceneInfo.ActiveCamera = mainCamera.get();

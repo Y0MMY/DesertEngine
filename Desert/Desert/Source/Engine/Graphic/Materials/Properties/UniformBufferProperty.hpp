@@ -3,10 +3,16 @@
 #include <Engine/Graphic/Materials/Properties/MaterialProperty.hpp>
 
 #include "FieldProperty.hpp"
+#include <Engine/ShaderResources/BufferFillKind.hpp>
 #include <Engine/ShaderResources/UniformBuffer.hpp>
 
 namespace Desert::Graphic
 {
+    // A uniform buffer that KNOWS how it is filled. See ShaderResources::BufferFillKind.hpp for why
+    // that matters: the two routes (whole-block SetRawData vs field-by-field UpdateFields) disagree
+    // about whether FieldProperty's local data means anything, and mixing them writes uninitialised
+    // heap over live camera matrices. The buffer claims a route on its first write and refuses the
+    // other one by name afterwards.
     class UniformBufferProperty : public MaterialProperty
     {
     public:
@@ -36,6 +42,9 @@ namespace Desert::Graphic
 
         void UpdateFields()
         {
+            if ( !ClaimFill( ShaderResources::FillKind::Fields, "UpdateFields" ) )
+                return;
+
             [[maybe_unused]] const auto mapPtr = m_Buffer->MapMemory();
             for ( auto& field : m_FieldProperties )
             {
@@ -52,8 +61,18 @@ namespace Desert::Graphic
 
         // A field stays dirty for frames-in-flight frames, so this returns true until every per-frame
         // buffer copy has received the new data. Used to keep flushing this UB across the whole window.
+        //
+        // A whole-filled buffer answers NO regardless of what its field counters say. Those counters
+        // start dirty for every field of every buffer (FieldProperty's constructor), so before this
+        // line a generic "flush every UB with dirty fields" loop -- and there were four of them --
+        // picked up CameraUB and ShadowUB on the opening frames and pushed uninitialised heap into
+        // them. That is the same loop DataDrivenMaterial::m_ParamBuffers used to be a hand-maintained
+        // exception list for; the exception is now a consequence of what the buffer is.
         bool HasDirtyFields() const
         {
+            if ( m_Fill == ShaderResources::FillKind::Whole )
+                return false;
+
             for ( const auto& field : m_FieldProperties )
             {
                 if ( field.IsDirty() )
@@ -62,9 +81,44 @@ namespace Desert::Graphic
             return false;
         }
 
+        /// Which route this buffer has claimed. Unclaimed until its first write.
+        ShaderResources::FillKind GetFillKind() const
+        {
+            return m_Fill;
+        }
+
+        /// Write one of THIS buffer's fields and claim the field-by-field route in the same step. The
+        /// sanctioned way to reach a FieldProperty from outside: a bare `field->SetRawBytes(...)` writes
+        /// data the buffer never learns about, which leaves the route unclaimed and lets a later
+        /// whole-block write be accepted over the top of it.
+        /// Returns false (writing nothing) if the buffer is whole-filled or @p field is not one of ours.
+        bool WriteField( FieldProperty* field, const void* data, size_t size )
+        {
+            if ( !field || !data )
+                return false;
+
+            // Membership, not trust: the caller found this pair through Material::FindFieldInAnyUB, and
+            // a mismatched pair would claim one buffer's route while writing another buffer's bytes.
+            const FieldProperty* first = m_FieldProperties.data();
+            if ( field < first || field >= first + m_FieldProperties.size() )
+            {
+                LOG_ERROR( "[UB] '{}' was asked to write field '{}', which belongs to another buffer",
+                           m_Buffer->GetName(), field->GetFieldInfo().Name );
+                return false;
+            }
+
+            if ( !ClaimFill( ShaderResources::FillKind::Fields, "a field write" ) )
+                return false;
+
+            return field->SetRawBytes( data, size );
+        }
+
         void SetRawData( const std::byte* data, size_t size )
         {
             DESERT_VERIFY( data != nullptr, "UniformBufferProperty::SetRawData: data is null" );
+
+            if ( !ClaimFill( ShaderResources::FillKind::Whole, "SetRawData" ) )
+                return;
 
             const size_t bufferSize = m_Buffer->GetSize();
             if ( size > bufferSize ) // the sizes identify WHICH UB overflowed (VERIFY drops its args)
@@ -111,8 +165,38 @@ namespace Desert::Graphic
         }
 
     private:
+        // Claim @p requested, or refuse it by name. @p operation is the wording of the caller as it
+        // should read in the log ("SetRawData", "UpdateFields", "a field write").
+        //
+        // Loud rather than silent, and loud rather than fatal: this is a wrong picture, not a crash
+        // (Docs/Clouds/DEV_CONTRACT.md 1.4), and the whole reason the defect cost a rendering session
+        // is that the corruption had no symptom other than the frame. A message naming the buffer and
+        // both routes turns it into a grep.
+        bool ClaimFill( ShaderResources::FillKind requested, const char* operation )
+        {
+            const auto claim = ShaderResources::ClaimFill( m_Fill, requested );
+            // Assigned on both paths on purpose: ClaimFill answers with the state the buffer must be
+            // left in, and a refusal answers with the state unchanged. Assigning only on success would
+            // make that half of its contract unreachable from here, and an unreachable guarantee is one
+            // nothing keeps true.
+            m_Fill = claim.Next;
+            if ( !claim.Accepted )
+            {
+                LOG_ERROR( "[UB] '{}' is filled {}; refusing {} ({}). One buffer cannot be filled both "
+                           "ways -- the field shadow copies of a whole-filled buffer are uninitialised "
+                           "memory, and flushing them erases whatever the renderer wrote.",
+                           m_Buffer->GetName(), ShaderResources::FillKindName( m_Fill ), operation,
+                           ShaderResources::FillKindName( requested ) );
+                return false;
+            }
+            return true;
+        }
+
+    private:
         std::vector<FieldProperty>                      m_FieldProperties;
         std::unordered_map<std::string, size_t>         m_FieldIndexMap;
         std::shared_ptr<ShaderResources::UniformBuffer> m_Buffer;
+        // Claimed by the first write; see ShaderResources::BufferFillKind.hpp.
+        ShaderResources::FillKind m_Fill = ShaderResources::FillKind::Unclaimed;
     };
 } // namespace Desert::Graphic

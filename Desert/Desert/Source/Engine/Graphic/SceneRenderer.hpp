@@ -16,6 +16,7 @@
 #include <Engine/Graphic/PipelineCache.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/Camera.hpp>
+#include <Engine/Core/RendererSlotPool.hpp>
 
 #include <Common/Core/Events/WindowEvents.hpp>
 #include <Common/Core/EventRegistry.hpp>
@@ -73,13 +74,13 @@ namespace Desert::Graphic
             bool                   ReceiveShadows  = true;
         };
 
-        // Each renderer claims a slot on construction — the index that says WHICH view is recording, so
-        // per-frame state can eventually be stored per renderer instead of being overwritten by the next
-        // one (EngineContext::GetActiveRendererSlot, Docs/RENDERER_FRAME_STATE.md). Slots are claimed in
-        // creation order and never reused; past kMaxRendererSlots they fold back to 0, which is the
-        // current behaviour for everyone anyway.
+        // Each renderer LEASES a slot on construction — the index that says WHICH view is recording, so
+        // per-frame state is stored per renderer instead of being overwritten by the next one
+        // (EngineContext::GetActiveRendererSlot, Docs/RENDERER_FRAME_STATE.md). The lowest free slot is
+        // taken, so a slot handed back by a closed view is reused; past kMaxRendererSlots the renderer
+        // records into slot 0 and warns, and holds no lease to give back.
         SceneRenderer();
-        // Releases the renderer slot, so closing a scene view hands it back instead of using it up.
+        // Returns the leased slot, so closing a view hands it back instead of using it up.
         ~SceneRenderer();
 
         void Init();
@@ -261,8 +262,9 @@ namespace Desert::Graphic
         }
 
     private:
-        // Which view this renderer is; see the constructor.
-        uint32_t m_RendererSlot = 0;
+        // Which view this renderer is; see the constructor. Held as a lease so the slot goes back when
+        // this renderer is destroyed, whatever destroys it.
+        Engine::RendererSlotLease m_SlotLease;
 
         void ClearMainFramebuffer();
         void CompositeRenderPass();

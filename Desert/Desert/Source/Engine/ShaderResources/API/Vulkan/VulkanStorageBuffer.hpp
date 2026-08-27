@@ -33,12 +33,19 @@ namespace Desert::ShaderResources::API::Vulkan
             return m_Size;
         }
 
-        // Indexed by (frame x recording renderer slot) — see CopyIndex. @p frameIndex is kept in the
-        // signature because every caller has it; the slot is resolved here so a write and the descriptor
-        // that points at it can never disagree.
+        // The descriptor for (@p frameIndex x recording renderer slot). The frame comes from the caller
+        // and the slot is resolved here, so a write and the descriptor that points at it cannot
+        // disagree about the view.
+        //
+        // @p frameIndex used to be accepted and dropped: this body read the CURRENT frame while
+        // VulkanUniformBuffer::GetDescriptorBufferInfo honoured the argument, so the two buffer types
+        // answered the same question differently. Latent, because all four call sites
+        // (VulkanMaterialBackend x2, VulkanPipelineCompute, VulkanRenderer's indirect draw) pass the
+        // current frame — but "the parameter is ignored" is exactly how a caller that finally needs to
+        // ask about another frame gets a silently wrong buffer.
         const VkDescriptorBufferInfo& GetDescriptorBufferInfo( uint32_t frameIndex ) const
         {
-            return m_DescriptorInfos[CopyIndex()];
+            return m_DescriptorInfos[CopyIndex( frameIndex )];
         }
 
         virtual const void* GetData() const override
@@ -47,7 +54,10 @@ namespace Desert::ShaderResources::API::Vulkan
         }
 
     private:
-        // The copy belonging to (current frame in flight x recording renderer slot).
+        // The copy belonging to (@p frameIndex x recording renderer slot).
+        static uint32_t CopyIndex( uint32_t frameIndex );
+        // The same, for the frame being recorded now. Writes use this; descriptors take the frame from
+        // their caller. Both go through the one arithmetic (ShaderResources::BufferCopyIndex).
         static uint32_t CopyIndex();
 
         void Release();

@@ -135,10 +135,15 @@ namespace Desert::ShaderResources::API::Vulkan
         return idx < m_MappedMemories.size() ? m_MappedMemories[idx] : nullptr;
     }
 
+    uint32_t VulkanStorageBuffer::CopyIndex( uint32_t frameIndex )
+    {
+        return BufferCopyIndex( frameIndex, EngineContext::GetInstance().GetActiveRendererSlot(),
+                                Engine::kMaxRendererSlots );
+    }
+
     uint32_t VulkanStorageBuffer::CopyIndex()
     {
-        return BufferCopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex(),
-                                EngineContext::GetInstance().GetActiveRendererSlot(), Engine::kMaxRendererSlots );
+        return CopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex() );
     }
 
     void VulkanStorageBuffer::UnmapMemory()

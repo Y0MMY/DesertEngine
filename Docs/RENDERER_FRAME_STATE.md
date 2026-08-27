@@ -81,6 +81,29 @@ exhausted the range and every later renderer folded onto slot 0 — sharing the 
 which showed up as "the Details preview moves when I move the scene camera". Running out now warns and
 falls back to slot 0 rather than doing it silently.
 
+**The accounting lives in `Engine/Core/RendererSlotPool.hpp`** — `RendererSlotPool` (the bitmask) and
+`RendererSlotLease` (one view's RAII hold on a slot, which is what `SceneRenderer` owns). It is a pure
+header with no Vulkan, no context and no globals, because the defect it guards against is a lease that is
+never returned, and that is invisible to a green sweep unless the bookkeeping can be driven directly:
+`SceneRenderer.cpp` is compiled by no test suite and never can be. `Desert/Tests/Engine/RendererSlots`
+drives it, and the assertion that matters is the RELATION — occupancy after a close equals the number of
+views still alive.
+
+**An overflowing renderer holds no lease, and that distinction is load-bearing.** `Claim()` returns
+`kNoFreeSlot`, not 0. The version before it returned 0 *without taking it* while the destructor released
+whatever number it held — so an overflowing renderer's destructor handed away the MAIN VIEWPORT's lease,
+and the next renderer created was given slot 0 as free while the viewport was still recording into it.
+Two live views in one slot, with the mask insisting only one was taken. It needed a seventh live renderer
+in one session to appear, which is why it survived until the slots got tight.
+
+**A preview surface that is merely hidden still owns its slot.** Telling a viewport to stop drawing does
+not release a `SceneRenderer`; only destroying it does. Both preview panels therefore destroy their
+`PreviewViewport` outright — `MaterialPreviewPanel` when its window is closed, `ScenePropertiesPanel` when
+the panel is closed or the selection has nothing to preview — and both do it from `OnPreUpdate`, which is
+the only per-frame hook that runs for hidden panels. Measured on the Details panel over repeated
+select/deselect cycles: before, one claim and zero releases for the whole session; after, one claim and
+one release per cycle, occupancy returning to its baseline every time.
+
 **What is still shared, deliberately:** persistent storage buffers (grass simulation, anything whose state
 is the point). Two views legitimately share one simulation.
 

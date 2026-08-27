@@ -18,50 +18,18 @@ namespace Desert::Graphic
             m_DirtyCount.fill( PropertyDirty::DirtyLifetime() );
             m_LastCleanFrame.fill( PropertyDirty::kNeverCleaned );
             m_LocalData.Allocate( field.Size );
+            // Common::Memory::Buffer::Allocate is a bare `new std::byte[]`, so without this the shadow
+            // copy of a field nobody has written yet is whatever the heap last held. The fill-kind
+            // refusal is what stops those bytes reaching the GPU; this is the second line — if some
+            // route we have not thought of ever flushes an unwritten field, the result is a
+            // deterministic black that a test can pin, not a frame that differs between runs.
+            m_LocalData.ZeroInitialize();
         }
 
         static uint32_t ActiveSlot()
         {
             const uint32_t slot = EngineContext::GetInstance().GetActiveRendererSlot();
             return slot < Engine::kMaxRendererSlots ? slot : 0;
-        }
-
-        template <typename T>
-        bool SetValue( const T& value )
-        {
-            static_assert( std::is_standard_layout_v<T>, "T must be standard layout" );
-            if ( sizeof( T ) != m_Field.Size && m_Field.ArraySize == 0 )
-            {
-                return false;
-            }
-
-            memcpy( m_LocalData.Data, &value, sizeof( T ) );
-            MarkDirty(); // every slot owes itself this write
-            return true;
-        }
-
-        bool SetRawBytes( const void* data, size_t size )
-        {
-            if ( size > m_Field.Size )
-                return false;
-            memcpy( m_LocalData.Data, data, size );
-            MarkDirty(); // every slot owes itself this write
-            return true;
-        }
-
-        template <typename T>
-        bool SetArray( const T* data, uint32_t count )
-        {
-            static_assert( std::is_standard_layout_v<T>, "T must be standard layout" );
-            if ( count != m_Field.ArraySize )
-            {
-                DESERT_VERIFY( false, "" );
-                return false;
-            }
-
-            memcpy( m_LocalData.Data, data, sizeof( T ) * count );
-            MarkDirty(); // every slot owes itself this write
-            return true;
         }
 
         [[nodiscard]] bool IsArray() const
@@ -125,6 +93,26 @@ namespace Desert::Graphic
         }
 
     private:
+        // WRITING A FIELD IS THE UNIFORM BUFFER'S BUSINESS, not the caller's. Reaching a FieldProperty
+        // and writing it directly leaves the buffer that owns it believing nothing has happened, so a
+        // whole-block SetRawData is still accepted afterwards and erases the value — and the reverse,
+        // a buffer the engine fills whole, gets its uninitialised shadow copies flushed over live
+        // camera matrices (ShaderResources::BufferFillKind.hpp). UniformBufferProperty::WriteField is
+        // the one way in, and it claims the fill route in the same step.
+        //
+        // Private + friend rather than a comment asking people not to: the previous arrangement was a
+        // comment, and the flush that emptied a frame was written by someone who had read it.
+        friend class UniformBufferProperty;
+
+        bool SetRawBytes( const void* data, size_t size )
+        {
+            if ( size > m_Field.Size )
+                return false;
+            memcpy( m_LocalData.Data, data, size );
+            MarkDirty(); // every slot owes itself this write
+            return true;
+        }
+
         ShaderResources::ShaderLayout::ShaderFieldLayout m_Field;
         Common::Memory::Buffer                           m_LocalData;
         // One counter per renderer slot — see MarkDirty.
