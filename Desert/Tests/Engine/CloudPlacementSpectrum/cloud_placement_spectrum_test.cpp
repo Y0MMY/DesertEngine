@@ -2474,6 +2474,366 @@ TEST( CloudPlacementSpectrum, TheStrokeFractionBelowTheLimitAnswersOnBothSidesOf
     EXPECT_FLOAT_EQ( MeasureCloudLayoutStrokes( bar, 0u, 0.0f ).FractionBelowLimit, 0.0f );
 }
 
+// =====================================================================================================
+// THE BRUSH
+//
+// Every test below asserts a RELATION between the brush and something that already existed, because the
+// brush's whole value is that a painted stroke and the sky agree about how wide it is. A test of the
+// brush alone would say the pixels are the pixels.
+// =====================================================================================================
+
+namespace
+{
+    /// One straight horizontal stroke across a canvas, painted with the engine's own brush and turned into
+    /// a layout by the very function the panel and the command-line tool call. Nothing here fills a struct
+    /// by hand: what is measured is the layout a FILE would carry.
+    CloudLayoutData BrushedBar( uint32_t side, uint32_t channel, const CloudLayoutBrush& brush )
+    {
+        auto canvas = MakeCloudLayoutCanvas( side );
+        EXPECT_TRUE( canvas ) << ( canvas ? "" : canvas.GetError() );
+        if ( !canvas )
+            return {};
+
+        std::vector<unsigned char> pixels = canvas.GetValue().Pixels;
+
+        const float     middle = static_cast<float>( side ) * 0.5f;
+        const glm::vec2 from( -2.0f, middle );
+        const glm::vec2 to( static_cast<float>( side ) + 2.0f, middle );
+
+        const auto painted = PaintCloudLayoutPolyline( pixels, side, channel, { from, to }, brush );
+        EXPECT_TRUE( painted ) << ( painted ? "" : painted.GetError() );
+
+        const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+
+        auto made = MakeCloudLayoutFromImage( pixels, side, side, channels, /*takeMask=*/false );
+        EXPECT_TRUE( made ) << ( made ? "" : made.GetError() );
+        return made ? made.ExtractValue() : CloudLayoutData{};
+    }
+} // namespace
+
+// THE ONE RELATION THE PANEL'S ADVICE RESTS ON. It tells an artist "this stroke is 4.9 km wide, the cell
+// is 3.0 km, you are fine" — and it computes that from CloudLayoutBrushWidthTexels while the verdict
+// underneath measures the pixels with MeasureCloudLayoutStrokes. If those two ever disagree, the panel is
+// confidently wrong about the only question it exists to answer.
+TEST( CloudPlacementSpectrum, TheBrushLaysExactlyTheStrokeWidthItPromises )
+{
+    constexpr uint32_t kSide = 128u;
+
+    for ( const float radius : { 4.0f, 9.0f, 21.0f } )
+    {
+        CloudLayoutBrush brush;
+        brush.RadiusTexels = radius;
+        brush.Hardness     = 1.0f;
+
+        const CloudLayoutData bar = BrushedBar( kSide, 0u, brush );
+        ASSERT_TRUE( bar.HasPattern() );
+
+        const CloudLayoutStrokeStats stats = MeasureCloudLayoutStrokes( bar, 0u, /*limitTexels=*/0.0f );
+
+        EXPECT_FLOAT_EQ( stats.MedianTexels, CloudLayoutBrushWidthTexels( brush ) )
+             << "a hard brush of radius " << radius << " promised " << CloudLayoutBrushWidthTexels( brush )
+             << " texels and measured " << stats.MedianTexels;
+    }
+
+    // A SOFTER BRUSH IS A NARROWER STROKE, and the promise has to follow it rather than quoting the
+    // diameter regardless. Within a texel, because the profile crosses the measure's midpoint between two
+    // rows and a canvas has no half-rows.
+    for ( const float hardness : { 0.0f, 0.5f } )
+    {
+        CloudLayoutBrush brush;
+        brush.RadiusTexels = 20.0f;
+        brush.Hardness     = hardness;
+
+        const CloudLayoutData bar = BrushedBar( kSide, 0u, brush );
+        ASSERT_TRUE( bar.HasPattern() );
+
+        EXPECT_NEAR( MeasureCloudLayoutStrokes( bar, 0u, 0.0f ).MedianTexels, CloudLayoutBrushWidthTexels( brush ),
+                     1.0f )
+             << "at hardness " << hardness << " the promise and the ruler parted company";
+    }
+
+    // AND THE INK DOES NOT MOVE THE WIDTH. A fainter stroke is not a thinner one — the measure thresholds
+    // at the channel's OWN midpoint, and if that ever became a fixed 0.5 this test goes red instead of a
+    // panel quietly warning about every soft painting anybody makes.
+    CloudLayoutBrush faint;
+    faint.RadiusTexels = 12.0f;
+    faint.Hardness     = 1.0f;
+    faint.Ink          = 0.35f;
+
+    EXPECT_FLOAT_EQ( MeasureCloudLayoutStrokes( BrushedBar( kSide, 0u, faint ), 0u, 0.0f ).MedianTexels,
+                     CloudLayoutBrushWidthTexels( faint ) )
+         << "a stroke at a third of the ink measured a different width from the same stroke at full ink";
+}
+
+// THE PANEL'S GREEN AND AMBER, AS A RELATION. It goes green when the promised width clears the cell and
+// amber when it does not; the verdict underneath reports the fraction of painted texels below that same
+// limit. The two must answer the same way about the same stroke, or the artist is warned and reassured at
+// once by one panel.
+TEST( CloudPlacementSpectrum, TheBrushsPromiseAndTheLegibilityVerdictAgreeAboutTheCell )
+{
+    constexpr uint32_t kSide       = 128u;
+    constexpr float    kCellTexels = 16.0f;
+
+    CloudLayoutBrush wide;
+    wide.RadiusTexels = 12.0f; // 24 texels, wider than the cell
+    wide.Hardness     = 1.0f;
+
+    CloudLayoutBrush thin;
+    thin.RadiusTexels = 3.0f; // 6 texels, well under it
+    thin.Hardness     = 1.0f;
+
+    ASSERT_GT( CloudLayoutBrushWidthTexels( wide ), kCellTexels );
+    ASSERT_LT( CloudLayoutBrushWidthTexels( thin ), kCellTexels );
+
+    EXPECT_FLOAT_EQ(
+         MeasureCloudLayoutStrokes( BrushedBar( kSide, 0u, wide ), 0u, kCellTexels ).FractionBelowLimit, 0.0f )
+         << "the panel would go green on a stroke the ruler calls finer than a cell";
+
+    EXPECT_FLOAT_EQ(
+         MeasureCloudLayoutStrokes( BrushedBar( kSide, 0u, thin ), 0u, kCellTexels ).FractionBelowLimit, 1.0f )
+         << "the panel would warn about a stroke the ruler calls wide enough";
+}
+
+// A STROKE IS LAID ONCE, AT ITS STRONGEST, so the same drag sampled at two different frame rates has to
+// produce the identical canvas. Without that the width promised above would be a function of how fast the
+// artist's hand moved and of how busy the machine was — and the same figure would come out different on a
+// laptop and on a workstation.
+TEST( CloudPlacementSpectrum, AStrokeIsTheSameWhateverRateTheMouseWasSampledAt )
+{
+    constexpr uint32_t kSide = 96u;
+
+    CloudLayoutBrush brush;
+    brush.RadiusTexels = 7.0f;
+    brush.Hardness     = 0.4f; // soft, where a build-up brush would differ most
+
+    const glm::vec2 from( 8.0f, 20.0f );
+    const glm::vec2 to( 84.0f, 70.0f );
+
+    auto coarse = MakeCloudLayoutCanvas( kSide );
+    auto fine   = MakeCloudLayoutCanvas( kSide );
+    ASSERT_TRUE( coarse );
+    ASSERT_TRUE( fine );
+
+    std::vector<unsigned char> coarsePixels = coarse.GetValue().Pixels;
+    std::vector<unsigned char> finePixels   = fine.GetValue().Pixels;
+
+    ASSERT_TRUE( PaintCloudLayoutPolyline( coarsePixels, kSide, 0u, { from, to }, brush ) );
+
+    std::vector<glm::vec2> many;
+    for ( int step = 0; step <= 40; ++step )
+    {
+        const float t = static_cast<float>( step ) / 40.0f;
+        many.emplace_back( from + ( to - from ) * t );
+    }
+    ASSERT_TRUE( PaintCloudLayoutPolyline( finePixels, kSide, 0u, many, brush ) );
+
+    EXPECT_EQ( coarsePixels, finePixels )
+         << "the same drag came out differently when it was sampled forty times instead of once, so the "
+            "stroke accumulates and its width depends on the frame rate";
+}
+
+// THE FOOTPRINT WRAPS, because the painting tiles the world and everything past the region is a REPEAT
+// sample of it. A stroke laid on the seam that did not come out of the other edge would put a hard
+// discontinuity across every region face — the one defect the whole `.dclayout` design exists to avoid,
+// and the reason Layout Repeats is an integer.
+TEST( CloudPlacementSpectrum, ABrushStrokeOnTheSeamComesOutOfTheOtherEdge )
+{
+    constexpr uint32_t kSide = 64u;
+
+    CloudLayoutBrush brush;
+    brush.RadiusTexels = 6.0f;
+    brush.Hardness     = 1.0f;
+
+    auto canvas = MakeCloudLayoutCanvas( kSide );
+    ASSERT_TRUE( canvas );
+    std::vector<unsigned char> pixels = canvas.GetValue().Pixels;
+
+    // Straight down the left-hand seam, so half the stroke belongs to the right-hand edge.
+    ASSERT_TRUE( PaintCloudLayoutPolyline(
+         pixels, kSide, 0u, { glm::vec2( 0.0f, -4.0f ), glm::vec2( 0.0f, static_cast<float>( kSide ) + 4.0f ) },
+         brush ) );
+
+    EXPECT_GT( pixels[( 32u * kSide + 0u ) * 4u], 200u ) << "the seam column itself was not painted";
+    EXPECT_GT( pixels[( 32u * kSide + ( kSide - 1u ) ) * 4u], 200u )
+         << "the stroke stopped at the edge instead of wrapping, so a figure on the seam is cut in half at "
+            "every region face";
+
+    const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+    auto           made = MakeCloudLayoutFromImage( pixels, kSide, kSide, channels, /*takeMask=*/false );
+    ASSERT_TRUE( made ) << made.GetError();
+
+    EXPECT_FLOAT_EQ( MeasureCloudLayoutStrokes( made.GetValue(), 0u, 0.0f ).MedianTexels,
+                     CloudLayoutBrushWidthTexels( brush ) )
+         << "a stroke on the seam measured as two half-strokes, so the wrap and the ruler disagree";
+}
+
+// A BLANK CANVAS SAYS NOTHING OF ITS OWN — and that turns out to be a different statement from "leaves
+// the sky where it was", which is what this test asserted on its first run and what the run disproved.
+//
+// ⚠️ THE DISPROVED VERSION IS WORTH MORE THAN THE ONE THAT PASSED. The first form compared the map with a
+// blank canvas bound against the map with no painting at all and expected them equal. They are not, and
+// nothing is wrong: binding ANY painting hands the cell's coverage to the painting and switches the
+// procedural weather patch OFF, because §1.3 and §4.2 allow exactly one modulator per number
+// (OnlyOneSourceModulatesACellsCoverage, above, is the test that pins it). So an artist who starts a
+// blank canvas gets a FLAT sky at the slider, not the sky they were looking at — which is a real thing
+// they have to be told, and the panel now tells them.
+//
+// What the blank canvas does guarantee is that it contributes nothing itself: a flat pattern is exactly
+// its own mean and subtracts to zero, and an alpha at NEUTRAL adds exactly zero. Both are asserted here
+// exactly rather than approximately, because both are exact.
+TEST( CloudPlacementSpectrum, ABlankCanvasIsExactlyTheCoverageSliderAndSwitchesTheWeatherPatchOff )
+{
+    auto canvas = MakeCloudLayoutCanvas( 64u );
+    ASSERT_TRUE( canvas );
+
+    EXPECT_FALSE( canvas.GetValue().TakeMask )
+         << "a blank canvas claimed to carry a mask, so an empty slot would not be free";
+
+    const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+
+    // takeMask TRUE on purpose: the neutral alpha is the interesting case. An opaque white canvas here
+    // would add a whole unit of coverage to every cell in the sky.
+    auto made = MakeCloudLayoutFromImage( canvas.GetValue().Pixels, 64u, 64u, channels, /*takeMask=*/true );
+    ASSERT_TRUE( made ) << made.GetError();
+    ASSERT_TRUE( made.GetValue().HasMask() );
+
+    CloudProceduralFieldParams painted = ShippedParams();
+    painted.Coverage                   = 0.50f;
+    painted.Layout                     = std::make_shared<const CloudLayoutData>( made.ExtractValue() );
+
+    auto withCanvas = BuildCloudLayoutPreview( painted, 0u, painted.RegionSizeKm, kMapSide );
+    ASSERT_TRUE( withCanvas ) << withCanvas.GetError();
+
+    for ( const float cell : withCanvas.GetValue().Coverage )
+        ASSERT_FLOAT_EQ( cell, painted.Coverage )
+             << "an untouched canvas moved a cell off the slider, so a blank painting is not silent";
+
+    // AND THE PATTERN SLIDER STILL MOVES THE SKY ON A CANVAS NOBODY DREW ON — which looks wrong and is the
+    // switch above seen from the other side. CellsPatternMoves compares the two ENDS of the slider, and at
+    // zero the painting stands down and the procedural weather patch comes back; so what the slider moves
+    // here is not the drawing, it is which of the two sources owns the cell. Asserted rather than
+    // tolerated, because the panel prints this number and somebody will otherwise "fix" it to zero.
+    EXPECT_GT( withCanvas.GetValue().CellsPatternMoves, 0u )
+         << "the two ends of the pattern slider agreed on a blank canvas, so turning it down no longer "
+            "hands the sky back to the weather patch";
+
+    // AND THE SKY IT REPLACED WAS NOT FLAT. Named here rather than left to be discovered: this is the
+    // difference an artist sees the moment they press New Canvas.
+    CloudProceduralFieldParams bare = ShippedParams();
+    bare.Coverage                   = 0.50f;
+
+    auto without = BuildCloudLayoutPreview( bare, 0u, bare.RegionSizeKm, kMapSide );
+    ASSERT_TRUE( without ) << without.GetError();
+
+    const auto& unpainted = without.GetValue().Coverage;
+    ASSERT_FALSE( unpainted.empty() );
+    EXPECT_NE( *std::max_element( unpainted.begin(), unpainted.end() ),
+               *std::min_element( unpainted.begin(), unpainted.end() ) )
+         << "the unpainted sky was already flat, so this scene cannot show that a painting replaces the "
+            "procedural weather patch and the panel's warning about it is untested";
+}
+
+// A PAINTING GOES BACK ON THE CANVAS IT CAME OFF, byte for byte, or the panel's "Edit this painting" is a
+// slow way to lose somebody's work. The round trip is what makes the brush an editor rather than a
+// one-way bake.
+TEST( CloudPlacementSpectrum, APaintedLayoutReopensAsExactlyTheCanvasItWasPaintedOn )
+{
+    constexpr uint32_t kSide = 64u;
+
+    CloudLayoutBrush brush;
+    brush.RadiusTexels = 5.0f;
+    brush.Hardness     = 0.7f;
+
+    auto canvas = MakeCloudLayoutCanvas( kSide );
+    ASSERT_TRUE( canvas );
+    std::vector<unsigned char> pixels = canvas.GetValue().Pixels;
+
+    // A figure on the pattern AND on the alpha, so the mask is the interesting case rather than absent.
+    ASSERT_TRUE( FillCloudLayoutCanvasChannel( pixels, kSide, 3u, 0u ) );
+    for ( uint32_t channel = 0; channel < kCloudLayoutChannels; ++channel )
+        ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, channel,
+                                               { glm::vec2( 10.0f, 12.0f ), glm::vec2( 50.0f, 44.0f ) }, brush ) );
+
+    const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+    auto           made = MakeCloudLayoutFromImage( pixels, kSide, kSide, channels, /*takeMask=*/true );
+    ASSERT_TRUE( made ) << made.GetError();
+
+    auto reopened = MakeCloudLayoutCanvasFromLayout( made.GetValue() );
+    ASSERT_TRUE( reopened ) << reopened.GetError();
+
+    EXPECT_EQ( reopened.GetValue().Side, kSide );
+    EXPECT_TRUE( reopened.GetValue().TakeMask )
+         << "a layout with a mask reopened as a canvas that would bake without one";
+    EXPECT_EQ( reopened.GetValue().Pixels, pixels )
+         << "the canvas came back different from the one the layout was painted on";
+}
+
+// AND A LAYOUT THAT CANNOT BE EXPRESSED AS ONE CANVAS IS REFUSED BY NAME rather than half kept. Five
+// tables do not fit in four planes; quietly dropping whichever one the code wrote last would change
+// somebody's sky with nothing on screen to explain it. This is the shape of silent fallback §1.4 forbids.
+TEST( CloudPlacementSpectrum, AMaskDrawnApartFromTheFourthChannelRefusesToOpenAsACanvas )
+{
+    constexpr uint32_t kSide  = 32u;
+    const size_t       texels = static_cast<size_t>( kSide ) * kSide;
+
+    CloudLayoutData data;
+    data.Resolution = kSide;
+    data.Pattern.assign( texels * 4u, 0u );
+    data.Mask.assign( texels, kCloudLayoutMaskNeutral );
+
+    // One texel where the mask and the fourth pattern channel disagree is the whole of the condition.
+    data.Mask[7] = 200u;
+
+    auto encoded = EncodeCloudLayout( data );
+    ASSERT_TRUE( encoded ) << encoded.GetError();
+    auto decoded = DecodeCloudLayout( encoded.GetValue() );
+    ASSERT_TRUE( decoded ) << decoded.GetError();
+
+    auto opened = MakeCloudLayoutCanvasFromLayout( decoded.GetValue() );
+    EXPECT_FALSE( opened ) << "a layout whose mask differs from its fourth pattern channel opened as a "
+                              "canvas, so one of its two tables was silently discarded";
+}
+
+// THE ERASER IS THE SAME BRUSH WITH THE REST VALUE AS ITS INK, and the rest value differs per plane — a
+// pattern channel rests at nothing, the mask rests at NEUTRAL. An eraser that returned the mask to 0
+// would not clear it; it would turn it into "remove all the cloud here", which is the opposite.
+TEST( CloudPlacementSpectrum, ErasingReturnsThePatternToNothingAndTheMaskToNeutral )
+{
+    constexpr uint32_t kSide = 48u;
+
+    CloudLayoutBrush lay;
+    lay.RadiusTexels = 8.0f;
+    lay.Hardness     = 1.0f;
+    lay.Ink          = 1.0f;
+
+    auto canvas = MakeCloudLayoutCanvas( kSide );
+    ASSERT_TRUE( canvas );
+    std::vector<unsigned char> pixels = canvas.GetValue().Pixels;
+
+    const std::vector<glm::vec2> path = { glm::vec2( 8.0f, 24.0f ), glm::vec2( 40.0f, 24.0f ) };
+
+    ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, 0u, path, lay ) );
+    ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, 3u, path, lay ) );
+
+    const size_t middle = ( 24u * kSide + 24u ) * 4u;
+    ASSERT_EQ( pixels[middle + 0], 255u );
+    ASSERT_EQ( pixels[middle + 3], 255u );
+
+    CloudLayoutBrush erasePattern = lay;
+    erasePattern.Ink              = 0.0f;
+
+    CloudLayoutBrush eraseMask = lay;
+    eraseMask.Ink              = static_cast<float>( kCloudLayoutMaskNeutral ) / 255.0f;
+
+    ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, 0u, path, erasePattern ) );
+    ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, 3u, path, eraseMask ) );
+
+    EXPECT_EQ( pixels[middle + 0], 0u ) << "erasing a pattern channel left cloud behind";
+    EXPECT_EQ( pixels[middle + 3], kCloudLayoutMaskNeutral )
+         << "erasing the mask left it at " << static_cast<int>( pixels[middle + 3] )
+         << " rather than at neutral, so an erased mask still says something about the sky";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

@@ -15,6 +15,10 @@
 //   * `letter-d` a stem and a bowl. Legible only from above the layer, which is what the top-down shot of
 //                the protocol is for, and the strongest possible answer to "did the sky follow the
 //                painting" — a hash does not produce a letter.
+//   * `brush-d`  the same letter drawn by the BRUSH, one continuous stroke through
+//                `Assets::PaintCloudLayoutPolyline` — the identical function the Cloud Layout panel's drag
+//                drives. `--brush-radius` sets the stroke's width, which is what decides whether the glyph
+//                survives to the sky at all: wider than the placement cell it reads, narrower it does not.
 //
 // `--image` is the path an artist takes, and it is the same path the editor takes: the PNG is read to
 // RGBA8 and handed to exactly the function the Cloud Layout panel calls,
@@ -43,10 +47,13 @@ namespace
         std::fprintf( stderr,
                       "usage: CloudLayoutBaker --out <path.dclayout> [--image <path.png>] [--figure <name>]\n"
                       "                        [--size <n>] [--channels r,g,b,a] [--mask]\n"
+                      "                        [--brush-radius <texels>] [--brush-hardness <0..1>]\n"
                       "  --out       where to write the layout\n"
                       "  --image     a square PNG/JPG/TGA to paint with; RGBA8 after decode\n"
-                      "  --figure    generate instead of reading: 'stripe' or 'letter-d'\n"
+                      "  --figure    generate instead of reading: 'stripe', 'letter-d' or 'brush-d'\n"
                       "  --size      side of a generated figure in texels, %u..%u (default 512)\n"
+                      "  --brush-radius    'brush-d' only: half the stroke's width in texels (default 26)\n"
+                      "  --brush-hardness  'brush-d' only: 0 feathered, 1 crisp (default 1)\n"
                       "  --channels  which SOURCE channel feeds each of the four species slots,\n"
                       "              e.g. 0,0,0,0 to put one greyscale painting on every slot (default 0,1,2,3)\n"
                       "  --mask      take the source's alpha as the add/remove mask; without it the layout\n"
@@ -131,6 +138,88 @@ namespace
         return pixels;
     }
 
+    /// The same capital D, drawn by the BRUSH instead of by a formula — one continuous stroke up the stem
+    /// and round the bowl, which is what the drag in the Cloud Layout panel lays down.
+    ///
+    /// WHY THIS EXISTS BESIDE `letter-d` RATHER THAN REPLACING IT. `letter-d` is the shipped fixture of
+    /// §PT: `Layout_LetterD.dclayout` and the scenes that bind it are pinned to its bytes, and a figure
+    /// that changed shape would silently re-authorise a published measurement. This one is the brush's
+    /// own acceptance figure — the frame that proves a painted letter reaches the sky has to be painted by
+    /// the thing being delivered, and `Assets::PaintCloudLayoutPolyline` here is the identical function
+    /// the panel's mouse drives. GUI input cannot be synthesised on the build machine, so this is how a
+    /// brush stroke is put in front of a renderer without a hand on the mouse.
+    ///
+    /// THE STROKE WIDTH IS THE POINT OF THE FLAG. At 512 texels over the shipped 48 km region one texel is
+    /// 93.75 m, so a radius of 26 at full hardness is a 4.9 km stroke — wider than the 3.0 km placement
+    /// cell, and the letter survives. A radius of 5 is 0.94 km, a third of a cell, and it does not. Both
+    /// frames come out of the same command with one number changed.
+    std::vector<unsigned char> BrushLetterD( uint32_t side, bool maskFollowsFigure, float radiusTexels,
+                                             float hardness )
+    {
+        auto made = Desert::Assets::MakeCloudLayoutCanvas( side );
+        if ( !made )
+        {
+            std::fprintf( stderr, "%s\n", made.GetError().c_str() );
+            return {};
+        }
+
+        Desert::Assets::CloudLayoutCanvas canvas = made.ExtractValue();
+
+        // THE MASK'S GROUND IS 0 AND NOT NEUTRAL when the mask follows the figure, exactly as `letter-d`
+        // has it: the mask is signed about 128, so a ground of 0 clears the sky everywhere the letter is
+        // not and the glyph is what is left. A neutral ground would leave the background sky untouched and
+        // the letter would have to fight the coverage slider to be seen.
+        if ( maskFollowsFigure )
+        {
+            const auto cleared = Desert::Assets::FillCloudLayoutCanvasChannel( canvas.Pixels, side, 3u, 0u );
+            if ( !cleared )
+            {
+                std::fprintf( stderr, "%s\n", cleared.GetError().c_str() );
+                return {};
+            }
+        }
+
+        const float            s = static_cast<float>( side );
+        std::vector<glm::vec2> path;
+
+        // Up the stem, then round the bowl and back to where the stem began: ONE drag, the way the letter
+        // is actually drawn.
+        path.emplace_back( 0.27f * s, 0.80f * s );
+        path.emplace_back( 0.27f * s, 0.20f * s );
+
+        constexpr int kArcSteps = 90; // two degrees a step: finer than a texel at every side we allow
+        for ( int step = 0; step <= kArcSteps; ++step )
+        {
+            const float angle = -1.5707963f + 3.1415927f * ( static_cast<float>( step ) / kArcSteps );
+            path.emplace_back( ( 0.27f + 0.26f * std::cos( angle ) ) * s,
+                               ( 0.50f + 0.30f * std::sin( angle ) ) * s );
+        }
+
+        Desert::Assets::CloudLayoutBrush brush;
+        brush.RadiusTexels = radiusTexels;
+        brush.Hardness     = hardness;
+        brush.Ink          = 1.0f;
+
+        // Every channel the source has: the greyscale figure goes on R, G and B so any `--channels`
+        // mapping finds it, and on alpha only when alpha is the mask.
+        const uint32_t last = maskFollowsFigure ? 4u : 3u;
+        for ( uint32_t channel = 0; channel < last; ++channel )
+        {
+            const auto painted =
+                 Desert::Assets::PaintCloudLayoutPolyline( canvas.Pixels, side, channel, path, brush );
+            if ( !painted )
+            {
+                std::fprintf( stderr, "%s\n", painted.GetError().c_str() );
+                return {};
+            }
+        }
+
+        std::printf( "painted the brush letter: radius %.1f texels, hardness %.2f, stroke %.1f texels wide\n",
+                     radiusTexels, hardness, Desert::Assets::CloudLayoutBrushWidthTexels( brush ) );
+
+        return canvas.Pixels;
+    }
+
     bool ParseChannels( const char* text, uint32_t out[Desert::Assets::kCloudLayoutChannels] )
     {
         int a = 0, b = 0, c = 0, d = 0;
@@ -155,6 +244,15 @@ int main( int argc, char** argv )
     std::string figure;
     uint32_t    side     = 512u;
     bool        takeMask = false;
+
+    // The brush figure's defaults: 26 texels of radius at 512 over a 48 km region is a 4.9 km stroke, which
+    // clears the 3.0 km placement cell. Crisp by default, because a letter is a letter.
+    float brushRadius   = 26.0f;
+    float brushHardness = 1.0f;
+
+    // REMEMBERED SO THEY CAN BE REFUSED. A brush number handed to `--figure stripe` would do nothing, and a
+    // flag that does nothing is how somebody comes to believe they baked a wider letter than they did.
+    bool brushArgumentGiven = false;
 
     uint32_t channels[Desert::Assets::kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
 
@@ -207,6 +305,22 @@ int main( int argc, char** argv )
                 return Usage();
             }
         }
+        else if ( std::strcmp( argv[i], "--brush-radius" ) == 0 )
+        {
+            const char* value = next( "--brush-radius" );
+            if ( !value )
+                return Usage();
+            brushRadius        = static_cast<float>( std::atof( value ) );
+            brushArgumentGiven = true;
+        }
+        else if ( std::strcmp( argv[i], "--brush-hardness" ) == 0 )
+        {
+            const char* value = next( "--brush-hardness" );
+            if ( !value )
+                return Usage();
+            brushHardness      = static_cast<float>( std::atof( value ) );
+            brushArgumentGiven = true;
+        }
         else if ( std::strcmp( argv[i], "--mask" ) == 0 )
         {
             takeMask = true;
@@ -229,6 +343,13 @@ int main( int argc, char** argv )
         return Usage();
     }
 
+    if ( brushArgumentGiven && figure != "brush-d" )
+    {
+        std::fprintf( stderr, "--brush-radius and --brush-hardness only mean anything to '--figure "
+                              "brush-d'; refused rather than ignored\n" );
+        return Usage();
+    }
+
     std::vector<unsigned char> pixels;
     uint32_t                   width  = side;
     uint32_t                   height = side;
@@ -246,9 +367,27 @@ int main( int argc, char** argv )
             pixels = Stripe( side, takeMask );
         else if ( figure == "letter-d" )
             pixels = LetterD( side, takeMask );
+        else if ( figure == "brush-d" )
+        {
+            if ( !( brushRadius > 0.0f ) || brushRadius > static_cast<float>( side ) )
+            {
+                std::fprintf( stderr, "--brush-radius %.3f must be positive and no wider than the canvas\n",
+                              brushRadius );
+                return 1;
+            }
+            if ( !( brushHardness >= 0.0f ) || brushHardness > 1.0f )
+            {
+                std::fprintf( stderr, "--brush-hardness %.3f must lie in [0, 1]\n", brushHardness );
+                return 1;
+            }
+
+            pixels = BrushLetterD( side, takeMask, brushRadius, brushHardness );
+            if ( pixels.empty() )
+                return 1;
+        }
         else
         {
-            std::fprintf( stderr, "unknown figure '%s'; known: stripe, letter-d\n", figure.c_str() );
+            std::fprintf( stderr, "unknown figure '%s'; known: stripe, letter-d, brush-d\n", figure.c_str() );
             return 1;
         }
     }

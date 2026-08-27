@@ -26,12 +26,20 @@ namespace Desert::Core
 namespace Desert::Editor
 {
     /**
-     * @brief The artist's tool for a PAINTED SKY: point at a picture, say which of its channels feeds
-     *        which cloud SPECIES, look at the SKY it makes, bake it to a `.dclayout`.
+     * @brief The artist's tool for a PAINTED SKY: DRAW the layout, or point at a picture and say which of
+     *        its channels feeds which cloud SPECIES, look at the SKY it makes, bake it to a `.dclayout`.
      *
      * WHY IT EXISTS. Phase PT shipped the format, the engine path, the Details slot with its picker and
      * its drag-and-drop target, and `Tools/CloudLayoutBaker`. That closes half the loop: an artist could
      * ATTACH a finished painting but could only MAKE one from a terminal. The owner asked for the editor.
+     *
+     * AND THE BRUSH IS THE SECOND HALF OF THAT ANSWER. Importing a picture presumes somebody drew it
+     * somewhere else; the owner asked for a panel where the designer CREATES the texture rather than
+     * brings one. The canvas below is that panel, and it is the same buffer an import produces — an RGBA8
+     * square — so the two ways in converge one line later, at `Assets::MakeCloudLayoutFromImage`, and
+     * neither can come to mean something different by a channel, a mask or a mean. Importing is not
+     * removed and is not second class: an artist brings a picture and then paints on it, which is what a
+     * canvas that is literally the decoded image buys for nothing.
      *
      * IT IS BUILT AFTER THE CLOUD NOISE VOLUME PANEL NEXT DOOR, deliberately and down to the section
      * order — source, preview, save — because that panel already does work of this shape and a second
@@ -74,6 +82,13 @@ namespace Desert::Editor
      *      (`Assets::MeasureCloudLayoutStrokes`) and reports how much of the drawing is finer than a
      *      cloud cell. Reported and never refused, because a stroke width is a fact about a picture and a
      *      threshold on it would be an opinion about somebody's art.
+     *
+     *      THE BRUSH TURNS THAT REPORT INTO SOMETHING AN ARTIST CAN ACT ON BEFORE DRAWING RATHER THAN
+     *      AFTER. The canvas carries the PLACEMENT CELL as a grid, and the cursor carries the stroke's own
+     *      measured width as a circle on top of it — so "wider than a cell" is a thing you can see under
+     *      your hand instead of a percentage you read afterwards. The grid and the verdict quote the same
+     *      two numbers (`m_Preview.CellKm` and `m_TexelKm`) for exactly the reason this panel refuses to
+     *      keep its own copy of a layer field: two derivations of one length is how they come to disagree.
      *
      *   3. A CHANNEL DOES NOT DRIVE "CLOUD TYPE N". The four type slots an artist fills in Details are
      *      COMPACTED into species — an empty slot is skipped, a repeated type is dropped
@@ -163,6 +178,7 @@ namespace Desert::Editor
         void DrawSourceSection();
         void DrawChannelSection();
         void DrawLayerSection();
+        void DrawBrushSection();
         void DrawPreviewSection();
         void DrawVerdictSection();
         void DrawSaveSection();
@@ -177,6 +193,25 @@ namespace Desert::Editor
         /// Rebuilds m_Layout from the source through Assets::MakeCloudLayoutFromImage — the tool's
         /// function, not a second reading of what a picture means.
         void RebuildLayout();
+
+        /// True when m_SourcePixels is a surface the brush can paint on: square, and inside the layout's
+        /// own resolution bounds. It is the SAME condition MakeCloudLayoutFromImage accepts, asked before
+        /// the fact rather than after, so the canvas cannot exist in a state the bake would refuse.
+        bool CanPaint() const;
+
+        /// Replaces the source with a blank canvas of @p side. Named rather than inlined because the
+        /// button and a future caller must clear exactly the same six pieces of state — a canvas that kept
+        /// the previous picture's name is a file baked under the wrong one.
+        void StartCanvas( uint32_t side );
+
+        /// Streams the painted channel into m_CanvasImage, creating the device image only when the side or
+        /// the channel changed. STREAMED AND NOT RECREATED: a drag touches this every frame, and building
+        /// a fresh VkImage per frame is descriptor churn for a picture that is one upload.
+        void RefreshCanvasImage();
+
+        /// The placement cell in texels of the CURRENT painting, or 0 when there is no map to take it
+        /// from. One derivation, shared by the canvas grid and the legibility verdict.
+        float CellTexels() const;
 
         /// Rebuilds the map, the stroke statistics and both device images. Called when the layout, the
         /// layer or the previewed slot changes — never per frame, because it allocates device images.
@@ -206,6 +241,43 @@ namespace Desert::Editor
         /// mask", because an opaque PNG has alpha 255 everywhere, which under the signed convention is a
         /// mask that adds cloud to the whole sky — a silent, uniform, wrong answer.
         bool m_TakeMask = false;
+
+        // ---- the brush --------------------------------------------------------------------------------
+
+        /// The brush's three numbers. They live here rather than on the layout because they describe the
+        /// HAND and not the picture: nothing about them is written to the file, and a canvas opened
+        /// tomorrow is painted with whatever the artist has the sliders on then.
+        Assets::CloudLayoutBrush m_Brush;
+
+        /// Which plane of the canvas the stroke lands in, 0..3 = R, G, B, A. Alpha is the add/remove mask
+        /// when `m_TakeMask` is on and species slot 3's own pattern when it is not — one plane, two
+        /// meanings, inherited from the fact that MakeCloudLayoutFromImage takes ONE image and a layout
+        /// carries five tables. The panel says which it currently is rather than leaving it to be
+        /// discovered in a rendered sky.
+        int m_PaintChannel = 0;
+
+        /// The side a "New canvas" would be. 512 is the shipped paintings' own resolution and, at the
+        /// shipped 48 km region, puts one texel at 94 m — a thirtieth of a placement cell, so a stroke has
+        /// room to be measured rather than quantised.
+        int m_NewCanvasSide = 512;
+
+        /// Pixels the canvas is drawn at. Larger than the preview panes on purpose: this one is drawn ON.
+        int m_CanvasPane = 320;
+
+        /// Whether the placement cell is drawn over the canvas. On by default, and it is the reason the
+        /// canvas exists at this size — the grid is the width rule made visible.
+        bool m_ShowCellGrid = true;
+
+        /// The open drag, between mouse-down and mouse-up. See Assets::CloudLayoutStroke for why a stroke
+        /// has state at all rather than being a series of independent stamps.
+        Assets::CloudLayoutStroke m_Stroke;
+        bool                      m_Painting = false;
+        glm::vec2                 m_LastPaintTexel{ 0.0f, 0.0f };
+
+        std::shared_ptr<Graphic::Image2D> m_CanvasImage;
+        uint32_t                          m_CanvasImageSide    = 0u;
+        int                               m_CanvasImageChannel = -1;
+        bool                              m_CanvasImageDirty   = true;
 
         // ---- the layout being authored ----------------------------------------------------------------
 
