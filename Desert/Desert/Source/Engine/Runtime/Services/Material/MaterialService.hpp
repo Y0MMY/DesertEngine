@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialOverrides.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
 
 namespace Desert::Runtime
@@ -28,6 +29,22 @@ namespace Desert::Runtime
         // v1 note: instance assets override PARAMS only — texture overrides need per-instance
         // descriptors and are ignored by the batched path.
         Graphic::MaterialInstancePtr CreateRuntimeInstance( const Assets::AssetHandle& handle ) const;
+
+        // The same resolution as CreateRuntimeInstance, but delivered as NAMED VALUES instead of a runtime
+        // instance — for a renderer that owns one material of its own and applies a material's parameters
+        // to it by name. The terrain is that renderer and is currently the only one: its surface is a
+        // single Terrain-domain program whose three splat layers are texture parameters of that program,
+        // so a terrain material has no per-object Graphic::MaterialInstance to be.
+        //
+        // Appends base-first, child-last, so a material INSTANCE's override wins where both name a
+        // parameter — the same "nearest wins" order CreateRuntimeInstance applies, and the order the
+        // consumers of MaterialOverrides already assume (last write wins).
+        //
+        // Appends rather than returns so the caller can hand the render command the vectors it already
+        // owns; this runs once per terrain entity per frame. Returns false when the handle resolves to no
+        // material at all, which is what an unset slot means: the caller then leaves the shader's own
+        // schema defaults in place.
+        bool ResolveOverrides( const Assets::AssetHandle& handle, Graphic::MaterialOverrides& out ) const;
 
         // For editor live-edit of a material-instance asset: entities rebuild their cached
         // runtime instances on the next tick (same mechanism as Invalidate, no graveyard needed —

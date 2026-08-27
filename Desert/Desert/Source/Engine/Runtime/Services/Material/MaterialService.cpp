@@ -108,6 +108,51 @@ namespace Desert::Runtime
         return instance;
     }
 
+    bool MaterialService::ResolveOverrides( const Assets::AssetHandle&  handle,
+                                            Graphic::MaterialOverrides& out ) const
+    {
+        // Same walk as CreateRuntimeInstance: collect the instance chain child -> base (depth-capped
+        // cycle guard), then append base-first so the childmost override lands last and wins.
+        std::vector<const Assets::SurfaceMaterialAsset*> chain;
+        Assets::AssetHandle                              current = handle;
+        for ( int depth = 0; depth < 8; ++depth )
+        {
+            auto ait = m_MaterialAssets.find( current );
+            if ( ait == m_MaterialAssets.end() )
+                break;
+            auto* surf = dynamic_cast<Assets::SurfaceMaterialAsset*>( ait->second.get() );
+            if ( !surf || !surf->Data().IsInstance() )
+                break;
+            chain.push_back( surf );
+            const auto parent = GetAssetHandleByExternal( *surf->Data().ParentMaterialId );
+            if ( parent.IsNull() || parent == current )
+                break;
+            current = parent;
+        }
+
+        auto baseIt = m_MaterialAssets.find( current );
+        if ( baseIt == m_MaterialAssets.end() )
+            return false;
+        auto* base = dynamic_cast<Assets::SurfaceMaterialAsset*>( baseIt->second.get() );
+        if ( !base )
+            return false;
+
+        // Unlike CreateRuntimeInstance this carries TEXTURES as well as params. It can: the consumer binds
+        // them onto its own material by sampler name, so there is no per-instance descriptor set to need.
+        const auto append = [&out]( const Assets::MaterialData& data )
+        {
+            for ( const auto& p : data.Params )
+                out.Params.emplace_back( p.Name, p.Value );
+            for ( const auto& t : data.Textures )
+                out.Textures.emplace_back( t.Name, t.TextureHandle );
+        };
+
+        append( base->Data() );
+        for ( auto it = chain.rbegin(); it != chain.rend(); ++it )
+            append( ( *it )->Data() );
+        return true;
+    }
+
     void MaterialService::Clear()
     {
         // Was an empty body. The graveyard goes with the rest: at shutdown there is no next frame to

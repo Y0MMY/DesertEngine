@@ -189,6 +189,7 @@ namespace
             {
                 using T = ::Desert::ECS::TerrainData;
                 TypeBuilder( "TerrainData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Material", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Material ), .Size = sizeof( T::Material ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Material", .Category = "Terrain", .IsAsset = true, .AssetType = "MaterialAsset", .Hidden = true, } } )
                     .Field( FieldInfo{ .Name = "Size", .Type = FieldType::Float, .Offset = offsetof( T, Size ), .Size = sizeof( T::Size ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Size", .Category = "Terrain", .HasRange = true, .RangeMin = 100.0f, .RangeMax = 50000.0f, .IsLength = true, } } )
                     .Field( FieldInfo{ .Name = "Resolution", .Type = FieldType::Int, .Offset = offsetof( T, Resolution ), .Size = sizeof( T::Resolution ), .TypeName = "int", .Meta = PropertyMetadata{ .DisplayName = "Resolution", .Category = "Terrain", .HasRange = true, .RangeMin = 2.0f, .RangeMax = 256.0f, } } )
                     .Field( FieldInfo{ .Name = "HeightScale", .Type = FieldType::Float, .Offset = offsetof( T, HeightScale ), .Size = sizeof( T::HeightScale ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Height Scale", .Category = "Terrain", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 5000.0f, .IsLength = true, } } )

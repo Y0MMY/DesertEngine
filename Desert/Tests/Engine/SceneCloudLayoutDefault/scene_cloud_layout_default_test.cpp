@@ -244,11 +244,20 @@ TEST( SceneCloudLayoutDefault, TheDefaultsFromAV6FileArePlacementNothingCanTellF
 // the difference is worth pinning: if somebody later adds a v7 for an unrelated reason, this test fails and
 // they read the paragraph explaining that the layout is NOT what v7 is for — instead of assuming it was and
 // wiring a migration to it.
+//
+// IT FIRED, ONCE, AND WORKED. v7 was added for an unrelated reason — the terrain's material became a
+// `.demat`, so the inline Material component a terrain entity carried had to be dropped from the file
+// (Docs/MaterialEditor/PLAN_STAGE3_ASSET_DOCUMENTS.md, M3). The developer on that task read this paragraph,
+// confirmed the layout is still not what any version constant is for, and moved the assertion DOWN to the
+// last constant the clouds own rather than deleting it. The claim it makes is unchanged: no cloud-layout
+// change has ever moved the schema, and the head being past that point is somebody else's step.
 TEST( SceneCloudLayoutDefault, ThePaintedLayoutDidNotMoveTheSchemaVersion )
 {
-    EXPECT_EQ( Desert::Core::kSceneVersion, Desert::Core::kSceneVersionCloudSet )
-         << "the scene schema version moved. The painted layout did NOT move it — it adds fields and "
-            "renames none, and an absent key already means 'the C++ default'. If your change renames, drops "
+    EXPECT_GE( Desert::Core::kSceneVersion, Desert::Core::kSceneVersionCloudSet )
+         << "the scene schema version went BACKWARDS past the clouds' last step, which no migration can do.";
+    EXPECT_EQ( Desert::Core::kSceneVersionCloudSet, 6 )
+         << "the painted layout did NOT move the clouds' last version constant — it adds fields and renames "
+            "none, and an absent key already means 'the C++ default'. If your CLOUD change renames, drops "
             "or reinterprets a key then it needs its own constant AND its own migration function; if it "
             "only adds fields, it needs neither, and it needs a test like the two above instead.";
 }
