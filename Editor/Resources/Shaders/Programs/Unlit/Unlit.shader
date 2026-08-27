@@ -55,36 +55,22 @@ Shader "Unlit"
         }
     }
 
-    // Depth-only variant (vertex-only program, front-face culling against peter-panning).
-    // A separate program registered as "Unlit/Depth" — fetch it with GetByName("Unlit/Depth").
-    Pass "Depth"
-    {
-        State
-        {
-            Cull Front
-        }
-
-        Vertex
-        {
-            In(0) vec3 a_Position;
-            In(1) vec3 a_Normal;
-            In(2) vec3 a_Tangent;
-            In(3) vec3 a_Bitangent;
-            In(4) vec2 a_TextureCoord;
-
-            #include <Common/CameraUB.glslh>
-
-            PushConstant PushConstants
-            {
-                mat4 Transform;
-            }
-            m_PushConstants;
-
-            void main()
-            {
-                gl_Position = cameraUB.Projection * cameraUB.View * m_PushConstants.Transform * vec4( a_Position, 1.0 );
-            }
-        }
-    }
+    // NO depth-only pass. There used to be a Pass "Depth" here, described as the shadow
+    // variant; ShaderService registered it as its own program under
+    // "Unlit/Depth" and compiled a SPIR-V module for it at every startup, and nothing could consume it —
+    // no GetByName call in the engine has ever asked for a "<Shader>/<Pass>" name.
+    //
+    // It could not have served if one had, but NOT for the reason the file made it look like. Its vertex
+    // stage was the right maths: byte for byte what Shadow.shader does, and reading cameraUB is exactly
+    // how the engine's own shadow vertex works — MaterialShadow feeds the LIGHT's view/projection into
+    // that same block, so shader text cannot tell a camera from a light. What was missing is that no
+    // material would ever have done so for this program. The disqualifier is the other one: the pass
+    // declared no FRAGMENT stage at all, while a cascade is a colour R32F attachment a fragment shader
+    // must write (Shadow.shader writes gl_FragCoord.z into it), so it would have rasterized and emitted
+    // nothing.
+    //
+    // A mesh with this material casts through the engine's shadow pipeline over the generic queue
+    // (MeshRenderer::RegisterShadowPass). Depth is material-independent, so a per-material depth shader
+    // has nothing to contribute. Tests/Engine/ShippedShaderPasses holds both halves of that.
 }
 
