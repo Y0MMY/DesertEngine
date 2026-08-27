@@ -98,10 +98,11 @@ namespace Desert::Engine
         // the device and the context's VMA allocator are still alive. Declared in the order below they are
         // destroyed window -> device -> context, which is the only order that holds.
         //
-        // It used to be the exact opposite (window declared first, context last), and both halves of the
-        // exit-time crash came from that: VulkanImage2D::Release() dereferenced an already-expired
-        // renderer context and segfaulted, and VulkanFramebuffer::Release() had grown an `if (allocator)`
-        // guard to survive the same window.
+        // It used to be the exact opposite -- window declared first, context last -- and that is where the
+        // exit-time SEGFAULT came from: VulkanImage2D::Release() dereferenced an already-expired renderer
+        // context to reach the allocator. VulkanFramebuffer::Release() carries an `if (allocator)` guard
+        // written to survive the same window; that guard is still load-bearing for the editor's
+        // process-lifetime thumbnail caches, which are not released deterministically yet.
     private:
         ApplicationInfo m_ApplicationInfo;
 
