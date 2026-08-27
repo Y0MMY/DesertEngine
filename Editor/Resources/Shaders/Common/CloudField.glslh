@@ -26,8 +26,14 @@
 //
 // HOW THE DATA ARRIVES. Through two macros, never through a sampler declared here:
 //
-//     CLOUD_SAMPLE_NOISE( vec3 texturePosition )   ->  vec4, the four channels of the noise volume, which
-//                                                      is the EROSION and nothing else now
+//     CLOUD_SAMPLE_NOISE( int slot,                ->  vec4, the four channels of ONE OF THE LAYER'S FOUR
+//                         vec3 texturePosition )       noise volumes, which is the EROSION and nothing
+//                                                      else now. The slot is the winning species' —
+//                                                      CloudFieldSample::NoiseSlot — because a type names
+//                                                      its own volume and a layer of four types can name
+//                                                      four. The march defines this as a four-way select
+//                                                      over four samplers; a test defines it as a call
+//                                                      into the generator with that slot's periods.
 //     CLOUD_SAMPLE_MODELLING( vec3 uvw )           ->  vec4, the procedural MODELLING VOLUME — ONE CHANNEL
 //                                                      PER SPECIES, in the order of the layer's slots,
 //                                                      each of them that species' Dimensional Profile
@@ -74,6 +80,15 @@ struct CloudFieldSample
     float DensityScale;     // per-sample multiplier applied AFTER erosion (deck p.118)
     float DetailFactor;     // the winner's multiplier on the layer's erosion depth
     float ExtinctionFactor; // the winner's multiplier on the layer's extinction
+
+    // WHICH NOISE VOLUME THE WINNER'S EDGE IS CUT FROM, 0..CLOUD_SPECIES_SLOTS-1. It travels with the
+    // sample for the same reason the four above do, and the reason is sharper here than for any of them:
+    // DetailCharacter and DetailFactor can only choose between the pairs of ONE volume and how deep to cut
+    // with them, so the SCALE of an edge — the lattice period the noise was baked at — has no other way to
+    // differ between two kinds of cloud in one sky. The shipped Cirrus is the type that needs it: it names
+    // a volume twice as fine as the default, and until this field existed it got that volume only when it
+    // happened to sit in the layer's first filled slot.
+    int NoiseSlot;
 };
 
 // Everything the procedural producer needs, unpacked from the GPU block by Common/CloudParams.glslh.
@@ -88,6 +103,12 @@ struct CloudFieldParams
     // Per species k: x DetailCharacter, y DetailFactor, z DensityFactor, w ExtinctionFactor. Four numbers
     // that describe what that kind of cloud is made of, and all four are read.
     vec4 SpeciesEdge[CLOUD_SPECIES_SLOTS];
+
+    // Per species k: which of the layer's bound noise volumes its edge is cut from. DEDUPLICATED by
+    // Graphic::ResolveCloudNoiseVolumes, so a sky whose types name one volume between them — which is
+    // eight of the nine shipped types — sends {0,0,0,0} and the fetch below is selected by a value that is
+    // uniform across the wave. That is what makes this cost nothing where nothing was asked for.
+    int SpeciesNoise[CLOUD_SPECIES_SLOTS];
 
     // WHERE THE MODELLING VOLUME IS, and it is two numbers rather than a matrix because the region is
     // axis-aligned by construction: the minimum corner of the region in world kilometres, and the
@@ -259,6 +280,10 @@ CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heig
     result.DensityScale     = 0.0f;
     result.DetailFactor     = 0.0f;
     result.ExtinctionFactor = 0.0f;
+    // Slot 0 is the one index that is ALWAYS bound (Graphic::ResolveCloudNoiseVolumes fills the unused
+    // descriptors with it), so the empty sample names a real image rather than a number the fetch would
+    // fall through on. Nothing reads it: CloudSampleDensity returns at a profile of zero, above the fetch.
+    result.NoiseSlot = 0;
 
     // THE WIND IS A SHIFT OF THE SAMPLE AND NOT OF THE VOLUME, which is what keeps the wind free: the
     // region's origin is chosen around the camera MINUS this same offset (Assets::
@@ -284,6 +309,10 @@ CloudFieldSample CloudSampleProceduralField( CloudFieldParams params, float heig
         result.DetailFactor     = CLOUD_MATERIAL_FACTOR( edge.y );
         result.DensityScale     = CLOUD_MATERIAL_FACTOR( params.DensityScale ) * CLOUD_MATERIAL_FACTOR( edge.z );
         result.ExtinctionFactor = CLOUD_MATERIAL_FACTOR( edge.w );
+        // THE FIFTH THING THE WINNER TAKES, and the one the union could not carry until now. Not blended,
+        // for a sharper version of the reason the four above are not: a volume is not a number, and the
+        // midpoint between two of them is not a third volume.
+        result.NoiseSlot = params.SpeciesNoise[slot];
     }
 
     return result;
@@ -332,6 +361,15 @@ CloudAuthoredResult CloudSampleAuthoredField( CloudFieldParams params, vec3 posi
     result.Field.DetailFactor     = 0.0f;
     result.Field.ExtinctionFactor = 0.0f;
     result.Cutout                 = 0.0f;
+
+    // A SCULPTED BODY IS ERODED BY SPECIES 0'S VOLUME, AND THAT IS UNCHANGED RATHER THAN CHOSEN. A hero
+    // cloud is not a species — it has no `.decloudtype` and therefore names no volume — and the volume it
+    // was cut from before this file could tell four apart was the layer's one volume, which was the first
+    // filled slot's, which is species 0's. So this line is the old behaviour written down, and it is
+    // written down HERE rather than left implicit because "0" would otherwise read as a placeholder.
+    // Giving an instance its own volume is an authored field this task did not add: a knob nobody asked
+    // for is a knob nobody tunes (PLAN_AUTHORED_CLOUDS.md).
+    result.Field.NoiseSlot = params.SpeciesNoise[0];
 
     int count = CLOUD_AUTHORED_COUNT;
 
@@ -414,6 +452,7 @@ CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction
     result.DensityScale     = 0.0f;
     result.DetailFactor     = 0.0f;
     result.ExtinctionFactor = 0.0f;
+    result.NoiseSlot        = 0; // always bound; nothing reads it at a profile of zero
 
     if ( authored.Cutout < 1.0f )
     {
@@ -460,7 +499,10 @@ float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 
     vec3  detailPos = vec3( windPos.x * CLOUD_DETAIL_FREQ_X / tile, windPos.y * CLOUD_DETAIL_FREQ_Y / tile,
                             windPos.z * CLOUD_DETAIL_FREQ_Z / tile );
 
-    vec4 noise = CLOUD_SAMPLE_NOISE( detailPos );
+    // THE VOLUME IS THE WINNING SPECIES', not the layer's. Until this argument existed there was one
+    // `sampler3D` on the march and a Cirrus standing beside a Cumulus was cut from the cumulus' volume —
+    // the last recorded debt of the cloud programme, and a dead setting in three of a layer's four slots.
+    vec4 noise = CLOUD_SAMPLE_NOISE( field.NoiseSlot, detailPos );
 
     // THE DECK'S OWN COMPOSITE (p.122), and it uses all four channels rather than two of them.
     //

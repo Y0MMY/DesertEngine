@@ -1023,7 +1023,10 @@ namespace
         const vec3  detailPos( windPos.x * CLOUD_DETAIL_FREQ_X / tile, windPos.y * CLOUD_DETAIL_FREQ_Y / tile,
                                windPos.z * CLOUD_DETAIL_FREQ_Z / tile );
 
-        const vec4 noise = CLOUD_SAMPLE_NOISE( detailPos );
+        // THE SAMPLE'S OWN SLOT, so the mirror reads whichever of the layer's volumes the winning species
+        // named — the same argument the seam passes. A mirror hardwired to slot 0 would agree with a
+        // shader that ignored the slot entirely, which is precisely the defect phase NV removed.
+        const vec4 noise = CLOUD_SAMPLE_NOISE( field.NoiseSlot, detailPos );
 
         const float wispy   = glm::mix( noise.x, noise.y, field.Profile );
         const float billowy = glm::mix( noise.z, noise.w, std::pow( field.Profile, 0.25f ) );
@@ -1255,6 +1258,111 @@ TEST( CloudFieldErosion, TheMirrorOfTheErosionAgreesWithTheShader )
     EXPECT_GT( checked, 100 ) << "the fixture put no cloud in front of the mirror, so it checked nothing";
     EXPECT_LT( worst, 1e-6 ) << "the erosion mirror and Common/CloudField.glslh disagree, so every sweep "
                                 "below is a sweep of something else";
+}
+
+TEST( CloudFieldSpecies, TheWinningSpeciesEdgeIsCutFromItsOwnNoiseVolume )
+{
+    // THE PROGRAMME'S LAST RECORDED DEBT, as an assertion. Until phase NV there was ONE `sampler3D` on the
+    // march and the whole layer was eroded by the volume of whichever slot happened to be filled first —
+    // so a Cirrus standing beside a Cumulus was cut from the cumulus' noise, silently, while the Cloud
+    // Type panel's own tooltip promised the opposite. It was measured on the frame before it was fixed:
+    // changing the cirrus type's NoiseVolume moved 0 pixels of 980 480 at all six protocol points when it
+    // sat in the second slot, and between 50.5 % and 72.6 % of them when it sat in the first
+    // (Docs/Clouds/CALIBRATION.md section NV).
+    //
+    // WHAT MAKES THIS AN ASSERTION AND NOT A TAUTOLOGY: neither side is the shader's own arithmetic. The
+    // left-hand side is CloudSampleDensity — the seam, compiled as C++ — and the right-hand side is the
+    // erosion mirror built on the volume the test names DIRECTLY, without going through the sample's
+    // NoiseSlot at all. They can only agree if the slot travelled with the winner.
+    //
+    // AND IT SWEEPS BOTH DIRECTIONS OF THE PAIR, which is not thoroughness either. A shader that ignored
+    // the slot and always read volume 0 passes any test whose species-0 volume is the interesting one; a
+    // shader that always read the LAST slot passes the mirror image of it. Only asking about both species
+    // in one sky can separate "the winner's volume" from either constant.
+    CloudFieldParams params = TwoSpeciesParams( 0.55f );
+
+    // Species 1 — the tower — is given the shipped fine-wisp volume in slot 1, exactly as an artist gives
+    // a type its own `.dcnv`. Species 0 keeps the default in slot 0.
+    CloudBindSpeciesNoise( params, 1, 1, kFineWispPeriods );
+
+    const float altitudeKm = 2.40f;
+    const float fraction   = FractionOfSetEnvelope( altitudeKm );
+
+    int checked        = 0;
+    int slotWrong      = 0;
+    int densityWrong   = 0;
+    int wouldHaveMoved = 0;
+
+    double worstDisagreement = 0.0;
+
+    constexpr int kColumns = 96;
+
+    for ( int iz = 0; iz < kColumns; ++iz )
+    {
+        for ( int ix = 0; ix < kColumns; ++ix )
+        {
+            const vec3 position( OriginKm().x + PeriodKm() * ( ix + 0.5f ) / kColumns,
+                                 altitudeKm - kDeck.BaseAltitudeKm,
+                                 OriginKm().y + PeriodKm() * ( iz + 0.5f ) / kColumns );
+
+            const float deck  = SpeciesProfileAt( params, 0, fraction, position );
+            const float tower = SpeciesProfileAt( params, 1, fraction, position );
+
+            const CloudFieldSample sample = SampleCloudField( params, fraction, position );
+            if ( sample.Profile <= 0.0f )
+                continue;
+
+            ++checked;
+
+            // `>=` for the reason the union test next door gives: the volume is quantised to a 255th, ties
+            // happen, and the producer takes a species only when it STRICTLY exceeds the best so far — so
+            // a tie is won by the EARLIER slot.
+            const int expectedSlot = deck >= tower ? 0 : 1;
+            if ( sample.NoiseSlot != expectedSlot )
+                ++slotWrong;
+
+            // THE DENSITY, computed twice: once by the seam, and once by the mirror told which volume to
+            // read rather than asked. ErosionNoiseAt reads sample.NoiseSlot, so the mirror is handed a
+            // COPY whose slot is the one this test believes in — which is what makes a disagreement a
+            // statement about the seam and not about the mirror.
+            CloudFieldSample believed = sample;
+            believed.NoiseSlot        = expectedSlot;
+
+            const float fromSeam = CloudSampleDensity( params, sample, position );
+            const float fromMirror =
+                 ErodedDensity( sample.Profile, ErosionNoiseAt( params, believed, position ),
+                                std::clamp( params.DetailStrength * sample.DetailFactor, 0.0f, 1.0f ) );
+
+            const double gap  = std::abs( static_cast<double>( fromSeam ) -
+                                          static_cast<double>( fromMirror ) * sample.DensityScale );
+            worstDisagreement = std::max( worstDisagreement, gap );
+            if ( gap > 1e-6 )
+                ++densityWrong;
+
+            // AND THE OTHER VOLUME WOULD HAVE GIVEN A DIFFERENT ANSWER HERE. Without this the whole test
+            // could pass on a sky where the two volumes happen to agree, which is the shape a green
+            // sabotage takes: the two `.dcnv` files differ by a factor of two on every lattice period, so
+            // they must disagree somewhere, and counting where says the assertions above had something to
+            // catch.
+            CloudFieldSample other = sample;
+            other.NoiseSlot        = expectedSlot == 0 ? 1 : 0;
+            if ( std::abs( CloudSampleDensity( params, other, position ) - fromSeam ) > 1e-6f )
+                ++wouldHaveMoved;
+        }
+    }
+
+    std::printf( "[CloudFieldSpecies] %d samples carried a species; %d would have moved on the other "
+                 "volume; worst density disagreement %.3e\n",
+                 checked, wouldHaveMoved, worstDisagreement );
+
+    CloudNoiseVolumeResetAll();
+
+    EXPECT_GT( checked, 100 ) << "no sample carried a species, so nothing about the volumes was checked";
+    EXPECT_EQ( slotWrong, 0 ) << "the sample did not carry the WINNING species' noise slot";
+    EXPECT_EQ( densityWrong, 0 ) << "the erosion was not cut from the volume the winner names";
+    EXPECT_GT( wouldHaveMoved, checked / 10 )
+         << "the two volumes agree almost everywhere on this fixture, so the assertions above could not "
+            "have failed and this test is inert";
 }
 
 TEST( CloudFieldErosion, TheBoundOnAMaterialFactorIsTheIdentityEverywhereTheFactorIsLegal )

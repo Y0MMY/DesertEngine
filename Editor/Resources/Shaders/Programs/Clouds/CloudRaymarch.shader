@@ -83,6 +83,33 @@ Shader "CloudRaymarch"
         // assumption.
         Uniform(3) sampler3D u_CloudNoise;
 
+        // AND THREE MORE OF THEM, because a layer carries four cloud types and a type names its own
+        // volume. Separate bindings and not an array: this engine's reflection refuses an array of
+        // descriptors in so many words (VulkanShaderReflection.cpp, "arrays of descriptors are not
+        // supported — declare separate bindings"). ALWAYS BOUND, all four, on the terms every other
+        // sampler here is bound on — Graphic::ResolveCloudNoiseVolumes fills the slots a layer does not
+        // need with slot 0's image, so an unused one is a second descriptor onto bytes that are already
+        // resident rather than a hole in the set.
+        Uniform(10) sampler3D u_CloudNoise1;
+        Uniform(11) sampler3D u_CloudNoise2;
+        Uniform(12) sampler3D u_CloudNoise3;
+
+        // THE FOUR-WAY SELECT, and it is a chain of compares because a sampler is not indexable in this
+        // dialect. It costs the wave every branch the wave takes — which is why the CPU DEDUPLICATES the
+        // slots before sending them: eight of the nine shipped types name no volume of their own, so the
+        // ordinary sky sends 0 for every species, `slot` is uniform, and this is one fetch exactly as it
+        // was before a type could name a volume at all.
+        vec4 CloudFetchNoise( int slot, vec3 p )
+        {
+            if ( slot == 1 )
+                return texture( u_CloudNoise1, p );
+            if ( slot == 2 )
+                return texture( u_CloudNoise2, p );
+            if ( slot == 3 )
+                return texture( u_CloudNoise3, p );
+            return texture( u_CloudNoise, p );
+        }
+
         // The sky's DISTANT SKY LIGHT: one texel holding the average radiance of the whole sky, marched
         // this frame by Programs/Sky/SkyDistantLight.shader. It is the physical model's ambient, and a
         // cloud is lit from every direction at once, so the full-sphere mean is the right quantity — the
@@ -127,7 +154,7 @@ Shader "CloudRaymarch"
 
         // The seam's three callbacks. Declared here, next to the samplers, because Common/CloudField.glslh
         // must stay free of samplers to remain compilable as C++ by its tests.
-        #define CLOUD_SAMPLE_NOISE(p) texture(u_CloudNoise, (p))
+        #define CLOUD_SAMPLE_NOISE(s, p) CloudFetchNoise((s), (p))
         // textureLod for the reason the authored atlas gives below, and for the same reason.
         #define CLOUD_SAMPLE_MODELLING(p) textureLod(u_CloudModelling, (p), 0.0f)
         // textureLod AND NOT texture: a compute shader has no derivatives, so the implicit level of

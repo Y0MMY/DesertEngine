@@ -93,15 +93,68 @@ namespace Desert::Tests::CloudFieldRef
         constexpr float kBillowPeriodLF = 3.0f;
         constexpr float kBillowPeriodHF = 6.0f;
 
-        vec4 CloudEvaluateBakedVolume( vec3 texturePosition )
+        // The number of noise volumes a layer can bind, taken from the C++ constant because
+        // CLOUD_SPECIES_SLOTS is declared by Common/CloudField.glslh, which is included BELOW this block —
+        // the callbacks have to exist before the header that calls them. Desert/Tests/Engine/CloudField
+        // asserts the two agree once both are in scope.
+        constexpr int kNoiseSlots = static_cast<int>( Graphic::kCloudSpeciesSlots );
+
+        /// The four lattice periods of one BOUND VOLUME, in the order CloudNoiseVolumeChannels takes them.
+        struct BoundVolumePeriods
         {
-            return CloudNoiseVolumeChannels( texturePosition, kVolumeSeed, kCurlStrength, kWispyPeriodLF,
-                                             kWispyPeriodHF, kBillowPeriodLF, kBillowPeriodHF );
+            float WispyLF, WispyHF, BillowLF, BillowHF;
+        };
+
+        /**
+         * The four volumes a layer can bind, as the reference sees them.
+         *
+         * SLOT 0 IS THE SHIPPED DEFAULT and every other slot starts as a COPY of it, because that is the
+         * state a layer whose types name no volume of their own is in — and it is the state every
+         * assertion written before a type could name one was written against. A test that wants a second
+         * volume calls CloudNoiseVolumeSelect, which is the same thing the renderer does when an artist
+         * drops a `.dcnv` into a type's slot.
+         *
+         * The second row this suite actually uses is the shipped CloudNoise_FineWisp.dcnv's — 4/8/6/12,
+         * exactly twice the default on every channel. It is the one volume in the repository that is not
+         * the default, so a mirror that used invented numbers would be testing a sky nobody ships.
+         */
+        struct BoundVolumes
+        {
+            BoundVolumePeriods Slot[kNoiseSlots];
+        };
+
+        BoundVolumes DefaultBoundVolumes()
+        {
+            BoundVolumes fresh{};
+            for ( int slot = 0; slot < kNoiseSlots; ++slot )
+                fresh.Slot[slot] =
+                     BoundVolumePeriods{ kWispyPeriodLF, kWispyPeriodHF, kBillowPeriodLF, kBillowPeriodHF };
+            return fresh;
         }
 
-        // Exact-key memoization: the key is the bit pattern of the three coordinates, so two callers that
-        // ask for the same position get the same answer and nothing is ever interpolated.
-        using NoiseKey = std::array<std::uint32_t, 3>;
+        BoundVolumes& NoiseVolumeState()
+        {
+            static BoundVolumes state = DefaultBoundVolumes();
+            return state;
+        }
+
+        /// The periods of the shipped `CloudNoise_FineWisp.dcnv`: twice the default's frequency on every
+        /// channel, which is the whole of what makes a cirrus' edge a different SIZE from a cumulus'.
+        constexpr BoundVolumePeriods kFineWispPeriods{ 4.0f, 8.0f, 6.0f, 12.0f };
+
+        vec4 CloudEvaluateBakedVolume( int slot, vec3 texturePosition )
+        {
+            const BoundVolumePeriods& p = NoiseVolumeState().Slot[std::clamp( slot, 0, kNoiseSlots - 1 )];
+            return CloudNoiseVolumeChannels( texturePosition, kVolumeSeed, kCurlStrength, p.WispyLF, p.WispyHF,
+                                             p.BillowLF, p.BillowHF );
+        }
+
+        // Exact-key memoization: the key is the SLOT and the bit pattern of the three coordinates, so two
+        // callers that ask the same volume for the same position get the same answer and nothing is ever
+        // interpolated. THE SLOT IS PART OF THE KEY and not an afterthought — without it the cache would
+        // hand slot 1 the answer slot 0 gave, which is precisely the defect this whole task is about,
+        // reproduced inside its own test.
+        using NoiseKey = std::array<std::uint32_t, 4>;
 
         std::map<NoiseKey, vec4>& NoiseCache()
         {
@@ -109,24 +162,41 @@ namespace Desert::Tests::CloudFieldRef
             return cache;
         }
 
-        vec4 CloudSampleBakedVolumeCached( vec3 texturePosition )
+        vec4 CloudSampleBakedVolumeCached( int slot, vec3 texturePosition )
         {
             NoiseKey key{};
-            std::memcpy( key.data(), &texturePosition.x, sizeof( float ) );
-            std::memcpy( key.data() + 1, &texturePosition.y, sizeof( float ) );
-            std::memcpy( key.data() + 2, &texturePosition.z, sizeof( float ) );
+            key[0] = static_cast<std::uint32_t>( std::clamp( slot, 0, kNoiseSlots - 1 ) );
+            std::memcpy( key.data() + 1, &texturePosition.x, sizeof( float ) );
+            std::memcpy( key.data() + 2, &texturePosition.y, sizeof( float ) );
+            std::memcpy( key.data() + 3, &texturePosition.z, sizeof( float ) );
 
             auto&      cache = NoiseCache();
             const auto it    = cache.find( key );
             if ( it != cache.end() )
                 return it->second;
 
-            const vec4 value = CloudEvaluateBakedVolume( texturePosition );
+            const vec4 value = CloudEvaluateBakedVolume( slot, texturePosition );
             cache.emplace( key, value );
             return value;
         }
 
-#define CLOUD_SAMPLE_NOISE( p ) CloudSampleBakedVolumeCached( p )
+        /// Bind @p periods into one of the four slots, and drop the cached answers that came from whatever
+        /// was there before. Same effect as the artist naming a different `.dcnv` on a cloud type.
+        void CloudNoiseVolumeSelect( int slot, const BoundVolumePeriods& periods )
+        {
+            NoiseVolumeState().Slot[std::clamp( slot, 0, kNoiseSlots - 1 )] = periods;
+            NoiseCache().clear();
+        }
+
+        /// Put every slot back on the shipped default, which is the state every assertion that does not
+        /// mention a volume assumes.
+        void CloudNoiseVolumeResetAll()
+        {
+            NoiseVolumeState() = DefaultBoundVolumes();
+            NoiseCache().clear();
+        }
+
+#define CLOUD_SAMPLE_NOISE( s, p ) CloudSampleBakedVolumeCached( ( s ), ( p ) )
 
         // ------------------------------------------------------------------------------------------
         // The procedural modelling volume, exactly as the device would see it
@@ -330,6 +400,12 @@ namespace Desert::Tests::CloudFieldRef
 
             for ( std::uint32_t slot = 0; slot < CLOUD_SPECIES_SLOTS; ++slot )
             {
+                // EVERY SPECIES ON VOLUME 0 unless a test says otherwise, which is what
+                // Graphic::ResolveCloudNoiseVolumes produces for a layer whose types name one volume
+                // between them — the state of every sky in the repository. A test that wants two calls
+                // CloudBindSpeciesNoise after this.
+                params.SpeciesNoise[slot] = 0;
+
                 if ( slot >= count )
                 {
                     params.SpeciesEdge[slot] = vec4( 0.0f );
@@ -365,6 +441,20 @@ namespace Desert::Tests::CloudFieldRef
         void CloudBindSingleSpecies( CloudFieldParams& params, const Desert::Graphic::CloudTypeShape& shape )
         {
             CloudBindSpecies( params, &shape, 1u, vec3( 1.0f, 0.0f, 0.0f ) );
+        }
+
+        /**
+         * Give species @p species its OWN noise volume, with @p periods, on a slot of its own.
+         *
+         * The two halves of what the renderer does, together, because they are one decision: the volume
+         * goes into a bound slot and the species is pointed at it. Splitting them is exactly how a test
+         * ends up asserting that a volume nothing reads was bound.
+         */
+        void CloudBindSpeciesNoise( CloudFieldParams& params, int species, int slot,
+                                    const BoundVolumePeriods& periods )
+        {
+            CloudNoiseVolumeSelect( slot, periods );
+            params.SpeciesNoise[species] = slot;
         }
 
     } // namespace

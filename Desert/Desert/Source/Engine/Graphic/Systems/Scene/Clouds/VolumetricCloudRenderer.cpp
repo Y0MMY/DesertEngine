@@ -666,19 +666,23 @@ namespace Desert::Graphic::System
 
         if ( !EnsureShadowMap( resolution ) )
             return;
-        if ( !EnsureNoiseVolume() )
-            return;
-        if ( !EnsureModellingVolume() )
-            return;
 
+        // THE SPECIES COME FIRST NOW, and the order is load-bearing rather than tidy: the volumes a layer
+        // binds are named by its TYPES, so the set has to be resolved before there is anything to look
+        // them up with.
         CloudTypeShape      shapes[kCloudSpeciesSlots]{};
         Assets::AssetHandle handles[kCloudSpeciesSlots]{};
         const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
 
+        if ( !EnsureNoiseVolumes( handles, speciesCount ) )
+            return;
+        if ( !EnsureModellingVolume() )
+            return;
+
         const CloudGpuPayload payload =
              PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
                               CloudRegionBinding{ m_ModellingOriginKm, m_ModellingParams.RegionSizeKm },
-                              quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor );
+                              quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor, m_NoiseSlots );
         m_ShadowParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         // Slot A, for the shadow map as well as for the eye: a hero cloud shades the ground under it
@@ -702,7 +706,11 @@ namespace Desert::Graphic::System
 
         auto& renderer = Renderer::GetInstance();
 
-        renderer.ComputeImageBeginRead( m_NoiseVolume );
+        // ONLY THE DISTINCT ONES ARE TRANSITIONED, and only they can be: the barrier is per image, and
+        // asking for the same image four times is four barriers on one resource rather than a no-op. The
+        // descriptors below are still written four times, because a descriptor is not a barrier.
+        for ( uint32_t slot = 0; slot < m_NoiseNeeded; ++slot )
+            renderer.ComputeImageBeginRead( m_NoiseVolume[slot] );
         renderer.ComputeImageBeginRead( m_ModellingVolume.get() );
         if ( m_AuthoredAtlas )
             renderer.ComputeImageBeginRead( m_AuthoredAtlas );
@@ -710,7 +718,8 @@ namespace Desert::Graphic::System
 
         m_ShadowMapPipeline->SetOutput( kCloudShadowOutputBinding, m_ShadowMapImage.get(), 0 );
         m_ShadowMapPipeline->SetStorageBuffer( kCloudShadowParamsBinding, m_ShadowParamsBuffer.get() );
-        m_ShadowMapPipeline->SetInput( kCloudShadowNoiseBinding, m_NoiseVolume );
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+            m_ShadowMapPipeline->SetInput( kCloudShadowNoiseBindings[slot], m_NoiseVolume[slot] );
         m_ShadowMapPipeline->SetInput( kCloudShadowModellingBinding, m_ModellingVolume.get() );
         m_ShadowMapPipeline->SetStorageBuffer( kCloudShadowAuthoredBinding, m_ShadowAuthoredBuffer.get() );
         // ALWAYS bound, fallback included — see the note at the march's own binding of it.
@@ -728,7 +737,8 @@ namespace Desert::Graphic::System
         if ( m_AuthoredAtlas )
             renderer.ComputeImageEndRead( m_AuthoredAtlas );
         renderer.ComputeImageEndRead( m_ModellingVolume.get() );
-        renderer.ComputeImageEndRead( m_NoiseVolume );
+        for ( uint32_t slot = m_NoiseNeeded; slot-- > 0; )
+            renderer.ComputeImageEndRead( m_NoiseVolume[slot] );
 
         m_ShadowMapValid = true;
     }
@@ -987,58 +997,68 @@ namespace Desert::Graphic::System
         return true;
     }
 
-    bool VolumetricCloudRenderer::EnsureNoiseVolume()
+    bool VolumetricCloudRenderer::EnsureNoiseVolumes( const Assets::AssetHandle ( &handles )[kCloudSpeciesSlots],
+                                                      uint32_t speciesCount )
     {
         auto* service = Runtime::ResourceRegistry::GetCloudNoiseService();
+        auto* types   = Runtime::ResourceRegistry::GetCloudTypeService();
 
         // Asked EVERY frame rather than cached behind a "have I got one" flag, because the answer changes
         // for three independent reasons now — the artist picks a different cloud TYPE, the type they
         // already picked is edited to name a different volume, or the volume itself is re-baked and
-        // hot-reloaded. A flag would answer none of them. Both lookups are hash-map probes against a
+        // hot-reloaded. A flag would answer none of them. Every lookup is a hash-map probe against a
         // handle; they are not worth a cache that can be wrong.
         //
         // THE VOLUME COMES THROUGH THE TYPE, which is the one structural change T1 made to this path: the
         // character of a cloud's edge is a property of what kind of cloud it is, so the type names it and
         // the layer does not. An empty slot on either side lands on the built-in default volume.
         //
-        // ONE VOLUME FOR THE WHOLE LAYER, TAKEN FROM THE FIRST SLOT, AND THAT IS A LIMIT RATHER THAN A
-        // DESIGN — it is stated here so the next person meets it in the code and not in a frame. There is
-        // one `sampler3D` on the march, so four types in one sky share one volume, and a Cirrus in slot 2
-        // beside a Cumulus in slot 1 is cut from the cumulus' volume. Two things make it survivable and
-        // neither makes it right: the per-species DetailCharacter already chooses between the volume's
-        // wispy and billowy PAIRS, which is most of what a type's edge is; and the quantile map that makes
-        // `Coverage` mean one fraction of sky is calibrated to one distribution, so four volumes in one
-        // layer would need four calibrations before they meant anything. Lifting it is a sampler array on
-        // the march and a fetch indexed by the winning slot — a contained change, and not this task's.
-        Assets::AssetHandle firstType = m_Data.CloudType1;
-        if ( firstType == Assets::AssetHandle::Null() )
-            firstType = m_Data.CloudType2;
-        if ( firstType == Assets::AssetHandle::Null() )
-            firstType = m_Data.CloudType3;
-        if ( firstType == Assets::AssetHandle::Null() )
-            firstType = m_Data.CloudType4;
+        // ONE VOLUME PER SPECIES, AND THIS FUNCTION USED TO TAKE THE FIRST NON-EMPTY SLOT'S AND GIVE IT TO
+        // THE WHOLE LAYER. That was the programme's last recorded debt, and it was a dead setting: three
+        // of a layer's four slots could name a volume the frame never read, silently, while the Cloud Type
+        // panel's own tooltip promised the opposite. What paid for it is four descriptors instead of one —
+        // and they cost nothing in memory, because Assets::AssetPreloader uploads every `.dcnv` in the
+        // project at startup whatever any scene names.
+        //
+        // THE HANDLES ARE THE SPECIES' AND NOT THE SLOTS', which matters when a layer's filled slots have
+        // holes in them: ResolveSpecies has already compacted slot 3 down to species 1, and the march
+        // indexes SpeciesNoise by the same compacted number. Two statements of that compaction is exactly
+        // the defect this task found in the code it replaced.
+        Assets::AssetHandle perSpecies[kCloudSpeciesSlots] = {};
 
-        Image3D* volume =
-             service->Get( Runtime::ResourceRegistry::GetCloudTypeService()->GetNoiseVolume( firstType ) );
-        if ( !volume )
+        const uint32_t species = std::min( speciesCount, kCloudSpeciesSlots );
+        for ( uint32_t k = 0; k < species; ++k )
+            perSpecies[k] = types->GetNoiseVolume( handles[k] );
+
+        m_NoiseSlots  = ResolveCloudNoiseVolumes( perSpecies, species );
+        m_NoiseNeeded = m_NoiseSlots.DistinctCount;
+
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
         {
-            // The service has already logged which volume is missing and why. Latched so a scene with a
-            // broken reference does not print once per frame forever.
-            if ( !m_NoiseFailed )
+            Image3D* volume = service->Get( m_NoiseSlots.Volume[slot] );
+            if ( !volume )
             {
-                m_NoiseFailed = true;
-                LOG_ERROR( "[Clouds] No noise volume could be resolved for this layer; the clouds will not "
-                           "render for this view until one is registered." );
+                // The service has already logged which volume is missing and why. Latched so a scene with a
+                // broken reference does not print once per frame forever.
+                if ( !m_NoiseFailed )
+                {
+                    m_NoiseFailed = true;
+                    LOG_ERROR( "[Clouds] No noise volume could be resolved for slot {} of this layer (of {} "
+                               "distinct volumes over {} species); the clouds will not render for this view "
+                               "until one is registered.",
+                               slot, m_NoiseNeeded, species );
+                }
+                return false;
             }
-            return false;
+
+            m_NoiseVolume[slot] = volume;
         }
 
-        // Cleared as soon as a volume does resolve: the failure above is a state of the SCENE, not of this
+        // Cleared as soon as the volumes do resolve: the failure above is a state of the SCENE, not of this
         // renderer, and dropping a project's clouds for the rest of the session because one scene was
         // opened with a stale reference is the kind of latch that reads as a broken build.
         m_NoiseFailed = false;
 
-        m_NoiseVolume = volume;
         return true;
     }
 
@@ -1075,19 +1095,21 @@ namespace Desert::Graphic::System
                                   HalfExtent( target->GetFramebufferHeight() ) ) )
             return;
 
-        if ( !EnsureNoiseVolume() )
-            return;
-
-        if ( !EnsureModellingVolume() )
-            return;
-
         // RESOLVED AGAIN RATHER THAN CACHED FROM EnsureModellingVolume. Two hash-map probes per slot
         // against handles that have not moved is not worth a member that can disagree with the volume it
         // was built beside — and the one thing that must not diverge is exactly the set whose channels the
         // volume carries.
+        //
+        // AND IT IS RESOLVED BEFORE THE NOISE, because the volumes a layer binds are named by its TYPES.
         CloudTypeShape      shapes[kCloudSpeciesSlots]{};
         Assets::AssetHandle handles[kCloudSpeciesSlots]{};
         const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
+
+        if ( !EnsureNoiseVolumes( handles, speciesCount ) )
+            return;
+
+        if ( !EnsureModellingVolume() )
+            return;
 
         // THE SAME CEILING THE SHADOW MAP'S BLOCK GOT, from the same one call, because the two passes march
         // the same field and a shadow ray of two different lengths in one frame is the class of
@@ -1096,7 +1118,7 @@ namespace Desert::Graphic::System
         const CloudGpuPayload   payload =
              PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
                               CloudRegionBinding{ m_ModellingOriginKm, m_ModellingParams.RegionSizeKm },
-                              quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor );
+                              quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor, m_NoiseSlots );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         // Slot A. Rebuilt here rather than reused from the shadow map's call: the two dispatches sit on
@@ -1123,7 +1145,9 @@ namespace Desert::Graphic::System
         // layout is not legal for a combined image sampler, and SetInput binds the tracked layout
         // verbatim.
         renderer.ComputeImageBeginRead( depthImage );
-        renderer.ComputeImageBeginRead( m_NoiseVolume );
+        // Only the DISTINCT volumes, for the reason the shadow pass gives at its own copy of this loop.
+        for ( uint32_t slot = 0; slot < m_NoiseNeeded; ++slot )
+            renderer.ComputeImageBeginRead( m_NoiseVolume[slot] );
         renderer.ComputeImageBeginRead( m_ModellingVolume.get() );
         if ( m_AuthoredAtlas )
             renderer.ComputeImageBeginRead( m_AuthoredAtlas );
@@ -1134,7 +1158,11 @@ namespace Desert::Graphic::System
         m_MarchPipeline->SetOutput( kCloudGuideOutputBinding, m_TraceGuideImage.get(), 0 );
         m_MarchPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
         m_MarchPipeline->SetInput( kCloudSceneDepthBinding, depthImage );
-        m_MarchPipeline->SetInput( kCloudNoiseBinding, m_NoiseVolume );
+        // ALL FOUR, always, whatever the layer needs — an unbound sampler is an invalid descriptor set and
+        // this backend answers one by skipping the dispatch. Slots past the distinct count repeat slot 0's
+        // image, which is what ResolveCloudNoiseVolumes filled them with.
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+            m_MarchPipeline->SetInput( kCloudNoiseBindings[slot], m_NoiseVolume[slot] );
         m_MarchPipeline->SetInput( kCloudModellingBinding, m_ModellingVolume.get() );
 
         // ALWAYS bound, even when the payload's gate says it will not be read: a declared sampler with no
@@ -1186,7 +1214,8 @@ namespace Desert::Graphic::System
         if ( m_AuthoredAtlas )
             renderer.ComputeImageEndRead( m_AuthoredAtlas );
         renderer.ComputeImageEndRead( m_ModellingVolume.get() );
-        renderer.ComputeImageEndRead( m_NoiseVolume );
+        for ( uint32_t slot = m_NoiseNeeded; slot-- > 0; )
+            renderer.ComputeImageEndRead( m_NoiseVolume[slot] );
         renderer.ComputeImageEndRead( depthImage );
 
         // S2 — THE TEMPORAL RECONSTRUCTION. The slot written alternates with the frame index, so the one

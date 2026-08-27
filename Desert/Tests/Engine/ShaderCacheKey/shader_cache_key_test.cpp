@@ -186,6 +186,36 @@ namespace
                                                      : ShaderReflection::BuildLayoutBindings( it->second );
     }
 
+    /**
+     * The DECLARED SIZE of a storage block, in bytes, as the compiled SPIR-V says it is.
+     *
+     * WHY THIS EXISTS BESIDE ComputeSetZero, which already reflects the same module: the descriptor list
+     * says a storage buffer is bound at a slot and says NOTHING about what is inside it. A parameter block
+     * has two statements — a `struct` in C++ and a `layout(std430)` in GLSL — and every member after a
+     * divergence is read from the wrong offset. That does not look like a bug; it looks like the clouds
+     * being badly tuned, which is the sentence CloudPayload.hpp opens with.
+     *
+     * Returns 0 when the block is absent, which every caller treats as a failure rather than as a size.
+     */
+    uint32_t ComputeStorageBlockBytes( const std::filesystem::path& shaderFile, uint32_t binding )
+    {
+        const std::string source = StageSource( shaderFile, ShaderStage::Compute );
+        const auto        spirv  = CompileStage( source, shaderFile, shaderc_compute_shader );
+        if ( spirv.empty() )
+            return 0u;
+
+        ShaderResource::ReflectionData data;
+        const auto diagnostics = ShaderReflection::ReflectStage( spirv, ShaderStage::Compute, data );
+        EXPECT_TRUE( diagnostics.empty() ) << ( diagnostics.empty() ? "" : diagnostics.front() );
+
+        const auto set = data.ShaderDescriptorSets.find( 0 );
+        if ( set == data.ShaderDescriptorSets.end() )
+            return 0u;
+
+        const auto block = set->second.StorageBuffers.find( binding );
+        return block == set->second.StorageBuffers.end() ? 0u : block->second.Size;
+    }
+
     bool HasBinding( const std::vector<VkDescriptorSetLayoutBinding>& bindings, uint32_t binding,
                      VkDescriptorType type )
     {
@@ -372,7 +402,7 @@ TEST_F( ShaderRootFixture, TheDistantSkyLightDeclaresFourDescriptorsInSetZero )
     EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // multi-scatter LUT
 }
 
-TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresSixDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresNineDescriptorsInSetZero )
 {
     // THE PRODUCER OF THE CLOUD SHADOW MAP, and the reason it is pinned here rather than trusted: its
     // inputs are bound by NUMBER and not by reflection (ComputePipeline::SetInput takes the binding
@@ -383,13 +413,26 @@ TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresSixDescriptorsInSetZero )
     // The inputs are DELIBERATELY the march's own slot numbers — one vocabulary for one field — which is
     // why 3, 7, 8 and 9 are occupied and 1, 2, 4, 5, 6 are not.
     //
-    // SIX SINCE SLOT A, and the last two are the ones a reader would not expect on a SHADOW pass: a hero
+    // SIX SINCE SLOT A, and two of those are the ones a reader would not expect on a SHADOW pass: a hero
     // cloud shades the ground under it because it IS the cloud field, so the shadow march samples the
     // sculpted body through the same instance buffer and the same volume the view march does. Nothing was
     // added to the deferred pass to make that happen.
+    //
+    // NINE SINCE PHASE NV, and the three that arrived are noise volumes 1, 2 and 3. A layer carries four
+    // cloud types and a type names its own volume; binding one of them was the programme's last recorded
+    // debt and a dead setting in three slots of four. THE SHADOW PASS TAKES ALL FOUR TOO, and that is the
+    // relation worth pinning here rather than the count: a cirrus eroded by the fine volume for the eye
+    // and by the default one for the shadow map would be two different clouds in one frame.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudShadowMap.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 6u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 9u );
+
+    for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+    {
+        EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowNoiseBindings[slot],
+                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
+             << "the shadow pass does not declare noise volume " << slot;
+    }
 
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudShadowOutputBinding,
                              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) ); // the triple it writes
@@ -405,7 +448,7 @@ TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresSixDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
 }
 
-TEST_F( ShaderRootFixture, TheCloudMarchDeclaresTenDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheCloudMarchDeclaresThirteenDescriptorsInSetZero )
 {
     // THE VIEW MARCH, pinned on the same terms and for the same reason, and it was NOT pinned before slot
     // A landed — which is precisely why it is worth doing now: two of its ten descriptors are new, both
@@ -413,9 +456,31 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresTenDescriptorsInSetZero )
     // it. An unbound sampler is an invalid descriptor set, and this backend answers an invalid set by
     // silently skipping the dispatch: every cloud in the frame would vanish with nothing in the log.
     // That failure has happened in this subsystem before, which is what makes a count a useful assertion.
+    //
+    // THIRTEEN SINCE PHASE NV. The three that arrived are noise volumes 1, 2 and 3, and they are bound on
+    // exactly the terms the note above describes: ALWAYS, even when the layer needs one volume, because
+    // Graphic::ResolveCloudNoiseVolumes fills the unused slots with slot 0's image rather than leaving
+    // them empty. They cost nothing in memory — Assets::AssetPreloader uploads every `.dcnv` in the
+    // project whatever any scene names — and they are what makes a type's own volume reach the frame.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 10u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 13u );
+
+    for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+    {
+        EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudNoiseBindings[slot],
+                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
+             << "the march does not declare noise volume " << slot;
+    }
+
+    // AND THE TWO PASSES USE ONE VOCABULARY FOR ONE FIELD. Stated as an assertion rather than as an alias
+    // in a header nobody re-reads: the shadow map binds by number too, and a march that read volume 2 from
+    // descriptor 11 while the shadow pass read it from 12 would give a cloud a shadow cut from a different
+    // noise, which is not an error anywhere — it is a shadow that does not fit its cloud.
+    for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+    {
+        EXPECT_EQ( Desert::Graphic::kCloudNoiseBindings[slot], Desert::Graphic::kCloudShadowNoiseBindings[slot] );
+    }
 
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudOutputBinding,
                              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) ); // the scatter target
@@ -436,6 +501,35 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresTenDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the hero cloud instances
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAuthoredAtlasBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
+}
+
+TEST_F( ShaderRootFixture, TheCloudParameterBlockIsTheSameNumberOfBytesOnBothSidesOfTheWire )
+{
+    // THE RELATION THE static_asserts IN CloudPayload.hpp CANNOT REACH. They pin the C++ struct's offsets
+    // against themselves, which catches half a move inside one file and nothing at all about the GLSL
+    // block that reads those bytes — and the two are edited in different files, in different languages, by
+    // whoever adds a parameter. A member added on one side only shifts every member after it, and the
+    // symptom is not an error: it is a sky that looks badly tuned.
+    //
+    // IT IS THE SIZE AND NOT THE OFFSETS, and the difference is what spirv-cross gives for a STORAGE block
+    // — VulkanShaderReflection fills member offsets for uniform buffers and only the declared size for
+    // storage buffers, and this block is a storage buffer. The size is the weaker statement of the two and
+    // it is the one available without changing the engine's reflection, which is another task's file. It
+    // catches exactly the failure this phase could have introduced: SpeciesNoise added to one side only.
+    //
+    // BOTH PASSES, because both include Common/CloudParams.glslh and both are handed the SAME bytes by
+    // VolumetricCloudRenderer — the shadow map's block and the march's block are one struct written twice.
+    for ( const char* shader : { "Clouds/CloudRaymarch.shader", "Clouds/CloudShadowMap.shader" } )
+    {
+        const uint32_t bytes =
+             ComputeStorageBlockBytes( ShaderPath( shader ), Desert::Graphic::kCloudParamsBinding );
+
+        EXPECT_GT( bytes, 0u ) << shader << " declares no storage block at the cloud parameter binding";
+        EXPECT_EQ( bytes, sizeof( Desert::Graphic::CloudGpuPayload ) )
+             << shader << " reads a parameter block of " << bytes << " bytes where Graphic::CloudGpuPayload "
+             << "is " << sizeof( Desert::Graphic::CloudGpuPayload )
+             << " — every member after the divergence is read from the wrong offset";
+    }
 }
 
 TEST_F( ShaderRootFixture, TheDeferredLightingPassDeclaresSeventeenDescriptorsInSetZero )

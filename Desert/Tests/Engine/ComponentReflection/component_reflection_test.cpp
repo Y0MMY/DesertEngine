@@ -989,6 +989,96 @@ TEST( VolumetricCloudPayload, TheTypesMatterAndEdgeReachTheGpuAsProductsOfTheLay
     EXPECT_LT( icePayload.SpeciesEdge[0].w, stormPayload.SpeciesEdge[0].w );
 }
 
+TEST( VolumetricCloudPayload, TheNoiseVolumesAreDeduplicatedAndEverySlotStaysBindable )
+{
+    // THE MAPPING THE RENDERER BINDS BY AND THE PACKER NUMBERS BY, and the only reason it is a function
+    // rather than two loops is that those two must not disagree: if the images were bound in one order
+    // and indexed in another, every cloud in the sky would be eroded by the wrong volume with nothing in
+    // the log. Pure, so this suite can drive it without a device.
+    using Desert::Assets::AssetHandle;
+    using Desert::Graphic::kCloudSpeciesSlots;
+    using Desert::Graphic::ResolveCloudNoiseVolumes;
+
+    const AssetHandle none = AssetHandle::Null();
+    const AssetHandle fine{ 111u };
+    const AssetHandle other{ 222u };
+
+    // ONE VOLUME BETWEEN FOUR SPECIES — the state of every scene in the repository, because eight of the
+    // nine shipped types name no volume of their own. It must resolve to ONE slot and to {0,0,0,0}: that
+    // is what makes the march's four-way select uniform across the wave and therefore free.
+    {
+        const AssetHandle all[kCloudSpeciesSlots] = { none, none, none, none };
+        const auto        resolved                = ResolveCloudNoiseVolumes( all, kCloudSpeciesSlots );
+
+        EXPECT_EQ( resolved.DistinctCount, 1u );
+        for ( uint32_t k = 0; k < kCloudSpeciesSlots; ++k )
+        {
+            EXPECT_EQ( resolved.SlotOfSpecies[k], 0u ) << k;
+            EXPECT_EQ( resolved.Volume[k], none ) << "slot " << k << " is not bindable";
+        }
+    }
+
+    // A NULL HANDLE IS A VALUE AND NOT A MISSING ONE. Two types that both name nothing share a slot for
+    // the same reason two that name the same file do — otherwise the commonest layer in the project would
+    // burn four descriptors and four branches on one image.
+    {
+        const AssetHandle mixed[kCloudSpeciesSlots] = { none, fine, none, fine };
+        const auto        resolved                  = ResolveCloudNoiseVolumes( mixed, kCloudSpeciesSlots );
+
+        EXPECT_EQ( resolved.DistinctCount, 2u );
+        EXPECT_EQ( resolved.SlotOfSpecies[0], 0u );
+        EXPECT_EQ( resolved.SlotOfSpecies[1], 1u );
+        EXPECT_EQ( resolved.SlotOfSpecies[2], 0u );
+        EXPECT_EQ( resolved.SlotOfSpecies[3], 1u );
+        EXPECT_EQ( resolved.Volume[0], none );
+        EXPECT_EQ( resolved.Volume[1], fine );
+        // The two slots nobody asked for still hold a real image, which is the difference between an
+        // unused descriptor and an INVALID descriptor set — and this backend answers an invalid set by
+        // skipping the dispatch, so the clouds would vanish with nothing in the log.
+        EXPECT_EQ( resolved.Volume[2], none );
+        EXPECT_EQ( resolved.Volume[3], none );
+    }
+
+    // AND THE INDEX THE MARCH READS IS THE ONE THIS PRODUCED. The packer is the other half of the wire;
+    // asserting the resolver alone would leave the two free to drift, which is the defect class this whole
+    // function exists to close.
+    {
+        const AssetHandle mixed[kCloudSpeciesSlots] = { other, fine, other, none };
+        const auto        resolved                  = ResolveCloudNoiseVolumes( mixed, kCloudSpeciesSlots );
+
+        EXPECT_EQ( resolved.DistinctCount, 3u );
+
+        Desert::Graphic::CloudTypeShape shapes[kCloudSpeciesSlots];
+        for ( uint32_t k = 0; k < kCloudSpeciesSlots; ++k )
+            shapes[k] = Desert::Assets::CloudTypeDefaultShape();
+
+        Desert::ECS::VolumetricCloudData layer;
+        Desert::Graphic::AtmosphereEnv   atmosphere;
+
+        const auto payload = Desert::Graphic::PackCloudParams(
+             layer, shapes, kCloudSpeciesSlots, atmosphere, glm::vec3( 0.0f ),
+             Desert::Graphic::CloudRegionBinding{}, Desert::ECS::kCloudLightMarchMaxSamples, 0.0f, resolved );
+
+        for ( uint32_t k = 0; k < kCloudSpeciesSlots; ++k )
+        {
+            EXPECT_FLOAT_EQ( payload.SpeciesNoise[static_cast<int>( k )],
+                             static_cast<float>( resolved.SlotOfSpecies[k] ) )
+                 << "species " << k
+                 << " reaches the march pointing at a different volume from the one the "
+                    "renderer bound for it";
+        }
+    }
+
+    // A LAYER WITH NO SPECIES AT ALL still binds one volume, because the alternative is an invalid
+    // descriptor set. The packer is written to be correct when its caller has checked nothing.
+    {
+        const auto resolved = ResolveCloudNoiseVolumes( nullptr, 0u );
+        EXPECT_EQ( resolved.DistinctCount, 1u );
+        for ( uint32_t k = 0; k < kCloudSpeciesSlots; ++k )
+            EXPECT_EQ( resolved.SlotOfSpecies[k], 0u ) << k;
+    }
+}
+
 // THE TEST THAT STOOD HERE WENT WITH THE THING IT MEASURED.
 //
 // `EachSpeciesGetsItsOwnPlacementFieldAndTheWindIsItsAxis` asserted the other half of D-14 on the block

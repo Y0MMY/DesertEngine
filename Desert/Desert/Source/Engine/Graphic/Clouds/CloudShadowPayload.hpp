@@ -106,8 +106,14 @@ namespace Desert::Graphic
     // CLOUD_PARAMS_BINDING inside Common/CloudParams.glslh, which both shaders include.
     inline constexpr uint32_t kCloudShadowOutputBinding  = 0; // the RGBA32F triple this pass writes
     inline constexpr uint32_t kCloudShadowParamsBinding  = kCloudParamsBinding;
-    inline constexpr uint32_t kCloudShadowNoiseBinding   = kCloudNoiseBinding;
+    inline constexpr uint32_t kCloudShadowNoiseBinding     = kCloudNoiseBinding;
     inline constexpr uint32_t kCloudShadowModellingBinding = kCloudModellingBinding;
+
+    /// All FOUR of the march's noise slots, because a cloud shades the ground with the edge it actually
+    /// has: a cirrus eroded by the fine volume for the eye and by the default one for the shadow map would
+    /// be two different clouds in one frame. The same array, aliased rather than restated — a second list
+    /// of four numbers is the two-statements-of-one-fact defect with four chances to make it.
+    inline constexpr const uint32_t ( &kCloudShadowNoiseBindings )[kCloudSpeciesSlots] = kCloudNoiseBindings;
 
     /**
      * The shadow map's projection for this frame.
