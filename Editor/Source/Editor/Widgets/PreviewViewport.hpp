@@ -126,9 +126,11 @@ namespace Desert::Editor
         // went blank. It also was not worth it — the second scene render measured ~6% of the frame, while
         // the editor's real cost at the time was the Logs panel rebuilding its row list per frame.
         // Anything reviving this must first make the last rendered image persist across skipped frames.
-        void RequestRender()
-        {
-        }
+        //
+        // What the revert left behind was a RequestRender() with an empty body and four callers marking the
+        // moments the cached image went stale — a dirty flag for a cache that no longer exists. Removed:
+        // five deletions, no behaviour change, because there was no behaviour. The knowledge above is worth
+        // keeping; a function that performs it is not.
 
         uint32_t m_Width = 0, m_Height = 0;
     };

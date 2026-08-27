@@ -2,6 +2,9 @@
 
 #include <Editor/Widgets/ThumbnailCache.hpp>
 
+#include <Engine/Core/EngineContext.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>
+
 #include <Common/Core/Logger.hpp>
 
 #include <filesystem>
@@ -15,6 +18,19 @@ namespace Desert::Editor
         // never registers — and retrying it forever would keep the queue permanently busy. Generous enough
         // that a slow first-time shader compile is not mistaken for a failure.
         constexpr int kInFlightGiveUpTicks = 240;
+
+        // How long the queue must stay empty before the renderer — and with it one of the six renderer
+        // slots — is given back. ~5 s at 60 fps.
+        //
+        // The two costs it sits between are not symmetric, which is why it is generous rather than eager.
+        // Re-creating the renderer is a device-idle wait plus a full framebuffer set, and requests arrive in
+        // bursts as an asset grid scrolls, so a short delay would tear the renderer down and build it again
+        // between two rows of the same folder — a visible hitch, repeatedly, to reclaim a slot nobody wanted
+        // in that second. Holding it costs nothing at all until a SIXTH surface is opened, and the surfaces
+        // that compete for slots (a scene view, the material editor, the photogrammetry preview) are opened
+        // by hand, seconds apart. Five seconds is past any scroll burst and far inside any two deliberate
+        // clicks.
+        constexpr int kIdleTicksBeforeRelease = 300;
     } // namespace
 
     ThumbnailService& ThumbnailService::Get()
@@ -76,6 +92,25 @@ namespace Desert::Editor
         // Nothing to preview this session -> never pay for the renderer (it owns a full SceneRenderer).
         if ( m_Queue.empty() && !m_Renderer )
             return;
+
+        // Idle for long enough: hand the renderer slot back. Counted here rather than at the point the last
+        // capture finished, because "the queue drained" and "no panel has asked for anything since" are
+        // different facts and only the second one means the service is done.
+        if ( m_Renderer && m_Queue.empty() && m_InFlight.empty() && !m_Renderer->HasPending() )
+        {
+            if ( ++m_IdleTicks >= kIdleTicksBeforeRelease )
+            {
+                // ~AssetThumbnailRenderer idles the device and releases the scene before the renderer, which
+                // is what returns the slot.
+                m_Renderer.reset();
+                m_IdleTicks = 0;
+                LOG_INFO( "[Thumbnails] idle for {} frames — renderer released ({}/{} renderer slots in use).",
+                          kIdleTicksBeforeRelease, Graphic::SceneRenderer::GetLiveRendererCount(),
+                          EngineContext::kMaxRendererSlots );
+            }
+            return;
+        }
+        m_IdleTicks = 0;
 
         if ( !m_Renderer )
             m_Renderer = std::make_unique<AssetThumbnailRenderer>();

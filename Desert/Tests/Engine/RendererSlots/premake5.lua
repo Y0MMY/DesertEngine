@@ -20,6 +20,11 @@ project(test_name)
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+        -- <Editor/Core/SceneViewIdentity.hpp>. The editor is where slots are opened and closed, and the
+        -- naming of an open scene view is the half of "close a view" that a slot count cannot check:
+        -- returning the slot while every surviving viewport's callback points at the wrong document is a
+        -- green sweep and a broken editor. Header-only, no ImGui, nothing to link.
+        "%{wks.location}/Editor/Source",
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do

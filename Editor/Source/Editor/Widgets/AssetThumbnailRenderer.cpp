@@ -17,6 +17,16 @@
 
 namespace Desert::Editor
 {
+    AssetThumbnailRenderer::~AssetThumbnailRenderer()
+    {
+        if ( !m_Inited )
+            return;
+
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+        m_Scene.reset();
+        m_Renderer.reset();
+    }
+
     void AssetThumbnailRenderer::EnsureInit()
     {
         if ( m_Inited )

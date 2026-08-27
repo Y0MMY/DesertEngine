@@ -266,6 +266,7 @@ namespace Desert::Editor
         CancelJob();
         if ( m_Worker.joinable() )
             m_Worker.join();
+        ReleasePreview();
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -639,24 +640,61 @@ namespace Desert::Editor
         skyC.RequestBake         = true;
 
         m_PreviewInit = true;
+
+        // A rebuild after ReleasePreview starts with an empty target, so the mesh the user was looking at
+        // has to be put back. Without this, closing and reopening the panel showed a blank pane with a
+        // reconstructed model still selected — which reads as the reconstruction having been lost.
+        if ( static_cast<uint64_t>( m_PreviewMesh ) != 0 )
+            ApplyPreviewMesh();
+    }
+
+    void PhotogrammetryPanel::ReleasePreview()
+    {
+        if ( !m_PreviewInit )
+            return;
+
+        // The last frame this recorded into may still be executing against the preview's pipelines,
+        // framebuffers and descriptor pools. Idle, then release the scene before the renderer that owns its
+        // passes — whose destructor is what hands the renderer slot back
+        // (Engine/Core/RendererSlotPool.hpp). Same order as ~PreviewViewport, which is the pattern this
+        // editor's preview surfaces are destroyed by.
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+        m_PreviewTarget = ECS::Entity();
+        m_PreviewScene.reset();
+        m_PreviewRenderer.reset();
+        m_PreviewInit = false;
+        m_PreviewW    = 0;
+        m_PreviewH    = 0;
+    }
+
+    void PhotogrammetryPanel::OnPreUpdate()
+    {
+        // Hidden or closed: give the slot back. This panel is opened rarely and left closed for whole
+        // sessions, so a slot it never returned was a permanent tax on every other preview surface.
+        if ( !m_SowPanel )
+            ReleasePreview();
     }
 
     void PhotogrammetryPanel::SetPreviewMesh( const Assets::AssetHandle& mesh )
     {
         m_PreviewMesh = mesh;
         EnsurePreview();
+        ApplyPreviewMesh();
+    }
 
+    void PhotogrammetryPanel::ApplyPreviewMesh()
+    {
         auto& smc = m_PreviewTarget.GetComponent<ECS::StaticMeshComponent>();
         smc.RuntimeMesh.reset();
         smc.Primitive.reset();
         smc.RuntimeMaterialInstances.clear();
         smc.MaterialSlots.clear();
-        smc.MeshHandle = mesh;
+        smc.MeshHandle = m_PreviewMesh;
 
         // Center + scale the mesh to fill the fixed preview camera (which sits at ~distance 8.66).
         glm::vec3 center( 0.0f );
         float     extent = 1.0f;
-        if ( auto* m = Runtime::ResourceRegistry::GetMeshService()->Get( mesh ) )
+        if ( auto* m = Runtime::ResourceRegistry::GetMeshService()->Get( m_PreviewMesh ) )
         {
             glm::vec3 mn( 1e9f ), mx( -1e9f );
             for ( const auto& sm : m->GetSubmeshes() )
