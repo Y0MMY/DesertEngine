@@ -5,7 +5,8 @@
 #include <Engine/ECS/Components.hpp>
 #include <functional>
 #include <Engine/Core/Scene.hpp>
-#include <unordered_map>
+#include <Engine/Runtime/Factory/PrefabFactory.hpp>
+#include <unordered_set>
 
 namespace Desert::Assets
 {
@@ -90,71 +91,39 @@ namespace Desert::Assets
         m_IsLoaded = true;
     }
 
-    ECS::Entity PrefabAsset::Instantiate( Core::Scene* scene, const AssetManager& assetManager, const glm::vec3* position ) const
+    // Placing an instance in the world. The BUILDING of the instance is not here and must not be: it is
+    // PrefabFactory::Instantiate, and this used to be a second copy of it that had drifted in three ways at
+    // once — it resolved duplicate ids the other way round (`insert` against the factory's `operator[]`),
+    // it ignored PrefabPath entirely so a prefab nested inside a prefab silently did not appear, and it
+    // guessed the root by looking for the first record with no `parent`. That guess is wrong for every
+    // prefab cut from an entity that HAD a parent: the first record then carries a parent id naming an
+    // entity outside the file, no record is parentless at all, and the function returned a null entity
+    // while leaving its entities in the scene — the editor's "Instantiate Prefab" appeared to do nothing.
+    // The factory takes the first record, which is the entity the prefab was cut from by construction.
+    //
+    // Everything this adds over the factory is the placement: the position argument the Lua binding and the
+    // editor's drag-and-drop use.
+    ECS::Entity PrefabAsset::Instantiate( Core::Scene* scene, const AssetManager& assetManager,
+                                          const glm::vec3* position ) const
     {
-        if ( m_EntityData.empty() )
+        if ( !scene || m_EntityData.empty() )
             return {};
 
-        std::unordered_map<Common::UUID, ECS::Entity> entityMap;
-        ECS::Entity rootEntity;
-
-        // The entity each record became, aligned with m_EntityData — see PrefabFactory::Instantiate for why
-        // the second pass must not re-derive this from the record.
-        std::vector<ECS::Entity> created;
-        created.reserve( m_EntityData.size() );
-
-        for ( const auto& entityData : m_EntityData )
-        {
-            ECS::Entity newEntity =
-                 scene->CreateEntityWithUUID( Common::UUID::Generate(), entityData.Tag.value_or( "Entity" ) );
-            created.push_back( newEntity );
-
-            if ( entityData.id.has_value() && !entityData.id->IsNull() )
-                entityMap.insert( { *entityData.id, newEntity } );
-        }
-
-        for ( size_t i = 0; i < m_EntityData.size(); ++i )
-        {
-            const auto& entityData = m_EntityData[i];
-            ECS::Entity newEntity  = created[i];
-
-            Core::Serialize::EntitySerializer::DeserializeEntity( entityData, newEntity, assetManager );
-
-            if ( entityData.parent.has_value() && !entityData.parent->IsNull() )
-            {
-                auto parentIt = entityMap.find( *entityData.parent );
-                if ( parentIt != entityMap.end() )
-                {
-                    scene->Attach( parentIt->second, newEntity );
-                }
-            }
-            else
-            {
-                if ( !rootEntity )
-                {
-                    rootEntity = newEntity;
-                }
-            }
-        }
+        std::unordered_set<Common::UUID> stack;
+        ECS::Entity                      rootEntity =
+             Runtime::Factory::PrefabFactory::Instantiate( *this, *scene, assetManager, stack );
 
         if ( position && rootEntity )
         {
             if ( rootEntity.HasComponent<ECS::TransformComponent>() )
             {
-                auto& tc = rootEntity.GetComponent<ECS::TransformComponent>();
+                auto& tc       = rootEntity.GetComponent<ECS::TransformComponent>();
                 tc.Translation = *position;
             }
             else
             {
                 rootEntity.AddComponent<ECS::TransformComponent>().Translation = *position;
             }
-        }
-
-        // Ensure the root entity is tagged as a prefab instance
-        if ( rootEntity && m_Metadata.Handle )
-        {
-            if ( !rootEntity.HasComponent<ECS::PrefabComponent>() )
-                rootEntity.AddComponent<ECS::PrefabComponent>().Prefab = m_Metadata.Handle;
         }
 
         return rootEntity;

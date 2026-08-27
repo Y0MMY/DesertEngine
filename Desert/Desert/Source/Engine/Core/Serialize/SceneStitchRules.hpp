@@ -30,6 +30,52 @@ namespace Desert::Core::Rules
     // must leave unattached rather than attaching to entity zero.
     inline constexpr size_t kNoSlot = static_cast<size_t>( -1 );
 
+    // THE TWO POLICY DECISIONS, stated once for every caller.
+    //
+    // These were not decisions anybody took: they were whatever container each of the four hand-written
+    // copies of this stitch happened to reach for. The scene loader and PrefabAsset used
+    // `unordered_map::insert` (first claimant keeps the id), PrefabFactory used `operator[]` (last writer
+    // wins), and the editor's snapshot restore keyed idless records under `value_or(Null())`, so every
+    // record without an id collided on the key 0 and two anonymous entities collapsed into one. Nothing
+    // reached any of the four, so the divergence was free to persist. It is decided here instead, once:
+    //
+    // 1. A DUPLICATED ID IS NOT A LOAD FAILURE, AND THE FIRST CLAIMANT KEEPS THE IDENTITY. The record that
+    //    comes second still gets an entity - it is a thing in the file and dropping it would lose geometry
+    //    - but its payload is written onto the claimant, and StitchPlan::Shadowed counts it so the caller
+    //    says so out loud instead of leaving a half-loaded scene to be found in the viewport.
+    //    WHY NOT "LAST WINS": creation order is file order, so first-wins is the only rule under which the
+    //    entity that answers an id is the one a reader of the file would point at, and it is the rule that
+    //    does not depend on how far down the file the duplicate is. WHY NOT A HARD ERROR: these files are
+    //    hand-merged (that is where duplicates come from), and refusing the whole scene over one bad record
+    //    destroys the other several hundred. A named warning costs nothing and loses nothing.
+    //
+    // 2. A RECORD WITHOUT AN ID IS MINTED ONE - it is not corruption. The id is a LINK KEY, not a claim
+    //    that the record is well-formed: EntitySerializer writes one for every entity it has ever
+    //    serialized, so a record without one is a record nobody can point at, which is a legal (if lonely)
+    //    thing to be. Minting makes that exactly what it is - a fresh identity no `parent` field names -
+    //    and it is what makes the snapshot-restore defect unspellable: two anonymous records can no longer
+    //    share a key, because they no longer share an id.
+    //
+    // Both decisions are the SAME for all callers. The only thing a caller chooses is PrefabRecordPolicy.
+
+    // What a record carrying a PrefabPath is, which differs between the two kinds of file these records
+    // live in - and is the one difference this function takes an argument for.
+    enum class PrefabRecordPolicy
+    {
+        // A .desce record naming a prefab file. The entity comes out of THAT file, not this one, so it
+        // cannot be created from the record and takes no part in the stitch: it is listed for the caller
+        // to instantiate afterwards. It answers no parent link, because the loader registers the
+        // instantiated root only after pass 2 - pinned deliberately, see the suite.
+        InstantiatedLater,
+
+        // A record inside a .deprefab (or an editor snapshot) that carries a nested prefab link. Here the
+        // record IS an entity of this file - one that happens to have another prefab hanging under it, or,
+        // in a snapshot, one whose children were captured alongside it. So it is created and stitched like
+        // every other record, and it is still listed, because whoever wants the nested body instantiated
+        // needs to know which slot to hang it off.
+        CreatedInPlace,
+    };
+
     // One entity the loader must create, in creation order.
     struct PlannedEntity
     {
@@ -46,15 +92,24 @@ namespace Desert::Core::Rules
         size_t Parent = kNoSlot; // index into StitchPlan::Created, or kNoSlot when the record names none
     };
 
+    // One record that names a prefab file. Slot is where the stitch put it under CreatedInPlace, and
+    // kNoSlot under InstantiatedLater - so the caller reads the answer instead of re-deriving it from the
+    // policy it passed in, which is the two-places-that-must-agree shape this whole header exists to kill.
+    struct PlannedPrefab
+    {
+        size_t Record = 0;
+        size_t Slot   = kNoSlot;
+    };
+
     struct StitchPlan
     {
-        std::vector<PlannedEntity> Created;       // pass 1, in file order over non-prefab records
+        std::vector<PlannedEntity> Created;       // pass 1, in file order
         std::vector<PlannedLoad>   Loads;         // pass 2, same order and same length as Created
-        std::vector<size_t>        PrefabRecords; // records carrying a PrefabPath, in file order
+        std::vector<PlannedPrefab> PrefabRecords; // records carrying a PrefabPath, in file order
 
         size_t Minted            = 0; // entities whose id was invented because the file did not name one
         size_t Shadowed          = 0; // records whose id was already claimed - their payload lands on the CLAIMANT
-        size_t UnresolvedParents = 0; // records naming a parent no non-prefab record answers to
+        size_t UnresolvedParents = 0; // records naming a parent no stitched record answers to
     };
 
     // Plans the identity stitch for one parsed scene file. PURE - no GPU, no filesystem, no global state.
@@ -69,20 +124,15 @@ namespace Desert::Core::Rules
     // and no parent link pointing at it ever resolved. Here the id is decided once, in Created, and pass 2
     // reads it back rather than deriving it a second time - the defect is not fixed, it is unspellable.
     //
-    // WHY `insert` SEMANTICS ARE PART OF THE RULE. The loader registers each entity with
-    // `unordered_map::insert`, which keeps the FIRST value for a key. So when two records claim one id -
-    // a corrupt or hand-merged file - the second record's payload is written onto the first record's
-    // entity, and the second entity stays bare. That is the behaviour this function reproduces exactly, and
-    // StitchPlan::Shadowed counts it so the loader can say so out loud instead of leaving a silently
-    // half-loaded scene. It is NOT quietly repaired here: changing what a corrupt file loads as is a
-    // decision about scene data, not about testability.
+    // DUPLICATED IDS AND IDLESS RECORDS: see "THE TWO POLICY DECISIONS" above. First claimant keeps the
+    // identity and the shadowed record is counted; a record with no id is minted one.
     //
-    // PREFAB ROOTS ARE PLANNED, NOT STITCHED. A record with a PrefabPath is instantiated from another file
-    // by PrefabFactory and cannot be created from the record alone, so it is only listed. It is also absent
-    // from the id map on purpose: prefab roots are registered by the loader AFTER pass 2, so a plain entity
-    // whose parent is a prefab root does not attach - which is what the loader does today.
+    // @p prefabs says what a PrefabPath record is to this caller - the ONE thing that legitimately differs
+    // between a scene file and a prefab body. Stated explicitly at every call site on purpose: there is no
+    // default, because a default is how the four copies of this loop came to disagree in the first place.
     template <typename MintFn>
-    inline StitchPlan PlanSceneStitch( std::span<const Assets::EntityData> records, MintFn&& mint )
+    inline StitchPlan PlanSceneStitch( std::span<const Assets::EntityData> records, MintFn&& mint,
+                                       PrefabRecordPolicy prefabs )
     {
         StitchPlan plan;
         plan.Created.reserve( records.size() );
@@ -99,11 +149,14 @@ namespace Desert::Core::Rules
         for ( size_t record = 0; record < records.size(); ++record )
         {
             const Assets::EntityData& data = records[record];
-            if ( data.PrefabPath.has_value() )
+            const bool                isPrefab = data.PrefabPath.has_value();
+            if ( isPrefab && prefabs == PrefabRecordPolicy::InstantiatedLater )
             {
-                plan.PrefabRecords.push_back( record );
+                plan.PrefabRecords.push_back( PlannedPrefab{ record, kNoSlot } );
                 continue;
             }
+            if ( isPrefab )
+                plan.PrefabRecords.push_back( PlannedPrefab{ record, plan.Created.size() } );
 
             PlannedEntity created;
             created.Record   = record;

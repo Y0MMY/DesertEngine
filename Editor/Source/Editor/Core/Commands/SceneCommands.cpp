@@ -5,6 +5,7 @@
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/Serialize/EntitySerializer.hpp>
+#include <Engine/Core/Serialize/SceneStitchRules.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
@@ -85,36 +86,80 @@ namespace Desert::Editor::Commands
         // Rebuilds a captured subtree. preserveIds=true (undo of a delete) recreates the exact same
         // UUIDs; false (duplicate) mints fresh ones. In-snapshot parent links are remapped; the root's
         // outer parent is re-attached by UUID if it still exists in the scene. Returns the new root.
+        //
+        // WHICH RECORD BECOMES WHICH ENTITY is Rules::PlanSceneStitch — the same function the scene loader
+        // and the prefab factory plan with. This was the fourth hand-written copy of that stitch and the
+        // one that had drifted furthest: it keyed the map with `ed.id.value_or( Null() )`, so every record
+        // WITHOUT an id landed on the key 0. Two anonymous entities in one snapshot therefore collapsed
+        // into one — the first received the second's components on top of its own, the second was created
+        // and left bare, and any child of the second attached to the first. The plan mints a distinct id
+        // per idless record, so two of them can no longer share a key.
+        //
+        // CreatedInPlace: a snapshot of a prefab instance contains that prefab's children as records of
+        // their own, because CaptureSubtree walks the LIVE subtree. So a record carrying a PrefabPath has
+        // to be rebuilt from the snapshot like any other — instantiating its file again would duplicate
+        // every child the snapshot already holds.
         ECS::Entity RestoreSnapshot( const std::vector<Assets::EntityData>& data, bool preserveIds )
         {
-            std::unordered_map<Common::UUID, ECS::Entity> idMap;
+            using ::Desert::Core::Rules::kNoSlot;
+            using ::Desert::Core::Rules::PlanSceneStitch;
+            using ::Desert::Core::Rules::PrefabRecordPolicy;
 
-            for ( const auto& ed : data )
+            const ::Desert::Core::Rules::StitchPlan plan =
+                 PlanSceneStitch( data, &Common::UUID::Generate, PrefabRecordPolicy::CreatedInPlace );
+
+            // DC §1.4: a snapshot that names one id twice restores as a subtree quietly missing a piece.
+            // (UnresolvedParents is not reported: the root record keeps the `parent` it had in the scene,
+            // which is outside the snapshot by definition — that is the normal case, handled below.)
+            if ( plan.Shadowed > 0 )
             {
-                const Common::UUID original = ed.id.value_or( Common::UUID::Null() );
-                if ( preserveIds && FindEntity( original ) )
-                    continue; // already alive (double-restore guard)
+                LOG_WARN( "[SceneCommands] snapshot restore: {0} of {1} record(s) claim an id another "
+                          "record already claimed; their components are applied to the first claimant and "
+                          "their own entities are left bare.",
+                          plan.Shadowed, data.size() );
+            }
+
+            // The entity each slot became. A slot the double-restore guard finds already alive is filled
+            // with the LIVE entity — children still need something to attach to — but is not written to
+            // again, which is what `restored` marks.
+            std::vector<ECS::Entity> created( plan.Created.size() );
+            std::vector<char>        restored( plan.Created.size(), 0 );
+
+            for ( size_t slot = 0; slot < plan.Created.size(); ++slot )
+            {
+                const Common::UUID original = plan.Created[slot].Id;
+                if ( preserveIds )
+                {
+                    if ( auto alive = FindEntity( original ) )
+                    {
+                        created[slot] = *alive; // already alive (double-restore guard)
+                        continue;
+                    }
+                }
 
                 const Common::UUID newId = preserveIds ? original : Common::UUID::Generate();
-                ECS::Entity        e = s_Scene->CreateEntityWithUUID( newId, ed.Tag.value_or( "Entity" ) );
-                idMap.insert( { original, e } );
+                created[slot]            = s_Scene->CreateEntityWithUUID(
+                     newId, data[plan.Created[slot].Record].Tag.value_or( "Entity" ) );
+                restored[slot] = 1;
             }
 
             ECS::Entity root;
-            for ( const auto& ed : data )
+            for ( const auto& load : plan.Loads )
             {
-                auto it = idMap.find( ed.id.value_or( Common::UUID::Null() ) );
-                if ( it == idMap.end() )
+                if ( !restored[load.Target] )
                     continue;
 
-                ECS::Entity e = it->second;
+                const Assets::EntityData& ed = data[load.Record];
+                ECS::Entity               e  = created[load.Target];
                 ::Desert::Core::Serialize::EntitySerializer::DeserializeEntity( ed, e, *s_AssetManager );
 
-                if ( ed.parent.has_value() && !ed.parent->IsNull() )
+                if ( load.Parent != kNoSlot )
                 {
-                    if ( auto parentIt = idMap.find( *ed.parent ); parentIt != idMap.end() )
-                        s_Scene->Attach( parentIt->second, e ); // in-snapshot child
-                    else if ( auto outer = FindEntity( *ed.parent ) )
+                    s_Scene->Attach( created[load.Parent], e ); // in-snapshot child
+                }
+                else if ( ed.parent.has_value() && !ed.parent->IsNull() )
+                {
+                    if ( auto outer = FindEntity( *ed.parent ) )
                         s_Scene->Attach( *outer, e ); // the root, back onto its original scene parent
                 }
 
