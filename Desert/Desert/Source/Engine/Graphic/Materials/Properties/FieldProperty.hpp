@@ -15,7 +15,18 @@ namespace Desert::Graphic
     public:
         FieldProperty( const ShaderResources::ShaderLayout::ShaderFieldLayout& field ) : m_Field( field )
         {
-            m_DirtyCount.fill( PropertyDirty::DirtyLifetime() );
+            // Born CLEAN, and that is load-bearing rather than tidiness. A field nobody has written has
+            // nothing to say — but while these were born dirty, every uniform block that merely DECLARED
+            // fields reported having some. Material::Bind's generic flush therefore wrote them, which
+            // claimed the block as field-filled, and the engine's own whole-block write of CameraUB,
+            // TimeUB and DirectionLightsUB was refused by name a moment later. Every shader-graph mesh
+            // vanished from the frame while every suite stayed green, because one of them asserted the
+            // defect: "fields are born dirty — if they were not, this guard would be guarding nothing".
+            //
+            // Born-dirty bought nothing anyway: the local data is zeroed below, so flushing an unwritten
+            // field pushed zeroes. Real values arrive through ApplyDefaults and SetParamRaw, and both
+            // WRITE the field, which is what makes it dirty.
+            m_DirtyCount.fill( 0u );
             m_LastCleanFrame.fill( PropertyDirty::kNeverCleaned );
             m_LocalData.Allocate( field.Size );
             // Common::Memory::Buffer::Allocate is a bare `new std::byte[]`, so without this the shadow
