@@ -266,23 +266,7 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanLogicalDevice::~VulkanLogicalDevice()
     {
-        // Static-destruction safety: the app SINGLETON destructs in __cxa_finalize (after main), by
-        // which point unrelated statics — including mutexes Destroy() ends up locking — may already
-        // be gone. An exception escaping a destructor is std::terminate, which the shell reports as
-        // the "Segmentation fault: 11" seen when the Project-Hub-launched editor exits. Swallow and
-        // report: the process is exiting anyway, the OS reclaims everything.
-        try
-        {
-            Destroy();
-        }
-        catch ( const std::exception& e )
-        {
-            std::fprintf( stderr, "[VulkanLogicalDevice] Destroy() threw during teardown: %s\n", e.what() );
-        }
-        catch ( ... )
-        {
-            std::fprintf( stderr, "[VulkanLogicalDevice] Destroy() threw during teardown\n" );
-        }
+        Destroy();
     }
 
     const Engine::DeviceCapabilities& VulkanLogicalDevice::GetCapabilities() const
