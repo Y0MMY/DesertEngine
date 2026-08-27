@@ -617,10 +617,19 @@ namespace Desert::Editor::ShaderGraph
         // shadow variant, and nothing in the engine ever asked for it: no C++ names "<shader>/Depth",
         // and the shadow pass binds its own pipeline. It could not have served even if something had —
         // it declared no fragment stage at all, while a cascade target is a colour R32F attachment that
-        // a shader must WRITE (Shadow.shader writes gl_FragCoord.z), and its vertex read cameraUB, the
-        // camera, rather than the light's matrix. Shadow casting for these materials is handled where it
-        // belongs, by the engine's shadow pipeline over the generic queue (MeshRenderer::RegisterShadowPass);
-        // depth is material-independent, so a per-material depth shader has nothing to contribute.
+        // a shader must WRITE (Shadow.shader writes gl_FragCoord.z).
+        //
+        // This comment used to add "and its vertex read cameraUB, the camera, rather than the light's
+        // matrix". That was WRONG and is corrected rather than deleted, because it invites the wrong
+        // repair: Shadow.shader's own vertex reads the same cameraUB and does the same
+        // Projection * View * Transform, and MaterialShadow::SetLightMatrix writes the LIGHT's matrices
+        // into that block before each cascade draw. Shader text cannot tell a camera from a light here.
+        // What was missing was never the matrix — it was any material that would have fed one to this
+        // pass. Establishing the same three properties on Unlit.shader is what caught it.
+        //
+        // Shadow casting for these materials is handled where it belongs, by the engine's shadow
+        // pipeline over the generic queue (MeshRenderer::RegisterShadowPass); depth is
+        // material-independent, so a per-material depth shader has nothing to contribute.
         out << "}\n";
 
         return Common::MakeSuccess( out.str() );
