@@ -1,6 +1,7 @@
 #include "NodeGraphPanel.hpp"
 
-#include <Editor/Panels/MaterialPreviewPanel.hpp>
+#include <Editor/Core/AssetOpenRequest.hpp>
+#include <Editor/Panels/MaterialEditor/MaterialShaderRebuild.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
@@ -453,14 +454,16 @@ namespace Desert::Editor
 
     void NodeGraphPanel::PublishToPreview()
     {
-        // Tell the preview window to drop the pipelines it built from the OLD modules before showing the
-        // material again. The shader object reloads itself, but pipelines are cached per SceneRenderer and
-        // the hot-reload path only invalidates the main scene's cache — so without this the preview would
-        // keep drawing the previous compile while the viewport drew the new one.
-        MaterialPreviewPanel::RequestShaderRebuilt( m_Doc.Name );
+        // Tell every Material Editor window on this shader to drop the pipelines it built from the OLD
+        // modules. The shader object reloads itself, but pipelines are cached per SceneRenderer and the
+        // hot-reload path only invalidates the main scene's cache — so without this a window would keep
+        // drawing the previous compile while the viewport drew the new one.
+        MaterialShaderRebuild::Publish( m_Doc.Name );
 
+        // Open-or-focus the document for this graph's scratch material. One window per material now, so a
+        // recompile brings the SAME window forward rather than re-pointing a shared one.
         if ( const auto material = EnsurePreviewMaterial(); static_cast<uint64_t>( material ) != 0 )
-            MaterialPreviewPanel::RequestPreview( material );
+            Core::AssetOpenRequests::Request( material, Assets::AssetTypeID::Material );
     }
 
     void NodeGraphPanel::DrawToolbar()
@@ -739,7 +742,7 @@ namespace Desert::Editor
         // MaterialComponent::ShaderName — the shader-OVERRIDE route — which is a different path in
         // MeshRenderer from the one a scene mesh takes. It therefore showed a correct material at times
         // when the scene showed something else (Docs/MaterialEditor/STAGE1_END_TO_END.md). Compile now
-        // publishes to the Material Preview window, which previews a material ASSET through the same
+        // opens a Material Editor window on this graph's material ASSET, which draws it through the same
         // per-slot route the game uses.
         DrawCanvas();
     }

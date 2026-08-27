@@ -7,6 +7,7 @@
 #include "FileExplorerPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
 #include <Editor/Core/SceneOpenRequest.hpp>
+#include <Editor/Panels/MaterialEditor/MaterialDocumentOpen.hpp>
 #include <Editor/Core/AssetFileOps.hpp>
 #include <Editor/Core/AssetReferences.hpp>
 #include <Editor/Panels/NodeGraph/NodeGraphPanel.hpp>
@@ -1999,6 +2000,23 @@ namespace Desert::Editor
             NodeGraphPanel::RequestOpen( entry->AssetPath ); // opens the Node Graph panel with this graph
         else if ( doubleClicked && entry->Type == FileType::Scene )
             Core::SceneOpenRequest::Request( entry->AssetPath ); // same guarded load as a drop / the menu
+        else if ( doubleClicked && entry->Type == FileType::Material )
+        {
+            // One Material Editor window bound to THIS .demat — UE's flow. Opening the same material twice
+            // focuses the window that is already on it; see EditorLayer::ServiceAssetOpenRequests.
+            //
+            // NotAMaterialPath is impossible here by the branch condition and is reported rather than
+            // ignored: the browser has just called this file a material, so the two disagreeing means the
+            // file-type table and the extension the opener checks have drifted apart — and the symptom
+            // would be a double-click that does nothing at all.
+            if ( RequestMaterialDocument( m_AssetManager, entry->AssetPath ) ==
+                 MaterialDocumentRequest::NotAMaterialPath )
+            {
+                LOG_ERROR( "[Assets] '{}' is listed as a material but does not look like one to the Material "
+                           "Editor — nothing opened.",
+                           entry->AssetPath );
+            }
+        }
 
         ImGui::PopID();
         return doubleClicked;

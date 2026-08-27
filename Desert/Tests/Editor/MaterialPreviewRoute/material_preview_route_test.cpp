@@ -154,16 +154,20 @@ TEST_F( MaterialPreviewRoute, PreviewViewportNeverUsesTheShaderOverrideRoute )
             "needs previewing, give PreviewViewport a separate entry point and leave SetMaterial alone.";
 }
 
-// The panel must go through the widget's material entry point rather than growing its own path.
-TEST_F( MaterialPreviewRoute, ThePanelPreviewsAMaterialAsset )
+// The window must go through the widget's material entry point rather than growing its own path.
+//
+// RE-POINTED, NOT WEAKENED. The singleton MaterialPreviewPanel became one MaterialEditorPanel per `.demat`
+// (Docs/MaterialEditor/PLAN_STAGE3_ASSET_DOCUMENTS.md, M1). The route it must take is unchanged and so is
+// every assertion below; only the file that has to take it moved.
+TEST_F( MaterialPreviewRoute, TheWindowPreviewsAMaterialAsset )
 {
-    const std::string code = Code( "Editor/Source/Editor/Panels/MaterialPreviewPanel.cpp" );
+    const std::string code = Code( "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditorPanel.cpp" );
 
     EXPECT_NE( code.find( "SetMaterial" ), std::string::npos )
-         << "MaterialPreviewPanel no longer calls PreviewViewport::SetMaterial. A material editor that "
+         << "MaterialEditorPanel no longer calls PreviewViewport::SetMaterial. A material editor that "
             "previews anything other than the material asset is not previewing what ships.";
     EXPECT_EQ( code.find( "MaterialComponent" ), std::string::npos )
-         << "MaterialPreviewPanel reaches for MaterialComponent, i.e. the shader-override route. See the "
+         << "MaterialEditorPanel reaches for MaterialComponent, i.e. the shader-override route. See the "
             "note on PreviewViewportNeverUsesTheShaderOverrideRoute.";
 }
 
@@ -179,9 +183,19 @@ TEST_F( MaterialPreviewRoute, ThePreviewDropsItsOwnPipelinesOnARecompile )
             "recompile while the viewport drew the new ones.";
 
     const std::string graph = Code( "Editor/Source/Editor/Panels/NodeGraph/NodeGraphPanel.cpp" );
-    EXPECT_NE( graph.find( "RequestShaderRebuilt" ), std::string::npos )
-         << "Compile no longer tells the preview window that the shader was rebuilt, so the window has no "
-            "reason to drop its stale pipelines.";
+    EXPECT_NE( graph.find( "MaterialShaderRebuild::Publish" ), std::string::npos )
+         << "Compile no longer tells the Material Editor windows that the shader was rebuilt, so they have "
+            "no reason to drop their stale pipelines.";
+
+    // And the window has to LISTEN. The publisher and the listener are asserted together because either one
+    // alone is a wire with nothing on the other end -- and one window consuming a shared pending flag is
+    // precisely how the several-windows version of this would go wrong silently.
+    const std::string window = Code( "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditorPanel.cpp" );
+    EXPECT_NE( window.find( "MaterialShaderRebuild::CountFor" ), std::string::npos )
+         << "MaterialEditorPanel no longer reads the rebuild count, so a recompile leaves it drawing the "
+            "shader modules from before the compile while the viewport draws the ones from after.";
+    EXPECT_NE( window.find( "InvalidatePipelines" ), std::string::npos )
+         << "MaterialEditorPanel hears about the rebuild and does nothing with it.";
 }
 
 int main( int argc, char** argv )

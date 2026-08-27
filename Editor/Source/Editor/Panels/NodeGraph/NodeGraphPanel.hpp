@@ -66,11 +66,11 @@ namespace Desert::Editor
         bool                    IsInputPin( uint64_t id ) const;
 
         // Makes sure a material asset exists that uses this graph's shader, and returns its handle. The
-        // preview window is a MATERIAL editor, so a bare shader is not something it can show.
+        // Material Editor is a MATERIAL editor, so a bare shader is not something it can show.
         Assets::AssetHandle EnsurePreviewMaterial();
 
-        // Hand the freshly compiled shader to the Material Preview window: invalidate the pipelines it
-        // cached from the old modules, then point it at this graph's material.
+        // Hand the freshly compiled shader to the Material Editor: tell every window on this shader to drop
+        // the pipelines it cached from the old modules, then open-or-focus this graph's material.
         void PublishToPreview();
 
         std::shared_ptr<Assets::AssetManager> m_AssetManager;

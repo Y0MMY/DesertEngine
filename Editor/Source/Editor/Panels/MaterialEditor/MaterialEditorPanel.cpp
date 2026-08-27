@@ -1,15 +1,13 @@
-#include "MaterialPreviewPanel.hpp"
+#include "MaterialEditorPanel.hpp"
+
+#include "MaterialShaderRebuild.hpp"
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
-#include <Common/Core/Logger.hpp>
-
 #include <algorithm>
-#include <filesystem>
 #include <string>
-#include <vector>
 
 namespace Desert::Editor
 {
@@ -19,12 +17,6 @@ namespace Desert::Editor
 
     namespace
     {
-        // One pending request of each kind is plenty: the last one wins, exactly like
-        // NodeGraphPanel::RequestOpen.
-        Assets::AssetHandle s_PendingMaterial{ static_cast<uint64_t>( 0 ) };
-        bool                s_HasPendingMaterial = false;
-        std::string         s_PendingRebuiltShader;
-
         // The preview renders offscreen at a fixed size. Set ONCE rather than per frame: SceneRenderer's
         // Resize recreates every frame buffer and idles the GPU, so following the ImGui window's size would
         // stall the editor on every drag of the window edge.
@@ -44,34 +36,56 @@ namespace Desert::Editor
             return "Sphere";
         }
 
-        std::string MaterialLabel( const Assets::Asset<Assets::SurfaceMaterialAsset>& asset )
+        // The window's display name is the material's file stem, taken ONCE — the title carries the ImGui
+        // window id (see AssetDocumentTitle) and a title that changed under a live window would orphan its
+        // saved dock entry. The id half is the handle, so the label is free to be a human name without being
+        // load-bearing.
+        std::string MaterialDocumentName( const Assets::AssetHandle&                   material,
+                                          const std::shared_ptr<Assets::AssetManager>& assetManager )
         {
-            if ( !asset )
-                return "<none>";
-            const auto path = asset->GetMetadata().Filepath;
-            return path.empty() ? std::string( "<unnamed>" ) : path.stem().string();
+            if ( assetManager )
+            {
+                if ( auto asset = assetManager->FindByHandle<Assets::SurfaceMaterialAsset>( material ) )
+                {
+                    const auto path = asset->GetMetadata().Filepath;
+                    if ( !path.empty() )
+                        return path.stem().string();
+                }
+            }
+            // Named by handle rather than "Material": two unnamed materials must still read as two windows.
+            return "Material " + std::to_string( static_cast<uint64_t>( material ) );
         }
     } // namespace
 
-    MaterialPreviewPanel::MaterialPreviewPanel( const std::shared_ptr<Assets::AssetManager>& assetManager )
-         : IPanel( "Material Preview", /*showPanel=*/false ), m_AssetManager( assetManager )
+    MaterialEditorPanel::MaterialEditorPanel( const Assets::AssetHandle&                   material,
+                                              const std::shared_ptr<Assets::AssetManager>& assetManager )
+         : IAssetEditorPanel( MaterialDocumentName( material, assetManager ), material,
+                              Assets::AssetTypeID::Material ),
+           m_AssetManager( assetManager )
     {
+        // Start level with the world: a rebuild that happened before this window existed left nothing here to
+        // invalidate, and treating it as pending would drop pipelines that were never built.
+        m_SeenRebuildCount = MaterialShaderRebuild::CountFor( EffectiveShaderName() );
     }
 
-    MaterialPreviewPanel::~MaterialPreviewPanel() = default;
-
-    void MaterialPreviewPanel::RequestPreview( const Assets::AssetHandle& material )
+    // Written out rather than left to the members' reverse-declaration order. The two objects have to go in
+    // a stated order — the UIHelper's descriptor sets reference the preview's images — and a teardown order
+    // that depends on which line a member happens to be declared on is the shape of defect this engine has
+    // paid for in Vulkan lifetimes more than once.
+    MaterialEditorPanel::~MaterialEditorPanel()
     {
-        s_PendingMaterial    = material;
-        s_HasPendingMaterial = true;
+        ReleasePreview();
     }
 
-    void MaterialPreviewPanel::RequestShaderRebuilt( const std::string& shaderName )
+    std::string MaterialEditorPanel::EffectiveShaderName() const
     {
-        s_PendingRebuiltShader = shaderName;
+        if ( !m_AssetManager )
+            return {};
+        auto asset = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() );
+        return asset ? asset->Data().EffectiveShaderName() : std::string{};
     }
 
-    void MaterialPreviewPanel::EnsurePreview()
+    void MaterialEditorPanel::EnsurePreview()
     {
         if ( m_Preview )
             return;
@@ -82,7 +96,7 @@ namespace Desert::Editor
         m_Applied = false; // the new viewport knows nothing about the current material
     }
 
-    void MaterialPreviewPanel::ReleasePreview()
+    void MaterialEditorPanel::ReleasePreview()
     {
         if ( !m_Preview )
             return;
@@ -95,98 +109,51 @@ namespace Desert::Editor
         m_Applied = false;
     }
 
-    void MaterialPreviewPanel::OnPreUpdate()
+    void MaterialEditorPanel::OnPreUpdate()
     {
-        // OnPreUpdate runs for EVERY panel, including hidden ones — that is what makes this the right place
-        // to give the slot back. A panel that only stopped rendering would still hold one of the six.
-        if ( !m_SowPanel )
-        {
-            ReleasePreview();
-            m_DrewThisFrame = false;
-            return;
-        }
-
-        if ( s_HasPendingMaterial )
-        {
-            m_Material           = s_PendingMaterial;
-            s_HasPendingMaterial = false;
-            m_Applied            = false;
-            m_SowPanel           = true;
-        }
-
-        // Opened with nothing to show: pick something rather than presenting a blank window. A material on
-        // a CUSTOM shader is preferred because that is what this window exists for — it is the shader
-        // graph's material editor — and only the standard PBR material otherwise. Deterministic, and the
-        // combo is right there to change it.
-        if ( static_cast<uint64_t>( m_Material ) == 0 && m_AssetManager )
-        {
-            const auto materials = m_AssetManager->FindAllByType<Assets::SurfaceMaterialAsset>();
-            for ( const auto& [handle, asset] : materials )
-            {
-                if ( asset && asset->Data().UsesCustomShader() )
-                {
-                    m_Material = handle;
-                    break;
-                }
-            }
-            if ( static_cast<uint64_t>( m_Material ) == 0 && !materials.empty() )
-                m_Material = materials.front().first;
-            m_Applied = false;
-        }
-
+        // THE SLOT IS NOT CLAIMED UNTIL THE WINDOW HAS ACTUALLY BEEN DRAWN. The document is created in
+        // EditorLayer::ServiceAssetOpenRequests, which runs earlier in this same OnUpdate — so on the frame a
+        // material is opened there is a panel but no window on screen yet, and building a Scene and a
+        // SceneRenderer for it then would spend one of the six on something nobody has seen.
+        //
+        // The predecessor of this panel also RELEASED here, on the frame it stopped being visible. That
+        // branch is gone rather than carried over: an asset document is not hidden when it is closed, it is
+        // DESTROYED (EditorLayer::CloseDismissedAssetDocuments, which runs before this loop and so before
+        // any such branch could fire), and one mechanism that runs is worth more than a second that cannot.
         if ( !m_DrewThisFrame )
-        {
-            // Open but not actually drawn last frame — a collapsed window or a background dock tab. Keep the
-            // viewport (the user is one click from it) but record nothing.
             return;
-        }
         m_DrewThisFrame = false;
 
         EnsurePreview();
 
-        if ( !m_Applied && static_cast<uint64_t>( m_Material ) != 0 )
+        if ( !m_Applied )
         {
-            m_Preview->SetMaterial( m_Material, m_Shape );
+            m_Preview->SetMaterial( Subject(), m_Shape );
             m_Applied = true;
         }
 
         // The shader behind this material was rebuilt: drop the pipelines THIS renderer cached from the old
-        // modules. Without it the preview keeps drawing the old shader after a recompile — see the note on
-        // RequestShaderRebuilt.
-        if ( !s_PendingRebuiltShader.empty() )
+        // modules. Without it the window keeps drawing the old shader after a recompile — see the note in
+        // MaterialShaderRebuild.hpp.
+        const std::string shaderName = EffectiveShaderName();
+        if ( const uint64_t rebuilds = MaterialShaderRebuild::CountFor( shaderName );
+             rebuilds != m_SeenRebuildCount )
         {
-            if ( auto shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( s_PendingRebuiltShader ) )
-                m_Preview->InvalidatePipelines( shader.get() );
-            s_PendingRebuiltShader.clear();
+            m_SeenRebuildCount = rebuilds;
+            if ( auto* shaderService = Runtime::ResourceRegistry::GetShaderService() )
+            {
+                if ( auto shader = shaderService->GetByName( shaderName ) )
+                    m_Preview->InvalidatePipelines( shader.get() );
+            }
         }
 
-        if ( static_cast<uint64_t>( m_Material ) != 0 )
-            m_Preview->Update( kPreviewRenderSize, kPreviewRenderSize );
+        m_Preview->Update( kPreviewRenderSize, kPreviewRenderSize );
     }
 
-    void MaterialPreviewPanel::DrawToolbar()
+    void MaterialEditorPanel::DrawToolbar()
     {
-        ImGui::SetNextItemWidth( 220.0f );
-        auto current = m_AssetManager ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( m_Material )
-                                      : Assets::Asset<Assets::SurfaceMaterialAsset>{};
-        if ( ImGui::BeginCombo( "Material", MaterialLabel( current ).c_str() ) )
-        {
-            if ( m_AssetManager )
-            {
-                for ( const auto& [handle, asset] : m_AssetManager->FindAllByType<Assets::SurfaceMaterialAsset>() )
-                {
-                    const bool selected = ( handle == m_Material );
-                    if ( ImGui::Selectable( MaterialLabel( asset ).c_str(), selected ) && !selected )
-                    {
-                        m_Material = handle;
-                        m_Applied  = false;
-                    }
-                }
-            }
-            ImGui::EndCombo();
-        }
-
-        ImGui::SameLine();
+        // No material combo: this window IS one material. Picking a different one is opening a different
+        // document, which is the whole point of the change that deleted the combo.
         ImGui::SetNextItemWidth( 110.0f );
         if ( ImGui::BeginCombo( "Shape", ShapeName( m_Shape ) ) )
         {
@@ -206,22 +173,19 @@ namespace Desert::Editor
         ImGui::SameLine();
         if ( ImGui::Button( "Reset View" ) && m_Preview )
             m_Preview->ResetView();
-
-        if ( !m_Status.empty() )
-        {
-            ImGui::SameLine();
-            ImGui::TextDisabled( "%s", m_Status.c_str() );
-        }
     }
 
-    void MaterialPreviewPanel::DrawParameters()
+    void MaterialEditorPanel::DrawParameters()
     {
-        if ( !m_AssetManager || static_cast<uint64_t>( m_Material ) == 0 )
+        if ( !m_AssetManager )
             return;
 
-        auto asset = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( m_Material );
+        auto asset = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() );
         if ( !asset )
+        {
+            ImGui::TextDisabled( "This material is no longer loaded" );
             return;
+        }
 
         auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
         auto  shader = shaderService ? shaderService->GetByName( asset->Data().EffectiveShaderName() ) : nullptr;
@@ -247,7 +211,7 @@ namespace Desert::Editor
         // uses. Drawing the label as ImGui's own trailing label instead put it on top of the value: a
         // colour row came out reading "A255e255 255 255", which is what looking at the panel found and
         // reading the code did not.
-        if ( !ImGui::BeginTable( "##preview_params", 2,
+        if ( !ImGui::BeginTable( "##material_params", 2,
                                  ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )
             return;
         ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.45f );
@@ -262,7 +226,7 @@ namespace Desert::Editor
             using W  = ::Desert::Core::Formats::ShaderParamWidget;
 
             const char*       label    = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
-            const std::string hiddenId = "##pp_" + p.Name; // the label lives in its own cell
+            const std::string hiddenId = "##mp_" + p.Name; // the label lives in its own cell
             glm::vec4         value    = asset->Data().GetParam( p.Name, p.Default );
             bool              edited   = false;
 
@@ -309,7 +273,7 @@ namespace Desert::Editor
         ImGui::EndTable();
     }
 
-    void MaterialPreviewPanel::OnUIRender()
+    void MaterialEditorPanel::OnUIRender()
     {
         DrawToolbar();
         ImGui::Separator();
@@ -317,12 +281,6 @@ namespace Desert::Editor
         const float  kParamColumnW = 300.0f;
         const ImVec2 avail         = ImGui::GetContentRegionAvail();
         const float  imageSide     = std::max( 64.0f, std::min( avail.x - kParamColumnW, avail.y ) );
-
-        if ( static_cast<uint64_t>( m_Material ) == 0 )
-        {
-            ImGui::TextDisabled( "Pick a material, or press Compile in the Node Graph." );
-            return;
-        }
 
         // The image is last frame's render; recording this frame's happens in OnPreUpdate. Rendering from
         // inside the ImGui pass destroys descriptor pools whose sets are bound to the command buffer being

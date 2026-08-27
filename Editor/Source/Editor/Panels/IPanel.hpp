@@ -7,6 +7,8 @@
 
 #include <Common/Core/Events/Event.hpp>
 
+#include <Engine/Assets/Common.hpp>
+
 namespace Desert::Core
 {
     class Scene;
@@ -93,5 +95,77 @@ namespace Desert::Editor
         const std::string m_PanelName;
         bool              m_SowPanel;
         bool              m_Pinned = false; // opened by hand: never auto-closed (see IsContextual)
+    };
+
+    // The window title an asset document must carry: "<display name>###assetdoc<subject handle>".
+    //
+    // THE ###id IS NOT DECORATION. Every panel is drawn with ImGui::Begin( PanelDisplayTitle( GetName() ) ),
+    // and ImGui derives a window's identity from the text after the LAST "###" — so two windows whose titles
+    // agree there are ONE window, merged, with the second one's content drawn into the first. Every panel
+    // before this was a singleton and never met the problem; ViewportPanel is the one type that did, and it
+    // escapes exactly this way ("<name>###sceneview<id>", EditorLayer::AddSceneView). This is that same
+    // escape, keyed on the SUBJECT rather than on a counter, which is also what makes open-or-focus fall out
+    // for free: the same material can only ever produce the same title, hence the same window.
+    //
+    // The subject and not a fresh id, deliberately: an id source would let one material open twice, and the
+    // two windows would then edit one asset through two parameter tables.
+    //
+    // The display half is stripped of any "###" of its own, and that is not defensive programming: what
+    // EditorLayer hands to Begin() is PanelDisplayTitle(GetName()), which appends "###" + the whole name
+    // again, and ImGui takes the id from the LAST "###" in the string. A display name carrying one (an asset
+    // file may be named anything) would therefore end up deciding the window id — and two such assets would
+    // merge into one window, which is the exact failure this function exists to prevent.
+    [[nodiscard]] inline std::string AssetDocumentTitle( const std::string&         displayName,
+                                                         const Assets::AssetHandle& subject )
+    {
+        std::string label = displayName;
+        if ( const auto pos = label.find( "###" ); pos != std::string::npos )
+            label.erase( pos );
+
+        return label + "###assetdoc" + std::to_string( static_cast<uint64_t>( subject ) );
+    }
+
+    // A panel that edits ONE asset: a document, not a tool.
+    //
+    // The difference that matters to the editor: a tool panel is created once at startup and toggled, so its
+    // name is a constant and hiding it is the whole of "closing" it. A document is created when the user
+    // opens an asset and DESTROYED when the window is dismissed — that destruction is what returns the
+    // Scene, the SceneRenderer and one of the six renderer slots, and there is no way to write it as a
+    // visibility flag. See EditorLayer::CloseDismissedAssetDocuments, which is the scene-view close path
+    // applied to the same problem.
+    class IAssetEditorPanel : public IPanel
+    {
+    public:
+        IAssetEditorPanel( const std::string& displayName, const Assets::AssetHandle& subject,
+                           Assets::AssetTypeID type )
+             : IPanel( AssetDocumentTitle( displayName, subject ), /*showPanel=*/true ), m_Subject( subject ),
+               m_SubjectType( type )
+        {
+        }
+
+        // WHAT THIS DOCUMENT EDITS, fixed for its whole life. Immutable because it is the window's identity:
+        // the title, and therefore the ImGui window id, is derived from it, and a title that changed under a
+        // live window would either merge it into another document's window or orphan its saved dock entry.
+        // Editing a different asset means opening a different document.
+        [[nodiscard]] const Assets::AssetHandle& Subject() const noexcept
+        {
+            return m_Subject;
+        }
+
+        [[nodiscard]] Assets::AssetTypeID SubjectType() const noexcept
+        {
+            return m_SubjectType;
+        }
+
+        // Is this document holding one of the six renderer slots RIGHT NOW?
+        //
+        // Asked by the slot census before a seventh consumer is admitted. A document that is open but has
+        // not drawn yet holds nothing and still has a claim coming, which is why the census counts pending
+        // demand separately rather than trusting the live-renderer count alone.
+        [[nodiscard]] virtual bool HoldsRendererSlot() const = 0;
+
+    private:
+        const Assets::AssetHandle m_Subject;
+        const Assets::AssetTypeID m_SubjectType;
     };
 } // namespace Desert::Editor
