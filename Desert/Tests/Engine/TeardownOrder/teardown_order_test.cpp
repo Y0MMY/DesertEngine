@@ -79,9 +79,8 @@ namespace
                 continue;
             const std::string name = text.substr( at + 3, end - at - 3 );
             // A name, not a sentence: anything with punctuation in it came from prose, not a call.
-            const bool isIdentifier =
-                 !name.empty() && std::all_of( name.begin(), name.end(),
-                                               []( unsigned char c ) { return std::isalnum( c ) != 0; } );
+            const bool isIdentifier = !name.empty() && std::all_of( name.begin(), name.end(), []( unsigned char c )
+                                                                    { return std::isalnum( c ) != 0; } );
             if ( isIdentifier )
                 names.insert( name );
         }
@@ -127,8 +126,7 @@ namespace
         for ( const auto& entry : std::filesystem::recursive_directory_iterator( root ) )
         {
             const auto& p = entry.path();
-            if ( entry.is_regular_file() && p.extension() == ".cpp" &&
-                 p.stem().string().size() > 7 &&
+            if ( entry.is_regular_file() && p.extension() == ".cpp" && p.stem().string().size() > 7 &&
                  p.stem().string().compare( p.stem().string().size() - 7, 7, "Service" ) == 0 )
                 files.push_back( p );
         }
@@ -140,7 +138,8 @@ namespace
 TEST( TeardownOrder, TheRepositoryRootWasFound )
 {
     ASSERT_TRUE( std::filesystem::exists( RepoRoot() / "Desert" / "Desert" / "Source" ) )
-         << "walked up from " << std::filesystem::current_path().string() << " and found no source tree; "
+         << "walked up from " << std::filesystem::current_path().string()
+         << " and found no source tree; "
             "every other test in this suite would pass vacuously";
 }
 
@@ -179,7 +178,7 @@ TEST( TeardownOrder, ApplicationDeclaresTheWindowAfterTheDeviceAndTheContext )
 // Two places that must agree, in one file, with nothing that makes them agree by construction.
 TEST( TeardownOrder, EveryResourceServiceIsClearedByClearAll )
 {
-    const auto dir = RepoRoot() / "Desert" / "Desert" / "Source" / "Engine" / "Runtime";
+    const auto        dir    = RepoRoot() / "Desert" / "Desert" / "Source" / "Engine" / "Runtime";
     const std::string header = StripLineComments( ReadFile( dir / "ResourceRegistry.hpp" ) );
     const std::string source = ReadFile( dir / "ResourceRegistry.cpp" );
     ASSERT_FALSE( header.empty() ) << "ResourceRegistry.hpp not found or empty";
@@ -195,9 +194,9 @@ TEST( TeardownOrder, EveryResourceServiceIsClearedByClearAll )
     const std::set<std::string> cleared = ServiceNames( clearAll );
 
     for ( const std::string& name : exposed )
-        EXPECT_TRUE( cleared.count( name ) == 1 )
-             << "ResourceRegistry exposes Get" << name << "Service() but ClearAll() never clears it; its "
-                "GPU objects would be released after the device is destroyed";
+        EXPECT_TRUE( cleared.count( name ) == 1 ) << "ResourceRegistry exposes Get" << name
+                                                  << "Service() but ClearAll() never clears it; its "
+                                                     "GPU objects would be released after the device is destroyed";
 }
 
 // RELATION: a service's Clear() is what ClearAll() relies on, so an EMPTY Clear() makes the test above
@@ -233,8 +232,8 @@ TEST( TeardownOrder, NoResourceServiceClearIsAnEmptyBody )
 TEST( TeardownOrder, StdExitAppearsOnlyBeforeTheApplicationExists )
 {
     const std::vector<std::filesystem::path> trees = {
-        RepoRoot() / "Desert" / "Desert" / "Source", RepoRoot() / "Desert" / "Common" / "Source",
-        RepoRoot() / "Editor" / "Source", RepoRoot() / "Runtime" / "Source" };
+         RepoRoot() / "Desert" / "Desert" / "Source", RepoRoot() / "Desert" / "Common" / "Source",
+         RepoRoot() / "Editor" / "Source", RepoRoot() / "Runtime" / "Source" };
 
     // Both hold a CreateApplication and nothing else that runs during a frame.
     const std::set<std::string> allowed = { "Sandbox.hpp", "Main.cpp" };
@@ -254,13 +253,15 @@ TEST( TeardownOrder, StdExitAppearsOnlyBeforeTheApplicationExists )
 
             const std::string code = StripLineComments( ReadFile( p ) );
             EXPECT_EQ( code.find( "std::exit(" ), std::string::npos )
-                 << p.string() << " calls std::exit() outside CreateApplication. Inside a running frame "
-                                  "that destroys the job system's mutexes under its own worker threads; "
-                                  "use Application::Close(status) instead.";
+                 << p.string()
+                 << " calls std::exit() outside CreateApplication. Inside a running frame "
+                    "that destroys the job system's mutexes under its own worker threads; "
+                    "use Application::Close(status) instead.";
         }
     }
 
-    EXPECT_GT( scanned, 100u ) << "only " << scanned << " sources scanned -- the walk, not the engine, is "
+    EXPECT_GT( scanned, 100u ) << "only " << scanned
+                               << " sources scanned -- the walk, not the engine, is "
                                   "what is wrong";
 }
 
