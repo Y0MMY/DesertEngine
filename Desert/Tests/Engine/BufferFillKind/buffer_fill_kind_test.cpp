@@ -231,19 +231,45 @@ TEST_F( BufferFill, FlushingTheFieldsOfAWholeFilledBufferWritesNothing )
 // The half that keeps the generic loops honest without any of them knowing what they are holding.
 // Both halves matter: a buffer that has not chosen yet DOES report dirty fields (every FieldProperty is
 // born dirty), which is precisely how the loops reached CameraUB in the first place.
-TEST_F( BufferFill, AWholeFilledBufferReportsNoDirtyFieldsAndAnUnclaimedOneDoes )
+TEST_F( BufferFill, ABufferNobodyHasWrittenReportsNoDirtyFields )
 {
     auto                           buffer = std::make_shared<RecordingUniformBuffer>( CameraModel() );
     Graphic::UniformBufferProperty prop( buffer );
 
-    ASSERT_TRUE( prop.HasDirtyFields() )
-         << "fields are born dirty — if they were not, this guard would be guarding nothing";
+    // This assertion is the REVERSE of the one that shipped here first, and the reversal is the whole
+    // point. Fields used to be born dirty, so a buffer that merely DECLARED fields answered yes — and
+    // Material::Bind's generic flush therefore wrote them, which claimed the buffer as field-filled, and
+    // the engine's own whole-block write of CameraUB was refused by name a moment later. Every
+    // shader-graph mesh vanished from the frame while every suite here stayed green, because the suite
+    // asserted the defect.
+    //
+    // A field nobody has written has nothing to say. That is what makes the flush loops safe without a
+    // list of exceptions, and it is what lets an unclaimed buffer still accept the whole-block write it
+    // is waiting for.
+    EXPECT_FALSE( prop.HasDirtyFields() ) << "an unwritten field must not invite a flush";
 
+    // Acceptance is checked through the buffer rather than a return value, because SetRawData returns
+    // void: a refusal is silent to the caller and only the bytes tell the truth.
     const auto camera = CameraPayload();
     prop.SetRawData( camera.data(), camera.size() );
+    EXPECT_EQ( 0, std::memcmp( buffer->GetData(), camera.data(), camera.size() ) )
+         << "an unclaimed buffer must accept the engine's whole-block write";
 
     EXPECT_FALSE( prop.HasDirtyFields() )
          << "the engine's four flush loops would pick this buffer up and destroy it";
+}
+
+TEST_F( BufferFill, WritingAFieldIsWhatMakesABufferDirty )
+{
+    auto                           buffer = std::make_shared<RecordingUniformBuffer>( MaterialModel() );
+    Graphic::UniformBufferProperty prop( buffer );
+
+    ASSERT_FALSE( prop.HasDirtyFields() );
+
+    const float tint[4] = { 0.4f, 0.5f, 0.6f, 1.0f };
+    ASSERT_TRUE( prop.WriteField( prop.GetField( "Tint" ), tint, sizeof( tint ) ) );
+
+    EXPECT_TRUE( prop.HasDirtyFields() ) << "a written field owes the GPU a flush";
 }
 
 // The mirror image: a buffer an artist's parameters own must not be blown away by a whole-block write.
