@@ -521,7 +521,8 @@ TEST_F( ShaderRootFixture, TheCloudParameterBlockIsTheSameNumberOfBytesOnBothSid
     // VolumetricCloudRenderer — the shadow map's block and the march's block are one struct written twice.
     for ( const char* shader : { "Clouds/CloudRaymarch.shader", "Clouds/CloudShadowMap.shader" } )
     {
-        const uint32_t bytes = ComputeStorageBlockBytes( ShaderPath( shader ), Desert::Graphic::kCloudParamsBinding );
+        const uint32_t bytes =
+             ComputeStorageBlockBytes( ShaderPath( shader ), Desert::Graphic::kCloudParamsBinding );
 
         EXPECT_GT( bytes, 0u ) << shader << " declares no storage block at the cloud parameter binding";
         EXPECT_EQ( bytes, sizeof( Desert::Graphic::CloudGpuPayload ) )
