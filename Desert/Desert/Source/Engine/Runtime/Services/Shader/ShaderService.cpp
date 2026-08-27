@@ -60,6 +60,10 @@ namespace Desert::Runtime
 
     void ShaderService::Clear()
     {
+        // Was an empty body. Shaders own VkShaderModules and the pipeline layouts built from them.
+        m_Shaders.clear();
+        m_PassShaders.clear();
+        m_NameToHandleMap.clear();
     }
 
     std::vector<std::string> ShaderService::GetAllNames() const

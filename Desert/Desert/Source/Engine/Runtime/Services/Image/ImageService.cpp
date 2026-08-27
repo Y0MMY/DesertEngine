@@ -20,6 +20,14 @@ namespace Desert::Runtime
         m_Images[handle.Value.Index].reset();
     }
 
+    void ImageService::Clear()
+    {
+        // The vector is INDEXED by handle, so the handle pool has to be reset with it or the next
+        // Allocate() would hand out an index into a table that no longer describes anything.
+        m_Images.clear();
+        m_HandlePool = Common::Core::HandlePool{};
+    }
+
     Graphic::Image* ImageService::Resolve( const ImageHandle& handle ) const
     {
         if ( handle.Value.Index >= m_Images.size() )

@@ -63,9 +63,20 @@ namespace Desert::Engine
     public:
         // Ends the run loop after the current frame. Used by the editor's screenshot mode, which renders a
         // fixed number of frames and leaves.
-        void Close()
+        //
+        // @p exitCode becomes the process exit status (see EntryPoint.hpp). It exists because a capture
+        // that could not write its PNG used to log the error and then exit 0: a caller reading the exit
+        // code was told the shot succeeded. A false success is worse than a false failure — it is the one
+        // a script cannot notice.
+        void Close( int exitCode = 0 )
         {
             m_IsRunningApplication = false;
+            m_ExitCode             = exitCode;
+        }
+
+        NO_DISCARD int ExitCode() const
+        {
+            return m_ExitCode;
         }
 
     private:
@@ -96,6 +107,7 @@ namespace Desert::Engine
 
         bool m_IsRunningApplication = true;
         bool m_Minimized            = false;
+        int  m_ExitCode             = 0;
 
         std::shared_ptr<Graphic::RendererContext> m_RendererContext;
         std::shared_ptr<Device>                   m_Device;

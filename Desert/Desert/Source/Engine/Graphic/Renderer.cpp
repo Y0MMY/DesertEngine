@@ -11,6 +11,7 @@
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 
 namespace Desert::Graphic
 {
@@ -244,6 +245,8 @@ namespace Desert::Graphic
         // is owned by a static that outlives the Application object; a static destructor cannot be
         // ordered against the device, so the release has to be said out loud here instead.
         m_BRDFTexture.reset();
+        Runtime::ResourceRegistry::ClearAll();
+        Geometry::PrimitiveMeshFactory::ReleaseShared();
 
         if ( const auto released = FallbackTextures::Get().Release(); !released )
         {

@@ -47,5 +47,13 @@ namespace Desert::Runtime
         // placement BAKE and never by a shader, which is the one service here that owns nothing on the GPU
         // by design rather than by accident.
         static CloudLayoutService* GetCloudLayoutService();
+
+        // Clear() every service above. Called once, from Renderer::Shutdown(), i.e. from ~Application and
+        // therefore inside main. WHY IT HAS TO BE SAID OUT LOUD: each service is a function-local static,
+        // so its destructor runs at __cxa_finalize — after the VkDevice and the VMA allocator are gone —
+        // and a GPU wrapper released then writes through a dangling allocator. That was the segfault the
+        // headless capture used to exit 139 with. This list lives HERE, beside the getters it has to agree
+        // with, so that adding a service and forgetting to release it is one screen of code, not two files.
+        static void ClearAll();
     };
 } // namespace Desert::Runtime

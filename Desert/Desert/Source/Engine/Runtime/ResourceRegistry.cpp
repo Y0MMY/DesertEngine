@@ -86,4 +86,24 @@ namespace Desert::Runtime
         return &cloudLayoutService;
     }
 
+    void ResourceRegistry::ClearAll()
+    {
+        // Order matters in one place only: the ImageService holds the VkImages that the material, skybox,
+        // font, icon and cloud services hand out views of, so it goes LAST.
+        GetMaterialService()->Clear();
+        GetMeshService()->Clear();
+        GetSkyboxService()->Clear();
+        GetTextureService()->Clear();
+        GetShaderService()->Clear();
+        GetFontService()->Clear();
+        GetIconService()->Clear();
+        GetAnimatedImageService()->Clear();
+        GetVideoService()->Clear();
+        GetCloudNoiseService()->Clear();
+        GetCloudTypeService()->Clear();
+        GetCloudModellingService()->Clear();
+        GetCloudLayoutService()->Clear();
+        GetImageService()->Clear();
+    }
+
 } // namespace Desert::Runtime

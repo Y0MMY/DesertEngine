@@ -98,16 +98,20 @@ int main( int argc, char** argv )
     // 3) destroy the application itself. This step is the point of the block and used to be missing: the
     //    application was left to a namespace-scope static, i.e. to __cxa_finalize, and the two faults
     //    every headless capture ended in both came from being there.
+    int exitCode = 0;
     {
         auto app = CreateApplication( argc, argv );
         app->OnCreate();
         app->Run();
         app->OnDestroy();
 
+        // Read before the application is destroyed at the closing brace.
+        exitCode = app->ExitCode();
+
         Common::JobSystem::Get().Shutdown();
         if ( const auto device = Desert::EngineContext::GetInstance().GetDevice() )
             device->WaitIdle();
     }
 
-    return 0;
+    return exitCode;
 }

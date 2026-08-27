@@ -776,16 +776,24 @@ namespace Desert::Editor
                 std::snprintf( name, sizeof( name ), "/frame_%05d.png", m_ShotFrame );
                 const std::string path = shot.Sequence + name;
                 if ( !WriteViewportPng( path ) )
+                {
                     LOG_ERROR( "[Shot] sequence frame {} not written to '{}'", m_ShotFrame, path );
+                    m_ShotFailed = true;
+                }
             }
 
             if ( m_ShotFrame >= shot.Frames )
             {
                 if ( !shot.Output.empty() && !WriteViewportPng( shot.Output ) )
+                {
                     LOG_ERROR( "[Shot] the final frame was not captured to '{}'", shot.Output );
+                    m_ShotFailed = true;
+                }
                 if ( shot.GpuProfile )
                     DumpProfilerToLog();
-                const_cast<Engine::Application*>( m_Application )->Close();
+                // A capture that wrote no PNG must not leave a zero exit status behind: the whole value of
+                // an exit code is that a script can trust it, and this one used to say "fine" either way.
+                const_cast<Engine::Application*>( m_Application )->Close( m_ShotFailed ? 1 : 0 );
             }
         }
 

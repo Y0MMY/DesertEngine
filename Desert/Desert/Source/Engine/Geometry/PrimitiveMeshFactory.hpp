@@ -17,6 +17,11 @@ namespace Desert::Geometry
         // (copy-on-edit), so this shared mesh is never mutated. Returns nullptr for an unknown type.
         static DynamicMesh* GetShared( PrimitiveType type );
 
+        // Drop the shared meshes. "Kept alive for the process" is exactly the problem: they own vertex and
+        // index buffers, and a static destructor releases those after ~Application has destroyed the device
+        // and the VMA allocator. Called from Renderer::Shutdown(), which runs inside main.
+        static void ReleaseShared();
+
     private:
         static std::shared_ptr<DynamicMesh> CreateCube();
         static std::shared_ptr<DynamicMesh> CreateSphere();

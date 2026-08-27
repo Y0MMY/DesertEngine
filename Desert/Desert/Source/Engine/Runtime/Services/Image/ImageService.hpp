@@ -18,6 +18,10 @@ namespace Desert::Runtime
             return m_Images;
         }
 
+        // Drop every registered image. The other thirteen services have this; this one did not, and it is
+        // the one holding the VkImages directly.
+        void Clear();
+
     private:
         Common::Core::HandlePool                     m_HandlePool;
         std::vector<std::shared_ptr<Graphic::Image>> m_Images;
