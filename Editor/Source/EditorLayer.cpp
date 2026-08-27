@@ -316,9 +316,18 @@ namespace Desert::Editor
                 LOG_ERROR( "[Shot] --scene '{}' does not exist (looked from '{}'); refusing to capture a "
                            "different scene under that name.",
                            shot.Scene, std::filesystem::current_path().string() );
-                std::exit( 2 );
+                // NOT std::exit(). The job system's workers are already running by the time this line is
+                // reached, and exit() runs static destructors under them: nine threads threw
+                // "recursive_mutex lock failed: Invalid argument" and the process aborted with 134. A
+                // status of 134 says "the engine crashed", not "the scene you asked for is missing" — the
+                // caller reading it learns the wrong thing. Ask for an ordered close with the real status;
+                // Run() then draws no frames and teardown happens exactly as on a normal quit.
+                const_cast<Engine::Application*>( m_Application )->Close( 2 );
             }
-            LoadScene( Common::Filepath( shot.Scene ) );
+            else
+            {
+                LoadScene( Common::Filepath( shot.Scene ) );
+            }
         }
         else if ( ProjectContext::HasProject() )
         {

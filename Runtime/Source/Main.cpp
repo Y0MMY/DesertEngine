@@ -39,7 +39,7 @@ namespace Desert::Player
 
         void OnCreate() override
         {
-            PushLayer( new RuntimeLayer( s_SceneOverride ) );
+            PushLayer( new RuntimeLayer( s_SceneOverride, this ) );
         }
 
         void OnDestroy() override

@@ -29,7 +29,10 @@ namespace Desert::Player
     {
     public:
         // scenePathOverride: from `--scene <path>`; empty -> the project's DefaultScene.
-        explicit RuntimeLayer( std::string scenePathOverride );
+        // application: the owner, so a UI "quit" button can ask for an ordered close instead of calling
+        // std::exit() from inside the frame (which destroys the job system's mutexes under its own live
+        // worker threads — see the quit handler in OnUpdate).
+        RuntimeLayer( std::string scenePathOverride, Engine::Application* application );
         ~RuntimeLayer();
 
         [[nodiscard]] Common::BoolResultStr OnAttach() override;
@@ -44,7 +47,8 @@ namespace Desert::Player
         void LoadSceneInternal( const std::string& path );
 
     private:
-        std::string m_ScenePathOverride;
+        std::string          m_ScenePathOverride;
+        Engine::Application* m_Application = nullptr;
 
         std::shared_ptr<Assets::AssetManager>        m_AssetManager;
         std::unique_ptr<Assets::AssetPreloader>      m_AssetPreloader;
