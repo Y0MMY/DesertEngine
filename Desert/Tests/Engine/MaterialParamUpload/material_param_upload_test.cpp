@@ -14,6 +14,10 @@
 // DataDrivenMaterial::FlushParameterBuffers). Anything that makes B stop serving a copy that A serves is
 // the defect coming back.
 //
+// The field writes below go through UniformBufferProperty::WriteField rather than reaching the
+// FieldProperty directly, because that is now the only way in: a bare field write left the owning
+// buffer unaware of which of its two fill routes had been used. See Tests/Engine/BufferFillKind.
+//
 // No GPU: UniformBufferProperty and FieldProperty are header-only, and ShaderResources::UniformBuffer is
 // abstract, so the copies live in a std::vector here. The copy a write lands in is resolved with the
 // PRODUCTION function, ShaderResources::BufferCopyIndex — the same one VulkanUniformBuffer uses. A test
@@ -137,7 +141,7 @@ namespace
         if ( route == Route::ApplyOnceThenFlush )
         {
             // Applied when the asset loads — one write, outside any recording.
-            prop.GetField( "Tint" )->SetRawBytes( value.data(), value.size() );
+            prop.WriteField( prop.GetField( "Tint" ), value.data(), value.size() );
             prop.UpdateFields();
         }
 
@@ -145,7 +149,7 @@ namespace
         {
             if ( route == Route::RestateEveryFrame )
             {
-                prop.GetField( "Tint" )->SetRawBytes( value.data(), value.size() );
+                prop.WriteField( prop.GetField( "Tint" ), value.data(), value.size() );
                 prop.UpdateFields();
             }
             else if ( flushPerDraw && prop.HasDirtyFields() )
@@ -230,7 +234,7 @@ TEST_F( MaterialParamUpload, ASecondRendererSlotIsStillOwedTheValue )
     auto                           buffer = std::make_shared<RecordingUniformBuffer>( MakeModel() );
     Graphic::UniformBufferProperty prop( buffer );
 
-    prop.GetField( "Tint" )->SetRawBytes( value.data(), value.size() );
+    prop.WriteField( prop.GetField( "Tint" ), value.data(), value.size() );
     prop.UpdateFields();
 
     // Slot 0 records alone for a while — long enough to drain its own dirty window.

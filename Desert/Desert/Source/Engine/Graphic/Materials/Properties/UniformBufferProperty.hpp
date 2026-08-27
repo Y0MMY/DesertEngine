@@ -175,6 +175,11 @@ namespace Desert::Graphic
         bool ClaimFill( ShaderResources::FillKind requested, const char* operation )
         {
             const auto claim = ShaderResources::ClaimFill( m_Fill, requested );
+            // Assigned on both paths on purpose: ClaimFill answers with the state the buffer must be
+            // left in, and a refusal answers with the state unchanged. Assigning only on success would
+            // make that half of its contract unreachable from here, and an unreachable guarantee is one
+            // nothing keeps true.
+            m_Fill = claim.Next;
             if ( !claim.Accepted )
             {
                 LOG_ERROR( "[UB] '{}' is filled {}; refusing {} ({}). One buffer cannot be filled both "
@@ -184,7 +189,6 @@ namespace Desert::Graphic
                            ShaderResources::FillKindName( requested ) );
                 return false;
             }
-            m_Fill = claim.Next;
             return true;
         }
 

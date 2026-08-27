@@ -28,6 +28,7 @@
 #include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
 #include <Engine/ShaderResources/BufferCopyLayout.hpp>
 #include <Engine/ShaderResources/BufferFillKind.hpp>
+#include <Engine/ShaderResources/StorageBuffer.hpp>
 
 #include <gtest/gtest.h>
 
@@ -295,6 +296,84 @@ TEST_F( BufferFill, AFieldFromAnotherBufferIsRefused )
     const float tint[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
     EXPECT_FALSE( camera.WriteField( material.GetField( "Tint" ), tint, sizeof( tint ) ) );
     EXPECT_EQ( camera.GetFillKind(), FillKind::Unclaimed ) << "a foreign field claimed the route";
+}
+
+// The shadow copy of a field nobody has written is ZERO, not whatever the heap last held. The fill-kind
+// refusal is what keeps those bytes off the GPU; this is the second line, and it is the difference
+// between a wrong frame that is the same every run and one that is not.
+TEST_F( BufferFill, AnUnwrittenFieldsShadowCopyIsZero )
+{
+    auto                           buffer = std::make_shared<RecordingUniformBuffer>( CameraModel() );
+    Graphic::UniformBufferProperty prop( buffer );
+
+    for ( const char* name : { "Projection", "View", "CameraPos" } )
+    {
+        const auto* field = prop.GetField( name );
+        ASSERT_NE( field, nullptr ) << name;
+
+        const auto& local = field->GetLocalData();
+        ASSERT_NE( local.Data, nullptr ) << name;
+
+        const auto* bytes = static_cast<const std::byte*>( local.Data );
+        for ( size_t i = 0; i < local.GetAllocatedSize(); ++i )
+            ASSERT_EQ( bytes[i], std::byte{ 0 } ) << name << " byte " << i << " is uninitialised heap";
+    }
+}
+
+// A storage buffer has no fields at all, which is what makes it a single-route buffer. The body used to
+// be `return {}` — a reference bound to a temporary that died at the closing brace — so this asserts the
+// reference is to something that outlives the call, not merely that it is empty.
+TEST( StorageBufferFields, HasNoneAndTheReferenceOutlivesTheCall )
+{
+    class Stub final : public StorageBuffer
+    {
+    public:
+        void SetData( const void*, uint32_t, uint32_t ) override
+        {
+        }
+        uint8_t* MapMemory() override
+        {
+            return nullptr;
+        }
+        void UnmapMemory() override
+        {
+        }
+        const uint32_t GetBinding() const override
+        {
+            return 0;
+        }
+        const uint32_t GetSize() const override
+        {
+            return 0;
+        }
+        const void* GetData() const override
+        {
+            return nullptr;
+        }
+    };
+
+    Stub buffer;
+    EXPECT_TRUE( buffer.GetFields().empty() ) << "a storage buffer with fields would have two fill routes";
+
+    // Asked from two different stack depths. A `static` answers with the same address both times; a
+    // temporary is materialised in the CALLER's frame, so its address moves with the frame.
+    //
+    // Comparing two calls at the SAME depth does not work, and that is a hole this suite had: the
+    // sabotage that put `return {}` back went green, because both temporaries landed on the same stack
+    // slot. Neither did the compiler object — clang issues no diagnostic for a reference bound to a
+    // temporary returned through a `const&` return type. Recursion is what makes the difference real.
+    struct Probe
+    {
+        static const void* At( const StorageBuffer& b, int depth )
+        {
+            if ( depth > 0 )
+                return At( b, depth - 1 );
+            return &b.GetFields();
+        }
+    };
+
+    EXPECT_EQ( Probe::At( buffer, 0 ), Probe::At( buffer, 24 ) )
+         << "GetFields() handed back something that lives on the caller's stack";
 }
 
 // Whole-block writes stay repeatable — the renderer restates the camera every frame and every slot, and

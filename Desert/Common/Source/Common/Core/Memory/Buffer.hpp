@@ -92,11 +92,13 @@ namespace Common::Memory
             return ( (std::byte*)Data )[index];
         }
 
-        inline std::size_t GetSize()
+        // const: a Buffer handed out by const reference (FieldProperty::GetLocalData) could not be
+        // asked how big it was, which is exactly what a caller holding one wants to know.
+        inline std::size_t GetSize() const
         {
             return Size;
         }
-        inline std::size_t GetAllocatedSize()
+        inline std::size_t GetAllocatedSize() const
         {
             return AllocatedSize;
         }
