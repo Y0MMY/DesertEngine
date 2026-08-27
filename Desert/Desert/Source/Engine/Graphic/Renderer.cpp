@@ -240,10 +240,19 @@ namespace Desert::Graphic
 
     void Renderer::Shutdown()
     {
-        s_RendererAPI->Shutdown();
-        FallbackTextures::Get().Release();
+        // Mirror image of Init(), and called from ~Application so it runs inside main. Everything below
+        // is owned by a static that outlives the Application object; a static destructor cannot be
+        // ordered against the device, so the release has to be said out loud here instead.
+        m_BRDFTexture.reset();
 
+        if ( const auto released = FallbackTextures::Get().Release(); !released )
+        {
+            LOG_ERROR( "[Renderer] fallback textures were not released: {}", released.GetError() );
+        }
+
+        s_RendererAPI->Shutdown();
         delete s_RendererAPI;
+        s_RendererAPI = nullptr;
     }
 
     Desert::Graphic::RendererAPI* Renderer::GetRendererAPI() const

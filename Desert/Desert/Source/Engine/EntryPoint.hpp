@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <memory>
 #include <typeinfo>
 
 // `execinfo.h` is POSIX and does not exist under MSVC. `_WIN32` rather than the project's own
@@ -16,7 +17,14 @@
 #include <pthread.h>
 #endif
 
-extern Desert::Engine::Application* CreateApplication( int argc, char** argv );
+// Returns the application BY VALUE-OWNERSHIP on purpose. It used to hand back a raw pointer into
+// Common::Singleton<T>, a namespace-scope static std::unique_ptr, and that single fact was the whole of
+// the exit-time crash: a namespace-scope static registers its destructor before main, so it is destroyed
+// LAST — after spdlog, after the job system, and after every library the Vulkan loader dlopen'ed during
+// main. The application, which owns the window, the device and every GPU resource, was therefore torn
+// down in a process where the things it tears down through no longer existed. Owned here, it dies inside
+// main, while they are all still alive.
+extern std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char** argv );
 
 /**
  * @brief Prints the exception and the THROWING stack when an exception escapes to std::terminate.
@@ -82,19 +90,24 @@ int main( int argc, char** argv )
 
     Common::Logger::LogInit();
 
-    auto app = CreateApplication( argc, argv );
-    app->OnCreate();
-    app->Run();
-    app->OnDestroy();
-
     // Ordered teardown BEFORE static destructors run (their cross-TU order is undefined):
     // 1) join the worker pool while the logger/engine objects its jobs touch are still alive;
-    // 2) drain the GPU so descriptor pools/buffers destroyed during static teardown are no longer
-    //    referenced by in-flight command buffers (the exit-time VUID-vkDestroyDescriptorPool-00303
-    //    followed by worker threads aborting on destroyed mutexes).
-    Common::JobSystem::Get().Shutdown();
-    if ( const auto device = Desert::EngineContext::GetInstance().GetDevice() )
-        device->WaitIdle();
+    // 2) drain the GPU so descriptor pools/buffers destroyed during teardown are no longer referenced by
+    //    in-flight command buffers (the exit-time VUID-vkDestroyDescriptorPool-00303 followed by worker
+    //    threads aborting on destroyed mutexes);
+    // 3) destroy the application itself. This step is the point of the block and used to be missing: the
+    //    application was left to a namespace-scope static, i.e. to __cxa_finalize, and the two faults
+    //    every headless capture ended in both came from being there.
+    {
+        auto app = CreateApplication( argc, argv );
+        app->OnCreate();
+        app->Run();
+        app->OnDestroy();
+
+        Common::JobSystem::Get().Shutdown();
+        if ( const auto device = Desert::EngineContext::GetInstance().GetDevice() )
+            device->WaitIdle();
+    }
 
     return 0;
 }

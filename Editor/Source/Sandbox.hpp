@@ -26,7 +26,7 @@ namespace Desert
     };
 } // namespace Desert
 
-Desert::Engine::Application* CreateApplication( int argc, char** argv )
+std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char** argv )
 {
     using namespace Desert::Engine;
 
@@ -130,5 +130,5 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
     appInfo.VSync = false;
     // Width/Height left as std::nullopt -> start fullscreen at the monitor's native resolution.
 
-    return &Common::Singleton<Desert::Sandbox>::CreateInstance( appInfo );
+    return std::make_unique<Desert::Sandbox>( appInfo );
 }

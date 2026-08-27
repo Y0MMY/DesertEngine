@@ -56,6 +56,22 @@ namespace Desert::Engine
         m_Window->SetEventCallback( [this]( Common::Event& e ) { ProcessEvents( e ); } );
     }
 
+    Application::~Application()
+    {
+        // Nothing below may be recorded into, or referenced by, a command buffer the GPU has not finished
+        // with. Run() has already presented its last frame, but presentation only queues the work.
+        if ( m_Device )
+            m_Device->WaitIdle();
+
+        // Everything the renderer generated at Init() (the BRDF LUT, the fallback textures, the API
+        // object) and every GPU resource the registries handed out lives in a static that outlives this
+        // object. Released here, while the device and the allocator are still alive, because a static
+        // destructor cannot be ordered against them.
+        Graphic::Renderer::GetInstance().Shutdown();
+
+        // Members then die window -> device -> context; see the note on the declarations.
+    }
+
     void Application::ProcessEvents( Common::Event& e )
     {
         Common::EventManager eventManager( e );

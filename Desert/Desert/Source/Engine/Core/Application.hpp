@@ -38,7 +38,9 @@ namespace Desert::Engine
     {
     public:
         Application( const ApplicationInfo& appInfo );
-        ~Application() = default;
+        // Virtual because main owns the concrete app through a std::unique_ptr<Application> (see
+        // EntryPoint.hpp): a non-virtual destructor there would destroy the base and leak the derived part.
+        virtual ~Application();
 
         const auto& GetEngineStats() const
         {
@@ -80,23 +82,29 @@ namespace Desert::Engine
 
         void ProcessImGui();
 
+        // MEMBER ORDER IS LOAD-BEARING. Members die in REVERSE declaration order, and the window owns the
+        // swapchain, its framebuffers and their images — device-owned objects that must be released while
+        // the device and the context's VMA allocator are still alive. Declared in the order below they are
+        // destroyed window -> device -> context, which is the only order that holds.
+        //
+        // It used to be the exact opposite (window declared first, context last), and both halves of the
+        // exit-time crash came from that: VulkanImage2D::Release() dereferenced an already-expired
+        // renderer context and segfaulted, and VulkanFramebuffer::Release() had grown an `if (allocator)`
+        // guard to survive the same window.
     private:
         ApplicationInfo m_ApplicationInfo;
-
-    protected:
-        std::shared_ptr<Window> m_Window;
-
-    private:
-        Common::LayerStack m_LayerStack;
-        EngineStats        m_EngineStats;
 
         bool m_IsRunningApplication = true;
         bool m_Minimized            = false;
 
-        std::shared_ptr<Device>                   m_Device;
         std::shared_ptr<Graphic::RendererContext> m_RendererContext;
+        std::shared_ptr<Device>                   m_Device;
 
-    public:
+        Common::LayerStack m_LayerStack;
+        EngineStats        m_EngineStats;
+
+    protected:
+        std::shared_ptr<Window> m_Window;
     };
 
     Application* CreateApplicaton( int argc, char** argv );
