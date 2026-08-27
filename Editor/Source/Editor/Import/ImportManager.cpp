@@ -282,9 +282,8 @@ namespace Desert::Editor
         // materials are never written and it inherits the first mesh's instead.
         static const std::regex illegal( R"([<>:"/\\|?*\s])" );
         const std::string       safeName = std::regex_replace( material.Name, illegal, "_" );
-        const std::filesystem::path path =
-             CookPaths::MaterialFolder( sourcePath ) /
-             ( safeName + Common::Constants::Extensions::MATERIAL_EXTENSION );
+        const std::filesystem::path path     = CookPaths::MaterialFolder( sourcePath ) /
+                                           ( safeName + Common::Constants::Extensions::MATERIAL_EXTENSION );
 
         // Only write if MISSING: re-importing a mesh must NOT clobber the user's edits to its material (UE
         // behaviour — re-import updates geometry, keeps the material asset). Delete the .demat to regenerate.

@@ -163,8 +163,7 @@ TEST( MeshImportKey, AMeshThatHasNotMovedKeepsItsKey )
              << "'s 'model' material no longer matches the one committed in its .demat, so the mesh's "
                 "submesh reference and the material asset have come apart";
 
-        EXPECT_EQ( CookPaths::MaterialFolder( source ),
-                   Common::Constants::Path::MATERIAL_PATH / entry.stem )
+        EXPECT_EQ( CookPaths::MaterialFolder( source ), Common::Constants::Path::MATERIAL_PATH / entry.stem )
              << "the committed .demat for " << entry.stem << " is no longer where the importer writes";
     }
 }

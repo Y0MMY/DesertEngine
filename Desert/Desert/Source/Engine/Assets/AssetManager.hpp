@@ -35,8 +35,7 @@ namespace Desert::Assets
 
             if ( const auto it = m_PathLookup.find( cacheKey ); it != m_PathLookup.end() )
             {
-                return AsRequestedType<AssetType>( m_AssetsCache[it->second].second, "CreateAsset",
-                                                   cacheKey );
+                return AsRequestedType<AssetType>( m_AssetsCache[it->second].second, "CreateAsset", cacheKey );
             }
 
             // NOTE:Perhaps the creation of an asset via the Create() method should be defined for each type
@@ -152,8 +151,7 @@ namespace Desert::Assets
         static Asset<TypeAsset> AsRequestedType( const Asset<AssetBase>& stored, const char* who,
                                                  const std::string& subject )
         {
-            static_assert( std::is_base_of_v<AssetBase, TypeAsset>,
-                           "TypeAsset must inherit from AssetBase" );
+            static_assert( std::is_base_of_v<AssetBase, TypeAsset>, "TypeAsset must inherit from AssetBase" );
 
             if ( !stored )
             {

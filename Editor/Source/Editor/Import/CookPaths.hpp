@@ -114,7 +114,6 @@ namespace Desert::Editor::CookPaths
     inline std::string MaterialKey( const std::filesystem::path& source, const std::string& materialName,
                                     const uint32_t index )
     {
-        return MeshRelativeId( source ).generic_string() + "::" + materialName + "#" +
-               std::to_string( index );
+        return MeshRelativeId( source ).generic_string() + "::" + materialName + "#" + std::to_string( index );
     }
 } // namespace Desert::Editor::CookPaths

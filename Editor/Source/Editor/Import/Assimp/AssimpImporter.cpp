@@ -215,9 +215,10 @@ namespace Desert::Editor
 
     // Extract every source material into the unified, reflected PBRSurfaceParams (the .demat schema). Recovers
     // NORMAL + OPACITY maps the old MaterialAssetData path silently dropped, and stamps a stable MaterialId.
-    static std::vector<ImportedMaterial>
-    ExtractMaterials( const aiScene* scene, const std::filesystem::path& basePath, ImportManager& manager,
-                      const std::filesystem::path& sourcePath )
+    static std::vector<ImportedMaterial> ExtractMaterials( const aiScene*               scene,
+                                                           const std::filesystem::path& basePath,
+                                                           ImportManager&               manager,
+                                                           const std::filesystem::path& sourcePath )
     {
         std::vector<ImportedMaterial> result;
 
