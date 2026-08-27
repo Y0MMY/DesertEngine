@@ -34,6 +34,14 @@ namespace Desert::ShaderResources
             return m_UniformModel.Fields;
         }
 
+        // The block name from shader reflection ("CameraUB", "MaterialUB", ...). Exists so a refusal can
+        // say WHICH buffer refused: "a uniform buffer rejected a write" is not actionable, and the
+        // defect this guards against was found by staring at a frame rather than at a message.
+        const std::string& GetName() const
+        {
+            return m_UniformModel.Name;
+        }
+
     protected:
         ShaderLayout::UniformBuffer m_UniformModel;
 

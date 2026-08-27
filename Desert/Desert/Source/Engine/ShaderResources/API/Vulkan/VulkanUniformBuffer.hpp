@@ -20,9 +20,11 @@ namespace Desert::ShaderResources::API::Vulkan
         virtual uint8_t* MapMemory() override;
         virtual void     UnmapMemory() override;
 
-        // The copy belonging to (frame in flight x RECORDING RENDERER). The slot is resolved here rather
-        // than passed in: every caller wants the copy for the renderer that is recording, and threading a
-        // second index through the material layer would only create ways to get them out of step.
+        // The descriptor for (@p frameIndex x RECORDING RENDERER). The slot is resolved here rather than
+        // passed in: every caller wants the copy for the renderer that is recording, and threading a
+        // second index through the material layer would only create ways to get them out of step. The
+        // FRAME, by contrast, is the caller's to choose, and VulkanStorageBuffer now answers it the same
+        // way — the two used to disagree about whether this argument meant anything.
         const VkDescriptorBufferInfo& GetDescriptorBufferInfo( uint32_t frameIndex ) const
         {
             return m_DescriptorInfos[CopyIndex( frameIndex )];

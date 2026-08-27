@@ -39,7 +39,7 @@ namespace Desert::Graphic
         return { nullptr, nullptr };
     }
 
-    void Material::UploadRegisteredProperties( std::unordered_set<UniformBufferProperty*>& outDirtyUBs )
+    void Material::UploadRegisteredProperties()
     {
         for ( auto* prop : m_RegisteredProperties )
         {
@@ -59,12 +59,11 @@ namespace Desert::Graphic
             else
             {
                 auto [ub, field] = FindFieldInAnyUB( prop->GetShaderName() );
-                if ( field )
+                if ( ub && field )
                 {
                     std::byte buf[256] = {};
                     prop->CopyValueTo( buf );
-                    field->SetRawBytes( buf, prop->GetByteSize() );
-                    outDirtyUBs.insert( ub );
+                    ub->WriteField( field, buf, prop->GetByteSize() );
                 }
             }
 
@@ -72,8 +71,7 @@ namespace Desert::Graphic
         }
     }
 
-    void Material::ApplyInstanceOverrides( const MaterialInstance*                    instance,
-                                           std::unordered_set<UniformBufferProperty*>& outDirtyUBs )
+    void Material::ApplyInstanceOverrides( const MaterialInstance* instance )
     {
         const auto& props = instance->GetPropertySet();
         for ( const auto& [name, prop] : props.GetProperties() )
@@ -98,14 +96,34 @@ namespace Desert::Graphic
                      else
                      {
                          auto [ub, field] = FindFieldInAnyUB( propName );
-                         if ( field )
+                         if ( ub && field )
                          {
-                             field->SetRawBytes( &val, sizeof( T ) );
-                             outDirtyUBs.insert( ub );
+                             ub->WriteField( field, &val, sizeof( T ) );
                          }
                      }
                  },
                  prop.Value );
+        }
+    }
+
+    // Flush every UB that still has dirty fields. A field stays dirty for frames-in-flight frames, so
+    // this writes the new data into EACH per-frame-in-flight buffer copy (not just the copy for the
+    // frame it first changed on). Flushing only the UBs "touched" this frame would leave the other
+    // copies at their initial zero contents, so any frame presenting those indices would render the
+    // mesh black/garbage — the source of the per-frame flicker.
+    //
+    // Whole-filled buffers report no dirty fields and are therefore skipped without being listed
+    // anywhere; that used to be DataDrivenMaterial's job to remember.
+    void Material::FlushFieldFilledUniformBuffers()
+    {
+        if ( !m_MaterialExecutor )
+            return;
+
+        for ( const auto& [ubName, idx] : m_MaterialExecutor->GetUniformBufferProperties() )
+        {
+            auto ubProp = m_MaterialExecutor->GetUniformBufferProperty( ubName );
+            if ( ubProp && ubProp->HasDirtyFields() )
+                ubProp->UpdateFields();
         }
     }
 
@@ -114,25 +132,14 @@ namespace Desert::Graphic
         if ( !m_MaterialExecutor )
             return;
 
-        std::unordered_set<UniformBufferProperty*> dirtyUBs;
-
         // 1. TProperty defaults → FieldProperty (only dirty ones)
-        UploadRegisteredProperties( dirtyUBs );
+        UploadRegisteredProperties();
 
         // 2. MaterialInstance overrides on top
-        ApplyInstanceOverrides( instance, dirtyUBs );
+        ApplyInstanceOverrides( instance );
 
-        // 3. Flush every UB that still has dirty fields. A field stays dirty for frames-in-flight
-        //    frames, so this writes the new data into EACH per-frame-in-flight buffer copy (not just
-        //    the copy for the frame it first changed on). Flushing only the UBs "touched" this frame
-        //    would leave the other copies at their initial zero contents, so any frame presenting those
-        //    indices would render the mesh black/garbage — the source of the per-frame flicker.
-        for ( const auto& [ubName, idx] : m_MaterialExecutor->GetUniformBufferProperties() )
-        {
-            auto ubProp = m_MaterialExecutor->GetUniformBufferProperty( ubName );
-            if ( ubProp && ubProp->HasDirtyFields() )
-                ubProp->UpdateFields();
-        }
+        // 3. Get them onto the GPU.
+        FlushFieldFilledUniformBuffers();
 
         OnBind( const_cast<MaterialInstance*>( instance ) );
     }
