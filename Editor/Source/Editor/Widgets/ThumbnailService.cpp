@@ -87,6 +87,32 @@ namespace Desert::Editor
         m_Queued.erase( assetPath );
     }
 
+    void ThumbnailService::Shutdown()
+    {
+        // See the header for why this exists at all. Nothing to say when the renderer was never built —
+        // a session that previewed nothing pays nothing, here as everywhere else in this file.
+        if ( !m_Renderer )
+            return;
+
+        // The queue goes first, so the state left behind is one a Tick() could legitimately act on rather
+        // than a half-cancelled capture: an in-flight PNG that no longer has a renderer behind it would be
+        // reported as "never completed" by the give-up path if the service were ever ticked again.
+        m_Queue.clear();
+        m_Queued.clear();
+        m_InFlight.clear();
+        m_InFlightPng.clear();
+        m_InFlightTicks = 0;
+
+        // ~AssetThumbnailRenderer idles the device and releases the scene before the renderer, which is what
+        // returns the slot. Identical to the idle path above — the DIFFERENCE is only that this one is not
+        // waiting for 300 frames that a quitting editor will never draw.
+        m_Renderer.reset();
+        m_IdleTicks = 0;
+
+        LOG_INFO( "[Thumbnails] renderer released on shutdown ({}/{} renderer slots in use).",
+                  Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots );
+    }
+
     void ThumbnailService::Tick()
     {
         // Nothing to preview this session -> never pay for the renderer (it owns a full SceneRenderer).

@@ -3372,6 +3372,23 @@ namespace Desert::Editor
         // is currently in use by VkCommandBuffer" validation errors on quit. Idle first, then tear down.
         Graphic::Renderer::GetInstance().WaitDeviceIdle();
 
+        // The thumbnail service is NOT one of the panels, and the sentence above is why that matters: it
+        // names "asset thumbnails" among the GPU objects this teardown covers, but m_Panels.clear() cannot
+        // reach a function-static that the panels merely talk to. Left to itself the service is destroyed at
+        // __cxa_finalize, long after the device is gone, and ~AssetThumbnailRenderer's WaitDeviceIdle() then
+        // dereferences a null renderer API — exit 139, measured. Released here, deterministically, while
+        // there is still a device to wait on. See ThumbnailService::Shutdown().
+        //
+        // Before the panels rather than after: a panel's own teardown must never be able to queue one last
+        // preview into a service that has already let its renderer go.
+        ThumbnailService::Get().Shutdown();
+
+        // The SECOND half of the same problem, and the half the sentence above still does not cover: the
+        // component widgets keep their thumbnail caches in function-statics (StaticMeshComponent.cpp,
+        // SkinnedMeshComponentWidget.cpp), so those GPU images belong to no panel and no service. Cleared
+        // here for the same reason and at the same moment. See ThumbnailCache::ReleaseAll().
+        ThumbnailCache::ReleaseAll();
+
 #ifdef EBABLE_IMGUI
         m_Panels.clear();
         m_ImGuiLayer->OnDetach();
