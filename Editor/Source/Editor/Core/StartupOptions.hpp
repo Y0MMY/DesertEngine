@@ -37,5 +37,23 @@ namespace Desert::Editor
         /// screen unattended, which is what every capture of one depends on. See
         /// EditorLayer::OnAttach for the resolution order and the error that names both kinds.
         std::vector<std::string> PanelsToOpen;
+
+        /// `--select <name-or-uuid>`: the entity that is SELECTED once the scene has settled, as though a
+        /// person had clicked it in the outliner. Empty = select nothing, which is the boot the editor has
+        /// always had.
+        ///
+        /// WHY A FLAG. The Details panel draws whatever `SelectionManager` holds, so with nothing selected
+        /// it draws an empty column — and nothing could select an entity without a mouse. Synthetic input
+        /// is not an option and that is measured, not assumed: `osascript` answers "not allowed to send
+        /// keystrokes. (1002)", because a build agent has no macOS assistive access. The consequence was
+        /// larger than any one capture: NO change to the Details panel was provable by a frame at all, and
+        /// two developers in a row owed a picture they had no way to take.
+        ///
+        /// Resolved against the entity's Tag first and its UUID second — the name is what a person reads in
+        /// the outliner, the UUID is what survives a rename. A value matching NEITHER ends the run
+        /// non-zero, naming it; selecting nothing quietly would be the same silent fallback as loading the
+        /// wrong scene, just harder to see, because an empty Details panel is what an unselected editor
+        /// looks like anyway.
+        std::string SelectEntity;
     };
 } // namespace Desert::Editor

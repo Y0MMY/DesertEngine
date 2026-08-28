@@ -19,6 +19,7 @@
 #include <Engine/Assets/Mesh/AnimationAsset.hpp>
 #include <Engine/Scripting/ScriptEngine.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
+#include "Editor/Core/CommandLine.hpp"
 #include "Editor/Core/CrashRecovery.hpp"
 #include "Editor/Core/LayoutManager.hpp"
 #include "Editor/Core/PanelRequests.hpp"
@@ -314,11 +315,15 @@ namespace Desert::Editor
             // editor and wrong for a capture: the run would go on to write PNGs named after the scene
             // that was asked for, holding the picture of a different one. That is worse than no evidence,
             // because it looks exactly like evidence. Interactive `--scene` keeps the old behaviour.
-            if ( shot.Active() && !std::filesystem::exists( shot.Scene ) )
+            //
+            // The RULE itself lives in Editor/Core/CommandLine.hpp as a pure function taking the existence
+            // as a parameter, so it is asserted by a test rather than only observable by launching the
+            // editor at a path that is not there. This call site supplies the filesystem it cannot.
+            const auto verdict = ValidateSceneForCapture( shot, std::filesystem::exists( shot.Scene ) );
+            if ( !verdict.IsSuccess() )
             {
-                LOG_ERROR( "[Shot] --scene '{}' does not exist (looked from '{}'); refusing to capture a "
-                           "different scene under that name.",
-                           shot.Scene, std::filesystem::current_path().string() );
+                LOG_ERROR( "[Shot] {} (looked from '{}')", verdict.GetError(),
+                           std::filesystem::current_path().string() );
                 // NOT std::exit(). The job system's workers are already running by the time this line is
                 // reached, and exit() runs static destructors under them: nine threads threw
                 // "recursive_mutex lock failed: Invalid argument" and the process aborted with 134. A
@@ -607,6 +612,17 @@ namespace Desert::Editor
             auto path = m_SceneLoadRequested.value();
             m_SceneLoadRequested.reset();
             LoadSceneInternal( path );
+        }
+
+        // `--select` lands HERE and not in OnAttach, because at OnAttach there is no scene to select in:
+        // the load is deferred to the first frame where the startup stages are done. This is the earliest
+        // point at which the entities exist, and it is before anything is drawn, so the very first frame
+        // already shows the Details panel filled — which is the whole reason a capture can prove anything
+        // about that panel.
+        if ( !m_StartupSelectionApplied && !m_SceneLoadRequested && !StartupLoading() )
+        {
+            m_StartupSelectionApplied = true;
+            ApplyStartupSelection();
         }
 
         // New (empty) scene — deferred like a load so it never tears down resources mid-frame.
@@ -2782,6 +2798,60 @@ namespace Desert::Editor
         }
     }
 
+    void EditorLayer::ApplyStartupSelection()
+    {
+        const std::string& wanted = Editor::StartupOptions::Get().SelectEntity;
+        if ( wanted.empty() )
+            return;
+
+        if ( !m_MainScene )
+        {
+            LOG_ERROR( "[Editor] --select '{}' but there is no scene to select in.", wanted );
+            const_cast<Engine::Application*>( m_Application )->Close( 2 );
+            return;
+        }
+
+        // TAG FIRST, UUID SECOND. The tag is what a person reads in the outliner and what a task brief
+        // names; the UUID is what survives a rename and what a script that walked the .desce already has.
+        // Tag first because a tag is what a human writes, and no tag in this engine is a bare decimal
+        // number by convention — so the two namespaces do not realistically collide.
+        std::string                 known;
+        std::optional<Common::UUID> match;
+
+        for ( const auto& entity : m_MainScene->GetAllEntities() )
+        {
+            if ( !entity.HasComponent<ECS::UUIDComponent>() )
+                continue;
+
+            const Common::UUID uuid = entity.GetComponent<ECS::UUIDComponent>().UUID;
+            const std::string  tag  = entity.HasComponent<ECS::TagComponent>()
+                                           ? entity.GetComponent<ECS::TagComponent>().Tag
+                                           : std::string();
+
+            if ( !tag.empty() )
+                known += ( known.empty() ? "" : ", " ) + tag;
+
+            if ( !match && ( tag == wanted || uuid.ToString() == wanted ) )
+                match = uuid;
+        }
+
+        if ( match )
+        {
+            Core::SelectionManager::SetSelected( *match );
+            LOG_INFO( "[Editor] --select '{}' -> entity {} selected.", wanted, match->ToString() );
+            return;
+        }
+
+        // NAMED, WITH THE LIST, AND FATAL — the same rule --open-panel follows next door, taken one step
+        // further. Selecting nothing quietly would be indistinguishable from the editor's ordinary
+        // unselected boot: an empty Details panel is exactly what "nothing is selected" looks like, so a
+        // capture of one would be a picture of the failure presented as a picture of the feature. That is
+        // defect 1 wearing a different hat, and it ends the run rather than the run ending in evidence.
+        LOG_ERROR( "[Editor] --select '{}' matches no entity by tag or UUID in scene '{}'. Entities: {}", wanted,
+                   m_MainScene->GetSceneName(), known.empty() ? "(none)" : known );
+        const_cast<Engine::Application*>( m_Application )->Close( 2 );
+    }
+
     void EditorLayer::DrawScenesMenu()
     {
         namespace ImGui = ::ImGui;
@@ -3301,6 +3371,23 @@ namespace Desert::Editor
         // buffer is in flight is what produced the "can't be called on VkPipeline/VkDescriptorPool ... that
         // is currently in use by VkCommandBuffer" validation errors on quit. Idle first, then tear down.
         Graphic::Renderer::GetInstance().WaitDeviceIdle();
+
+        // The thumbnail service is NOT one of the panels, and the sentence above is why that matters: it
+        // names "asset thumbnails" among the GPU objects this teardown covers, but m_Panels.clear() cannot
+        // reach a function-static that the panels merely talk to. Left to itself the service is destroyed at
+        // __cxa_finalize, long after the device is gone, and ~AssetThumbnailRenderer's WaitDeviceIdle() then
+        // dereferences a null renderer API — exit 139, measured. Released here, deterministically, while
+        // there is still a device to wait on. See ThumbnailService::Shutdown().
+        //
+        // Before the panels rather than after: a panel's own teardown must never be able to queue one last
+        // preview into a service that has already let its renderer go.
+        ThumbnailService::Get().Shutdown();
+
+        // The SECOND half of the same problem, and the half the sentence above still does not cover: the
+        // component widgets keep their thumbnail caches in function-statics (StaticMeshComponent.cpp,
+        // SkinnedMeshComponentWidget.cpp), so those GPU images belong to no panel and no service. Cleared
+        // here for the same reason and at the same moment. See ThumbnailCache::ReleaseAll().
+        ThumbnailCache::ReleaseAll();
 
 #ifdef EBABLE_IMGUI
         m_Panels.clear();

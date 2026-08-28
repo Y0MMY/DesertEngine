@@ -1,6 +1,7 @@
 #include "ThumbnailCache.hpp"
 
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/Logger.hpp>
 
 #include <Engine/Core/Formats/ImageFormat.hpp>
 
@@ -122,5 +123,39 @@ namespace Desert::Editor
     void ThumbnailCache::Clear()
     {
         m_Cache.clear();
+    }
+
+    std::unordered_set<ThumbnailCache*>& ThumbnailCache::Live()
+    {
+        // Function-local so it is constructed before the first cache registers, whatever the translation
+        // unit order is — three of the owners are themselves function-statics in other files.
+        static std::unordered_set<ThumbnailCache*> s_Live;
+        return s_Live;
+    }
+
+    ThumbnailCache::ThumbnailCache()
+    {
+        Live().insert( this );
+    }
+
+    ThumbnailCache::~ThumbnailCache()
+    {
+        Live().erase( this );
+    }
+
+    void ThumbnailCache::ReleaseAll()
+    {
+        // See the header. Clear(), not destroy: these caches outlive this call by design — the three that
+        // matter are function-statics that will not be destroyed until the process ends — and what has to
+        // go is the GPU image each one holds, not the map that held it.
+        std::size_t images = 0;
+        for ( ThumbnailCache* cache : Live() )
+        {
+            images += cache->m_Cache.size();
+            cache->Clear();
+        }
+
+        LOG_INFO( "[Thumbnails] released {} cached image(s) from {} cache(s) on shutdown.", images,
+                  Live().size() );
     }
 } // namespace Desert::Editor

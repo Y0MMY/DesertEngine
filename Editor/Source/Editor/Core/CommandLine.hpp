@@ -1,0 +1,340 @@
+#pragma once
+
+#include <Common/Core/ResultStr.hpp>
+
+#include <Editor/Core/ShotOptions.hpp>
+#include <Editor/Core/StartupOptions.hpp>
+
+#include <charconv>
+#include <cerrno>
+#include <cmath>
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+namespace Desert::Editor
+{
+    /**
+     * @brief The editor's command line, resolved to values or to a NAMED failure. Pure: no files, no
+     *        globals, no GPU — argv in, options out, which is what makes it assertable by a test.
+     *
+     * WHY THIS IS A FUNCTION AND NOT A LOOP IN main(). It used to be the loop, and the loop had the same
+     * defect three times over: an argument it did not recognise was DROPPED IN SILENCE. `--sceen X` (one
+     * transposed letter), `--shot-frames` written last with its value forgotten, `--camera 0,200` with a
+     * component missing — each of those parsed to "nothing happened", and "nothing happened" for `--scene`
+     * means the editor loads the PROJECT'S DEFAULT scene, renders it, writes a plausible PNG under the name
+     * of the scene that was asked for, and exits 0.
+     *
+     * That is the silent fallback the delivery contract forbids (DC 1.4), and it is worse than a crash: a
+     * capture that fails loudly costs a re-run, while a capture that succeeds with the wrong subject enters
+     * a document as evidence. One row of measurements was already lost to it, and three developers spent a
+     * programme cross-checking every frame against its own log by hand to be sure of what had rendered.
+     *
+     * So the rule here is total: EVERY token on the command line is either recognised and consumed, or the
+     * run stops with a message naming the token. There is no third outcome, and in particular there is no
+     * "ignore it and carry on".
+     *
+     * @note The engine reads argv nowhere else — `CreateApplication` is its only consumer — so this
+     *       function may reject what it does not know without stepping on a flag somebody else handles.
+     */
+
+    /// One accepted flag. The table exists so the error message that lists the known flags cannot drift
+    /// from the set the parser actually accepts; a test walks it and asserts every entry parses.
+    struct CommandLineFlag
+    {
+        const char* Name;
+        bool        TakesValue;
+        /// A value that parses, for the table-driven test. Null for a flag that takes none.
+        const char* ExampleValue;
+    };
+
+    inline constexpr CommandLineFlag kCommandLineFlags[] = {
+         { "--project", true, "Desert.deproj" },
+         { "--scene", true, "Scene.desce" },
+         { "--shot", true, "out.png" },
+         { "--shot-frames", true, "90" },
+         { "--camera", true, "0,200,0" },
+         { "--look", true, "0,0.9,-1" },
+         { "--camera-to", true, "0,200,-100" },
+         { "--look-to", true, "0,0.5,-1" },
+         { "--shot-sequence", true, "/tmp/seq" },
+         { "--shot-every", true, "1" },
+         { "--open-panel", true, "Details" },
+         { "--select", true, "Directional Light" },
+         { "--gpu-profile", false, nullptr },
+         { "--no-gpu-timing", false, nullptr },
+         { "--gpu-profile-frame-only", false, nullptr },
+         { "--play", false, nullptr },
+    };
+
+    /// Everything the command line resolved to. Held by value and copied into the process-wide singletons
+    /// by the caller, so that the parsing itself stays a pure function of its input.
+    struct CommandLineOptions
+    {
+        /// `--project <path.deproj>`. Whether the path OPENS is the caller's business — this function never
+        /// touches the disk, which is exactly what lets it be tested without one.
+        std::string    Project;
+        ShotOptions    Shot;
+        StartupOptions Startup;
+    };
+
+    namespace CommandLineDetail
+    {
+        /// A float that consumes its ENTIRE text. `strtof` alone stops at the first character it cannot
+        /// use and reports success for what it read, so "0.5abc" and "0,200" both look like wins; the
+        /// end-pointer check is what turns a partial read into the error it is.
+        inline bool ParseFloatStrict( const std::string& text, float& out )
+        {
+            if ( text.empty() )
+                return false;
+
+            errno             = 0;
+            char*       end   = nullptr;
+            const float value = std::strtof( text.c_str(), &end );
+
+            if ( end != text.c_str() + text.size() )
+                return false;
+            if ( errno == ERANGE )
+                return false;
+            // "inf"/"nan" parse cleanly and are not camera coordinates. A NaN position produces a frame
+            // that is uniformly one colour, which reads as a broken renderer rather than a bad argument.
+            if ( !std::isfinite( value ) )
+                return false;
+
+            out = value;
+            return true;
+        }
+
+        /// Exactly three comma-separated floats. Not "at least three": `--camera 0,200,0,7` is a person
+        /// who meant something the flag cannot express, and guessing which three they meant is the silent
+        /// fallback in miniature.
+        inline bool ParseVec3Strict( const std::string& text, glm::vec3& out )
+        {
+            const std::size_t first = text.find( ',' );
+            if ( first == std::string::npos )
+                return false;
+            const std::size_t second = text.find( ',', first + 1 );
+            if ( second == std::string::npos )
+                return false;
+            if ( text.find( ',', second + 1 ) != std::string::npos )
+                return false;
+
+            float x = 0.0f;
+            float y = 0.0f;
+            float z = 0.0f;
+            if ( !ParseFloatStrict( text.substr( 0, first ), x ) )
+                return false;
+            if ( !ParseFloatStrict( text.substr( first + 1, second - first - 1 ), y ) )
+                return false;
+            if ( !ParseFloatStrict( text.substr( second + 1 ), z ) )
+                return false;
+
+            out = glm::vec3( x, y, z );
+            return true;
+        }
+
+        /// An integer that consumes its entire text. `atoi` — which this replaces — answers 0 for "abc"
+        /// and for "90x" alike, so a mistyped frame count silently became "capture immediately".
+        inline bool ParseIntStrict( const std::string& text, int& out )
+        {
+            const char* begin = text.data();
+            const char* end   = text.data() + text.size();
+
+            int        value  = 0;
+            const auto result = std::from_chars( begin, end, value );
+            if ( result.ec != std::errc() || result.ptr != end )
+                return false;
+
+            out = value;
+            return true;
+        }
+
+        /// The known flags, comma separated — for the message a rejected token gets. Built from the table
+        /// rather than written out, so a flag added above appears here without anyone remembering to.
+        inline std::string KnownFlagList()
+        {
+            std::string list;
+            for ( const CommandLineFlag& flag : kCommandLineFlags )
+            {
+                if ( !list.empty() )
+                    list += ", ";
+                list += flag.Name;
+            }
+            return list;
+        }
+    } // namespace CommandLineDetail
+
+    /**
+     * @brief Resolve @p args (argv WITHOUT the program name) into options, or fail naming the token.
+     *
+     * Failure modes, all of which used to be silent no-ops:
+     *   - a token that is not a known flag;
+     *   - a flag whose value is missing because the flag was written last;
+     *   - a vector or an integer that does not parse, or parses only in part.
+     */
+    inline Common::ResultStr<CommandLineOptions> ParseCommandLine( const std::vector<std::string>& args )
+    {
+        using namespace CommandLineDetail;
+
+        CommandLineOptions options;
+
+        for ( std::size_t i = 0; i < args.size(); ++i )
+        {
+            const std::string& arg = args[i];
+
+            // Find the flag in the table first. This is what makes an unknown token an ERROR rather than
+            // something that falls off the end of an if/else chain, which is how the old loop lost them.
+            const CommandLineFlag* flag = nullptr;
+            for ( const CommandLineFlag& candidate : kCommandLineFlags )
+            {
+                if ( arg == candidate.Name )
+                {
+                    flag = &candidate;
+                    break;
+                }
+            }
+
+            if ( flag == nullptr )
+            {
+                return Common::MakeFormattedError<CommandLineOptions>(
+                     "unrecognised argument '{}'. A token this parser does not know used to be dropped in "
+                     "silence, which for a mistyped '--scene' meant capturing the DEFAULT scene under the "
+                     "name of the one that was asked for. Known flags: {}",
+                     arg, KnownFlagList() );
+            }
+
+            if ( !flag->TakesValue )
+            {
+                if ( arg == "--gpu-profile" )
+                    options.Shot.GpuProfile = true;
+                else if ( arg == "--no-gpu-timing" )
+                    options.Shot.GpuTiming = false;
+                else if ( arg == "--gpu-profile-frame-only" )
+                    options.Shot.GpuFrameOnly = true;
+                else if ( arg == "--play" )
+                    options.Shot.Play = true;
+                continue;
+            }
+
+            if ( i + 1 >= args.size() )
+            {
+                return Common::MakeFormattedError<CommandLineOptions>(
+                     "'{}' needs a value and is the last token on the command line. Written this way it "
+                     "used to be dropped entirely, leaving the setting at its default with nothing said.",
+                     arg );
+            }
+
+            const std::string& value = args[++i];
+
+            if ( arg == "--project" )
+                options.Project = value;
+            else if ( arg == "--scene" )
+                options.Shot.Scene = value;
+            else if ( arg == "--shot" )
+                options.Shot.Output = value;
+            else if ( arg == "--shot-sequence" )
+                options.Shot.Sequence = value;
+            else if ( arg == "--open-panel" )
+                options.Startup.PanelsToOpen.emplace_back( value );
+            else if ( arg == "--select" )
+                options.Startup.SelectEntity = value;
+            else if ( arg == "--shot-frames" )
+            {
+                int frames = 0;
+                if ( !ParseIntStrict( value, frames ) || frames < 1 )
+                {
+                    return Common::MakeFormattedError<CommandLineOptions>(
+                         "--shot-frames '{}' is not a frame count (a whole number, at least 1).", value );
+                }
+                options.Shot.Frames = frames;
+            }
+            else if ( arg == "--shot-every" )
+            {
+                int every = 0;
+                if ( !ParseIntStrict( value, every ) || every < 1 )
+                {
+                    return Common::MakeFormattedError<CommandLineOptions>(
+                         "--shot-every '{}' is not an interval (a whole number, at least 1).", value );
+                }
+                options.Shot.SequenceEvery = every;
+            }
+            else if ( arg == "--camera" )
+            {
+                if ( !ParseVec3Strict( value, options.Shot.Position ) )
+                {
+                    return Common::MakeFormattedError<CommandLineOptions>(
+                         "--camera '{}' is not a position (three comma-separated numbers, e.g. 0,200,0).", value );
+                }
+                options.Shot.HasCamera = true;
+            }
+            else if ( arg == "--look" )
+            {
+                if ( !ParseVec3Strict( value, options.Shot.Forward ) )
+                {
+                    return Common::MakeFormattedError<CommandLineOptions>(
+                         "--look '{}' is not a direction (three comma-separated numbers, e.g. 0,0.9,-1).", value );
+                }
+                options.Shot.HasCamera = true;
+            }
+            // The far end of a moving shot. Each also implies --camera, because a path that nothing places
+            // is a path the scene's own camera ignores.
+            else if ( arg == "--camera-to" )
+            {
+                if ( !ParseVec3Strict( value, options.Shot.PositionTo ) )
+                {
+                    return Common::MakeFormattedError<CommandLineOptions>(
+                         "--camera-to '{}' is not a position (three comma-separated numbers).", value );
+                }
+                options.Shot.HasPositionTo = true;
+                options.Shot.HasCamera     = true;
+            }
+            else if ( arg == "--look-to" )
+            {
+                if ( !ParseVec3Strict( value, options.Shot.ForwardTo ) )
+                {
+                    return Common::MakeFormattedError<CommandLineOptions>(
+                         "--look-to '{}' is not a direction (three comma-separated numbers).", value );
+                }
+                options.Shot.HasForwardTo = true;
+                options.Shot.HasCamera    = true;
+            }
+        }
+
+        return Common::MakeSuccess( std::move( options ) );
+    }
+
+    /**
+     * @brief The one capture precondition that needs the disk, written so it can be tested WITHOUT one:
+     *        given the resolved options and whether the `--scene` file was found, either the run may go on
+     *        or it must stop with a named reason.
+     *
+     * THE RELATION IS "capture is active" AGAINST "the scene is there", and it is the whole of defect 1.
+     * The scene loader logs a missing file and leaves the current scene standing, which is right for an
+     * editor — a person sees the message and picks another scene from the menu — and wrong for a capture,
+     * where nobody is watching and the run goes on to write a PNG named after the scene that was asked for
+     * holding the picture of a different one. That frame is worse than no frame, because it looks exactly
+     * like evidence, and one row of measurements was lost to it.
+     *
+     * Taking the existence as a PARAMETER rather than calling the filesystem is what lets the rule be
+     * asserted instead of argued: the caller supplies `std::filesystem::exists`, a test supplies a bool.
+     *
+     * @param sceneExists Whether `shot.Scene` was found on disk. Ignored when no `--scene` was given.
+     */
+    inline Common::BoolResultStr ValidateSceneForCapture( const ShotOptions& shot, bool sceneExists )
+    {
+        // No --scene at all: the project's own default scene loads, and that is not this rule's business.
+        if ( shot.Scene.empty() )
+            return Common::MakeSuccess( true );
+
+        if ( sceneExists )
+            return Common::MakeSuccess( true );
+
+        // Interactive `--scene` keeps the editor's behaviour: the loader complains and the session stays
+        // usable. There is a person here, and the message reaches them.
+        if ( !shot.Active() )
+            return Common::MakeSuccess( true );
+
+        return Common::MakeFormattedError<bool>(
+             "--scene '{}' does not exist; refusing to capture a different scene under that name.", shot.Scene );
+    }
+} // namespace Desert::Editor

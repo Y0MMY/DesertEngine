@@ -51,6 +51,38 @@ namespace Desert::Editor
         // Forget a cached/failed result, e.g. after the asset was edited.
         void Invalidate( const std::string& assetPath );
 
+        /**
+         * @brief Release the renderer NOW, while the device is still alive. Called from
+         *        EditorLayer::OnDetach.
+         *
+         * WHY THIS IS SAID OUT LOUD INSTEAD OF LEFT TO THE DESTRUCTOR. This service is a function-static:
+         * it is destroyed at `__cxa_finalize`, after main has returned and after ~Application has taken the
+         * device and the VMA allocator with it. ~AssetThumbnailRenderer's first act is
+         * Renderer::WaitDeviceIdle(), which then dereferences a null s_RendererAPI and segfaults — measured,
+         * exit 139, with the backtrace naming exactly this chain:
+         *
+         *     Renderer::WaitDeviceIdle <- ~AssetThumbnailRenderer <- ~ThumbnailService
+         *     <- __cxa_finalize_ranges <- exit
+         *
+         * This is the same family 0bfdeccf fixed for the engine-side registries ("process-lifetime caches
+         * became the next thing to outlive the device"), and this is the member that fix missed. It was
+         * missed for a understandable reason: EditorLayer::OnDetach already names "asset thumbnails" among
+         * the GPU objects it tears down, but that comment is about the PANELS, and this service is a peer of
+         * the panels rather than one of them — no m_Panels.clear() can reach it.
+         *
+         * A static destructor cannot be ordered against the device, so ordering is not something to get
+         * right here; it is something to stop relying on. After this call the destructor has nothing left to
+         * do, which is the point — the release is deterministic, not merely early.
+         *
+         * NOT a guard inside ~AssetThumbnailRenderer that skips the wait when the device is gone: that would
+         * turn a broken teardown order into a silent one, and a leak that never reports itself is worse than
+         * the crash that does.
+         *
+         * Idempotent, and NOT a one-way switch: the service is usable again afterwards, because this is the
+         * same release the 300-idle-frame path performs and that path must keep working mid-session.
+         */
+        void Shutdown();
+
         [[nodiscard]] bool HasWork() const
         {
             return !m_Queue.empty() || ( m_Renderer && m_Renderer->HasPending() );
