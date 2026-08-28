@@ -107,8 +107,10 @@ float CloudAmbientOcclusion( float profile, float strength )
 //
 // WHAT REPLACES IT. A separate quantity — the optical depth of everything above the sample, integrated
 // straight up — produced into a volume by Programs/Clouds/CloudSkyOcclusionVolume.shader and read back
-// here. The two functions below are the whole of the maths: how a VERTICAL optical depth becomes a
-// HEMISPHERICAL transmittance, and how the artist's strength blends it in.
+// here. The three steps below are the whole of the maths: how a VERTICAL optical depth becomes a
+// HEMISPHERICAL transmittance, how that hemisphere is composed back into the SPHERE the ambient is a mean
+// over, and how the artist's strength blends the result in. The middle step is not optional bookkeeping —
+// leaving it out is what made the deck go brown at full strength (see CloudSkyOcclusion).
 
 // THE EXPONENTIAL INTEGRAL E1, Abramowitz & Stegun 5.1.53 (x <= 1, |error| < 2e-7) and 5.1.56 (x >= 1,
 // |error| < 5e-5 in `x e^x E1(x)`). Its only caller is the transmittance below.
@@ -157,23 +159,98 @@ float CloudExpIntegralE1( float x )
 // evaluated ONCE PER TEXEL of the volume rather than at every one of the march's samples, which is
 // exactly why it is affordable here and would not have been in the march.
 //
-// WHAT IS STILL AN APPROXIMATION, and it is the larger one: the slab. A slant ray through a FINITE cumulus
-// exits its side long before it has crossed tau/mu, so real broken cloud occludes LESS than this says.
-// The term is therefore biased dark, the bias grows with how broken the sky is, and the artist's strength
-// below is what pulls it back — rather than a second fitted constant tuned on one camera angle.
+// WHAT IS STILL AN APPROXIMATION: the slab. A slant ray through a FINITE cumulus exits its side long
+// before it has crossed tau/mu, so real broken cloud occludes LESS than this says. The term is therefore
+// biased dark and the bias grows with how broken the sky is. Its magnitude is still unmeasured — no
+// converged reference for hemispherical occlusion over broken cloud exists in this repository — so what
+// is claimed here is the DIRECTION only.
+//
+// THIS SENTENCE USED TO END "and the artist's strength below is what pulls it back", and that was the
+// defect Р7 found rather than a description of one. A strength that has to be held at 0.5 to keep a
+// modelling error out of the frame is a knob hiding a defect, and it is why the dial could not be raised:
+// the frame went brown at 1.0. The pull-back now belongs to CloudSkyOcclusion, which composes this
+// HEMISPHERE into the SPHERE the ambient is a mean over instead of scaling one by the other. The strength
+// is an art dial again, and the slab bias is a bounded second-order error on top of a first-order
+// composition that is now correct.
 float CloudSkyDiffuseTransmittance( float verticalOpticalDepth )
 {
     float tau = max( verticalOpticalDepth, 0.0f );
     return clamp( exp( -tau ) * ( 1.0f - tau ) + tau * tau * CloudExpIntegralE1( tau ), 0.0f, 1.0f );
 }
 
+// THE SHARE OF THE SPHERE THIS VOLUME CAN SPEAK FOR. The volume integrates material ABOVE a sample
+// (Programs/Clouds/CloudSkyOcclusionVolume.shader walks the column from the top of the shell downward),
+// and CloudSkyDiffuseTransmittance above converts that into an UPPER-HEMISPHERE transmittance. The
+// quantity it is applied to is the FULL-SPHERE mean sky radiance — CloudRaymarch.shader reads
+// SKY_DISTANT_LIGHT_SPHERE_TEXEL, and says in as many words that a cloud is lit from every direction at
+// once. Half of those directions point DOWN, and nothing this volume knows about occludes them.
+//
+// ONE HALF, AND WHERE THAT NUMBER COMES FROM — read this before changing it. What the term wants is
+//
+//     f = integral L(w) T(w) dw / integral L(w) dw
+//
+// and the shader does not have L(w). It has ONE texel, the mean over the whole sphere
+// (Graphic::kDistantLightWidth is 1), so every possible value of this constant is a statement about an
+// angular distribution nobody here can see. The previous form chose the most extreme statement available
+// — that ALL the ambient arrives from above — and that is what drove the multiplier to zero.
+//
+// One half is the value, and the ONLY value, that the available information supports: with nothing known
+// about L beyond its mean, the hemispheres are two equal solid angles carrying equal shares. It is
+// therefore not a fitted constant and must not be tuned into one; it is what "we know the mean and
+// nothing else" evaluates to. The bound it enforces is what actually matters and holds for any true
+// split w: f lies in [w, 1] and is exactly 1 when nothing is overhead. Zero satisfied neither.
+//
+// WHAT WOULD REPLACE IT WITH A MEASUREMENT, stated so the next person does not re-derive it: a SECOND
+// texel in the distant sky light holding the UPPER hemisphere's own mean, from which
+// w = 1 - L_upper / (2 * L_sphere) falls out on the GPU with no assumption at all. The 8x8 direction grid
+// SkyDistantLight already walks is 32 up and 32 down, so the sum is already half-computed; what it costs
+// is one more lane of groupshared reduction and one more texel of a 1xN image. That is
+// Programs/Sky/SkyDistantLight.shader, Common/SkyScattering.glslh and Graphic::kDistantLightWidth — the
+// SKY's files, not the cloud's, which is why Р7 did not do it.
+#define CLOUD_SKY_LOWER_HEMISPHERE 0.5f
+
 // The occlusion multiplier the march applies to the ambient term, from the transmittance the volume
 // stores. @p strength is the SAME AmbientOcclusionStrength that drives CloudAmbientOcclusion — one knob
 // with one meaning ("how strongly the sky light is occluded"), and the component's flag chooses only
 // WHICH geometry computes it, so neither field goes dead when the other is in use.
+//
+// THE HEMISPHERE SPLIT, and why the term read `mix(1, T, strength)` before. Multiplying the full sphere
+// by T asserts that a sample under three kilometres of congestus receives no sky light from ANY
+// direction, including the open lower half it can see straight down into. At the shipped extinction of
+// 8/km that assertion is not academic: the deck's own optical depth drives T to ~1e-7, and Р7 measured
+// 74.5 % of the visible deck below an ambient multiplier of 0.10 at strength 1.0, with 0.03 % below
+// 0.02. The sky light is not attenuated there, it is ANNIHILATED — and what remains is the sun term,
+// whose colour is SunIlluminanceOnGround, the atmospherically reddened sun. That is the brown: the shade
+// was not tinted warm, it had its only cool contributor deleted. Measured on Clouds_Protocol at 7
+// degrees away from the sun, the deck's B/R runs 1.083 shipped -> 0.884 at strength 1.0, against 0.859
+// with the ambient removed outright — 88.8 % of the whole displacement the term is capable of.
+//
+// WHAT THIS DOES TO THE DIAL, because it is not obvious and the owner is choosing on it. The old term was
+// `1 - s(1 - T)` and the new one is `1 - (s/2)(1 - T)`, so strength s now buys exactly what s/2 used to:
+// Р7 rendered strength 1.0 through this function and got a frame IDENTICAL IN EVERY CHANNEL to the
+// shipped 0.5. The consequence is worth saying out loud rather than leaving to be discovered — the deep
+// shading that made the 1.0 frame's lobes read as solid volumes was the sky light being DELETED, not a
+// better-modelled cloud, and it is not reachable without the brown that came with it. A real cumulus
+// underside is grey-blue because it is weakly occluded and sees most of the sky; the term that darkens it
+// past that point is not modelling anything.
+//
+// WHY THIS IS NOT THE PROFILE TERM'S PROBLEM TOO. CloudAmbientOcclusion floors at zero and that is
+// correct for it: `Profile` measures depth inside the sample's OWN body, which surrounds it on every
+// side, so a sample in the core genuinely is shut off from the whole sphere. The two floors differ
+// because the two geometries differ, which is the same reason the flag chooses between them.
+//
+// WHAT IS STILL AN APPROXIMATION. The lower hemisphere is left fully open. Cloud BELOW a sample does
+// occlude it, and this volume does not carry that number — it accumulates downward, so at any slice it
+// holds only what is overhead. The error is therefore one-sided and bounded: this can be too BRIGHT
+// deep inside a body, never too dark, where the form it replaces could only ever be too dark. The
+// visible underside of a deck, which is what a ground camera sees and what this feature exists for, has
+// open air beneath it and is the case the split is exact for.
 float CloudSkyOcclusion( float skyTransmittance, float strength )
 {
-    return mix( 1.0f, clamp( skyTransmittance, 0.0f, 1.0f ), clamp( strength, 0.0f, 1.0f ) );
+    float sphere = CLOUD_SKY_LOWER_HEMISPHERE +
+                   ( 1.0f - CLOUD_SKY_LOWER_HEMISPHERE ) * clamp( skyTransmittance, 0.0f, 1.0f );
+
+    return mix( 1.0f, sphere, clamp( strength, 0.0f, 1.0f ) );
 }
 
 // ---------------------------------------------------------------------------------------------------
