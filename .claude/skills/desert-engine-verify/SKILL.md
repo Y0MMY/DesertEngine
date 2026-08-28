@@ -90,7 +90,7 @@ disocclusion, the neighbourhood clamp under translation, or the Ultra tier's che
 change touches anything temporal, move the camera. A translation under a cloud deck is also the
 strongest test of whether a layer reads as sitting at altitude.
 
-### The noise floor of `--shot` is ZERO, so a pixel diff is an exact instrument
+### The noise floor of `--shot` is usually ZERO — but it is a property of the SCENE, so measure it
 
 **Corrected 2026-08-19.** This section used to say cloud and sky scenes are not byte-reproducible
 run to run, and prescribed freezing animation and measuring a noise floor before any comparison.
@@ -100,8 +100,18 @@ That is wrong for the headless `--shot` path. Two independent measurements on th
   2 947 884;
 - a developer's own repeat at 1280x766 — **0 differing pixels** of 980 480.
 
-Whatever the interactive editor does with a wall-clock timestep, `--shot-frames` advances the same
-way every run. So:
+**Corrected again 2026-08-28, and this one is the important direction.** The sentence that stood
+here — "whatever the interactive editor does with a wall-clock timestep, `--shot-frames` advances the
+same way every run" — is **false for any scene with grass**. Grass sway is driven by
+`steady_clock::now()` (`SceneRenderer.cpp:353` → `GrassUB.Wind.w`), not by the frame counter, so
+`Terrain_Grass` differs by **8.94 % of pixels, max delta 50/255, between two runs of the UNMODIFIED
+binary**. With grass off, the same scene's floor is exactly 0 bytes. The developer who found it was
+about to claim "these two frames are byte-identical" as the load-bearing evidence of a migration —
+which is exactly the claim a non-zero floor destroys.
+
+So the rule is not "the floor is zero"; it is **"the floor is a property of the scene and the repeat
+shot costs one run"**. Take it. A wall-clock input anywhere in the frame — grass, and possibly
+others not yet found — puts it above zero. Then:
 
 - **Diff the pixels.** "18.4% of pixels changed, max delta 1/255" and "1.3% changed, max delta 14/255"
   are two different findings about two different fixes, and that separation was only available

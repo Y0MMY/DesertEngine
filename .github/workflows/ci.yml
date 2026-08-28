@@ -30,6 +30,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # merge-base needs history
+          # ...but merge-base needs COMMITS AND TREES, not file contents, and this repository carries
+          # over half a gigabyte of verification screenshots (Docs/Clouds/Shots alone). A full-history
+          # clone stopped fitting in this job's ten minutes on 2026-08-27: the run spent the entire
+          # budget inside actions/checkout, never reached clang-format at all, and GitHub reports a
+          # timeout as "cancelled". Windows and macOS both `needs: format`, so they were SKIPPED --
+          # three merges landed with no build validation and a status that did not look like failure.
+          # blob:none fetches blobs lazily, so CheckFormat.sh pulls only the .cpp/.hpp it actually
+          # diffs. Removing this restores the timeout, and the timeout looks like a cancellation.
+          filter: blob:none
 
       - name: Install clang-format
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format
