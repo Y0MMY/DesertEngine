@@ -496,9 +496,12 @@ TEST( CloudSkyOcclusion, TheStrengthRemovesItExactlyAsItRemovesTheProfileTerm )
     // with itself across the flag.
     for ( const float transmittance : { 0.0f, 0.25f, 0.5f, 0.9f, 1.0f } )
     {
+        // What the strength blends TOWARD is the sphere, not the hemisphere — see the relation test below.
+        const float sphere = CLOUD_SKY_LOWER_HEMISPHERE + ( 1.0f - CLOUD_SKY_LOWER_HEMISPHERE ) * transmittance;
+
         EXPECT_FLOAT_EQ( CloudSkyOcclusion( transmittance, 0.0f ), 1.0f ) << "t " << transmittance;
-        EXPECT_FLOAT_EQ( CloudSkyOcclusion( transmittance, 1.0f ), transmittance ) << "t " << transmittance;
-        EXPECT_NEAR( CloudSkyOcclusion( transmittance, 0.5f ), 0.5f * ( 1.0f + transmittance ), 1e-6f );
+        EXPECT_FLOAT_EQ( CloudSkyOcclusion( transmittance, 1.0f ), sphere ) << "t " << transmittance;
+        EXPECT_NEAR( CloudSkyOcclusion( transmittance, 0.5f ), 0.5f * ( 1.0f + sphere ), 1e-6f );
     }
 
     // Both inputs clamped, for the reason the profile term's own test gives: an out-of-range value is one
@@ -511,6 +514,64 @@ TEST( CloudSkyOcclusion, TheStrengthRemovesItExactlyAsItRemovesTheProfileTerm )
             EXPECT_GE( occlusion, 0.0f );
             EXPECT_LE( occlusion, 1.0f );
         }
+}
+
+TEST( CloudSkyOcclusion, AHemisphericalTransmittanceIsComposedIntoTheSphereTheAmbientIsAMeanOver )
+{
+    // THE TWO SIDES THAT MUST AGREE, and the one Р7 found disagreeing. CloudRaymarch.shader multiplies
+    // this term into SKY_DISTANT_LIGHT_SPHERE_TEXEL — the mean radiance over the FULL SPHERE — while the
+    // volume that feeds it integrates material ABOVE the sample only and CloudSkyDiffuseTransmittance
+    // converts that into an UPPER-HEMISPHERE transmittance. Scaling one by the other asserts that cloud
+    // overhead also blocks the open sky underneath, which is how the deck lost every cool contributor it
+    // had and turned brown at full strength.
+    //
+    // Asserted as the composition rather than as a table of outputs: what is being pinned is that a
+    // half-sphere quantity enters a full-sphere one through its own solid angle.
+    for ( const float transmittance : { 0.0f, 1e-7f, 0.25f, 0.5f, 0.9f, 1.0f } )
+    {
+        const float lower = 1.0f; // nothing this volume knows about occludes it
+        const float upper = transmittance;
+        const float mean  = CLOUD_SKY_LOWER_HEMISPHERE * lower + ( 1.0f - CLOUD_SKY_LOWER_HEMISPHERE ) * upper;
+
+        EXPECT_NEAR( CloudSkyOcclusion( transmittance, 1.0f ), mean, 1e-6f ) << "t " << transmittance;
+    }
+
+    // The hemispheres are equal solid angles of the sphere, so the split is one half exactly. A fitted
+    // constant here would be the "second constant tuned on one camera angle" the header refuses.
+    EXPECT_FLOAT_EQ( CLOUD_SKY_LOWER_HEMISPHERE, 0.5f );
+
+    // THE FLOOR IS THE UNOCCLUDED HEMISPHERE AND NOT ZERO. This is the bound the previous form violated:
+    // however much cloud is stacked overhead, a sample still sees half the sphere. Stated for the worst
+    // case the shipped scene can reach — Clouds_Protocol's ExtinctionScale of 8/km over a 3.6 km deck
+    // drives the stored transmittance to about 1e-7, i.e. numerically zero.
+    for ( const float strength : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f } )
+    {
+        EXPECT_GE( CloudSkyOcclusion( 0.0f, strength ), CLOUD_SKY_LOWER_HEMISPHERE ) << "s " << strength;
+        EXPECT_LE( CloudSkyOcclusion( 0.0f, strength ), 1.0f ) << "s " << strength;
+    }
+
+    // Clear sky above must occlude NOTHING at any strength, or the term would darken a cloud that has no
+    // cloud over it — which is the one case the whole feature is supposed to leave alone.
+    for ( const float strength : { 0.0f, 0.5f, 1.0f } )
+        EXPECT_FLOAT_EQ( CloudSkyOcclusion( 1.0f, strength ), 1.0f ) << "s " << strength;
+
+    // Monotone in both arguments: more cloud above is never more sky, and more strength is never less
+    // occlusion. Catches an inversion that a spot value cannot.
+    float previous = 2.0f;
+    for ( int i = 0; i <= 20; ++i )
+    {
+        const float occlusion = CloudSkyOcclusion( static_cast<float>( i ) / 20.0f, 1.0f );
+        EXPECT_GE( occlusion, previous == 2.0f ? 0.0f : previous );
+        previous = occlusion;
+    }
+
+    previous = 2.0f;
+    for ( int i = 0; i <= 20; ++i )
+    {
+        const float occlusion = CloudSkyOcclusion( 0.0f, static_cast<float>( i ) / 20.0f );
+        EXPECT_LE( occlusion, previous );
+        previous = occlusion;
+    }
 }
 
 TEST( CloudSkyOcclusion, TheVolumeIsHalfTheModellingVolumeOnEveryAxisAndItsTexelStaysInsideTheLayer )
@@ -610,11 +671,19 @@ TEST( CloudSkyOcclusion, AColumnOfCloudDarkensASampleUNDERItAndLeavesTheOneABOVE
 
     // And the bottom of a solid deck is DARK rather than merely dimmer. Eleven slices of 4/km over 3.6 km
     // is a vertical tau of 9.9, which the hemispherical integral turns into about eight parts in a
-    // million — the "modelled, shaded base" the ambient knock-out frame showed and the shipped renderer
-    // cannot produce at all, because at the shipped strength of 0.5 the profile term's FLOOR is exactly
-    // half the whole sky whatever is overhead. That gap between 0.5 and ~0 is the feature.
+    // million: the UPPER hemisphere over that sample is shut.
     EXPECT_LT( previous, 1e-4f );
-    EXPECT_FLOAT_EQ( CloudAmbientOcclusion( 1.0f, 0.5f ), 0.5f ) << "the floor this replaces";
+
+    // WHAT THAT DOES AND DOES NOT LICENCE. This sentence used to end "that gap between 0.5 and ~0 is the
+    // feature", and taking it at its word is what shipped a brown deck: the ~0 is a fact about the
+    // hemisphere the volume measures, not about the sphere the ambient is a mean over. Composed through
+    // CloudSkyOcclusion the same column leaves the sample its open lower half, so the multiplier the march
+    // applies bottoms at CLOUD_SKY_LOWER_HEMISPHERE and not at zero. The feature is the gap between the
+    // profile term's flat 0.5 and a number that MOVES with what is actually overhead — 1.0 under clear sky
+    // here, 0.5 under eleven slices of deck — not the gap between 0.5 and nothing.
+    EXPECT_FLOAT_EQ( CloudAmbientOcclusion( 1.0f, 0.5f ), 0.5f ) << "the flat floor this replaces";
+    EXPECT_NEAR( CloudSkyOcclusion( previous, 1.0f ), CLOUD_SKY_LOWER_HEMISPHERE, 1e-4f );
+    EXPECT_FLOAT_EQ( CloudSkyOcclusion( 1.0f, 1.0f ), 1.0f ) << "the top of the deck is untouched";
 }
 
 int main( int argc, char** argv )
