@@ -74,6 +74,7 @@
 #include "Editor/Panels/Validation/SceneValidationPanel.hpp"
 #include "Editor/Panels/Clouds/CloudModellingVolumePanel.hpp"
 #include "Editor/Core/StartupOptions.hpp"
+#include "Editor/Panels/Clouds/CloudDocumentOpen.hpp"
 #include "Editor/Panels/Clouds/CloudLayoutPanel.hpp"
 #include "Editor/Panels/Clouds/CloudNoiseVolumePanel.hpp"
 #include "Editor/Panels/Clouds/CloudTypePanel.hpp"
@@ -450,10 +451,12 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::HistoryPanel>() );
         m_Panels.emplace_back(
              std::make_unique<Editor::SceneValidationPanel>( m_MainScene, m_AssetManager.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::CloudNoiseVolumePanel>( m_AssetManager.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::CloudTypePanel>( m_AssetManager.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::CloudModellingVolumePanel>( m_AssetManager.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::CloudLayoutPanel>( m_MainScene, m_AssetManager.get() ) );
+        // THE FOUR CLOUD PANELS ARE NOT CONSTRUCTED HERE ANY MORE. They were singletons in this list, each
+        // reached from the View menu and bound to whatever file its own combo had last opened; they are now
+        // asset DOCUMENTS, built on demand by the registry below. Dropping them from the list is what
+        // removes them from the View menu, the command palette and `--open-panel <name>` at once — all three
+        // are generic over m_Panels, so there was never a per-panel entry to delete. An asset is opened from
+        // the asset, not from a menu (Docs/Clouds/DEV_CONTRACT.md §4).
 
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
@@ -472,14 +475,35 @@ namespace Desert::Editor
              std::make_unique<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::BuildSettingsPanel>() );
 
-        // Which editor opens which kind of asset. The Material Editor is the first entry and, today, the
-        // only one: double-clicking a `.demat` in the browser opens ONE window bound to THAT material, and a
-        // second material is a second window. Adding the next asset kind is another line here rather than
-        // another branch in FileExplorerPanel and another file-static inbox beside it — see
+        // Which editor opens which kind of asset. Double-clicking a `.demat` in the browser opens ONE window
+        // bound to THAT material, and a second material is a second window; the four cloud formats follow
+        // exactly the same rule. Adding the next asset kind is another line here rather than another branch
+        // in FileExplorerPanel and another file-static inbox beside it — see
         // Editor/Core/AssetEditorRegistry.hpp.
         m_AssetEditors.Register(
              Assets::AssetTypeID::Material, [this]( const Assets::AssetHandle& material )
              { return std::make_unique<Editor::MaterialEditorPanel>( material, m_AssetManager ); } );
+
+        // THE FOUR CLOUD DOCUMENTS. Each takes the raw AssetManager pointer the panels already held, so the
+        // move from singleton to document changed the panels' ownership of their subject and nothing about
+        // how they reach their assets.
+        m_AssetEditors.Register(
+             Assets::AssetTypeID::CloudNoiseVolume, [this]( const Assets::AssetHandle& subject )
+             { return std::make_unique<Editor::CloudNoiseVolumePanel>( subject, m_AssetManager.get() ); } );
+        m_AssetEditors.Register(
+             Assets::AssetTypeID::CloudType, [this]( const Assets::AssetHandle& subject )
+             { return std::make_unique<Editor::CloudTypePanel>( subject, m_AssetManager.get() ); } );
+        m_AssetEditors.Register(
+             Assets::AssetTypeID::CloudModellingVolume, [this]( const Assets::AssetHandle& subject )
+             { return std::make_unique<Editor::CloudModellingVolumePanel>( subject, m_AssetManager.get() ); } );
+        // The layout document also READS the active scene's cloud layer for its preview numbers — the scene
+        // is an input, never a second subject, and SetScene keeps it following the focused viewport exactly
+        // as the singleton did.
+        m_AssetEditors.Register( Assets::AssetTypeID::CloudLayout,
+                                 [this]( const Assets::AssetHandle& subject ) {
+                                     return std::make_unique<Editor::CloudLayoutPanel>( subject, m_MainScene,
+                                                                                        m_AssetManager.get() );
+                                 } );
 
         // `--open-panel <name>`: put a tool on screen at boot, by the name the View menu shows. See
         // Editor/Core/StartupOptions.hpp for why it is an argument rather than a click. A CONTEXTUAL
@@ -519,6 +543,12 @@ namespace Desert::Editor
             {
                 continue;
             }
+
+            // The same fall-through for the four cloud formats, and it is the ONLY way to put one of these
+            // documents on screen unattended: they no longer have panel names for the loop above to match,
+            // and macOS refuses synthetic input, so a capture of a cloud editor cannot come from a click.
+            if ( RequestCloudDocument( m_AssetManager.get(), wanted ) != CloudDocumentRequest::NotACloudPath )
+                continue;
 
             // NAMED, WITH THE LIST. A flag that quietly did nothing is indistinguishable from a panel
             // that failed to draw, and this argument exists precisely for runs nobody is watching.
@@ -1111,7 +1141,7 @@ namespace Desert::Editor
 
                 census.push_back( { std::string( Assets::AssetTypeName( document->SubjectType() ) ) +
                                          " document '" + label + "'",
-                                    document->HoldsRendererSlot() } );
+                                    document->HoldsRendererSlot(), document->ClaimsRendererSlot() } );
             }
         }
 
@@ -1150,14 +1180,11 @@ namespace Desert::Editor
             // Pending demand is counted separately and it is not pedantry: a document that is open but has
             // not drawn yet holds NO slot and has a claim coming, so the live-renderer count alone would
             // admit a document there is no slot for and discover it a frame later.
+            //
+            // The counting rule itself lives in AssetEditorRegistry.hpp, not here: this file is compiled by
+            // no suite, and a rule written in it is a rule nothing can assert.
             const uint32_t live    = Graphic::SceneRenderer::GetLiveRendererCount();
-            uint32_t       pending = 0;
-            for ( const auto& panel : m_Panels )
-            {
-                const auto* document = dynamic_cast<const IAssetEditorPanel*>( panel.get() );
-                if ( document && !document->HoldsRendererSlot() )
-                    ++pending;
-            }
+            const uint32_t pending = PendingRendererSlotDemand( m_Panels );
 
             if ( live + pending >= EngineContext::kMaxRendererSlots )
             {
@@ -1165,8 +1192,10 @@ namespace Desert::Editor
                 for ( const auto& consumer : RendererSlotCensus() )
                 {
                     const char* state = consumer.HoldsSlot ? "holds a slot"
-                                                           : "no slot right now, but will "
-                                                             "claim one when it draws";
+                                        : consumer.ClaimsSlot
+                                             ? "no slot right now, but will claim one when it draws"
+                                             : "holds no slot and never will (drawn on the CPU) — closing "
+                                               "it frees nothing";
                     census += "\n    " + consumer.Name + " — " + state;
                 }
                 LOG_ERROR( "[Editor] Refusing to open a '{}' document (handle {}): {} of {} renderer slots are "
@@ -1181,11 +1210,16 @@ namespace Desert::Editor
                 continue; // the registry already said why
 
             const std::string name = document->GetName();
+            // Asked BEFORE the move, and counted rather than assumed: a document that will never claim a
+            // slot adds nothing to the committed total, and "pending + 1" would have reported every cloud
+            // document as a claim on a slot it does not take. See IAssetEditorPanel::ClaimsRendererSlot.
+            const uint32_t committed = pending + ( document->ClaimsRendererSlot() ? 1u : 0u );
+
             m_Panels.emplace_back( std::move( document ) );
             m_FocusPanel = name;
             LOG_INFO( "[Editor] Opened a '{}' document '{}' ({}/{} renderer slots in use, {} committed).",
                       Assets::AssetTypeName( request.Type ), name, Graphic::SceneRenderer::GetLiveRendererCount(),
-                      EngineContext::kMaxRendererSlots, pending + 1 );
+                      EngineContext::kMaxRendererSlots, committed );
         }
     }
 

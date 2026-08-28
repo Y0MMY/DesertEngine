@@ -1,5 +1,7 @@
 #include "CloudTypePanel.hpp"
 
+#include "CloudDocumentOpen.hpp"
+
 #include <Editor/Core/ImGuiUtilities.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
@@ -50,13 +52,39 @@ namespace Desert::Editor
                 return full.generic_string();
             return rel.generic_string();
         }
+
+        // The document's VISIBLE title: the subject's file name. Computed before the base class is
+        // constructed — IAssetEditorPanel bakes the title in its own constructor and holds it for the
+        // window's life — so it is a free function rather than a member.
+        std::string SubjectTitle( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
+        {
+            if ( assets )
+            {
+                if ( const auto asset = assets->FindByHandle<Assets::CloudTypeAsset>( subject ) )
+                    return asset->GetMetadata().Filepath.filename().string();
+            }
+            return "Cloud Type";
+        }
     } // namespace
 
-    CloudTypePanel::CloudTypePanel( Assets::AssetManager* assets )
-         : IPanel( "Cloud Type", /*showPanel=*/false ), m_Assets( assets )
+    CloudTypePanel::CloudTypePanel( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
+         : IAssetEditorPanel( SubjectTitle( subject, assets ), subject, Assets::AssetTypeID::CloudType ),
+           m_Assets( assets )
     {
-        CopyInto( m_NameBuffer, sizeof( m_NameBuffer ), m_Data.DisplayName.value_or( "" ) );
-        CopyInto( m_NotesBuffer, sizeof( m_NotesBuffer ), m_Data.Notes.value_or( "" ) );
+        // The subject is read through the SAME OpenType the library combo used to call, so a document opened
+        // from the browser and a type opened from the old list cannot end up with differently-populated
+        // buffers. The built-in default stays as the fallback for a subject that will not resolve.
+        if ( assets )
+        {
+            if ( const auto asset = assets->FindByHandle<Assets::CloudTypeAsset>( subject ) )
+                OpenType( asset->GetMetadata().Filepath );
+        }
+
+        if ( m_SourcePath.empty() )
+        {
+            CopyInto( m_NameBuffer, sizeof( m_NameBuffer ), m_Data.DisplayName.value_or( "" ) );
+            CopyInto( m_NotesBuffer, sizeof( m_NotesBuffer ), m_Data.Notes.value_or( "" ) );
+        }
     }
 
     void CloudTypePanel::OnUIRender()
@@ -125,42 +153,12 @@ namespace Desert::Editor
 
         ImGui::Text( "Editing: %s", m_SourceName.c_str() );
 
-        ImGui::SetNextItemWidth( -1.0f );
-        if ( ImGui::BeginCombo( "##openType", "Open a type..." ) )
-        {
-            if ( m_Assets )
-            {
-                for ( const auto& [handle, type] : m_Assets->FindAllByType<Assets::CloudTypeAsset>() )
-                {
-                    if ( ImGui::Selectable( type->GetDisplayName().c_str() ) )
-                        OpenType( type->GetMetadata().Filepath );
-                }
-            }
-            ImGui::EndCombo();
-        }
-
-        if ( ImGui::Button( "New from built-in" ) )
-        {
-            // A NEW TYPE STARTS FROM THE BUILT-IN DEFAULT rather than from zeros, because a type of zeros
-            // is a type that renders nothing and the first thing an artist would have to do is discover
-            // twelve plausible numbers. Starting from the cumulus everything else is measured against means
-            // the first edit is already a cloud.
-            m_Data = Assets::CloudTypeDefault();
-            m_SourcePath.clear();
-            m_SourceName = "(new, unsaved)";
-            CopyInto( m_NameBuffer, sizeof( m_NameBuffer ), "New cloud type" );
-            CopyInto( m_NotesBuffer, sizeof( m_NotesBuffer ), "" );
-            m_Status        = "Started a new type from the built-in cumulus congestus.";
-            m_StatusIsError = false;
-        }
-        ImGui::SameLine();
-        if ( ImGui::Button( "Open File..." ) )
-        {
-            const std::filesystem::path picked =
-                 Common::Utils::FileSystem::OpenFileDialog( "Cloud Type\0*.decloudtype\0" );
-            if ( !picked.empty() )
-                OpenType( picked );
-        }
+        // THE "OPEN A TYPE..." COMBO, "NEW FROM BUILT-IN" AND "OPEN FILE..." THAT WERE HERE ARE GONE, and
+        // their absence is the feature. They were how this window came to edit a different asset than the
+        // one it was opened on — which, now that the title, the ImGui id and open-or-focus are all keyed on
+        // the subject handle, would leave a window called one thing saving over another. A different type is
+        // a different window, opened by double-clicking it in the asset browser; a NEW type is Save As
+        // below, which writes a copy and opens ITS window rather than repointing this one.
 
         if ( ImGui::InputText( "Display Name", m_NameBuffer, sizeof( m_NameBuffer ) ) )
             m_Data.DisplayName = std::string( m_NameBuffer );
@@ -390,9 +388,18 @@ namespace Desert::Editor
             ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "Not saveable: %s",
                                 valid.GetError().c_str() );
 
-        ImGui::BeginDisabled( !valid );
-        const bool save = ImGui::Button( "Save", ImVec2( 100.0f, 0.0f ) ) && !m_SourcePath.empty();
+        // SAVE WRITES THE SUBJECT. SAVE AS CREATES A SECOND ASSET AND OPENS ITS OWN WINDOW — it does NOT
+        // repoint this one, and that is the one place this differs from UE. The subject is this window's
+        // identity: its title, its ImGui id and the key open-or-focus matches on are all built from it, so a
+        // document that followed a Save As would be a window named after a file it no longer edits, and the
+        // next double-click on the original would focus it and show the wrong asset. Making a new type is
+        // still exactly what it was — edit, Save As — and now the copy arrives as its own document.
+        ImGui::BeginDisabled( !valid || m_SourcePath.empty() );
+        const bool save = ImGui::Button( "Save", ImVec2( 100.0f, 0.0f ) );
+        ImGui::EndDisabled();
+
         ImGui::SameLine();
+        ImGui::BeginDisabled( !valid );
         const bool saveAs = ImGui::Button( "Save As...", ImVec2( 120.0f, 0.0f ) );
         ImGui::EndDisabled();
 
@@ -415,6 +422,11 @@ namespace Desert::Editor
             return;
         }
 
+        // A Save As to a DIFFERENT file makes a new asset, and the new asset gets its own window rather than
+        // stealing this one. Compared before the write, because after it the file exists and the two paths
+        // would be indistinguishable by anything on disk.
+        const bool isCopy = target != m_SourcePath;
+
         const auto written = Assets::CloudTypeAsset::Save( target, m_Data );
         if ( !written )
         {
@@ -423,8 +435,10 @@ namespace Desert::Editor
             return;
         }
 
-        m_SourcePath = target;
-        m_SourceName = target.filename().string();
+        // NOT m_SourcePath = target. On a Save As that is a DIFFERENT file, repointing is exactly the defect
+        // the immutable subject exists to prevent — see the note above the buttons.
+        if ( !isCopy )
+            m_SourceName = target.filename().string();
 
         // Re-registered straight away so a layer already pointing at this type shows the new numbers in
         // the viewport this frame. A tool whose output only appears after a restart is a tool nobody
@@ -448,8 +462,23 @@ namespace Desert::Editor
                     m_StatusIsError = true;
                     return;
                 }
-                m_Data = asset->GetData(); // re-read from the file, so the buffer is what is on disk
+
+                // Only for the file this document actually edits. Re-reading a COPY's data into this
+                // window would be the repointing above by another route.
+                if ( !isCopy )
+                    m_Data = asset->GetData(); // re-read from the file, so the buffer is what is on disk
             }
+        }
+
+        if ( isCopy )
+        {
+            // The copy is a new asset, so it gets its own document. Queued rather than constructed here:
+            // EditorLayer is the only place that may create a panel, and this is the same wire the asset
+            // browser's double-click uses.
+            RequestCloudDocument( m_Assets, target.string() );
+            m_Status        = "Saved a copy to " + target.string() + " - it has opened in its own window.";
+            m_StatusIsError = false;
+            return;
         }
 
         m_Status        = "Saved to " + target.string();

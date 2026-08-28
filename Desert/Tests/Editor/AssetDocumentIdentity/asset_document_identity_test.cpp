@@ -31,6 +31,7 @@ using Desert::Editor::AssetDocumentTitle;
 using Desert::Editor::FindOpenAssetDocument;
 using Desert::Editor::IAssetEditorPanel;
 using Desert::Editor::IPanel;
+using Desert::Editor::PendingRendererSlotDemand;
 
 namespace
 {
@@ -47,8 +48,9 @@ namespace
     class FakeDocument final : public IAssetEditorPanel
     {
     public:
-        FakeDocument( const std::string& name, const AssetHandle& subject )
-             : IAssetEditorPanel( name, subject, AssetTypeID::Material )
+        FakeDocument( const std::string& name, const AssetHandle& subject,
+                      AssetTypeID type = AssetTypeID::Material )
+             : IAssetEditorPanel( name, subject, type )
         {
         }
 
@@ -57,6 +59,41 @@ namespace
         }
 
         [[nodiscard]] bool HoldsRendererSlot() const override
+        {
+            return m_HoldsSlot;
+        }
+
+        [[nodiscard]] bool ClaimsRendererSlot() const override
+        {
+            return m_ClaimsSlot;
+        }
+
+        // Set by the slot-census tests. Public because this is a stub, and a setter for each would be two
+        // lines of ceremony around a bool the test is about.
+        bool m_HoldsSlot  = false;
+        bool m_ClaimsSlot = true;
+    };
+
+    // A CPU-only document — the four cloud editors. It never holds a renderer slot and never will, which is
+    // the distinction PendingRendererSlotDemand exists to make.
+    class FakeCpuDocument final : public IAssetEditorPanel
+    {
+    public:
+        FakeCpuDocument( const std::string& name, const AssetHandle& subject, AssetTypeID type )
+             : IAssetEditorPanel( name, subject, type )
+        {
+        }
+
+        void OnUIRender() override
+        {
+        }
+
+        [[nodiscard]] bool HoldsRendererSlot() const override
+        {
+            return false;
+        }
+
+        [[nodiscard]] bool ClaimsRendererSlot() const override
         {
             return false;
         }
@@ -183,6 +220,120 @@ TEST( AssetDocumentIdentity, ADocumentsSubjectIsFixedForItsLife )
     static_assert( !std::is_assignable_v<decltype( std::declval<FakeDocument&>().Subject() ), AssetHandle>,
                    "IAssetEditorPanel::Subject() must not be assignable -- the subject is the window's id." );
     SUCCEED();
+}
+
+// --- Cloud assets are documents too (Р3) --------------------------------------------------------------
+
+TEST( AssetDocumentIdentity, TwoCloudTypesGiveTwoDifferentWindowIds )
+{
+    // The owner's request in one assertion: an artist opens two `.decloudtype` and gets two windows to
+    // compare them in. The naming rule is shared with materials, so what this really guards is that nothing
+    // about the cloud documents opted out of it — a cloud panel that kept its old constant panel name
+    // ("Cloud Type") would put both subjects in one merged window and lose the second silently.
+    const std::string a = AssetDocumentTitle( "Cumulus.decloudtype", AssetHandle( 501u ) );
+    const std::string b = AssetDocumentTitle( "Stratus.decloudtype", AssetHandle( 502u ) );
+
+    EXPECT_NE( WindowId( a ), WindowId( b ) )
+         << "Two cloud types produced the same ImGui window id, so ImGui would draw them as ONE merged "
+            "window -- the second document's controls inside the first document's frame.";
+}
+
+TEST( AssetDocumentIdentity, EveryCloudFormatIsFoundByItsOwnSubject )
+{
+    // Four formats, four open documents, one panel list. Open-or-focus is keyed on the SUBJECT and never on
+    // the type, so a `.dcnv` and a `.decloudtype` open at once must not find each other -- which is what a
+    // lookup that had fallen back to matching on SubjectType would do.
+    std::vector<std::unique_ptr<IPanel>> panels;
+    panels.push_back( std::make_unique<FakeTool>( "Assets" ) );
+    panels.push_back(
+         std::make_unique<FakeCpuDocument>( "N.dcnv", AssetHandle( 601u ), AssetTypeID::CloudNoiseVolume ) );
+    panels.push_back(
+         std::make_unique<FakeCpuDocument>( "T.decloudtype", AssetHandle( 602u ), AssetTypeID::CloudType ) );
+    panels.push_back(
+         std::make_unique<FakeCpuDocument>( "B.dcmv", AssetHandle( 603u ), AssetTypeID::CloudModellingVolume ) );
+    panels.push_back(
+         std::make_unique<FakeCpuDocument>( "L.dclayout", AssetHandle( 604u ), AssetTypeID::CloudLayout ) );
+
+    ASSERT_NE( FindOpenAssetDocument( panels, AssetHandle( 601u ) ), nullptr );
+    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 602u ) )->SubjectType(), AssetTypeID::CloudType );
+    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 603u ) )->SubjectType(),
+               AssetTypeID::CloudModellingVolume );
+    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 604u ) )->SubjectType(), AssetTypeID::CloudLayout );
+    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 605u ) ), nullptr );
+}
+
+// --- What is spoken for, and what is not ---------------------------------------------------------------
+
+TEST( PendingRendererSlotDemand, AnOpenDocumentThatHasNotDrawnYetIsCounted )
+{
+    // The original reason the count exists: a Material Editor is created before it first draws, and builds
+    // its PreviewViewport on that frame. Between the two it holds nothing and has a claim coming.
+    std::vector<std::unique_ptr<IPanel>> panels;
+    panels.push_back( std::make_unique<FakeDocument>( "MP_GreenTint", AssetHandle( 111u ) ) );
+
+    EXPECT_EQ( PendingRendererSlotDemand( panels ), 1u );
+}
+
+TEST( PendingRendererSlotDemand, ADocumentThatAlreadyHoldsItsSlotIsNotCountedTwice )
+{
+    // It is already in the LIVE renderer count, so counting it here as well would refuse the cap one
+    // document early for every window that had drawn.
+    auto drawn         = std::make_unique<FakeDocument>( "MP_GreenTint", AssetHandle( 111u ) );
+    drawn->m_HoldsSlot = true;
+
+    std::vector<std::unique_ptr<IPanel>> panels;
+    panels.push_back( std::move( drawn ) );
+
+    EXPECT_EQ( PendingRendererSlotDemand( panels ), 0u );
+}
+
+TEST( PendingRendererSlotDemand, CpuOnlyDocumentsAreNotPendingDemand )
+{
+    // THE DEFECT THIS RULE EXISTS FOR. The four cloud editors bake on the CPU and upload an Image2D; they
+    // hold no renderer slot and never will. Counted as pending demand -- which is what "open, holding
+    // nothing" meant before ClaimsRendererSlot existed -- five of them beside the main viewport would make
+    // `live + pending` reach the six-slot cap, and the sixth cloud asset an artist double-clicked would be
+    // refused with a census listing windows that hold nothing and would never hold anything.
+    std::vector<std::unique_ptr<IPanel>> panels;
+    for ( uint64_t i = 0; i < 5; ++i )
+    {
+        panels.push_back(
+             std::make_unique<FakeCpuDocument>( "cloud", AssetHandle( 700u + i ), AssetTypeID::CloudType ) );
+    }
+
+    EXPECT_EQ( PendingRendererSlotDemand( panels ), 0u )
+         << "A CPU-only document was counted as a renderer-slot claim, so opening a sixth cloud asset would "
+            "be refused for a shortage that does not exist.";
+}
+
+TEST( PendingRendererSlotDemand, CountsOnlyTheDocumentsThatWillActuallyClaim )
+{
+    // The mixed list, which is the one the editor really has: tool panels, cloud documents, a drawn
+    // material and an undrawn one. Only the last is demand.
+    auto drawn         = std::make_unique<FakeDocument>( "Drawn", AssetHandle( 801u ) );
+    drawn->m_HoldsSlot = true;
+
+    std::vector<std::unique_ptr<IPanel>> panels;
+    panels.push_back( std::make_unique<FakeTool>( "Logs" ) );
+    panels.push_back( std::move( drawn ) );
+    panels.push_back( std::make_unique<FakeDocument>( "Undrawn", AssetHandle( 802u ) ) );
+    panels.push_back(
+         std::make_unique<FakeCpuDocument>( "L.dclayout", AssetHandle( 803u ), AssetTypeID::CloudLayout ) );
+
+    EXPECT_EQ( PendingRendererSlotDemand( panels ), 1u );
+}
+
+TEST( PendingRendererSlotDemand, ADocumentThatDoesNotSayIsTreatedAsAClaimant )
+{
+    // ClaimsRendererSlot defaults to TRUE, and that default is the conservative one: a new document type
+    // that forgets to answer is refused early rather than admitted past the cap and discovered later as two
+    // surfaces trading each other's per-frame camera. Asserted on the base class's own default so that
+    // flipping it to false-by-default cannot pass unnoticed.
+    std::vector<std::unique_ptr<IPanel>> panels;
+    panels.push_back( std::make_unique<FakeDocument>( "Silent", AssetHandle( 901u ) ) );
+
+    EXPECT_TRUE( static_cast<const IAssetEditorPanel*>( panels.back().get() )->ClaimsRendererSlot() );
+    EXPECT_EQ( PendingRendererSlotDemand( panels ), 1u );
 }
 
 int main( int argc, char** argv )

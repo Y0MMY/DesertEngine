@@ -164,6 +164,24 @@ namespace Desert::Editor
         // demand separately rather than trusting the live-renderer count alone.
         [[nodiscard]] virtual bool HoldsRendererSlot() const = 0;
 
+        // Will this document EVER claim one of the six renderer slots?
+        //
+        // HoldsRendererSlot answers "right now"; this answers "ever", and the census needs both. It counts
+        // an open document that holds no slot as PENDING DEMAND, because a Material Editor that has not
+        // drawn yet is a claim that has not landed — but a document that renders on the CPU has no claim
+        // coming at all, and counting it would refuse a window that costs nothing. With the four cloud
+        // documents (which bake on the CPU and upload an Image2D) that is not hypothetical: five of them
+        // open beside the main viewport made `live + pending` reach the cap, and the sixth was refused with
+        // a census telling the user to close windows that were holding nothing.
+        //
+        // Defaults to TRUE, which is the conservative answer: a new document type that forgets to say is
+        // treated as a claimant and refused early, rather than admitted past the cap and discovered as two
+        // surfaces quietly trading each other's per-frame camera some minutes later.
+        [[nodiscard]] virtual bool ClaimsRendererSlot() const
+        {
+            return true;
+        }
+
     private:
         const Assets::AssetHandle m_Subject;
         const Assets::AssetTypeID m_SubjectType;

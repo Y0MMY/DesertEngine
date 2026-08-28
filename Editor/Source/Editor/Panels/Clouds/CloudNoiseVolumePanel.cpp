@@ -1,5 +1,7 @@
 #include "CloudNoiseVolumePanel.hpp"
 
+#include "CloudDocumentOpen.hpp"
+
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
@@ -46,11 +48,55 @@ namespace Desert::Editor
         {
             return axis == 0 ? "X" : axis == 1 ? "Y" : "Z";
         }
+
+        // The document's VISIBLE title: the subject's file name. Computed before the base class is
+        // constructed — IAssetEditorPanel bakes the title in its own constructor and holds it for the
+        // window's life — so it is a free function rather than a member.
+        //
+        // Falls back to the type's name rather than to something empty: a document whose asset has gone
+        // missing still has to be a window the user can find and close.
+        std::string SubjectTitle( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
+        {
+            if ( assets )
+            {
+                if ( const auto asset = assets->FindByHandle<Assets::CloudNoiseVolumeAsset>( subject ) )
+                    return asset->GetMetadata().Filepath.filename().string();
+            }
+            return "Cloud Noise Volume";
+        }
     } // namespace
 
-    CloudNoiseVolumePanel::CloudNoiseVolumePanel( Assets::AssetManager* assets )
-         : IPanel( "Cloud Noise Volume", /*showPanel=*/false ), m_Assets( assets )
+    CloudNoiseVolumePanel::CloudNoiseVolumePanel( const Assets::AssetHandle& subject,
+                                                  Assets::AssetManager*      assets )
+         : IAssetEditorPanel( SubjectTitle( subject, assets ), subject, Assets::AssetTypeID::CloudNoiseVolume ),
+           m_Assets( assets )
     {
+        LoadSubject( assets );
+    }
+
+    void CloudNoiseVolumePanel::LoadSubject( Assets::AssetManager* assets )
+    {
+        if ( !assets )
+            return;
+
+        const auto asset = assets->FindByHandle<Assets::CloudNoiseVolumeAsset>( Subject() );
+        if ( !asset || !asset->IsReadyForUse() )
+        {
+            // NAMED rather than left as an empty panel. The opener (CloudDocumentOpen.hpp) refuses to queue
+            // a document for an asset that would not load, so reaching this means the asset was evicted
+            // between the request and the frame that serviced it — rare, and invisible without this line.
+            m_Status        = "This volume is not loaded - the log says why. Nothing can be saved from here.";
+            m_StatusIsError = true;
+            return;
+        }
+
+        m_Volume      = asset->GetVolume();
+        m_Params      = m_Volume.Params;
+        m_HasVolume   = true;
+        m_SubjectPath = asset->GetMetadata().Filepath;
+        m_SourceName  = m_SubjectPath.filename().string();
+        m_SliceIndex  = static_cast<int>( m_Volume.Params.Resolution ) / 2;
+        m_SliceDirty  = true;
     }
 
     CloudNoiseVolumePanel::~CloudNoiseVolumePanel()
@@ -178,33 +224,11 @@ namespace Desert::Editor
             ImGui::ProgressBar( m_BakeProgress.load(), ImVec2( -1.0f, 0.0f ) );
         }
 
-        // Loading an existing volume back in is half the tool: it is how an artist opens the default,
-        // sees what it is made of, and re-rolls a variant of it rather than starting from nothing.
-        if ( m_Assets )
-        {
-            const auto volumes = m_Assets->FindAllByType<Assets::CloudNoiseVolumeAsset>();
-            ImGui::BeginDisabled( busy || volumes.empty() );
-            if ( ImGui::BeginCombo( "Open", volumes.empty() ? "(no volumes on disk)" : "Pick a volume" ) )
-            {
-                for ( const auto& [handle, asset] : volumes )
-                {
-                    const std::string name = asset->GetMetadata().Filepath.filename().string();
-                    if ( ImGui::Selectable( name.c_str() ) && asset->IsReadyForUse() )
-                    {
-                        m_Volume        = asset->GetVolume();
-                        m_Params        = m_Volume.Params;
-                        m_HasVolume     = true;
-                        m_SourceName    = name;
-                        m_SliceIndex    = static_cast<int>( m_Volume.Params.Resolution ) / 2;
-                        m_SliceDirty    = true;
-                        m_Status        = "Opened '" + name + "' - its parameters are above, ready to re-roll.";
-                        m_StatusIsError = false;
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::EndDisabled();
-        }
+        // THE "OPEN A VOLUME" COMBO THAT WAS HERE IS GONE, and its absence is the feature. It was how this
+        // window came to edit a different asset than the one it was opened on — which, now that the title,
+        // the ImGui id and open-or-focus are all keyed on the subject handle, would leave a window called
+        // one thing editing another. A different volume is a different window, opened by double-clicking it
+        // in the asset browser. See Editor/Panels/IPanel.hpp on why the subject is immutable.
     }
 
     std::vector<unsigned char> CloudNoiseVolumePanel::BuildSlicePixels() const
@@ -361,56 +385,87 @@ namespace Desert::Editor
     {
         Utils::ImGuiUtilities::SectionHeader( "Save" );
 
-        ImGui::BeginDisabled( !m_HasVolume || m_BakeRunning );
-        if ( ImGui::Button( "Save As...", ImVec2( 120.0f, 0.0f ) ) )
-        {
-            std::filesystem::path target =
-                 Common::Utils::FileSystem::SaveFileDialog( "Cloud Noise Volume\0*.dcnv\0" );
-            if ( !target.empty() )
-            {
-                if ( target.extension() != Assets::kCloudNoiseVolumeExtension )
-                    target.replace_extension( Assets::kCloudNoiseVolumeExtension );
+        // SAVE WRITES THE SUBJECT. SAVE AS CREATES A SECOND ASSET AND OPENS ITS OWN WINDOW — it does NOT
+        // repoint this one. The subject is this window's identity: its title, its ImGui id and the key
+        // open-or-focus matches on are all built from it, so a document that followed a Save As would be a
+        // window named after a file it no longer edits. Baking a variant and keeping it is still exactly
+        // what it was — re-roll, Save As — and now the variant arrives as its own document.
+        const bool busy = m_BakeRunning;
 
-                const auto written = Assets::CloudNoiseVolumeAsset::Save( target, m_Volume );
-                if ( !written )
-                {
-                    m_Status        = "Save failed: " + written.GetError();
-                    m_StatusIsError = true;
-                }
-                else
-                {
-                    m_SourceName    = target.filename().string();
-                    m_Status        = "Saved to " + target.string();
-                    m_StatusIsError = false;
+        ImGui::BeginDisabled( !m_HasVolume || busy || m_SubjectPath.empty() );
+        const bool save = ImGui::Button( "Save", ImVec2( 120.0f, 0.0f ) );
+        ImGui::EndDisabled();
 
-                    // Registered straight away so the component's slot lists it without a restart. A tool
-                    // whose output only appears after the editor is reopened is a tool nobody iterates in.
-                    if ( m_Assets )
-                    {
-                        auto asset = m_Assets->FindByPath<Assets::CloudNoiseVolumeAsset>( target );
-                        if ( asset )
-                            asset->Load(); // overwritten in place: re-read so the cached bytes are the new ones
-                        else
-                            asset = m_Assets->CreateAsset<Assets::CloudNoiseVolumeAsset>(
-                                 Assets::AssetPriority::Medium, target );
-
-                        if ( asset )
-                        {
-                            if ( const auto uploaded =
-                                      Runtime::ResourceRegistry::GetCloudNoiseService()->Register( asset );
-                                 !uploaded )
-                            {
-                                m_Status = "Saved, but the volume could not be uploaded: " + uploaded.GetError();
-                                m_StatusIsError = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled( !m_HasVolume || busy );
+        const bool saveAs = ImGui::Button( "Save As...", ImVec2( 120.0f, 0.0f ) );
         ImGui::EndDisabled();
 
         ImGui::SameLine();
         ImGui::TextDisabled( "Volumes live in %s", Common::Constants::Path::CLOUD_NOISE_PATH.string().c_str() );
+
+        std::filesystem::path target;
+        if ( save )
+        {
+            target = m_SubjectPath;
+        }
+        else if ( saveAs )
+        {
+            target = Common::Utils::FileSystem::SaveFileDialog( "Cloud Noise Volume\0*.dcnv\0" );
+            if ( !target.empty() && target.extension() != Assets::kCloudNoiseVolumeExtension )
+                target.replace_extension( Assets::kCloudNoiseVolumeExtension );
+        }
+
+        if ( target.empty() )
+            return;
+
+        // Compared before the write, because after it the file exists and the two paths would be
+        // indistinguishable by anything on disk.
+        const bool isCopy = target != m_SubjectPath;
+
+        const auto written = Assets::CloudNoiseVolumeAsset::Save( target, m_Volume );
+        if ( !written )
+        {
+            m_Status        = "Save failed: " + written.GetError();
+            m_StatusIsError = true;
+            return;
+        }
+
+        if ( !isCopy )
+            m_SourceName = target.filename().string();
+        m_Status        = "Saved to " + target.string();
+        m_StatusIsError = false;
+
+        // Re-registered straight away so the component's slot shows the new bytes without a restart. A tool
+        // whose output only appears after the editor is reopened is a tool nobody iterates in.
+        if ( !m_Assets )
+            return;
+
+        auto asset = m_Assets->FindByPath<Assets::CloudNoiseVolumeAsset>( target );
+        if ( asset )
+            asset->Load(); // overwritten in place: re-read so the cached bytes are the new ones
+        else
+            asset = m_Assets->CreateAsset<Assets::CloudNoiseVolumeAsset>( Assets::AssetPriority::Medium, target );
+
+        if ( !asset )
+            return;
+
+        if ( const auto uploaded = Runtime::ResourceRegistry::GetCloudNoiseService()->Register( asset );
+             !uploaded )
+        {
+            m_Status        = "Saved, but the volume could not be uploaded: " + uploaded.GetError();
+            m_StatusIsError = true;
+            return;
+        }
+
+        if ( isCopy )
+        {
+            // The copy is a new asset, so it gets its own document. Queued rather than constructed here:
+            // EditorLayer is the only place that may create a panel, and this is the same wire the asset
+            // browser's double-click uses.
+            RequestCloudDocument( m_Assets, target.string() );
+            m_Status        = "Saved a copy to " + target.string() + " - it has opened in its own window.";
+            m_StatusIsError = false;
+        }
     }
 } // namespace Desert::Editor

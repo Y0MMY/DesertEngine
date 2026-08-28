@@ -5,6 +5,7 @@
 #include <Engine/Assets/CloudNoiseVolume.hpp>
 
 #include <atomic>
+#include <filesystem>
 #include <future>
 #include <memory>
 #include <string>
@@ -39,11 +40,17 @@ namespace Desert::Editor
      * unoptimised on the machine this was written on; blocking the editor for that would make the tool feel
      * broken the first time it was used. The generator writes a progress fraction that the panel reads each
      * frame, and the panel refuses to start a second bake while one is running.
+     *
+     * ONE WINDOW PER `.dcnv`, OPENED BY DOUBLE-CLICKING THE ASSET — UE's flow, and what this class became
+     * in Р3. It was a SINGLETON with an "Open" combo in it: one window, whichever volume was last picked in
+     * it, reached from the View menu. The combo is gone with the singleton — the subject is fixed at
+     * construction, two volumes are two windows, and the browser is where a volume is chosen. See
+     * Editor/Core/AssetEditorRegistry.hpp for the seam and Clouds/CloudDocumentOpen.hpp for the resolution.
      */
-    class CloudNoiseVolumePanel final : public IPanel
+    class CloudNoiseVolumePanel final : public IAssetEditorPanel
     {
     public:
-        explicit CloudNoiseVolumePanel( Assets::AssetManager* assets );
+        CloudNoiseVolumePanel( const Assets::AssetHandle& subject, Assets::AssetManager* assets );
         ~CloudNoiseVolumePanel() override;
 
         ImVec2 GetDefaultSize() const override
@@ -53,7 +60,28 @@ namespace Desert::Editor
 
         void OnUIRender() override;
 
+        // NEVER, and this is measured rather than assumed. This panel owns no PreviewViewport, no Scene and
+        // no SceneRenderer: it bakes on the CPU and uploads the result as a single Graphic::Image2D, which
+        // is a device image and not a renderer. So the six-slot census (EditorLayer::RendererSlotCensus)
+        // counts this document at zero for its whole life, and closing it returns nothing because it took
+        // nothing. The same is true of the other three cloud documents.
+        [[nodiscard]] bool HoldsRendererSlot() const override
+        {
+            return false;
+        }
+
+        // ...and never will, which is the half the SLOT CENSUS needs. Without it an open cloud document
+        // counts as a claim that has not landed yet, and five of them would exhaust the cap on paper.
+        [[nodiscard]] bool ClaimsRendererSlot() const override
+        {
+            return false;
+        }
+
     private:
+        // Reads the subject out of the AssetManager into the editing buffer. Called once, from the
+        // constructor: the subject cannot change, so neither can the answer.
+        void LoadSubject( Assets::AssetManager* assets );
+
         void DrawGenerateSection();
         void DrawPreviewSection();
         void DrawSaveSection();
@@ -74,6 +102,11 @@ namespace Desert::Editor
         std::string                    m_SourceName; // what is in m_Volume: a file name, or "(baked)"
         std::string                    m_Status;     // the last thing that happened, shown to the artist
         bool                           m_StatusIsError = false;
+
+        // WHERE SAVE WRITES: the subject's own file, resolved once at construction. Save As may write
+        // ELSEWHERE, but it never assigns to this — a copy becomes its OWN document rather than repointing
+        // this window, because the subject is the window's identity. See DrawSaveSection.
+        std::filesystem::path m_SubjectPath;
 
         // The running bake. A future rather than a raw thread so the result is collected exactly once and
         // the panel cannot be destroyed while a thread is still writing into it.

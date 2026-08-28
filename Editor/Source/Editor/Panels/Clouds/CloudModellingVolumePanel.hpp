@@ -68,11 +68,16 @@ namespace Desert::Editor
      * mechanism and a hero cloud is an ASSET being authored, not an entity being placed; the entity's own
      * transform is what puts a finished body in the sky (phase A2). Numbers and slices are what a volume
      * with 15.6 m voxels is actually tuned by.
+     *
+     * ONE WINDOW PER `.dcmv`, OPENED BY DOUBLE-CLICKING THE ASSET — UE's flow, and what this class became
+     * in Р3. It was a SINGLETON with an "Open..." file dialog in it, reached from the View menu; the dialog
+     * is gone with the singleton, because the subject is now the window's identity and a window that could
+     * open a different body would be titled after a file it no longer edits.
      */
-    class CloudModellingVolumePanel final : public IPanel
+    class CloudModellingVolumePanel final : public IAssetEditorPanel
     {
     public:
-        explicit CloudModellingVolumePanel( Assets::AssetManager* assets );
+        CloudModellingVolumePanel( const Assets::AssetHandle& subject, Assets::AssetManager* assets );
         ~CloudModellingVolumePanel() override;
 
         ImVec2 GetDefaultSize() const override
@@ -82,7 +87,25 @@ namespace Desert::Editor
 
         void OnUIRender() override;
 
+        // NEVER — see CloudNoiseVolumePanel::HoldsRendererSlot. This panel bakes one slice plane per frame
+        // on the CPU and uploads it as a Graphic::Image2D; it owns no Scene and no SceneRenderer, so it
+        // costs none of the six slots and returns none when it closes.
+        [[nodiscard]] bool HoldsRendererSlot() const override
+        {
+            return false;
+        }
+
+        // ...and never will — see CloudNoiseVolumePanel::ClaimsRendererSlot.
+        [[nodiscard]] bool ClaimsRendererSlot() const override
+        {
+            return false;
+        }
+
     private:
+        // Reads the subject's recipe out of its `.dcmv` header into the editing buffer. Called once, from
+        // the constructor: the subject cannot change, so neither can the answer.
+        void LoadSubject( Assets::AssetManager* assets );
+
         void DrawRecipeSection();
         void DrawLumpListSection();
         void DrawSelectedLumpSection();
@@ -137,6 +160,11 @@ namespace Desert::Editor
         // the header written beside it.
         std::filesystem::path              m_BakeTarget;
         Assets::CloudModellingVolumeRecipe m_BakingRecipe;
+
+        // THE FILE THIS DOCUMENT EDITS, resolved once at construction. "Bake & Save" writes here; "Bake &
+        // Save As" may write ELSEWHERE, but never assigns to this — a copy becomes its OWN document rather
+        // than repointing this window, because the subject is the window's identity. See DrawBakeSection.
+        std::filesystem::path m_SubjectPath;
 
         // Which of the four channels the preview shows. All four at once is the overview; one at a time is
         // the only way to tell "the Density Scale channel is flat" from "the profile is too shallow".

@@ -105,7 +105,7 @@ namespace Desert::ECS
         // of a shipped file, which would make every scene depend on a file being present.
         PROPERTY( DisplayName( "Cloud Type 1" ), Category( "Cloud Layer" ), Summary, Asset<CloudTypeAsset>,
                   Tooltip( "Which kind of cloud this layer is made of — drag a .decloudtype from the "
-                           "Content Browser or author one in Window > Cloud Type. The type carries its own "
+                           "Content Browser or double-click one there to edit it. The type carries its own "
                            "base and top in kilometres, its own family of vertical profiles, its own edge "
                            "character, its own density and its own placement scale, and the shell the "
                            "march intersects is COMPUTED from all of them together. A layer may carry up "
@@ -400,14 +400,15 @@ namespace Desert::ECS
         // cloud is gets decided once, when the settings change or the region shifts, and never per frame.
         // The march reads the volume it already read.
 
-        PROPERTY( DisplayName( "Cloud Layout" ), Category( "Layout" ), Summary, Asset<CloudLayoutAsset>,
-                  Tooltip( "A PAINTED sky — drag a .dclayout from the Content Browser, or make one from an "
-                           "image in View > Cloud Layout. Its four channels say where each of this "
-                           "layer's four cloud type slots lives, and its mask adds or removes cloud in "
-                           "regions you paint. EMPTY IS THE NORMAL STATE: with no layout the sky is placed "
-                           "procedurally exactly as before, and Weather Patch Strength decides which parts "
-                           "of it are busy. The painting is read when the clouds are placed, not while they "
-                           "are drawn, so it costs the frame nothing." ) )
+        PROPERTY(
+             DisplayName( "Cloud Layout" ), Category( "Layout" ), Summary, Asset<CloudLayoutAsset>,
+             Tooltip( "A PAINTED sky — drag a .dclayout from the Content Browser, or double-click one "
+                      "there to paint it or rebuild it from an image. Its four channels say where each of this "
+                      "layer's four cloud type slots lives, and its mask adds or removes cloud in "
+                      "regions you paint. EMPTY IS THE NORMAL STATE: with no layout the sky is placed "
+                      "procedurally exactly as before, and Weather Patch Strength decides which parts "
+                      "of it are busy. The painting is read when the clouds are placed, not while they "
+                      "are drawn, so it costs the frame nothing." ) )
         // ALL LAYERS SHIP WITH THIS EMPTY, and that is the phase's own acceptance criterion rather than a
         // convenience: an unpainted sky must render the frame it rendered before this field existed, byte
         // for byte, at all six points of the protocol. The default is 0 and not the id of a shipped file

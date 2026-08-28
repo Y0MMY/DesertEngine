@@ -34,11 +34,15 @@ namespace Desert::Editor
      * NO BACKGROUND WORK, unlike the noise volume panel next door: generating a profile table is 16 384
      * evaluations of a closed-form curve and the preview needs 256 of them, so it is redrawn every frame
      * the panel is open and costs less than the widgets around it.
+     *
+     * ONE WINDOW PER `.decloudtype`, OPENED BY DOUBLE-CLICKING THE ASSET — UE's flow, and what this class
+     * became in Р3. It was a SINGLETON with an "Open a type..." combo, reached from the View menu; the
+     * combo is gone with the singleton, because the subject is now the window's identity.
      */
-    class CloudTypePanel final : public IPanel
+    class CloudTypePanel final : public IAssetEditorPanel
     {
     public:
-        explicit CloudTypePanel( Assets::AssetManager* assets );
+        CloudTypePanel( const Assets::AssetHandle& subject, Assets::AssetManager* assets );
 
         ImVec2 GetDefaultSize() const override
         {
@@ -46,6 +50,19 @@ namespace Desert::Editor
         }
 
         void OnUIRender() override;
+
+        // NEVER — see CloudNoiseVolumePanel::HoldsRendererSlot. This panel draws a curve with ImGui::PlotLines
+        // and owns no Scene and no SceneRenderer, so it costs none of the six slots.
+        [[nodiscard]] bool HoldsRendererSlot() const override
+        {
+            return false;
+        }
+
+        // ...and never will — see CloudNoiseVolumePanel::ClaimsRendererSlot.
+        [[nodiscard]] bool ClaimsRendererSlot() const override
+        {
+            return false;
+        }
 
     private:
         void DrawLibrarySection();
