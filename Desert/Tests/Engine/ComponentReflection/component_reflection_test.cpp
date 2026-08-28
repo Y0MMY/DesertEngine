@@ -479,6 +479,7 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "PhaseGBackward",
          "PhaseBlend",
          "AmbientOcclusionStrength",
+         "SkyOcclusionVolume",
          "LightMarchDistance",
          "LightMarchSamples",
          "MultiScatterOctaves",
@@ -497,7 +498,7 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 51u );
+    EXPECT_EQ( cloud.Fields.size(), 52u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
     EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 9u );
@@ -514,12 +515,17 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     // type. A group with nothing in it is a heading an artist opens and finds empty.
     EXPECT_EQ( CountInCategory( cloud, "Noise" ), 0u );
     EXPECT_EQ( CountInCategory( cloud, "Detail" ), 6u );
-    EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 14u );
+    // FIFTEEN SINCE Р4, and the row that arrived is Sky Occlusion Volume — a bool, and deliberately the
+    // ONLY field that feature added. What it chooses is which geometry AmbientOcclusionStrength measures,
+    // so the strength stayed one knob with one meaning; a second strength beside it would have been a
+    // parameter whose only job is to say the same thing twice.
+    EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 15u );
     // THE SHADOWS GROUP IS TWO ROWS AND NOT FOUR. The map's extent and resolution are engine constants
     // like the step schedule (they trade cost against quality identically in every scene, and the extent
-    // is DERIVED from the march's own resolvable chord), and the sky-light occlusion under a deck is a
-    // different quantity with a different geometry that Unreal answers with a second volume. Both are
-    // named as out of scope in the component rather than half-exposed here.
+    // is DERIVED from the march's own resolvable chord). The sky-light occlusion under a deck is a
+    // different quantity with a different geometry, and it now has its own volume — but it belongs to
+    // LIGHTING, not here: what it occludes is the sky's ambient, not the sun, and nothing about it reaches
+    // the shadow map on the ground.
     EXPECT_EQ( CountInCategory( cloud, "Shadows" ), 2u );
     EXPECT_EQ( CountInCategory( cloud, "Quality" ), 2u );
     EXPECT_EQ( CountInCategory( cloud, "Animation" ), 2u );

@@ -284,6 +284,11 @@ namespace
          { "PhaseGBackward", kCloudPayload },
          { "PhaseBlend", kCloudPayload },
          { "AmbientOcclusionStrength", kCloudPayload },
+         // THE RENDERER AND NOT THE PAYLOAD, and the difference is the point: this field never reaches the
+         // parameter block at all. It decides whether ExecuteInFrame dispatches the sky-light occlusion
+         // volume, and what the march is told is only whether that dispatch HAPPENED — a property of the
+         // frame rather than of the weather, on CloudPush::SkyOcclusion.
+         { "SkyOcclusionVolume", kCloudRenderer },
          { "AerialPerspectiveStartDistance", kCloudPayload },
          { "AerialPerspectiveFadeDistance", kCloudPayload },
          { "LightMarchDistance", kCloudPayload },

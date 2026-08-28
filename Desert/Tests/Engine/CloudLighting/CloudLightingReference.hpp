@@ -18,10 +18,12 @@ namespace Desert::Tests::CloudLightingRef
 {
     namespace
     {
+        using vec2 = glm::vec2;
         using vec3 = glm::vec3;
 
         using glm::clamp;
         using glm::exp;
+        using glm::log;
         using glm::max;
         using glm::mix;
         using glm::pow;

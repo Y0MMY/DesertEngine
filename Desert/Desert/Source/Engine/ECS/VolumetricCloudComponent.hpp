@@ -710,11 +710,42 @@ namespace Desert::ECS
         float PhaseBlend = 0.575f;
 
         PROPERTY( DisplayName( "Ambient Occlusion Strength" ), Category( "Lighting" ), Range( 0.0f, 1.0f ),
-                  Tooltip( "How strongly the depth inside the cloud darkens the ambient it receives. At 0 "
-                           "the core of a three-kilometre cumulus is lit as brightly as a wisp on its edge, "
-                           "which reads as a flat white cut-out." ) )
+                  Tooltip( "How strongly the sky light reaching a sample is occluded. Which occluder is "
+                           "measured is Sky Occlusion Volume's choice; this is how much of it is applied, "
+                           "either way. At 0 the core of a three-kilometre cumulus is lit as brightly as a "
+                           "wisp on its edge, which reads as a flat white cut-out." ) )
         // 0.5 — the amount UE carries in the alpha of Cloud_AlbedoColor.
+        //
+        // ONE KNOB, TWO GEOMETRIES, and it stays one knob deliberately. The field below chooses whether
+        // the occlusion is computed from the sample's own depth inside its body or from the cloud standing
+        // over its column; this number is the blend toward whichever answer that is. A second strength
+        // beside it would be a parameter whose only job is to say the same thing twice, and the day one of
+        // them is at 0.5 and the other at 1.0 nobody can say what the sky is supposed to look like.
+        // Read by Editor/Resources/Shaders/Programs/Clouds/CloudRaymarch.shader.
         float AmbientOcclusionStrength = 0.5f;
+
+        PROPERTY( DisplayName( "Sky Occlusion Volume" ), Category( "Lighting" ),
+                  Tooltip( "Occlude the sky light by the cloud STANDING OVER a sample instead of by the "
+                           "sample's own depth inside its body. Off, a sample under three kilometres of "
+                           "congestus receives exactly what a sample under clear sky receives, so a deck "
+                           "has no dark side and the clouds read as flat white lobes. On, a second compute "
+                           "pass builds a 128x16x128 volume of how much cloud stands over every column and "
+                           "the march reads it — which costs one dispatch and two megabytes per view.\n\n"
+                           "Off by default: it changes how every cloud in a scene is lit, and no scene "
+                           "authored before it existed was lit that way." ) )
+        // DEFAULT OFF, and the frame with it off is the frame without this feature — the march's gate is a
+        // push-constant flag and the pass is not dispatched, so nothing is allocated and nothing is read.
+        // That is the same arrangement Unreal ships its own second volume under and the same one this
+        // programme used for per-sample sun transmittance, and it is what makes the A/B in the report a
+        // property of one binary rather than of two.
+        //
+        // WHY IT IS A FLAG AND NOT A REPLACEMENT. The local term is not wrong — Р0 measured it recovering
+        // 34 % of the gap at the sunward zenith, which is exactly where the occluder IS the sample's own
+        // body — and the volume costs a dispatch that a scene with a thin cirrus veil has no use for.
+        // Read by Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.cpp, which decides whether
+        // to dispatch Editor/Resources/Shaders/Programs/Clouds/CloudSkyOcclusionVolume.shader, and by
+        // Editor/Resources/Shaders/Programs/Clouds/CloudRaymarch.shader through CloudPush::SkyOcclusion.
+        bool SkyOcclusionVolume = false;
 
         PROPERTY( DisplayName( "Light March Distance" ), Category( "Lighting" ), Length,
                   Range( 10000.0f, 2000000.0f ),
@@ -836,10 +867,11 @@ namespace Desert::ECS
         //     the texel is derived from the finest cloud chord the march can resolve, so an artist moving
         //     one of them would be moving a number the producer's own step schedule fixes.
         //   * THE SKY-LIGHT OCCLUSION under a deck is a DIFFERENT quantity with a different geometry (a
-        //     hemisphere rather than a direction) and Unreal builds a second, separate volume for it. It
-        //     is not approximated here with this map, because a directional occlusion applied to an
-        //     omnidirectional term is wrong in a way that looks tuned rather than broken. Named as out of
-        //     scope rather than half-done.
+        //     hemisphere rather than a direction) and it is still not approximated with this map, because
+        //     a directional occlusion applied to an omnidirectional term is wrong in a way that looks
+        //     tuned rather than broken. It has its OWN volume now — Sky Occlusion Volume in the Lighting
+        //     group above, built by Programs/Clouds/CloudSkyOcclusionVolume.shader — which is where Р4
+        //     took the "named as out of scope rather than half-done" note this paragraph used to end on.
 
         PROPERTY( DisplayName( "Cast Shadows" ), Category( "Shadows" ), Summary,
                   Tooltip( "Whether the layer shades the world beneath it. Off dispatches nothing and "

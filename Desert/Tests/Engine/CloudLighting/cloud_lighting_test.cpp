@@ -20,6 +20,11 @@
 
 #include <gtest/gtest.h>
 
+// For the PROCEDURAL MODELLING VOLUME'S extents only, so that "half of it on every axis" is a relation
+// this suite checks rather than a sentence in a comment. Constants only — nothing here is called, so the
+// test still links against nothing.
+#include <Engine/Assets/CloudProceduralVolume.hpp>
+
 #include <cmath>
 #include <cstdio>
 
@@ -388,6 +393,228 @@ TEST( CloudLightingAmbient, TheStrengthBlendsBetweenNoOcclusionAndTheFullTermAnd
 
     EXPECT_FLOAT_EQ( CloudAmbientOcclusion( -1.0f, 1.0f ), 1.0f );
     EXPECT_FLOAT_EQ( CloudAmbientOcclusion( 2.0f, 1.0f ), 0.0f );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE SKY-LIGHT OCCLUSION VOLUME — the other occluder, and the relations that make it mean anything
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // 2 * E3(tau) = 2 * integral(0..1) mu * exp(-tau / mu) dmu — the EXACT cosine-weighted hemispherical
+    // transmittance of a horizontally uniform slab of vertical optical depth `tau`. Midpoint rule; the
+    // integrand is smooth on (0, 1] and vanishes at mu -> 0 faster than any power, so the quadrature
+    // converges quickly and 200 000 samples is far more than the tolerances below need.
+    //
+    // THIS IS THE THING THE SHADER APPROXIMATES, and it is integrated here rather than quoted because the
+    // whole point of the assertion is to measure the size of the approximation instead of asserting that
+    // somebody's remembered constant equals itself.
+    double IntegrateDiffuseTransmittance( double tau, int samples )
+    {
+        const double dmu = 1.0 / samples;
+
+        double sum = 0.0;
+        for ( int i = 0; i < samples; ++i )
+        {
+            const double mu = ( static_cast<double>( i ) + 0.5 ) * dmu;
+            sum += mu * std::exp( -tau / mu ) * dmu;
+        }
+        return 2.0 * sum;
+    }
+} // namespace
+
+TEST( CloudSkyOcclusion, TheHemisphereSeesMoreCloudThanTheVerticalDoes )
+{
+    // THE RELATION THE DIFFUSIVITY FACTOR EXISTS FOR, and the one that decides whether the constant is
+    // above or below 1 at all. Every slant path through a slab is LONGER than the vertical one — tau/mu
+    // with mu <= 1 — so the hemispherical transmittance is strictly below exp(-tau) for every tau > 0.
+    // A factor of 1 (the naive "just use the column") would light the shaded side of every deck too
+    // brightly, and a factor below 1 would be backwards.
+    EXPECT_FLOAT_EQ( CloudSkyDiffuseTransmittance( 0.0f ), 1.0f ) << "no cloud above must occlude nothing";
+
+    float previous = 2.0f;
+    for ( int step = 1; step <= 200; ++step )
+    {
+        const float tau = 0.05f * static_cast<float>( step );
+        const float t   = CloudSkyDiffuseTransmittance( tau );
+
+        EXPECT_LT( t, std::exp( -tau ) ) << "tau " << tau << ": the hemisphere is not darker than the column";
+        EXPECT_LT( t, previous ) << "tau " << tau << " rose";
+        EXPECT_GE( t, 0.0f );
+        EXPECT_LE( t, 1.0f );
+        previous = t;
+    }
+
+    // A negative depth is one hand-edited scene away from a hand-edited extinction, and exp of a positive
+    // argument is a transmittance above 1, which is a cloud that AMPLIFIES the sky.
+    EXPECT_FLOAT_EQ( CloudSkyDiffuseTransmittance( -1.0f ), 1.0f );
+}
+
+TEST( CloudSkyOcclusion, TheClosedFormIsTheHemisphericalIntegralAndNotAFittedStandInForIt )
+{
+    // TWO IMPLEMENTATIONS OF ONE QUANTITY, asserted equal — the house pattern, and here it is what lets
+    // the shader carry an identity rather than a constant somebody would later "correct" on one camera
+    // angle. The left side is the definition, 2 * integral(0..1) mu exp(-tau/mu) dmu, integrated
+    // numerically; the right is exp(-tau)(1-tau) + tau^2 E1(tau) as the march's own header evaluates it.
+    //
+    // THE PREVIOUS VERSION OF THIS TEST FAILED AND THE CODE CHANGED RATHER THAN THE TOLERANCE. It measured
+    // the diffusivity factor — one slant path at a fixed secant of 1.66, radiative transfer's usual
+    // shortcut, which is what the header carried first — at up to 26.9 % off over [0, 1.5], and worse, at
+    // an error that CHANGES SIGN near tau 0.4. That is recorded here so nobody reinstates it as the
+    // cheaper option: it is not cheaper anywhere it matters, because this runs once per texel of the
+    // volume and not once per march sample.
+    std::printf( "\n  vertical tau   2*E3(tau) exact   header's value   relative error\n" );
+
+    double worst = 0.0;
+    for ( int step = 0; step <= 60; ++step )
+    {
+        const double tau      = 0.1 * static_cast<double>( step );
+        const double exact    = IntegrateDiffuseTransmittance( tau, 200000 );
+        const double header   = CloudSkyDiffuseTransmittance( static_cast<float>( tau ) );
+        const double relative = std::abs( header - exact ) / std::max( exact, 1e-9 );
+
+        worst = std::max( worst, relative );
+
+        if ( step % 10 == 0 )
+            std::printf( "  %10.2f   %15.7f   %14.7f   %13.4f %%\n", tau, exact, header, 100.0 * relative );
+    }
+
+    std::printf( "  worst relative error over tau in [0, 6]: %.4f %%\n\n", 100.0 * worst );
+
+    // A HALF PER CENT over the whole range, and it is dominated by the float cancellation in
+    // exp(-tau)(1 - tau) + tau^2 E1(tau) at the far end where both terms are large and the answer is
+    // tiny — where the value is also below what a half-float volume can store. Stated as a bound so that
+    // a future edit to either side has to move it deliberately.
+    EXPECT_LT( worst, 0.005 );
+}
+
+TEST( CloudSkyOcclusion, TheStrengthRemovesItExactlyAsItRemovesTheProfileTerm )
+{
+    // ONE KNOB, TWO GEOMETRIES. The component has a single AmbientOcclusionStrength and its flag chooses
+    // which occluder it applies to, so the two must blend the same way — otherwise turning the volume on
+    // would change what the strength MEANS as well as what it measures, and no scene could be compared
+    // with itself across the flag.
+    for ( const float transmittance : { 0.0f, 0.25f, 0.5f, 0.9f, 1.0f } )
+    {
+        EXPECT_FLOAT_EQ( CloudSkyOcclusion( transmittance, 0.0f ), 1.0f ) << "t " << transmittance;
+        EXPECT_FLOAT_EQ( CloudSkyOcclusion( transmittance, 1.0f ), transmittance ) << "t " << transmittance;
+        EXPECT_NEAR( CloudSkyOcclusion( transmittance, 0.5f ), 0.5f * ( 1.0f + transmittance ), 1e-6f );
+    }
+
+    // Both inputs clamped, for the reason the profile term's own test gives: an out-of-range value is one
+    // hand-edited scene away, and an occlusion above 1 is a cloud that brightens the sky behind it.
+    for ( const float t : { -1.0f, 2.0f } )
+        for ( const float strength : { -1.0f, 2.0f } )
+        {
+            const float occlusion = CloudSkyOcclusion( t, strength );
+            EXPECT_TRUE( std::isfinite( occlusion ) );
+            EXPECT_GE( occlusion, 0.0f );
+            EXPECT_LE( occlusion, 1.0f );
+        }
+}
+
+TEST( CloudSkyOcclusion, TheVolumeIsHalfTheModellingVolumeOnEveryAxisAndItsTexelStaysInsideTheLayer )
+{
+    // THE RELATION THAT SIZES THE VOLUME, asserted rather than left as two numbers in two files. What it
+    // stores is a hemispherical integral whose own horizontal footprint is the height of the cloud above
+    // the sample — kilometres — so a texel finer than the layer is thick would store structure the
+    // quantity does not have, and one much coarser would lose the cloud-scale variation that IS the
+    // point. Half the modelling volume on every axis lands comfortably between the two.
+    EXPECT_FLOAT_EQ( CLOUD_SKY_OCCLUSION_RESOLUTION * 2.0f,
+                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeWidth ) );
+    EXPECT_FLOAT_EQ( CLOUD_SKY_OCCLUSION_RESOLUTION * 2.0f,
+                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeDepth ) );
+    EXPECT_FLOAT_EQ( CLOUD_SKY_OCCLUSION_SLICES * 2.0f,
+                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeHeight ) );
+
+    // AND THE TEXEL IS BRACKETED BY TWO REAL QUANTITIES, which is what makes the halving a relation rather
+    // than a convenience. The shipped region is 48 km across (Clouds_Protocol's RegionSize) over a 3.6 km
+    // congestus deck.
+    const float regionKm     = 48.0f;
+    const float thicknessKm  = 3.6f;
+    const float texelKm      = regionKm / CLOUD_SKY_OCCLUSION_RESOLUTION;
+    const float fieldTexelKm = regionKm / static_cast<float>( Desert::Assets::kCloudProceduralVolumeWidth );
+
+    // ABOVE: the term's own horizontal footprint is the height of the cloud over the sample, and nothing
+    // above the layer contributes at all — so a grid coarser than the deck is thick would average across
+    // clouds that do not share a sky, and the shaded side would stop following the body casting it.
+    EXPECT_LT( texelKm, thicknessKm ) << "a texel coarser than the deck is thick cannot resolve a cloud";
+
+    // BELOW: the field this integrates has no structure finer than the volume it is fetched from, so a
+    // grid finer than THAT stores interpolation and calls it detail — at four times the cost per octave.
+    EXPECT_GE( texelKm, fieldTexelKm ) << "finer than the field it integrates is interpolation, not detail";
+}
+
+TEST( CloudSkyOcclusion, TheAddressingIsTheModellingVolumesOwnFrameAndItsTopSliceCannotWrapToItsBottom )
+{
+    // THE ADDRESSING IS ONE MAPPING USED IN TWO DIRECTIONS — the producer places its columns on this grid
+    // and the march reads them back through this function — so what has to be true is that a point at the
+    // region's minimum corner lands at uv 0 and one a full side away lands at uv 1, in the SAME frame the
+    // profile fetch beside it uses (Common/CloudField.glslh, CloudProceduralVolumeUvw).
+    const vec2  originKm{ -24.0f, 7.0f };
+    const float sideKm    = 48.0f;
+    const float invSideKm = 1.0f / sideKm;
+
+    const vec3 corner = CloudSkyOcclusionUvw( originKm, invSideKm, 0.5f, vec3( -24.0f, 1.0f, 7.0f ) );
+    EXPECT_NEAR( corner.x, 0.0f, 1e-5f );
+    EXPECT_NEAR( corner.z, 0.0f, 1e-5f );
+
+    const vec3 far = CloudSkyOcclusionUvw( originKm, invSideKm, 0.5f, vec3( 24.0f, 1.0f, 55.0f ) );
+    EXPECT_NEAR( far.x, 1.0f, 1e-5f );
+    EXPECT_NEAR( far.z, 1.0f, 1e-5f );
+
+    // HORIZONTALLY UNCLAMPED AND IT MUST STAY SO: the modelling volume is exactly periodic over the
+    // region, so REPEAT past the footprint is the same sky again — which is what makes this term reach the
+    // 47 km of shell a 7-degree ray crosses, where the shadow map's 30 km square could not.
+    const vec3 outside = CloudSkyOcclusionUvw( originKm, invSideKm, 0.5f, vec3( 120.0f, 1.0f, -90.0f ) );
+    EXPECT_GT( outside.x, 1.0f );
+    EXPECT_LT( outside.z, 0.0f );
+
+    // VERTICALLY CLAMPED TO THE TEXEL CENTRES, because every sampler in this engine is REPEAT: without it
+    // a height fraction of 1 wraps to the bottom slice, and the top of the layer would be told that the
+    // whole deck stands above it.
+    const float halfV = 0.5f / CLOUD_SKY_OCCLUSION_SLICES;
+    EXPECT_NEAR( CloudSkyOcclusionUvw( originKm, invSideKm, 1.0f, vec3( 0.0f ) ).y, 1.0f - halfV, 1e-6f );
+    EXPECT_NEAR( CloudSkyOcclusionUvw( originKm, invSideKm, 0.0f, vec3( 0.0f ) ).y, halfV, 1e-6f );
+    EXPECT_NEAR( CloudSkyOcclusionUvw( originKm, invSideKm, 2.0f, vec3( 0.0f ) ).y, 1.0f - halfV, 1e-6f );
+    EXPECT_NEAR( CloudSkyOcclusionUvw( originKm, invSideKm, -1.0f, vec3( 0.0f ) ).y, halfV, 1e-6f );
+}
+
+TEST( CloudSkyOcclusion, AColumnOfCloudDarkensASampleUNDERItAndLeavesTheOneABOVEItAlone )
+{
+    // THE MONOTONICITY THAT IS THE WHOLE FEATURE, and the property the term it replaces cannot have: more
+    // cloud above a sample means less sky reaches it, and a sample at the TOP of a deck is untouched
+    // however thick the deck under it is.
+    //
+    // The producer accumulates downward, so this drives the same arithmetic with a synthetic column:
+    // sixteen slices of a uniform deck, the top eight empty and the bottom eight solid.
+    const float thicknessKm = 3.6f;
+    const float sigma       = 4.0f; // per km, the shipped extinction times a mid density
+    const float sliceKm     = thicknessKm / CLOUD_SKY_OCCLUSION_SLICES;
+
+    float tau      = 0.0f;
+    float previous = 2.0f;
+    for ( int slice = static_cast<int>( CLOUD_SKY_OCCLUSION_SLICES ) - 1; slice >= 0; --slice )
+    {
+        const float transmittance = CloudSkyDiffuseTransmittance( tau );
+
+        if ( slice >= 12 )
+            EXPECT_FLOAT_EQ( transmittance, 1.0f ) << "slice " << slice << " has clear sky above it";
+
+        EXPECT_LE( transmittance, previous ) << "slice " << slice << " sees MORE sky than the one above it";
+        previous = transmittance;
+
+        if ( slice < 12 )
+            tau += sigma * sliceKm;
+    }
+
+    // And the bottom of a solid deck is DARK rather than merely dimmer. Eleven slices of 4/km over 3.6 km
+    // is a vertical tau of 9.9, which the hemispherical integral turns into about eight parts in a
+    // million — the "modelled, shaded base" the ambient knock-out frame showed and the shipped renderer
+    // cannot produce at all, because at the shipped strength of 0.5 the profile term's FLOOR is exactly
+    // half the whole sky whatever is overhead. That gap between 0.5 and ~0 is the feature.
+    EXPECT_LT( previous, 1e-4f );
+    EXPECT_FLOAT_EQ( CloudAmbientOcclusion( 1.0f, 0.5f ), 0.5f ) << "the floor this replaces";
 }
 
 int main( int argc, char** argv )

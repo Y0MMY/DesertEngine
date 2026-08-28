@@ -9,6 +9,7 @@
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 #include <Engine/Graphic/Clouds/CloudQuality.hpp>
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
+#include <Engine/Graphic/Clouds/CloudSkyOcclusionPayload.hpp>
 #include <Engine/Graphic/Materials/Clouds/MaterialCloudComposite.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/Renderer.hpp>
@@ -184,6 +185,12 @@ namespace Desert::Graphic::System
         //
         // @param resolution texels per side for THIS tier, from Graphic::CloudShadowResolutionForScale.
         bool EnsureShadowMap( uint32_t resolution );
+        // Allocates the sky-light occlusion volume the first frame a layer asks for it, and never again:
+        // its extents are a fixed grid over the modelling volume's region, so neither a viewport resize
+        // nor a quality tier can change them. Returns false having logged the reason and latched the
+        // failure, and a false answer makes the march fall back to the profile-driven occlusion rather
+        // than sampling an image nobody wrote.
+        bool EnsureSkyOcclusionVolume();
 
         /**
          * The types in this layer's four slots, packed down to a prefix, with the empty ones removed and
@@ -255,6 +262,7 @@ namespace Desert::Graphic::System
         std::shared_ptr<ComputePipeline>  m_MarchPipeline;
         std::shared_ptr<ComputePipeline>  m_ResolvePipeline;
         std::shared_ptr<ComputePipeline>  m_ShadowMapPipeline;
+        std::shared_ptr<ComputePipeline>  m_SkyOcclusionPipeline;
         std::shared_ptr<GraphicsPipeline> m_CompositePipeline;
 
         std::unique_ptr<MaterialCloudComposite> m_CompositeMaterial;
@@ -292,6 +300,24 @@ namespace Desert::Graphic::System
         CloudShadowMapView m_ShadowMapView{};
         bool               m_ShadowMapValid  = false;
         bool               m_ShadowMapFailed = false;
+
+        // THE SKY-LIGHT OCCLUSION VOLUME — 128 x 16 x 128 RGBA16F, 2.00 MiB, holding at every column and
+        // altitude the diffuse transmittance of the cloud STANDING OVER it. It is what the march's ambient
+        // term is occluded by when the layer asks for it, and it exists because the alternative —
+        // CloudAmbientOcclusion on the sample's own Profile — cannot express "there is cloud above me" at
+        // all (Docs/Clouds/DIAGNOSIS_CARTOON.md §1).
+        //
+        // PER VIEW AND OWNED, exactly like m_ModellingVolume beside it and for a stronger reason than the
+        // Docs/RENDERER_FRAME_STATE.md rule requires: its region follows the modelling volume's, which
+        // follows THIS view's camera, so a shared one would drag the viewport's shading to wherever a
+        // preview's camera happens to be. A renderer whose layer does not want it never allocates it,
+        // which is every scene authored before this existed and every asset thumbnail.
+        //
+        // NO SECOND PARAMETER BUFFER, unlike the shadow map: this pass is dispatched inside
+        // ExecuteInFrame between the one write of m_ParamsBuffer and the march that reads it, so both
+        // dispatches read one upload rather than racing two.
+        std::shared_ptr<Image3D> m_SkyOcclusionVolume;
+        bool                     m_SkyOcclusionFailed = false;
 
         // BORROWED, not owned: Runtime::CloudNoiseService owns every noise volume and shares one upload
         // across all views. A raw pointer says that plainly, where a shared_ptr here would suggest this
