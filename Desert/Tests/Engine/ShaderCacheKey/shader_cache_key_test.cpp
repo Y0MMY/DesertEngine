@@ -27,6 +27,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
+#include <Engine/Graphic/Clouds/CloudSkyOcclusionPayload.hpp>
 
 #include <Common/Core/Constants.hpp>
 
@@ -448,7 +449,7 @@ TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresNineDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
 }
 
-TEST_F( ShaderRootFixture, TheCloudMarchDeclaresThirteenDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheCloudMarchDeclaresFourteenDescriptorsInSetZero )
 {
     // THE VIEW MARCH, pinned on the same terms and for the same reason, and it was NOT pinned before slot
     // A landed — which is precisely why it is worth doing now: two of its ten descriptors are new, both
@@ -462,9 +463,13 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresThirteenDescriptorsInSetZero )
     // Graphic::ResolveCloudNoiseVolumes fills the unused slots with slot 0's image rather than leaving
     // them empty. They cost nothing in memory — Assets::AssetPreloader uploads every `.dcnv` in the
     // project whatever any scene names — and they are what makes a type's own volume reach the frame.
+    //
+    // FOURTEEN SINCE Р4. The one that arrived is the SKY-LIGHT OCCLUSION VOLUME at binding 13, and it is
+    // bound on exactly the terms this note describes: ALWAYS, fallback included, even in the default scene
+    // where the layer's flag is off and CloudPush::SkyOcclusion.x tells the march not to read it.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 13u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 14u );
 
     for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
     {
@@ -501,6 +506,48 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresThirteenDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the hero cloud instances
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudAuthoredAtlasBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudSkyOcclusionBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sky-light occlusion volume
+}
+
+TEST_F( ShaderRootFixture, TheSkyOcclusionVolumesProducerAndConsumerAgreeAboutTheFieldTheyIntegrate )
+{
+    // THE RELATION THAT MAKES THE VOLUME MEAN ANYTHING. A column is integrated by one shader and read by
+    // another, and what makes the number correct is that BOTH sampled the same field: the same four noise
+    // volumes, the same modelling volume, the same hero-cloud atlas and instance list. A producer that
+    // eroded its column from a different volume than the eye's would darken clouds the frame does not
+    // contain — not an error anywhere, just a shaded side that does not fit its cloud, which is the exact
+    // failure shape the shadow map's own binding assertions exist to catch.
+    const auto producer = ComputeSetZero( ShaderPath( "Clouds/CloudSkyOcclusionVolume.shader" ) );
+
+    EXPECT_TRUE( HasBinding( producer, Desert::Graphic::kCloudSkyOcclusionOutputBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) ); // the volume it writes
+    EXPECT_TRUE( HasBinding( producer, Desert::Graphic::kCloudSkyOcclusionParamsBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );
+    EXPECT_TRUE( HasBinding( producer, Desert::Graphic::kCloudSkyOcclusionModellingBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( producer, Desert::Graphic::kCloudSkyOcclusionAuthoredBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );
+    EXPECT_TRUE( HasBinding( producer, Desert::Graphic::kCloudSkyOcclusionAuthoredAtlasBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+
+    for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+    {
+        EXPECT_TRUE( HasBinding( producer, Desert::Graphic::kCloudSkyOcclusionNoiseBindings[slot],
+                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
+             << "the sky-light occlusion producer does not declare noise volume " << slot;
+
+        // ONE VOCABULARY FOR ONE FIELD, asserted rather than left to an alias nobody re-reads.
+        EXPECT_EQ( Desert::Graphic::kCloudNoiseBindings[slot],
+                   Desert::Graphic::kCloudSkyOcclusionNoiseBindings[slot] );
+    }
+
+    // AND IT READS THE SAME PARAMETER BLOCK, byte for byte. It is handed the very buffer the march is
+    // handed — one upload, two dispatches — so a block of a different size here would be every field after
+    // the divergence read from the wrong offset in a pass whose output is then trusted by the other.
+    const uint32_t bytes = ComputeStorageBlockBytes( ShaderPath( "Clouds/CloudSkyOcclusionVolume.shader" ),
+                                                     Desert::Graphic::kCloudParamsBinding );
+    EXPECT_EQ( bytes, sizeof( Desert::Graphic::CloudGpuPayload ) );
 }
 
 TEST_F( ShaderRootFixture, TheCloudParameterBlockIsTheSameNumberOfBytesOnBothSidesOfTheWire )

@@ -152,6 +152,21 @@ Shader "CloudRaymarch"
         // binds the engine's fallback volume and the instance count is zero, so nothing reads it.
         Uniform(9) sampler3D u_CloudAuthoredAtlas;
 
+        // THE SKY-LIGHT OCCLUSION VOLUME — 128 x 16 x 128 RGBA16F over the procedural modelling volume's
+        // own region, .r holding the diffuse transmittance of everything ABOVE that column at that
+        // altitude, written this frame by Programs/Clouds/CloudSkyOcclusionVolume.shader.
+        //
+        // IT IS THE QUANTITY u_CloudPhase.z's OTHER OCCLUDER CANNOT EXPRESS. CloudAmbientOcclusion is a
+        // function of the sample's own Profile — its depth inside its OWN body — so a sample under three
+        // kilometres of congestus receives exactly what a sample under clear sky receives. See
+        // Common/CloudLighting.glslh, which owns both the maths and the addressing, and
+        // Docs/Clouds/DIAGNOSIS_CARTOON.md §1, which is the measurement that asked for this.
+        //
+        // ALWAYS BOUND, fallback included, on the terms every sampler here is bound on: a declared sampler
+        // with no image is an INVALID descriptor set, and this backend answers one by silently skipping
+        // the dispatch. u_CloudSkyOcclusion.x decides whether it is read.
+        Uniform(13) sampler3D u_CloudSkyOcclusionVolume;
+
         // The seam's three callbacks. Declared here, next to the samplers, because Common/CloudField.glslh
         // must stay free of samplers to remain compilable as C++ by its tests.
         #define CLOUD_SAMPLE_NOISE(s, p) CloudFetchNoise((s), (p))
@@ -179,6 +194,10 @@ Shader "CloudRaymarch"
             //      pass cannot derive: imageSize() reports the quarter-res target it writes, and the two
             //      round-ups that produced it are not invertible on an odd viewport.
             vec4 u_CloudTrace;
+            // x = 1 when the sky-light occlusion volume was written for THIS frame and must be read. Its
+            // region and side are NOT here: the volume shares the modelling volume's frame exactly, so
+            // u_CloudRegion already carries both and a second copy would be one fact on the wire twice.
+            vec4 u_CloudSkyOcclusion;
         };
 
         LocalSize(8, 8, 1);
@@ -514,9 +533,43 @@ Shader "CloudRaymarch"
                         float opticalDepth = CloudLightOpticalDepth(layer, params, samplePos, toSun,
                                                                     lightMarchKm, lightSamples, extinction);
 
-                        // Authored, not fixed at full: UE carries the amount in the alpha of its albedo
-                        // parameter, so it IS a dial there and the earlier note here was wrong.
+                        // HOW MUCH OF THE SKY THIS SAMPLE CAN SEE, by one of two geometries.
+                        //
+                        // The strength is the SAME field either way — u_CloudPhase.z, the artist's
+                        // AmbientOcclusionStrength — and it keeps one meaning, "how strongly the sky light
+                        // is occluded". What the layer's flag chooses is which occluder computes it, so
+                        // neither path leaves the other's parameters dead.
+                        //
+                        // DEFAULT (volume off): the sample's own Profile, i.e. its depth inside its OWN
+                        // body. Authored, not fixed at full: UE carries the amount in the alpha of its
+                        // albedo parameter, so it IS a dial there.
+                        //
+                        // VOLUME ON: the diffuse transmittance of everything ABOVE this column at this
+                        // altitude. It REPLACES the profile term rather than multiplying it, and that is
+                        // deliberate — the column integrated from the sample upward already contains the
+                        // upper half of the sample's own body, so applying both would count that material
+                        // twice and darken a cloud's own core for a reason nobody could find later.
                         float ambientOcclusion = CloudAmbientOcclusion(field.Profile, u_CloudPhase.z);
+                        if (u_CloudSkyOcclusion.x > 0.5f)
+                        {
+                            // The WIND-SHIFTED position, because that is the frame the volume was traced
+                            // in — the same subtraction Common/CloudField.glslh makes on its own way into
+                            // the modelling volume, and the reason the two land on the same texel however
+                            // far the wind has run.
+                            vec3 skyWindPos = vec3(fieldPos.x - params.WindOffsetKm.x,
+                                                   fieldPos.y - params.WindOffsetKm.y,
+                                                   fieldPos.z - params.WindOffsetKm.z);
+
+                            vec3 skyUvw = CloudSkyOcclusionUvw(params.RegionOriginKm, params.InvRegionSizeKm,
+                                                               heightFraction, skyWindPos);
+
+                            // textureLod AND NOT texture, for the reason every other volume fetch in this
+                            // file gives: a compute shader has no derivatives, so the implicit level of
+                            // detail is undefined.
+                            ambientOcclusion =
+                                CloudSkyOcclusion(textureLod(u_CloudSkyOcclusionVolume, skyUvw, 0.0f).r,
+                                                  u_CloudPhase.z);
+                        }
 
                         // Wrenninge's multiple-scattering octaves, as Unreal implements them. Each order
                         // scatters less, is absorbed less and is less directional than the one before it,

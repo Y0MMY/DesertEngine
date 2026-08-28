@@ -23,10 +23,11 @@ namespace Desert::Graphic::System
         // size is fine.
         constexpr uint32_t kMarchWorkGroupSize = 8;
 
-        constexpr const char* kMarchShaderName     = "CloudRaymarch";
-        constexpr const char* kResolveShaderName   = "CloudTemporalResolve";
-        constexpr const char* kCompositeShaderName = "CloudComposite";
-        constexpr const char* kShadowMapShaderName = "CloudShadowMap";
+        constexpr const char* kMarchShaderName        = "CloudRaymarch";
+        constexpr const char* kResolveShaderName      = "CloudTemporalResolve";
+        constexpr const char* kCompositeShaderName    = "CloudComposite";
+        constexpr const char* kShadowMapShaderName    = "CloudShadowMap";
+        constexpr const char* kSkyOcclusionShaderName = "CloudSkyOcclusionVolume";
 
         constexpr uint32_t GroupCount( uint32_t extent, uint32_t groupSize )
         {
@@ -148,12 +149,15 @@ namespace Desert::Graphic::System
         m_MarchPipeline.reset();
         m_ResolvePipeline.reset();
         m_ShadowMapPipeline.reset();
+        m_SkyOcclusionPipeline.reset();
         m_CompositePipeline.reset();
         m_CompositeMaterial.reset();
         m_TraceImage.reset();
         m_TraceGuideImage.reset();
         m_ShadowMapImage.reset();
         m_ShadowMapValid = false;
+        m_SkyOcclusionVolume.reset();
+        m_SkyOcclusionFailed = false;
         for ( uint32_t i = 0; i < 2u; ++i )
         {
             m_HistoryImage[i].reset();
@@ -558,6 +562,25 @@ namespace Desert::Graphic::System
             return false;
         m_ShadowMapPipeline->Invalidate();
 
+        // THE SKY-LIGHT OCCLUSION VOLUME'S PRODUCER. Created unconditionally, like the three above, even
+        // though the default layer never dispatches it: a pipeline is created once per renderer and a
+        // pipeline created lazily inside the dispatch path is a failure with nowhere to go but a silent
+        // skip — which is precisely the class of defect this subsystem's zero-cost ladder is written to
+        // avoid. What is conditional is the IMAGE and the DISPATCH, and both are below the layer's flag.
+        const auto skyOcclusionShader = shaderService->GetByName( kSkyOcclusionShaderName );
+        if ( !skyOcclusionShader )
+        {
+            LOG_ERROR( "[Clouds] Compute shader '{}' is not registered. Expected "
+                       "Editor/Resources/Shaders/Programs/Clouds/{}.shader.",
+                       kSkyOcclusionShaderName, kSkyOcclusionShaderName );
+            return false;
+        }
+        m_SkyOcclusionPipeline =
+             ComputePipeline::Create( { .Shader = skyOcclusionShader, .DebugName = kSkyOcclusionShaderName } );
+        if ( !m_SkyOcclusionPipeline )
+            return false;
+        m_SkyOcclusionPipeline->Invalidate();
+
         const auto target = m_TargetFramebuffer.lock();
         if ( !target )
             return false;
@@ -595,7 +618,54 @@ namespace Desert::Graphic::System
         if ( m_CompositePipeline )
             m_CompositePipeline->Invalidate();
 
-        return m_MarchPipeline && m_ResolvePipeline && m_ShadowMapPipeline && m_CompositePipeline;
+        return m_MarchPipeline && m_ResolvePipeline && m_ShadowMapPipeline && m_SkyOcclusionPipeline &&
+               m_CompositePipeline;
+    }
+
+    bool VolumetricCloudRenderer::EnsureSkyOcclusionVolume()
+    {
+        if ( m_SkyOcclusionFailed )
+            return false;
+        if ( m_SkyOcclusionVolume )
+            return true;
+
+        // ALLOCATED ON THE FIRST FRAME THE LAYER ACTUALLY ASKS FOR IT, and never reallocated: unlike the
+        // six trace targets its size is not a property of the view, and unlike the shadow map its size is
+        // not a property of the quality tier either. It is a fixed grid over the modelling volume's own
+        // region, so nothing a session can do changes how many texels it needs.
+        //
+        // NO TIER LEVER, and that is a decision rather than an omission. The cost of this pass is
+        // resolution^2 columns of a fixed sample count and it is already a fraction of the shadow map's;
+        // halving the grid would buy a fraction of a fraction while coarsening a term that is applied to
+        // every cloud pixel in the frame. If it ever needs one, the lever is this constant and the
+        // relation in Common/CloudLighting.glslh says what it must stay inside.
+        const Core::Formats::Image3DSpecification spec{
+             .Tag        = "CloudSkyOcclusionVolume",
+             .Width      = kCloudSkyOcclusionResolution,
+             .Height     = kCloudSkyOcclusionSlices,
+             .Depth      = kCloudSkyOcclusionResolution,
+             .Format     = Core::Formats::ImageFormat::RGBA16F,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
+        };
+
+        m_SkyOcclusionVolume = Image3D::Create( spec );
+        if ( !m_SkyOcclusionVolume )
+        {
+            LOG_ERROR( "[Clouds] The {}x{}x{} RGBA16F sky-light occlusion volume could not be created on the "
+                       "device; the clouds will fall back to occluding their ambient by the sample's own "
+                       "profile for this view.",
+                       kCloudSkyOcclusionResolution, kCloudSkyOcclusionSlices, kCloudSkyOcclusionResolution );
+            m_SkyOcclusionFailed = true;
+            return false;
+        }
+
+        LOG_INFO( "[Clouds] Sky-light occlusion volume {}x{}x{} RGBA16F ({:.2f} MiB) — {:.0f} km across the "
+                  "world at {:.0f} m per texel, {} altitude slices over the shell.",
+                  kCloudSkyOcclusionResolution, kCloudSkyOcclusionSlices, kCloudSkyOcclusionResolution,
+                  BytesToMiB( kCloudSkyOcclusionBytes ), m_ModellingParams.RegionSizeKm,
+                  m_ModellingParams.RegionSizeKm / static_cast<float>( kCloudSkyOcclusionResolution ) * 1000.0f,
+                  kCloudSkyOcclusionSlices );
+        return true;
     }
 
     bool VolumetricCloudRenderer::EnsureShadowMap( uint32_t resolution )
@@ -1164,13 +1234,70 @@ namespace Desert::Graphic::System
         const glm::mat4     viewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
         const CloudSubPixel subPixel       = CloudTraceSubPixel( m_FrameIndex );
 
+        auto& renderer = Renderer::GetInstance();
+
+        // ---- THE SKY-LIGHT OCCLUSION VOLUME ----------------------------------------------------------
+        //
+        // HERE AND NOT IN ITS OWN Execute*, and the placement is the whole of its correctness. It is
+        // dispatched AFTER m_ParamsBuffer was written just above and BEFORE the march below, so the two
+        // dispatches read ONE upload of one block — where the shadow map, which sits on the far side of
+        // the render graph, needs a second buffer for exactly the bytes this one shares. It writes an
+        // image the march then samples, which fixes the order and forbids reordering them.
+        //
+        // ZERO COST WHEN OFF: no allocation, no dispatch, and the march's gate is a push constant of 0, so
+        // a scene without the flag is the frame it was before this pass existed.
+        const bool wantsSkyOcclusion = m_Data.SkyOcclusionVolume;
+        bool       skyOcclusionReady = false;
+
+        if ( wantsSkyOcclusion && EnsureSkyOcclusionVolume() )
+        {
+            DESERT_PROFILE_PASS( "Clouds: SkyOcclusion" );
+
+            for ( uint32_t slot = 0; slot < m_NoiseNeeded; ++slot )
+                renderer.ComputeImageBeginRead( m_NoiseVolume[slot] );
+            renderer.ComputeImageBeginRead( m_ModellingVolume.get() );
+            if ( m_AuthoredAtlas )
+                renderer.ComputeImageBeginRead( m_AuthoredAtlas );
+            renderer.ComputeImageBeginWrite( m_SkyOcclusionVolume.get() );
+
+            m_SkyOcclusionPipeline->SetOutput( kCloudSkyOcclusionOutputBinding, m_SkyOcclusionVolume.get(), 0 );
+            m_SkyOcclusionPipeline->SetStorageBuffer( kCloudSkyOcclusionParamsBinding, m_ParamsBuffer.get() );
+            for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+                m_SkyOcclusionPipeline->SetInput( kCloudSkyOcclusionNoiseBindings[slot], m_NoiseVolume[slot] );
+            m_SkyOcclusionPipeline->SetInput( kCloudSkyOcclusionModellingBinding, m_ModellingVolume.get() );
+            m_SkyOcclusionPipeline->SetStorageBuffer( kCloudSkyOcclusionAuthoredBinding, m_AuthoredBuffer.get() );
+            // ALWAYS bound, fallback included — see the note at the march's own binding of it.
+            m_SkyOcclusionPipeline->SetInput(
+                 kCloudSkyOcclusionAuthoredAtlasBinding,
+                 m_AuthoredAtlas
+                      ? m_AuthoredAtlas
+                      : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
+
+            // ONE INVOCATION PER COLUMN — the altitude axis is walked inside the shader, because the whole
+            // point of the pass is that a column's optical depth accumulates downward and a thread per
+            // texel would have to re-integrate everything above it.
+            renderer.DispatchComputeInFrame( m_SkyOcclusionPipeline.get(),
+                                             GroupCount( kCloudSkyOcclusionResolution, kMarchWorkGroupSize ),
+                                             GroupCount( kCloudSkyOcclusionResolution, kMarchWorkGroupSize ), 1 );
+
+            renderer.ComputeImageEndWrite( m_SkyOcclusionVolume.get() );
+            if ( m_AuthoredAtlas )
+                renderer.ComputeImageEndRead( m_AuthoredAtlas );
+            renderer.ComputeImageEndRead( m_ModellingVolume.get() );
+            for ( uint32_t slot = m_NoiseNeeded; slot-- > 0; )
+                renderer.ComputeImageEndRead( m_NoiseVolume[slot] );
+
+            skyOcclusionReady = true;
+        }
+
         CloudPush push{};
         push.InverseViewProjection = glm::inverse( viewProjection );
         push.CameraPosition = glm::vec4( camera->GetPosition(), static_cast<float>( m_FrameIndex & 0xFFFFu ) );
         push.Trace          = glm::vec4( static_cast<float>( subPixel.X ), static_cast<float>( subPixel.Y ),
                                          static_cast<float>( m_HalfWidth ), static_cast<float>( m_HalfHeight ) );
-
-        auto& renderer = Renderer::GetInstance();
+        // THE GATE IS "WAS IT WRITTEN", not "was it asked for". A layer whose flag is on but whose volume
+        // failed to allocate must fall back to the profile term, not read an image nobody filled.
+        push.SkyOcclusion = glm::vec4( skyOcclusionReady ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f );
 
         Image2D* depthImage = target->GetDepthAttachmentImage().get();
 
@@ -1226,6 +1353,15 @@ namespace Desert::Graphic::System
              kCloudAuthoredAtlasBinding,
              m_AuthoredAtlas
                   ? m_AuthoredAtlas
+                  : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
+
+        // The sky-light occlusion volume, on the same always-bound terms as the two samplers above and for
+        // the same reason. When the layer does not want it the image does not exist at all, so the
+        // fallback is what the descriptor points at and push.SkyOcclusion.x is 0.
+        m_MarchPipeline->SetInput(
+             kCloudSkyOcclusionBinding,
+             skyOcclusionReady
+                  ? m_SkyOcclusionVolume.get()
                   : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
 
         m_MarchPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );

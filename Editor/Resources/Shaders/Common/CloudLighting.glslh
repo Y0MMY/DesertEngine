@@ -91,4 +91,131 @@ float CloudAmbientOcclusion( float profile, float strength )
     return mix( 1.0f, occluded, clamp( strength, 0.0f, 1.0f ) );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// SKY-LIGHT OCCLUSION BY THE CLOUD ABOVE THE SAMPLE — the quantity CloudAmbientOcclusion above CANNOT
+// express, and the largest measured discrepancy in this sky (Docs/Clouds/DIAGNOSIS_CARTOON.md §1 #1/#2).
+// ---------------------------------------------------------------------------------------------------
+//
+// THE PROBLEM, IN ONE SENTENCE. `Profile` is how deep a sample sits inside its OWN body, so a sample can
+// never receive less than `mix(1, 0, strength)` of the whole sky's mean radiance however much OTHER cloud
+// is stacked over it — at the shipped strength of 0.5 that floor is half the sky, and the visible surface
+// (profile 0.576) receives 0.826 of it. Three kilometres of congestus overhead changes neither number.
+// Р0 measured the consequence: deleting the ambient entirely moves contrast 0.202 -> 0.401 against the
+// reference's 0.438 at 7 degrees — 84 % of the largest gap in the protocol — while the knob that exists
+// to occlude it recovers 17 % there and 34 % at 42 degrees sunward. That split IS the signature: a local
+// term bites where the occluder is the body itself and fails where the occluder is other cloud.
+//
+// WHAT REPLACES IT. A separate quantity — the optical depth of everything above the sample, integrated
+// straight up — produced into a volume by Programs/Clouds/CloudSkyOcclusionVolume.shader and read back
+// here. The two functions below are the whole of the maths: how a VERTICAL optical depth becomes a
+// HEMISPHERICAL transmittance, and how the artist's strength blends it in.
+
+// THE EXPONENTIAL INTEGRAL E1, Abramowitz & Stegun 5.1.53 (x <= 1, |error| < 2e-7) and 5.1.56 (x >= 1,
+// |error| < 5e-5 in `x e^x E1(x)`). Its only caller is the transmittance below.
+//
+// GUARDED AT ZERO because E1 diverges there. The caller multiplies it by x*x, so the limit of the product
+// is 0 and returning 0 reproduces it exactly — where the divergence itself would be an infinity times a
+// zero, and a NaN transmittance is a black hole in the layer that no unit test of either half would find.
+float CloudExpIntegralE1( float x )
+{
+    if ( x <= 0.0f )
+        return 0.0f;
+
+    if ( x <= 1.0f )
+    {
+        float series =
+             -0.57721566f +
+             x * ( 0.99999193f +
+                   x * ( -0.24991055f + x * ( 0.05519968f + x * ( -0.00976004f + x * 0.00107857f ) ) ) );
+        return series - log( x );
+    }
+
+    float numerator   = x * x + 2.334733f * x + 0.250621f;
+    float denominator = x * x + 3.330657f * x + 1.681534f;
+    return exp( -x ) * numerator / ( x * denominator );
+}
+
+// The fraction of the sky's mean radiance that survives @p verticalOpticalDepth of cloud overhead.
+//
+// THE SKY IS A HEMISPHERE AND THIS VOLUME STORES ONE NUMBER PER COLUMN, so the conversion from "how much
+// cloud is straight up" to "how much of the sky is visible" is where the geometry is put back. For a
+// horizontally uniform slab a ray leaving at zenith angle acos(mu) crosses tau/mu of material, and the
+// cosine-weighted hemispherical transmittance is exactly
+//
+//     T(tau) = 2 * integral(0..1) mu * exp(-tau / mu) dmu = 2 * E3(tau)
+//            = exp(-tau) * (1 - tau) + tau^2 * E1(tau)
+//
+// and that identity is what is evaluated here. Desert/Tests/Engine/CloudLighting integrates the left-hand
+// side numerically and asserts the two agree to a fraction of a per cent.
+//
+// WHY NOT THE DIFFUSIVITY FACTOR. Radiative transfer's usual shortcut is one slant path at a fixed
+// effective secant of 1.66, and it was written here first. The suite measured it at up to 27 % off over
+// the range where the term is still visible, and — the part that decided it — the error CHANGES SIGN
+// around tau 0.4: brighter than the truth below, darker above. A one-constant approximation whose error
+// reverses in the middle of its working range is the shape of thing that gets "corrected" later by moving
+// an artist's slider on one camera angle. The exact form costs about fifteen extra ALU ops and is
+// evaluated ONCE PER TEXEL of the volume rather than at every one of the march's samples, which is
+// exactly why it is affordable here and would not have been in the march.
+//
+// WHAT IS STILL AN APPROXIMATION, and it is the larger one: the slab. A slant ray through a FINITE cumulus
+// exits its side long before it has crossed tau/mu, so real broken cloud occludes LESS than this says.
+// The term is therefore biased dark, the bias grows with how broken the sky is, and the artist's strength
+// below is what pulls it back — rather than a second fitted constant tuned on one camera angle.
+float CloudSkyDiffuseTransmittance( float verticalOpticalDepth )
+{
+    float tau = max( verticalOpticalDepth, 0.0f );
+    return clamp( exp( -tau ) * ( 1.0f - tau ) + tau * tau * CloudExpIntegralE1( tau ), 0.0f, 1.0f );
+}
+
+// The occlusion multiplier the march applies to the ambient term, from the transmittance the volume
+// stores. @p strength is the SAME AmbientOcclusionStrength that drives CloudAmbientOcclusion — one knob
+// with one meaning ("how strongly the sky light is occluded"), and the component's flag chooses only
+// WHICH geometry computes it, so neither field goes dead when the other is in use.
+float CloudSkyOcclusion( float skyTransmittance, float strength )
+{
+    return mix( 1.0f, clamp( skyTransmittance, 0.0f, 1.0f ), clamp( strength, 0.0f, 1.0f ) );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE VOLUME ITSELF — its extents, and where a sample lands in it
+// ---------------------------------------------------------------------------------------------------
+//
+// IT SHARES THE PROCEDURAL MODELLING VOLUME'S FRAME EXACTLY: the same region origin, the same side, the
+// same wind shift, the same REPEAT horizontally (Common/CloudField.glslh, CloudProceduralVolumeUvw). That
+// is the one design decision in this feature and it is what kills the seam an earlier attempt had.
+//
+// THE SEAM IT AVOIDS. Docs/Sky/HANDOVER.md §1 item 3 records a version of this that projected the SUN-space
+// shadow map onto the vertical, and its third fault was that the shadow map's footprint is a 30 km radius
+// square snapped to the camera — so the term was ZERO outside it, and at 7 degrees of elevation the
+// protocol's own ray runs from 18.29 km to 47.27 km through the shell, which is mostly OUTSIDE. The
+// elevation where the discrepancy is largest is exactly the elevation a camera-snapped square cannot
+// reach. The modelling volume's region has no outside at all: the bake splats every lump at its wrapped
+// positions, so the field is EXACTLY periodic over the region and "past the footprint" is the same sky
+// again — the identical degenerate far path the profile fetch beside it already takes.
+//
+// HALF THE MODELLING VOLUME ON EVERY AXIS (256 x 32 x 256 -> 128 x 16 x 128), and the halving is a
+// relation rather than a size: what this volume stores is a HEMISPHERICAL integral, whose own horizontal
+// footprint is the height of the cloud above the sample — kilometres — so a texel finer than the layer is
+// thick stores structure the quantity does not have. At the shipped 48 km region a texel is 375 m against
+// a 3.6 km deck, still an order inside it. Desert/Tests/Engine/CloudLighting asserts the relation.
+#define CLOUD_SKY_OCCLUSION_RESOLUTION 128.0f
+#define CLOUD_SKY_OCCLUSION_SLICES 16.0f
+
+// Where a sample lands in the volume. @p windPos is the WIND-SHIFTED position the field itself is
+// evaluated at (Common/CloudField.glslh builds it), so this addresses the same frame the profile does and
+// the two cannot drift; @p heightFraction is the sample's own normalised altitude in the shell, which the
+// march already holds.
+//
+// VERTICALLY CLAMPED TO THE TEXEL CENTRES for the reason CloudProceduralVolumeUvw gives at its own clamp:
+// every sampler in this engine is REPEAT, and a height fraction of 1 would otherwise wrap to the bottom
+// slice — so the top of the layer would be told the whole deck is above it.
+vec3 CloudSkyOcclusionUvw( vec2 regionOriginKm, float invRegionSizeKm, float heightFraction, vec3 windPos )
+{
+    float halfV = 0.5f / CLOUD_SKY_OCCLUSION_SLICES;
+
+    return vec3( ( windPos.x - regionOriginKm.x ) * invRegionSizeKm,
+                 clamp( heightFraction, halfV, 1.0f - halfV ),
+                 ( windPos.z - regionOriginKm.y ) * invRegionSizeKm );
+}
+
 #endif // CLOUD_LIGHTING_GLSLH

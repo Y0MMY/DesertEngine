@@ -166,6 +166,14 @@ namespace Desert::Graphic
     // one binding went out and one came in, so the descriptor set's shape is unchanged and every
     // consumer's slot list stayed where it was.
     inline constexpr uint32_t kCloudModellingBinding = 7;
+    // THE SKY-LIGHT OCCLUSION VOLUME (Engine/Graphic/Clouds/CloudSkyOcclusionPayload.hpp): 128 x 16 x 128
+    // RGBA16F over the modelling volume's own region, .r holding the diffuse transmittance of the cloud
+    // ABOVE that column at that altitude. Bound on the same terms as the distant sky light and the aerial
+    // perspective volume — ALWAYS, fallback included, gated by CloudPush::SkyOcclusion.x — because a
+    // declared sampler with no image is an invalid descriptor set and this backend answers one by skipping
+    // the dispatch. 13 rather than 8: the authored buffer and its atlas took 8 and 9, and noise volumes 1
+    // to 3 took 10 to 12.
+    inline constexpr uint32_t kCloudSkyOcclusionBinding = 13;
 
     /**
      * @brief The FOUR noise volumes a layer can bind, by descriptor number, in the order CloudGpuPayload::
@@ -221,9 +229,23 @@ namespace Desert::Graphic
         //        UP twice — deriving it from the quarter size would be off by a pixel on odd viewports and
         //        would shear the whole jitter pattern by half a texel along the right and bottom edges.
         glm::vec4 Trace;
+        // x = 1 when the sky-light occlusion volume was dispatched for THIS frame and must be read, 0
+        //     otherwise. y, z, w are unwritten — a push constant is laid out in vec4s and this is the only
+        //     scalar the gate needs.
+        //
+        // A GATE AND NOT A REGION, which is the whole reason the volume costs one float here: it shares the
+        // procedural modelling volume's frame exactly, so its origin and side are already on the wire as
+        // CloudGpuPayload::Region and a copy of them here would be the same two numbers travelling twice.
+        //
+        // IT IS A PROPERTY OF THE FRAME AND NOT OF THE WEATHER, which is why it is here rather than in the
+        // parameter block beside the artist's fields: the component's flag can be on while the dispatch
+        // did not happen (no atmosphere, a failed allocation), and a march that read a volume nobody wrote
+        // would shade the sky with uninitialised device memory.
+        glm::vec4 SkyOcclusion;
     };
 
-    static_assert( sizeof( CloudPush ) == 96 );
+    static_assert( sizeof( CloudPush ) == 112,
+                   "CloudPush must stay inside the 128 bytes Vulkan guarantees for push constants" );
 
     /**
      * Unreal's VolumetricRenderTarget sub-pixel walk, mode 0.
