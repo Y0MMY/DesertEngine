@@ -445,6 +445,27 @@ TEST( SceneTerrainMaterialMigration, TheTerrainCollectorActuallyReadsTheMaterial
 
 // ── The repository, swept ──────────────────────────────────────────────────────────────────────────
 
+// A scene the REPOSITORY ships, as opposed to one this machine happens to have on disk.
+//
+// `Scenes/Autosave/` holds `<name>_autosave.desce`, written periodically by the editor for crash
+// recovery (EditorLayer.cpp:662-685) and gitignored precisely so a stale copy on an old schema is not a
+// file in the repository. A `recursive_directory_iterator` over `Scenes/` descends into it anyway, so
+// the sweep below picked up whatever the last editor session left behind — and those files are never
+// migrated, because migration is for content we ship.
+//
+// That is invisible in CI, where a fresh checkout has no `Autosave/` at all, and it fails on every
+// machine that has ever run the editor. Which is exactly what happened: green in the author's
+// worktree, two failures on the integrator's, on a stale `Clouds_Demo_autosave.desce` still stamped
+// SceneVersion 1. An environment-dependent gate is worse than no gate, because it teaches people that
+// a red suite means nothing.
+static bool IsShippedScene( const std::filesystem::path& p )
+{
+    for ( const auto& part : p )
+        if ( part == "Autosave" )
+            return false;
+    return true;
+}
+
 // WHY A SWEEP AND NOT A LIST. DC 4.5 says every scene in the repository is converted by the task that
 // changes the format, and this step DROPS what it finds — so "which scenes are affected" is not a question
 // to answer once at review time. Every `.desce` is opened, and two things are asserted about each: it is
@@ -462,6 +483,8 @@ TEST( SceneTerrainMaterialMigration, NoSceneInTheRepositoryStillCarriesATerrains
     for ( const auto& entry : std::filesystem::recursive_directory_iterator( dir ) )
     {
         if ( !entry.is_regular_file() || entry.path().extension() != ".desce" )
+            continue;
+        if ( !IsShippedScene( entry.path() ) )
             continue;
 
         std::ifstream in( entry.path(), std::ios::binary );
@@ -507,6 +530,8 @@ TEST( SceneTerrainMaterialMigration, EveryShippedSceneIsAlreadyMigratedAndMigrat
     for ( const auto& entry : std::filesystem::recursive_directory_iterator( dir ) )
     {
         if ( !entry.is_regular_file() || entry.path().extension() != ".desce" )
+            continue;
+        if ( !IsShippedScene( entry.path() ) )
             continue;
 
         std::ifstream      in( entry.path(), std::ios::binary );
