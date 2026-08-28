@@ -471,6 +471,130 @@ CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction
     return result;
 }
 
+// ---------------------------------------------------------------------------------------------------
+// WHY THE EROSION CANNOT PUT A SURFACE ON THIS CLOUD, AND WHAT WAS REFUSED — task Р9, 2026-08-28
+// ---------------------------------------------------------------------------------------------------
+//
+// THE OWNER'S COMPLAINT THAT THIS ANSWERS is that the lobes are smooth, rounded and uniform: cotton
+// wool. Р0 got as far as two findings and could not join them — the erosion is "CONFIRMED as a ceiling,
+// REFUTED as a knob" (Docs/Clouds/DIAGNOSIS_CARTOON.md §1 row 5) and our fine-scale energy over cloud
+// pixels is about half the reference's, "and I could not name what limits it" (row 6, verdict OPEN).
+// Р6 then refused the resolution explanation with numbers and said what was needed was "a mechanism
+// that ADDS surface" (VolumetricCloudRenderer.cpp:36-42). This is what limits it: a ratio of two
+// lengths, neither of which anything in the Detail block can move.
+//
+// THE SILHOUETTE IS A LINE INTEGRAL, NOT A SURFACE. A ray does not stop where the density becomes
+// non-zero; it stops where it has accumulated unit optical depth. Measured on the shipped protocol sky
+// by Desert/Tests/Engine/CloudField (TheEyeLooksThroughMoreCloudThanTheErosionVariesOver, which prints
+// both numbers on every run):
+//
+//     the depth the eye looks through before the cloud is opaque   657 m
+//     the distance over which the erosion field decorrelates       160 m      -> 4.11x
+//
+// Integrating 657 m of a field that decorrelates in 160 m is a LOW-PASS FILTER. The erosion arrives at
+// the silhouette perfectly fine-grained — that was never the problem — and then four correlation lengths
+// of it are averaged together before anything reaches the eye. What survives is its long-wavelength
+// part, which is a cloud of a slightly different SIZE rather than a cloud with a surface. The erosion
+// contributes 4.1 m of roughness at an 80 m lag on top of the 94.3 m the bare lumps already have: 4.3 %.
+//
+// THAT ONE RATIO PREDICTS FIVE INDEPENDENT REFUTATIONS, four of which were already in the tree as
+// separate mysteries:
+//
+//   * DetailStrength over its whole range is worth 2.86/255 (Р0) — it scales an amplitude that is
+//     averaged away afterwards.
+//   * DetailTileSize is worth 1.29/255 (Р0), and the sweep is now understood rather than observed: over
+//     tile 0.5 / 1 / 2 / 3 km the silhouette's roughness at a 50 m lag reads 60.7 / 61.0 / 59.8 / 58.7 m.
+//     A coarser tile survives the averaging and is too coarse to read as detail; a finer one reads as
+//     detail and does not survive. The two cancel, which is why six tasks found nothing here.
+//   * MaxSteps 256 -> 512 is worth 0.92/255 (Р0) and the trace octave 1.3-3.4 % for 2.83x (Р6): both are
+//     about SAMPLING, and this is about AVERAGING.
+//   * AND THE MODELLING VOLUME IS NOT THE LIMIT EITHER, which nobody had measured. Doubling it to
+//     512 x 32 x 512 — 93.75 m per voxel, 32.00 MiB, four times D-9's allowance for it — moves the
+//     silhouette's roughness at an 80 m lag from 94.3 m to 95.8 m. ONE AND A HALF PER CENT for four
+//     times the memory. The volume carries the silhouette and the noise carries the edge
+//     (PLAN_AUTHORED_CLOUDS.md §2), and neither producer's resolution is what is missing.
+//
+// So no resolution anywhere in the subsystem is the constraint, and the phrase this programme has been
+// reaching for — "invest in the composition of the noise at up-rez" (ANALYSIS_APPROACH.md §6) — is right
+// in kind but cannot be spent on frequency or on amplitude. Both are averaged.
+//
+// WHAT WAS BUILT AND REFUSED. The one term the averaging does NOT destroy is the SHAPE OF THE CUT'S
+// HISTOGRAM. The erosion's depth is proportional to the noise, and the noise's median sits at 0.5 by
+// construction (Common/CloudNoise.glslh's CLOUD_ALLIGATOR_MEDIAN_SHAPE, which re-labels the Alligator's
+// naturally skewed field so a slider reads the middle of it — that calibration is right and was not
+// touched). The side effect is that almost every sample receives a MIDDLING cut, so the erosion delivers
+// itself as a uniform 138.7 m dent, and a uniform dent is exactly what a 657 m average cannot destroy and
+// the eye cannot see. A mean-preserving contrast about that median spends the same average cut as clefts
+// instead, costs one multiply and one clamp, adds no fetch and no parameter, and measures well:
+//
+//     contrast          1.0     1.5     2.0     3.0     4.0     6.0
+//     roughness added   4.9 m   7.3 m   9.4 m  13.8 m  15.4 m  17.7 m   (50 m lag, above the bare lumps)
+//     columns lost      0.070   0.069   0.066   0.062   0.060   0.057   (it opens FEWER holes, not more)
+//     mean travel     138.7 m           125.0 m 113.5 m                 (the census, at strength 0.65)
+//
+// 2.8x the surface for free, and it was still refused, for two reasons measured in that order.
+//
+//   1. THE FRAME SAYS THE SURFACE IT ADDS IS THE WRONG SURFACE. At contrast 3 the near field grows a
+//      visible RETICULATED LATTICE — a honeycomb of polygonal cells with bright ridges between them,
+//      which is the Alligator's own `best - second` cell structure showing through once the cut is deep
+//      enough to resolve it. Docs/Clouds/Shots/P9_contrast3_el45_away.png against
+//      P9_base_el45_away.png: 78.9 % of pixels differ, max 99/255, and what changed is a lattice. It is
+//      unmistakable at a second angle, P9_contrast3_el65_lattice.png, so it is the noise and not one view.
+//      (The repeat shot on this scene is 0 differing pixels of 980 480 and the same md5, so every pixel
+//      figure in this note is the change and nothing else.)
+//      It is a NEAR-FIELD failure and the two elevations bracket it, which is why the dome sweep and not
+//      six points is what found it:
+//
+//                              contrast (tonal)   p05     p95     pixels   max
+//        EL 45 away, a lobe    0.464 -> 0.373    0.274 -> 0.366  78.9 %    99   <- lattice, and WORSE
+//        filling the frame                                                       on Р0's own ruler
+//        EL 25 sunward         0.245 -> 0.244    0.465 -> 0.476  71.1 %    76   <- reads as granularity
+//
+//      So it does not merely fail to help at the near field, it takes 0.091 of tonal contrast OFF the
+//      frame there — filling the deep blue gaps, because a concentrated cut opens fewer holes — and
+//      contrast is Р0's ranking #1. THE STATISTICS ALL SAID YES: more roughness, fewer holes, less
+//      shrinkage, no change in penetration. Only the frame said no, which is §1 of the verify skill in
+//      one line.
+//   2. AND IT BREAKS TWO CALIBRATED RELATIONS, both of which are themselves mis-stated. Recorded because
+//      whoever takes this next needs them restated before ANY deep-cut mechanism can land:
+//      * TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers requires the MEAN travel
+//        to clear 1.05x the march's resolvable chord (131.25 m). Contrast 2 lands on 125.0 and contrast 3
+//        on 113.5. But the mean travel is the UNIFORM component — the part this whole note shows produces
+//        no surface at all — so the relation is pinning the quantity that does not matter: at contrast 3
+//        it falls 18 % while the roughness that does matter rises 180 %.
+//      * HowMuchASampleKeepsRisesWithHowDeepInsideTheBodyItIs asserts retention is monotone in the
+//        profile "because the weight is (1 - Profile) and nothing else in the expression depends on it".
+//        THAT JUSTIFICATION IS FALSE ABOUT THIS FILE and was false before Р9: both `wispy` and `billowy`
+//        below are frequency blends DRIVEN BY THE PROFILE. The relation holds today with a margin of
+//        exactly 0.000 — a tie, not a pass — and any contrast above ~1.25 breaks it.
+//
+// WHAT WOULD ACTUALLY MOVE IT, priced, so the next task does not re-derive any of this:
+//
+//   * SHORTEN THE 657 m. It is set by the extinction and the profile ramp. Sixteen times the extinction
+//     shortens it to 235 m and buys 4.9 -> 14.1 m of roughness — the same 2.8x the contrast bought — at
+//     the cost of every lighting number the programme has calibrated. Measured, not estimated.
+//   * GIVE THE EROSION VOLUME FRACTAL DETAIL AT THE BAKE. The lattice in reason 1 is the whole finding
+//     about this noise, and the field's own structure function says the same thing without the picture:
+//     sampled on the silhouette it reads D(50 m) 0.167, D(100) 0.210, D(200) 0.218, D(400) 0.220,
+//     D(800) 0.219 — it SATURATES BY 200 m, which is the signature of a field with exactly ONE scale in
+//     it. Each channel is one Alligator octave, so a cut deep enough to matter can only expose its
+//     cells. A channel that summed two or three octaves would have no single cell scale to expose and
+//     would keep rising past 200 m, and the cut could then be driven hard. That is
+//     Common/CloudNoise.glslh (CloudNoiseVolumeChannels) plus a re-bake of the two shipped `.dcnv`
+//     volumes, and it is where ANALYSIS_APPROACH.md §6's "invest in the composition of the noise at
+//     up-rez" actually cashes out — at the BAKE, not at the read. Р9 did not build it: it changes what
+//     is IN a shipped asset, which is a content decision rather than a shader one.
+//
+// AND ONE THING THE WHOLE-DOME SWEEP SAYS THAT NO SINGLE FRAME DOES. At the sheet's 1/4 scale the
+// contrast build reads BETTER over most of the dome — broken edges instead of smooth ellipsoids at
+// EL 25, 65 and 85 (Docs/Clouds/Shots/P9_dome_contrast3.png against P9_dome_base.png). The defect is
+// only in the near field and only at full resolution. A six-point protocol that happened to miss
+// EL 45 would have shipped this.
+//
+// The contrast itself is NOT left in the tree behind a constant of 1: a knob that moves nothing is a
+// dead setting (contract §1.3). It is one multiply and one clamp on `detailField` below, and this note is
+// what it costs to put it back.
+
 // The up-rez: turn the low-frequency profile into something with a cloud's edge.
 //
 // The erosion is a REMAP, not a subtraction (deck p.120, `ValueErosion`). The difference shows at the

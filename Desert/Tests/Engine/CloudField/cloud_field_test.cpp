@@ -1740,6 +1740,221 @@ TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAn
             "parameter was first lowered to escape";
 }
 
+// ---------------------------------------------------------------------------------------------------
+// WHAT THE EYE SEES AGAINST WHAT THE EROSION CUTS — task Р9, 2026-08-28
+// ---------------------------------------------------------------------------------------------------
+//
+// WHY THIS SECTION EXISTS. §DS above measures how far the erosion moves the visible surface, and its
+// answer — 138.7 m at the shipped strength — is a MEAN. A mean displacement is a cloud of a slightly
+// different SIZE; it is not a rough one. Nothing in this suite, or anywhere else in the programme, had
+// measured the quantity the owner's complaint is actually about: how much the surface VARIES.
+//
+// Measured here, the answer is that the erosion contributes about 4.9 m of roughness at a 50 m lag on top
+// of the 56.1 m the bare lumps already have — under a tenth — and that the whole remaining range of every
+// knob aimed at it is worth a few metres more. The reason is a ratio of two lengths, and it is the finding
+// this section exists to pin:
+//
+//     the depth the eye looks through before the cloud is opaque   ~635 m
+//     the distance over which the erosion field decorrelates       ~200 m
+//
+// THE SILHOUETTE IS A LINE INTEGRAL, not a surface. A ray does not stop where the density becomes
+// non-zero; it stops where it has accumulated unit optical depth, and on the shipped sky that takes 635 m
+// of cloud. Integrating over 635 m of a field that decorrelates in 200 m is a LOW-PASS FILTER, and only
+// the long-wavelength part of the erosion survives it — which is precisely the part that reads as a change
+// of size rather than as detail.
+//
+// THAT RATIO EXPLAINS FOUR REFUTATIONS THAT WERE PREVIOUSLY UNRELATED (Docs/Clouds/DIAGNOSIS_CARTOON.md):
+// the whole DetailStrength range is worth 2.86/255 because it scales an amplitude that is averaged away
+// afterwards; DetailTileSize is worth 1.29/255 because a coarser tile survives the averaging and is too
+// coarse to read as detail while a finer one reads as detail and does not survive, and the two cancel;
+// and MaxSteps and the trace resolution buy nothing because they are about SAMPLING where this is about
+// AVERAGING (Р6's octave, 1.3-3.4 % for 2.83x the cost).
+//
+// WHAT WOULD MOVE IT is the ratio's numerator or its denominator, and both are priced in Р9's report. The
+// assertions below are the two halves of the relation, so that a change to either is noticed here.
+namespace
+{
+    struct SurfaceRoughness
+    {
+        double PenetrationM   = 0.0;         // how deep the ray goes before the cloud is opaque
+        double DecorrelationM = 0.0;         // the lag at which the erosion field is 95 % of its far-field spread
+        double BareM[3]       = { 0, 0, 0 }; // roughness of the silhouette with the erosion OFF
+        double ErodedM[3]     = { 0, 0, 0 }; // and with it at the shipped strength
+    };
+
+    /// Walks a patch of the SHIPPED field and measures the silhouette's roughness at three lags, with the
+    /// erosion off and on. Sized for Debug: 64 x 64 columns at 80 m over 240 levels is under a million
+    /// samples, which is the same order as the census above.
+    SurfaceRoughness TakeSurfaceRoughness()
+    {
+        const CloudFieldParams params = ParamsAtCoverage( kShippedCoverage );
+
+        constexpr int   kN         = 64;
+        constexpr float kSpacingKm = 0.08f;
+        constexpr int   kLevels    = 240;
+
+        const float envelopeKm = EnvelopeThicknessKm( DefaultShape() );
+        const float stepKm     = envelopeKm / kLevels;
+        const float extPerKm   = kExtinctionPerKm * DefaultShape().ExtinctionFactor * DefaultShape().DensityFactor;
+
+        const float x0 = OriginKm().x + 0.5f * PeriodKm() - 0.5f * kN * kSpacingKm;
+        const float z0 = OriginKm().y + 0.5f * PeriodKm() - 0.5f * kN * kSpacingKm;
+
+        std::vector<float> profile( static_cast<size_t>( kN ) * kN * kLevels, 0.0f );
+        std::vector<float> noise( static_cast<size_t>( kN ) * kN * kLevels, 0.0f );
+
+        for ( int iz = 0; iz < kN; ++iz )
+            for ( int ix = 0; ix < kN; ++ix )
+                for ( int ih = 0; ih < kLevels; ++ih )
+                {
+                    const float fraction = ( ih + 0.5f ) / kLevels;
+                    const vec3  at( x0 + kSpacingKm * ( ix + 0.5f ), fraction * envelopeKm,
+                                    z0 + kSpacingKm * ( iz + 0.5f ) );
+
+                    const CloudFieldSample field = SampleCloudField( params, fraction, at );
+                    if ( field.Profile <= 0.0f )
+                        continue;
+
+                    const size_t k = ( static_cast<size_t>( iz ) * kN + ix ) * kLevels + ih;
+                    profile[k]     = field.Profile;
+                    noise[k]       = ErosionNoiseAt( params, field, at );
+                }
+
+        SurfaceRoughness out;
+
+        // The two silhouettes, and the erosion field sampled on the un-eroded one.
+        std::vector<double> bare( static_cast<size_t>( kN ) * kN, -1.0 );
+        std::vector<double> eroded( static_cast<size_t>( kN ) * kN, -1.0 );
+        std::vector<float>  atSurface( static_cast<size_t>( kN ) * kN, -1.0f );
+
+        const float shipped = glm::clamp( Desert::ECS::VolumetricCloudData{}.DetailStrength, 0.0f, 1.0f );
+
+        double penetration = 0.0;
+        long   surfaces    = 0;
+
+        for ( int iz = 0; iz < kN; ++iz )
+            for ( int ix = 0; ix < kN; ++ix )
+            {
+                const size_t cell = static_cast<size_t>( iz ) * kN + ix;
+                const size_t base = cell * kLevels;
+
+                for ( int pass = 0; pass < 2; ++pass )
+                {
+                    const float t            = pass == 0 ? 0.0f : shipped;
+                    double      opticalDepth = 0.0;
+                    int         top          = -1;
+
+                    for ( int ih = kLevels - 1; ih >= 0; --ih )
+                    {
+                        if ( profile[base + ih] <= 0.0f )
+                            continue;
+                        if ( top < 0 )
+                            top = ih;
+
+                        opticalDepth +=
+                             static_cast<double>( ErodedDensity( profile[base + ih], noise[base + ih], t ) ) *
+                             extPerKm * stepKm;
+
+                        if ( opticalDepth >= 1.0 )
+                        {
+                            const double km = ( ih + 0.5 ) / kLevels * envelopeKm;
+                            if ( pass == 0 )
+                            {
+                                bare[cell]      = km * 1000.0;
+                                atSurface[cell] = noise[base + ih];
+                                penetration += ( top - ih ) * stepKm * 1000.0;
+                                ++surfaces;
+                            }
+                            else
+                                eroded[cell] = km * 1000.0;
+                            break;
+                        }
+                    }
+                }
+            }
+
+        out.PenetrationM = surfaces > 0 ? penetration / surfaces : 0.0;
+
+        // Mean |f(p) - f(p + lag)| along x, for a field addressed on the grid. Used for both the surface
+        // (in metres) and the erosion field (in field units).
+        auto structureAt = [&]( const auto& field, int lag, double missing ) -> double
+        {
+            double total = 0.0;
+            long   pairs = 0;
+            for ( int iz = 0; iz < kN; ++iz )
+                for ( int ix = 0; ix + lag < kN; ++ix )
+                {
+                    const double a = field[static_cast<size_t>( iz ) * kN + ix];
+                    const double b = field[static_cast<size_t>( iz ) * kN + ix + lag];
+                    if ( a <= missing || b <= missing )
+                        continue;
+                    total += std::fabs( a - b );
+                    ++pairs;
+                }
+            return pairs > 0 ? total / pairs : 0.0;
+        };
+
+        for ( int li = 0; li < 3; ++li )
+        {
+            const int lag   = 1 << li; // 80, 160, 320 m
+            out.BareM[li]   = structureAt( bare, lag, 0.0 );
+            out.ErodedM[li] = structureAt( eroded, lag, 0.0 );
+        }
+
+        // WHERE THE EROSION FIELD STOPS BEING CORRELATED WITH ITSELF. Its structure function rises and then
+        // flattens; the flat value is the far field, and the decorrelation length is the first lag that
+        // reaches 95 % of it. Reported in metres so it can be compared with the penetration directly.
+        const double farField = structureAt( atSurface, kN / 2, 0.0f );
+        out.DecorrelationM    = kN / 2 * kSpacingKm * 1000.0;
+        for ( int lag = 1; lag <= kN / 2; ++lag )
+            if ( farField > 0.0 && structureAt( atSurface, lag, 0.0f ) >= 0.95 * farField )
+            {
+                out.DecorrelationM = lag * kSpacingKm * 1000.0;
+                break;
+            }
+
+        return out;
+    }
+} // namespace
+
+TEST( CloudFieldErosion, TheEyeLooksThroughMoreCloudThanTheErosionVariesOver )
+{
+    const SurfaceRoughness r = TakeSurfaceRoughness();
+
+    std::printf( "[CloudFieldErosion] the eye looks through %.0f m of cloud; the erosion decorrelates in "
+                 "%.0f m (%.2fx)\n",
+                 r.PenetrationM, r.DecorrelationM, r.PenetrationM / std::max( r.DecorrelationM, 1.0 ) );
+    std::printf( "[CloudFieldErosion]   lag    bare    eroded    added   [metres of silhouette]\n" );
+    for ( int li = 0; li < 3; ++li )
+        std::printf( "[CloudFieldErosion]  %4d   %6.1f   %6.1f   %6.1f\n", 80 << li, r.BareM[li], r.ErodedM[li],
+                     r.ErodedM[li] - r.BareM[li] );
+
+    // ── THE EROSION IS CONNECTED AT ALL ─────────────────────────────────────────────────────────────────
+    //
+    // The weakest half of the relation and the one worth having as a regression guard: whatever the ceiling
+    // is, the erosion must ROUGHEN the silhouette rather than merely translate it. A refactor that left the
+    // cut applied uniformly — or that lost the noise fetch and kept the mean — would leave §DS's travel
+    // measurement intact and would be caught only here.
+    EXPECT_GT( r.ErodedM[0] - r.BareM[0], 1.0 )
+         << "the erosion moves the surface " << r.ErodedM[0] - r.BareM[0]
+         << " m at an 80 m lag, so it is displacing the silhouette without roughening it — which is a cloud "
+            "of a different size rather than a cloud with a surface";
+
+    // ── AND THE CEILING IS THE RATIO, NAMED SO THAT MOVING IT IS NOTICED ────────────────────────────────
+    //
+    // This is the number Р9 was asked for and it is asserted rather than only printed, because the whole
+    // point of the finding is that it is the binding constraint: while the eye looks through several times
+    // the distance the erosion varies over, no amount of erosion can put detail on the silhouette. The
+    // bound is loose on purpose — it is not a target, it is a tripwire. A change that shortens the
+    // penetration (a higher extinction, a steeper profile ramp) or lengthens the correlation should come
+    // here and restate the relation with its new numbers rather than silently pass.
+    EXPECT_GT( r.PenetrationM, 0.0 );
+    EXPECT_LT( r.PenetrationM / std::max( r.DecorrelationM, 1.0 ), 8.0 )
+         << "the eye now looks through " << r.PenetrationM / r.DecorrelationM
+         << " erosion correlation lengths; past about eight the up-rez cannot reach the silhouette at all "
+            "and the layer is a smooth lump field whatever the Detail sliders say";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
