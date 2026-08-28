@@ -5,6 +5,12 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Graphic/Render/Commands/DrawTerrainCommand.hpp>
 
+#include <Common/Core/Logger.hpp>
+
+#include <cstdint>
+#include <unordered_set>
+#include <utility>
+
 namespace Desert::ECS
 {
     // Collects every TerrainComponent entity each frame and forwards its transform + params to the
@@ -34,20 +40,33 @@ namespace Desert::ECS
                 const auto& terrain     = terrainComp.Data;
                 const auto& transform   = view.get<TransformComponent>( entity );
 
-                // Optional MaterialComponent on the same entity supplies generic param + texture overrides
-                // (Tint, DetailTiling, u_GrassTex/u_RockTex/u_SnowTex splat layers, ...).
-                std::vector<std::pair<std::string, glm::vec4>> overrides;
-                std::vector<std::pair<std::string, uint64_t>>  textureOverrides;
-                if ( registry.has<MaterialComponent>( entity ) )
+                // The terrain's material is a `.demat` like every other material: its values (Tint,
+                // DetailTiling and the u_GrassTex/u_RockTex/u_SnowTex splat layers) arrive as named
+                // overrides that TerrainRenderer applies on top of the shader's own schema defaults.
+                //
+                // It used to be an ECS::MaterialComponent authored in Details, which made the terrain the
+                // last thing in the engine with a second way to edit a material. Unset resolves to nothing
+                // and leaves the schema defaults standing, which is what an empty slot means.
+                Graphic::MaterialOverrides overrides;
+                if ( static_cast<uint64_t>( terrain.Material ) != 0 )
                 {
-                    const auto& mat = registry.get<MaterialComponent>( entity );
-                    overrides.reserve( mat.Params.size() );
-                    for ( const auto& p : mat.Params )
-                        overrides.emplace_back( p.Name, p.Value );
-
-                    textureOverrides.reserve( mat.Textures.size() );
-                    for ( const auto& t : mat.Textures )
-                        textureOverrides.emplace_back( t.Name, t.TextureHandle );
+                    auto* materialService = Runtime::ResourceRegistry::GetMaterialService();
+                    if ( !materialService || !materialService->ResolveOverrides( terrain.Material, overrides ) )
+                    {
+                        // Not a silent default: a handle that resolves to nothing is a material the scene
+                        // names and the asset database does not have, and the terrain then renders in the
+                        // shader's defaults, which looks like an authoring mistake rather than a missing file.
+                        // Said ONCE per handle — this runs every frame, and a warning repeated sixty times a
+                        // second is how a log stops being read.
+                        const uint64_t raw = static_cast<uint64_t>( terrain.Material );
+                        if ( m_WarnedMissingMaterials.insert( raw ).second )
+                        {
+                            LOG_WARN( "[Terrain] material handle {} does not resolve to a registered "
+                                      "material — the terrain renders with the Terrain shader's own "
+                                      "defaults.",
+                                      raw );
+                        }
+                    }
                 }
 
                 const glm::vec3 layerModes( static_cast<float>( terrain.GrassMode ),
@@ -60,12 +79,17 @@ namespace Desert::ECS
 
                 renderCommandBuffer.Emplace<Graphic::Render::DrawTerrainCommand>(
                      transform.GetTransform(), terrain.Size, terrain.Resolution, terrain.HeightScale,
-                     terrain.NoiseFrequency, terrain.Seed, layerModes, terrainComp.SplatMap.get(),
-                     grassParams,
+                     terrain.NoiseFrequency, terrain.Seed, layerModes, terrainComp.SplatMap.get(), grassParams,
                      glm::vec3( terrain.GrassBrightness, static_cast<float>( terrain.GrassBladesPerClump ),
                                 0.0f ), // x=brightness, y=bladesPerClump (packed into the GrassTint channel)
-                     Graphic::MaterialOverrides{ std::move( overrides ), std::move( textureOverrides ) } );
+                     std::move( overrides ) );
             }
         }
+
+    private:
+        // Handles already reported as unresolvable, so the warning above is said once and not once a frame.
+        // Owned by the system and touched only from its own Update, which runs on exactly one thread per
+        // frame even when the collector group runs in parallel.
+        std::unordered_set<uint64_t> m_WarnedMissingMaterials;
     };
 } // namespace Desert::ECS

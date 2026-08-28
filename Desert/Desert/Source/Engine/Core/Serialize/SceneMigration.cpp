@@ -817,6 +817,95 @@ namespace Desert::Core
         return report;
     }
 
+    TerrainMaterialMigrationReport MigrateTerrainMaterialV6ToV7( std::vector<Assets::EntityData>& entities )
+    {
+        static constexpr const char* kTerrainKey  = "Terrain";
+        static constexpr const char* kMaterialKey = "Material";
+
+        TerrainMaterialMigrationReport report;
+
+        for ( auto& entity : entities )
+        {
+            // BOTH keys, and that pairing is the whole gate. A "Material" on an entity with no terrain is
+            // the runtime/script override channel and stays exactly where it is; only the terrain's copy of
+            // it was ever an AUTHORING surface, and only the terrain's copy goes.
+            if ( !entity.Components.get( kTerrainKey ).has_value() )
+                continue;
+
+            const auto material = entity.Components.get( kMaterialKey );
+            if ( !material.has_value() )
+                continue; // already raised, or a terrain that never had one - leave the tree byte-identical
+
+            // Counted before it is dropped. A malformed payload (a number, a string, a hand-edit) still
+            // COUNTS as a removal and is still reported: the entity carried something under that key, and
+            // saying "nothing was there" because it could not be read would be the quiet substitution this
+            // whole clause exists to forbid.
+            const auto fields = material.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': the terrain's Material payload is {1}, not an "
+                          "object - it is removed with the authoring path it belonged to, and nothing "
+                          "could be read out of it to name here",
+                          entity.Tag.value_or( "Entity" ), Describe( material.value() ) );
+            }
+            else
+            {
+                for ( const auto& [key, value] : fields.value() )
+                {
+                    // The two vectors of values. "ShaderName" is deliberately not among them: the new model
+                    // has exactly one Terrain-domain program and a terrain material is created on it, so the
+                    // name was never a value anybody has to re-author.
+                    if ( key != "Params" && key != "Textures" )
+                        continue;
+
+                    const auto rows = value.to_array();
+                    if ( !rows.has_value() )
+                    {
+                        LOG_WARN( "[SceneMigration] entity '{0}': the terrain's Material.{1} is {2}, not an "
+                                  "array - it is removed and its contents cannot be named",
+                                  entity.Tag.value_or( "Entity" ), key, Describe( value ) );
+                        continue;
+                    }
+
+                    for ( const auto& row : rows.value() )
+                    {
+                        // The name is what makes this reportable at all, so a row without one is still
+                        // counted and reported under a placeholder rather than skipped.
+                        std::string name = "<unnamed>";
+                        if ( const auto rowFields = row.to_object(); rowFields.has_value() )
+                        {
+                            if ( const auto named = rowFields.value().get( "Name" ); named.has_value() )
+                            {
+                                if ( const auto text = named.value().to_string(); text.has_value() )
+                                    name = text.value();
+                            }
+                        }
+
+                        if ( key == "Params" )
+                            report.Params += 1;
+                        else
+                            report.Textures += 1;
+                        report.DroppedNames.push_back( std::move( name ) );
+                    }
+                }
+            }
+
+            // Rebuilt rather than erased, exactly like the payload migrations above: rfl::Object is an
+            // ordered vector of pairs with no erase, so every OTHER component is copied across in order and
+            // the one being retired is simply not.
+            rfl::ExtraFields<rfl::Generic> kept;
+            for ( const auto& [key, value] : entity.Components )
+            {
+                if ( key != kMaterialKey )
+                    kept[key] = value;
+            }
+            entity.Components = std::move( kept );
+            report.Entities += 1;
+        }
+
+        return report;
+    }
+
     SceneMigrationReport MigrateScene( SceneSerialized& scene )
     {
         SceneMigrationReport report;
@@ -868,6 +957,15 @@ namespace Desert::Core
         {
             report.CloudSetRaised = true;
             report.CloudSet       = MigrateCloudSetV5ToV6( scene.Entities );
+        }
+
+        // Independent of the cloud chain above it and of everything else in this function: no terrain field
+        // is a length the unit migration scales, and no sky or cloud step reads either of the two keys this
+        // one pairs. It sits last because it is newest, not because anything requires it to.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionTerrainMaterial )
+        {
+            report.TerrainMaterialRaised = true;
+            report.TerrainMaterial       = MigrateTerrainMaterialV6ToV7( scene.Entities );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

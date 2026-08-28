@@ -218,6 +218,22 @@ namespace Desert::ECS
     {
         REFLECT()
 
+        // The terrain's material, a `.demat` like every other material — the surface is drawn by ONE
+        // program of domain Terrain, and its three splat layers (u_GrassTex/u_RockTex/u_SnowTex) are
+        // TEXTURE PARAMETERS of that one program, blended in-shader by the layer modes below. So this is
+        // one handle and not a slot vector: a vector would promise a material per layer, and nothing
+        // downstream could consume one. Unset = the shader's own schema defaults.
+        //
+        // Read by Engine/ECS/System/TerrainECSSystem.hpp, which resolves it through
+        // Runtime::MaterialService::ResolveData and forwards the values as named overrides.
+        //
+        // Hidden from the auto-built Details on the same terms as SkyboxData::SkyboxHandle below: the
+        // builder's asset slot is texture-oriented, and the Terrain entry draws a material field with an
+        // Edit button that opens the Material Editor window — after Stage 3 that window is the only place
+        // a material is authored. Still serialized; Hidden is editor-only.
+        PROPERTY( DisplayName( "Material" ), Category( "Terrain" ), Asset<MaterialAsset>, Hidden )
+        Assets::AssetHandle Material;
+
         PROPERTY( DisplayName( "Size" ), Category( "Terrain" ), Range( 100.0f, 50000.0f ), Length )
         float Size = 5000.0f;
 

@@ -33,13 +33,17 @@ namespace Desert::Core
     //   6             - a layer carries a SET of up to four kinds of cloud instead of one. `CloudType`
     //                   becomes `CloudType1`, the first of four slots; nothing else about a scene changes
     //                   and a one-type layer renders the sky it rendered before
-    inline constexpr int kSceneVersionSky          = 1;
-    inline constexpr int kSceneVersionTonemap      = 2;
-    inline constexpr int kSceneVersionCloudNoise   = 3;
-    inline constexpr int kSceneVersionCloudSpecies = 4;
-    inline constexpr int kSceneVersionCloudType    = 5;
-    inline constexpr int kSceneVersionCloudSet     = 6;
-    inline constexpr int kSceneVersion             = kSceneVersionCloudSet;
+    //   7             - the terrain's material is a `.demat` named by `Terrain.Material`, so the
+    //                   `Material` component a terrain entity used to carry as its authoring channel is
+    //                   gone from terrain entities
+    inline constexpr int kSceneVersionSky             = 1;
+    inline constexpr int kSceneVersionTonemap         = 2;
+    inline constexpr int kSceneVersionCloudNoise      = 3;
+    inline constexpr int kSceneVersionCloudSpecies    = 4;
+    inline constexpr int kSceneVersionCloudType       = 5;
+    inline constexpr int kSceneVersionCloudSet        = 6;
+    inline constexpr int kSceneVersionTerrainMaterial = 7;
+    inline constexpr int kSceneVersion                = kSceneVersionTerrainMaterial;
 
     // World-unit generation of a .desce file. Absent (or 0) means the scene was authored when one world
     // unit was one METRE; today a unit is a CENTIMETRE (Common/Core/Units.hpp), so such a scene is scaled
@@ -317,6 +321,47 @@ namespace Desert::Core
     // SHELF LIFE: this raises v5 to v6 and nothing else. It is deleted once no v5 file remains.
     CloudSetMigrationReport MigrateCloudSetV5ToV6( std::vector<Assets::EntityData>& entities );
 
+    // What MigrateTerrainMaterialV6ToV7 did to one file.
+    struct TerrainMaterialMigrationReport
+    {
+        int Entities = 0; // terrain entities that carried a "Material" component, and no longer do
+        int Params   = 0; // parameter values those components held
+        int Textures = 0; // texture bindings those components held
+
+        // The names of everything above, in the order it was found, so the loader can print WHAT has to be
+        // re-authored rather than only how much. A count alone would make this a silent default in all but
+        // arithmetic (DC 1.4): "3 values dropped" tells nobody that the grass texture was one of them.
+        std::vector<std::string> DroppedNames;
+    };
+
+    // Raises a scene from schema v6 to v7: the terrain's material stopped being an ECS::MaterialComponent
+    // authored on the terrain entity and became a `.demat` that `Terrain.Material` names by handle.
+    //
+    // WHAT IT DOES. For every entity carrying BOTH a "Terrain" and a "Material" payload, the "Material"
+    // payload is removed and everything it held is reported by name. An entity with a "Material" and no
+    // "Terrain" is left alone: there the component is the runtime/Lua `setMaterialParam` channel and the
+    // legacy-scene compatibility path, which is all it claims to be and all it now is.
+    //
+    // WHY IT REMOVES RATHER THAN CARRIES. The new form of these values is a file — a `.demat` with the
+    // Terrain shader and these parameters in it — and this function is pure: no filesystem, so it cannot
+    // create one, and there is no second place in the scene tree for a material's values to live that is
+    // not the inline authoring this task exists to delete. Writing them anywhere else would be the
+    // "deprecated but still read" shape of DC 4.1 wearing a migration's clothes.
+    //
+    // So it drops them, LOUDLY: every name goes back to the loader, which prints them with the scene and
+    // tells the reader to re-author them on a terrain material. That is the honest trade and it is a small
+    // one — the values are three splat textures and a tint, they were only ever reachable through one
+    // editor widget, and no scene in this repository has any (the sweep in the migration's own test suite
+    // is what keeps that true).
+    //
+    // PURE - no GPU, no filesystem, no global state. The counters go back to the loader, which is the one
+    // that knows which file this was.
+    //
+    // Idempotent: an entity with no "Material" payload is left byte-identical and reports zero.
+    //
+    // SHELF LIFE: this raises v6 to v7 and nothing else. It is deleted once no v6 file remains.
+    TerrainMaterialMigrationReport MigrateTerrainMaterialV6ToV7( std::vector<Assets::EntityData>& entities );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -334,11 +379,14 @@ namespace Desert::Core
         CloudTypeMigrationReport    CloudType;
         bool                        CloudSetRaised = false; // the schema was below kSceneVersionCloudSet
         CloudSetMigrationReport     CloudSet;
+        // the schema was below kSceneVersionTerrainMaterial
+        bool                           TerrainMaterialRaised = false;
+        TerrainMaterialMigrationReport TerrainMaterial;
 
         bool Changed() const
         {
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
-                   CloudTypeRaised || CloudSetRaised;
+                   CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised;
         }
     };
 

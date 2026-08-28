@@ -147,6 +147,30 @@ namespace Desert::Core
                       Graphic::kCloudSpeciesSlots, migration.CloudSet.Entities, migration.CloudSet.SlotsCarried,
                       migration.CloudSet.SlotsEmpty );
         }
+        if ( migration.TerrainMaterialRaised && migration.TerrainMaterial.Entities > 0 )
+        {
+            // The names, not just the counts. This is the one migration in this file that DROPS values
+            // rather than moving them (a material's new home is a `.demat`, and a pure function cannot
+            // write one — see MigrateTerrainMaterialV6ToV7), so the log has to be good enough to re-author
+            // from. DC 1.4: never substitute a default quietly.
+            std::string dropped;
+            for ( const auto& name : migration.TerrainMaterial.DroppedNames )
+            {
+                if ( !dropped.empty() )
+                    dropped += ", ";
+                dropped += name;
+            }
+
+            LOG_INFO( "[SceneMigration] '{0}': scene schema v{1} -> v{2} - the terrain's material is a "
+                      "`.demat` now, named by Terrain > Material, so the inline Material component {3} "
+                      "terrain entity(ies) carried was removed. It held {4} parameter(s) and {5} texture(s): "
+                      "{6}. Re-author them on a terrain material (Details > Terrain > New Terrain Material, "
+                      "then Edit) - they are not read any more. Re-save (or run SceneMigrator) to stamp the "
+                      "file so this never runs again.",
+                      sceneData->SceneName, kSceneVersionCloudSet, kSceneVersionTerrainMaterial,
+                      migration.TerrainMaterial.Entities, migration.TerrainMaterial.Params,
+                      migration.TerrainMaterial.Textures, dropped.empty() ? "nothing nameable" : dropped );
+        }
         if ( migration.UnitsRaised )
         {
             LOG_INFO( "[SceneMigration] '{0}': world units v0 -> v{1} (metres -> centimetres, x{2}) - {3} "

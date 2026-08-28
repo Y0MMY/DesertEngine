@@ -281,7 +281,10 @@ TEST( SceneCloudSetMigration, MigrateSceneRunsItAndStampsTheFileSoItNeverRunsAga
     EXPECT_EQ( report.CloudSet.SlotsCarried, 1 );
     EXPECT_TRUE( report.Changed() );
     EXPECT_EQ( scene.SceneVersion.value_or( 0 ), kSceneVersion );
-    EXPECT_EQ( kSceneVersion, kSceneVersionCloudSet );
+    // The stamp is the HEAD, which is at or past this step — it was exactly this step until v7 moved the
+    // head for the terrain's material. What this line pins is that the file leaves MigrateScene raised past
+    // the point this suite is about, not that this suite owns the head.
+    EXPECT_GE( kSceneVersion, kSceneVersionCloudSet );
 
     // Second pass over the stamped tree: nothing left to do.
     const auto again = MigrateScene( scene );

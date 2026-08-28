@@ -140,6 +140,26 @@ int main( int argc, char** argv )
                 std::cout << "stamp only — no cloud layer carried a bake setting";
             std::cout << ")";
         }
+        if ( report.TerrainMaterialRaised )
+        {
+            std::cout << " scene v" << Desert::Core::kSceneVersionCloudSet << "->v"
+                      << Desert::Core::kSceneVersionTerrainMaterial << " (";
+            if ( report.TerrainMaterial.Entities > 0 )
+            {
+                // Named, not counted, and for the same reason the loader names them: this step DROPS the
+                // values it finds, so the operator running this tool has to be able to see what left.
+                std::cout << "inline terrain material removed from " << report.TerrainMaterial.Entities
+                          << " entity(ies), dropping " << report.TerrainMaterial.Params << " param(s) and "
+                          << report.TerrainMaterial.Textures << " texture(s):";
+                for ( const auto& name : report.TerrainMaterial.DroppedNames )
+                    std::cout << " " << name;
+            }
+            else
+            {
+                std::cout << "stamp only — no terrain entity carried an inline material";
+            }
+            std::cout << ")";
+        }
         if ( report.UnitsRaised )
             std::cout << " units v0->v" << Desert::Core::kUnitVersion << " (" << report.Units.Entities
                       << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected
