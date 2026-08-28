@@ -55,28 +55,60 @@ drive the render through the flags above.
 **Take at least two frames: what the change fixed, and what it could have broken.** These fail in
 opposite directions and one alone is not evidence.
 
-### For anything in the sky: THREE elevations, never one — and TWO azimuths, never one
+### For anything in the sky: shoot the WHOLE DOME, not six patches of it
 
+```bash
+scripts/MacOS/DomeSweep.sh Resources/Assets/Scenes/Clouds_Protocol.desce /tmp/dome
+# -> /tmp/dome/Clouds_Protocol_dome.png
+#    40 tiles: 8 azimuths x 5 elevations (5/25/45/65/85 deg), the angles in the filename AND burnt
+#    into every tile. ~25 min at 90 frames. --elevations / --azimuths / --frames cut it down.
 ```
-zenith   --look 0,0.9,-1      mid   --look 0,0.45,-1      horizon   --look 0,0.12,-1
-```
 
-**Those three vary only Y.** X is zero and Z is -1 in all of them, so the camera faces one compass
-direction, and an entire programme was shot that way for a phase and a half. The sun sits at one
-azimuth: toward it and away from it are a different phase function, a different silver lining and a
-different lit side of the cloud. Flip Z and shoot again — `--look 0,0.9,1` and so on.
+**This section used to prescribe six look directions — three elevations times two azimuths — and six
+rays is a SAMPLE.** Everything it said about why one axis of coverage is not enough is still true and
+is kept below; what changed on 2026-08-28 is that covering both axes is no longer a discipline
+somebody has to remember. One command sweeps them and hands back one picture.
 
-The first frame ever taken sunward at high elevation showed **hard full-width horizontal bands**
-cutting through both sky and cloud, deterministic and reproducible to three decimals, needing BOTH
-conditions at once — sunward azimuth AND high elevation. It had been there, unseen, the whole time
-(`Docs/Clouds/REVIEW_622a01a6.md` Ц9). One axis of coverage hid it completely.
+The two defects the six points were introduced to catch, neither of which they caught:
 
-A ten-merge cloud and sky programme was verified almost entirely from the horizon, and the owner
-found two defects by simply looking up: a zenith that was empty above ~20 degrees, and vertical
-streaking that cut every cloud at mid elevation. **The horizon is the most forgiving angle in the
-sky** — a grazing ray crosses dozens of weather cells and hundreds of samples, so it hides both
-sparsity and per-ray failures. The mid angle is where a player actually looks and where these
-defects live.
+- The first frame ever taken sunward at high elevation showed **hard full-width horizontal bands**
+  cutting through both sky and cloud, deterministic and reproducible to three decimals, needing BOTH
+  conditions at once — sunward azimuth AND high elevation. It had been there, unseen, the whole time
+  (`Docs/Clouds/REVIEW_622a01a6.md` Ц9). One axis of coverage hid it completely.
+- A ten-merge cloud and sky programme was verified almost entirely from the horizon, and the owner
+  found two defects by simply looking up: a zenith that was empty above ~20 degrees, and vertical
+  streaking that cut every cloud at mid elevation. **The horizon is the most forgiving angle in the
+  sky** — a grazing ray crosses dozens of weather cells and hundreds of samples, so it hides both
+  sparsity and per-ray failures. The mid angle is where a player actually looks and where these
+  defects live.
+
+And both are ARBITRARY IN AZIMUTH. Nothing about a lattice of weather cells, a periodic noise or a
+placement seed makes a defect appear along `-Z` rather than at 135 degrees; the bands were found at
+one azimuth because that was the azimuth someone happened to shoot. Two directions out of a circle is
+a one-in-four chance of standing in the right place, and eight cost the same afternoon.
+
+Reading the sheet:
+
+- **Azimuth 0 is `-Z`, azimuth 180 is `+Z`** — the sun's axis in the cloud scenes, so the old six
+  points are COLUMNS of this dome and not a different set of rays. `AZ 000 / EL 45` and
+  `--look 0,1,-1` are the same ray, and a number measured under the old protocol is comparable with a
+  tile of the new one.
+- Row 1 is the horizon and the last row the zenith, so the sheet reads bottom-up like the sky does.
+- **The label and the ray cannot drift apart.** `DomeSweep.sh` computes no angles at all: it asks
+  `DomeSheet --plan` for the `--look` vector, the file stem and the burnt-in label *together*, and
+  `Desert/Tests/Tools/DomeSheetLayout` asserts the round trip label -> angles -> vector. A sheet that
+  mislabels a tile is worse than no sheet, because it still looks like evidence — the same
+  two-things-that-must-agree shape as §4.
+- Every tile is checked against **its own log** before it reaches the sheet, and a sweep that lost one
+  refuses to assemble rather than producing a sheet with a hole in it.
+- **It is 1/4 resolution.** It says WHERE to look; the full-size tile (`--keep-tiles`) is what you
+  then look at, and pixel diffs are still taken on full frames.
+- **Commit the SHEET, not the tiles.** `Docs/Clouds/Shots` is already 508 MB of a 5.6 GB repository.
+  Forty 1.2 MB frames per sweep is not a thing to keep; the tiles are deleted unless asked for, and
+  the two or three that carry the argument are what get committed beside the sheet.
+
+Sweep at `--frames 3` as well when the change touches per-frame-in-flight state: the convergence
+window is also a masking window, and one such defect was live in `dev` and invisible at 90.
 
 ### The camera can move, and static frames prove nothing about the temporal stage
 

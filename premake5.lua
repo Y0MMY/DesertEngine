@@ -26,6 +26,7 @@ include "Tools/SceneMigrator/"
 include "Tools/ImageStat/"
 include "Tools/LineJump/"
 include "Tools/ImageDiff/"
+include "Tools/DomeSheet/"
 group ""
 
 include "Desert/"
