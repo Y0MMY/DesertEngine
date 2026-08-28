@@ -102,6 +102,11 @@ namespace Desert::Editor
         void PrepareScenePopup();
         void LoadScene( const Common::Filepath& path );
         void LoadSceneInternal( const Common::Filepath& path );
+
+        // Applies `--select <name-or-uuid>` once the scene has settled — see Editor/Core/StartupOptions.hpp
+        // for why the flag exists at all. Runs exactly once per session; a name that matches nothing ends
+        // the run non-zero rather than selecting nothing quietly.
+        void ApplyStartupSelection();
         void NewSceneInternal(); // clears the current scene to a fresh empty one (File -> New Scene / Ctrl+N)
 
         // ===== Multi-scene editing (independent SceneRenderers) =====
@@ -273,6 +278,12 @@ namespace Desert::Editor
         bool m_ShotCameraPlaced = false;
         // Set when any PNG of this capture could not be written; becomes the process exit status.
         bool m_ShotFailed = false;
+
+        // `--select` is applied once, on the first frame where no scene load is outstanding — whether the
+        // scene came from --scene, from the project's default, or nowhere at all. A latch rather than a
+        // check against the flag's own value, because the flag stays set for the life of the process and
+        // re-applying it every frame would fight a person clicking in the outliner.
+        bool m_StartupSelectionApplied = false;
 
         std::optional<Common::Filepath> m_SceneLoadRequested;
         // Stop tears down + recreates GPU render resources (framebuffers / render graph). It must run
