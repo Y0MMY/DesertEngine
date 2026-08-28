@@ -1,5 +1,7 @@
 #include "CloudModellingVolumePanel.hpp"
 
+#include "CloudDocumentOpen.hpp"
+
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 
@@ -49,17 +51,84 @@ namespace Desert::Editor
             blob.Primitive = Assets::CloudModellingPrimitive::Sphere;
             return blob;
         }
+
+        // The document's VISIBLE title: the subject's file name. Computed before the base class is
+        // constructed — IAssetEditorPanel bakes the title in its own constructor and holds it for the
+        // window's life — so it is a free function rather than a member.
+        std::string SubjectTitle( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
+        {
+            if ( assets )
+            {
+                if ( const auto asset = assets->FindByHandle<Assets::CloudModellingVolumeAsset>( subject ) )
+                    return asset->GetMetadata().Filepath.filename().string();
+            }
+            return "Cloud Modelling Volume";
+        }
     } // namespace
 
-    CloudModellingVolumePanel::CloudModellingVolumePanel( Assets::AssetManager* assets )
-         : IPanel( "Cloud Modelling Volume", /*showPanel=*/false ), m_Assets( assets )
+    CloudModellingVolumePanel::CloudModellingVolumePanel( const Assets::AssetHandle& subject,
+                                                          Assets::AssetManager*      assets )
+         : IAssetEditorPanel( SubjectTitle( subject, assets ), subject,
+                              Assets::AssetTypeID::CloudModellingVolume ),
+           m_Assets( assets )
     {
         // STARTING FROM THE SHIPPED EXAMPLE RATHER THAN FROM AN EMPTY BOX. An empty recipe is refused by
         // Validate (a volume with no lumps is a box, not a cloud), so a panel that opened empty would greet
         // its first user with an error message. The precedent is CloudTypeDefaultShape: a tool that has not
         // been given anything still has to have something to show.
+        //
+        // Still the fallback, not the norm: LoadSubject overwrites it with the subject's own recipe, and
+        // leaves it in place only for a `.dcmv` whose header would not decode.
         m_Recipe     = Assets::CloudModellingDefaultRecipe();
         m_SourceName = "(the shipped example)";
+
+        LoadSubject( assets );
+    }
+
+    void CloudModellingVolumePanel::LoadSubject( Assets::AssetManager* assets )
+    {
+        if ( !assets )
+            return;
+
+        const auto asset = assets->FindByHandle<Assets::CloudModellingVolumeAsset>( Subject() );
+        if ( !asset )
+        {
+            m_Status        = "This body is not registered - the log says why. Save would create it anew.";
+            m_StatusIsError = true;
+            return;
+        }
+
+        m_SubjectPath = asset->GetMetadata().Filepath;
+
+        // DECODED FROM THE FILE RATHER THAN FETCHED FROM THE ASSET, and deliberately — the same reason the
+        // "Open..." dialog this replaces did it: the RECIPE lives in the file's own header, and the asset
+        // exposes the baked voxels, not the lumps they came from. A0 put the recipe there precisely so a
+        // body could be revised rather than re-sculpted.
+        std::ifstream file( m_SubjectPath, std::ios::binary );
+        if ( !file )
+        {
+            m_Status        = "'" + m_SubjectPath.string() + "' could not be read.";
+            m_StatusIsError = true;
+            return;
+        }
+
+        const std::vector<unsigned char> bytes( ( std::istreambuf_iterator<char>( file ) ),
+                                                std::istreambuf_iterator<char>() );
+
+        const auto decoded = Assets::DecodeCloudModellingVolume( bytes );
+        if ( !decoded )
+        {
+            m_Status = "'" + m_SubjectPath.filename().string() + "' is not usable: " + decoded.GetError() +
+                       " - showing the shipped example instead.";
+            m_StatusIsError = true;
+            return;
+        }
+
+        m_Recipe     = decoded.GetValue().Recipe;
+        m_Selected   = m_Recipe.Blobs.empty() ? -1 : 0;
+        m_SourceName = m_SubjectPath.filename().string();
+        m_SliceIndex = static_cast<int>( Assets::CloudModellingAxisExtent( m_Axis ) / 2u );
+        InvalidateSlice();
     }
 
     CloudModellingVolumePanel::~CloudModellingVolumePanel()
@@ -147,7 +216,12 @@ namespace Desert::Editor
             return;
         }
 
-        m_SourceName    = m_BakeTarget.filename().string();
+        // A bake aimed somewhere OTHER than the subject is a new asset — it gets its own document, and this
+        // window keeps editing the file it was opened on. See DrawBakeSection for why repointing is refused.
+        const bool isCopy = m_BakeTarget != m_SubjectPath;
+
+        if ( !isCopy )
+            m_SourceName = m_BakeTarget.filename().string();
         m_Status        = "Saved to " + m_BakeTarget.string();
         m_StatusIsError = false;
 
@@ -171,6 +245,16 @@ namespace Desert::Editor
         {
             m_Status        = "Saved, but the volume could not be uploaded: " + uploaded.GetError();
             m_StatusIsError = true;
+            return;
+        }
+
+        if ( isCopy )
+        {
+            // Queued rather than constructed here: EditorLayer is the only place that may create a panel,
+            // and this is the same wire the asset browser's double-click uses.
+            RequestCloudDocument( m_Assets, m_BakeTarget.string() );
+            m_Status        = "Saved a copy to " + m_BakeTarget.string() + " - it has opened in its own window.";
+            m_StatusIsError = false;
         }
     }
 
@@ -197,7 +281,7 @@ namespace Desert::Editor
                     m_SourceName = Assets::CloudModellingSpeciesName( species );
                     m_Status     = std::string( "Loaded the catalogue's " ) +
                                Assets::CloudModellingSpeciesName( species ) + " - " +
-                               std::to_string( m_Recipe.Blobs.size() ) + " lumps. Bake & Save As... to keep it.";
+                               std::to_string( m_Recipe.Blobs.size() ) + " lumps. Bake & Save to keep it.";
                     InvalidateSlice();
                 }
             }
@@ -624,46 +708,62 @@ namespace Desert::Editor
         if ( !valid )
             ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", valid.GetError().c_str() );
 
-        ImGui::BeginDisabled( m_BakeRunning || !valid );
-        if ( ImGui::Button( "Bake & Save As...", ImVec2( 160.0f, 0.0f ) ) )
-        {
-            std::filesystem::path target =
-                 Common::Utils::FileSystem::SaveFileDialog( "Cloud Modelling Volume\0*.dcmv\0" );
-            if ( !target.empty() )
-            {
-                if ( target.extension() != Assets::kCloudModellingVolumeExtension )
-                    target.replace_extension( Assets::kCloudModellingVolumeExtension );
-
-                // THE PATH IS CHOSEN BEFORE THE BAKE STARTS, not after it finishes. A file dialog that
-                // appears at the end of a thirty-second wait is one the artist has walked away from.
-                m_BakeTarget = target;
-
-                // SNAPSHOT. Everything the worker reads is copied here, on the UI thread, so that editing
-                // while a bake runs cannot make the voxels disagree with the recipe written beside them in
-                // the same file.
-                m_BakingRecipe = m_Recipe;
-
-                m_BakeProgress.store( 0.0f );
-                m_BakeCancelled.store( false );
-                m_BakeRunning   = true;
-                m_Status        = "Baking " + target.filename().string() + "...";
-                m_StatusIsError = false;
-
-                // The two atomics are the ONLY channel between the worker and the UI thread: one number
-                // out, one flag in. Nothing else the worker touches is shared, which is what makes the
-                // bake safe to run beside a panel the artist is still typing into.
-                const Assets::CloudModellingVolumeRecipe   recipe     = m_BakingRecipe;
-                const Assets::CloudModellingBakeProgressFn onProgress = [this]( float fraction )
-                {
-                    m_BakeProgress.store( fraction );
-                    return !m_BakeCancelled.load();
-                };
-
-                m_Baking = std::async( std::launch::async, [recipe, onProgress]
-                                       { return Assets::GenerateCloudModellingVolume( recipe, onProgress ); } );
-            }
-        }
+        // BAKE & SAVE WRITES THE SUBJECT. BAKE & SAVE AS CREATES A SECOND ASSET AND OPENS ITS OWN WINDOW —
+        // it does NOT repoint this one. The subject is this window's identity: its title, its ImGui id and
+        // the key open-or-focus matches on are all built from it, so a document that followed a Save As
+        // would be a window named after a file it no longer edits. Sculpting a variant and keeping it is
+        // still exactly what it was, and now the variant arrives as its own document.
+        ImGui::BeginDisabled( m_BakeRunning || !valid || m_SubjectPath.empty() );
+        const bool bakeOverSubject = ImGui::Button( "Bake & Save", ImVec2( 160.0f, 0.0f ) );
         ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled( m_BakeRunning || !valid );
+        const bool bakeAs = ImGui::Button( "Bake & Save As...", ImVec2( 180.0f, 0.0f ) );
+        ImGui::EndDisabled();
+
+        std::filesystem::path chosen;
+        if ( bakeOverSubject )
+        {
+            chosen = m_SubjectPath;
+        }
+        else if ( bakeAs )
+        {
+            chosen = Common::Utils::FileSystem::SaveFileDialog( "Cloud Modelling Volume\0*.dcmv\0" );
+            if ( !chosen.empty() && chosen.extension() != Assets::kCloudModellingVolumeExtension )
+                chosen.replace_extension( Assets::kCloudModellingVolumeExtension );
+        }
+
+        if ( !chosen.empty() )
+        {
+            // THE PATH IS CHOSEN BEFORE THE BAKE STARTS, not after it finishes. A file dialog that appears
+            // at the end of a thirty-second wait is one the artist has walked away from.
+            m_BakeTarget = chosen;
+
+            // SNAPSHOT. Everything the worker reads is copied here, on the UI thread, so that editing
+            // while a bake runs cannot make the voxels disagree with the recipe written beside them in
+            // the same file.
+            m_BakingRecipe = m_Recipe;
+
+            m_BakeProgress.store( 0.0f );
+            m_BakeCancelled.store( false );
+            m_BakeRunning   = true;
+            m_Status        = "Baking " + m_BakeTarget.filename().string() + "...";
+            m_StatusIsError = false;
+
+            // The two atomics are the ONLY channel between the worker and the UI thread: one number
+            // out, one flag in. Nothing else the worker touches is shared, which is what makes the
+            // bake safe to run beside a panel the artist is still typing into.
+            const Assets::CloudModellingVolumeRecipe   recipe     = m_BakingRecipe;
+            const Assets::CloudModellingBakeProgressFn onProgress = [this]( float fraction )
+            {
+                m_BakeProgress.store( fraction );
+                return !m_BakeCancelled.load();
+            };
+
+            m_Baking = std::async( std::launch::async, [recipe, onProgress]
+                                   { return Assets::GenerateCloudModellingVolume( recipe, onProgress ); } );
+        }
 
         if ( m_BakeRunning )
         {
@@ -678,50 +778,11 @@ namespace Desert::Editor
             }
         }
 
-        // OPEN IS WHAT MAKES THE RECIPE-IN-THE-HEADER REAL. Without it a `.dcmv` is a dead end and every
-        // revision means re-sculpting from nothing; with it the file IS the document.
-        ImGui::BeginDisabled( m_BakeRunning );
-        if ( ImGui::Button( "Open...", ImVec2( 160.0f, 0.0f ) ) )
-        {
-            const std::filesystem::path source =
-                 Common::Utils::FileSystem::OpenFileDialog( "Cloud Modelling Volume\0*.dcmv\0" );
-            if ( !source.empty() )
-            {
-                std::ifstream file( source, std::ios::binary );
-                if ( !file )
-                {
-                    m_Status        = "'" + source.string() + "' could not be opened.";
-                    m_StatusIsError = true;
-                }
-                else
-                {
-                    const std::vector<unsigned char> bytes( ( std::istreambuf_iterator<char>( file ) ),
-                                                            std::istreambuf_iterator<char>() );
-
-                    // Decoded rather than fetched through the AssetManager, and deliberately: the recipe
-                    // lives in the file's own header, so reading the file is the shortest path to it and
-                    // the one that also works for a volume outside the project's asset folders.
-                    const auto decoded = Assets::DecodeCloudModellingVolume( bytes );
-                    if ( !decoded )
-                    {
-                        m_Status = "'" + source.filename().string() + "' is not usable: " + decoded.GetError();
-                        m_StatusIsError = true;
-                    }
-                    else
-                    {
-                        m_Recipe     = decoded.GetValue().Recipe;
-                        m_Selected   = m_Recipe.Blobs.empty() ? -1 : 0;
-                        m_SourceName = source.filename().string();
-                        m_SliceIndex = static_cast<int>( Assets::CloudModellingAxisExtent( m_Axis ) / 2u );
-                        m_Status = "Opened '" + m_SourceName + "' - " + std::to_string( m_Recipe.Blobs.size() ) +
-                                   " lumps, ready to revise.";
-                        m_StatusIsError = false;
-                        InvalidateSlice();
-                    }
-                }
-            }
-        }
-        ImGui::EndDisabled();
+        // THE "OPEN..." DIALOG THAT WAS HERE IS GONE, and its absence is the feature. Opening the recipe
+        // out of a `.dcmv` header is still what makes the format revisable — it now happens once, in
+        // LoadSubject, against the file this window was opened ON. A different body is a different window,
+        // opened by double-clicking it in the asset browser; a dialog that could repoint this one would
+        // leave a window titled after a file it no longer edits.
 
         ImGui::SameLine();
         ImGui::TextDisabled( "Bodies live in %s", Common::Constants::Path::CLOUD_VOLUME_PATH.string().c_str() );

@@ -7,6 +7,7 @@
 #include "FileExplorerPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
 #include <Editor/Core/SceneOpenRequest.hpp>
+#include <Editor/Panels/Clouds/CloudDocumentOpen.hpp>
 #include <Editor/Panels/MaterialEditor/MaterialDocumentOpen.hpp>
 #include <Editor/Core/AssetFileOps.hpp>
 #include <Editor/Core/AssetReferences.hpp>
@@ -2014,6 +2015,30 @@ namespace Desert::Editor
             {
                 LOG_ERROR( "[Assets] '{}' is listed as a material but does not look like one to the Material "
                            "Editor — nothing opened.",
+                           entry->AssetPath );
+            }
+        }
+        else if ( doubleClicked && IsCloudAssetPath( entry->AssetPath ) )
+        {
+            // ONE EDITOR WINDOW PER CLOUD ASSET, bound to THIS file — the same flow as a `.demat` one branch
+            // up, and the reason all four cloud formats share a single branch: the document that opens is
+            // decided by the EXTENSION inside RequestCloudDocument, so a fifth format is a line there rather
+            // than a fifth branch here.
+            //
+            // BRANCHED ON THE EXTENSION AND NOT ON entry->Type, unlike every branch above it. The `FileType`
+            // enum has no cloud members, and adding four would mean editing FileExplorerPanel.hpp and the
+            // three sibling tables (`s_FileTypes`, `s_TypeColors`, `s_FileTypesToIcon`) that are keyed on
+            // it. That is worth doing for the icons; it is not what makes the double-click work, and the
+            // file's own idiom for asking an extension directly is already used twice in this class.
+            //
+            // NotACloudPath is impossible here by the branch condition and is reported rather than ignored:
+            // IsCloudAssetPath has just called this file a cloud asset, so the two disagreeing means the
+            // extension test and the opener have drifted apart — and the symptom would be a double-click
+            // that does nothing at all.
+            if ( RequestCloudDocument( m_AssetManager, entry->AssetPath ) == CloudDocumentRequest::NotACloudPath )
+            {
+                LOG_ERROR( "[Assets] '{}' looks like a cloud asset but no cloud editor would take it — "
+                           "nothing opened.",
                            entry->AssetPath );
             }
         }

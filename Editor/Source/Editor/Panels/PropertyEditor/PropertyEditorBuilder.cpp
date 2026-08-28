@@ -881,8 +881,8 @@ namespace Desert::Editor
                     if ( ImGui::IsItemHovered() )
                         ImGui::SetTooltip( "Pick a cloud type or drag a .decloudtype here. \"Default\" is "
                                            "the engine's built-in cumulus congestus, so a scene nobody has "
-                                           "authored a type for still has a sky. Author your own in "
-                                           "Window > Cloud Type." );
+                                           "authored a type for still has a sky. Double-click a "
+                                           ".decloudtype in the Content Browser to edit it." );
                     break;
                 }
 

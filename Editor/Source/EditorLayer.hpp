@@ -144,6 +144,11 @@ namespace Desert::Editor
         {
             std::string Name;
             bool        HoldsSlot = false;
+            // Whether this consumer will ever want a slot. A CPU-only asset document (the four cloud
+            // editors) holds none and is not waiting for one, and the census has to say so — "no slot right
+            // now, but will claim one when it draws" would name it as something to close to free a slot it
+            // was never going to take. See IAssetEditorPanel::ClaimsRendererSlot.
+            bool ClaimsSlot = true;
         };
         [[nodiscard]] std::vector<RendererSlotConsumer> RendererSlotCensus() const;
         // Rebinds the editor to a focused document: m_MainScene (and thus every play/save/gizmo call site)

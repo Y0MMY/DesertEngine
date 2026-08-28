@@ -1,5 +1,7 @@
 #include "CloudLayoutPanel.hpp"
 
+#include "CloudDocumentOpen.hpp"
+
 #include <Editor/Core/DragPayloads.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
@@ -63,12 +65,54 @@ namespace Desert::Editor
         const ImVec4 kErrorColour( 0.95f, 0.45f, 0.40f, 1.0f );
         const ImVec4 kWarnColour( 0.95f, 0.78f, 0.35f, 1.0f );
         const ImVec4 kGoodColour( 0.55f, 0.85f, 0.55f, 1.0f );
+
+        // The document's VISIBLE title: the subject's file name. Computed before the base class is
+        // constructed — IAssetEditorPanel bakes the title in its own constructor and holds it for the
+        // window's life — so it is a free function rather than a member.
+        std::string SubjectTitle( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
+        {
+            if ( assets )
+            {
+                if ( const auto asset = assets->FindByHandle<Assets::CloudLayoutAsset>( subject ) )
+                    return asset->GetMetadata().Filepath.filename().string();
+            }
+            return "Cloud Layout";
+        }
     } // namespace
 
-    CloudLayoutPanel::CloudLayoutPanel( std::shared_ptr<::Desert::Core::Scene> scene,
+    CloudLayoutPanel::CloudLayoutPanel( const Assets::AssetHandle&             subject,
+                                        std::shared_ptr<::Desert::Core::Scene> scene,
                                         Assets::AssetManager*                  assets )
-         : IPanel( "Cloud Layout", /*showPanel=*/false ), m_Scene( std::move( scene ) ), m_Assets( assets )
+         : IAssetEditorPanel( SubjectTitle( subject, assets ), subject, Assets::AssetTypeID::CloudLayout ),
+           m_Scene( std::move( scene ) ), m_Assets( assets )
     {
+        LoadSubject();
+    }
+
+    void CloudLayoutPanel::LoadSubject()
+    {
+        if ( !m_Assets )
+            return;
+
+        const auto painting = m_Assets->FindByHandle<Assets::CloudLayoutAsset>( Subject() );
+        if ( !painting || !painting->IsReadyForUse() )
+        {
+            m_Status        = "This painting is not loaded - the log says why.";
+            m_StatusIsError = true;
+            return;
+        }
+
+        m_SubjectPath = painting->GetMetadata().Filepath;
+
+        m_Layout     = painting->GetLayout();
+        m_HasLayout  = true;
+        m_SourceName = m_SubjectPath.filename().string();
+
+        // FROM A FILE, so the channel-mapping controls are disabled and say why: the mapping an image was
+        // baked WITH is already in these pixels and there is no picture here to re-map. "Edit this painting"
+        // is what puts it back on the canvas.
+        m_LayoutFromFile = true;
+        m_PreviewDirty   = true;
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -216,32 +260,12 @@ namespace Desert::Editor
             m_PreviewDirty = true;
         }
 
-        // THE PANEL OPENS ON THE SKY YOU ARE LOOKING AT. A layer with a painting bound hands it to the
-        // panel once, when it changes — once and not every frame, so that an artist who then opens a
-        // different picture is not overwritten by the scene on the next frame.
-        if ( layer.BoundLayout != m_AdoptedLayout )
-        {
-            m_AdoptedLayout = layer.BoundLayout;
-            if ( layer.BoundLayout != 0u && m_Assets )
-            {
-                if ( auto painting =
-                          m_Assets->FindByHandle<Assets::CloudLayoutAsset>( Common::UUID( layer.BoundLayout ) );
-                     painting && painting->IsReadyForUse() )
-                {
-                    m_Layout    = painting->GetLayout();
-                    m_HasLayout = true;
-                    m_SourcePixels.clear();
-                    m_SourceWidth    = 0u;
-                    m_SourceHeight   = 0u;
-                    m_SourceName     = painting->GetMetadata().Filepath.filename().string();
-                    m_LayoutFromFile = true;
-                    m_PreviewDirty   = true;
-                    m_Status         = "Showing the painting this scene's cloud layer has bound. Point at a "
-                                       "picture to author a new one.";
-                    m_StatusIsError  = false;
-                }
-            }
-        }
+        // THE "ADOPT THE LAYER'S BOUND PAINTING" BLOCK THAT WAS HERE IS GONE, and its absence is required
+        // rather than tidy. It existed because the singleton had no subject: with nothing to show, showing
+        // the sky you were looking at was the best guess available. A DOCUMENT has a subject, and the guess
+        // becomes a defect — a window opened on painting A whose layer happens to wear painting B would
+        // have replaced A's pixels with B's on its very first frame, then baked B over A's file. The layer
+        // is still READ, for the preview's numbers; it no longer decides what is being edited.
 
         ImGui::TextWrapped( "A PAINTED SKY. Draw the layout with the brush, or point at a picture and say "
                             "which of its channels feeds which of this layer's cloud species, then bake it "
@@ -412,38 +436,11 @@ namespace Desert::Editor
         ImGui::SameLine();
         ImGui::TextDisabled( "or drag a .png here from the Content Browser" );
 
-        // Opening a finished painting is the other half of the tool: it is how an artist sees what a
-        // shipped layout does to their sky before binding it, and how they check one somebody else baked.
-        if ( m_Assets )
-        {
-            const auto paintings = m_Assets->FindAllByType<Assets::CloudLayoutAsset>();
-            ImGui::BeginDisabled( paintings.empty() );
-            if ( ImGui::BeginCombo( "Open", paintings.empty() ? "(no paintings on disk)" : "Pick a .dclayout" ) )
-            {
-                for ( const auto& [handle, painting] : paintings )
-                {
-                    const std::string name = painting->GetMetadata().Filepath.filename().string();
-                    if ( ImGui::Selectable( name.c_str() ) && painting->IsReadyForUse() )
-                    {
-                        m_Layout    = painting->GetLayout();
-                        m_HasLayout = true;
-                        m_SourcePixels.clear();
-                        m_SourceWidth    = 0u;
-                        m_SourceHeight   = 0u;
-                        m_SourceName     = name;
-                        m_LayoutFromFile = true;
-                        m_PreviewDirty   = true;
-                        m_Status         = "Opened '" + name +
-                                   "'. It has no source picture here, so the channel mapping below is "
-                                   "what it was baked with and cannot be changed - point at the picture "
-                                   "again to re-map it.";
-                        m_StatusIsError = false;
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::EndDisabled();
-        }
+        // THE "OPEN A .dclayout" COMBO THAT WAS HERE IS GONE, and its absence is the feature. It was how
+        // this window came to edit a different painting than the one it was opened on — which, now that the
+        // title, the ImGui id and open-or-focus are all keyed on the subject handle, would leave a window
+        // called one thing baking over another. A different painting is a different window, opened by
+        // double-clicking it in the asset browser.
 
         if ( m_HasLayout )
         {
@@ -1439,61 +1436,90 @@ namespace Desert::Editor
         if ( !Utils::ImGuiUtilities::SectionHeader( "Bake" ) )
             return;
 
+        // BAKE WRITES THE SUBJECT. BAKE AS CREATES A SECOND ASSET AND OPENS ITS OWN WINDOW — it does NOT
+        // repoint this one. The subject is this window's identity: its title, its ImGui id and the key
+        // open-or-focus matches on are all built from it, so a document that followed a Bake As would be a
+        // window named after a file it no longer edits. Authoring a new painting is still exactly what it
+        // was — draw or import, Bake As — and now the new one arrives as its own document.
+        ImGui::BeginDisabled( !m_HasLayout || m_SubjectPath.empty() );
+        const bool bake = ImGui::Button( "Bake", ImVec2( 180.0f, 0.0f ) );
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
         ImGui::BeginDisabled( !m_HasLayout );
-        if ( ImGui::Button( "Bake to .dclayout...", ImVec2( 180.0f, 0.0f ) ) )
-        {
-            std::filesystem::path target =
-                 Common::Utils::FileSystem::SaveFileDialog( "Cloud Layout\0*.dclayout\0" );
-            if ( !target.empty() )
-            {
-                if ( target.extension() != Assets::kCloudLayoutExtension )
-                    target.replace_extension( Assets::kCloudLayoutExtension );
-
-                const auto written = Assets::CloudLayoutAsset::Save( target, m_Layout );
-                if ( !written )
-                {
-                    m_Status        = "Bake failed: " + written.GetError();
-                    m_StatusIsError = true;
-                }
-                else
-                {
-                    m_SourceName     = target.filename().string();
-                    m_LayoutFromFile = true;
-                    m_Status         = "Baked to " + target.string();
-                    m_StatusIsError  = false;
-
-                    // Registered straight away so the cloud component's slot lists it without a restart.
-                    // A tool whose output only appears after the editor is reopened is a tool nobody
-                    // iterates in.
-                    if ( m_Assets )
-                    {
-                        auto painting = m_Assets->FindByPath<Assets::CloudLayoutAsset>( target );
-                        if ( painting )
-                            painting->Load(); // overwritten in place: re-read so the cached bytes are new
-                        else
-                            painting = m_Assets->CreateAsset<Assets::CloudLayoutAsset>(
-                                 Assets::AssetPriority::Medium, target );
-
-                        if ( painting )
-                        {
-                            if ( const auto registered =
-                                      Runtime::ResourceRegistry::GetCloudLayoutService()->Register( painting );
-                                 !registered )
-                            {
-                                m_Status =
-                                     "Baked, but the painting could not be registered: " + registered.GetError();
-                                m_StatusIsError = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        const bool bakeAs = ImGui::Button( "Bake As...", ImVec2( 180.0f, 0.0f ) );
         ImGui::EndDisabled();
 
         ImGui::SameLine();
         ImGui::TextDisabled( "Paintings live in %s", Common::Constants::Path::CLOUD_LAYOUT_PATH.string().c_str() );
 
         ImGui::TextDisabled( "Then drag it onto a cloud layer's Cloud Layout slot in Details." );
+
+        std::filesystem::path target;
+        if ( bake )
+        {
+            target = m_SubjectPath;
+        }
+        else if ( bakeAs )
+        {
+            target = Common::Utils::FileSystem::SaveFileDialog( "Cloud Layout\0*.dclayout\0" );
+            if ( !target.empty() && target.extension() != Assets::kCloudLayoutExtension )
+                target.replace_extension( Assets::kCloudLayoutExtension );
+        }
+
+        if ( target.empty() )
+            return;
+
+        // Compared before the write, because after it the file exists and the two paths would be
+        // indistinguishable by anything on disk.
+        const bool isCopy = target != m_SubjectPath;
+
+        const auto written = Assets::CloudLayoutAsset::Save( target, m_Layout );
+        if ( !written )
+        {
+            m_Status        = "Bake failed: " + written.GetError();
+            m_StatusIsError = true;
+            return;
+        }
+
+        if ( !isCopy )
+        {
+            m_SourceName     = target.filename().string();
+            m_LayoutFromFile = true;
+        }
+        m_Status        = "Baked to " + target.string();
+        m_StatusIsError = false;
+
+        // Re-registered straight away so the cloud component's slot shows the new pixels without a restart.
+        // A tool whose output only appears after the editor is reopened is a tool nobody iterates in.
+        if ( !m_Assets )
+            return;
+
+        auto painting = m_Assets->FindByPath<Assets::CloudLayoutAsset>( target );
+        if ( painting )
+            painting->Load(); // overwritten in place: re-read so the cached bytes are new
+        else
+            painting = m_Assets->CreateAsset<Assets::CloudLayoutAsset>( Assets::AssetPriority::Medium, target );
+
+        if ( !painting )
+            return;
+
+        if ( const auto registered = Runtime::ResourceRegistry::GetCloudLayoutService()->Register( painting );
+             !registered )
+        {
+            m_Status        = "Baked, but the painting could not be registered: " + registered.GetError();
+            m_StatusIsError = true;
+            return;
+        }
+
+        if ( isCopy )
+        {
+            // The copy is a new asset, so it gets its own document. Queued rather than constructed here:
+            // EditorLayer is the only place that may create a panel, and this is the same wire the asset
+            // browser's double-click uses.
+            RequestCloudDocument( m_Assets, target.string() );
+            m_Status        = "Baked a copy to " + target.string() + " - it has opened in its own window.";
+            m_StatusIsError = false;
+        }
     }
 } // namespace Desert::Editor

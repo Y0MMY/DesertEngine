@@ -105,11 +105,37 @@ namespace Desert::Editor
      * NO BACKGROUND WORK, unlike the noise volume panel: building a 512-square layout from an image is
      * one pass over a million texels and the map is a few thousand evaluations of a closed-form
      * expression, so both are recomputed when something changes and never per frame.
+     *
+     * ONE WINDOW PER `.dclayout`, OPENED BY DOUBLE-CLICKING THE ASSET — UE's flow, and what this class
+     * became in Р3. It was a SINGLETON with an "Open" combo, reached from the View menu; the combo is gone
+     * with the singleton, because the subject is now the window's identity.
+     *
+     * THE SCENE IS STILL READ AND STILL NOT EDITED. A document is bound to an ASSET, but this panel's
+     * preview needs the LAYER's numbers to say anything true about a sky, so it keeps following the active
+     * scene through SetScene exactly as before. That is not a second subject: nothing here writes to the
+     * scene, and the layer is an input to the preview in the same way a light is an input to a material
+     * thumbnail.
      */
-    class CloudLayoutPanel final : public IPanel
+    class CloudLayoutPanel final : public IAssetEditorPanel
     {
     public:
-        CloudLayoutPanel( std::shared_ptr<::Desert::Core::Scene> scene, Assets::AssetManager* assets );
+        CloudLayoutPanel( const Assets::AssetHandle& subject, std::shared_ptr<::Desert::Core::Scene> scene,
+                          Assets::AssetManager* assets );
+
+        // NEVER — see CloudNoiseVolumePanel::HoldsRendererSlot. The "sky" in this panel's right-hand pane is
+        // a CPU-evaluated top-down map uploaded as a Graphic::Image2D, not a rendered frame: there is no
+        // Scene of its own and no SceneRenderer, so this document costs none of the six slots. It holds a
+        // shared_ptr to the ACTIVE scene, which it reads and never renders.
+        [[nodiscard]] bool HoldsRendererSlot() const override
+        {
+            return false;
+        }
+
+        // ...and never will — see CloudNoiseVolumePanel::ClaimsRendererSlot.
+        [[nodiscard]] bool ClaimsRendererSlot() const override
+        {
+            return false;
+        }
 
         ImVec2 GetDefaultSize() const override
         {
@@ -186,6 +212,10 @@ namespace Desert::Editor
         /// Reads the open scene's first cloud layer. Pure of side effects on the panel's own state.
         LayerContext ReadLayer() const;
 
+        /// Reads the subject `.dclayout` into the editing buffer. Called once, from the constructor: the
+        /// subject cannot change, so neither can the answer.
+        void LoadSubject();
+
         /// Reads an image off disk into the source. Named so the file dialog and the drag-and-drop target
         /// are one operation and cannot decode a picture two different ways.
         void LoadSourceImage( const std::filesystem::path& path );
@@ -223,6 +253,12 @@ namespace Desert::Editor
 
         std::shared_ptr<::Desert::Core::Scene> m_Scene;
         Assets::AssetManager*                  m_Assets = nullptr;
+
+        /// WHERE THE BAKE WRITES: the subject's own file, resolved once at construction. A document saves
+        /// over what it opened — there is no "Bake to..." dialog here, because writing somewhere else would
+        /// leave the window's title, its ImGui id and its open-or-focus key all naming the file it no
+        /// longer edits. Making a NEW painting is the asset browser's job ("New Cloud Layout").
+        std::filesystem::path m_SubjectPath;
 
         // ---- source -----------------------------------------------------------------------------------
 
@@ -288,11 +324,6 @@ namespace Desert::Editor
         /// describe an image-to-slot mapping and there is no image, so they are disabled and say why —
         /// rather than sitting there implying they would do something.
         bool m_LayoutFromFile = false;
-
-        /// The layer's bound painting as of the last frame. The panel adopts a layer's layout ONCE, when
-        /// it changes, so that an artist who then opens a different picture is not overwritten every
-        /// frame by the scene.
-        uint64_t m_AdoptedLayout = 0u;
 
         // ---- preview ----------------------------------------------------------------------------------
 
