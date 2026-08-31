@@ -444,6 +444,12 @@ TEST( CloudFieldCoverage, AtZeroTheSkyIsGenuinelyClear )
 
 namespace
 {
+    // The erosion's own noise term, defined with the §DS instruments further down because that is where
+    // the sweep it was written for lives, and DECLARED here because the monotonicity relation below needs
+    // the same quantity and must not carry a second copy of the mirror — the whole value of that mirror is
+    // that TheMirrorOfTheErosionAgreesWithTheShader checks ONE of it against the source.
+    float ErosionNoiseAt( const CloudFieldParams& params, const CloudFieldSample& field, vec3 positionKm );
+
     // The eroded density as a fraction of the profile it started from — "how much of this sample
     // survived the erosion". One number, comparable between a core sample and an edge sample, which is
     // what the relation below is about.
@@ -461,6 +467,14 @@ namespace
         // left this at zero would erode nothing whatever the strength said.
         sample.DetailFactor     = params.SpeciesEdge[0].y;
         sample.ExtinctionFactor = params.SpeciesEdge[0].w;
+        // AND THE SLOT, which this fixture did not set until Р13 and which CloudSampleDensity reads on
+        // every call. CloudFieldSample is a GLSL struct compiled as C++ and has no default member
+        // initialisers, so the fetch below was addressed by whatever was on the stack — the same defect,
+        // in the same struct, that AtZeroStrengthTheProfileSurvivesUntouched documents having turned
+        // macOS Release red. It is latent rather than live only because every slot starts as a copy of
+        // slot 0 (CloudFieldReference.hpp) and the tests that bind a second volume run after these; the
+        // reference clamps the index, so it cannot crash, it can only read the wrong volume.
+        sample.NoiseSlot = params.SpeciesNoise[0];
 
         return CloudSampleDensity( params, sample, positionKm ) / profile;
     }
@@ -521,29 +535,123 @@ TEST( CloudFieldDensity, TheCoreKeepsItsDensityAndTheEdgeLosesMostOfItAtFullEros
     EXPECT_LT( meanEdge, 0.5f ) << "the erosion is not cutting the edge at all";
 }
 
+// THE RELATION IS TRUE AND THE REASON GIVEN FOR IT WAS NOT — restated by Р13, 2026-09-01.
+//
+// WHAT STOOD HERE: "retention has to be monotone in the profile, because the weight is (1 - Profile) and
+// nothing else in the expression depends on it." THREE things in the expression depend on the profile,
+// not one. Common/CloudField.glslh's CloudSampleDensity computes
+//
+//     wispy   = mix( noise.x, noise.y, Profile )
+//     billowy = mix( noise.z, noise.w, pow( Profile, 0.25 ) )
+//     erosion = mix( wispy, billowy, DetailType ) * strength * ( 1 - Profile )
+//
+// so the profile drives the weight AND both frequency blends. The sentence was written when the erosion
+// was two channels picked by type; the deck's full composite (p.122) replaced that with these two blends
+// and the justification was never revisited.
+//
+// IT IS NOT A PEDANTIC CORRECTION, because the cut is genuinely NOT monotone. Measured over this ladder —
+// 11 400 comparisons, 600 positions by 20 steps — the cut at unit strength, d(p) * (1 - p), RISES between
+// neighbouring steps at 91 of them, by as much as 0.0316, all of it at a profile of 0.10 where the
+// fourth-root blend's slope is steepest (p^-0.75 is 5.6 there). The weight does not dominate everywhere.
+//
+// WHAT ACTUALLY HOLDS THE RELATION UP is CloudRemap's own clamp, and that is the mechanism this test now
+// asserts instead of the false one. Where the cut rises with the profile it has already overtaken the
+// profile, so the remap returns zero and goes on returning zero: 90 of those 91 rising comparisons are
+// 0 against 0. Exactly ONE of them has a live density, and there the retention still rises.
+//
+// SO THE RELATION PASSES ON A TIE, which is what Р9 meant and which nothing here said. 2 010 of the
+// 11 400 comparisons are 0 against 0, the worst margin over the whole ladder is exactly 0.000000, and the
+// worst margin that is NOT a tie is 1.01e-4 — at the top of the range, where retention has saturated at 1.
+//
+// AND THAT IS WHY THE NEXT DEEP CUT BREAKS IT. A mean-preserving contrast about the median multiplies the
+// detail field's own profile-slope by the contrast, which pushes the rise OUT of the clamped region where
+// nothing is holding it. Р9 measured the break at about 1.25. A task that trips this test has not
+// necessarily broken the shader — it may have moved the cut into the range where this relation was only
+// ever true by accident — and it must say which, rather than widening the tolerance.
 TEST( CloudFieldDensity, HowMuchASampleKeepsRisesWithHowDeepInsideTheBodyItIs )
 {
-    // The same relation stated as a gradient rather than at two points: retention has to be monotone in
-    // the profile, because the weight is (1 - Profile) and nothing else in the expression depends on it.
-    // A regression that made the weight depend on the noise instead would still pass the two-point test
-    // above at most positions and fail here.
     CloudFieldParams params = DefaultParams();
     params.DetailStrength   = 0.6f;
+
+    long   pairs = 0, zeroTies = 0, rising = 0, risingAndLive = 0;
+    double worstMargin = std::numeric_limits<double>::max();
+    double worstRise   = -std::numeric_limits<double>::max();
 
     for ( const vec3& position : ErosionProbePositions() )
     {
         float previous = -1.0f;
+        float previousCut = -1.0f;
+
         for ( int step = 1; step <= 20; ++step )
         {
             const float profile   = 0.05f * static_cast<float>( step );
             const float retention = Retention( params, profile, position );
 
+            // The cut this sample would receive at unit strength, which is the quantity the old
+            // justification claimed was monotone in the profile and is not.
+            CloudFieldSample probe;
+            probe.Profile          = profile;
+            probe.DetailType       = params.SpeciesEdge[0].x;
+            probe.DensityScale     = 1.0f;
+            probe.DetailFactor     = params.SpeciesEdge[0].y;
+            probe.ExtinctionFactor = params.SpeciesEdge[0].w;
+            probe.NoiseSlot        = params.SpeciesNoise[0];
+
+            const float cut = ErosionNoiseAt( params, probe, position ) * ( 1.0f - profile );
+
             EXPECT_GE( retention, previous - 1e-5f )
                  << "profile " << profile << " at (" << position.x << ", " << position.y << ", " << position.z
                  << ") kept LESS than the thinner sample below it";
-            previous = retention;
+
+            if ( previous >= 0.0f )
+            {
+                ++pairs;
+                worstMargin = std::min( worstMargin, static_cast<double>( retention ) - previous );
+                if ( retention == 0.0f && previous == 0.0f )
+                    ++zeroTies;
+
+                if ( cut > previousCut )
+                {
+                    ++rising;
+                    worstRise = std::max( worstRise, static_cast<double>( cut ) - previousCut );
+                    if ( retention > 0.0f )
+                        ++risingAndLive;
+                }
+            }
+
+            previous    = retention;
+            previousCut = cut;
         }
     }
+
+    std::printf( "[CloudFieldDensity] %ld comparisons: worst margin %.6f, of which %ld are 0 against 0\n", pairs,
+                 worstMargin, zeroTies );
+    std::printf( "[CloudFieldDensity] the cut d(p)*(1-p) RISES at %ld of them (worst %+.6f); %ld of those "
+                 "still have a live density\n",
+                 rising, worstRise, risingAndLive );
+
+    // ── THE MECHANISM, ASSERTED WHERE THE FALSE ONE WAS ONLY WRITTEN DOWN ────────────────────────────────
+    //
+    // The cut is not monotone in the profile, so the relation cannot rest on the weight alone. What it
+    // rests on is that the region where the cut rises lies INSIDE the region the remap has already clamped
+    // to zero. Asserting that is the difference between a test that passes and a test that knows why.
+    EXPECT_GT( rising, 0 ) << "the cut no longer rises with the profile anywhere on this ladder. That is not "
+                              "a failure — it means the frequency blends have changed shape — but the note "
+                              "above this test is now describing a field that no longer exists, and the "
+                              "monotonicity has a different reason that has to be written down.";
+
+    EXPECT_LE( risingAndLive, rising / 10 )
+         << risingAndLive << " of the " << rising
+         << " comparisons where the cut RISES with the profile still carry a live density. The monotonicity "
+            "of the retention was holding because CloudRemap's clamp had already zeroed those samples; with "
+            "the rise out in the open there is nothing left holding it, and the next step of whatever "
+            "deepened the cut will invert the ladder. Say which quantity moved rather than widening the "
+            "1e-5 above.";
+
+    // ── AND THE TIE IS NAMED, so that "it passes" is never mistaken for "it has margin" ──────────────────
+    EXPECT_GT( zeroTies, 0 ) << "no comparison on this ladder is 0 against 0 any more, so the worst margin "
+                                "is now a real one — which is BETTER than what was measured in 2026-09-01 "
+                                "and means this note's account of why the relation holds is out of date.";
 }
 
 TEST( CloudFieldDensity, AtZeroStrengthTheProfileSurvivesUntouchedAndTheDensityScaleIsTheOnlyMultiplier )
@@ -1142,7 +1250,8 @@ namespace
 
         struct Result
         {
-            double TravelM;   // how far the erosion moved the visible surface, metres
+            double TravelM;   // how far the erosion moved the visible surface, metres — the MEAN
+            double TravelSdM; // and how much that distance VARIES between columns
             double LostShare; // share of opaque columns that stopped being opaque
             long   Opaque;
         };
@@ -1167,9 +1276,10 @@ namespace
 
         Result At( float t ) const
         {
-            long   opaque = 0;
-            long   lost   = 0;
-            double travel = 0.0;
+            long   opaque  = 0;
+            long   lost    = 0;
+            double travel  = 0.0;
+            double travel2 = 0.0;
 
             for ( size_t i = 0; i < Columns.size(); ++i )
             {
@@ -1184,10 +1294,23 @@ namespace
                     ++lost;
                     continue;
                 }
-                travel += ( ReferenceKm[i] - moved ) * 1000.0;
+                const double moveM = ( ReferenceKm[i] - moved ) * 1000.0;
+                travel += moveM;
+                travel2 += moveM * moveM;
             }
 
-            return Result{ opaque > lost ? travel / static_cast<double>( opaque - lost ) : 0.0,
+            const long   kept = opaque - lost;
+            const double mean = kept > 0 ? travel / static_cast<double>( kept ) : 0.0;
+
+            // THE SECOND MOMENT IS NOT DECORATION, and §Р13 below is what it is for: the MEAN travel is the
+            // erosion's uniform component — a cloud of a different size — and a calibration can keep it
+            // while the cut stops varying between neighbouring columns at all. Carried here rather than
+            // recomputed by the one test that wants it, because it costs a running sum on a walk that is
+            // already the most expensive thing in this suite.
+            const double variance =
+                 kept > 0 ? std::max( 0.0, travel2 / static_cast<double>( kept ) - mean * mean ) : 0.0;
+
+            return Result{ mean, std::sqrt( variance ),
                            opaque > 0 ? static_cast<double>( lost ) / static_cast<double>( opaque ) : 0.0,
                            opaque };
         }
@@ -1698,14 +1821,62 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
 // produces, and measures what the pair delivers. Move either one alone and it is red, and the message
 // names the other one.
 //
-// WHY THE THRESHOLD IS 1.05x AND NOT THE 1.11x THE PAIR SHIPS AT. The physical bound is 1.00x — below it
-// the erosion carves structure finer than the renderer can represent. §DS's convention is to ship the
-// first ladder step with REAL headroom over that, which it put at 1.11x and which this pair also lands on
+// WHY THE THRESHOLD IS 1.05x AND NOT THE 1.11x THE PAIR SHIPS AT. §DS's convention is to ship the first
+// ladder step with REAL headroom over the bound, which it put at 1.11x and which this pair also lands on
 // (0.65 gives 139 m against 125). Asserting at the shipped value would make the test a copy of the default
 // rather than a guard on it, and asserting at the bare floor would let a future pair sit balanced on a
 // bound §DS refused to balance on by name. 1.05x is halfway between the bound being protected and the
 // value protecting it: a generator change that moves a body by a voxel does not trip it, and a calibration
 // that quietly gives up its headroom does.
+//
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+// >>> WHAT THIS WINDOW ACTUALLY PINS — restated by Р13, 2026-09-01, after Р9 named it mis-stated
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// THE SENTENCE THAT WAS WRONG stood one paragraph up and read "the physical bound is 1.00x — below it the
+// erosion carves structure finer than the renderer can represent". That reads the window as a bound on
+// DETAIL. It is not one, and the difference is the whole of why six tasks looked for a surface in the
+// Detail block and did not find it.
+//
+// `TravelM` IS A MEAN. Every column's silhouette moves inward and this is the average of that
+// displacement. A displacement that is the same everywhere is a cloud of a different SIZE — it carries no
+// surface at all, whatever its magnitude, and the march resolves it the way it resolves any other
+// silhouette. So the chord the march can be relied on to find is the wrong ruler for it, and calling this
+// "structure the renderer can represent" attaches a detail justification to a size quantity.
+//
+// AND THE SPREAD IS NOT THE SURFACE EITHER, which is the part that had to be measured rather than
+// reasoned. The obvious repair — pin the VARIATION of the travel instead of its mean — fails on its own
+// instrument. Measured on this census, at the shipped strength, sweeping Р9's mean-preserving contrast:
+//
+//     contrast   mean travel   sd of travel   added roughness at an 80 m lag
+//        1.00       138.7 m       215.8 m        4.1 m
+//        1.50       130.8 m       205.1 m        6.9 m
+//        2.00       124.9 m       200.6 m        7.8 m
+//        3.00       113.6 m       187.1 m       10.6 m
+//        4.00       106.7 m       177.3 m       13.1 m
+//
+// THE MEAN AND THE SPREAD FALL TOGETHER while the surface RISES. Both of the first two columns are
+// dominated by how differently deep the columns are — a property of the LUMPS — and a deeper cut shortens
+// every column's travel a little, so both come down. Only a SHORT-LAG structure function isolates the
+// erosion: it differences two neighbouring columns, which cancels the lump-scale variation both other
+// statistics are made of. That number is measured by
+// TheEyeLooksThroughMoreCloudThanTheErosionVariesOver at the bottom of this file, it is 4.1 m against the
+// 94.3 m the bare lumps already have, and it is the only one of the three that answers the owner.
+//
+// SO THE WINDOW STAYS AND ITS NUMBERS DO NOT MOVE. It is a real guard and §SIL's defect is real: lump
+// aspect and Detail Strength are one calibration, and the mean travel is exactly the quantity that
+// couples them. What changes is what it may be READ as. It pins the uniform component — how much smaller
+// the erosion makes the cloud — and it is silent about the surface.
+//
+// AND IT IS THEREFORE A GATE ON EVERY DEEP-CUT MECHANISM, which is a property of the bound and not of the
+// sky. Anything that spends the same average cut as clefts instead of as a uniform dent LOWERS the mean
+// and RAISES the surface: Р9's contrast at 2 lands on 124.9 m against a floor of 131.25 and is red here
+// while the thing it was built to buy has nearly doubled. A task that trips this must say which of the
+// two it moved, and must not answer by lowering 1.05.
+//
+// THE HALF THAT WAS MISSING is asserted below beside the mean: the travel has to VARY. A cut that moves
+// every column by the same distance passes the window and is a shrink rather than an erosion, and nothing
+// in this file noticed that until now. 215.8 m against the 125 m chord today.
 TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers )
 {
     const Desert::ECS::VolumetricCloudData shipped;
@@ -1727,6 +1898,11 @@ TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAn
     std::printf( "[CloudFieldErosion] lump aspect %.3f x strength %.3f: the surface sits at profile %.3f "
                  "and travels %.1f m, %.2fx the %.0f m the march resolves\n",
                  aspect, strength, census.SurfaceProfile, result.TravelM, result.TravelM / floorM, floorM );
+    // THE DECOMPOSITION, printed every run so the note above is checkable rather than remembered: the
+    // window below is on the first number, the surface is not either of them, and the third is where it is.
+    std::printf( "[CloudFieldErosion]   uniform component (mean travel) %.1f m; it VARIES by %.1f m "
+                 "(%.2fx the chord) — neither is the surface, see TheEyeLooksThrough...\n",
+                 result.TravelM, result.TravelSdM, result.TravelSdM / floorM );
 
     // ── THE RELATION, AND IT IS A WINDOW RATHER THAN A FLOOR ────────────────────────────────────────────
     //
@@ -1767,6 +1943,30 @@ TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAn
             "same cut moves the surface less far. If the aspect was just raised, the strength has to "
             "follow it up; if the strength was just lowered, the aspect has to come down with it. "
             "Docs/Clouds/CALIBRATION.md §SIL2 carries the measured ladder for both.";
+
+    // ── AND THE CUT HAS TO VARY, WHICH THE WINDOW ABOVE CANNOT SEE ──────────────────────────────────────
+    //
+    // The half Р13 added. The two bounds above are on a MEAN, and a mean survives a cut that moves every
+    // column by exactly the same distance — which is a cloud of a different size and not an erosion at
+    // all. The census already walks every column, so the second moment is free, and asserting it is what
+    // makes "the erosion moves the surface" mean something other than "the layer shrank".
+    //
+    // AGAINST THE SAME CHORD as the mean, and for a reason of its own rather than by symmetry: if
+    // neighbouring columns move together to within what the march can resolve, there is nothing in the
+    // displacement for the renderer to draw as anything but a smaller cloud. Today it reads 215.8 m
+    // against 125 — the spread is LARGER than the mean, because the columns differ enormously in how much
+    // cloud they hold. That is a loose tripwire and it is meant to be one: it fires on a cut that has
+    // collapsed into a uniform shrink, not on a calibration that has drifted a little.
+    //
+    // AND IT IS NOT THE SURFACE. Under a deeper cut it falls WITH the mean (187.1 m at a contrast of 3)
+    // while the surface rises — see the note above this test. Do not read this as the detail bound either.
+    EXPECT_GT( result.TravelSdM, floorM )
+         << "THE CUT HAS COLLAPSED INTO A SHRINK. The erosion moves the visible surface by " << result.TravelM
+         << " m on average but that distance varies between columns by only " << result.TravelSdM
+         << " m, under the " << floorM
+         << " m the march resolves — so every column is moving together and what this calibration produces "
+            "is a cloud of a different SIZE rather than a cloud whose edge has been cut into. The window "
+            "above cannot see this, because it is stated on the mean.";
 
     // ── AND THE LEVER HAS TO STILL BE A LEVER ───────────────────────────────────────────────────────────
     //

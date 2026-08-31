@@ -451,6 +451,49 @@ float CloudCurlyAlligator01( vec3 position, float period, uint seed, float stren
 // worth a task, where neither half alone was. Whoever takes it must restate the two relations Р9 found
 // mis-stated first (the mean-travel floor pins the uniform component; the retention justification claims
 // nothing else depends on the profile, and both frequency blends do), because a deep cut moves both.
+//
+// ---------------------------------------------------------------------------------------------------
+// THE PAIR WAS BUILT AND REFUSED — task Р13, 2026-09-01. THE FRACTAL HALF IS THE HARMLESS ONE.
+// ---------------------------------------------------------------------------------------------------
+//
+// Р13 built exactly what the paragraph above asks for: an ADDITIVE fractal here (three octaves, lacunarity
+// 2, gain 0.5, each octave entering as `(o - 0.5)`), both shipped `.dcnv` re-baked from their own recipes,
+// and Р9's mean-preserving contrast on `detailField` in Common/CloudField.glslh. Everything below was
+// measured on a baseline re-shot with the sky-light occlusion volume ON, which is what Р12 made the
+// default and what makes Р9's and Р10's absolute figures not directly comparable. The repeat shot on
+// Clouds_Protocol is 0 differing bytes and the same md5, so every pixel figure is the change.
+//
+// THE PREMISE OF THE FRACTAL DOES NOT SURVIVE ITS OWN INSTRUMENT. The reason to sum octaves was that a
+// field with several lattices "would have no single cell scale to expose and would keep rising past
+// 200 m". It does not. EveryChannelHasExactlyOneScaleAndSaturates... prints D(.20)/D(.40) at 0.947 /
+// 0.959 / 0.965 / 1.002 for the fractal against 0.947 / 0.963 / 0.949 / 1.009 for the single octave: the
+// saturation is exactly where it was. The reason is the one Р10 already wrote down two paragraphs up and
+// did not carry through to the prescription — the field is EXACTLY PERIODIC AT THE TILE, so the only
+// octaves a fractal can add are FINER ones, and a finer octave cannot make a structure function keep
+// rising at a lag of 200 m. Filling that band needs COARSER scales, and above the tile there are none.
+//
+// WHAT THE FRACTAL ALONE IS WORTH, measured with the contrast at 1 (all relations green):
+//
+//     silhouette roughness added at an 80 m lag     4.1 m -> 5.8 m, on the 94.3 m the bare lumps give
+//     mean travel                                 138.7 m -> 136.0 m  (1.11x the march chord -> 1.09x)
+//     the erosion's decorrelation length            160 m -> 160 m    (unchanged — see below)
+//
+// +1.7 m on a 94.3 m silhouette is 1.8 % of it, for a re-bake that moves 60-78 % of the pixels of every
+// frame of every scene, three times the bake cost, and every published table in the programme. It does
+// not earn that, so the assets came back — the same judgement, for the same reason, that Р10's own
+// re-bake got. What is kept is the finding.
+//
+// AND THE ONE THING A FUTURE FRACTAL MUST NOT REPEAT, because it was found by building it: the OCTAVE
+// COUNT IS NOT A CONSTANT, it is bounded by the voxel. CloudNoise_Default is period 2/4/3/6, so three
+// octaves at lacunarity 2 reach period 24 — 5.3 voxels per lattice cell at the shipped 128, which the
+// volume can hold. CloudNoise_FineWisp is 4/8/6/12 and the same three octaves reach 48: 2.7 voxels,
+// which it cannot. A bare count would have put an aliasing octave into the CIRRUS volume alone, and the
+// frame that showed it would have been blamed on the cirrus. Any future octave sum has to take the
+// bake's resolution as an input and stop when the next cell would be under about four voxels.
+//
+// WHY THE CONTRAST — the other half, and the half that actually moves the picture — is refused too, with
+// its five broken relations and its whole-dome numbers, is written where it would have lived:
+// Common/CloudField.glslh, at the bottom.
 vec4 CloudNoiseVolumeChannels( vec3 uvw, uint seed, float curlStrength, float wispyPeriodLF,
                                float wispyPeriodHF, float billowPeriodLF, float billowPeriodHF )
 {
