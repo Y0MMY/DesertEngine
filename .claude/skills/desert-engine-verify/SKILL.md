@@ -99,6 +99,13 @@ Reading the sheet:
   `Desert/Tests/Tools/DomeSheetLayout` asserts the round trip label -> angles -> vector. A sheet that
   mislabels a tile is worse than no sheet, because it still looks like evidence — the same
   two-things-that-must-agree shape as §4.
+- **The log prints the scene's NAME, not its path** — `Loading scene: Clouds_Protocol` comes from the
+  `SceneName` field inside the file. Two different `.desce` copied from one original are therefore
+  *indistinguishable in the log*, which is exactly what an A/B built by copying a scene and editing one
+  field produces. Grepping for the filename finds nothing and reads as a mismatch; grepping for the name
+  passes on the wrong file. **Give each variant a distinct `SceneName` when you build it**, then the
+  check means something. Found on 2026-08-31 while re-measuring a disputed control: the integrator's own
+  grep reported a mismatch that was not one, and the same blind spot would have hidden a real one.
 - Every tile is checked against **its own log** before it reaches the sheet, and a sweep that lost one
   refuses to assemble rather than producing a sheet with a hole in it.
 - **It is 1/4 resolution.** It says WHERE to look; the full-size tile (`--keep-tiles`) is what you
