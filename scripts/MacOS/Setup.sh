@@ -235,6 +235,13 @@ echo "--- Verifying the paths the build reads"
 # them is pulled in by a wildcard, so when it is missing premake5 still succeeds
 # and emits a project with no source files — the failure only surfaces later as
 # "No rule to make target ...". Name them here instead.
+#
+# Three submodules are deliberately absent from this list because no premake
+# file and no source in the tree refers to them: ThirdParty/NVRHI,
+# ThirdParty/lightweightvk and Editor/ThirdParty/ImGuiColorTextEdit. They are
+# still initialised above, and a failure to initialise one is still reported —
+# but the build does not need them, so their absence must not be reported as a
+# missing build input.
 REQUIRED_PATHS=(
     "ThirdParty/optick/src/optick.h"
     "ThirdParty/meshoptimizer/src/meshoptimizer.h"
@@ -249,7 +256,6 @@ REQUIRED_PATHS=(
     "ThirdParty/spdlog/include/spdlog/spdlog.h"
     "ThirdParty/sol2/include/sol/sol.hpp"
     "Editor/ThirdParty/ImGuizmo/ImGuizmo.cpp"
-    "Editor/ThirdParty/ImGuiColorTextEdit/TextEditor.cpp"
     "ThirdParty/reflect-cpp/include"
     "ThirdParty/google-test/include/gtest/gtest.h"
     "ThirdParty/glm/glm/glm.hpp"
@@ -297,7 +303,13 @@ if [ ${#MISSING_PATHS[@]} -gt 0 ]; then
 fi
 
 echo ""
-echo "premake5 will not produce a working build until the above are resolved."
+if [ ${#MISSING_PATHS[@]} -eq 0 ]; then
+    echo "Every path the build reads is nevertheless present, so premake5 gmake"
+    echo "should succeed. Fix the failed steps above before relying on this tree."
+else
+    echo "premake5 will not produce a working build until the missing paths above"
+    echo "are resolved."
+fi
 echo "Re-running this script is safe: it retries every step that failed."
 echo ""
 echo "If one submodule keeps failing, reset that one by hand and retry it:"
