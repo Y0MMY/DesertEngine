@@ -395,9 +395,26 @@ discrete lumps under it — **more** like a low overcast, not less.
 
 ### 4.2 The sky-occlusion volume — built, measured, and switched on by NO scene
 
+> ⚠️ **SUPERSEDED BY Р12 (2026-08-31), and one figure in this paragraph was wrong when it was
+> written.** `SkyOcclusionVolume` now defaults to **`true`** and the four scenes that write it
+> explicitly write `true`. And it was never **six** scenes that mentioned the field: at this
+> document's own commit (`8d4ae29c`) exactly **four** `.desce` in the repository contained the key —
+> `Clouds_Protocol` and `PR_Hero0/3/8`, the four that spell every reflected field out — which is
+> still the count today. The substantive claim, that no scene switched it on, was correct.
+>
+> **The four rows below are at the strength Р12 ships, and this document does not say so.** No
+> strength is named anywhere in §4.2, and the shipped default at the time was 0.5, so the natural
+> reading is that only the flag was flipped. It was not: Р12 re-measured the same A/B at
+> `AZ 000 / EL 25` and gets **mean Δ 9.3561, bias −12.0336** against the 9.36 / −12.03 below, while
+> the same A/B at `AmbientOcclusionStrength` **0.5** gives **mean Δ 1.74, bias −1.49** — nothing like
+> it. So these rows are `SkyOcclusionVolume` on **at strength 1.0**, which is exactly the
+> configuration that now ships, and their verdict ("not a clean win and it is not free") applies to it
+> directly. The `before` column differs from Р12's by 0.001 of contrast because the sky itself moved
+> slightly between `8d4ae29c` and `9c980835`.
+
 `SkyOcclusionVolume` exists (`Programs/Clouds/CloudSkyOcclusionVolume.shader`, built by Р4 to answer
-Р0's ranked #1), defaults to `false`, and **not one scene in `Editor/Resources/Assets/Scenes` sets it
-`true`.** Six scenes even mention the field; all six write `false`.
+Р0's ranked #1), defaulted to `false` when this was written, and **not one scene in
+`Editor/Resources/Assets/Scenes` set it `true`.**
 
 | point | mean Δ/255 | bias | contrast | p05 |
 |---|---|---|---|---|

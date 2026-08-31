@@ -4,6 +4,20 @@
 range is, how far the frame moves across that range, at which angles that was measured, and a
 verdict of **live**, **nearly dead** or **dead**.
 
+> ⚠️ **MEASURED WITH THE SKY-LIGHT OCCLUSION VOLUME OFF — the whole census, not two rows of it.**
+> Р12 (2026-08-31, hours after this document landed) turned `SkyOcclusionVolume` on and moved
+> `AmbientOcclusionStrength` to 1.0 in both the component defaults and the four protocol scenes. Every
+> row below is an endpoint-to-endpoint difference taken on `Clouds_Protocol` with the volume off, so
+> **the sky each row was swept against is not the sky that ships**, and every movement figure is of a
+> configuration the repository no longer has. **They are left exactly as measured**; §Р12 of
+> `CALIBRATION.md` carries the shipped sky's own numbers. Two rows are stale in a stronger sense than
+> "a moved baseline" and are flagged at the figure: **36 and 37**.
+>
+> **The census was NOT re-run**, so what happens to the other ninety-five rows is unknown rather than
+> claimed. The smallest movement in the table is 8/255 (row 44) against a noise floor of zero, so it
+> would take a large change to push a row to "dead"; but Р12 darkens every frame by 2.5–16.2 of 255
+> and nobody has measured what that does to a sweep, and "probably still live" is not a verdict.
+
 ## Why this document exists
 
 The product owner restated the acceptance criterion for the cloud programme as a capability rather
@@ -218,8 +232,32 @@ it is largest, with the per-ray figures beside it.
 | 33 | `PhaseG` | −0.9 → 0.9 | **98**/255 | 98/95.2 % · 2/28.2 % · 19/53.0 % | live |
 | 34 | `PhaseGBackward` | −0.9 → 0.9 | **71**/255 | 71/97.2 % · 4/32.7 % · 20/55.4 % | live |
 | 35 | `PhaseBlend` | 0 → 1 | **85**/255 | 85/95.4 % · 26/83.2 % · 34/61.5 % | live |
-| 36 | `AmbientOcclusionStrength` | 0 → 1 | **53**/255 | 53/100 % · 47/84.6 % · 50/60.0 % | live |
-| 37 | `SkyOcclusionVolume` | off → on | **11**/255 | 9/92.4 % · 11/79.5 % · 6/49.0 % | live |
+| 36 | `AmbientOcclusionStrength` | 0 → 1 | **53**/255 | 53/100 % · 47/84.6 % · 50/60.0 % | live ⚠️ **§Р12** |
+| 37 | `SkyOcclusionVolume` | off → on | **11**/255 | 9/92.4 % · 11/79.5 % · 6/49.0 % | live ⚠️ **§Р12** |
+
+> ⚠️ **ROWS 36 AND 37 MEASURE A CONFIGURATION THAT NO LONGER SHIPS, and not merely from a moved
+> baseline.** Both were swept with `SkyOcclusionVolume` **off**, so row 36 measures the strength
+> against the PROFILE term — the sample's own depth in its own body. Since Р12 the flag is on by
+> default, so the same slider drives the VOLUME instead, which is a different quantity with a
+> different geometry; the two are not comparable and row 36 is not a smaller or larger version of the
+> shipped one. Row 37's endpoints have both moved: its `on` leg was taken at strength 0.5 and the
+> shipped strength is 1.0.
+>
+> Re-measured by Р12 on `Clouds_Protocol` at `AZ 000 / EL 25` with the volume ON throughout, so the
+> ladder below is one geometry over the whole travel — whole frame, `ImageDiff` against the pre-Р12
+> shipped frame, zero noise floor:
+>
+> | strength, volume on | differing | max | mean Δ/255 | bias |
+> |---|---|---|---|---|
+> | 0.0 | 84.2 % | 20 | 5.58 | **+7.25** (brighter — no occluder at all) |
+> | 0.5 | 79.5 % | 11 | 1.74 | −1.49 |
+> | **1.0 (shipped)** | 83.5 % | **33** | **9.36** | **−12.03** |
+>
+> The travel is **not** linear in the strength, and the reason is that the comparison is against the
+> profile term rather than against nothing: at 0.5 the volume's floor (0.75 of the sphere) happens to
+> sit close to what `mix(1, sqrt(1−Profile), 0.5)` was already doing, so the two nearly cancel. The
+> knob is live over the whole range and monotone in the frame's mean; only its DIFFERENCE from the old
+> occluder is non-monotone.
 | 38 | `LightMarchDistance` | 0.1 → 20 km | **146**/255 | 120/100 % · 61/83.1 % · 146/66.3 % | live |
 | 39 | `LightMarchSamples` | 1 → 64 | **178**/255 | 133/100 % · 71/84.6 % · 178/81.9 % | live |
 | 40 | `MultiScatterOctaves` | 1 → 3 | **81**/255 | 81/100 % · 65/85.3 % · 59/62.3 % | live |

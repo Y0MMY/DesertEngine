@@ -5046,6 +5046,14 @@ MoltenVK. `ImageStat` over **`0 0 1280 551`**, `LineJump` over **`2 2 1278 551`*
 **This table replaces `Clouds_Demo` as the thing a later phase re-shoots as its "before". The numbers in it
 are identical to §SIL2's "after" column — that is the acceptance criterion, not a coincidence.**
 
+> ⚠️ **SUPERSEDED AS THE "BEFORE" BY §Р12 (2026-08-31).** The freeze did what it promised — no C++
+> default has moved this scene since — but Р12 moved the scene ITSELF, deliberately and through the
+> channel this section names as the legitimate one: `SkyOcclusionVolume` `false` → `true` and
+> `AmbientOcclusionStrength` `0.5` → `1.0`, written into the file. The six rows below are still the
+> correct base for anything measured before 2026-08-31 and are what §Р12 re-shoots as its own "before";
+> **a phase starting now re-shoots §Р12's "after" table instead.** The chain is not broken, it has one
+> more link.
+
 | point | mean | p05 | p50 | p95 | contrast | sat |
 |---|---|---|---|---|---|---|
 | zenith away `0,0.9,-1` | 0.570 | 0.319 | 0.558 | 0.734 | 0.415 | 0.098 |
@@ -6503,3 +6511,195 @@ Two things worth carrying forward:
 The suites caught it, which is the system working. What is worth noting is that they caught it by
 measuring the SKY — "no cloud below the ceiling", "two species never overlap" — and not by any assertion
 about the struct.
+
+---
+
+## Р12 — the sky-light occlusion volume is switched ON in the shipped sky, 2026-08-31
+
+Decision **D-26** held `SkyOcclusionVolume` off in every scene until Р9 reported. Р9 closed as a refusal,
+so the second re-authoring the owner was waiting to avoid is not coming and the hold has nothing left to
+hold. This section is the measurement that goes with turning it on, and it is a re-authoring: **the
+appearance of every cloud scene in the repository changes.**
+
+**The argument is about the instrument and not about one sky.** Every measurement this programme takes is
+taken against the SHIPPED configuration, and with the flag off that configuration carried, in every frame
+anybody measured, the largest single discrepancy `DIAGNOSIS_CARTOON.md` ranks — an ambient sky term with
+no geometric occluder. Р11's census is about nine hundred captures taken against exactly that. It is a tax
+on everything downstream, not a one-off loss.
+
+### What moved, and why it is two channels rather than one
+
+| where | from | to |
+|---|---|---|
+| `ECS/VolumetricCloudComponent.hpp` — `SkyOcclusionVolume` | `false` | **`true`** |
+| `ECS/VolumetricCloudComponent.hpp` — `AmbientOcclusionStrength` | `0.5f` | **`1.0f`** |
+| `Clouds_Protocol.desce`, `PR_Hero0/3/8.desce` — both keys | `false` / `0.5` | **`true` / `1.0`** |
+
+**Both channels are required and §PR is why.** Thirty-six scenes carry a `VolumetricCloud`; thirty-two of
+them write between 3 and 16 of its 52 fields and take the rest from the C++ default, so the default is the
+only thing that reaches them. The other four — the protocol scene and the three hero cost legs — write
+**all 52 fields explicitly**, precisely so that no C++ default can move them (§PR: "a scene that states
+all fifty-one of its cloud parameters cannot be moved by a change to a C++ default"). Changing only the
+default would therefore have left the measuring instrument on the old sky, which is the one scene where
+that matters most. Changing only the scenes would have left the other thirty-two, and every scene authored
+tomorrow, behind.
+
+**The fourteen `.desce` with no volumetric cloud are untouched and carry no new key.** A scene with no
+cloud has no business carrying the flag, and none of them does.
+
+### Why 1.0 and not the 0.5 UE carries
+
+Not because twice as much occlusion was wanted. Р7 found the volume's UPPER-HEMISPHERE transmittance being
+multiplied into a FULL-SPHERE mean radiance and replaced the product with a composition, so the term went
+from `1 - s(1 - T)` to `1 - (s/2)(1 - T)`: **every strength now buys what half of it used to.** 1.0 after
+the fix is arithmetically the term Р4 measured at 0.5 before it.
+
+That is a claim about arithmetic, and it is verified here on the FRAME rather than taken. Р4's
+`VOLUME at 0.5` column, re-shot at `AmbientOcclusionStrength` 1.0 on today's binary, reproduces **to three
+decimals at all six protocol points**:
+
+| point | reference | Р4's `VOLUME at 0.5` (pre-fix) | Р12 measured at 1.0 (post-fix) |
+|---|---|---|---|
+| zenith away | 0.479 | 0.395 | **0.395** |
+| mid away | 0.479 | 0.383 | **0.383** |
+| horizon away | 0.438 | 0.282 | **0.282** |
+| zenith sun | 0.479 | 0.340 | **0.340** |
+| mid sun | 0.479 | 0.275 | **0.275** |
+| horizon sun | 0.438 | 0.303 | **0.303** |
+
+Half strength would buy half of that. It would also not answer the one risk this term still carries — the
+SLAB approximation, which Р4 named and Р7 left standing as an unmeasured second-order error biased dark —
+because that bias scales with the strength like everything else does. What removed the visible consequence
+of it, the brown deck at full strength, was Р7's composition and not a smaller dial.
+
+### The instrument and its floor
+
+`Clouds_Protocol.desce`, camera `0,200,0`, `--shot-frames 90 --play`, Debug, MoltenVK, 1280x766.
+`ImageStat` over `0 0 1280 551`, `ImageDiff` over the whole frame.
+
+**The floor was measured, not assumed**, and the first render in this fresh worktree was discarded per
+§A1's correction — which was not a formality:
+
+| repeat | differing | max |
+|---|---|---|
+| `mid_away`, same command twice | **0** / 980 480 | 0 |
+| `zenith_away`, same command twice | **0** / 980 480 | 0 |
+| the DISCARDED first render vs the settled one | **4** / 980 480 | **1** |
+
+Four pixels is nothing, and it is also exactly the size of thing an A/B of 9/255 would have absorbed
+without anybody noticing.
+
+**And every frame was checked against its own log by a line that names the CONFIGURATION rather than the
+scene.** `desert-engine-verify` records that the log prints `SceneName`, not the path, so two `.desce`
+copied from one original are indistinguishable in it — and here both legs are the same file, edited
+between them, so the name is identical by construction and could not have distinguished them at all. The
+check used instead is the renderer's own allocation line, `[Clouds] Sky-light occlusion volume 128x16x128
+RGBA16F (2.00 MiB) — 48 km across the world at 375 m per texel, 16 altitude slices over the shell`, which
+is printed only when the pass is dispatched: **0 of 40 tiles in the OFF leg, 40 of 40 in the ON leg.** The
+two control scenes used below WERE copies, and were given distinct `SceneName`s — `P12_vol_s05` and
+`P12_vol_s00` — for the reason the skill gives.
+
+### The six protocol points — the new base
+
+This table replaces §PR's as the thing a later phase re-shoots as its "before". The `before` column
+reproduces Р0's and Р4's `shipped` column exactly at all six points, so the chain from §PR through Р0 is
+intact and this is one more link in it rather than a break.
+
+| point | contrast before | contrast after | reference | gap before | gap after | closed |
+|---|---|---|---|---|---|---|
+| zenith away `0,0.9,-1` | 0.417 | 0.395 | 0.479 | −0.062 | −0.084 | **worse** |
+| mid away `0,0.45,-1` | 0.395 | 0.383 | 0.479 | −0.084 | −0.096 | **worse** |
+| horizon away `0,0.12,-1` | 0.202 | **0.282** | 0.438 | −0.236 | −0.156 | **34 %** |
+| zenith sun `0,0.9,1` | 0.296 | **0.340** | 0.479 | −0.183 | −0.139 | **24 %** |
+| mid sun `0,0.45,1` | 0.254 | **0.275** | 0.479 | −0.225 | −0.204 | **9 %** |
+| horizon sun `0,0.12,1` | 0.248 | **0.303** | 0.438 | −0.190 | −0.135 | **29 %** |
+
+and the full statistics, before → after:
+
+| point | mean | p05 | p50 | p95 | sat | mean Δ/255 | bias |
+|---|---|---|---|---|---|---|---|
+| zenith away | 0.569 → 0.519 | 0.317 → 0.317 | 0.557 → 0.495 | 0.734 → 0.712 | 0.098 → 0.086 | 8.94 | −11.47 |
+| mid away | 0.533 → 0.490 | 0.324 → 0.321 | 0.546 → 0.476 | 0.719 → 0.704 | 0.176 → 0.165 | 9.43 | −12.12 |
+| horizon away | 0.606 → 0.553 | **0.521 → 0.433** | 0.598 → 0.535 | 0.723 → 0.715 | 0.085 → 0.073 | 7.57 | −9.76 |
+| zenith sun | 0.569 → 0.506 | **0.497 → 0.424** | 0.542 → 0.475 | 0.794 → 0.763 | 0.084 → 0.070 | 12.08 | −15.57 |
+| mid sun | 0.560 → 0.506 | **0.465 → 0.429** | 0.545 → 0.480 | 0.719 → 0.703 | 0.117 → 0.102 | 10.60 | −13.65 |
+| horizon sun | 0.590 → 0.539 | **0.494 → 0.431** | 0.573 → 0.511 | 0.743 → 0.734 | 0.113 → 0.103 | 7.18 | −9.27 |
+
+### The whole dome, and the reading of it that matters
+
+`Shots/P12_dome_occoff.png` and `Shots/P12_dome_occon.png` — 40 tiles each, 8 azimuths x 5 elevations,
+`--shot-frames 90 --play`.
+
+Whole-frame `ImageDiff` per tile: **every one of the forty moved**, 55.4 % to 100 % of pixels, mean Δ 2.54
+to 12.54 of 255, max 20 to 42, and **the bias is negative at all forty** (−3.24 to −16.21). The term
+darkens, everywhere, which is what an occluder does.
+
+**Contrast (`p95 − p05`) falls at 34 of the 40 tiles and rises at 6. That statistic is misleading here and
+the mechanism is exact.** Where a tile contains clear sky, `p05` IS the sky — and this term touches only
+cloud, so `p05` cannot move while `p95`, the sunlit cloud top, falls a little; `p95 − p05` can then only
+shrink. Where a tile is filled with deck, `p05` is cloud, and it falls hard. Checked against the tiles
+rather than asserted: at the losing tiles `p05` is identical to three decimals before and after, and **the
+six tiles that gain contrast are exactly the six whose `p05` drops** — `AZ 135 / EL 25, 45, 65`,
+`AZ 180 / EL 25, 45` and `AZ 225 / EL 45`, all of them the sunward sector at mid elevation where the frame
+is deck rather than sky. The largest is `AZ 135 / EL 45`, 0.283 → 0.327.
+
+So the honest summary is **not** "contrast improves". It is: *the term puts a dark end into frames that had
+none, and where a frame had no dark end to gain it simply darkens the cloud a little.* The six protocol
+points, which are the only angles with a UE reference to be right or wrong against, close 34 %, 29 %, 24 %
+and 9 % of the gap at four of six and lose 0.022 and 0.012 of contrast at the two away-azimuth points
+whose `p05` is blue sky.
+
+### And the frames, because no statistic here decides it
+
+`Shots/P12_el25_pair.png` and `Shots/P12_el45_pair.png` — the two mid elevations this programme's defects
+have hidden at, off on the left and on on the right.
+
+At `EL 25` the change is not subtle. The OFF frame is the "flat white cut-out" the component's own tooltip
+describes: lobes lit as brightly underneath as on top, and the deck at `AZ 135` a featureless pale wash.
+The ON frame gives every lobe a grey underside and the deck a shaded ceiling. At `EL 45 / AZ 000` — one of
+the two points whose contrast statistic went DOWN — the flat white mass across the middle of the frame
+gains a modelled body while the lobe tops stay bright. **The tile whose number got worse is one of the
+tiles that looks most improved**, which is why this section leads with the frames and not with the table.
+
+**Nothing in the sweep looks worse.** The failure this was watched for — Р4's brown deck at full strength —
+is not present and could not be: it was the pre-fix term, and Р7 removed it. Saturation falls a little
+everywhere (0.098 → 0.086 at the zenith away, 0.117 → 0.102 at mid sun), which is what removing sky light
+from a shaded region does, and no point goes warm.
+
+### The price — measured by Р4, not re-measured here
+
+0.410 ms of the pass's own GPU self time and **2.00 MiB per view, FIXED rather than resolution-scaled**
+(128x16x128 over the field's own region). Against D-9's budgets: 20.5 % of the 2 ms and 3.1 % of the
+64 MB. Re-measuring it was explicitly out of scope; what IS verified here is that the pass really is
+dispatched — the allocation line above, in 40 of 40 tiles, quoting the 2.00 MiB itself.
+
+### What this makes stale, and what was NOT done about it
+
+Every figure in `DIAGNOSIS_CARTOON.md`, `CONTROL_CENSUS.md` and this file that was taken from a rendered
+frame of a cloud scene was taken against the occlusion-off sky. **None of them has been adjusted.** Each
+document now carries a banner at its head saying so, and the figures that are stale in a stronger sense
+than "a moved baseline" are flagged where they stand:
+
+* `CONTROL_CENSUS.md` rows **36** and **37** — row 36 swept `AmbientOcclusionStrength` against the PROFILE
+  term, which the shipped flag no longer selects, so it is not a larger or smaller version of the shipped
+  measurement but a different quantity; row 37's `on` leg was at strength 0.5. Both are re-measured at the
+  row.
+* `DIAGNOSIS_CARTOON.md` ranking **#1** and **#2** and the three knock-out tables of §3. #1 and #2 are the
+  finding this task acts on.
+* §PR's `THE NEW BASE` table in this file, superseded by the six points above.
+* `P8_DOME_AND_THE_LOW_DECK.md` §4.2, which was not in the brief's list and needed two corrections of its
+  own — see there.
+
+### Two things found while doing this, neither of them about the occlusion
+
+**`P8_DOME_AND_THE_LOW_DECK.md` §4.2 says "six scenes even mention the field".** It was four, at that
+document's own commit and today:
+`git grep -l SkyOcclusionVolume 8d4ae29c -- Editor/Resources/Assets/Scenes` returns `Clouds_Protocol` and
+`PR_Hero0/3/8`. Its substantive claim — that no scene switched it on — was correct.
+
+**The same §4.2's four rows were taken at strength 1.0, and the document does not say so.** No strength
+appears anywhere in the section and the shipped default at the time was 0.5, so it reads as "only the flag
+was flipped". Re-measuring the same A/B here at `AZ 000 / EL 25` gives mean Δ **9.3561** / bias **−12.0336**
+against its 9.36 / −12.03, while the same A/B at strength 0.5 gives **1.74** / **−1.49**. Its rows are
+therefore about the configuration that now ships, and its conclusion — "not a clean win and it is not
+free" — applies to Р12 directly.
