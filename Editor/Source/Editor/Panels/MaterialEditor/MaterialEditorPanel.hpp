@@ -60,6 +60,21 @@ namespace Desert::Editor
             return m_Preview != nullptr;
         }
 
+        // NOT ALWAYS — and that is the point. A material whose shader draws no mesh geometry (a
+        // Terrain-domain one; see PreviewUnavailableReason) never builds a PreviewViewport at all, so it
+        // is not demand for a renderer slot that has yet to land. Answering the base class's `true` here
+        // would make such a window count against the six for ever, and the census would tell the user to
+        // close a window that holds nothing and never will — the exact failure the four cloud documents
+        // caused before IAssetEditorPanel::ClaimsRendererSlot existed.
+        //
+        // Read from the same string the pane prints, so the census and what the artist is looking at
+        // cannot disagree. Empty before the first draw, which is the conservative answer: a window that
+        // has not decided yet is counted as a claimant.
+        [[nodiscard]] bool ClaimsRendererSlot() const override
+        {
+            return m_PreviewUnavailable.empty();
+        }
+
     private:
         // @p asset is null while the material is not loaded — the toolbar still draws its view controls,
         // but the actions that write the asset are not offered rather than offered and doing nothing.
@@ -69,6 +84,13 @@ namespace Desert::Editor
         // its parent chain's shader, so a picker on one would be a control with nothing behind it.
         // Returns true when the shader changed (the runtime material is a different CLASS and must be
         // rebuilt, not merely re-valued).
+        //
+        // THE LIST IS THIS MATERIAL'S OWN DOMAIN, not a fixed one. It used to filter on a hardcoded
+        // `Domain != Surface`, so a Terrain material displayed `Terrain` over a list that could not
+        // contain it: the one value the combo was showing was the one value it could not reproduce, and
+        // any click at all moved the material into another domain — where its parameters name uniform
+        // fields the new shader does not have. Nothing downstream rejects that mismatch (it builds a
+        // valid pipeline and draws wrong), so the picker is the only place it can be prevented.
         bool DrawShaderPicker( Assets::SurfaceMaterialAsset& asset );
 
         // The schema-driven parameter editor — every parameter the shader declares, TEXTURES INCLUDED.
@@ -99,10 +121,38 @@ namespace Desert::Editor
         void EnsurePreview();  // create the viewport + scene + renderer (claims a slot)
         void ReleasePreview(); // destroy them (returns the slot)
 
+        // Why this material cannot be shown on a preview primitive, or empty while it can.
+        //
+        // The pane draws a sphere, a cube or a plane through the ordinary mesh path, so a material only
+        // appears in it if its shader draws MESH GEOMETRY. Both of the engine's Terrain-domain shaders
+        // synthesize their geometry from `gl_VertexIndex` instead — Terrain.shader as a control-point
+        // patch grid for the tessellator, Grass.shader as indirect blade instances — and neither has
+        // anything that could be fed by a primitive's vertex buffer. Nothing errors and nothing crashes:
+        // the pane simply renders an empty scene, and a grey rectangle that explains nothing is the
+        // silent fallback the delivery contract forbids (§1.4). An artist cannot tell "this domain has no
+        // preview shape" from "the preview is broken", and the difference decides whether they go looking
+        // for a bug.
+        //
+        // Also answers for the two states that are not about the domain at all — a shader that is not
+        // loaded, and one that is registered but has no compiled stages (ShaderService keeps the NAME
+        // either way, deliberately, and MeshRenderer skips the draw) — because an empty pane means the
+        // same thing to the eye in all three cases and something different in each.
+        [[nodiscard]] std::string PreviewUnavailableReason( const std::string& shaderName ) const;
+
+        // The pane when there is no image: the same rectangle as before, with the reason written inside
+        // it. Inside, not underneath — the message has to be where the picture would have been, or it is
+        // one more line in a column of labels.
+        void DrawPreviewPlaceholder( float side, const std::string& reason ) const;
+
         // The name of the shader this document's material actually draws with, or empty if the material is
         // gone. Recomputed rather than cached: the shader a material names is editable (this window's own
         // picker, and the Node Graph rewriting its scratch material), so a cached copy would leave the
         // window watching rebuilds of a shader it no longer uses.
+        //
+        // An INSTANCE resolves through its parent, because an instance has no shader of its own — that is
+        // why it is shown no picker. Reading the child's own name gave "StaticMeshPBR", the default a
+        // material with no name reports, so an instance window watched rebuilds of a shader it does not
+        // draw with and kept its pipelines from before the parent shader's recompile.
         [[nodiscard]] std::string EffectiveShaderName() const;
 
         std::shared_ptr<Assets::AssetManager> m_AssetManager;
@@ -122,5 +172,12 @@ namespace Desert::Editor
         // Set in OnUIRender, consumed in OnPreUpdate: the render is only paid for while the window really
         // drew last frame, so a hidden dock tab costs nothing even before the window is closed outright.
         bool m_DrewThisFrame = false;
+
+        // PreviewUnavailableReason for the material as it stood on the last drawn frame; empty means the
+        // pane shows a real render. Computed in OnUIRender and read by OnPreUpdate on the next frame —
+        // the same one-frame handshake m_DrewThisFrame uses, and for the same reason: OnPreUpdate is the
+        // only place allowed to build or destroy the renderer, and it must not resolve the shader a
+        // second time and risk answering differently from the message already on screen.
+        std::string m_PreviewUnavailable;
     };
 } // namespace Desert::Editor

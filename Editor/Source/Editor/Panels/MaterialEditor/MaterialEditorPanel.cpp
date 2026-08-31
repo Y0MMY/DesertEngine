@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace Desert::Editor
 {
@@ -50,6 +51,59 @@ namespace Desert::Editor
                     return "Plane";
             }
             return "Sphere";
+        }
+
+        // What a domain is CALLED in this window. Written out rather than reflected off the enum: this is
+        // artist-facing copy that has to read as English beside a material's name, and "Unspecified" is a
+        // parser state, not a thing to tell somebody.
+        const char* DomainName( ::Desert::Core::Formats::ShaderDomain domain )
+        {
+            using D = ::Desert::Core::Formats::ShaderDomain;
+            switch ( domain )
+            {
+                case D::Unspecified:
+                    return "engine-internal";
+                case D::Surface:
+                    return "Surface";
+                case D::Terrain:
+                    return "Terrain";
+                case D::Skybox:
+                    return "Skybox";
+                case D::PostProcess:
+                    return "Post Process";
+            }
+            return "engine-internal";
+        }
+
+        // What a shader of this domain draws INSTEAD, as a clause following the shader's own name. The half
+        // of "no preview here" that is actually useful: being told a pane cannot show something is only
+        // half an answer while nobody says where to look for it.
+        //
+        // ASCII ONLY, here and in every other string this file puts on screen. The editor's fonts are built
+        // with GetGlyphRangesCyrillic() (EditorResources.cpp), whose Latin block stops at U+00FF: an em dash
+        // or an ellipsis character is outside it and draws as a missing glyph. A message explaining a blank
+        // pane cannot afford to be the thing that renders wrong.
+        const char* WhatTheDomainDrawsInstead( ::Desert::Core::Formats::ShaderDomain domain )
+        {
+            using D = ::Desert::Core::Formats::ShaderDomain;
+            switch ( domain )
+            {
+                case D::Terrain:
+                    return "draws the scene's terrain and its grass, geometry the renderer synthesizes "
+                           "itself, so there is no sphere, cube or plane this pane could put it on. Edit "
+                           "it here and look at the terrain in the viewport.";
+                case D::Skybox:
+                    return "draws the sky behind everything else, not an object this pane could place.";
+                case D::PostProcess:
+                    return "draws over the whole finished frame, not an object this pane could place.";
+                case D::Unspecified:
+                case D::Surface:
+                    break;
+            }
+            // Surface never reaches here (it is the one domain the pane CAN draw), so this is the
+            // Unspecified case: a shader with no `Domain` line at all, which the engine treats as internal.
+            return "declares no material domain, so the engine treats it as internal. No material should be "
+                   "pointing at it at all.";
         }
 
         // The window's display name is the material's file stem, taken ONCE — the title carries the ImGui
@@ -98,7 +152,70 @@ namespace Desert::Editor
         if ( !m_AssetManager )
             return {};
         auto asset = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() );
-        return asset ? asset->Data().EffectiveShaderName() : std::string{};
+        if ( !asset )
+            return {};
+
+        // Through the parent for an instance — see the header. MaterialData::EffectiveShaderName() answers
+        // "StaticMeshPBR" for a material that names none, which is right for a base asset and wrong for a
+        // child, whose shader is simply somewhere else.
+        if ( auto parent = ResolveParent( *asset ) )
+            return parent->Data().EffectiveShaderName();
+        return asset->Data().EffectiveShaderName();
+    }
+
+    std::string MaterialEditorPanel::PreviewUnavailableReason( const std::string& shaderName ) const
+    {
+        auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
+        if ( !shaderService )
+            return "No preview: the shader service is not running, so nothing can be resolved to draw with.";
+
+        auto shader = shaderService->GetByName( shaderName );
+        if ( !shader )
+            return "No preview: the shader '" + shaderName +
+                   "' is not loaded, so there is nothing to draw this material with.";
+
+        // Registered-but-uncompiled is a real state and a deliberate one: ShaderService keeps the NAME of a
+        // shader that failed to compile so the material does not quietly fall back to the standard one.
+        // MeshRenderer then skips the draw outright, which is why the pane would be empty for a reason that
+        // has nothing to do with this material's own values.
+        if ( !shader->IsCompiled() )
+            return "No preview: the shader '" + shaderName +
+                   "' is registered but has no compiled stages, so nothing draws with it. The compile "
+                   "error is in the Logs panel, named after this shader.";
+
+        const auto domain = shader->GetProgramMeta().Domain;
+        if ( domain != ::Desert::Core::Formats::ShaderDomain::Surface )
+            return std::string( "No preview shape for a " ) + DomainName( domain ) + "-domain material.\n\n'" +
+                   shaderName + "' " + WhatTheDomainDrawsInstead( domain ) +
+                   "\n\nThe parameters beside it edit the material normally.";
+
+        return {};
+    }
+
+    void MaterialEditorPanel::DrawPreviewPlaceholder( float side, const std::string& reason ) const
+    {
+        // Local (window) coordinates as well as screen ones: the draw list wants screen, and both the text
+        // wrap position and the cursor restore below are window-space. Mixing the two puts the wrap column
+        // hundreds of pixels off and the message renders as one unbroken line.
+        const ImVec2 local  = ImGui::GetCursorPos();
+        const ImVec2 screen = ImGui::GetCursorScreenPos();
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled( screen, ImVec2( screen.x + side, screen.y + side ), IM_COL32( 28, 28, 32, 255 ), 4.0f );
+        dl->AddRect( screen, ImVec2( screen.x + side, screen.y + side ), IM_COL32( 68, 68, 76, 255 ), 4.0f );
+
+        constexpr float kPad = 14.0f;
+        ImGui::SetCursorPos( ImVec2( local.x + kPad, local.y + kPad ) );
+        ImGui::PushTextWrapPos( local.x + side - kPad );
+        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.74f, 0.74f, 0.78f, 1.0f ) );
+        ImGui::TextUnformatted( reason.c_str() );
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+
+        // Back to the top-left corner and claim exactly the square an image would have claimed. Without
+        // this the parameter column beside the pane moves with the length of the message.
+        ImGui::SetCursorPos( local );
+        ImGui::Dummy( ImVec2( side, side ) );
     }
 
     void MaterialEditorPanel::EnsurePreview()
@@ -139,6 +256,17 @@ namespace Desert::Editor
         if ( !m_DrewThisFrame )
             return;
         m_DrewThisFrame = false;
+
+        // A material the pane cannot draw does not get a renderer slot. RELEASED rather than merely not
+        // created: the shader behind a material is editable under a live window (the Node Graph rewrites
+        // its scratch material's shader, and a `.demat` can be reloaded from disk), so a window that
+        // already holds a slot has to give it back when its material moves to a domain with no shape —
+        // otherwise one of the six is held for ever by a window showing a paragraph of text.
+        if ( !m_PreviewUnavailable.empty() )
+        {
+            ReleasePreview();
+            return;
+        }
 
         EnsurePreview();
 
@@ -211,7 +339,8 @@ namespace Desert::Editor
                 PropagateEdit( *asset, /*isInstance=*/true );
             }
             if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Drop every override — back to the parent's values" );
+                // ASCII: an em dash here draws as '?' — measured, see WhatTheDomainDrawsInstead.
+                ImGui::SetTooltip( "Drop every override, back to the parent's values" );
         }
     }
 
@@ -238,25 +367,79 @@ namespace Desert::Editor
     {
         auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
         if ( !shaderService )
+        {
+            ImGui::TextDisabled( "Shader: the shader service is not running" );
             return false;
+        }
 
-        // No hardcoded entries: the picker lists every Surface-domain shader from the service —
-        // StaticMeshPBR (the standard shader with the batched backend) included, like any other.
         const std::string current = asset.Data().EffectiveShaderName();
+
+        // THE DOMAIN COMES FROM THE MATERIAL, and everything below follows from it. See the header for
+        // what the hardcoded `Surface` filter did to a Terrain material.
+        auto currentShader = shaderService->GetByName( current );
+        if ( !currentShader )
+        {
+            // No shader, no domain, and therefore no honest list. Falling back to "well, Surface then"
+            // would be the whole defect again: a click would silently rehome a material whose real domain
+            // nobody in this process can currently read.
+            ImGui::TextDisabled( "Shader" );
+            ImGui::TextDisabled( "'%s' is not loaded, so its domain is unknown and no list can be offered",
+                                 current.c_str() );
+            return false;
+        }
+
+        // IsUserAssignable() is asked of the MATERIAL'S OWN shader, not of the candidates: inside one
+        // domain every entry is assignable by construction, so asking it there would be a tautology. Here
+        // it answers the question that is not — whether this material sits in a domain a user authors
+        // materials in at all. A `.demat` naming a Skybox shader, or one with no `Domain` line, is already
+        // drawing nothing; the list it needs is not "more of the same domain".
+        const bool assignable = currentShader->GetProgramMeta().IsUserAssignable();
+        const auto domain     = currentShader->GetProgramMeta().Domain;
+
+        if ( assignable )
+        {
+            ImGui::TextDisabled( "Shader  (%s domain)", DomainName( domain ) );
+        }
+        else
+        {
+            ImGui::TextDisabled( "Shader" );
+            ImGui::TextColored( ImVec4( 1.0f, 0.72f, 0.35f, 1.0f ),
+                                "'%s' is not a material shader (%s). Pick a real one below.", current.c_str(),
+                                DomainName( domain ) );
+        }
+
+        // Sorted, because GetAllNames() walks an unordered_map: without this the same project shows the
+        // same shaders in a different order every run, and the entry under the cursor moves between
+        // sessions.
+        std::vector<std::string> names = shaderService->GetAllNames();
+        std::sort( names.begin(), names.end() );
 
         bool shaderChanged = false;
         ImGui::SetNextItemWidth( -FLT_MIN );
-        if ( ImGui::BeginCombo( "##shader", current.c_str() ) )
+        const bool open    = ImGui::BeginCombo( "##shader", current.c_str() );
+        const bool hovered = ImGui::IsItemHovered(); // the combo itself; after EndCombo this is the popup
+        if ( open )
         {
-            for ( const auto& name : shaderService->GetAllNames() )
+            for ( const auto& name : names )
             {
                 auto candidate = shaderService->GetByName( name );
-                if ( !candidate ||
-                     candidate->GetProgramMeta().Domain != ::Desert::Core::Formats::ShaderDomain::Surface )
+                if ( !candidate )
                     continue;
 
+                const auto& meta = candidate->GetProgramMeta();
+                // Same domain when the material has one; every assignable domain when it does not, which
+                // is the only way out of a material pointing at an engine shader.
+                const bool offer = assignable ? ( meta.Domain == domain ) : meta.IsUserAssignable();
+                if ( !offer && name != current )
+                    continue;
+
+                // The current entry is listed even when it would not otherwise qualify. A combo that
+                // cannot reproduce the value it is displaying is the defect this function was rewritten
+                // for, and a shader that fails to compile keeps its name precisely so it stays visible.
                 const bool selected = ( name == current );
-                if ( ImGui::Selectable( name.c_str(), selected ) && !selected )
+                const std::string label    = candidate->IsCompiled() ? name : name + "  (does not compile)";
+
+                if ( ImGui::Selectable( label.c_str(), selected ) && !selected )
                 {
                     // Params always belong to a shader's schema — a switch clears them; the
                     // schema editor reseeds defaults on the next draw.
@@ -269,6 +452,20 @@ namespace Desert::Editor
                     ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
+        }
+
+        if ( hovered )
+        {
+            if ( assignable )
+                ImGui::SetTooltip( "%s-domain shaders only.\nA material's domain decides how the renderer "
+                                   "draws it at all; a shader from another domain would leave these "
+                                   "parameters naming uniform fields it does not have, and nothing further "
+                                   "down rejects that.",
+                                   DomainName( domain ) );
+            else
+                ImGui::SetTooltip( "Every shader a material may use.\n'%s' is not one of them, so this list "
+                                   "is the repair rather than the usual same-domain choice.",
+                                   current.c_str() );
         }
         return shaderChanged;
     }
@@ -466,7 +663,7 @@ namespace Desert::Editor
         const std::uintmax_t written = std::filesystem::file_size( path, sizeEc );
         if ( sizeEc || written != text.size() )
         {
-            LOG_ERROR( "[MaterialEditor] '{}' was not written ({} bytes on disk, {} expected) — this "
+            LOG_ERROR( "[MaterialEditor] '{}' was not written ({} bytes on disk, {} expected): this "
                        "material's edits are still only in memory.",
                        path.generic_string(), sizeEc ? 0ull : static_cast<uint64_t>( written ), text.size() );
             return;
@@ -494,6 +691,12 @@ namespace Desert::Editor
         auto       parent     = asset ? ResolveParent( *asset ) : nullptr;
         const bool isInstance = asset && asset->Data().IsInstance();
 
+        // Decided HERE, once, for both the pane below and next frame's OnPreUpdate — which is the only
+        // place allowed to build or destroy the renderer. Resolving it twice is how the window would come
+        // to hold a slot while telling the artist it has no preview, or the reverse.
+        m_PreviewUnavailable = asset ? PreviewUnavailableReason( EffectiveShaderName() )
+                                     : std::string( "No preview: this material is no longer loaded." );
+
         DrawToolbar( asset.get(), isInstance );
         ImGui::Separator();
 
@@ -504,17 +707,18 @@ namespace Desert::Editor
         // The image is last frame's render; recording this frame's happens in OnPreUpdate. Rendering from
         // inside the ImGui pass destroys descriptor pools whose sets are bound to the command buffer being
         // recorded — the editor has been bitten by exactly that.
-        if ( m_Preview && m_UIHelper && m_Preview->HasContent() )
+        if ( m_PreviewUnavailable.empty() && m_Preview && m_UIHelper && m_Preview->HasContent() )
         {
             m_Preview->Draw( *m_UIHelper, ImVec2( imageSide, imageSide ) );
         }
         else
         {
-            ImDrawList*  dl = ImGui::GetWindowDrawList();
-            const ImVec2 p0 = ImGui::GetCursorScreenPos();
-            dl->AddRectFilled( p0, ImVec2( p0.x + imageSide, p0.y + imageSide ), IM_COL32( 28, 28, 32, 255 ),
-                               4.0f );
-            ImGui::Dummy( ImVec2( imageSide, imageSide ) );
+            // The empty reason is the one frame between the window first drawing and OnPreUpdate building
+            // its viewport. Said out loud rather than left as a blank rectangle: "starting" and "there is
+            // nothing to show you" look identical, and only one of them is worth waiting for.
+            DrawPreviewPlaceholder( imageSide, m_PreviewUnavailable.empty()
+                                                    ? std::string( "Starting the preview..." )
+                                                    : m_PreviewUnavailable );
         }
 
         ImGui::SameLine();
@@ -539,8 +743,8 @@ namespace Desert::Editor
             else
             {
                 // The shader lives INSIDE the material (Unity's model, and ours). An instance never gets a
-                // picker: it always renders with its parent chain's shader.
-                ImGui::TextDisabled( "Shader" );
+                // picker: it always renders with its parent chain's shader. The caption is the picker's
+                // own, because it names the domain the list is filtered to and that is not knowable here.
                 if ( DrawShaderPicker( *asset ) )
                 {
                     // A different shader means a different runtime material CLASS — the cached one cannot be
