@@ -3,6 +3,7 @@
 #include <Engine/Graphic/Materials/Material.hpp>
 #include <Engine/Graphic/Materials/MaterialOverrides.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
+#include <Engine/Runtime/Services/Material/MaterialIdentity.hpp>
 
 namespace Desert::Runtime
 {
@@ -10,9 +11,15 @@ namespace Desert::Runtime
     {
     public:
         // Eager: build the runtime Material now.
+        //
+        // REFUSES, naming both files, when the handle is already held by a DIFFERENT `.demat` (DC 1.4):
+        // the first registration keeps the identity and the second is rejected rather than silently
+        // taking it over. Before this, whichever material registered second won the service map and the
+        // other could never resolve — with nothing logged to say a material had been displaced.
         Common::BoolResultStr Register( const std::shared_ptr<Assets::MaterialAsset>& materialAsset );
         // Lazy: register the asset SHELL + the external->internal map only; the runtime Material (which binds
-        // its textures) is built on the first Get.
+        // its textures) is built on the first Get. Refuses a colliding identity on the same terms as
+        // Register above.
         Common::BoolResultStr RegisterAsset( const std::shared_ptr<Assets::MaterialAsset>& materialAsset );
 
         // Builds-on-miss from a shell. A material-INSTANCE handle resolves through its parent
@@ -79,6 +86,11 @@ namespace Desert::Runtime
         }
 
     private:
+        // BOOLSUCCESS when `handle` is free, or held by the very file that is registering again. Otherwise
+        // it LOGS both filepaths and returns the same text as an error, and the caller writes nothing.
+        Common::BoolResultStr RefuseOnCollision( const Assets::AssetHandle&                    handle,
+                                                 const std::shared_ptr<Assets::MaterialAsset>& incoming ) const;
+
         uint32_t m_InvalidationVersion = 0;
         mutable std::unordered_map<Assets::AssetHandle, std::shared_ptr<Graphic::Material>> m_Materials;
         std::unordered_map<Common::UUID, Assets::AssetHandle>                               m_ExternalToInternal;

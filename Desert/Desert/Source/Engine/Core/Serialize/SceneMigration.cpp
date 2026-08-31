@@ -906,7 +906,203 @@ namespace Desert::Core
         return report;
     }
 
-    SceneMigrationReport MigrateScene( SceneSerialized& scene )
+    namespace
+    {
+        // The components that can name a material, and the key each names it under. `MaterialPaths` is a
+        // LIST (one per mesh slot); `Terrain.Material` is a single string. Kept as one table so a fifth
+        // component that gains a material slot is one line here rather than a fourth copy of the loop.
+        struct MaterialPathSite
+        {
+            const char* Component;
+            const char* Key;
+            bool        IsList;
+        };
+
+        constexpr MaterialPathSite kMaterialPathSites[] = {
+             { "StaticMesh", "MaterialPaths", true },
+             { "InstancedStaticMesh", "MaterialPaths", true },
+             { "SkinnedMesh", "MaterialPaths", true },
+             { "Terrain", "Material", false },
+        };
+
+        // The path `stored` names, expressed relative to `assetsRoot`, or nullopt when it already is (or
+        // lies outside the root, or is empty).
+        //
+        // Lexical on purpose - see the header. The root's own components are matched as a contiguous run
+        // inside the stored path and the LAST match wins, so the answer does not depend on whether the
+        // root arrived spelled relatively or absolutely.
+        std::optional<std::string> RelativeToAssetsRoot( const std::string&           stored,
+                                                         const std::filesystem::path& assetsRoot )
+        {
+            if ( stored.empty() )
+                return std::nullopt; // "no material in this slot" - not a path to rewrite
+
+            std::vector<std::string> rootParts;
+            for ( const auto& part : assetsRoot.lexically_normal() )
+            {
+                // A trailing separator makes the last component an empty string ("Resources/Assets/" ->
+                // {"Resources","Assets",""}), and matching on it would match everywhere.
+                if ( !part.empty() && part != "." )
+                    rootParts.push_back( part.generic_string() );
+            }
+            if ( rootParts.empty() )
+                return std::nullopt;
+
+            std::vector<std::string> pathParts;
+            for ( const auto& part : std::filesystem::path( stored ).lexically_normal() )
+                pathParts.push_back( part.generic_string() );
+
+            if ( pathParts.size() <= rootParts.size() )
+                return std::nullopt;
+
+            std::size_t bestEnd = 0; // one past the last component of the best match, 0 = no match
+            for ( std::size_t start = 0; start + rootParts.size() < pathParts.size(); ++start )
+            {
+                if ( std::equal( rootParts.begin(), rootParts.end(), pathParts.begin() + start ) )
+                    bestEnd = start + rootParts.size();
+            }
+            if ( bestEnd == 0 )
+                return std::nullopt; // not under this root - the caller reports it rather than guessing
+
+            std::string relative;
+            for ( std::size_t i = bestEnd; i < pathParts.size(); ++i )
+            {
+                if ( !relative.empty() )
+                    relative += '/';
+                relative += pathParts[i];
+            }
+            if ( relative.empty() || relative == stored )
+                return std::nullopt;
+            return relative;
+        }
+    } // namespace
+
+    MaterialPathMigrationReport MigrateMaterialPathV7ToV8( std::vector<Assets::EntityData>& entities,
+                                                           const std::filesystem::path&     assetsRoot )
+    {
+        MaterialPathMigrationReport report;
+
+        for ( auto& entity : entities )
+        {
+            const std::string tag     = entity.Tag.value_or( "Entity" );
+            bool              touched = false;
+
+            for ( const auto& site : kMaterialPathSites )
+            {
+                const auto payload = entity.Components.get( site.Component );
+                if ( !payload.has_value() )
+                    continue;
+
+                const auto fields = payload.value().to_object();
+                if ( !fields.has_value() )
+                {
+                    LOG_WARN( "[SceneMigration] entity '{0}': the {1} payload is {2}, not an object - the "
+                              "material path(s) in it could not be made relative and stay as they are",
+                              tag, site.Component, Describe( payload.value() ) );
+                    continue;
+                }
+
+                const auto named = fields.value().get( site.Key );
+                if ( !named.has_value() )
+                    continue; // this component names no material - nothing to do, tree untouched
+
+                // Rebuilt rather than assigned into: rfl::Object is an ordered vector of pairs, and copying
+                // every key while replacing one value is what every migration above this one does. Order is
+                // preserved, so a scene that changes nothing round-trips byte-identically.
+                rfl::Generic::Object kept;
+                bool                 rewroteHere = false;
+
+                for ( const auto& [key, value] : fields.value() )
+                {
+                    if ( key != site.Key )
+                    {
+                        kept[key] = value;
+                        continue;
+                    }
+
+                    if ( !site.IsList )
+                    {
+                        const auto text = value.to_string();
+                        if ( !text.has_value() )
+                        {
+                            LOG_WARN( "[SceneMigration] entity '{0}': {1}.{2} is {3}, not a string - it is "
+                                      "left exactly as it is and still names no material relative to the "
+                                      "assets root",
+                                      tag, site.Component, site.Key, Describe( value ) );
+                            kept[key] = value;
+                            continue;
+                        }
+
+                        if ( const auto rel = RelativeToAssetsRoot( text.value(), assetsRoot ) )
+                        {
+                            kept[key] = *rel;
+                            report.Paths += 1;
+                            rewroteHere = true;
+                        }
+                        else
+                        {
+                            if ( std::filesystem::path( text.value() ).is_absolute() )
+                                report.OutsideNames.push_back( tag + " > " + site.Component + "." + site.Key +
+                                                               " = " + text.value() );
+                            kept[key] = value;
+                        }
+                        continue;
+                    }
+
+                    const auto rows = value.to_array();
+                    if ( !rows.has_value() )
+                    {
+                        LOG_WARN( "[SceneMigration] entity '{0}': {1}.{2} is {3}, not an array - the slot "
+                                  "paths in it are left exactly as they are",
+                                  tag, site.Component, site.Key, Describe( value ) );
+                        kept[key] = value;
+                        continue;
+                    }
+
+                    rfl::Generic::Array slots;
+                    for ( const auto& row : rows.value() )
+                    {
+                        const auto text = row.to_string();
+                        if ( !text.has_value() )
+                        {
+                            LOG_WARN( "[SceneMigration] entity '{0}': a slot of {1}.{2} is {3}, not a "
+                                      "string - it is left exactly as it is",
+                                      tag, site.Component, site.Key, Describe( row ) );
+                            slots.push_back( row );
+                            continue;
+                        }
+
+                        if ( const auto rel = RelativeToAssetsRoot( text.value(), assetsRoot ) )
+                        {
+                            slots.push_back( rfl::Generic( *rel ) );
+                            report.Paths += 1;
+                            rewroteHere = true;
+                            continue;
+                        }
+
+                        if ( std::filesystem::path( text.value() ).is_absolute() )
+                            report.OutsideNames.push_back( tag + " > " + site.Component + "." + site.Key + " = " +
+                                                           text.value() );
+                        slots.push_back( row );
+                    }
+                    kept[key] = std::move( slots );
+                }
+
+                if ( !rewroteHere )
+                    continue; // already relative, or nothing usable - leave the tree byte-identical
+
+                entity.Components[site.Component] = rfl::Generic( std::move( kept ) );
+                touched                           = true;
+            }
+
+            if ( touched )
+                report.Entities += 1;
+        }
+
+        return report;
+    }
+
+    SceneMigrationReport MigrateScene( SceneSerialized& scene, const std::filesystem::path& assetsRoot )
     {
         SceneMigrationReport report;
 
@@ -966,6 +1162,16 @@ namespace Desert::Core
         {
             report.TerrainMaterialRaised = true;
             report.TerrainMaterial       = MigrateTerrainMaterialV6ToV7( scene.Entities );
+        }
+
+        // AFTER the step above, and this pair's order does matter: v6 -> v7 REMOVES the inline Material
+        // component from terrain entities, and this step reads `Terrain.Material` - a different key on a
+        // different payload, but running it first would rewrite paths inside a component that is about to
+        // be deleted and report work that did not survive.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionMaterialPath )
+        {
+            report.MaterialPathRaised = true;
+            report.MaterialPath       = MigrateMaterialPathV7ToV8( scene.Entities, assetsRoot );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,
