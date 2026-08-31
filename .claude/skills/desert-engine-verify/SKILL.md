@@ -330,6 +330,20 @@ The check that catches this class costs one line, and it is worth running whenev
 for b in $(ls build/Bin/Tests/Debug); do case "$b" in <your skip list>) echo "SKIPPED BUT IS A TEST: $b";; esac; done
 ```
 
+**A moved or renamed source file leaves a stale `.d` behind, and `make` then demands the deleted
+path.** After a task moved `SceneMigration.cpp` out of the engine, nine suites reported `BUILD-FAIL`
+with *"No rule to make target `…/Engine/Core/Serialize/SceneMigration.cpp'"* — while the generated
+makefile referenced only the new path. The old path was in
+`build/Tests/Intermediates/…/<Suite>/SceneMigration.d`, which `make` includes, so the previous
+build's dependency graph outlived the file. Deleting those intermediates fixed all nine.
+
+CI never sees this — it checks out fresh — so it is a **local sweep reporting a failure that does
+not exist**, which is as expensive as the reverse. It was the third stale artefact to lie to a sweep
+in one day: a skip list that hid a real suite, `.make` files that are untracked and outlive a
+rename, and this. **When a sweep fails right after files moved, delete the intermediates for the
+failing targets before believing it** — and re-run `premake5 gmake`, because the makefiles are
+generated and untracked too.
+
 **Never trust the first render in a fresh worktree.** A task's baseline differed from its result by
 110 pixels of 980 480, and four experiments eliminated every plausible cause — shader recompilation,
 a changed asset header, an unrelated translation unit — before rebuilding the previous binary settled
