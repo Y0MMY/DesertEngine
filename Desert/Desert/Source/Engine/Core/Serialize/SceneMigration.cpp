@@ -14,6 +14,7 @@
 #include <glm/trigonometric.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <optional>
 #include <string>
@@ -931,6 +932,28 @@ namespace Desert::Core
         // Lexical on purpose - see the header. The root's own components are matched as a contiguous run
         // inside the stored path and the LAST match wins, so the answer does not depend on whether the
         // root arrived spelled relatively or absolutely.
+        // Does this string LOOK rooted, on any platform rather than on this one?
+        //
+        // std::filesystem::path::is_absolute() asks the grammar of the HOST, and that is the wrong question
+        // here. A scene travels between developers: a POSIX "/Users/dan/Proj/.../M.demat" read on Windows is
+        // is_absolute() == FALSE, because Windows wants a drive letter. Used to decide whether to REPORT an
+        // unrewritable path, that hole is silent exactly where it matters most -- the Mac-authored scene
+        // opened on Windows, which is the defect this whole migration exists to prevent. Found by CI: the
+        // test was right and the code was wrong, on Windows only, with macOS green.
+        //
+        // So: a leading '/', a drive letter, or a UNC prefix. Any of the three means "this was rooted
+        // somewhere, and it is not under our assets root" — which is a fact about the string, not about the
+        // machine reading it.
+        bool LooksRootedOnAnyPlatform( const std::string& stored )
+        {
+            if ( stored.empty() )
+                return false;
+            if ( stored[0] == '/' || stored[0] == '\\' ) // POSIX absolute, or a UNC / drive-relative root
+                return true;
+            return stored.size() >= 3 && std::isalpha( static_cast<unsigned char>( stored[0] ) ) &&
+                   stored[1] == ':' && ( stored[2] == '/' || stored[2] == '\\' );
+        }
+
         std::optional<std::string> RelativeToAssetsRoot( const std::string&           stored,
                                                          const std::filesystem::path& assetsRoot )
         {
@@ -1041,7 +1064,7 @@ namespace Desert::Core
                         }
                         else
                         {
-                            if ( std::filesystem::path( text.value() ).is_absolute() )
+                            if ( LooksRootedOnAnyPlatform( text.value() ) )
                                 report.OutsideNames.push_back( tag + " > " + site.Component + "." + site.Key +
                                                                " = " + text.value() );
                             kept[key] = value;
@@ -1080,7 +1103,7 @@ namespace Desert::Core
                             continue;
                         }
 
-                        if ( std::filesystem::path( text.value() ).is_absolute() )
+                        if ( LooksRootedOnAnyPlatform( text.value() ) )
                             report.OutsideNames.push_back( tag + " > " + site.Component + "." + site.Key + " = " +
                                                            text.value() );
                         slots.push_back( row );

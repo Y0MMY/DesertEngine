@@ -222,6 +222,46 @@ TEST( SceneMaterialPathMigration, APathOutsideTheAssetsRootIsLeftAloneAndNamed )
     EXPECT_EQ( SlotsOf( entities[0], "StaticMesh", "MaterialPaths" )[0], "/opt/shared/library/Steel.demat" );
 }
 
+// THE MIRROR OF THE TEST ABOVE, AND THE TWO ONLY MEAN SOMETHING TOGETHER.
+//
+// "Is this path rooted" was asked with std::filesystem::path::is_absolute(), which answers in the grammar
+// of the HOST. So the POSIX path above is not absolute on Windows and a Windows path is not absolute on
+// POSIX, and in each case the migration silently left a path it could not rewrite instead of naming it.
+// The test above went red on Windows CI while macOS stayed green, which is the whole shape of the defect:
+// a scene travels between developers, and the Mac-authored one opened on Windows is exactly the case the
+// migration exists for.
+//
+// One test on each platform's own spelling would still have passed on the platform that wrote it. This
+// pair cannot: whichever host runs them, one of the two is foreign, so the predicate has to be about the
+// STRING rather than about the machine reading it.
+TEST( SceneMaterialPathMigration, AWindowsRootedPathIsAlsoLeftAloneAndNamed )
+{
+    std::vector<EntityData> entities;
+    entities.push_back( MeshEntity( "Prop", "StaticMesh", Paths( { "C:/shared/library/Steel.demat" } ) ) );
+
+    const MaterialPathMigrationReport report = MigrateMaterialPathV7ToV8( entities, kAssetsRoot );
+
+    EXPECT_EQ( report.Paths, 0 );
+    ASSERT_EQ( report.OutsideNames.size(), 1u )
+         << "a drive-lettered path is rooted somewhere and is not under our assets root, whatever OS is "
+            "reading it -- leaving it unnamed is the silent substitution DC 1.4 forbids";
+    EXPECT_NE( report.OutsideNames[0].find( "C:/shared/library/Steel.demat" ), std::string::npos );
+    EXPECT_EQ( SlotsOf( entities[0], "StaticMesh", "MaterialPaths" )[0], "C:/shared/library/Steel.demat" );
+}
+
+// And a backslash-spelled one, because that is what Windows actually writes.
+TEST( SceneMaterialPathMigration, ABackslashRootedPathIsAlsoLeftAloneAndNamed )
+{
+    std::vector<EntityData> entities;
+    entities.push_back( MeshEntity( "Prop", "StaticMesh", Paths( { "D:\\build\\Steel.demat" } ) ) );
+
+    const MaterialPathMigrationReport report = MigrateMaterialPathV7ToV8( entities, kAssetsRoot );
+
+    EXPECT_EQ( report.Paths, 0 );
+    ASSERT_EQ( report.OutsideNames.size(), 1u );
+    EXPECT_NE( report.OutsideNames[0].find( "D:\\build\\Steel.demat" ), std::string::npos );
+}
+
 // ── Missing and malformed fields ───────────────────────────────────────────────────────────────────
 
 TEST( SceneMaterialPathMigration, AnEntityThatNamesNoMaterialIsUntouched )
