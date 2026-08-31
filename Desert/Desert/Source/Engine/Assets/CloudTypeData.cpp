@@ -1,5 +1,6 @@
 #include <Engine/Assets/CloudTypeData.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 #include <rflcpp/rfl/json.hpp>
@@ -43,7 +44,10 @@ namespace Desert::Assets
              /* TopAltitudeKm    */ 5.80f,
              /* EdgeTopFraction  */ 0.15f,
              /* BaseRampFraction */ 0.04f,
-             /* TopTaper         */ 0.50f,
+             // WHERE `TopTaper` 0.50 WENT. The curve is that law sampled, so this row is still T0's
+             // congestus digit for digit — what changed is that the digits are now in the asset instead of
+             // in a closed form in the generator.
+             /* Profile          */ Graphic::CloudProfileDefault(),
              /* AnvilAltitudeKm  */ 0.0f,
              /* AnvilThicknessKm */ 0.0f,
              /* AnvilStrength    */ 0.0f,
@@ -96,8 +100,32 @@ namespace Desert::Assets
         // is a value nobody chose standing in for one somebody typed.
         if ( auto r = InRange( "BaseRampFraction", shape.BaseRampFraction, 0.001f, 1.0f ); !r )
             return r;
-        if ( auto r = InRange( "TopTaper", shape.TopTaper, 0.001f, 1.0f ); !r )
-            return r;
+
+        // THE PROFILE, SAMPLE BY SAMPLE AND NAMED BY INDEX. A NaN or a negative width anywhere in the row
+        // is a lump radius the layout will clamp or a body turned inside out, and a message that said only
+        // "the profile is invalid" would leave sixteen numbers to search by hand.
+        for ( uint32_t i = 0; i < Graphic::kCloudProfileSamples; ++i )
+        {
+            const float halfWidth = shape.Profile.HalfWidth[i];
+            if ( !Graphic::CloudProfileSampleIsLegal( halfWidth ) )
+                return Common::MakeFormattedError<bool>(
+                     "Profile.HalfWidth[{}] is {}, which is not a finite width in [0, 4] cluster radii", i,
+                     halfWidth );
+        }
+
+        // A CURVE OF ALL ZEROES IS NOT A TYPE, and it is refused here rather than drawn. Every lump would
+        // be floored at the march's resolvable chord, so the sky would come out as a field of identical
+        // minimum-sized specks — a shape nobody authored, produced by a clamp. The threshold is a
+        // hundredth of a cluster radius, which is the same figure the footprint's floor uses.
+        float widest = 0.0f;
+        for ( uint32_t i = 0; i < Graphic::kCloudProfileSamples; ++i )
+            widest = std::max( widest, shape.Profile.HalfWidth[i] );
+
+        if ( !( widest > 0.01f ) )
+            return Common::MakeFormattedError<bool>(
+                 "the vertical profile is {} at its widest: a type has to be wider than a hundredth of its "
+                 "own cluster radius somewhere, or it draws nothing but specks",
+                 widest );
 
         if ( auto r = InRange( "AnvilStrength", shape.AnvilStrength, 0.0f, 1.0f ); !r )
             return r;

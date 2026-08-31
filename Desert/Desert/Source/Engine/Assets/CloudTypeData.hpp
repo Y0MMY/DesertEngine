@@ -25,11 +25,16 @@ namespace Desert::Assets
      * settles the form: a DATA asset, not a node graph, because D-5 forbade the graph and instance
      * parameters were never what it forbade.
      *
-     * WHY THE PROFILE IS STILL GENERATED AND NOT STORED. Decision D-13: the runtime representation is a
-     * 256 x 64 table, and the parametric curve stays as its GENERATOR. So this file carries twelve numbers
-     * rather than sixteen thousand texels — small enough to read, diff and hand-edit, and the table is
-     * rebuilt from it whenever the slot changes. It also means a type has no baked artefact that can go
-     * stale against the maths that produced it.
+     * WHY THE VERTICAL PROFILE IS STORED HERE AND NOT GENERATED. This paragraph used to cite decision
+     * D-13 and describe a 256 x 64 table the march sampled, generated from a parametric curve. THAT TABLE
+     * NO LONGER EXISTS — it was removed in phase Э5 when the profile became the distance field of a joined
+     * pile of lumps (Graphic/Clouds/CloudTypeShape.hpp), and the generator was left with no consumer.
+     *
+     * What stands in its place is the curve itself, sampled: sixteen numbers describing half-width against
+     * height up the type's own band. They are read at ONE place, the lump-stack layout in
+     * CloudProceduralVolume.cpp, and they are what that layout's lobe radii ARE rather than a multiplier
+     * over them — decision D-22, and the reason the vertical has one authority. Still small enough to
+     * read, diff and hand-edit; still no baked artefact that can go stale against the maths.
      *
      * WHY JSON AND NOT A BINARY CONTAINER, when the noise volume next door is binary. The volume is eight
      * mebibytes of voxels and its header is metadata about a payload; a type IS its metadata. `.demat`
@@ -44,13 +49,20 @@ namespace Desert::Assets
     /// The FILE layout's version, bumped when a field moves. It is not the maths' version: the profile
     /// generator lives in Engine/Graphic/Clouds/CloudTypeShape.hpp and changing it changes every type at
     /// once, which is a change to the engine rather than to any file.
-    /// VERSION 2 SINCE T3. The shape gained `PlacementScale` and `PlacementAnisotropy` — where a type puts
-    /// itself in the sky and how it is drawn out by the wind — and a version-1 file does not carry them.
-    /// It is REFUSED rather than defaulted: a fibrous cirrus and a round-patched one are different kinds of
-    /// cloud, so filling the missing numbers in silently would render a sky the file does not describe
-    /// while claiming it does. The nine shipped files were rewritten in the same commit (§4.5), which is
-    /// what makes the loud refusal affordable.
-    inline constexpr int32_t kCloudTypeFormatVersion = 2;
+    /// VERSION 3 SINCE Р2. `TopTaper` is GONE and `Profile` stands in its place — a sampled curve of
+    /// half-width against height, which is the same silhouette the taper described plus every silhouette
+    /// it could not (a shelf, a waist, a body that widens with height; the old law was a product of two
+    /// falling lines and therefore monotone at every setting).
+    ///
+    /// REFUSED RATHER THAN MIGRATED, which is this format's own established answer and not a new one:
+    /// version 1 was refused the same way when T3 added the placement pair, for the reason restated here.
+    /// A version-2 file carries a taper and no curve. The engine COULD synthesise the curve from it —
+    /// `Graphic::CloudProfileFromTaper` is exactly that function and it is what rewrote the library — but
+    /// doing it at load would leave two file layouts alive in the reader for ever, which is the legacy path
+    /// DEV_CONTRACT.md §4 forbids. So the conversion happens ONCE, in the commit, in the files: all nine
+    /// shipped types were rewritten to version 3 through that function, so the library renders the sky it
+    /// rendered before the format moved.
+    inline constexpr int32_t kCloudTypeFormatVersion = 3;
 
     /**
      * @brief One cloud type on disk, and in memory — the same struct, because there is nothing to convert.
@@ -84,8 +96,8 @@ namespace Desert::Assets
         /// developer's home directory. The asset joins it to Constants::Path::ASSETS_PATH once, on load.
         std::optional<std::string> NoiseVolume;
 
-        /// The twelve numbers. Nested rather than flattened so that the file's schema and the struct the
-        /// generator consumes cannot drift apart: there is no mapping between them to get wrong.
+        /// The numbers and the curve. Nested rather than flattened so that the file's schema and the
+        /// struct the generator consumes cannot drift apart: there is no mapping between them to get wrong.
         Graphic::CloudTypeShape Shape;
     };
 

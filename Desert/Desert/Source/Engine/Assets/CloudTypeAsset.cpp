@@ -7,7 +7,9 @@
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Utilities/VFS.hpp>
 
+#include <algorithm>
 #include <fstream>
+#include <iterator>
 
 namespace Desert::Assets
 {
@@ -58,12 +60,24 @@ namespace Desert::Assets
         ++m_Revision;
         m_Ready = true;
 
+        // THE PROFILE IS SUMMARISED RATHER THAN PRINTED IN FULL: sixteen floats per type times nine types
+        // is a screenful of log nobody reads, and what a reader needs from this line is whether the curve
+        // that loaded is the curve they authored. Base, widest and top say that — they separate a deck
+        // (equal ends), a taper (falling), and a tower (widest in the middle) from one another at a
+        // glance, which is the whole set of shapes the format can now carry.
+        const auto& profile = m_Data.Shape.Profile;
+        const auto  widest  = std::max_element( profile.HalfWidth.begin(), profile.HalfWidth.end() );
+        const float peakAt  = static_cast<float>( std::distance( profile.HalfWidth.begin(), widest ) ) /
+                             static_cast<float>( Graphic::kCloudProfileSamples - 1 );
+
         LOG_INFO( "[Clouds] Cloud type '{}' loaded: {}, base {:.2f} km, top {:.2f} km, edge {:.2f}, "
-                  "anvil {:.2f} at {:.2f} km, detail {:.2f} ({}), density x{:.2f}, extinction x{:.2f}.",
+                  "anvil {:.2f} at {:.2f} km, detail {:.2f} ({}), density x{:.2f}, extinction x{:.2f}, "
+                  "profile {:.3f} at the base to {:.3f} at the top, widest {:.3f} at {:.0f}% up the band.",
                   path, m_DisplayName, m_Data.Shape.BaseAltitudeKm, m_Data.Shape.TopAltitudeKm,
                   m_Data.Shape.EdgeTopFraction, m_Data.Shape.AnvilStrength, m_Data.Shape.AnvilAltitudeKm,
                   m_Data.Shape.DetailFactor, m_Data.Shape.DetailCharacter < 0.5f ? "wispy" : "billowy",
-                  m_Data.Shape.DensityFactor, m_Data.Shape.ExtinctionFactor );
+                  m_Data.Shape.DensityFactor, m_Data.Shape.ExtinctionFactor, profile.HalfWidth.front(),
+                  profile.HalfWidth.back(), *widest, peakAt * 100.0f );
 
         return BOOLSUCCESS;
     }

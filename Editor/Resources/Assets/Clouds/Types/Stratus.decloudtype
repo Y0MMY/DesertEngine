@@ -1,5 +1,5 @@
 {
-    "FormatVersion": 2,
+    "FormatVersion": 3,
     "DisplayName": "Stratus",
     "Notes": "A featureless sheet a few hundred metres thick, sitting almost on the ground. EdgeTopFraction 0.88 because a sheet does not thin into a pad at its rim, and the erosion is halved because what makes stratus stratus is that it has no edge to speak of. Placement scale 4.00: a sheet has no cells. Pushing the period to four times the layer's tile is how a type says 'I am one patch as far as you can see' without a second kind of coverage field.",
     "Shape": {
@@ -7,7 +7,14 @@
         "TopAltitudeKm": 0.55,
         "EdgeTopFraction": 0.88,
         "BaseRampFraction": 0.12,
-        "TopTaper": 0.35,
+        "Profile": {
+            "HalfWidth": [
+                0.62, 0.60222447, 0.5846978, 0.56742,
+                0.55039114, 0.5336111, 0.51708, 0.50079775,
+                0.48476446, 0.46898, 0.45344445, 0.43815777,
+                0.42312, 0.40833113, 0.3937911, 0.3795
+            ]
+        },
         "AnvilAltitudeKm": 0.0,
         "AnvilThicknessKm": 0.0,
         "AnvilStrength": 0.0,

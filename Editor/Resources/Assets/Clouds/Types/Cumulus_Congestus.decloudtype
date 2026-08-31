@@ -1,5 +1,5 @@
 {
-    "FormatVersion": 2,
+    "FormatVersion": 3,
     "DisplayName": "Cumulus congestus",
     "Notes": "The same base as mediocris, four times the height, and a rim that is a flat pad - EdgeTopFraction 0.15. This is the type an empty slot resolves to, and its numbers are the reference the layer's Density Scale, Extinction Scale and Detail Strength are relative to. Placement is the IDENTITY pair - scale 1, no stretch - because this row is the reference every other type's placement is stated against, exactly as its three material factors are. Changing it would move the sky of every scene that has ever used the built-in default.",
     "Shape": {
@@ -7,7 +7,14 @@
         "TopAltitudeKm": 5.8,
         "EdgeTopFraction": 0.15,
         "BaseRampFraction": 0.04,
-        "TopTaper": 0.5,
+        "Profile": {
+            "HalfWidth": [
+                0.62, 0.5991778, 0.5787111, 0.5586,
+                0.53884447, 0.51944447, 0.5004, 0.48171112,
+                0.46337777, 0.4454, 0.42777777, 0.4105111,
+                0.3936, 0.37704444, 0.36084443, 0.345
+            ]
+        },
         "AnvilAltitudeKm": 0.0,
         "AnvilThicknessKm": 0.0,
         "AnvilStrength": 0.0,

@@ -1,5 +1,5 @@
 {
-    "FormatVersion": 2,
+    "FormatVersion": 3,
     "DisplayName": "Cumulonimbus",
     "Notes": "A tower to nine kilometres plus the ANVIL, a second lobe at 9.5 km that no single-humped curve can produce and the profile table can. The anvil is what makes the type recognisable from the ground. Placement scale 2.00: a storm cell is tens of kilometres across and there is ONE of it, not a field. At the shipped 12 km layer tile this puts a 6 km cell under a 9 km tower, which is the aspect a real cumulonimbus has.",
     "Shape": {
@@ -7,7 +7,14 @@
         "TopAltitudeKm": 9.0,
         "EdgeTopFraction": 0.12,
         "BaseRampFraction": 0.04,
-        "TopTaper": 0.4,
+        "Profile": {
+            "HalfWidth": [
+                0.62, 0.60120887, 0.5827022, 0.56448,
+                0.5465422, 0.5288889, 0.51152, 0.49443555,
+                0.47763556, 0.46112, 0.4448889, 0.42894223,
+                0.41328, 0.39790222, 0.3828089, 0.368
+            ]
+        },
         "AnvilAltitudeKm": 9.5,
         "AnvilThicknessKm": 1.8,
         "AnvilStrength": 0.85,

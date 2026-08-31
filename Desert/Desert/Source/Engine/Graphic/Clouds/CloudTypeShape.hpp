@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -8,7 +9,214 @@
 namespace Desert::Graphic
 {
     /**
-     * WHAT A KIND OF CLOUD IS, as fourteen numbers — and nothing about how they are turned into a field.
+     * THE VERTICAL PROFILE — the one UE capability this engine did not have, and the reason it is a
+     * SAMPLED CURVE rather than the closed form it replaces.
+     *
+     * WHAT WAS MISSING. Horizontally an artist has had authority for three phases: `.dclayout` carries a
+     * painted pattern and mask, `.dcmv` sculpts a hero volume, `.dcnv` authors the noise an edge is cut
+     * from. Vertically there was one law, written in this engine and not in any asset:
+     *
+     *     halfWidth(t) = (0.62 - 0.16 t) * (1 - 0.5 * TopTaper * t)
+     *
+     * — a product of two falling lines, so it is MONOTONE DECREASING at every setting of its one knob.
+     * A shelf, a waist, a body that widens with height, mass gathered at the top of its own band: none
+     * of them is reachable, whatever `TopTaper` is set to. That is the capability gap, and it is a
+     * property of the closed form rather than of the numbers fed to it.
+     *
+     * WHAT EPIC'S TEXTURE SAYS, because this is the thing being matched: "each channel of this texture
+     * describes the profile shape AND RELATIVE ALTITUDE of a different cloud type". Both halves are here.
+     * The shape is the samples below; the relative altitude falls out of them, because a lump's height is
+     * derived from its own width by `kCloudLumpVerticalOverHorizontal` and the stack is fitted into the
+     * type's band — so a curve whose mass sits high puts fat lumps high and thin ones low, and the body's
+     * centre of mass moves without any second number saying so.
+     *
+     * WHY A CURVE AND NOT A FOUR-CHANNEL TEXTURE. Decision D-22 required a curve; the owner relaxed that
+     * for Р2 and asked the MEASUREMENT to decide, because the painting canvas Р1 built made the texture
+     * path far cheaper than it had been when D-22 was written. It was measured, and it decided the same
+     * way for a different and much stronger reason than D-22 gave. Two findings, one of them numeric:
+     *
+     *   * THE CONSUMER RESOLVES SIX POINTS, AND THE STORAGE CANNOT OUTRUN IT. The profile is read by the
+     *     lump stack and by nothing else, and the stack is `kBlobsPerCluster` = 6 lobes at fixed heights
+     *     `t = ((step + 0.5) / 6) ^ 1.7`. So the entire difference a sample count can make is the
+     *     piecewise-linear error at those six heights, and that is computable rather than arguable.
+     *     Against the closed form, worst case over every taper the shipped library uses, expressed as the
+     *     LUMP-RADIUS error it causes on the shipped congestus' 2.16 km cluster:
+     *
+     *         N =    4      6      8     12     16     32     64    256
+     *         err 6.96 m 2.22 m 0.92 m 0.53 m 0.18 m 0.05 m 0.01 m 0.00 m
+     *
+     *     The march's finest resolvable chord is 125 m. Sixteen samples are already wrong by a
+     *     seven-hundredth of the smallest thing the march can see; two hundred and fifty-six samples buy
+     *     0.18 m of cloud. A painted raster's extra rows are not detail, they are unreachable storage.
+     *   * CHANNEL = SPECIES IS ALREADY SPENT. Unreal packs four types into R/G/B/A because its profile is
+     *     ONE texture shared by the whole material. Ours is not shared: a type IS a file
+     *     (`.decloudtype`, decision D-11), so the four channels would carry four copies of one type's
+     *     profile — three of them dead in the sense of DEV_CONTRACT.md §1.3.
+     *
+     * So the profile is stored the way the file already stores everything else: a short row of numbers a
+     * human can read, diff and hand-edit, with no baked artefact that can go stale against the maths.
+     *
+     * WHAT WOULD CHANGE THE ANSWER, since a refusal has to say so: raise `kBlobsPerCluster`, or make the
+     * stack's lobe count depend on the band, and the consumer stops being six-tap. A stack of sixty lobes
+     * would read a curve sixty times and the argument above would have to be re-measured, not re-quoted.
+     */
+
+    /// HOW MANY SAMPLES THE CURVE CARRIES, and the number is set by the AUTHORING grid rather than by
+    /// fidelity, because fidelity was already spent at four samples (the table above).
+    ///
+    /// WHAT SETS IT IS THE LUMP SPACING. Sixteen samples put the artist's finest expressible feature at
+    /// `band / 15` — 27 m on the shipped stratus, 240 m on the congestus, 540 m on the cumulonimbus. The
+    /// thing that renders those features is a stack of six lobes spread over the same band, so the lobes
+    /// are 67 m, 600 m and 1350 m apart respectively. Sixteen therefore gives the artist between two and
+    /// two-and-a-half times the resolution the stack can carry, on every shipped type.
+    ///
+    /// NOT EIGHT, which puts the congestus' grid at 514 m against a 600 m lobe spacing — the artist would
+    /// be authoring at exactly the granularity of the thing drawing it, with no headroom for a corner that
+    /// lands between two lobes. NOT THIRTY-TWO, which is five times finer than the stack and is the
+    /// unreachable storage the block above refuses.
+    inline constexpr uint32_t kCloudProfileSamples = 16;
+
+    /**
+     * The type's silhouette: its horizontal half-width at `kCloudProfileSamples` equally spaced heights
+     * across its OWN band, in units of the cluster's radius. Sample `i` is at height fraction
+     * `i / (kCloudProfileSamples - 1)`, so sample 0 is the cloud base and the last sample is its top.
+     *
+     * IN CLUSTER RADII AND NOT NORMALISED TO ONE, which is deliberate. The cluster's radius already
+     * carries how BIG this cloud is — it is the cell, the coverage and the size draw — so a curve
+     * normalised to a peak of 1 would need a gain constant beside it to get back to the 0.62 the law it
+     * replaces starts at, and that constant is a second place the width is decided. The samples are the
+     * width. There is nothing else.
+     *
+     * LINEARLY INTERPOLATED between samples and CLAMPED outside, by `CloudProfileHalfWidth` below. Linear
+     * and not a spline: a spline overshoots, and an overshoot here is a lump wider than any number in the
+     * asset — a silhouette the artist did not draw, arrived at by the interpolator.
+     */
+    struct CloudVerticalProfile
+    {
+        std::array<float, kCloudProfileSamples> HalfWidth;
+    };
+
+    /// The half-width at height fraction @p t up the type's band, in cluster radii.
+    ///
+    /// CLAMPED AT BOTH ENDS rather than extrapolated. `t` arrives from the stack layout, where it is a
+    /// curve of the step index and can sit a hair outside [0, 1]; extrapolating a linear segment there
+    /// produces a negative width at one end and an unbounded one at the other, both of which are lumps
+    /// nobody authored.
+    inline float CloudProfileHalfWidth( const CloudVerticalProfile& profile, float t )
+    {
+        constexpr uint32_t last = kCloudProfileSamples - 1;
+
+        const float clamped  = std::clamp( t, 0.0f, 1.0f );
+        const float position = clamped * static_cast<float>( last );
+
+        const uint32_t low      = std::min( static_cast<uint32_t>( position ), last );
+        const uint32_t high     = std::min( low + 1u, last );
+        const float    fraction = position - static_cast<float>( low );
+
+        return profile.HalfWidth[low] + ( profile.HalfWidth[high] - profile.HalfWidth[low] ) * fraction;
+    }
+
+    /**
+     * THE CLOSED FORM THIS CURVE REPLACES, sampled — and it is kept as a named function for three jobs
+     * that all need the SAME numbers: it rewrote the nine shipped `.decloudtype` files when the format
+     * moved to version 3, it is what the panel's "classic taper" preset starts an artist from, and it is
+     * the oracle `Desert/Tests/Engine/CloudType` compares the shipped library against.
+     *
+     * `(0.62 - 0.16 t) * (1 - 0.5 * taper * t)` is the law that stood in the stack layout up to version 2
+     * of the format, transcribed with no change of scale. That is what makes the format move a
+     * re-expression rather than a re-authoring: the library at version 3 renders the sky the library at
+     * version 2 rendered, to the 0.18 m of lump radius tabulated above.
+     */
+    /// CONSTEXPR, and that is not decoration. `CloudTypeShape` is an aggregate, and several suites build
+    /// one with a POSITIONAL initialiser — `{ 0.15f, 0.55f, 0.88f, 0.12f, ... }`. When the profile took
+    /// `TopTaper`'s place in that list, brace elision let the taper's old value initialise
+    /// `Profile.HalfWidth[0]` and shifted every number after it one slot up the array. It COMPILED, in a
+    /// `constexpr` context, and produced shapes that drew no cloud at all. The fix is for every such
+    /// initialiser to name the profile, and they can only do that if this function is usable where they are.
+    constexpr CloudVerticalProfile CloudProfileFromTaper( float taper )
+    {
+        constexpr uint32_t last = kCloudProfileSamples - 1;
+
+        const float clamped = std::clamp( taper, 0.0f, 1.0f );
+
+        CloudVerticalProfile profile{};
+        for ( uint32_t i = 0; i <= last; ++i )
+        {
+            const float t        = static_cast<float>( i ) / static_cast<float>( last );
+            profile.HalfWidth[i] = ( 0.62f - 0.16f * t ) * ( 1.0f - 0.5f * clamped * t );
+        }
+        return profile;
+    }
+
+    /// The profile of the type an empty slot resolves to — the shipped congestus, which stood at a taper
+    /// of 0.5. One expression of it, so the default asset and the default curve cannot come apart.
+    inline CloudVerticalProfile CloudProfileDefault()
+    {
+        return CloudProfileFromTaper( 0.5f );
+    }
+
+    /**
+     * A DECK: the same width from base to top. The silhouette of a sheet — a slab of cloud with no
+     * convective structure up its height, which is what a stratus or an altostratus IS seen edge on.
+     *
+     * REACHABLE UNDER THE OLD LAW ONLY AS AN APPROXIMATION, and that is worth saying because it is the
+     * weaker of the two presets as evidence. `TopTaper` at 0 gave `0.62 - 0.16 t`, which still loses a
+     * quarter of its width by the top. This is flat to the last digit.
+     */
+    inline CloudVerticalProfile CloudProfileFlatDeck()
+    {
+        CloudVerticalProfile profile{};
+        profile.HalfWidth.fill( 0.62f );
+        return profile;
+    }
+
+    /**
+     * A TOWER: pinched at the base, swelling through the upper half, closing at the very top.
+     *
+     * THIS IS THE SHAPE THAT PROVES THE CAPABILITY, because it is NOT REACHABLE under the law the curve
+     * replaced at any setting of any number. That law was `(0.62 - 0.16 t) * (1 - 0.5 * taper * t)` — a
+     * product of two lines that both fall — so its derivative is negative everywhere for every taper in
+     * range. A profile whose maximum is in its interior cannot be written as such a product, so no
+     * version-2 `.decloudtype` could describe this and no slider could reach it.
+     *
+     * WHAT IT LOOKS LIKE IN THE SKY, and why the two lobes are not an anvil: the mass moves UP the band.
+     * A lump's height is derived from its own width, so a curve that is thin low and fat high puts small
+     * lumps at the base and large ones near the top — a cauliflower standing on a stalk. The anvil is a
+     * separate lobe with a GAP under it (`CloudProceduralVolume.cpp`), a thing no single curve expresses;
+     * this is one connected body whose waist is low.
+     */
+    inline CloudVerticalProfile CloudProfileTower()
+    {
+        constexpr uint32_t last = kCloudProfileSamples - 1;
+
+        CloudVerticalProfile profile{};
+        for ( uint32_t i = 0; i <= last; ++i )
+        {
+            const float t = static_cast<float>( i ) / static_cast<float>( last );
+
+            // A raised cosine centred at three quarters of the band, on a narrow stalk. The peak is 0.92
+            // against the deck's 0.62 and the base is 0.15, so the silhouette is unmistakable from any
+            // angle rather than a subtle re-weighting the dome sweep would have to be squinted at.
+            const float lobe     = std::cos( ( t - 0.75f ) * 3.14159265f / 0.62f );
+            profile.HalfWidth[i] = 0.15f + 0.77f * std::max( lobe, 0.0f );
+        }
+        return profile;
+    }
+
+    /// Rejects a profile the stack layout cannot honour, naming the sample that is wrong. Pure, so the
+    /// panel refuses to save for the same reason the loader refuses to read.
+    ///
+    /// A CEILING OF FOUR, and it is the cluster's radius times four rather than a round number: the
+    /// footprint compensation that keeps the Coverage slider honest is a quadrature over this curve, and
+    /// a width far outside the range that quadrature was checked over would be priced by extrapolation.
+    inline bool CloudProfileSampleIsLegal( float halfWidth )
+    {
+        return std::isfinite( halfWidth ) && halfWidth >= 0.0f && halfWidth <= 4.0f;
+    }
+
+    /**
+     * WHAT A KIND OF CLOUD IS, as thirteen numbers and a curve — and nothing about how they are turned
+     * into a field.
      *
      * WHAT THIS HEADER USED TO ALSO HOLD, AND WHY IT DOES NOT. Until phase Э5 it carried a parametric
      * curve `f(altitude, placement pattern)` and the generator that evaluated it into a 256 x 64 RGBA32F
@@ -27,7 +235,9 @@ namespace Desert::Graphic
      *   Base / Top Altitude               the band a cluster of lumps spans
      *   Edge Top Fraction                 how short the shallowest cluster is against the fullest
      *   Base Ramp Fraction                the thickness of the lowest lobe against the ones above it
-     *   Top Taper                         how fast a stack narrows going up
+     *   Profile                           the silhouette: half-width against height up the band. It
+     *                                     REPLACED `Top Taper` in format version 3 — see the block above
+     *                                     the struct — and it is the only authority over the vertical
      *   Anvil Altitude / Thickness / Strength   one extra, wider, flatter lump above the tower — which is
      *                                     the shape D-13 reached for a two-dimensional table to express,
      *                                     and a second lump expresses without a table at all
@@ -69,7 +279,16 @@ namespace Desert::Graphic
         float TopAltitudeKm;    // the top it reaches at the CORE of a placement patch
         float EdgeTopFraction;  // fraction of (Top - Base) it reaches where the patch has just begun
         float BaseRampFraction; // fraction of the cloud's own height the base ramp takes to reach full
-        float TopTaper;         // fraction of the cloud's own height over which the top melts away
+
+        // THE SILHOUETTE, and it is where `TopTaper` went. That number was one knob on a monotone law
+        // and this is the law itself, authored: half-width against height up the band, in cluster radii.
+        // It is read at `CloudProceduralVolume.cpp` by the stack layout — which is the ONLY place the
+        // vertical silhouette is decided, and the reason the knob could not stay beside it. Two authorities
+        // over one quantity is the defect class §2.3.1 of the contract is about, and the calibration the
+        // second one would have fought is pinned by
+        // `TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers`.
+        CloudVerticalProfile Profile;
+
         float AnvilAltitudeKm;  // centre of the SECOND lobe; zero strength means the type has none
         float AnvilThicknessKm; // half-height of that lobe
         float AnvilStrength;    // how dense the anvil is against the tower that feeds it

@@ -47,7 +47,7 @@ namespace
         shape.TopAltitudeKm       = 5.80f;
         shape.EdgeTopFraction     = 0.15f;
         shape.BaseRampFraction    = 0.04f;
-        shape.TopTaper            = 0.50f;
+        shape.Profile             = Desert::Graphic::CloudProfileFromTaper( 0.50f );
         shape.DetailCharacter     = 1.00f;
         shape.DetailFactor        = 1.00f;
         shape.DensityFactor       = 1.15f;
@@ -694,7 +694,7 @@ TEST( CloudPlacementSpectrum, TheAnvilShrinksWithTheClusterItCaps )
         shape.BaseAltitudeKm                   = 0.9f;
         shape.TopAltitudeKm                    = 9.0f;
         shape.EdgeTopFraction                  = 0.12f;
-        shape.TopTaper                         = 0.4f;
+        shape.Profile                          = Desert::Graphic::CloudProfileFromTaper( 0.4f );
         shape.AnvilAltitudeKm                  = 9.5f;
         shape.AnvilThicknessKm                 = 1.8f;
         shape.AnvilStrength                    = 0.85f;
@@ -762,7 +762,7 @@ TEST( CloudPlacementSpectrum, TheAnvilIsDrawnOutDownwindWithTheTowerItCaps )
     shape.BaseAltitudeKm                   = 0.9f;
     shape.TopAltitudeKm                    = 9.0f;
     shape.EdgeTopFraction                  = 0.12f;
-    shape.TopTaper                         = 0.4f;
+    shape.Profile                          = Desert::Graphic::CloudProfileFromTaper( 0.4f );
     shape.AnvilAltitudeKm                  = 9.5f;
     shape.AnvilThicknessKm                 = 1.8f;
     shape.AnvilStrength                    = 0.85f;
@@ -848,7 +848,7 @@ namespace
         shape.TopAltitudeKm                    = 9.0f;
         shape.EdgeTopFraction                  = 0.12f;
         shape.BaseRampFraction                 = 0.04f;
-        shape.TopTaper                         = 0.4f;
+        shape.Profile                          = Desert::Graphic::CloudProfileFromTaper( 0.4f );
         shape.AnvilAltitudeKm                  = 9.5f;
         shape.AnvilThicknessKm                 = 1.8f;
         shape.AnvilStrength                    = 0.85f;
@@ -949,8 +949,8 @@ TEST( CloudPlacementSpectrum, TheTowersFootprintConstantsSayWhatTheLayoutActuall
 {
     // WHY THIS EXISTS: A SABOTAGE FOUND THE HOLE. Dropping the taper term from
     // CloudClusterTowerFootprintRadii — making the tower's footprint one constant instead of a line
-    // through two — left the whole repository green, because every test above holds `TopTaper` fixed and
-    // an error common to both arms cancels. That is an untested number in the middle of a calibration,
+    // through two — left the whole repository green, because every test above holds the profile curve
+    // fixed and an error common to both arms cancels. That is an untested number in the middle of a calibration,
     // which is the shape DEV_CONTRACT.md §1.3 forbids arrived at from the far side.
     //
     // WHAT IT ASSERTS. The two constants are a QUADRATURE over the lobe layout, not a fit, so they are a
@@ -964,7 +964,7 @@ TEST( CloudPlacementSpectrum, TheTowersFootprintConstantsSayWhatTheLayoutActuall
     {
         CloudProceduralFieldParams params     = StormParams();
         params.Species[0].Shape.AnvilStrength = 0.0f;
-        params.Species[0].Shape.TopTaper      = taper;
+        params.Species[0].Shape.Profile       = Desert::Graphic::CloudProfileFromTaper( taper );
         params.Coverage                       = 0.5f;
         return SkyCover( params );
     };
@@ -977,8 +977,8 @@ TEST( CloudPlacementSpectrum, TheTowersFootprintConstantsSayWhatTheLayoutActuall
 
     const double measured = std::log( 1.0 - tapered ) / std::log( 1.0 - flat );
 
-    const double a         = CloudClusterTowerFootprintRadii( 1.0f );
-    const double b         = CloudClusterTowerFootprintRadii( 0.4f );
+    const double a         = CloudClusterTowerFootprintRadii( Desert::Graphic::CloudProfileFromTaper( 1.0f ) );
+    const double b         = CloudClusterTowerFootprintRadii( Desert::Graphic::CloudProfileFromTaper( 0.4f ) );
     const double predicted = ( a * a ) / ( b * b );
 
     std::printf( "[CloudPlacementSpectrum] tower footprint, taper 1.0 over 0.4: the constants say %.4f, "
@@ -1013,14 +1013,14 @@ TEST( CloudPlacementSpectrum, ACanopyInsideItsOwnTowerIsNotPaidForTwice )
     // untapered tower is 0.949 cluster radii against the tower's 0.959.
     shape.AnvilThicknessKm = 1.8f;
     shape.AnvilStrength    = 0.0011f;
-    shape.TopTaper         = 0.0f;
+    shape.Profile          = Desert::Graphic::CloudProfileFromTaper( 0.0f );
     EXPECT_FLOAT_EQ( CloudClusterFootprintGain( shape ), 1.0f )
          << "a canopy hidden inside its own tower is being paid for, so the storm is shrunk for cloud that "
             "was never outside it";
 
     // The shipped storm, whose canopy is far outside its tower and IS paid for.
     shape.AnvilStrength = 0.85f;
-    shape.TopTaper      = 0.4f;
+    shape.Profile       = Desert::Graphic::CloudProfileFromTaper( 0.4f );
     EXPECT_GT( CloudClusterFootprintGain( shape ), 1.6f );
     EXPECT_LT( CloudClusterFootprintGain( shape ), 1.8f );
 }
@@ -1120,6 +1120,19 @@ TEST( CloudPlacementSpectrum, EveryFieldTheBakeReadsMakesTheCachedVolumeStale )
     moved                                  = base;
     moved.Species[0].Shape.EdgeTopFraction = 0.5f;
     notices( moved, "the type's edge top fraction" );
+
+    // THE VERTICAL PROFILE, and both ends of it. The shape is compared as bytes, so the curve is covered
+    // by construction — but "covered by construction" is exactly what was true of the taper this replaced,
+    // and §1.3 is about the authored field being asserted live rather than inferred. A whole preset and a
+    // SINGLE SAMPLE are both here: sixteen floats inside a memcmp is the shape of a field that starts
+    // being compared partially the first time somebody hand-rolls the comparison.
+    moved                          = base;
+    moved.Species[0].Shape.Profile = Desert::Graphic::CloudProfileTower();
+    notices( moved, "the type's vertical profile curve" );
+
+    moved = base;
+    moved.Species[0].Shape.Profile.HalfWidth[11] += 0.05f;
+    notices( moved, "one sample of the type's vertical profile curve" );
 
     moved = base;
     moved.Species.push_back( moved.Species[0] );

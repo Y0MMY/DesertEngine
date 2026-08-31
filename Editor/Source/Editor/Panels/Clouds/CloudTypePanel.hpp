@@ -23,17 +23,21 @@ namespace Desert::Editor
      * CHOOSE a cloud type, and this is where they MAKE one. Three things it offers that twelve sliders on
      * the component could not:
      *
-     *   AUTHOR   the twelve numbers, validated as a set before anything is written, so an illegal type is
+     *   AUTHOR   the numbers and the vertical profile curve, validated as a set before anything is
+     *            written, so an illegal type is
      *            refused with the number that is wrong rather than saved and discovered as a missing sky.
-     *   SEE      the vertical profile the numbers generate, drawn at the rim of a placement patch and at
-     *            its core — which is the only way to tell "this type is a tower in the middle of a patch"
-     *            from "this type is flat everywhere" without rendering a frame.
+     *   SEE      the field those inputs actually produce, read down two vertical lines — at the rim of a
+     *            placement patch and at its core. It is the only way to tell "this type is a tower in the
+     *            middle of a patch" from "this type is flat everywhere" without rendering a frame, and it
+     *            is deliberately NOT the profile curve played back: the curve is the input, and a preview
+     *            that redrew the input would agree with itself no matter what the generator did with it.
      *   KEEP     save to a `.decloudtype`, which the Content Browser then lists and a cloud layer's slot
      *            then accepts. That round trip is the whole feature.
      *
-     * NO BACKGROUND WORK, unlike the noise volume panel next door: generating a profile table is 16 384
-     * evaluations of a closed-form curve and the preview needs 256 of them, so it is redrawn every frame
-     * the panel is open and costs less than the widgets around it.
+     * NO BACKGROUND WORK, unlike the noise volume panel next door. The claim used to be about generating a
+     * 16 384-texel profile table, which has not existed since phase Э5; what it costs now is placing one
+     * preview region's lumps and reading the field down two vertical lines, which is a few thousand
+     * evaluations. Still cheaper than the widgets around it, so it is redrawn every frame the panel is open.
      */
     class CloudTypePanel final : public IPanel
     {
@@ -50,6 +54,15 @@ namespace Desert::Editor
     private:
         void DrawLibrarySection();
         void DrawShapeSection();
+
+        // The vertical profile, drawn as the cloud's own silhouette and edited by dragging it.
+        //
+        // ITS OWN METHOD AND NOT PART OF THE SHAPE SECTION, because it is the one control here that is a
+        // CANVAS rather than a slider: it owns a hit region, a drag that runs across several samples, and
+        // a set of presets. Folding it into the slider list would have buried the only authored thing on
+        // this panel that is not a number.
+        void DrawProfileEditor();
+
         void DrawNoiseSection();
         void DrawPreviewSection();
         void DrawSaveSection();

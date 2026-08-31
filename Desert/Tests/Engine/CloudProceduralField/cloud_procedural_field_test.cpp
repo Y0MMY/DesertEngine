@@ -76,7 +76,7 @@ namespace
         species.Shape.TopAltitudeKm       = 3.4f;
         species.Shape.EdgeTopFraction     = 0.35f;
         species.Shape.BaseRampFraction    = 0.25f;
-        species.Shape.TopTaper            = 0.45f;
+        species.Shape.Profile             = Desert::Graphic::CloudProfileFromTaper( 0.45f );
         species.Shape.AnvilAltitudeKm     = 0.0f;
         species.Shape.AnvilThicknessKm    = 0.0f;
         species.Shape.AnvilStrength       = 0.0f;
@@ -346,7 +346,7 @@ TEST( CloudProceduralField, NoGeneratedLumpIsThinnerThanTheMarchCanFindAtAnyTier
             params.Species[0].CellKm               = item.CellKm;
             params.Species[0].Shape.BaseAltitudeKm = item.BaseKm;
             params.Species[0].Shape.TopAltitudeKm  = item.TopKm;
-            params.Species[0].Shape.TopTaper       = item.Taper;
+            params.Species[0].Shape.Profile        = Desert::Graphic::CloudProfileFromTaper( item.Taper );
             params.LayerBottomKm                   = std::min( params.LayerBottomKm, item.BaseKm );
             params.LayerThicknessKm = std::max( params.LayerThicknessKm, item.TopKm - params.LayerBottomKm );
 
