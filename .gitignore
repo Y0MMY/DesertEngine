@@ -119,3 +119,9 @@ Docs/Clouds/UEReference/Source/
 
 # Scratch git worktrees created by tooling. They are checkouts, not content.
 .claude/worktrees/
+
+# Gauntlet runs: the LEDGER is the point and is committed -- STATE.md, BAR.md, RUBRIC.md,
+# every verdict and every reveal receipt. The paired images are not: they are copies of
+# frames that already exist elsewhere, 40 tiles a sweep, and Docs/Clouds/Shots is already
+# 508 MB of a 1.6 GB repository that has blown a CI checkout timeout once (see task D4).
+.gauntlet/*/rounds/*/ab/
