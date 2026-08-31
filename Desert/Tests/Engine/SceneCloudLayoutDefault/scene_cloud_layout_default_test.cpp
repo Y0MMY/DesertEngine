@@ -119,7 +119,7 @@ namespace
         species.Shape.TopAltitudeKm       = 5.80f;
         species.Shape.EdgeTopFraction     = 0.15f;
         species.Shape.BaseRampFraction    = 0.04f;
-        species.Shape.TopTaper            = 0.50f;
+        species.Shape.Profile             = Desert::Graphic::CloudProfileFromTaper( 0.50f );
         species.Shape.DetailCharacter     = 1.00f;
         species.Shape.DetailFactor        = 1.00f;
         species.Shape.DensityFactor       = 1.15f;

@@ -18,6 +18,8 @@
 
 #include <ImGui/imgui.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 
@@ -30,8 +32,9 @@ namespace Desert::Editor
 
     namespace
     {
-        // How many points the profile preview is drawn with. 256 is the table's own altitude resolution,
-        // so the curve on screen is the curve that will be uploaded rather than a smoother idea of it.
+        // How many points the READ-BACK preview below the editor is drawn with. It is deliberately far
+        // finer than the sixteen the profile is authored at: the preview reads the field the lumps
+        // actually make, and the whole question it answers is what the sixteen turned into.
         constexpr int kPreviewSamples = 256;
 
         void CopyInto( char* buffer, size_t size, const std::string& text )
@@ -96,9 +99,10 @@ namespace Desert::Editor
         // and nothing else. Every panel in this folder had it and drew nothing; no panel outside it
         // does. See CALIBRATION.md §PTP.
         ImGui::TextWrapped(
-             "A cloud TYPE is twelve numbers plus the noise its edge is cut from. They generate the "
-             "vertical profile table the march samples (256 x 64), so a type is small, readable and "
-             "editable - there is no baked texture here to go stale against the maths." );
+             "A cloud TYPE is thirteen numbers, a vertical profile curve, and the noise its edge is cut "
+             "from. Together they place the pile of lumps this kind of cloud is made of, so a type stays "
+             "small, readable and editable - there is no baked texture here to go stale against the "
+             "maths." );
         ImGui::Separator();
 
         DrawLibrarySection();
@@ -194,13 +198,14 @@ namespace Desert::Editor
                                "Small is the flat bottom of a cumulus; as long as the taper it becomes the "
                                "symmetric section of a lenticular." );
 
-        ImGui::SliderFloat( "Top Taper", &s.TopTaper, 0.001f, 1.0f, "%.3f" );
+        DrawProfileEditor();
+
         ImGui::SliderFloat( "Anvil Strength", &s.AnvilStrength, 0.0f, 1.0f, "%.2f" );
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "A SECOND lobe of cloud, above the tower and spreading wider than it. Zero "
-                               "means this kind has none. It is what makes a cumulonimbus recognisable, and "
-                               "it is the reason the profile is a table rather than a curve - no "
-                               "single-humped curve has two maxima." );
+            ImGui::SetTooltip( "A SECOND lobe of cloud, above the tower and spreading wider than it, with a "
+                               "GAP between the two. Zero means this kind has none. The profile above "
+                               "cannot express it and is not meant to: one curve is one connected body, and "
+                               "what makes a cumulonimbus recognisable is the gap." );
 
         ImGui::BeginDisabled( s.AnvilStrength <= 0.0f );
         ImGui::SliderFloat( "Anvil Altitude (km)", &s.AnvilAltitudeKm, 0.0f, 16.0f, "%.2f" );
@@ -238,6 +243,142 @@ namespace Desert::Editor
                                "Above 1 combs them out downwind, which is what makes cirrus fibrous instead "
                                "of blotchy; BELOW 1 stretches them ACROSS the wind, which is what a wave "
                                "cloud is - a lenticular's crest lies perpendicular to the flow." );
+    }
+
+    void CloudTypePanel::DrawProfileEditor()
+    {
+        Utils::ImGuiUtilities::SectionHeader( "Vertical profile" );
+
+        Graphic::CloudVerticalProfile& profile = m_Data.Shape.Profile;
+
+        ImGui::TextWrapped( "Drag inside the box to shape the cloud. Height runs up the box - the bottom "
+                            "edge is this type's base altitude and the top edge its top - and the width of "
+                            "the silhouette is how wide the cloud is there." );
+
+        // THE SILHOUETTE IS DRAWN MIRRORED AND EDITED ON EITHER SIDE, because that is the thing an artist
+        // is thinking about: the outline of a cloud seen from the side. A single-sided plot of half-width
+        // against height is the same sixteen numbers and reads as a graph, which is what the panel used to
+        // show as a RESULT. This is the input, so it looks like the cloud.
+        ImGui::InvisibleButton( "##profileCanvas", ImVec2( ImGui::GetContentRegionAvail().x, 220.0f ) );
+
+        const bool   active = ImGui::IsItemActive();
+        const ImVec2 min    = ImGui::GetItemRectMin();
+        const ImVec2 max    = ImGui::GetItemRectMax();
+        const float  width  = max.x - min.x;
+        const float  height = max.y - min.y;
+        const float  centre = min.x + width * 0.5f;
+
+        // THE FULL-SCALE HALF-WIDTH THE BOX IS DRAWN AGAINST. It is the validator's ceiling of 4 divided
+        // by four rather than the widest sample present: a box that rescaled itself to its own content
+        // would make every profile look the same and hide exactly the comparison the artist is making.
+        constexpr float kFullScaleHalfWidth = 1.0f;
+
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        draw->AddRectFilled( min, max, IM_COL32( 24, 26, 30, 255 ) );
+
+        // The base and top edges, so "which way is up" is not something to remember.
+        draw->AddLine( ImVec2( min.x, max.y - 1.0f ), ImVec2( max.x, max.y - 1.0f ),
+                       IM_COL32( 90, 96, 110, 255 ) );
+        draw->AddLine( ImVec2( min.x, min.y + 1.0f ), ImVec2( max.x, min.y + 1.0f ),
+                       IM_COL32( 90, 96, 110, 255 ) );
+        draw->AddLine( ImVec2( centre, min.y ), ImVec2( centre, max.y ), IM_COL32( 60, 64, 74, 255 ) );
+
+        constexpr uint32_t kLast = Graphic::kCloudProfileSamples - 1;
+
+        // WHERE SAMPLE `i` SITS IN THE BOX. Sample 0 is the base, so it is at the BOTTOM — the y axis is
+        // inverted against ImGui's, which is the one place this widget has to remember that.
+        const auto sampleY = [&]( uint32_t i )
+        { return max.y - ( static_cast<float>( i ) / static_cast<float>( kLast ) ) * height; };
+
+        const auto sampleHalfPixels = [&]( uint32_t i )
+        { return ( profile.HalfWidth[i] / kFullScaleHalfWidth ) * ( width * 0.5f ); };
+
+        // THE BODY AS ONE FILLED SHAPE rather than sixteen bars: the artist is authoring a continuous
+        // silhouette and the layout interpolates linearly between samples, so a filled quad strip between
+        // consecutive samples is literally what the generator will read.
+        for ( uint32_t i = 0; i < kLast; ++i )
+        {
+            const float lowY  = sampleY( i );
+            const float highY = sampleY( i + 1 );
+            const float lowW  = sampleHalfPixels( i );
+            const float highW = sampleHalfPixels( i + 1 );
+
+            const ImVec2 quad[4] = { ImVec2( centre - lowW, lowY ), ImVec2( centre + lowW, lowY ),
+                                     ImVec2( centre + highW, highY ), ImVec2( centre - highW, highY ) };
+            draw->AddConvexPolyFilled( quad, 4, IM_COL32( 168, 186, 214, 210 ) );
+        }
+
+        for ( uint32_t i = 0; i <= kLast; ++i )
+        {
+            const float y = sampleY( i );
+            const float w = sampleHalfPixels( i );
+            draw->AddCircleFilled( ImVec2( centre + w, y ), 2.5f, IM_COL32( 250, 250, 250, 235 ) );
+            draw->AddCircleFilled( ImVec2( centre - w, y ), 2.5f, IM_COL32( 250, 250, 250, 120 ) );
+        }
+
+        // THE DRAG WRITES EVERY SAMPLE IT CROSSES, not just the nearest one to where the mouse ended up.
+        // A mouse moving faster than one sample per frame would otherwise leave gaps in the curve — the
+        // same defect a painting brush has when it stamps instead of sweeping, which is why Р1's brush
+        // draws a stroke as a capsule rather than a dot. Here the stroke is one-dimensional, so the
+        // capsule degenerates to the closed interval between the last position and this one.
+        if ( active )
+        {
+            const ImVec2 mouse = ImGui::GetIO().MousePos;
+            const ImVec2 prev( mouse.x - ImGui::GetIO().MouseDelta.x, mouse.y - ImGui::GetIO().MouseDelta.y );
+
+            const auto sampleAt = [&]( float y )
+            {
+                const float fraction = std::clamp( ( max.y - y ) / std::max( height, 1.0f ), 0.0f, 1.0f );
+                return static_cast<uint32_t>( std::lround( fraction * static_cast<float>( kLast ) ) );
+            };
+
+            const uint32_t from = sampleAt( std::max( prev.y, mouse.y ) );
+            const uint32_t to   = sampleAt( std::min( prev.y, mouse.y ) );
+
+            const float halfWidth =
+                 std::clamp( std::abs( mouse.x - centre ) / std::max( width * 0.5f, 1.0f ), 0.0f, 1.0f ) *
+                 kFullScaleHalfWidth;
+
+            for ( uint32_t i = from; i <= to && i <= kLast; ++i )
+                profile.HalfWidth[i] = halfWidth;
+        }
+
+        // The numbers, because a curve that can only be dragged cannot be typed and an artist reproducing
+        // a reference needs to be able to type. Sixteen floats in four rows of four.
+        if ( ImGui::TreeNode( "Samples (base first)" ) )
+        {
+            for ( uint32_t row = 0; row < Graphic::kCloudProfileSamples; row += 4 )
+            {
+                ImGui::PushID( static_cast<int>( row ) );
+                ImGui::SetNextItemWidth( -1.0f );
+                ImGui::DragFloat4( "##profileRow", &profile.HalfWidth[row], 0.005f, 0.0f, 4.0f, "%.3f" );
+                ImGui::PopID();
+            }
+            ImGui::TreePop();
+        }
+
+        // THE PRESETS ARE THE ENGINE'S OWN FUNCTIONS, not a second set of numbers written out here. The
+        // tower and the deck are what the delivery frames were shot with and what the tests assert
+        // against, so a preset that drifted from them would make the panel and the evidence disagree.
+        if ( ImGui::Button( "Flat deck" ) )
+            profile = Graphic::CloudProfileFlatDeck();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "The same width from base to top - a sheet seen edge on." );
+
+        ImGui::SameLine();
+        if ( ImGui::Button( "Tower" ) )
+            profile = Graphic::CloudProfileTower();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Pinched at the base, swelling through the upper half. NOT reachable under "
+                               "the old Top Taper knob at any setting: that law was a product of two "
+                               "falling lines, so it narrowed all the way up whatever it was set to." );
+
+        ImGui::SameLine();
+        if ( ImGui::Button( "Classic taper" ) )
+            profile = Graphic::CloudProfileDefault();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "The shape every type had before the curve existed - the built-in "
+                               "congestus, which stood at a Top Taper of 0.5." );
     }
 
     void CloudTypePanel::DrawNoiseSection()

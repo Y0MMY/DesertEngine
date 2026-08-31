@@ -188,7 +188,8 @@ namespace Desert::Assets
         /// footprint gain, for the same reason as above.
         constexpr float kAnvilAcrossOverAlong = 0.9f;
 
-        /// THE TOWER'S OWN FOOTPRINT, at the two ends of the `TopTaper` knob, as the radius of the circle of
+        /// THE TOWER'S OWN FOOTPRINT, at the two ends of the width law the profile curve replaced (which is
+        /// `Graphic::CloudProfileFromTaper` at 0 and at 1), as the radius of the circle of
         /// the same area in cluster radii. Both come from one quadrature over the layout below — six lobes a
         /// golden angle apart on a disc of `0.48 * (1 - 0.55 t)` cluster radii, each `(0.62 - 0.16 t)` wide
         /// and scaled by a wobble on [0.85, 1.15], each displaced by up to 0.18 radii — with the union taken
@@ -449,10 +450,69 @@ namespace Desert::Assets
         return glm::vec2( cell * root, cell / root );
     }
 
-    float CloudClusterTowerFootprintRadii( float topTaper )
+    float CloudProfileMeanHalfWidth( const Graphic::CloudVerticalProfile& profile )
     {
-        const float taper = std::clamp( topTaper, 0.0f, 1.0f );
-        return kTowerFootprintAtNoTaper + ( kTowerFootprintAtFullTaper - kTowerFootprintAtNoTaper ) * taper;
+        // AT THE STACK'S OWN HEIGHTS AND NOT AT EVEN SPACING, because these six are the only heights the
+        // curve is ever read at — `t = pow(u, 1.7)` below is the stack's parameterisation, and a mean
+        // taken anywhere else would be a mean of a curve nothing samples.
+        float sum = 0.0f;
+        for ( uint32_t step = 0; step < kBlobsPerCluster; ++step )
+        {
+            const float u = ( static_cast<float>( step ) + 0.5f ) / static_cast<float>( kBlobsPerCluster );
+            sum += Graphic::CloudProfileHalfWidth( profile, std::pow( u, 1.7f ) );
+        }
+        return sum / static_cast<float>( kBlobsPerCluster );
+    }
+
+    float CloudClusterTowerFootprintRadii( const Graphic::CloudVerticalProfile& profile )
+    {
+        // THE CALIBRATED LINE IS KEPT AND THE CURVE IS MAPPED ONTO IT, rather than the quadrature being
+        // re-run over the authored curve — and that is a MEASURED refusal, not an economy.
+        //
+        // Re-deriving the footprint from the curve directly was built and measured first: an independent
+        // grid quadrature over this file's own layout (six lobes, golden angle, disc 0.48 x (1 - 0.55 t),
+        // wobble on [0.85, 1.15], displacement to 0.18 radii) reproduces the two constants below to
+        // 0.2 per cent — 0.9614 / 0.9040 against 0.9594 / 0.9051 — which is what makes the generalisation
+        // legitimate at all. What it also has is REALISATION NOISE: the answer moves 0.5 per cent between
+        // one set of wobble draws and another (0.9614 at 16 realisations, 0.9531 at 32, 0.9548 at 48), so
+        // a runtime quadrature would make a calibrated constant depend on an arbitrary seed count. The
+        // committed constants were measured once, carefully, and they are better numbers than anything
+        // this can compute per bake. Revisit if the layout's lobe count or disc law changes, which is what
+        // would make the constants stale rather than merely old.
+        //
+        // THE SCALAR IS THE MEAN LOBE WIDTH, because that is the only thing about the curve the footprint
+        // can see: the projected union is a function of the six lobe radii, and the calibrated line
+        // already says how that union moves as those radii shrink together. A curve that re-expresses a
+        // taper therefore prices EXACTLY as that taper did, which is what keeps the version-3 library
+        // rendering the version-2 sky.
+        const float atNoTaper   = CloudProfileMeanHalfWidth( Graphic::CloudProfileFromTaper( 0.0f ) );
+        const float atFullTaper = CloudProfileMeanHalfWidth( Graphic::CloudProfileFromTaper( 1.0f ) );
+
+        const float mean = CloudProfileMeanHalfWidth( profile );
+
+        // THE SPAN IS NEGATIVE AND THE GUARD HAS TO KNOW IT: a taper NARROWS the mean half-width, so
+        // `atFullTaper` is below `atNoTaper` (0.4647 against 0.5610). A `std::max` against a small
+        // POSITIVE epsilon here — which is what was written first — never returns the span at all, and the
+        // equivalent taper comes out scaled by about -96 000. It was not a subtle failure and it was not
+        // found by reading: `TheTowersFootprintConstantsSayWhatTheLayoutActuallyDoes` predicted a footprint
+        // ratio of 6.2466 against a sky that said 0.9341, and three further tests went red behind it
+        // because the gain had collapsed to 1 for every type. The guard is on the MAGNITUDE.
+        const float span     = atFullTaper - atNoTaper;
+        const float safeSpan = std::abs( span ) > 1e-6f ? span : -1e-6f;
+
+        // NOT CLAMPED TO [0, 1], and the extrapolation is the point. A curve wider than anything the old
+        // law could reach is a legal thing to author now, and it covers more sky than a full-width tower —
+        // so it must be priced as covering more, or the Coverage slider starts lying again in the one
+        // direction the new capability opens. The line is monotone, so the extension is monotone too.
+        const float equivalentTaper = ( mean - atNoTaper ) / safeSpan;
+
+        const float radii = kTowerFootprintAtNoTaper +
+                            ( kTowerFootprintAtFullTaper - kTowerFootprintAtNoTaper ) * equivalentTaper;
+
+        // A FLOOR AND NOT A CLAMP TO THE OLD RANGE: a curve of all zeroes is a type that draws no tower,
+        // and the gain that divides by this must not divide by zero. Anything at or under a hundredth of a
+        // cluster radius is that type.
+        return std::max( radii, 0.01f );
     }
 
     float CloudClusterFootprintGain( const Graphic::CloudTypeShape& shape )
@@ -470,7 +530,7 @@ namespace Desert::Assets
         const float strength = std::clamp( shape.AnvilStrength, 0.0f, 1.0f );
         const float anvil    = ( 1.0f + kAnvilSpreadPerStrength * strength ) * std::sqrt( kAnvilAcrossOverAlong );
 
-        const float tower = CloudClusterTowerFootprintRadii( shape.TopTaper );
+        const float tower = CloudClusterTowerFootprintRadii( shape.Profile );
 
         // FLOORED AT ONE, and the floor is a statement rather than a guard: a canopy narrower than the
         // tower it caps sits INSIDE the tower's own silhouette and costs the sky nothing at all, so there
@@ -1035,8 +1095,20 @@ namespace Desert::Assets
                         const float u = ( static_cast<float>( step ) + 0.5f ) / static_cast<float>( stackCount );
                         const float t = std::pow( u, 1.7f );
 
-                        const float taper  = std::clamp( shape.TopTaper, 0.0f, 1.0f );
-                        const float radius = clusterRadiusKm * ( 0.62f - 0.16f * t ) * ( 1.0f - taper * t * 0.5f );
+                        // THE TYPE'S OWN SILHOUETTE, READ HERE AND NOWHERE ELSE. Up to format version 2
+                        // this line was `(0.62 - 0.16 t) * (1 - 0.5 * TopTaper * t)` — a product of two
+                        // falling lines, hence monotone decreasing at every setting of its one knob, so a
+                        // shelf, a waist or a body that widens with height could not be authored at all.
+                        // The curve IS that law now, sampled into the asset.
+                        //
+                        // IT ENTERS HERE AND IS NOT APPLIED AFTERWARDS, which is the whole of decision
+                        // D-22 and the reason the vertical still has one source of truth. Everything below
+                        // this line is fed by `radius`: the lump's vertical radius is derived from it by
+                        // `kLumpVerticalOverHorizontal`, the band clamp squashes THAT, and the travel is
+                        // fitted to what the end lumps leave. A multiplier laid over the finished stack
+                        // would have been a second vertical authority fighting the aspect-and-erosion
+                        // calibration, which is exactly the defect D-22 names.
+                        const float radius = clusterRadiusKm * Graphic::CloudProfileHalfWidth( shape.Profile, t );
 
                         // BASE RAMP FRACTION IS THE THICKNESS OF THE LOWEST LOBE against the ones above it:
                         // a type whose base fills in slowly has a thin, spreading floor and a fat body over

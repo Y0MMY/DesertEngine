@@ -363,14 +363,26 @@ namespace Desert::Assets
      * displaced by up to 0.18 radii). It is computed by quadrature over that layout and NOT fitted to any
      * sky, so it does not move when the coverage, the cell, the density or the genus does.
      *
-     * IT DEPENDS ON `TopTaper` AND ON NOTHING ELSE A TYPE AUTHORS, because the taper is the one authored
-     * number that reaches a lobe's WIDTH. The quadrature gives 0.9594 at a taper of 0 and 0.9051 at 1, and
-     * the law between them is linear to 0.2 per cent — which is why two numbers ship rather than a table.
+     * IT DEPENDS ON THE TYPE'S VERTICAL PROFILE AND ON NOTHING ELSE A TYPE AUTHORS, because the profile is
+     * the only authored thing that reaches a lobe's WIDTH. It used to depend on `TopTaper`, which was that
+     * profile expressed as one knob on a monotone law; the quadrature gave 0.9594 at a taper of 0 and
+     * 0.9051 at 1, and the law between them is linear to 0.2 per cent — which is why two numbers ship
+     * rather than a table.
      *
-     * Desert/Tests/Engine/CloudPlacementSpectrum re-measures it from the EMITTED lumps at three tapers on
+     * THOSE TWO NUMBERS SURVIVED THE CURVE, and the reason is measured rather than conservative — see the
+     * definition. A curve is mapped onto that calibrated line by its MEAN LOBE WIDTH, taken at the stack's
+     * own six heights, and the mapping is the identity for any curve that re-expresses a taper. So the
+     * shipped library prices exactly as it did before the format moved, and an authored curve outside the
+     * old law's reach EXTRAPOLATES the line rather than being clamped onto its end.
+     *
+     * Desert/Tests/Engine/CloudPlacementSpectrum re-measures it from the EMITTED lumps at three profiles on
      * every run, so the constants and the layout cannot drift apart in silence.
      */
-    float CloudClusterTowerFootprintRadii( float topTaper );
+    float CloudClusterTowerFootprintRadii( const Graphic::CloudVerticalProfile& profile );
+
+    /// The mean of a type's lobe half-widths at the six heights the stack actually samples. Exposed
+    /// because the footprint above is defined in terms of it and a test has to be able to say so.
+    float CloudProfileMeanHalfWidth( const Graphic::CloudVerticalProfile& profile );
 
     /**
      * @brief How much wider than the calibrated tower this type's own body reaches, as a factor to divide

@@ -6374,3 +6374,132 @@ PakTool  ProjectHub  SceneMigrator                                — двена
 Сторонние библиотеки (`GLFW`, `ImGui`, `Jolt`, `Lua`, …) в цикл не попадают вовсе: их makefile'ы лежат в
 `ThirdParty/`, а цикл идёт по `*.make` верхнего уровня. Их имена в `case` остаются как страховка на
 случай, если генератор когда-нибудь начнёт класть их рядом.
+
+---
+
+## §VP — the vertical profile: what a sample count buys, and why not a texture
+
+**Р2, 2026-08-28.** The task was the owner's one remaining UE capability gap: authored vertical shape.
+Decision D-22 had required a curve; the owner relaxed that and asked the measurement to choose between a
+curve and a four-channel painted texture, since Р1's canvas had made the texture path cheap. It was
+measured. The curve won, for a reason D-22 never gave.
+
+### The consumer resolves six points, and that is the whole ceiling
+
+The vertical profile is read by the lump-stack layout in `CloudProceduralVolume.cpp` and by nothing else.
+The stack is `kBlobsPerCluster` = 6 lobes at fixed heights `t = ((step + 0.5) / 6) ^ 1.7`:
+
+    t = 0.0146, 0.0947, 0.2258, 0.4000, 0.6132, 0.8625
+
+So the entire difference a storage resolution can make is the piecewise-linear error **at those six
+heights**. That is computable rather than arguable. Worst case over every taper the shipped library uses
+(0.35 … 0.55), expressed as the lump-radius error it causes on the shipped congestus' 2.16 km cluster:
+
+| N samples | 4 | 6 | 8 | 12 | 16 | 24 | 32 | 64 | 256 |
+|---|---|---|---|---|---|---|---|---|---|
+| max rel. error | 0.322 % | 0.103 % | 0.043 % | 0.025 % | 0.0085 % | 0.0031 % | 0.0024 % | 0.0007 % | 0 |
+| lump radius | 6.96 m | 2.22 m | 0.92 m | 0.53 m | **0.18 m** | 0.07 m | 0.05 m | 0.01 m | 0 |
+
+The march's finest resolvable chord is **125 m** (`CloudFinestResolvableChordKm`, 256 max steps). Sixteen
+samples are wrong by a seven-hundredth of the smallest thing the march can see. **Two hundred and fifty-six
+samples buy 0.18 m of cloud.** A painted raster's extra rows are not detail; they are storage nothing reads.
+
+### And the channels were already spent
+
+Unreal packs four types into R/G/B/A because its profile is ONE texture shared by the whole material —
+"each channel describes the profile shape and relative altitude of a different cloud type". Ours is not
+shared: a type IS a file (`.decloudtype`, D-11). Four channels would carry four copies of one type's
+profile, three of them dead in the sense of DEV_CONTRACT.md §1.3. The channel-per-species arrangement is
+already expressed, one level up, by `.dclayout` — where the channel is the SLOT.
+
+### Why sixteen and not eight
+
+Fidelity was spent at four samples, so the sample count is set by the **authoring** grid instead: the
+finest feature an artist can place is `band / 15`, and the thing that draws it is six lobes over the same
+band.
+
+| type | band | grid at N=16 | lobe spacing | headroom |
+|---|---|---|---|---|
+| Stratus | 0.40 km | 27 m | 67 m | 2.5x |
+| Cumulus_Mediocris | 1.00 km | 67 m | 167 m | 2.5x |
+| Cumulus_Congestus | 3.60 km | 240 m | 600 m | 2.5x |
+| Cumulonimbus | 8.10 km | 540 m | 1350 m | 2.5x |
+
+Eight would put the congestus' grid at 514 m against a 600 m lobe spacing — authoring at exactly the
+granularity of the thing drawing it, with no headroom for a corner landing between two lobes. Thirty-two
+is five times finer than the stack and is the unreachable storage refused above.
+
+**What would change the answer.** Raise `kBlobsPerCluster`, or make the lobe count depend on the band, and
+the consumer stops being six-tap. A stack of sixty lobes reads a curve sixty times and this table has to be
+re-measured, not re-quoted.
+
+### A second refusal, inside the first: the footprint quadrature was not re-derived
+
+`CloudClusterTowerFootprintRadii` used to be a line through two quadrature constants in `TopTaper`
+(0.9594 R and 0.9051 R, §CB above). With the taper gone, the obvious move was to re-run that quadrature
+over the authored curve. **It was built and measured first.** An independent grid quadrature over this
+file's own layout reproduces the two committed constants to **0.2 per cent** — 0.9614 / 0.9040 against
+0.9594 / 0.9051 — which is what makes generalising legitimate at all. What it also has is **realisation
+noise**: the answer moves **0.5 per cent** between one set of wobble draws and another (0.9614 at 16
+realisations, 0.9531 at 32, 0.9548 at 48). A runtime quadrature would make a calibrated constant depend on
+an arbitrary seed count, and the committed constants were measured once, carefully, and are better numbers
+than anything computable per bake.
+
+So the curve is mapped onto the calibrated line by its **mean lobe half-width at the stack's own six
+heights**, extrapolated rather than clamped outside the old law's range. The mapping is the identity for
+any curve that re-expresses a taper, which is what keeps the version-3 library pricing exactly as version 2
+did. **Revisit if the lobe count or the disc law changes** — that is what would make the constants stale.
+
+### What the sign error cost, and what caught it
+
+The first version of that mapping guarded the division with `std::max( span, 1e-6f )`. The span is
+`atFullTaper - atNoTaper`, which is **negative** — a taper narrows the mean half-width — so the guard
+returned `1e-6` every single time and the equivalent taper came out scaled by about -96 000. It was found
+in one run by `TheTowersFootprintConstantsSayWhatTheLayoutActuallyDoes`, which predicted a footprint ratio
+of **6.2466** against a sky that said **0.9341**, and dragged three further tests red behind it because the
+gain had collapsed to 1 for every type. That test's own header says it exists because a sabotage found the
+hole; it has now caught a live one. The guard is on the magnitude.
+
+### The frames
+
+`Clouds_Protocol`, one seed (1), one camera (`0,200,0`), 90 frames, `--play`. The only thing that differs
+between the two is the sixteen numbers in `Cumulus_Congestus.decloudtype`.
+
+| file | what it is |
+|---|---|
+| `Shots/P2_profile_deck_mid.png` | the deck preset — the same width base to top |
+| `Shots/P2_profile_tower_mid.png` | the tower preset — pinched base, swelling upper half |
+| `Shots/P2_dome_deck.png` | whole dome, deck, 8 azimuths x 5 elevations |
+| `Shots/P2_dome_tower.png` | whole dome, tower, the same 40 rays |
+
+**The noise floor of this scene is exactly zero** — the same command run twice gave 0 differing bytes of
+980 480 pixels, so every number below is signal. Deck against tower at the mid angle: **90.20 % of pixels
+differ, max delta 122/255, mean delta over the differing pixels 22.25**. The tower's bodies read as necked
+turrets with bulbous caps; the deck's read as flat continuous masses. Neither sheet has an empty zenith, a
+band, or an angle at which the difference disappears.
+
+Both sweeps were shot with the SAME binary, built before either of them, so the two sheets differ only by
+the asset. The first render in this worktree was discarded per verification §7.
+
+### The silent field-shift, which is the thing to remember from this task
+
+`CloudTypeShape` is an aggregate, and five fixtures across two suites built one by POSITION:
+
+    constexpr CloudTypeShape kSheet{ 0.15f, 0.55f, 0.88f, 0.12f, 0.35f, 0.0f, 0.0f, ... };
+
+The fifth slot was `TopTaper`. When the profile curve took its place, brace elision fed `0.35f` into
+`Profile.HalfWidth[0]` and shifted **every number after it one slot up the array** — altitudes became
+widths, widths became altitudes. It **compiled**, in a `constexpr` context, with no warning, and produced
+shapes that drew no cloud at all: three tests in `CloudField` and one in `ComponentReflection` went red
+with `cloudyBelow = 0`, `bothPresent = 0`, `checked = 0`.
+
+Two things worth carrying forward:
+
+* **Searching for the removed field's NAME does not find these.** Not one of the five fixtures contains the
+  string `TopTaper` — the taper is just a number in a row. The search that finds them is for the TYPE.
+* **They are now named field by field**, and `CloudProfileFromTaper` is `constexpr` precisely so that a
+  `constexpr` fixture can name the profile instead of positioning it.
+
+The suites caught it, which is the system working. What is worth noting is that they caught it by
+measuring the SKY — "no cloud below the ceiling", "two species never overlap" — and not by any assertion
+about the struct.

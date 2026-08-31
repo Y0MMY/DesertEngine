@@ -38,6 +38,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -59,7 +60,7 @@ namespace
              /* TopAltitudeKm    */ 3.00f,
              /* EdgeTopFraction  */ 0.40f,
              /* BaseRampFraction */ 0.10f,
-             /* TopTaper         */ 0.40f,
+             /* Profile          */ Desert::Graphic::CloudProfileFromTaper( 0.40f ),
              /* AnvilAltitudeKm  */ 0.00f,
              /* AnvilThicknessKm */ 0.00f,
              /* AnvilStrength    */ 0.00f,
@@ -282,7 +283,10 @@ TEST( CloudTypeFormat, ATypeSurvivesBeingWrittenAndReadBack )
     EXPECT_FLOAT_EQ( round.Shape.TopAltitudeKm, original.Shape.TopAltitudeKm );
     EXPECT_FLOAT_EQ( round.Shape.EdgeTopFraction, original.Shape.EdgeTopFraction );
     EXPECT_FLOAT_EQ( round.Shape.BaseRampFraction, original.Shape.BaseRampFraction );
-    EXPECT_FLOAT_EQ( round.Shape.TopTaper, original.Shape.TopTaper );
+    // THE CURVE SAMPLE BY SAMPLE, and not as a struct comparison: a writer that dropped the tail of the
+    // row would otherwise report "the shapes differ" and leave sixteen numbers to search.
+    for ( uint32_t i = 0; i < Desert::Graphic::kCloudProfileSamples; ++i )
+        EXPECT_FLOAT_EQ( round.Shape.Profile.HalfWidth[i], original.Shape.Profile.HalfWidth[i] ) << i;
     EXPECT_FLOAT_EQ( round.Shape.AnvilAltitudeKm, original.Shape.AnvilAltitudeKm );
     EXPECT_FLOAT_EQ( round.Shape.AnvilThicknessKm, original.Shape.AnvilThicknessKm );
     EXPECT_FLOAT_EQ( round.Shape.AnvilStrength, original.Shape.AnvilStrength );
@@ -297,7 +301,7 @@ TEST( CloudTypeFormat, TheOptionalFieldsAreOptionalAndTheShapeIsNot )
     // A file an artist wrote by hand, with nothing in it but the numbers that have no answer.
     const std::string minimal = R"({"Shape":{
         "BaseAltitudeKm":1.0,"TopAltitudeKm":3.0,"EdgeTopFraction":0.4,"BaseRampFraction":0.1,
-        "TopTaper":0.4,"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
+        "Profile":{"HalfWidth":[0.62,0.60120887,0.5827022,0.56448,0.5465422,0.5288889,0.51152,0.49443555,0.47763556,0.46112,0.4448889,0.42894223,0.41328,0.39790222,0.3828089,0.368]},"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
         "DetailCharacter":0.6,"DetailFactor":1.0,"DensityFactor":1.0,"ExtinctionFactor":1.0,
         "PlacementScale":1.0,"PlacementAnisotropy":1.0}})";
 
@@ -310,7 +314,7 @@ TEST( CloudTypeFormat, TheOptionalFieldsAreOptionalAndTheShapeIsNot )
     // number nobody wrote is not a number anybody chose.
     const std::string incomplete = R"({"Shape":{
         "BaseAltitudeKm":1.0,"TopAltitudeKm":3.0,"EdgeTopFraction":0.4,"BaseRampFraction":0.1,
-        "TopTaper":0.4,"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
+        "Profile":{"HalfWidth":[0.62,0.60120887,0.5827022,0.56448,0.5465422,0.5288889,0.51152,0.49443555,0.47763556,0.46112,0.4448889,0.42894223,0.41328,0.39790222,0.3828089,0.368]},"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
         "DetailCharacter":0.6,"DetailFactor":1.0,"DensityFactor":1.0,
         "PlacementScale":1.0,"PlacementAnisotropy":1.0}})";
     EXPECT_FALSE( ParseCloudType( incomplete ) ) << "a shape missing ExtinctionFactor was accepted";
@@ -322,13 +326,151 @@ TEST( CloudTypeFormat, TheOptionalFieldsAreOptionalAndTheShapeIsNot )
     // affordable (§4.5).
     const std::string versionOne = R"({"FormatVersion":1,"Shape":{
         "BaseAltitudeKm":1.0,"TopAltitudeKm":3.0,"EdgeTopFraction":0.4,"BaseRampFraction":0.1,
-        "TopTaper":0.4,"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
+        "Profile":{"HalfWidth":[0.62,0.60120887,0.5827022,0.56448,0.5465422,0.5288889,0.51152,0.49443555,0.47763556,0.46112,0.4448889,0.42894223,0.41328,0.39790222,0.3828089,0.368]},"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
         "DetailCharacter":0.6,"DetailFactor":1.0,"DensityFactor":1.0,"ExtinctionFactor":1.0}})";
 
     const auto refused = ParseCloudType( versionOne );
-    ASSERT_FALSE( refused ) << "a version-1 file was read as if it were a version-2 one";
+    ASSERT_FALSE( refused ) << "a version-1 file was read as if it were a version-3 one";
     EXPECT_NE( refused.GetError().find( "version" ), std::string::npos )
          << "the refusal does not say the format version is the problem: " << refused.GetError();
+
+    // AND A VERSION-2 FILE THE SAME WAY, which is the refusal Р2 added and the one that matters most,
+    // because a version-2 file is not obviously broken: it is a real, complete, legal type as of last
+    // week. What it carries is `TopTaper`, a single number where the reader now wants a curve. The engine
+    // COULD synthesise that curve — `Graphic::CloudProfileFromTaper` is exactly that function and it is
+    // what rewrote the shipped library — and doing it here is precisely what DEV_CONTRACT.md §4 forbids:
+    // it would leave two file layouts alive in the reader for ever, and the older one would be the one
+    // nobody tests. The conversion happened once, in the commit, in the files.
+    const std::string versionTwo = R"({"FormatVersion":2,"Shape":{
+        "BaseAltitudeKm":1.0,"TopAltitudeKm":3.0,"EdgeTopFraction":0.4,"BaseRampFraction":0.1,
+        "TopTaper":0.4,"AnvilAltitudeKm":0.0,"AnvilThicknessKm":0.0,"AnvilStrength":0.0,
+        "DetailCharacter":0.6,"DetailFactor":1.0,"DensityFactor":1.0,"ExtinctionFactor":1.0,
+        "PlacementScale":1.0,"PlacementAnisotropy":1.0}})";
+
+    const auto refusedTwo = ParseCloudType( versionTwo );
+    ASSERT_FALSE( refusedTwo ) << "a version-2 file was read as if its TopTaper were a profile curve";
+    EXPECT_NE( refusedTwo.GetError().find( "version" ), std::string::npos )
+         << "the refusal does not say the format version is the problem: " << refusedTwo.GetError();
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The vertical profile — Р2. What the curve can say, what it may not say, and that the library still
+// says what it said before the format moved.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CloudTypeProfile, TheCurveReadsBackTheNumbersItWasAuthoredWith )
+{
+    const Desert::Graphic::CloudVerticalProfile profile = Desert::Graphic::CloudProfileFromTaper( 0.5f );
+
+    // AT THE SAMPLE POINTS IT IS THE SAMPLES, exactly — not "close to". An interpolator that missed its
+    // own knots would make every authored number a suggestion.
+    for ( uint32_t i = 0; i < Desert::Graphic::kCloudProfileSamples; ++i )
+    {
+        const float t = static_cast<float>( i ) / static_cast<float>( Desert::Graphic::kCloudProfileSamples - 1 );
+        EXPECT_FLOAT_EQ( Desert::Graphic::CloudProfileHalfWidth( profile, t ), profile.HalfWidth[i] ) << i;
+    }
+
+    // CLAMPED AND NOT EXTRAPOLATED outside [0, 1]. The stack's `t` is a curve of the step index and can
+    // land a hair outside; a linear extrapolation there is a negative width at one end and an unbounded
+    // one at the other, which is a lump nobody authored.
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudProfileHalfWidth( profile, -3.0f ), profile.HalfWidth.front() );
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudProfileHalfWidth( profile, 7.0f ), profile.HalfWidth.back() );
+
+    // AND BETWEEN TWO KNOTS IT IS THE MIDPOINT, because linear is the whole of the promise.
+    const float half = 0.5f / static_cast<float>( Desert::Graphic::kCloudProfileSamples - 1 );
+    EXPECT_NEAR( Desert::Graphic::CloudProfileHalfWidth( profile, half ),
+                 0.5f * ( profile.HalfWidth[0] + profile.HalfWidth[1] ), 1e-6f );
+}
+
+TEST( CloudTypeProfile, TheTowerIsAShapeTheOldLawCouldNotReachAtAnySetting )
+{
+    // THE CAPABILITY CLAIM, ASSERTED RATHER THAN DESCRIBED. Everything Р2 delivers rests on one property
+    // of the law it replaced: `(0.62 - 0.16 t) * (1 - 0.5 * taper * t)` is a product of two lines that
+    // both FALL over [0, 1], so it is monotone decreasing for every taper in range. A profile whose
+    // maximum is in its interior therefore cannot be written as that product by any taper whatsoever —
+    // which is why the vertical was the one UE capability this engine did not have, and why a slider
+    // could not have been the answer.
+    //
+    // If this test ever fails, either the tower preset stopped being a tower or the old law was not what
+    // this task said it was; both would invalidate the argument for the whole change.
+    for ( int step = 0; step <= 100; ++step )
+    {
+        const Desert::Graphic::CloudVerticalProfile old =
+             Desert::Graphic::CloudProfileFromTaper( static_cast<float>( step ) / 100.0f );
+
+        for ( uint32_t i = 1; i < Desert::Graphic::kCloudProfileSamples; ++i )
+            ASSERT_LE( old.HalfWidth[i], old.HalfWidth[i - 1] )
+                 << "the law Р2 replaced was not monotone at taper " << step / 100.0f << ", sample " << i;
+    }
+
+    const Desert::Graphic::CloudVerticalProfile tower = Desert::Graphic::CloudProfileTower();
+
+    uint32_t peak = 0;
+    for ( uint32_t i = 1; i < Desert::Graphic::kCloudProfileSamples; ++i )
+    {
+        if ( tower.HalfWidth[i] > tower.HalfWidth[peak] )
+            peak = i;
+    }
+
+    EXPECT_GT( peak, 0u ) << "the tower preset's widest point is its base, so it is reachable by a taper";
+    EXPECT_LT( peak, Desert::Graphic::kCloudProfileSamples - 1 )
+         << "the tower preset's widest point is its top, which is monotone the other way and still not a "
+            "shape with an interior maximum";
+
+    // And the deck: flat is not monotone-decreasing-and-falling either, since the old law lost a quarter
+    // of its width by the top even at a taper of zero.
+    const Desert::Graphic::CloudVerticalProfile deck = Desert::Graphic::CloudProfileFlatDeck();
+    EXPECT_FLOAT_EQ( deck.HalfWidth.front(), deck.HalfWidth.back() );
+}
+
+TEST( CloudTypeProfile, EveryShippedTypeIsItsOldTaperReExpressedAndNotReAuthored )
+{
+    // WHAT MAKES THE FORMAT MOVE HONEST. Version 3 is a change of REPRESENTATION, and the claim that goes
+    // with it is that the library renders the sky it rendered before. That claim is only worth anything if
+    // something checks it, and this is the check: every shipped file's curve must be exactly the sampled
+    // closed form of the taper that file carried at version 2. Those tapers are transcribed from the
+    // version-2 files as literals — reading them back out of the version-3 files would be asserting the
+    // library against itself.
+    const std::map<std::string, float> tapersAtVersionTwo = {
+         { kCloudTypeStratus, 0.35f },          { kCloudTypeCumulusMediocris, 0.45f },
+         { kCloudTypeCumulusCongestus, 0.50f }, { kCloudTypeCumulonimbus, 0.40f },
+         { kCloudTypeCumulusHumilis, 0.45f },   { kCloudTypeStratocumulus, 0.35f },
+         { kCloudTypeAltocumulus, 0.35f },      { kCloudTypeCirrus, 0.55f },
+         { kCloudTypeLenticular, 0.45f },
+    };
+
+    for ( const auto& [name, taper] : tapersAtVersionTwo )
+    {
+        const CloudTypeShape                        shape    = LoadShipped( name.c_str() ).Shape;
+        const Desert::Graphic::CloudVerticalProfile expected = Desert::Graphic::CloudProfileFromTaper( taper );
+
+        for ( uint32_t i = 0; i < Desert::Graphic::kCloudProfileSamples; ++i )
+            EXPECT_FLOAT_EQ( shape.Profile.HalfWidth[i], expected.HalfWidth[i] ) << name << " sample " << i;
+    }
+}
+
+TEST( CloudTypeProfile, AProfileThatDrawsNothingIsRefusedRatherThanDrawnAsSpecks )
+{
+    CloudTypeShape shape = LegalShape();
+
+    // A CURVE OF ALL ZEROES is a type whose every lump would be floored at the march's resolvable chord,
+    // so the sky comes out as a field of identical minimum-sized specks — a shape nobody authored,
+    // produced by a clamp. §1.4 of the contract: refuse it and say why, rather than substitute quietly.
+    shape.Profile.HalfWidth.fill( 0.0f );
+    const auto refused = ValidateCloudTypeShape( shape );
+    EXPECT_FALSE( refused );
+    EXPECT_NE( std::string( refused.GetError() ).find( "widest" ), std::string::npos ) << refused.GetError();
+
+    // A single non-zero sample is enough to be a cloud, because the interpolation carries it either side.
+    shape.Profile.HalfWidth[8] = 0.5f;
+    EXPECT_TRUE( ValidateCloudTypeShape( shape ) );
+
+    // A NaN anywhere in the row is refused and NAMED BY INDEX. A NaN that reaches the layout is a lump
+    // radius of NaN, a body that never renders and nothing in the log.
+    shape.Profile.HalfWidth[3] = std::numeric_limits<float>::quiet_NaN();
+    const auto nan             = ValidateCloudTypeShape( shape );
+    EXPECT_FALSE( nan );
+    EXPECT_NE( std::string( nan.GetError() ).find( "[3]" ), std::string::npos ) << nan.GetError();
 }
 
 TEST( CloudTypeFormat, EveryRefusalNamesTheNumberThatIsWrong )
@@ -365,10 +507,10 @@ TEST( CloudTypeFormat, EveryRefusalNamesTheNumberThatIsWrong )
                s.BaseRampFraction = 0.0f;
                return s;
            } },
-         { "TopTaper",
+         { "Profile.HalfWidth",
            []( CloudTypeShape s )
            {
-               s.TopTaper = -0.1f;
+               s.Profile.HalfWidth[7] = -0.1f;
                return s;
            } },
          { "AnvilThicknessKm",
@@ -464,7 +606,8 @@ TEST( CloudTypeLibrary, TheBuiltInDefaultIsTheShippedCumulusCongestus )
     EXPECT_FLOAT_EQ( shipped.TopAltitudeKm, builtIn.TopAltitudeKm );
     EXPECT_FLOAT_EQ( shipped.EdgeTopFraction, builtIn.EdgeTopFraction );
     EXPECT_FLOAT_EQ( shipped.BaseRampFraction, builtIn.BaseRampFraction );
-    EXPECT_FLOAT_EQ( shipped.TopTaper, builtIn.TopTaper );
+    for ( uint32_t i = 0; i < Desert::Graphic::kCloudProfileSamples; ++i )
+        EXPECT_FLOAT_EQ( shipped.Profile.HalfWidth[i], builtIn.Profile.HalfWidth[i] ) << i;
     EXPECT_FLOAT_EQ( shipped.AnvilAltitudeKm, builtIn.AnvilAltitudeKm );
     EXPECT_FLOAT_EQ( shipped.AnvilThicknessKm, builtIn.AnvilThicknessKm );
     EXPECT_FLOAT_EQ( shipped.AnvilStrength, builtIn.AnvilStrength );
@@ -512,7 +655,14 @@ TEST( CloudTypeLibrary, TheFourTypesT0ShippedAreUnchanged )
         EXPECT_FLOAT_EQ( shape.TopAltitudeKm, row.TopKm ) << row.Name;
         EXPECT_FLOAT_EQ( shape.EdgeTopFraction, row.Edge ) << row.Name;
         EXPECT_FLOAT_EQ( shape.BaseRampFraction, row.Ramp ) << row.Name;
-        EXPECT_FLOAT_EQ( shape.TopTaper, row.Taper ) << row.Name;
+        // THE TAPER SURVIVES AS THE CURVE IT GENERATES. Format version 3 replaced the number with the
+        // sampled law; asserting the SAMPLES against `CloudProfileFromTaper(row.Taper)` is the same claim
+        // this line always made — that the file still says what T0's table said — expressed in the form
+        // the file now says it in. If this ever fails, the library was re-authored rather than
+        // re-expressed, which is the thing the whole test exists to forbid.
+        const Desert::Graphic::CloudVerticalProfile expected = Desert::Graphic::CloudProfileFromTaper( row.Taper );
+        for ( uint32_t i = 0; i < Desert::Graphic::kCloudProfileSamples; ++i )
+            EXPECT_FLOAT_EQ( shape.Profile.HalfWidth[i], expected.HalfWidth[i] ) << row.Name << " sample " << i;
         EXPECT_FLOAT_EQ( shape.AnvilAltitudeKm, row.AnvilKm ) << row.Name;
         EXPECT_FLOAT_EQ( shape.AnvilThicknessKm, row.AnvilThickness ) << row.Name;
         EXPECT_FLOAT_EQ( shape.AnvilStrength, row.AnvilStrength ) << row.Name;

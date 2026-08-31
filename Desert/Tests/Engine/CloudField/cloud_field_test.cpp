@@ -71,14 +71,56 @@ namespace
     // also moved its patches would be changing two things between one measurement and the next.
 
     // A SHEET: nearly the same height everywhere in a patch, thin, low.
-    constexpr CloudTypeShape kSheet{ 0.15f, 0.55f, 0.88f, 0.12f, 0.35f, 0.0f,  0.0f,
-                                     0.0f,  0.05f, 0.50f, 0.70f, 0.75f, 1.00f, 1.00f };
+    // NAMED FIELD BY FIELD RATHER THAN BY POSITION, and the reason is a defect this file carried for one
+    // build. The fifth slot used to be `TopTaper`; when Р2 replaced it with the profile CURVE, brace
+    // elision quietly fed the taper's old value into `Profile.HalfWidth[0]` and shifted every number after
+    // it one place up the array. It compiled in a `constexpr` context and produced shapes that drew NO
+    // CLOUD, which is how three tests in this file went red at once. A positional initialiser of an
+    // aggregate whose members can change is a silent field-shift waiting to happen.
+    constexpr CloudTypeShape kSheet{ /* BaseAltitudeKm */ 0.15f,
+                                     /* TopAltitudeKm */ 0.55f,
+                                     /* EdgeTopFraction */ 0.88f,
+                                     /* BaseRampFraction */ 0.12f,
+                                     /* Profile */ Desert::Graphic::CloudProfileFromTaper( 0.35f ),
+                                     /* AnvilAltitudeKm */ 0.0f,
+                                     /* AnvilThicknessKm */ 0.0f,
+                                     /* AnvilStrength */ 0.0f,
+                                     /* DetailCharacter */ 0.05f,
+                                     /* DetailFactor */ 0.50f,
+                                     /* DensityFactor */ 0.70f,
+                                     /* ExtinctionFactor */ 0.75f,
+                                     /* PlacementScale */ 1.00f,
+                                     /* PlacementAnisotropy */ 1.00f };
     // A HEAP: a fair-weather cumulus, half its height at the rim of a patch.
-    constexpr CloudTypeShape kHeap{ 0.90f, 1.90f, 0.45f, 0.06f, 0.45f, 0.0f,  0.0f,
-                                    0.0f,  0.70f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f };
+    constexpr CloudTypeShape kHeap{ /* BaseAltitudeKm */ 0.90f,
+                                    /* TopAltitudeKm */ 1.90f,
+                                    /* EdgeTopFraction */ 0.45f,
+                                    /* BaseRampFraction */ 0.06f,
+                                    /* Profile */ Desert::Graphic::CloudProfileFromTaper( 0.45f ),
+                                    /* AnvilAltitudeKm */ 0.0f,
+                                    /* AnvilThicknessKm */ 0.0f,
+                                    /* AnvilStrength */ 0.0f,
+                                    /* DetailCharacter */ 0.70f,
+                                    /* DetailFactor */ 1.00f,
+                                    /* DensityFactor */ 1.00f,
+                                    /* ExtinctionFactor */ 1.00f,
+                                    /* PlacementScale */ 1.00f,
+                                    /* PlacementAnisotropy */ 1.00f };
     // A STORM: the only fixture with a second lobe, and the one the anvil is drawn from.
-    constexpr CloudTypeShape kStorm{ 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f,  1.8f,
-                                     0.85f, 0.85f, 1.00f, 1.35f, 1.30f, 1.00f, 1.00f };
+    constexpr CloudTypeShape kStorm{ /* BaseAltitudeKm */ 0.90f,
+                                     /* TopAltitudeKm */ 9.00f,
+                                     /* EdgeTopFraction */ 0.12f,
+                                     /* BaseRampFraction */ 0.04f,
+                                     /* Profile */ Desert::Graphic::CloudProfileFromTaper( 0.40f ),
+                                     /* AnvilAltitudeKm */ 9.5f,
+                                     /* AnvilThicknessKm */ 1.8f,
+                                     /* AnvilStrength */ 0.85f,
+                                     /* DetailCharacter */ 0.85f,
+                                     /* DetailFactor */ 1.00f,
+                                     /* DensityFactor */ 1.35f,
+                                     /* ExtinctionFactor */ 1.30f,
+                                     /* PlacementScale */ 1.00f,
+                                     /* PlacementAnisotropy */ 1.00f };
 
     // The ENVELOPE the march intersects for a shape, computed the way Graphic::PackCloudParams computes it
     // rather than restated. There is no authored layer thickness — that is the whole point of the phase —
@@ -770,10 +812,34 @@ namespace
     // built-in congestus at the layer's scale. Written out rather than loaded from disk because this suite
     // does not read files, and because what is being tested is the arithmetic of the union rather than the
     // library's numbers — Desert/Tests/Engine/CloudType owns those.
-    constexpr CloudTypeShape kDeck{ 0.60f, 2.60f, 0.80f, 0.10f, 0.35f, 0.0f,  0.0f,
-                                    0.0f,  0.95f, 0.70f, 0.95f, 1.00f, 0.35f, 1.60f };
-    constexpr CloudTypeShape kTower{ 2.20f, 5.80f, 0.15f, 0.04f, 0.50f, 0.0f,  0.0f,
-                                     0.0f,  1.00f, 1.00f, 1.15f, 1.00f, 1.00f, 1.00f };
+    constexpr CloudTypeShape kDeck{ /* BaseAltitudeKm */ 0.60f,
+                                    /* TopAltitudeKm */ 2.60f,
+                                    /* EdgeTopFraction */ 0.80f,
+                                    /* BaseRampFraction */ 0.10f,
+                                    /* Profile */ Desert::Graphic::CloudProfileFromTaper( 0.35f ),
+                                    /* AnvilAltitudeKm */ 0.0f,
+                                    /* AnvilThicknessKm */ 0.0f,
+                                    /* AnvilStrength */ 0.0f,
+                                    /* DetailCharacter */ 0.95f,
+                                    /* DetailFactor */ 0.70f,
+                                    /* DensityFactor */ 0.95f,
+                                    /* ExtinctionFactor */ 1.00f,
+                                    /* PlacementScale */ 0.35f,
+                                    /* PlacementAnisotropy */ 1.60f };
+    constexpr CloudTypeShape kTower{ /* BaseAltitudeKm */ 2.20f,
+                                     /* TopAltitudeKm */ 5.80f,
+                                     /* EdgeTopFraction */ 0.15f,
+                                     /* BaseRampFraction */ 0.04f,
+                                     /* Profile */ Desert::Graphic::CloudProfileFromTaper( 0.50f ),
+                                     /* AnvilAltitudeKm */ 0.0f,
+                                     /* AnvilThicknessKm */ 0.0f,
+                                     /* AnvilStrength */ 0.0f,
+                                     /* DetailCharacter */ 1.00f,
+                                     /* DetailFactor */ 1.00f,
+                                     /* DensityFactor */ 1.15f,
+                                     /* ExtinctionFactor */ 1.00f,
+                                     /* PlacementScale */ 1.00f,
+                                     /* PlacementAnisotropy */ 1.00f };
 
     CloudFieldParams TwoSpeciesParams( float coverage )
     {

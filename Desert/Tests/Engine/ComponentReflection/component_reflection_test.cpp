@@ -941,10 +941,40 @@ TEST( VolumetricCloudPayload, TheTypesMatterAndEdgeReachTheGpuAsProductsOfTheLay
     // be an artist's Density Scale doing nothing because the type had already decided.
     const Desert::Graphic::AtmosphereEnv atmosphere{};
 
-    const Desert::Graphic::CloudTypeShape ice{ 8.00f, 9.40f, 0.90f, 0.25f, 0.55f, 0.0f,  0.0f,
-                                               0.0f,  0.00f, 2.50f, 0.35f, 0.25f, 2.50f, 8.00f };
-    const Desert::Graphic::CloudTypeShape storm{ 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f,  1.8f,
-                                                 0.85f, 0.85f, 1.00f, 1.35f, 1.30f, 2.00f, 1.00f };
+    // NAMED FIELD BY FIELD RATHER THAN BY POSITION, and the reason is a defect this file carried for one
+    // build. The fifth slot used to be `TopTaper`; when Р2 replaced it with the profile CURVE, brace
+    // elision quietly fed the taper's old value into `Profile.HalfWidth[0]` and shifted every number after
+    // it one place up the array. It compiled in a `constexpr` context and produced shapes that drew NO
+    // CLOUD, which is how three tests in this file went red at once. A positional initialiser of an
+    // aggregate whose members can change is a silent field-shift waiting to happen.
+    const Desert::Graphic::CloudTypeShape ice{ /* BaseAltitudeKm */ 8.00f,
+                                               /* TopAltitudeKm */ 9.40f,
+                                               /* EdgeTopFraction */ 0.90f,
+                                               /* BaseRampFraction */ 0.25f,
+                                               /* Profile */ Desert::Graphic::CloudProfileFromTaper( 0.55f ),
+                                               /* AnvilAltitudeKm */ 0.0f,
+                                               /* AnvilThicknessKm */ 0.0f,
+                                               /* AnvilStrength */ 0.0f,
+                                               /* DetailCharacter */ 0.00f,
+                                               /* DetailFactor */ 2.50f,
+                                               /* DensityFactor */ 0.35f,
+                                               /* ExtinctionFactor */ 0.25f,
+                                               /* PlacementScale */ 2.50f,
+                                               /* PlacementAnisotropy */ 8.00f };
+    const Desert::Graphic::CloudTypeShape storm{ /* BaseAltitudeKm */ 0.90f,
+                                                 /* TopAltitudeKm */ 9.00f,
+                                                 /* EdgeTopFraction */ 0.12f,
+                                                 /* BaseRampFraction */ 0.04f,
+                                                 /* Profile */ Desert::Graphic::CloudProfileFromTaper( 0.40f ),
+                                                 /* AnvilAltitudeKm */ 9.5f,
+                                                 /* AnvilThicknessKm */ 1.8f,
+                                                 /* AnvilStrength */ 0.85f,
+                                                 /* DetailCharacter */ 0.85f,
+                                                 /* DetailFactor */ 1.00f,
+                                                 /* DensityFactor */ 1.35f,
+                                                 /* ExtinctionFactor */ 1.30f,
+                                                 /* PlacementScale */ 2.00f,
+                                                 /* PlacementAnisotropy */ 1.00f };
 
     for ( const Desert::Graphic::CloudTypeShape& shape : { ice, storm, Desert::Assets::CloudTypeDefaultShape() } )
     {

@@ -187,13 +187,13 @@ namespace
     //
     // And four more since: LayerBottomAltitude and LayerThickness stated the shell by hand, which the
     // cloud type now states in kilometres and the packer computes; the old scalar CloudType and its
-    // variance drove one analytic profile curve, which is now a per-type TABLE indexed by the placement
-    // pattern's own value. Every one of the four was removed rather than repointed.
+    // variance drove one analytic profile curve, which is now a per-type AUTHORED curve living in the
+    // type's own asset. Every one of the four was removed rather than repointed.
     //
     // And ONE more with T1: NoiseVolume. It was not removed - it MOVED, onto the cloud type asset, because
     // the character of a cloud's edge is a property of the kind of cloud rather than of the layer's
     // weather. There is no row for it here because it is no longer a field of this component; the row that
-    // replaced it is CloudType, and the renderer is what resolves that handle into both the twelve numbers
+    // replaced it is CloudType, and the renderer is what resolves that handle into both the type's numbers
     // and the volume.
     // ------------------------------------------------------------------------------------------------
 
@@ -207,7 +207,8 @@ namespace
 
          // Cloud Layer - the shell the march intersects. The CLOUD TYPES are what the shell is built
          // from, and unlike every other row here they are resolved rather than packed: the renderer turns
-         // each handle into fourteen numbers through Runtime::CloudTypeService, and those numbers become
+         // each handle into thirteen numbers and a vertical profile curve through Runtime::CloudTypeService,
+         // and those become
          // Layer.y/Layer.z (the shell, the UNION of the set's bands) and one entry each of SpeciesEdge
          // and SpeciesPlacement. Two fields that used to state the shell by hand are gone, because an
          // authored shell and a type's altitudes are two numbers obliged to agree.
