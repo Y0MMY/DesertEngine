@@ -179,6 +179,12 @@ is deleted, not kept "in case we roll back". Rolling back is called `git revert`
 - **`git stash` is shared across worktrees on this machine.** One `stash pop` pulled another
   engineer's untracked files into an unrelated tree. Prefer explicit commits; if you must stash,
   apply by name.
+- **The scratchpad is shared too, and it overwrites silently.** Two developers on one day each lost
+  a run to it: one had `shot.sh` replaced mid-task by another worktree's copy pointing at a
+  *different binary*, the other lost `sweep.sh` and `shot.sh` together, which killed a sweep. Nothing
+  warns you — the script simply becomes somebody else's and keeps running. **Prefix every scratch
+  file with your task's name**, and if a measurement disagrees with the one before it, check that the
+  script that produced it is still yours before you go looking for a defect in the code.
 - **The machine is shared too.** Rendering and timing while someone else renders produces numbers
   that measure them, not you — see `desert-engine-verify` §5a before quoting a slope.
 
