@@ -10,7 +10,9 @@ project(test_name)
 
     -- One unit under test, GPU-free:
     --   * Editor/Resources/Shaders/Common/CloudNoise.glslh — the periodic hash, the improved-Perlin
-    --     lattice, the fractal sum and the remap — compiled AS C++ through CloudNoiseReference.hpp. That
+    --     lattice, the Alligator basis and the remap — compiled AS C++ through CloudNoiseReference.hpp.
+    --     ("The fractal sum" stood here and named nothing: every channel is ONE octave, which is the
+    --     finding Р10 measured and the reason its own test asserts the saturation.) That
     --     is why the SHADER ROOT is on the include path: the test drives the exact text the cloud passes
     --     compile, so a passing test is a statement about the code the GPU runs.
     -- Nothing to link — no renderer, no Vulkan.
