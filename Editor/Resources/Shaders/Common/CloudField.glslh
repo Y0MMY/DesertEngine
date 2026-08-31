@@ -614,6 +614,89 @@ CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction
 // The contrast itself is NOT left in the tree behind a constant of 1: a knob that moves nothing is a
 // dead setting (contract §1.3). It is one multiply and one clamp on `detailField` below, and this note is
 // what it costs to put it back.
+//
+// ---------------------------------------------------------------------------------------------------
+// THE PAIR — CONTRAST ON A FRACTAL CHANNEL — WAS BUILT AND REFUSED. Task Р13, 2026-09-01.
+// ---------------------------------------------------------------------------------------------------
+//
+// Р10 ended by saying the pair was worth a task where neither half alone was: applying this contrast to a
+// FRACTAL erosion channel, "the lattice does not appear at all, and the EL 45 penalty falls from Р9's
+// 0.091 to 0.010 — a factor of nine". Р13 built both halves, re-baked both shipped volumes, and swept the
+// whole dome twice. It does not survive.
+//
+// THE BASELINE MOVED FIRST. Every figure below is on a base re-shot with Р12's sky-light occlusion volume
+// ON (`SkyOcclusionVolume = true`, `AmbientOcclusionStrength = 1.0`, and Clouds_Protocol sets both
+// explicitly), so Р9's and Р10's absolutes are not comparable with these and only the DELTAS are. The
+// repeat shot is 0 differing pixels of 980 480 and the same md5; the first render in the fresh worktree
+// differed from the settled one by 16 pixels at a max of 1/255 and was discarded, exactly as the protocol
+// says — that discard is not a formality, it is the same 110-pixel ghost the verify skill records.
+//
+// THE LATTICE APPEARS ON THE FRACTAL CHANNEL TOO, which is the claim the task rested on and it is false.
+// `Docs/Clouds/Shots/P13_pair_el45_lattice.png` against `P13_base_el45.png`: the near lobe carries the
+// same polygonal web of bright cell walls Р9 photographed on the single octave. It is not subtle and it
+// is not hidden by having three lattices instead of one — the coarse octave still carries most of the
+// amplitude, and it is the coarse octave's cells that the deepened cut exposes.
+//
+// AND THE FACTOR OF NINE IS A CHANGE OF SUPPORT, NOT A CHANGE OF SKY. Measured on this baseline at
+// AZ 000 / EL 45, one frame, two rectangles:
+//
+//     support                       base     pair    penalty
+//     the near lobe (400x310 px)    0.480 -> 0.397    0.083   <- Р9 measured a LOBE and got 0.091
+//     the whole frame               0.399 -> 0.383    0.016   <- Р10 measured a FRAME and got 0.010
+//
+// Both figures reproduce. They are the same defect measured over two different areas, and the ninefold
+// improvement is the ratio between the two rectangles rather than between two skies. This is the error
+// the §Р11 correction three screens up already names — "a mean over the frame is the wrong support for
+// this control... averaging over 736 804 pixels drowns exactly the thing being judged" — applied to the
+// other side of the same argument. Р10's numbers were right; the comparison between them was not.
+//
+// THE WHOLE DOME, forty tiles, base against pair, tonal contrast on Р0's ruler:
+//
+//     tiles where contrast FALLS        35 of 40
+//     tiles where it rises               4 of 40, by at most 0.009
+//     mean change                       -0.0064
+//     worst single tile        AZ 090 / EL 25   0.350 -> 0.307   (-0.043)
+//
+// Mean luminance rises on 33 of 40 and the cloud fraction grows — a concentrated cut opens FEWER holes,
+// so the deep blue gaps fill in. Saturation falls with it (0.133 -> 0.120 at EL 45). At the sheet's 1/4
+// scale the pair again reads BETTER over most of the dome, exactly as it did for Р9; the defect is in the
+// near field at full resolution, and only EL 45 and EL 25 at full size show it.
+//
+// FIVE CALIBRATED RELATIONS BREAK, and they were restated with the truth BEFORE the pair was built, which
+// is the only reason it is possible to say which of them is the pair's fault:
+//
+//   1. TheEyeLooksThroughMoreCloudThanTheErosionVariesOver — AND THIS IS THE ONE THAT SETTLES IT. The
+//      contrast HALVES the erosion's decorrelation length, 160 m -> at most 80 m (the instrument's own
+//      smallest lag), so the eye now integrates 8.21 correlation lengths instead of 4.11 — through the
+//      bound of 8 that this very note sets as the point past which "the up-rez cannot reach the
+//      silhouette at all". The mechanism eats itself: it buys roughness by making the field finer, and
+//      finer is the direction the 657 m integral already destroys. THE FRACTAL DOES NOT DO THIS — with
+//      the contrast at 1 the decorrelation is still exactly 160 m. It is the clipping in the contrast,
+//      which turns gradual transitions into steps.
+//   2. TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers — mean travel 138.7 m ->
+//      113.9 m, 0.91x the march chord against a floor of 1.05x. Known and priced: the strength would
+//      have to go 0.65 -> about 0.85 to pay for it, which is a shipped component default and four scenes.
+//   3. TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatingTheBody — the same quantity, older floor.
+//   4. HowMuchASampleKeepsRisesWithHowDeepInsideTheBodyItIs — worst margin -0.736 against a base of
+//      exactly 0.000, and the comparisons where the cut RISES with the profile while the density is still
+//      live go from 1 to 42. A sample 5 % deeper inside the body keeps 74 % less of its density: the
+//      erosion is eating the CORE, which is the clouds-versus-fog defect the (1 - Profile) weight exists
+//      to prevent.
+//   5. TheCoreKeepsItsDensityAndTheEdgeLosesMostOfItAtFullErosionStrength — same cause.
+//
+// AND THERE IS NO CONTRAST THAT CLEARS THEM. 1.25 — Р9's own estimate of the break point, confirmed to
+// the decimal — already fails 1, 4 and 5 (worst margin -0.0017, decorrelation already at 80 m). The
+// correlation collapse is not gradual: the clipping starts as soon as the histogram is widened at all.
+// So the legal range of this lever is (1.0, 1.25), where it buys 4.1 m -> under 7.0 m of roughness on a
+// 94.3 m silhouette, and even that band fails the relation that matters most.
+//
+// WHAT WOULD CHANGE THE ANSWER, so the next task does not re-derive it. Nothing in the composition of the
+// noise will, and that is now measured from three directions rather than argued: amplitude (Р9),
+// frequency (Р9), where the energy sits (Р10), octave count (Р13) and histogram shape (Р9, Р13) have all
+// been spent. The binding constraint is the 657 m the eye integrates, and only its own two terms move it
+// — the extinction and the profile ramp. Р9 priced that: sixteen times the extinction shortens it to
+// 235 m and buys the same 2.8x of roughness, at the cost of every lighting number the programme has
+// calibrated. That is the next task, and it is a lighting task, not a noise one.
 
 // The up-rez: turn the low-frequency profile into something with a cloud's edge.
 //
