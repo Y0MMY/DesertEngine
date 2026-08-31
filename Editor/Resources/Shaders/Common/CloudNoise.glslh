@@ -384,6 +384,73 @@ float CloudCurlyAlligator01( vec3 position, float period, uint seed, float stren
 // The periods are lattice cells across the unit cube and must divide it a whole number of times, or REPEAT
 // sampling puts a seam through the sky. They are parameters rather than constants because they are what an
 // artist changes to get a different edge: the same four noises at half the period is a different cloud.
+//
+// ---------------------------------------------------------------------------------------------------
+// EACH CHANNEL IS ONE OCTAVE, AND A FRACTAL ONE WAS MEASURED AND REFUSED — task Р10, 2026-08-28
+// ---------------------------------------------------------------------------------------------------
+//
+// Р9 ended by naming this function as the place to spend the programme's remaining idea: the erosion's
+// structure function "SATURATES BY 200 m, the signature of a field with exactly ONE scale in it... A
+// channel that summed two or three octaves would have no single cell scale to expose and would keep
+// rising past 200 m" (Common/CloudField.glslh). Р10 built that, measured it, and is not shipping it.
+// Everything below is measured on Clouds_Protocol with Р9's own instrument, so the numbers compare.
+//
+// THE SATURATION IS REAL and is now asserted rather than remembered — Desert/Tests/Engine/CloudNoise's
+// EveryChannelHasExactlyOneScaleAndSaturatesFarBelowTheDepthTheEyeLooksThrough prints the table and
+// pins the ratio. All four channels are flat by a fifth of a tile: D(.20)/D(.40) reads 0.947, 0.963,
+// 0.949 and 1.009. So the diagnosis was right.
+//
+// THE PRESCRIPTION WAS NOT, and it fails for a reason nobody had written down: THE EROSION FIELD IS
+// EXACTLY PERIODIC AT THE TILE. It is a REPEAT fetch of a unit cube spanning Detail Tile Size, so its
+// structure function returns to ZERO at 1 km by construction and it can carry no energy above that at
+// any resolution or octave count. The band the brief asked to fill — "scales comparable to and above the
+// 657 m integration length" — is therefore 657 m to 1 km, which at whole-number periods is a single
+// octave at period 1: one Alligator cell per tile. That is not a surface, it is the tile.
+//
+// AND A MEAN-PRESERVING FRACTAL MAKES IT WORSE, which is the part that is worth having in writing. A
+// weighted average of independent octaves normalised to keep the mean is a VARIANCE SINK — sd falls as
+// sqrt(sum w^2)/sum w — so the field gets SMOOTHER at every lag. Channel 3's D at an 83 m lag reads
+// 0.201 with one octave, 0.146 with two and 0.125 with three. The construction that preserves the mean
+// by averaging cannot add roughness in principle, and measuring it was the fastest way to find that out.
+//
+// AN ADDITIVE FRACTAL — each octave entering as (o - 0.5) about the median, which does preserve the mean
+// without averaging — does add roughness, and is STRICTLY DOMINATED BY THE LEVER Р9 ALREADY REFUSED.
+// Silhouette roughness added at an 80 m lag, above the 94.3 m the bare lumps give, at MATCHED total
+// deviation:
+//
+//     construction                        deviation   added roughness
+//     one octave (shipped)                    1.00        4.1 m
+//     fractal, 3 octaves, COARSER             1.75        5.3 m
+//     fractal, 3 octaves, FINER               1.75        5.3 m
+//     mean-preserving contrast, one octave    1.75        6.8 m   <- Р9's refused lever
+//     fractal, 4 octaves, lacunarity 1.5      3.10        7.3 m
+//     mean-preserving contrast, one octave    3.10        9.4 m   <- and again
+//
+// TWO THINGS FALL OUT OF THAT TABLE. First, a coarse-biased and a fine-biased fractal at the same
+// deviation give the SAME 5.3 m, so WHERE the energy sits is irrelevant and only how much of it there is
+// matters — which refutes the surviving-the-average mechanism directly, on its own instrument. Second,
+// spreading a deviation across scales delivers about three quarters of the roughness that spending it in
+// one octave does, because the coarse octaves put energy where an 80 m lag cannot see it and the fine
+// ones put it where the 657 m integral eats it. The fractal is not a way around the refusal; it is the
+// refused mechanism at a discount.
+//
+// THE FRAME AGREES. The best fractal above, baked into both shipped `.dcnv` volumes and rendered against
+// an unchanged binary (the repeat shot is 0 differing pixels of 980 480, so every figure is the change):
+// 65.7-71.6 % of pixels move by a MEAN of 0.65-1.11 of 255, tonal contrast holds to within 0.004 on Р0's
+// ruler at all four points, mean luminance moves +0.002 — and at EL 25 and EL 45 alike the lobes are the
+// same smooth rounded cotton wool they were. No harm, and no surface: a 3.3 % change in a quantity that
+// is 4.3 % of the silhouette to begin with.
+//
+// WHAT DID PAY, AND IT IS Р9'S ACTUAL HYPOTHESIS RATHER THAN THE ONE Р10 WAS SET. The fractal's value is
+// not roughness, it is that it HAS NO SINGLE CELL SIZE TO EXPOSE. Р9 refused the mean-preserving contrast
+// because at 3 the near field grew the Alligator's own `best - second` lattice as a bright honeycomb and
+// tonal contrast at EL 45 fell 0.464 -> 0.373. Applying that same contrast to a FRACTAL channel, the
+// lattice does not appear at all, and the EL 45 penalty falls from Р9's 0.091 to 0.010 (0.418 -> 0.408 on
+// Р10's own baseline) — a factor of nine — while the edges finally break into filaments. That is one
+// frame at one angle and it is NOT a shipping recommendation: it is the measurement that says the pair is
+// worth a task, where neither half alone was. Whoever takes it must restate the two relations Р9 found
+// mis-stated first (the mean-travel floor pins the uniform component; the retention justification claims
+// nothing else depends on the profile, and both frequency blends do), because a deep cut moves both.
 vec4 CloudNoiseVolumeChannels( vec3 uvw, uint seed, float curlStrength, float wispyPeriodLF,
                                float wispyPeriodHF, float billowPeriodLF, float billowPeriodHF )
 {

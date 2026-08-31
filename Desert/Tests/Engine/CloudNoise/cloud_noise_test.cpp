@@ -479,6 +479,94 @@ TEST( CloudNoiseVolumeLayout, TheFourChannelsAreDecorrelated )
     EXPECT_LT( std::abs( correlation( g, b ) ), 0.25 );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// HOW MANY SCALES THE EROSION HAS, AND WHY THAT IS THE CEILING ON IT — task Р10, 2026-08-28
+// ---------------------------------------------------------------------------------------------------
+//
+// WHY THIS EXISTS. Р9 established that the silhouette is a LINE INTEGRAL: a ray stops where it has
+// accumulated unit optical depth, and on the shipped protocol sky that takes 657 m of cloud, while the
+// erosion field decorrelates in 160 m. Integrating 657 m of a field that varies over 160 m is a low-pass
+// filter, so the erosion contributes 4.1 m of roughness at an 80 m lag on top of the 94.3 m the bare
+// lumps already give — 4.3 % (Common/CloudField.glslh, and CloudFieldErosion's own instrument).
+//
+// Р9's note quotes a structure function for this volume — D(50) 0.167, D(100) 0.210, D(200) 0.218,
+// D(400) 0.220, D(800) 0.219, "saturating by 200 m, the signature of a field with exactly ONE scale" —
+// and NOTHING IN THE TREE COMPUTED IT. It was measured once, by hand, and written into a comment. This
+// test is that measurement made permanent, because the whole of Р10 turns on it and the next task after
+// this one will want to know the day it changes.
+//
+// WHAT IT PINS, and it is a property rather than a number: the field SATURATES far below the tile. Each
+// channel is one Alligator octave, so it has a single cell size and no energy above it. Р10's refusal
+// rests on that being true, and a change that makes it false — a fractal channel, a second octave, a
+// different basis — should come here and restate the finding rather than quietly pass.
+//
+// THE LAG IS IN FRACTIONS OF A TILE and deliberately not in metres, so that this suite keeps the one
+// property its premake file calls out — it links nothing and knows about no world. The conversion is a
+// single multiplication the reader can do: one texture unit of this volume spans the LAYER's Detail Tile
+// Size along x, because Common/CloudField.glslh forms `windPos * CLOUD_DETAIL_FREQ_X / tile` and that
+// frequency is exactly 1. At the shipped Detail Tile Size of 1 km (Engine/ECS/VolumetricCloudComponent.hpp)
+// a lag of 0.2 tiles is 200 m and 0.4 tiles is 400 m, which are the two Р9's note quotes. Retuning the
+// tile moves the metres and moves nothing here, which is correct: how many scales a field has is a
+// property of the field, not of the layer that samples it.
+TEST( CloudNoiseVolumeLayout, EveryChannelHasExactlyOneScaleAndSaturatesFarBelowTheDepthTheEyeLooksThrough )
+{
+    // Mean |f(p) - f(p + lag)| along x, over the whole grid, for one channel. The same estimator Р9's
+    // instrument uses on the silhouette, applied here to the FIELD that feeds it.
+    auto structureAt = []( const std::vector<float>& f, int lag )
+    {
+        double total = 0.0;
+        long   pairs = 0;
+        for ( int z = 0; z < kGrid; ++z )
+            for ( int y = 0; y < kGrid; ++y )
+                for ( int x = 0; x + lag < kGrid; ++x )
+                {
+                    const size_t a = ( static_cast<size_t>( z ) * kGrid + y ) * kGrid + x;
+                    total += std::fabs( f[a] - f[a + lag] );
+                    ++pairs;
+                }
+        return pairs > 0 ? total / pairs : 0.0;
+    };
+
+    std::printf( "[CloudNoise] the eye looks through 657 m of cloud (Р9); at the shipped 1 km tile the "
+                 "lags below are 50, 100, 200 and 400 m\n" );
+    std::printf( "[CloudNoise]  channel   D(.05)  D(.10)  D(.20)  D(.40)   ratio .20/.40\n" );
+
+    for ( int channel = 0; channel < 4; ++channel )
+    {
+        const std::vector<float> f = SampleChannel( channel );
+
+        // Lags in GRID STEPS for the four fractions of a tile Р9's note quotes.
+        const auto lagFor = []( double tiles ) { return std::max( 1, static_cast<int>( tiles * kGrid + 0.5 ) ); };
+
+        const double d50  = structureAt( f, lagFor( 0.05 ) );
+        const double d100 = structureAt( f, lagFor( 0.10 ) );
+        const double d200 = structureAt( f, lagFor( 0.20 ) );
+        const double d400 = structureAt( f, lagFor( 0.40 ) );
+
+        std::printf( "[CloudNoise]  %d          %.3f   %.3f   %.3f   %.3f        %.3f\n", channel, d50, d100, d200,
+                     d400, d400 > 0.0 ? d200 / d400 : 0.0 );
+
+        // ── IT RISES AT ALL ──────────────────────────────────────────────────────────────────────────
+        //
+        // The weak half, and a guard against a channel that has become constant: a field with no lateral
+        // variation would satisfy the saturation bound below trivially.
+        EXPECT_GT( d200, 0.05 ) << "channel " << channel << " varies by " << d200
+                                << " over 200 m, which is not a field the erosion can cut anything with";
+
+        // ── AND IT HAS STOPPED RISING BY 200 m ───────────────────────────────────────────────────────
+        //
+        // ONE SCALE, stated as the relation Р10 measured rather than as a stored constant. A single
+        // Alligator octave is flat past its own cell, so D(200) and D(400) agree to within a tenth. A
+        // channel carrying two or three octaves would keep climbing and this would fail — which is the
+        // point: the erosion's inability to reach the silhouette is a consequence of this saturation, so
+        // whoever changes it is the person who has to restate Р9's ratio.
+        EXPECT_GT( d200 / std::max( d400, 1e-6 ), 0.90 )
+             << "channel " << channel << " is still rising at 200 m (D200/D400 = " << d200 / d400
+             << "), so it now carries more than one scale — restate the 657 m / 160 m ratio in "
+                "Common/CloudField.glslh with the new numbers rather than deleting this bound";
+    }
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
