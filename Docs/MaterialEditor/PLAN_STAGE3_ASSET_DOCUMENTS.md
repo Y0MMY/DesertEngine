@@ -167,6 +167,14 @@ Two consequences the task inherits:
 
 - The shader picker in the terrain widget currently iterates every shader of domain `Terrain`, and
   there is exactly **one**. It becomes a normal material asset field; the combo goes.
+
+  > **CORRECTED 2026-08-31 — there are TWO.** `Terrain.shader` and `Grass.shader` both declare
+  > `Domain Terrain`. The count was wrong when I wrote it and the conclusion drawn from it — "one
+  > program, so a combo over a single item is pointless" — was therefore reached from a false
+  > premise. The decision it supported (a single `TerrainMaterial` handle rather than a slot vector)
+  > survives on its own evidence, which was the shader's `Properties` block: the splat layers are
+  > texture parameters of one program, not three materials. But the combo's removal rested on the
+  > wrong number, and anybody re-opening that question should start from two.
 - The three splat textures stop being `MaterialComponent::Textures` overrides and become ordinary
   texture params of a `.demat`, edited in the Material Editor window like any other material. That is
   the whole point: after M3 there is one way to edit a material, not two.
