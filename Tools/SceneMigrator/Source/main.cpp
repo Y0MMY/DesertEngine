@@ -160,6 +160,21 @@ int main( int argc, char** argv )
             }
             std::cout << ")";
         }
+        if ( report.MaterialPathRaised )
+        {
+            std::cout << " scene v" << Desert::Core::kSceneVersionTerrainMaterial << "->v"
+                      << Desert::Core::kSceneVersionMaterialPath << " (";
+            if ( report.MaterialPath.Paths > 0 )
+                std::cout << report.MaterialPath.Paths << " material path(s) made relative to the assets "
+                          << "root in " << report.MaterialPath.Entities << " entity(ies)";
+            else
+                std::cout << "stamp only - no entity named a material by an absolute path";
+            // Named, not counted, for the reason the terrain step names its drops: these are the ones the
+            // step could not fix, and the operator has to be able to see which slot to re-point.
+            for ( const auto& name : report.MaterialPath.OutsideNames )
+                std::cout << "; OUTSIDE the assets root, left absolute: " << name;
+            std::cout << ")";
+        }
         if ( report.UnitsRaised )
             std::cout << " units v0->v" << Desert::Core::kUnitVersion << " (" << report.Units.Entities
                       << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected

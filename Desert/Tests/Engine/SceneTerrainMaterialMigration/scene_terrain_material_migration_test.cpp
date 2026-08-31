@@ -328,7 +328,11 @@ TEST( SceneTerrainMaterialMigration, MigrateSceneRunsItAndStampsTheFileSoItNever
     EXPECT_EQ( report.TerrainMaterial.Textures, 3 );
     EXPECT_TRUE( report.Changed() );
     EXPECT_EQ( scene.SceneVersion.value_or( 0 ), kSceneVersion );
-    EXPECT_EQ( kSceneVersion, kSceneVersionTerrainMaterial );
+    // GE, not EQ. This used to pin the head to this step's own number, which was true only while the
+    // terrain step WAS the head — the v7 -> v8 material-path step moved it, and the assertion failed
+    // without anything about the terrain migration having changed. The tonemap suite wrote GE here for
+    // exactly this reason and recorded why; this is the same lesson arriving a second time.
+    EXPECT_GE( kSceneVersion, kSceneVersionTerrainMaterial );
 
     // Second pass over the stamped tree: nothing left to do.
     const auto again = MigrateScene( scene );
@@ -354,8 +358,9 @@ TEST( SceneTerrainMaterialMigration, AFileAlreadyAtV7IsNotRunThroughTheStepAgain
     EXPECT_TRUE( scene.Entities.front().Components.get( "Material" ).has_value() );
 }
 
-// A v0 file arrives at v7 in one pass. Every step is gated on its OWN constant precisely so that a file
-// entering the chain at any point comes out at the end of it, and the terrain step is now the end.
+// A v0 file arrives at the HEAD in one pass — which is what this test is named for, and which is not
+// the same claim as "arrives at v7". Every step is gated on its OWN constant precisely so that a file
+// entering the chain at any point comes out at the end of it, wherever the end currently is.
 TEST( SceneTerrainMaterialMigration, AFileFromBeforeEveryStepStillComesOutAtTheHead )
 {
     SceneSerialized scene;
@@ -367,7 +372,7 @@ TEST( SceneTerrainMaterialMigration, AFileFromBeforeEveryStepStillComesOutAtTheH
 
     EXPECT_TRUE( report.TerrainMaterialRaised );
     EXPECT_EQ( report.TerrainMaterial.Entities, 1 );
-    EXPECT_EQ( scene.SceneVersion.value_or( 0 ), kSceneVersionTerrainMaterial );
+    EXPECT_EQ( scene.SceneVersion.value_or( 0 ), kSceneVersion );
     EXPECT_FALSE( scene.Entities.front().Components.get( "Material" ).has_value() );
 }
 

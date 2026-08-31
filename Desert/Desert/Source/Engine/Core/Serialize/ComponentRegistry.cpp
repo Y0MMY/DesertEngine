@@ -219,7 +219,26 @@ namespace Desert::Core::Serialize
                 if ( type == "MaterialAsset" )
                 {
                     auto a = mgr.FindByHandle<Assets::MaterialAsset>( Common::UUID( handle ) );
-                    return a ? a->GetMetadata().Filepath.string() : "";
+                    if ( !a )
+                        return "";
+
+                    // RELATIVE to the assets root, on exactly the terms the three cloud branches below are
+                    // relative — and this branch is the reason they had to say so. It wrote the asset's
+                    // filepath verbatim, which is ABSOLUTE, so every scene re-saved in the editor took
+                    // whoever saved it home directory into the repository: 22 distinct
+                    // `/Users/<somebody>/.../Materials/*.demat` across 42 of the 51 scenes here, none of
+                    // which resolves on any other machine. A material is content that ships WITH the
+                    // project, so the path that names it must be too. The v7 -> v8 migration produces this
+                    // same string, and FromPath below accepts either form.
+                    std::error_code ec;
+                    const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
+                                                                     Common::Constants::Path::ASSETS_PATH, ec );
+                    // generic_string() rather than native(): native() is a WIDE string on Windows and a
+                    // narrow one here, so a narrow ".." literal only compiles on this platform.
+                    const auto relStr = rel.generic_string();
+                    if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
+                        return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
+                    return relStr;
                 }
                 if ( type == "TextureAsset" )
                 {
@@ -334,21 +353,46 @@ namespace Desert::Core::Serialize
                 }
                 if ( type == "MaterialAsset" )
                 {
-                    auto a = mgr.FindByPath<Assets::MaterialAsset>( path );
+                    // BOTH FORMS ARE ACCEPTED, on the terms the cloud branches below state: a file written
+                    // by ToPath above (or by the v7 -> v8 migration) carries a path relative to the assets
+                    // root, because a material ships with the project; a material an artist points at
+                    // outside the project carries an absolute one. Joining the relative form to the root
+                    // HERE means it happens exactly once, and it is also what makes the FindByPath below
+                    // hit: that lookup compares filepaths VERBATIM (unlike CreateAsset, which dedups on
+                    // the spelling-independent StableKeyForPath), so a scene naming a preloaded material
+                    // by any other spelling missed it and went the create-and-register way round.
+                    const std::filesystem::path named( path );
+                    const std::filesystem::path full =
+                         named.is_absolute() ? named
+                                             : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+
+                    auto a = mgr.FindByPath<Assets::MaterialAsset>( full );
                     if ( !a )
                     {
                         // Not preloaded (e.g. an editor .demat the preloader's .mat scan missed). Create +
                         // load + register from the path so materials survive a cold restart, not just an
                         // in-session reload.
                         auto created =
-                             m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, path );
+                             m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, full );
                         if ( created )
                         {
                             if ( !created->IsReadyForUse() )
                                 created->Load();
                             if ( !Runtime::ResourceRegistry::GetMaterialService()->Get(
                                       created->GetMetadata().Handle ) )
-                                Runtime::ResourceRegistry::GetMaterialService()->Register( created );
+                            {
+                                if ( const auto registered =
+                                          Runtime::ResourceRegistry::GetMaterialService()->Register( created );
+                                     !registered )
+                                {
+                                    // DC 1.4: the slot is about to fall back to the default material, and
+                                    // the reason (another `.demat` already holds this MaterialId) is only
+                                    // knowable here.
+                                    LOG_ERROR( "[Materials] Material '{}' named by the scene could not be "
+                                               "registered: {}",
+                                               full.string(), registered.GetError() );
+                                }
+                            }
                             a = created;
                         }
                     }

@@ -4,6 +4,8 @@
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
+#include <Common/Core/Logger.hpp>
+
 namespace Desert::Runtime
 {
     Common::BoolResultStr MaterialService::Register( const std::shared_ptr<Assets::MaterialAsset>& materialAsset )
@@ -13,7 +15,10 @@ namespace Desert::Runtime
             return Common::MakeError( "Material asset is invalid" );
         }
 
-        auto handle   = materialAsset->GetMetadata().Handle;
+        auto handle = materialAsset->GetMetadata().Handle;
+        if ( const auto refusal = RefuseOnCollision( handle, materialAsset ); !refusal )
+            return refusal;
+
         auto material = Graphic::MaterialFactory::CreateMaterial( materialAsset.get() );
 
         m_Materials[handle]      = material;
@@ -31,11 +36,43 @@ namespace Desert::Runtime
         {
             return Common::MakeError( "Material asset is invalid" );
         }
-        const auto handle        = materialAsset->GetMetadata().Handle;
-        m_MaterialAssets[handle]  = materialAsset; // runtime Material built lazily on first Get
+        const auto handle = materialAsset->GetMetadata().Handle;
+        if ( const auto refusal = RefuseOnCollision( handle, materialAsset ); !refusal )
+            return refusal;
+
+        m_MaterialAssets[handle] = materialAsset; // runtime Material built lazily on first Get
         // The mesh->material link resolves by EXTERNAL id, so the map must exist before any build.
         m_ExternalToInternal[materialAsset->GetMaterialUUID()] = handle;
         return BOOLSUCCESS;
+    }
+
+    Common::BoolResultStr
+    MaterialService::RefuseOnCollision( const Assets::AssetHandle&                    handle,
+                                        const std::shared_ptr<Assets::MaterialAsset>& incoming ) const
+    {
+        const auto it = m_MaterialAssets.find( handle );
+        if ( it == m_MaterialAssets.end() || !it->second )
+            return BOOLSUCCESS;
+
+        const auto& held = it->second->GetMetadata().Filepath;
+        const auto& want = incoming->GetMetadata().Filepath;
+        if ( !IsMaterialIdentityCollision( held, want ) )
+            return BOOLSUCCESS; // the same file re-registering: rebuild, as before
+
+        // BOTH files, and the id, because the message has to be actionable without a debugger: the fix is
+        // to change the MaterialId in one of the two `.demat` files and re-point the scenes that name it.
+        // The FIRST registration keeps the identity — refusing is what makes the outcome deterministic
+        // rather than a property of the order the asset scan happened to run in.
+        LOG_ERROR( "[MaterialService] Two materials claim MaterialId {}: '{}' already holds it, so '{}' was "
+                   "REFUSED and will not resolve. A `.demat`'s MaterialId is its asset handle, so a shared "
+                   "one makes a mesh slot, an Edit button and a double-click open whichever of the two "
+                   "registered first. Give one of them a different MaterialId and re-point every scene "
+                   "that names it.",
+                   static_cast<uint64_t>( handle ), held.generic_string(), want.generic_string() );
+
+        return Common::MakeFormattedError<bool>( "MaterialId {} is already held by '{}'; '{}' was refused",
+                                                 static_cast<uint64_t>( handle ), held.generic_string(),
+                                                 want.generic_string() );
     }
 
     Graphic::Material* MaterialService::Get( const Assets::AssetHandle& handle ) const

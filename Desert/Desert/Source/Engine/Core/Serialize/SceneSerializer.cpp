@@ -171,6 +171,35 @@ namespace Desert::Core
                       migration.TerrainMaterial.Entities, migration.TerrainMaterial.Params,
                       migration.TerrainMaterial.Textures, dropped.empty() ? "nothing nameable" : dropped );
         }
+        if ( migration.MaterialPathRaised && migration.MaterialPath.Paths > 0 )
+        {
+            LOG_INFO( "[SceneMigration] '{0}': scene schema v{1} -> v{2} - a material is named by a path "
+                      "RELATIVE to the assets root now, so {3} path(s) in {4} entity(ies) were rewritten. "
+                      "They used to be absolute, which put whoever last saved the scene home directory in "
+                      "the file and made it unopenable anywhere else. Re-save (or run SceneMigrator) to "
+                      "stamp the file so this never runs again.",
+                      sceneData->SceneName, kSceneVersionTerrainMaterial, kSceneVersionMaterialPath,
+                      migration.MaterialPath.Paths, migration.MaterialPath.Entities );
+        }
+        if ( migration.MaterialPathRaised && !migration.MaterialPath.OutsideNames.empty() )
+        {
+            // Named, not counted. These are the ones the step could NOT fix, so the log has to be good
+            // enough to re-point the slot from (DC 1.4) - a count would say a scene is still broken
+            // without saying where.
+            std::string outside;
+            for ( const auto& name : migration.MaterialPath.OutsideNames )
+            {
+                if ( !outside.empty() )
+                    outside += "; ";
+                outside += name;
+            }
+
+            LOG_WARN( "[SceneMigration] '{0}': {1} material path(s) name a file OUTSIDE this project's "
+                      "assets root, so they have no project-relative form and were left absolute - this "
+                      "scene still will not open on another machine until they are re-pointed at a "
+                      "material inside the project: {2}",
+                      sceneData->SceneName, migration.MaterialPath.OutsideNames.size(), outside );
+        }
         if ( migration.UnitsRaised )
         {
             LOG_INFO( "[SceneMigration] '{0}': world units v0 -> v{1} (metres -> centimetres, x{2}) - {3} "

@@ -2,6 +2,9 @@
 
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 
+#include <Common/Core/Constants.hpp>
+
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -36,6 +39,9 @@ namespace Desert::Core
     //   7             - the terrain's material is a `.demat` named by `Terrain.Material`, so the
     //                   `Material` component a terrain entity used to carry as its authoring channel is
     //                   gone from terrain entities
+    //   8             - a material is named by a path RELATIVE to the assets root, like the three cloud
+    //                   asset classes already were. The absolute paths the saver used to write carried one
+    //                   developer's home directory into every scene in the repository
     inline constexpr int kSceneVersionSky             = 1;
     inline constexpr int kSceneVersionTonemap         = 2;
     inline constexpr int kSceneVersionCloudNoise      = 3;
@@ -43,7 +49,8 @@ namespace Desert::Core
     inline constexpr int kSceneVersionCloudType       = 5;
     inline constexpr int kSceneVersionCloudSet        = 6;
     inline constexpr int kSceneVersionTerrainMaterial = 7;
-    inline constexpr int kSceneVersion                = kSceneVersionTerrainMaterial;
+    inline constexpr int kSceneVersionMaterialPath    = 8;
+    inline constexpr int kSceneVersion                = kSceneVersionMaterialPath;
 
     // World-unit generation of a .desce file. Absent (or 0) means the scene was authored when one world
     // unit was one METRE; today a unit is a CENTIMETRE (Common/Core/Units.hpp), so such a scene is scaled
@@ -362,6 +369,55 @@ namespace Desert::Core
     // SHELF LIFE: this raises v6 to v7 and nothing else. It is deleted once no v6 file remains.
     TerrainMaterialMigrationReport MigrateTerrainMaterialV6ToV7( std::vector<Assets::EntityData>& entities );
 
+    // What MigrateMaterialPathV7ToV8 did to one file.
+    struct MaterialPathMigrationReport
+    {
+        int Entities = 0; // entities in which at least one material path was rewritten
+        int Paths    = 0; // individual path strings rewritten to the assets-root-relative form
+
+        // Paths that could NOT be made relative because they do not lie under the assets root at all, and
+        // their entity's tag. Left exactly as they were - a file genuinely outside the project has no
+        // project-relative form to have - and NAMED, because a scene that carries one still does not open
+        // on another machine and a count alone would not say which slot to re-point (DC 1.4).
+        std::vector<std::string> OutsideNames;
+    };
+
+    // Raises a scene from schema v7 to v8: a material stops being named by the ABSOLUTE path the saver
+    // wrote and is named relative to the assets root, which is the form Core::MakeAssetResolver reads back.
+    //
+    // WHY. `MakeAssetResolver::ToPath`'s MaterialAsset branch wrote `asset->GetMetadata().Filepath` verbatim.
+    // With a project open every content root is absolute (Constants::Path::SetProjectRoot), so a scene
+    // re-saved in the editor took whoever saved it home directory into the repository: 22 distinct
+    // `/Users/<somebody>/.../Materials/*.demat` strings across 42 of the 51 scenes shipped here, none of
+    // which names anything on any other machine. The three cloud asset classes went relative for exactly
+    // this reason and say so at their branches; this applies the decision already taken to the fourth.
+    //
+    // WHAT IT REWRITES. The four places a scene can name a material: `MaterialPaths` on `StaticMesh`,
+    // `InstancedStaticMesh` and `SkinnedMesh`, and `Material` on `Terrain`.
+    //
+    // HOW, WITHOUT A FILESYSTEM. std::filesystem::relative() consults the disk (it canonicalises both
+    // sides), and this function may not. So the rewrite is LEXICAL: the path's components are searched for
+    // the LAST occurrence of `assetsRoot`'s own component sequence, and everything after it is kept.
+    // That deliberately makes the answer independent of how the root is spelled - `Resources/Assets/` and
+    // `/Users/x/Proj/Editor/Resources/Assets/` both reduce
+    // `/Users/x/Proj/Editor/Resources/Assets/Materials/M.demat` to `Materials/M.demat` - which is what lets
+    // the editor (working directory `Editor/`) and Tools/SceneMigrator (working directory the repository
+    // root) produce the same file from the same input.
+    //
+    // The root is a PARAMETER and not `Constants::Path::ASSETS_PATH` read from inside, so the function has
+    // no global to disagree with and a test can drive it with a root of its own.
+    //
+    // Idempotent: a path already relative to the root contains no `assetsRoot` sequence to strip, so a
+    // second run leaves the tree byte-identical and reports zero. An empty string (which is what ToPath
+    // writes for a slot whose handle resolves to nothing) is left alone rather than turned into ".".
+    //
+    // PURE - no GPU, no filesystem, no global state. The counters go back to the loader, which is the one
+    // that knows which file this was.
+    //
+    // SHELF LIFE: this raises v7 to v8 and nothing else. It is deleted once no v7 file remains.
+    MaterialPathMigrationReport MigrateMaterialPathV7ToV8( std::vector<Assets::EntityData>& entities,
+                                                           const std::filesystem::path&     assetsRoot );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -382,11 +438,13 @@ namespace Desert::Core
         // the schema was below kSceneVersionTerrainMaterial
         bool                           TerrainMaterialRaised = false;
         TerrainMaterialMigrationReport TerrainMaterial;
+        bool                        MaterialPathRaised = false; // the schema was below kSceneVersionMaterialPath
+        MaterialPathMigrationReport MaterialPath;
 
         bool Changed() const
         {
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
-                   CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised;
+                   CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised;
         }
     };
 
@@ -399,6 +457,13 @@ namespace Desert::Core
     // The three migrations are independent (no sky field is a length, no length lives under
     // "SkyAtmosphere", and the tonemapper touches neither), so the order below is the order they were
     // written and nothing depends on it.
-    SceneMigrationReport MigrateScene( SceneSerialized& scene );
+    //
+    // `assetsRoot` is what the v7 -> v8 material-path step measures against, and it DEFAULTS to the live
+    // content root so that the loader, the migrator tool and the six suites that already call this need no
+    // change. The default is evaluated at the call site, which is the only place that knows whether a
+    // project has been opened; the step underneath it takes the root explicitly and is tested that way.
+    SceneMigrationReport
+    MigrateScene( SceneSerialized&             scene,
+                  const std::filesystem::path& assetsRoot = Common::Constants::Path::ASSETS_PATH );
 
 } // namespace Desert::Core
