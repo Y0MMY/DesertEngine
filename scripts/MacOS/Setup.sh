@@ -272,6 +272,10 @@ done
 
 if [ ${#MISSING_PATHS[@]} -eq 0 ]; then
     echo "    all ${#REQUIRED_PATHS[@]} required paths present"
+else
+    for missing in "${MISSING_PATHS[@]}"; do
+        echo "    MISSING: $missing"
+    done
 fi
 
 # ---------------------------------------------------------------------------
