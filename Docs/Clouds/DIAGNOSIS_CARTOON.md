@@ -13,6 +13,20 @@ as a cause with a residue I could not close (5), and one is confirmed as a ceili
 (2). One of the refutations is of a mechanism I had already written up as the answer before I rendered
 the test that killed it — §5.
 
+> ⚠️ **EVERY NUMBER IN THIS DOCUMENT WAS MEASURED WITH THE SKY-LIGHT OCCLUSION VOLUME OFF, and that is
+> no longer the shipped sky.** Р12 (2026-08-31) turned `SkyOcclusionVolume` on and moved
+> `AmbientOcclusionStrength` to 1.0 — the component defaults and the four protocol scenes together — so
+> the `base` row of every table below, and therefore every gap and every "% closed" derived from it, is
+> a measurement of a configuration the repository no longer ships. **The figures are left exactly as
+> they were taken**: they are the diagnosis this programme acted on, and adjusting them to a sky they
+> were not measured on would destroy the evidence rather than update it. The shipped sky's own numbers
+> are in `CALIBRATION.md` §Р12.
+>
+> Two rows are affected beyond their baseline and are flagged where they stand: **ranking #1 and #2**,
+> which are the finding Р12 acts on, and **§3's `AmbientOcclusionStrength` rows**, which measure a
+> control whose meaning changed — with the volume on, that slider no longer drives the local profile
+> term at all.
+
 ---
 
 ## 0. The method, and the one thing about it the reader must know first
@@ -79,6 +93,11 @@ What survives the difference of subject, and what the ranking rests on:
 ---
 
 ## 1. THE RANKING
+
+> **#1 and #2 are what Р12 acted on.** The occluder #1 says is missing was built by Р4, corrected by
+> Р7 and switched on in the shipped sky by Р12; #2's "the existing knob cannot reach it" is why the
+> strength went to 1.0 rather than staying at UE's 0.5. Both rows describe the sky as it was, and
+> both are left as they were measured.
 
 | # | discrepancy | the number that ranks it | hypothesis |
 |---|---|---|---|
@@ -184,6 +203,10 @@ not present here.
 `mid_away`, `--shot-frames 90`, one authored field changed per row, everything against
 `Shots/P0_base90_mid_away.png` on a zero noise floor. The scene variants were temporary `.desce` copies,
 now deleted; the shader was not touched.
+
+> ⚠️ **The `base` row of this table and of the two that follow it is the pre-Р12 sky** — sky-light
+> occlusion volume off, `AmbientOcclusionStrength` 0.5. Every "% closed" column is a fraction of a gap
+> measured from that base. Left as taken.
 
 | row | mean | p05 | p95 | contrast | sat | pixels differing | max | **mean Δ/255** |
 |---|---|---|---|---|---|---|---|---|
@@ -391,6 +414,12 @@ it. It is not approximated here with this map... Named as out of scope rather th
 honestly named and it is the largest measured discrepancy in the sky.
 
 **The numbers:**
+
+> ⚠️ **"shipped" in this table means the sky as it shipped on 2026-08-27, with the sky-light occlusion
+> volume OFF.** Since Р12 the shipped layer has the volume on and `AmbientOcclusionStrength` at 1.0, so
+> the row below is a baseline that no longer exists and the two `AmbientOcclusionStrength` rows measure
+> a control that, in the shipped configuration, no longer drives the profile term at all. Measured, not
+> adjusted; `CALIBRATION.md` §Р12 carries the replacement.
 
 | | contrast at `horizon_away` | vs `UE_horizon` 0.438 |
 |---|---|---|

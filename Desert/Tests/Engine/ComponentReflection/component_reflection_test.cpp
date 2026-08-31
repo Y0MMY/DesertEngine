@@ -650,7 +650,19 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PhaseG" ), 0.8f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PhaseGBackward" ), 0.1667f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PhaseBlend" ), 0.575f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "AmbientOcclusionStrength" ), 0.5f );
+    // THE OCCLUSION IS ONE CALIBRATION AND THESE ARE ITS TWO HALVES, so they are asserted together and
+    // the message names the other one. The strength is 1.0 and not UE's 0.5 because Р7's composition
+    // halves what any strength buys — `1 - s(1 - T)` became `1 - (s/2)(1 - T)` — so 1.0 against the
+    // VOLUME is the same amount of occlusion UE's 0.5 describes, and it is the setting Р4 measured as
+    // closing 34 % and 29 % of the contrast gap at the two horizon points. Against the PROFILE term the
+    // same 1.0 means something else entirely: the local occluder at its ceiling, which Р0 measured at
+    // 17 % there. A default pair that drifted apart would therefore not be two settings slightly wrong,
+    // it would be a sky nobody chose — §2.3.1's "two values obliged to agree".
+    EXPECT_TRUE( DefaultOf<bool>( cloud, "SkyOcclusionVolume" ) )
+         << "the sky-light occlusion volume is off by default again, but AmbientOcclusionStrength's "
+            "default of 1.0 is calibrated for the volume's geometry, not the profile term's";
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "AmbientOcclusionStrength" ), 1.0f )
+         << "the strength no longer matches the geometry SkyOcclusionVolume's default selects";
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartMaxDistance" ), 35000000.0f );
     // FIFTEEN kilometres, not the five hundred metres this line used to assert, and the change was
     // forced by a measurement rather than chosen: a shadow ray that starts inside a two-kilometre cloud

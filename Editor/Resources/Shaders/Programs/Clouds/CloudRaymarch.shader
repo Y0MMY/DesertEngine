@@ -540,12 +540,13 @@ Shader "CloudRaymarch"
                         // is occluded". What the layer's flag chooses is which occluder computes it, so
                         // neither path leaves the other's parameters dead.
                         //
-                        // DEFAULT (volume off): the sample's own Profile, i.e. its depth inside its OWN
-                        // body. Authored, not fixed at full: UE carries the amount in the alpha of its
-                        // albedo parameter, so it IS a dial there.
+                        // VOLUME OFF: the sample's own Profile, i.e. its depth inside its OWN body.
+                        // Authored, not fixed at full: UE carries the amount in the alpha of its albedo
+                        // parameter, so it IS a dial there.
                         //
-                        // VOLUME ON: the diffuse transmittance of everything ABOVE this column at this
-                        // altitude. It REPLACES the profile term rather than multiplying it, and that is
+                        // VOLUME ON, WHICH IS THE DEFAULT SINCE Р12: the diffuse transmittance of
+                        // everything ABOVE this column at this altitude.
+                        // It REPLACES the profile term rather than multiplying it, and that is
                         // deliberate — the column integrated from the sample upward already contains the
                         // upper half of the sample's own body, so applying both would count that material
                         // twice and darken a cloud's own core for a reason nobody could find later.

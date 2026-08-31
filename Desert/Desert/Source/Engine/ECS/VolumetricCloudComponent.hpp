@@ -715,7 +715,31 @@ namespace Desert::ECS
                            "measured is Sky Occlusion Volume's choice; this is how much of it is applied, "
                            "either way. At 0 the core of a three-kilometre cumulus is lit as brightly as a "
                            "wisp on its edge, which reads as a flat white cut-out." ) )
-        // 0.5 — the amount UE carries in the alpha of Cloud_AlbedoColor.
+        // 1.0 SINCE Р12, AND IT IS STILL UE'S 0.5 OF OCCLUSION RATHER THAN TWICE IT. The digit moved
+        // because the term it drives was FIXED, not because the sky was re-tuned. Р7 found the volume's
+        // UPPER-HEMISPHERE transmittance being multiplied into a FULL-SPHERE mean radiance and replaced
+        // the product with a composition (Common/CloudLighting.glslh): the term was `1 - s(1 - T)` and is
+        // now `1 - (s/2)(1 - T)`, so every strength buys exactly what half of it used to. 1.0 here renders
+        // a frame identical in every channel to the 0.5 that preceded the fix — which is the setting Р4
+        // measured as closing 34 % of the contrast gap at the horizon away from the sun and 29 % at the
+        // horizon into it, against 17 % and 13 % for the profile term at its own ceiling. Half of this
+        // number buys half of that.
+        //
+        // THE ONE THING HALF WOULD BUY, said plainly because it is the argument against this value. The
+        // term's remaining approximation is the SLAB: a slant ray through a finite cumulus leaves its side
+        // long before it has crossed tau/mu, so real broken cloud occludes LESS than the volume says, and
+        // the error is biased dark and still unmeasured (Common/CloudLighting.glslh names it). That bias
+        // is linear in this number, so 0.5 would halve the exposure to it. What it would NOT do is remove
+        // it, and what removed its one observed consequence — the brown deck Р4 saw at full strength — was
+        // Р7's composition rather than a smaller dial. Measured over the whole dome at 1.0, no protocol
+        // point goes warm.
+        //
+        // IT IS ONE CALIBRATION WITH THE FIELD BELOW, NOT TWO DEFAULTS THAT HAPPEN TO SIT TOGETHER. This
+        // value is calibrated for the geometry Sky Occlusion Volume selects. Applied to the PROFILE term
+        // instead — the flag off at this strength — it is the local occlusion at its ceiling, a third
+        // configuration nobody measured and the one Р0 recorded as recovering 17 % at the horizon rather
+        // than 34 %. Desert/Tests/Engine/ComponentReflection asserts the two defaults in one place for
+        // that reason, and its message names the other one.
         //
         // ONE KNOB, TWO GEOMETRIES, and it stays one knob deliberately. The field below chooses whether
         // the occlusion is computed from the sample's own depth inside its body or from the cloud standing
@@ -723,7 +747,7 @@ namespace Desert::ECS
         // beside it would be a parameter whose only job is to say the same thing twice, and the day one of
         // them is at 0.5 and the other at 1.0 nobody can say what the sky is supposed to look like.
         // Read by Editor/Resources/Shaders/Programs/Clouds/CloudRaymarch.shader.
-        float AmbientOcclusionStrength = 0.5f;
+        float AmbientOcclusionStrength = 1.0f;
 
         PROPERTY( DisplayName( "Sky Occlusion Volume" ), Category( "Lighting" ),
                   Tooltip( "Occlude the sky light by the cloud STANDING OVER a sample instead of by the "
@@ -732,21 +756,42 @@ namespace Desert::ECS
                            "has no dark side and the clouds read as flat white lobes. On, a second compute "
                            "pass builds a 128x16x128 volume of how much cloud stands over every column and "
                            "the march reads it — which costs one dispatch and two megabytes per view.\n\n"
-                           "Off by default: it changes how every cloud in a scene is lit, and no scene "
-                           "authored before it existed was lit that way." ) )
-        // DEFAULT OFF, and the frame with it off is the frame without this feature — the march's gate is a
-        // push-constant flag and the pass is not dispatched, so nothing is allocated and nothing is read.
-        // That is the same arrangement Unreal ships its own second volume under and the same one this
-        // programme used for per-sample sun transmittance, and it is what makes the A/B in the report a
-        // property of one binary rather than of two.
+                           "On by default. Turn it off for a layer whose cloud never stands over anything "
+                           "— a thin cirrus veil — and the dispatch and the two megabytes are not paid at "
+                           "all." ) )
+        // DEFAULT ON SINCE Р12, and the frame with it OFF is still exactly the frame without this feature
+        // — the march's gate is a push-constant flag and the pass is not dispatched, so a layer that turns
+        // it off allocates nothing and reads nothing. That is what keeps the A/B in any report a property
+        // of one binary rather than of two, and it is the same arrangement Unreal ships its own second
+        // volume under.
         //
-        // WHY IT IS A FLAG AND NOT A REPLACEMENT. The local term is not wrong — Р0 measured it recovering
-        // 34 % of the gap at the sunward zenith, which is exactly where the occluder IS the sample's own
-        // body — and the volume costs a dispatch that a scene with a thin cirrus veil has no use for.
+        // WHY IT IS ON. Decision D-26 held it off pending Р9 and Р9 closed as a refusal, so the hold had
+        // nothing left to hold. The argument that decided it is not about one sky: every measurement this
+        // programme takes is taken against the SHIPPED one, and with this off that sky's largest single
+        // discrepancy — Docs/Clouds/DIAGNOSIS_CARTOON.md's ranked #1, an ambient term with no geometric
+        // occluder — was in every frame anybody measured. Р11 spent about nine hundred captures against
+        // it. The price is one dispatch of 0.410 ms and a FIXED 2.00 MiB per view (128x16x128, not
+        // resolution-scaled): 20.5 % of decision D-9's 2 ms budget and 3.1 % of its 64 MB.
+        //
+        // WHAT IT IS STILL A FLAG FOR. The local term is not wrong — Р0 measured it recovering 34 % of the
+        // gap at the sunward zenith, which is exactly where the occluder IS the sample's own body — and
+        // the volume costs a dispatch a thin veil has no use for. Turning it off is an authoring choice
+        // with a cost attached, which is what a flag is; it is no longer the default because the default
+        // is what every unauthored scene and every future measurement inherits.
+        //
+        // AND IT IS NOT A CLEAN WIN ON EVERY STATISTIC, which is recorded here rather than left to be
+        // rediscovered. Measured over the whole dome on Clouds_Protocol (Docs/Clouds/CALIBRATION.md §Р12):
+        // all forty tiles darken, and p95-p05 contrast FALLS at thirty-four of them. That reading is an
+        // artefact of the statistic and the mechanism is exact — where a frame contains clear sky, p05 IS
+        // the sky, this term touches only cloud, so p05 cannot move while the sunlit top falls a little.
+        // The six tiles that gain contrast are exactly the six whose p05 is deck rather than sky. Of the
+        // protocol's own six points, four close 34/29/24/9 % of the gap to the UE reference and two lose
+        // 0.022 and 0.012. A scene authored against the flat frame may want its exposure looked at once.
+        //
         // Read by Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.cpp, which decides whether
         // to dispatch Editor/Resources/Shaders/Programs/Clouds/CloudSkyOcclusionVolume.shader, and by
         // Editor/Resources/Shaders/Programs/Clouds/CloudRaymarch.shader through CloudPush::SkyOcclusion.
-        bool SkyOcclusionVolume = false;
+        bool SkyOcclusionVolume = true;
 
         PROPERTY( DisplayName( "Light March Distance" ), Category( "Lighting" ), Length,
                   Range( 10000.0f, 2000000.0f ),
