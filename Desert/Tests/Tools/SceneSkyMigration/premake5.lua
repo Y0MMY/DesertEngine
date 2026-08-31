@@ -8,29 +8,30 @@ project(test_name)
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
-    -- Reflection.gen.cpp is written by DesertHeaderTool as a PREBUILD STEP OF `Desert`. Without this edge
-    -- a parallel build can compile a stale table in and the assertions would report on yesterday's struct.
+    -- Reflection.gen.cpp is written by DesertHeaderTool as a PREBUILD STEP OF `Desert`, so without this a
+    -- parallel build can compile a stale table into this test and the assertions would report on a
+    -- component set that no longer exists. Build order only; nothing is linked from Desert.
     dependson { "Desert" }
 
-    -- WHAT THIS SUITE COMPILES AND WHY THERE IS NO MIGRATION IN THE LIST. The painted layout ADDS fields
-    -- and renames none, so there is no v6 -> v7 function: an absent key is already how the reflected
-    -- serializer spells "keep the C++ default", and a migration that returned zeros would be the stub §1.2
-    -- of the contract forbids. What has to be proved instead is the CONSEQUENCE of that -- that a scene
-    -- written before this phase reads back as a layer with no painting -- and proving it needs the
-    -- reflection table, the deserializer, and the bake's own parameters to check the result against.
+    -- Everything the migration needs and nothing else: the pure function itself, the reflection table it
+    -- is checked against, and the reflected (de)serializer that ComponentRegistry calls for these two
+    -- components. No renderer, no scene, no asset manager - if any of those were needed here, the
+    -- migration would not be the pure function the contract requires.
     files {
         test_files,
+        "%{wks.location}/Tools/SceneMigrator/Source/SceneMigration.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudLayout.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
     }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+        -- The migrations live in the TOOL now (they used to be an engine TU that ran on every
+        -- scene load). This is what makes `#include <SceneMigration.hpp>` below resolve, and its
+        -- own `#include "SceneMigration.hpp"` of itself.
+        "%{wks.location}/Tools/SceneMigrator/Source",
         "%{wks.location}/ThirdParty/entt/include/",       -- Components.hpp is an entt registry away
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the scene tree is rfl::Generic
     }
@@ -56,7 +57,7 @@ project(test_name)
         defines { "DESERT_PLATFORM_LINUX" }
     filter {}
 
-    -- Common: UUID/AssetHandle/the logger the migration's warnings go through.
+    -- Common: UUID/AssetHandle/the logger the rejection warnings go through.
     -- Optick: Common's JobSystem registers its worker threads with the profiler.
     links { "Common", "Optick" }
 

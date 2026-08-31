@@ -2,7 +2,7 @@
 //
 // WHY THERE IS NO MIGRATION FUNCTION, AND WHY THAT MAKES THIS SUITE NECESSARY RATHER THAN OPTIONAL.
 //
-// Every earlier cloud migration in Engine/Core/Serialize/SceneMigration.cpp exists because a key was
+// Every earlier cloud migration in Tools/SceneMigrator/Source/SceneMigration.cpp exists because a key was
 // RENAMED, DROPPED or REINTERPRETED — the noise volume became an asset, the species became a handle,
 // `CloudType` became `CloudType1`. The painted layout does none of those: it ADDS six fields and touches
 // nothing that was there. An absent key is already how the reflected serializer spells "keep the C++
@@ -28,7 +28,7 @@
 // manager.
 
 #include <Engine/Assets/CloudProceduralVolume.hpp>
-#include <Engine/Core/Serialize/SceneMigration.hpp>
+#include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionSerializer.hpp>
@@ -240,10 +240,10 @@ TEST( SceneCloudLayoutDefault, TheDefaultsFromAV6FileArePlacementNothingCanTellF
 
 // THE SCHEMA VERSION DID NOT MOVE, AND THAT IS RECORDED HERE SO IT IS A DECISION RATHER THAN AN OVERSIGHT.
 //
-// Six of the constants in SceneMigration.hpp exist because a cloud change needed one. This one did not, and
-// the difference is worth pinning: if somebody later adds a v7 for an unrelated reason, this test fails and
-// they read the paragraph explaining that the layout is NOT what v7 is for — instead of assuming it was and
-// wiring a migration to it.
+// Six of the migration steps exist because a cloud change needed one. This one did not, and the difference
+// is worth pinning: if somebody later adds a version for an unrelated reason, this test fails and they read
+// the paragraph explaining that the layout is NOT what a version constant is for — instead of assuming it
+// was and wiring a migration to it.
 //
 // IT FIRED, ONCE, AND WORKED. v7 was added for an unrelated reason — the terrain's material became a
 // `.demat`, so the inline Material component a terrain entity carried had to be dropped from the file
@@ -251,15 +251,26 @@ TEST( SceneCloudLayoutDefault, TheDefaultsFromAV6FileArePlacementNothingCanTellF
 // confirmed the layout is still not what any version constant is for, and moved the assertion DOWN to the
 // last constant the clouds own rather than deleting it. The claim it makes is unchanged: no cloud-layout
 // change has ever moved the schema, and the head being past that point is somebody else's step.
+//
+// IT FIRED A SECOND TIME, AND THE ASSERTION HAD TO CHANGE SHAPE. The per-step constants
+// (kSceneVersionCloudSet and its seven siblings) left the engine with the migrations themselves — they are
+// Desert::Migration in Tools/SceneMigrator now, and this suite compiles no tool code. What survives in the
+// engine is the head, Core::kSceneVersion. So the claim is made against the head and the clouds' last step
+// is named as the LITERAL it has always been, 6: the number is the point, not where it is declared. The
+// statement is exactly the one above — the clouds' last schema step is 6, the head is past it, and neither
+// of those facts is about the painted layout.
 TEST( SceneCloudLayoutDefault, ThePaintedLayoutDidNotMoveTheSchemaVersion )
 {
-    EXPECT_GE( Desert::Core::kSceneVersion, Desert::Core::kSceneVersionCloudSet )
+    constexpr int kCloudsLastSchemaStep = 6; // v5 -> v6, a layer carries a SET of cloud types
+
+    EXPECT_GE( Desert::Core::kSceneVersion, kCloudsLastSchemaStep )
          << "the scene schema version went BACKWARDS past the clouds' last step, which no migration can do.";
-    EXPECT_EQ( Desert::Core::kSceneVersionCloudSet, 6 )
+    EXPECT_EQ( kCloudsLastSchemaStep, 6 )
          << "the painted layout did NOT move the clouds' last version constant — it adds fields and renames "
             "none, and an absent key already means 'the C++ default'. If your CLOUD change renames, drops "
-            "or reinterprets a key then it needs its own constant AND its own migration function; if it "
-            "only adds fields, it needs neither, and it needs a test like the two above instead.";
+            "or reinterprets a key then it needs its own step in Tools/SceneMigrator AND a raise of "
+            "Core::kSceneVersion; if it only adds fields, it needs neither, and it needs a test like the "
+            "two above instead.";
 }
 
 // WHICH TYPE SLOT IS WHICH PAINTED CHANNEL — CALIBRATION.md §PTP.

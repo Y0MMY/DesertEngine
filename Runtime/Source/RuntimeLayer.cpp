@@ -3,6 +3,7 @@
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
+#include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 #include <Engine/UI/UICanvasRenderer.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
@@ -117,7 +118,14 @@ namespace Desert::Player
         if ( !scenePath.empty() && Common::Utils::FileSystem::Exists( scenePath ) ) // VFS-aware
         {
             Core::SceneSerializer serializer( m_Scene.get(), m_AssetManager.get() );
-            serializer.DeserializeFromJson( Common::Utils::FileSystem::ReadFileContent( scenePath ) );
+            // RETURNED, not logged and stepped over: a cooked game whose boot scene will not load has
+            // nothing to run, and starting on an empty world would be the silent substitution §1.4 forbids
+            // - the player would see a black screen and the reason would be one line up in a log they do
+            // not have. The loader's error already names the file, the version and the fix.
+            if ( const auto loaded = serializer.DeserializeFromJson(
+                      Common::Utils::FileSystem::ReadFileContent( scenePath ), scenePath );
+                 !loaded )
+                return Common::MakeError( loaded.GetError() );
             if ( const auto init = m_Scene->Init(); !init )
                 return init;
             LOG_INFO( "[Runtime] Scene loaded: {}", scenePath );
@@ -155,11 +163,26 @@ namespace Desert::Player
             return;
         }
 
+        // ASKED BEFORE ANYTHING IS TORN DOWN. Clear() below drops every entity of the scene that is running,
+        // so finding out afterwards that the target will not load would leave the game in an empty world it
+        // cannot get out of. The loader asks the same question again and its answer is the authoritative
+        // one; this is only the difference between a switch that does not happen and a game that ends.
+        const std::string json = Common::Utils::FileSystem::ReadFileContent( path );
+        if ( const auto loadable = Core::ParseLoadableScene( path, json ); !loadable )
+        {
+            LOG_ERROR( "[Runtime] Scene switch refused, the running scene is untouched: {}", loadable.GetError() );
+            return;
+        }
+
         EngineContext::GetInstance().GetDevice()->WaitIdle(); // scene teardown frees GPU resources
         m_Scene->Clear();                                     // keeps the gameplay systems, drops the entities
 
         Core::SceneSerializer serializer( m_Scene.get(), m_AssetManager.get() );
-        serializer.DeserializeFromJson( Common::Utils::FileSystem::ReadFileContent( path ) );
+        if ( const auto loaded = serializer.DeserializeFromJson( json, path ); !loaded )
+        {
+            LOG_ERROR( "[Runtime] Scene switch failed after teardown: {}", loaded.GetError() );
+            return;
+        }
         if ( const auto init = m_Scene->Init(); !init )
         {
             LOG_ERROR( "[Runtime] Scene switch init failed: {}", init.GetError() );

@@ -8,25 +8,19 @@ project(test_name)
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
-    -- Reflection.gen.cpp is written by DesertHeaderTool as a PREBUILD STEP OF `Desert`. Without this edge
-    -- a parallel build can compile a stale table in, and a stale table is precisely what this suite would
-    -- then fail to notice: it exists to compare the reflection table against the scenes on disk.
-    dependson { "Desert" }
-
-    -- No migration TU any more. The protocol scenes must be at the CURRENT generation, and the check for
-    -- that is Core::SceneIsAtCurrentVersion - an inline function in SceneFormat.hpp, which is the same gate
-    -- the loader applies. The migrations themselves moved to Tools/SceneMigrator and are tested beside it.
+    -- The version gate and nothing else. SceneFormat.cpp is the whole of what the loader decides with:
+    -- parse the tree, compare two integers, build the refusal. That it compiles here — with no renderer, no
+    -- scene and no asset manager — is the same property that let the eight migrations move out to
+    -- Tools/SceneMigrator, and it is why the corpus sweep at the bottom of the suite can run at all.
     files {
         test_files,
-        "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Core/Serialize/SceneFormat.cpp",
     }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
-        "%{wks.location}/ThirdParty/entt/include/",       -- Components.hpp is an entt registry away
+        "%{wks.location}/ThirdParty/entt/include/",       -- PrefabData reaches ECS headers
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the scene tree is rfl::Generic
     }
 
@@ -42,7 +36,7 @@ project(test_name)
         defines { define }
     end
 
-    -- Components.hpp reaches engine headers that use DESERT_DEBUG_BREAK, which needs the platform.
+    -- PrefabData.hpp reaches engine headers that use DESERT_DEBUG_BREAK, which needs to know the platform.
     filter "system:windows"
         defines { "DESERT_PLATFORM_WINDOWS" }
     filter "system:macosx"
@@ -51,8 +45,7 @@ project(test_name)
         defines { "DESERT_PLATFORM_LINUX" }
     filter {}
 
-    -- Common: UUID/AssetHandle/the logger the migration's warnings go through.
-    -- Optick: Common's JobSystem registers its worker threads with the profiler.
+    -- Common: UUID and AssetHandle. Optick: Common's JobSystem registers its worker threads with it.
     links { "Common", "Optick" }
 
     filter "system:not windows"

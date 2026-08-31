@@ -27,7 +27,7 @@
 // No Scene, no renderer: the whole point of the split. Section 9 reads files, and only files - it parses
 // them with the loader's own parser and plans over the result, with no asset manager and no scene graph.
 
-#include <Engine/Core/Serialize/SceneMigration.hpp> // SceneSerialized - the corpus block at the bottom
+#include <Engine/Core/Serialize/SceneFormat.hpp> // SceneSerialized - the corpus block at the bottom
 #include <Engine/Core/Serialize/SceneStitchRules.hpp>
 
 #include <rflcpp/rfl/json.hpp>
