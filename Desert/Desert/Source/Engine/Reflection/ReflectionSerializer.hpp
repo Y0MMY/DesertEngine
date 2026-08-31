@@ -15,13 +15,17 @@ namespace Desert::Reflection
     // AssetHandle field (de)serializes as a stable PATH STRING (backward-compatible with the old custom
     // serializers) instead of a raw runtime uint64. `assetType` comes from PROPERTY(Asset<...>) metadata
     // so the resolver can dispatch per asset type (skybox vs mesh vs material).
+    //
+    // INVARIANT: Core::MakeAssetResolver is the only place one is built, and it assigns all three members
+    // unconditionally. A resolver that exists therefore has every member callable — test the POINTER for
+    // null (it is optional and defaults to nullptr), never an individual std::function for emptiness.
     struct AssetResolver
     {
         std::function<std::string( uint64_t handle, const std::string& assetType )>      ToPath;
         std::function<uint64_t( const std::string& path, const std::string& assetType )> FromPath;
         // Asset-database resolution: validates a persisted stable GUID (ensuring the asset is
         // loaded + registered in its service) and returns it, or 0 when unknown — the caller
-        // then falls back to FromPath. std::function is empty on legacy call sites.
+        // then falls back to FromPath.
         std::function<uint64_t( uint64_t guid, const std::string& assetType )> FromGuid;
     };
 

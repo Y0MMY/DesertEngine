@@ -705,7 +705,7 @@ namespace Desert::Core::Serialize
 
                 // GUID first (rename-safe asset-database reference), path as fallback/back-compat.
                 uint64_t meshHandle = 0;
-                if ( meshData.MeshGuid && resolver.FromGuid )
+                if ( meshData.MeshGuid )
                     meshHandle = resolver.FromGuid( *meshData.MeshGuid, "StaticMeshAsset" );
                 if ( meshHandle == 0 && meshData.MeshPath )
                     meshHandle = resolver.FromPath( *meshData.MeshPath, "StaticMeshAsset" );
@@ -721,7 +721,7 @@ namespace Desert::Core::Serialize
                     for ( size_t i = 0; i < slotCount; ++i )
                     {
                         uint64_t h = 0;
-                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() && resolver.FromGuid )
+                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() )
                             h = resolver.FromGuid( ( *meshData.MaterialGuids )[i], "MaterialAsset" );
                         if ( h == 0 && meshData.MaterialPaths && i < meshData.MaterialPaths->size() )
                             h = resolver.FromPath( ( *meshData.MaterialPaths )[i], "MaterialAsset" );
@@ -916,8 +916,7 @@ namespace Desert::Core::Serialize
                     for ( const auto& t : *data.Textures )
                     {
                         // GUID first (rename-safe), then the legacy path.
-                        uint64_t h =
-                             ( t.Guid && resolver.FromGuid ) ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
+                        uint64_t h = t.Guid ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
                         if ( h == 0 )
                             h = resolver.FromPath( t.Path, "TextureAsset" );
                         mc.Textures.push_back( { t.Name, h } );
@@ -975,7 +974,7 @@ namespace Desert::Core::Serialize
                 auto  resolver = MakeAssetResolver( assetManager );
 
                 uint64_t meshHandle = 0;
-                if ( meshData.MeshGuid && resolver.FromGuid )
+                if ( meshData.MeshGuid )
                     meshHandle = resolver.FromGuid( *meshData.MeshGuid, "SkinnedMeshAsset" );
                 if ( meshHandle == 0 && meshData.MeshPath )
                     meshHandle = resolver.FromPath( *meshData.MeshPath, "SkinnedMeshAsset" );
@@ -991,7 +990,7 @@ namespace Desert::Core::Serialize
                     for ( size_t i = 0; i < slotCount; ++i )
                     {
                         uint64_t h = 0;
-                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() && resolver.FromGuid )
+                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() )
                             h = resolver.FromGuid( ( *meshData.MaterialGuids )[i], "MaterialAsset" );
                         if ( h == 0 && meshData.MaterialPaths && i < meshData.MaterialPaths->size() )
                             h = resolver.FromPath( ( *meshData.MaterialPaths )[i], "MaterialAsset" );
@@ -1272,7 +1271,7 @@ namespace Desert::Core::Serialize
             auto resolver = MakeAssetResolver( mgr );
             for ( const auto& t : *data.Textures )
             {
-                uint64_t h = ( t.Guid && resolver.FromGuid ) ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
+                uint64_t h = t.Guid ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
                 if ( h == 0 )
                     h = resolver.FromPath( t.Path, "TextureAsset" );
                 mc.Textures.push_back( { t.Name, h } );
