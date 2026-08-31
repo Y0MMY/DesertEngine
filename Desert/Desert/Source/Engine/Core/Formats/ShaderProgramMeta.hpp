@@ -106,6 +106,63 @@ namespace Desert::Core::Formats
         PostProcess
     };
 
+    // The enum's own spelling, for diagnostics. It lives beside the enum so a domain added above cannot
+    // leave a log line reading "3": this switch has no default, so growing the enum is a -Wswitch warning
+    // and the build is warning-clean.
+    //
+    // NOT the same function as the editor's DomainName() (MaterialEditorPanel.cpp), which is deliberately
+    // separate artist-facing copy -- "engine-internal" reads better than "Unspecified" beside a material's
+    // name in a window, whereas a log wants the token the `.shader` file actually writes so the message can
+    // be grepped straight back to the file that caused it.
+    constexpr const char* ShaderDomainName( ShaderDomain domain )
+    {
+        switch ( domain )
+        {
+            case ShaderDomain::Unspecified:
+                return "Unspecified";
+            case ShaderDomain::Surface:
+                return "Surface";
+            case ShaderDomain::Terrain:
+                return "Terrain";
+            case ShaderDomain::Skybox:
+                return "Skybox";
+            case ShaderDomain::PostProcess:
+                return "PostProcess";
+        }
+        return "Unspecified";
+    }
+
+    // ---- Which draw path may execute a domain ----
+    //
+    // These two are the domain's actual MEANING, and they are separate on purpose. A domain is not a label
+    // a material carries around; it is the name of the one renderer that knows how to feed that shader.
+    //
+    // THE TRAP THEY EXIST TO CLOSE. IsUserAssignable() below is their UNION, and a draw path that asks the
+    // union instead of its own half accepts a material it cannot execute. That shipped: a `.demat` naming
+    // the `Terrain` shader, placed in a StaticMeshComponent slot, drew with a pipeline belonging to a
+    // different renderer and produced nothing at all -- no log, no refusal, no validation error -- because
+    // the geometry and the uniform blocks the mesh path supplies are not the ones a terrain shader reads.
+    // MeshRenderer::DrawGenericMeshes asks DrawnByMeshPath() and refuses by name.
+    //
+    // So: when a new domain is added, it gets a predicate here and a path that answers to it, or it is not
+    // user-assignable. There is no third option in which a user may pick it and nothing draws it.
+
+    // The domain each path rasterizes, named rather than spelled inside the predicates: a refusal has to
+    // print the domain it drew AND the domain it wanted, and those two strings must come from the same
+    // place the comparison does or the message can describe a rule the code is not applying.
+    inline constexpr ShaderDomain kMeshPathDomain    = ShaderDomain::Surface;
+    inline constexpr ShaderDomain kTerrainPathDomain = ShaderDomain::Terrain;
+
+    constexpr bool DrawnByMeshPath( ShaderDomain domain )
+    {
+        return domain == kMeshPathDomain;
+    }
+
+    constexpr bool DrawnByTerrainPath( ShaderDomain domain )
+    {
+        return domain == kTerrainPathDomain;
+    }
+
     struct ShaderProgramMeta
     {
         std::vector<ShaderParam> Params;
@@ -123,9 +180,14 @@ namespace Desert::Core::Formats
         }
 
         // Can a user assign this shader to a renderable via a MaterialComponent?
+        //
+        // DERIVED from the per-path predicates rather than restating the list, so the two cannot drift:
+        // "a user may assign it" means exactly "some path draws it". Restated by hand, this is the line
+        // that would keep offering a domain after its renderer stopped answering for it -- and a draw path
+        // must still ask its OWN predicate, never this one (see the note above DrawnByMeshPath).
         bool IsUserAssignable() const
         {
-            return Domain == ShaderDomain::Surface || Domain == ShaderDomain::Terrain;
+            return DrawnByMeshPath( Domain ) || DrawnByTerrainPath( Domain );
         }
     };
 
