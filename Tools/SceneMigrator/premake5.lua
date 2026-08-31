@@ -1,8 +1,13 @@
--- SceneMigrator — standalone CLI over the ENGINE's own scene migrations (Engine/Core/Serialize/
--- SceneMigration.cpp). It compiles that one translation unit directly instead of linking the engine,
--- the same recipe DShaderTool uses: the migrations are pure functions over the
--- parsed tree, so they need no GPU, no asset manager and no scene graph — and the files this tool
--- writes can never be produced by different code from the one the loader runs.
+-- SceneMigrator — the ONLY thing in this repository that knows an old .desce format.
+--
+-- The migrations used to live in the engine (Engine/Core/Serialize/SceneMigration.cpp) and run on every
+-- scene load; they are Source/SceneMigration.cpp here now, and the engine loader REFUSES an old file and
+-- names this tool instead. Nothing about the functions changed — they were always pure functions over the
+-- parsed tree, needing no GPU, no asset manager and no scene graph, which is exactly what let them move.
+--
+-- It still reaches into the engine for HEADERS and not for code: the current on-disk struct
+-- (Engine/Core/Serialize/SceneFormat.hpp), the tonemap enum and the shipped cloud-type names. Those are
+-- statements of the CURRENT format, and a second copy of any of them here is a format that can fork.
 -- dofile, not include: the dependency list was already include()'d by the engine projects.
 local deps = dofile(_MAIN_SCRIPT_DIR .. '/Desert/Dependencies.lua')
 
@@ -13,7 +18,6 @@ project "SceneMigrator"
 
     files {
         "Source/**.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Core/Serialize/SceneMigration.cpp",
     }
 
     includedirs {

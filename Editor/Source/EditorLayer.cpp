@@ -19,6 +19,7 @@
 #include <Engine/Assets/Mesh/AnimationAsset.hpp>
 #include <Engine/Scripting/ScriptEngine.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
+#include <Engine/Core/Serialize/SceneFormat.hpp>
 #include "Editor/Core/CommandLine.hpp"
 #include "Editor/Core/CrashRecovery.hpp"
 #include "Editor/Core/LayoutManager.hpp"
@@ -2798,6 +2799,20 @@ namespace Desert::Editor
             return;
         }
 
+        // ASKED BEFORE ANYTHING IS DESTROYED, and this is the call site that makes it worth asking. Below
+        // this point the undo history is dropped and the open scene is cleared; a file the loader will
+        // refuse - an old autosave, a scene saved by an older build - would then have cost the user the
+        // scene they had and given them nothing. So an unloadable file leaves the editor exactly as it is
+        // and says why, with the command that fixes the file.
+        const std::string content = Common::Utils::FileSystem::ReadFileContent( path );
+        if ( const auto loadable = Desert::Core::ParseLoadableScene( path.string(), content ); !loadable )
+        {
+            LOG_ERROR( "{0}", loadable.GetError() );
+            Editor::ToastManager::Push( "Scene not loaded — see the log (it names the SceneMigrator command)",
+                                        Editor::ToastLevel::Error );
+            return;
+        }
+
         // Wait for GPU to be idle before destroying resources mid-frame
         EngineContext::GetInstance().GetDevice()->WaitIdle();
 
@@ -2808,8 +2823,15 @@ namespace Desert::Editor
         m_MainScene->Clear();
 
         Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
-        const std::string             content = Common::Utils::FileSystem::ReadFileContent( path );
-        serializer.DeserializeFromJson( content );
+        // Cannot fire - the same text passed the same check above, before anything was torn down. It is
+        // reported and NOT returned from on purpose: the scene is already cleared by this point, so the
+        // rebuild below is what leaves the editor in a coherent (empty) state rather than one holding a
+        // render registry for entities that no longer exist.
+        if ( const auto loaded = serializer.DeserializeFromJson( content, path.string() ); !loaded )
+        {
+            LOG_ERROR( "{0}", loaded.GetError() );
+            Editor::ToastManager::Push( "Scene failed to load — see the log", Editor::ToastLevel::Error );
+        }
 
         m_MainScene->Init();
 
@@ -3178,7 +3200,17 @@ namespace Desert::Editor
         m_MainScene->Clear();
 
         Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
-        serializer.DeserializeFromJson( m_PlaySnapshot );
+        // NOT A FILE, and it cannot be at an old version: this text came out of SerializeToJson() a moment
+        // ago in this same build, which stamps the head of both version integers. It is named rather than
+        // pathed so that if it ever DOES fail, the message says which of the two things called "loading a
+        // scene" broke - restoring the pre-Play state is not opening a file, and reading "Play snapshot" in
+        // the log is the difference between one minute of diagnosis and twenty.
+        if ( const auto restored = serializer.DeserializeFromJson( m_PlaySnapshot, "<Play snapshot>" ); !restored )
+        {
+            LOG_ERROR( "[Scene] Play snapshot could not be restored: {0}", restored.GetError() );
+            Editor::ToastManager::Push( "Play snapshot could not be restored — see the log",
+                                        Editor::ToastLevel::Error );
+        }
         m_MainScene->Init();
 
         // Destroy the old registry FIRST: its destructor unregisters the editor passes by name, and

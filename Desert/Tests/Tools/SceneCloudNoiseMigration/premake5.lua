@@ -8,29 +8,33 @@ project(test_name)
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
-    -- Reflection.gen.cpp is written by DesertHeaderTool as a PREBUILD STEP OF `Desert`. Without this edge
-    -- a parallel build can compile a stale table in and the assertions would report on yesterday's struct.
+    -- Reflection.gen.cpp is written by DesertHeaderTool as a PREBUILD STEP OF `Desert`, and this test
+    -- asserts that the four bake fields are GONE from the reflected VolumetricCloudData. Without this edge
+    -- a parallel build can compile a stale table in and the assertion would report on yesterday's struct.
     dependson { "Desert" }
 
-    -- WHAT THIS SUITE COMPILES AND WHY THERE IS NO MIGRATION IN THE LIST. The painted layout ADDS fields
-    -- and renames none, so there is no v6 -> v7 function: an absent key is already how the reflected
-    -- serializer spells "keep the C++ default", and a migration that returned zeros would be the stub §1.2
-    -- of the contract forbids. What has to be proved instead is the CONSEQUENCE of that -- that a scene
-    -- written before this phase reads back as a layer with no painting -- and proving it needs the
-    -- reflection table, the deserializer, and the bake's own parameters to check the result against.
+    -- The migration, the reflection table it writes for, and the reflected (de)serializer that turns the
+    -- migrated payload into the VolumetricCloudData the renderer reads. Nothing else - the migration is a
+    -- pure function over the parsed tree, and this project failing to link without a renderer is the proof.
     files {
         test_files,
+        "%{wks.location}/Tools/SceneMigrator/Source/SceneMigration.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudLayout.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
+        -- The volume slot this migration created now lives on the cloud TYPE, and the test follows it
+        -- there: the built-in type's own empty slot is the other half of "a scene that names nothing
+        -- still renders".
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudTypeData.cpp",
     }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+        -- The migrations live in the TOOL now (they used to be an engine TU that ran on every
+        -- scene load). This is what makes `#include <SceneMigration.hpp>` below resolve, and its
+        -- own `#include "SceneMigration.hpp"` of itself.
+        "%{wks.location}/Tools/SceneMigrator/Source",
         "%{wks.location}/ThirdParty/entt/include/",       -- Components.hpp is an entt registry away
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the scene tree is rfl::Generic
     }

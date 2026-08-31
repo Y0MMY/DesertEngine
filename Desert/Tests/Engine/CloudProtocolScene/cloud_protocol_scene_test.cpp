@@ -17,10 +17,10 @@
 // obliged to agree (contract §2.3.1): the reflection table and the file on disk. Adding a field to a
 // reflected component turns this suite RED, and the message names the field.
 //
-// It is a pure-function suite: it parses JSON, walks the reflection registry, and runs the migration
-// functions. No GPU, no asset manager, no scene graph.
+// It is a pure-function suite: it parses JSON, walks the reflection registry, and asks the loader's own
+// version gate whether each file is one the engine will read. No GPU, no asset manager, no scene graph.
 
-#include <Engine/Core/Serialize/SceneMigration.hpp>
+#include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
 #include <rflcpp/rfl/json.hpp>
@@ -33,7 +33,7 @@
 #include <string>
 #include <vector>
 
-using Desert::Core::MigrateScene;
+using Desert::Core::SceneIsAtCurrentVersion;
 using Desert::Core::SceneSerialized;
 using Desert::Reflection::ReflectionRegistry;
 using Desert::Reflection::TypeInfo;
@@ -184,28 +184,32 @@ TEST( CloudProtocolScene, TheSettingsBlockIsWrittenInFullIncludingTheCloudQualit
     }
 }
 
-// THE SECOND CHANNEL. A file at an old schema is migrated on load, and what the renderer then sees is the
-// migration's output rather than the file's content — which is a value nobody can read off the scene. A
-// protocol scene has to be at the current generation of BOTH version integers, so that "what the file says"
-// and "what the engine loads" are the same sentence.
-TEST( CloudProtocolScene, NothingMigratesOnLoadSoTheFileIsWhatTheEngineSees )
+// THE SECOND CHANNEL. What the renderer sees has to be what the FILE says, and for a while that was not
+// guaranteed: a file at an old schema was MIGRATED on load, so the numbers reaching the renderer were the
+// migration's output and no reader of the .desce could tell.
+//
+// That whole class is gone. The loader REFUSES an old file now instead of repairing it (§4.3), so any scene
+// it accepts is a scene it read verbatim, and the thing left to assert is the ACCEPTANCE: a protocol scene
+// must be at the current generation of BOTH version integers, which is exactly the gate the loader applies.
+// If one of these files ever falls behind, this suite goes red here rather than the measurement quietly
+// moving - and the fix is the run of Tools/SceneMigrator that the loader's own refusal would name.
+TEST( CloudProtocolScene, TheLoaderReadsTheseFilesVerbatimBecauseItAcceptsThemAtAll )
 {
     for ( const char* sceneName : kProtocolScenes )
     {
         auto parsed = rfl::json::read<SceneSerialized>( ReadAll( ScenePath( sceneName ) ) );
         ASSERT_TRUE( parsed ) << sceneName;
 
-        SceneSerialized scene = parsed.value();
+        const SceneSerialized scene = parsed.value();
         ASSERT_TRUE( scene.SceneVersion.has_value() ) << sceneName << " states no SceneVersion";
         ASSERT_TRUE( scene.UnitVersion.has_value() ) << sceneName << " states no UnitVersion";
         EXPECT_EQ( *scene.SceneVersion, Desert::Core::kSceneVersion ) << sceneName;
         EXPECT_EQ( *scene.UnitVersion, Desert::Core::kUnitVersion ) << sceneName;
 
-        const auto report = MigrateScene( scene );
-        EXPECT_FALSE( report.Changed() )
+        EXPECT_TRUE( SceneIsAtCurrentVersion( scene ) )
              << sceneName
-             << " is migrated on load, so the numbers the renderer uses are the migration's and not the "
-                "file's. Re-save it at the current generation.";
+             << " is not at the generation this engine loads, so the loader refuses it and the measurement "
+                "this scene exists for cannot be taken at all. Convert it: Tools/SceneMigrator.";
     }
 }
 

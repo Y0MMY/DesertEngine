@@ -8,10 +8,14 @@
 // new form, and that "the scenes in the repository are converted by the same task". This is the thing that
 // converts them.
 //
-// It is deliberately the ENGINE'S OWN CODE PATH and not a text substitution: it parses into
-// Core::SceneSerialized, calls Core::MigrateScene() — the same function the loader calls on the same
-// struct — and writes the same tree back out. There is no second implementation of the migration to
-// disagree with the first.
+// AND IT IS NOW THE ONLY THING THAT MIGRATES. The migrations used to ALSO live in the engine and run on
+// every scene load; they are Source/SceneMigration.cpp beside this file now, and Core::kSceneVersion is a
+// requirement the loader enforces rather than a target it drags files towards. So this tool is not a
+// convenience any more — it is the conversion, and the loader's refusal names it by command line.
+//
+// It parses into Core::SceneSerialized, the engine's own struct for the current on-disk shape, and writes
+// the same tree back out, so the file this produces is the file the engine reads. There is no second
+// statement of the format to disagree with the first.
 //
 // It needs no GPU, no asset manager and no scene graph, because the migrations are pure functions over the
 // parsed tree. That is what makes running it over a whole repository safe: a scene whose meshes or
@@ -21,7 +25,7 @@
 //   SceneMigrator <path>...        one or more .desce files, or directories searched recursively
 //   SceneMigrator --check <path>...  report what would change and write nothing (exit 1 if any would)
 
-#include <Engine/Core/Serialize/SceneMigration.hpp>
+#include "SceneMigration.hpp"
 
 #include <rflcpp/rfl/json.hpp>
 
@@ -101,7 +105,7 @@ int main( int argc, char** argv )
             continue;
         }
 
-        auto parsed = rfl::json::read<Desert::Core::SceneSerialized>( source );
+        auto parsed = rfl::json::read<Desert::Migration::SceneSerialized>( source );
         if ( !parsed )
         {
             std::cerr << "FAIL   " << path.string() << " — " << parsed.error().what() << "\n";
@@ -109,30 +113,30 @@ int main( int argc, char** argv )
             continue;
         }
 
-        const Desert::Core::SceneMigrationReport report = Desert::Core::MigrateScene( parsed.value() );
+        const Desert::Migration::SceneMigrationReport report = Desert::Migration::MigrateScene( parsed.value() );
         if ( !report.Changed() )
         {
-            std::cout << "ok     " << path.string() << " — already at scene v" << Desert::Core::kSceneVersion
-                      << " / units v" << Desert::Core::kUnitVersion << "\n";
+            std::cout << "ok     " << path.string() << " — already at scene v" << Desert::Migration::kSceneVersion
+                      << " / units v" << Desert::Migration::kUnitVersion << "\n";
             continue;
         }
 
         ++changed;
         std::cout << ( check ? "WOULD  " : "raised " ) << path.string() << " —";
         if ( report.SkyRaised )
-            std::cout << " sky v0->v" << Desert::Core::kSceneVersionSky << " (" << report.Sky.Entities
+            std::cout << " sky v0->v" << Desert::Migration::kSceneVersionSky << " (" << report.Sky.Entities
                       << " entity(ies), " << report.Sky.FieldsCarried << " carried, " << report.Sky.FieldsRejected
                       << " rejected)";
         if ( report.TonemapperRaised )
-            std::cout << " scene v" << Desert::Core::kSceneVersionSky << "->v"
-                      << Desert::Core::kSceneVersionTonemap << " ("
+            std::cout << " scene v" << Desert::Migration::kSceneVersionSky << "->v"
+                      << Desert::Migration::kSceneVersionTonemap << " ("
                       << ( report.Tonemap.OperatorPinned ? "tonemapper pinned to Reinhard"
                                                          : "tonemapper NOT pinned — see the warning above" )
                       << ( report.Tonemap.SettingsCreated ? ", settings block created" : "" ) << ")";
         if ( report.CloudNoiseRaised )
         {
-            std::cout << " scene v" << Desert::Core::kSceneVersionTonemap << "->v"
-                      << Desert::Core::kSceneVersionCloudNoise << " (";
+            std::cout << " scene v" << Desert::Migration::kSceneVersionTonemap << "->v"
+                      << Desert::Migration::kSceneVersionCloudNoise << " (";
             if ( report.CloudNoise.Entities > 0 )
                 std::cout << report.CloudNoise.FieldsDropped << " cloud bake setting(s) dropped from "
                           << report.CloudNoise.Entities << " entity(ies)";
@@ -142,8 +146,8 @@ int main( int argc, char** argv )
         }
         if ( report.TerrainMaterialRaised )
         {
-            std::cout << " scene v" << Desert::Core::kSceneVersionCloudSet << "->v"
-                      << Desert::Core::kSceneVersionTerrainMaterial << " (";
+            std::cout << " scene v" << Desert::Migration::kSceneVersionCloudSet << "->v"
+                      << Desert::Migration::kSceneVersionTerrainMaterial << " (";
             if ( report.TerrainMaterial.Entities > 0 )
             {
                 // Named, not counted, and for the same reason the loader names them: this step DROPS the
@@ -162,8 +166,8 @@ int main( int argc, char** argv )
         }
         if ( report.MaterialPathRaised )
         {
-            std::cout << " scene v" << Desert::Core::kSceneVersionTerrainMaterial << "->v"
-                      << Desert::Core::kSceneVersionMaterialPath << " (";
+            std::cout << " scene v" << Desert::Migration::kSceneVersionTerrainMaterial << "->v"
+                      << Desert::Migration::kSceneVersionMaterialPath << " (";
             if ( report.MaterialPath.Paths > 0 )
                 std::cout << report.MaterialPath.Paths << " material path(s) made relative to the assets "
                           << "root in " << report.MaterialPath.Entities << " entity(ies)";
@@ -176,7 +180,7 @@ int main( int argc, char** argv )
             std::cout << ")";
         }
         if ( report.UnitsRaised )
-            std::cout << " units v0->v" << Desert::Core::kUnitVersion << " (" << report.Units.Entities
+            std::cout << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
                       << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected
                       << " rejected)";
         std::cout << "\n";

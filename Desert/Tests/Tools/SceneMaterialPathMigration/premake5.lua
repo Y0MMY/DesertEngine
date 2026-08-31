@@ -12,25 +12,24 @@ project(test_name)
     -- a parallel build can compile a stale table in and the assertions would report on yesterday's struct.
     dependson { "Desert" }
 
-    -- WHAT THIS SUITE COMPILES AND WHY THERE IS NO MIGRATION IN THE LIST. The painted layout ADDS fields
-    -- and renames none, so there is no v6 -> v7 function: an absent key is already how the reflected
-    -- serializer spells "keep the C++ default", and a migration that returned zeros would be the stub §1.2
-    -- of the contract forbids. What has to be proved instead is the CONSEQUENCE of that -- that a scene
-    -- written before this phase reads back as a layer with no painting -- and proving it needs the
-    -- reflection table, the deserializer, and the bake's own parameters to check the result against.
+    -- The migration, the reflection table it writes for, and the reflected (de)serializer that turns the
+    -- migrated payload into the TerrainData the renderer reads. Nothing else - the migration is a pure
+    -- function over the parsed tree, and this project failing to link without a renderer is the proof.
     files {
         test_files,
+        "%{wks.location}/Tools/SceneMigrator/Source/SceneMigration.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudLayout.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudProceduralVolume.cpp",
-        "%{wks.location}/Desert/Desert/Source/Engine/Assets/CloudModellingVolume.cpp",
     }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+        -- The migrations live in the TOOL now (they used to be an engine TU that ran on every
+        -- scene load). This is what makes `#include <SceneMigration.hpp>` below resolve, and its
+        -- own `#include "SceneMigration.hpp"` of itself.
+        "%{wks.location}/Tools/SceneMigrator/Source",
         "%{wks.location}/ThirdParty/entt/include/",       -- Components.hpp is an entt registry away
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the scene tree is rfl::Generic
     }
