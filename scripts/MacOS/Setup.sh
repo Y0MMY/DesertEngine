@@ -105,10 +105,25 @@ diagnose_submodule() {
     fi
 }
 
+# A submodule whose clone succeeded but whose checkout did not leaves a
+# directory holding nothing but the .git pointer. git treats that as up to
+# date: `git submodule status` prints it clean at the right commit, and
+# `git submodule update` exits 0 without touching it, for ever. Checking the
+# exit status alone therefore cannot tell a populated submodule from an empty
+# one — look at the working tree.
+submodule_is_populated() {
+    local sm_path="$1"
+    [ -n "$(ls -A "$sm_path" 2>/dev/null | grep -v '^\.git$')" ]
+}
+
 # Local state only. Never touches .gitmodules or the recorded commit.
 reset_submodule_state() {
     local sm_path="$1"
-    if git -C "$sm_path" rev-parse --git-dir >/dev/null 2>&1 &&
+    # Only meaningful when the working tree actually has content: in an empty
+    # submodule `git status` reports every tracked file as deleted, which is
+    # not a local modification worth warning about.
+    if submodule_is_populated "$sm_path" &&
+        git -C "$sm_path" rev-parse --git-dir >/dev/null 2>&1 &&
         [ -n "$(git -C "$sm_path" status --porcelain 2>/dev/null)" ]; then
         echo "       WARNING: discarding local modifications in $sm_path" >&2
     fi
@@ -129,19 +144,28 @@ if [ ${#SUBMODULE_PATHS[@]} -eq 0 ]; then
     fail "no submodules found in the git index (is this a git checkout?)"
 else
     for sm_path in "${SUBMODULE_PATHS[@]}"; do
-        if git submodule update --init --recursive -- "$sm_path"; then
+        if git submodule update --init --recursive -- "$sm_path" &&
+            submodule_is_populated "$sm_path"; then
             echo "    $sm_path: ok"
             continue
         fi
 
-        echo "    $sm_path: failed; resetting its local state and retrying once"
-        diagnose_submodule "$sm_path"
+        if submodule_is_populated "$sm_path"; then
+            echo "    $sm_path: failed; resetting its local state and retrying once"
+            diagnose_submodule "$sm_path"
+        else
+            echo "    $sm_path: git calls it up to date but its working tree is empty;" \
+                "resetting its local state and retrying once"
+        fi
         reset_submodule_state "$sm_path"
 
-        if git submodule update --init --recursive -- "$sm_path"; then
+        if git submodule update --init --recursive -- "$sm_path" &&
+            submodule_is_populated "$sm_path"; then
             echo "    $sm_path: ok (after reset)"
-        else
+        elif submodule_is_populated "$sm_path"; then
             fail "git submodule update --init --recursive -- $sm_path"
+        else
+            fail "$sm_path is still empty after a reset and a re-clone"
         fi
     done
 fi
