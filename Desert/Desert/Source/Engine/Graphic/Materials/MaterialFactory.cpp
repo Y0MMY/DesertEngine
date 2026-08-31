@@ -80,6 +80,15 @@ namespace Desert::Graphic
         // Shader-name registry (replaces the old closed MaterialType switch). Specialized shaders keep
         // their optimized C++ material (PBR batches into an SSBO); any other shader is handled generically
         // by DataDrivenMaterial — so a new shader becomes assignable with zero C++.
+        //
+        // THERE IS DELIBERATELY NO DOMAIN CHECK HERE, and this is the obvious place to want one. A
+        // Terrain-domain material in a mesh slot used to draw silently and wrongly, and the tempting fix
+        // is to refuse it at birth. That would be wrong: this function does not know its consumer, and
+        // every other consumer of a Terrain material is legitimate — the terrain draws with one, the
+        // Material Editor loads one to edit its parameters, and the File Explorer registers one for every
+        // `.demat` it thumbnails. Refusing here would break the correct uses to stop the incorrect one.
+        // The refusal lives where the consumer IS known, in MeshRenderer::DrawGenericMeshes, which asks
+        // Core::Formats::DrawnByMeshPath() and names the material it will not draw.
         if ( shaderName.empty() || shaderName == "StaticMeshPBR" || shaderName == "SkinnedMeshPBR" )
         {
             auto pbrMaterial = std::make_shared<StaticMaterialPBR>();

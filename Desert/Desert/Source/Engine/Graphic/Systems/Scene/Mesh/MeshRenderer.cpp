@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <unordered_set>
 
 namespace Desert::Graphic::System
 {
@@ -269,6 +270,66 @@ namespace Desert::Graphic::System
             // once, with the file and line, and repeating it every frame for every mesh would bury it.
             if ( !shader || !shader->IsCompiled() || !g.Mesh || ( g.SlotMaterial && !material ) )
                 continue;
+
+            // ── The domain gate ────────────────────────────────────────────────────────────────
+            //
+            // This path rasterizes ONE domain. A material naming a shader of any other domain used to
+            // draw here, silently and wrongly, and NOTHING below this point was ever going to object.
+            //
+            // What was measured, with a `.demat` naming the Terrain shader in a mesh slot: the submesh
+            // reached this loop, left the batched PBR path (so it was masked out of the PBR draw), and
+            // then drew nothing, with no log line and no validation error -- validation layers were
+            // active and reported only an unrelated teardown leak. No pipeline was built for it either:
+            // the spec assembled below differs from the terrain's own only in DebugName and Layout, and
+            // PipelineCache::MakeKey hashes neither, so GetOrCreate returned the pipeline TerrainRenderer
+            // had already cached. The mesh was therefore drawn with the terrain's pipeline -- whose vertex
+            // shader ignores the vertex buffer entirely and reads gl_VertexIndex -- against a TerrainUB
+            // that this function never fills, because it engine-fills CameraUB, TimeUB and
+            // DirectionLightsUB by name and nothing else.
+            //
+            // The cache collision is a separate hazard and is NOT what this gate fixes; it is simply why
+            // the failure was even quieter than "a wrong pipeline". This gate stops the draw before any
+            // of that, on the one fact that is always true: the domains do not match.
+            //
+            // WHY HERE, and not at material creation. A Terrain-domain material is a legitimate object:
+            // the terrain draws with one, the Material Editor edits one, and MaterialService builds one
+            // for any `.demat` the File Explorer thumbnails. Creation does not know its consumer, so a
+            // refusal there would refuse the correct uses too. This is the narrowest point that knows
+            // BOTH facts -- the material's domain and that the consumer is the mesh path -- and it is
+            // the single place every producer converges: per-slot draws, MaterialComponent shader
+            // overrides and the text system all arrive in this one queue, as does every editor entry
+            // point (scene slot, thumbnail, Collections). One gate covers them.
+            //
+            // NAMED ONCE PER SHADER, because this runs per frame per submesh group and an unguarded
+            // LOG_ERROR here would be a flood that buries the message it is trying to deliver. The set
+            // is a log throttle and nothing else; the refusal itself is unconditional. Same shape as
+            // the s_Warned* guards this file already uses for the skinned and instanced paths, with a
+            // finer key so a second offending shader is not silenced by the first.
+            //
+            // The entity may still cast a shadow: the shadow pass draws depth with its own shader and
+            // never executes this material, and the caster belongs to the ENTITY (see
+            // Rules::RouteMeshShadowCaster), whose other submeshes may be drawing correctly.
+            if ( const auto domain = shader->GetProgramMeta().Domain; !Core::Formats::DrawnByMeshPath( domain ) )
+            {
+                static std::unordered_set<std::string> s_RefusedShaders;
+                if ( s_RefusedShaders.insert( shaderName ).second )
+                {
+                    LOG_ERROR( "[MeshRenderer] Material shader '{}' declares Domain {}, but a mesh "
+                               "material slot draws Domain {}. REFUSED: this submesh is not drawn. "
+                               "Nothing lower down would have objected -- the mesh path hands a "
+                               "{}-domain shader geometry and uniform blocks it does not read, and "
+                               "neither Vulkan validation nor the pipeline cache can see that is wrong, "
+                               "so the draw produced garbage or nothing at all with no error. Assign a "
+                               "{}-domain material to this slot; a {}-domain material belongs on the "
+                               "component that draws that domain.",
+                               shaderName, Core::Formats::ShaderDomainName( domain ),
+                               Core::Formats::ShaderDomainName( Core::Formats::kMeshPathDomain ),
+                               Core::Formats::ShaderDomainName( domain ),
+                               Core::Formats::ShaderDomainName( Core::Formats::kMeshPathDomain ),
+                               Core::Formats::ShaderDomainName( domain ) );
+                }
+                continue;
+            }
 
             if ( !material )
             {
