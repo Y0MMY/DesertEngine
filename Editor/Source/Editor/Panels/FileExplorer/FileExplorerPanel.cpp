@@ -8,6 +8,7 @@
 #include <Editor/Core/DragPayloads.hpp>
 #include <Editor/Core/SceneOpenRequest.hpp>
 #include <Editor/Panels/Clouds/CloudDocumentOpen.hpp>
+#include <Editor/Panels/FileExplorer/NewCloudAsset.hpp>
 #include <Editor/Panels/MaterialEditor/MaterialDocumentOpen.hpp>
 #include <Editor/Core/AssetFileOps.hpp>
 #include <Editor/Core/AssetReferences.hpp>
@@ -224,7 +225,22 @@ namespace Desert::Editor
         }
     }
 
-    FileExplorerPanel::~FileExplorerPanel() = default;
+    FileExplorerPanel::~FileExplorerPanel()
+    {
+        // CANCEL, THEN WAIT. The worker writes into m_CloudBakeProgress and into a path this object owns,
+        // so the panel must outlive it; waiting rather than detaching is the difference between a slow
+        // editor shutdown and a use-after-free. The same discipline CloudModellingVolumePanel keeps, for
+        // the same reason.
+        //
+        // The cancel bounds the wait for a `.dcmv` (the bake asks the callback whether to carry on between
+        // slabs). A `.dcnv` cannot be cancelled — Assets::GenerateCloudNoiseVolume takes a progress
+        // pointer and no stop condition — so closing the editor during one waits out the remainder of a
+        // bake measured at 8.7 s in Debug. That is the existing CloudNoiseVolumePanel's behaviour too, and
+        // fixing it means a stop hook on an engine function this task does not own.
+        m_CloudBakeCancelled.store( true );
+        if ( m_CloudBake.valid() )
+            m_CloudBake.wait();
+    }
 
     namespace
     {
@@ -254,6 +270,11 @@ namespace Desert::Editor
 
     void FileExplorerPanel::OnPreUpdate()
     {
+        // BEFORE the throttle and before the early return on a null directory: a generation that has
+        // finished must be collected on the frame it finished, whatever the browser is looking at. A
+        // future nobody polls is a thread whose result is thrown away at shutdown.
+        PollCloudAssetBake();
+
         // Throttle to ~every 30 frames (~0.5s @60fps) — directory_iterator is cheap but not free.
         if ( ++m_PollCounter < 30 )
             return;
@@ -444,6 +465,181 @@ namespace Desert::Editor
         // Minimal valid material: no params, no textures — the engine derives a stable id from the path.
         Common::Utils::FileSystem::WriteContentToFile( path, "{\"Params\":[],\"Textures\":[]}" );
         QueueRefresh();
+    }
+
+    void FileExplorerPanel::CreateNewCloudAsset( CloudAssetKind kind )
+    {
+        if ( !m_CurrentDir )
+            return;
+
+        // The menu items are disabled while a generation is in flight; this is the second lock and it is
+        // not redundant, because overwriting m_CloudBake would detach a thread still storing into
+        // m_CloudBakeProgress.
+        if ( m_CloudBakeRunning )
+            return;
+
+        const char* stem = nullptr;
+        const char* ext  = nullptr;
+        switch ( kind )
+        {
+            case CloudAssetKind::Type:
+                stem = "NewCloudType";
+                ext  = Assets::kCloudTypeExtension;
+                break;
+            case CloudAssetKind::Layout:
+                stem = "NewCloudLayout";
+                ext  = Assets::kCloudLayoutExtension;
+                break;
+            case CloudAssetKind::NoiseVolume:
+                stem = "NewCloudNoise";
+                ext  = Assets::kCloudNoiseVolumeExtension;
+                break;
+            case CloudAssetKind::ModellingVolume:
+                stem = "NewCloudBody";
+                ext  = Assets::kCloudModellingVolumeExtension;
+                break;
+        }
+
+        // The same uniquifier the material item uses, so creating a second one never silently overwrites
+        // somebody's file.
+        const std::string name = AssetFileOps::UniqueName(
+             stem, ext, [&]( const std::string& n )
+             { return std::filesystem::exists( std::filesystem::path( m_CurrentDir->AssetPath ) / n ); } );
+
+        // THE DIRECTORY IS THE ONE THE ARTIST IS LOOKING AT, not Constants::Path::CLOUD_*_PATH. Those name
+        // where the SHIPPED library lives and are what a scene resolves a preset against; where somebody
+        // puts their own asset is their business, and the same choice the material item already makes.
+        const std::filesystem::path path = std::filesystem::path( m_CurrentDir->AssetPath ) / name;
+
+        m_CloudBakePath  = path.string();
+        m_CloudBakeLabel = name;
+
+        // ── The two that are numbers, and are written where they were asked for ────────────────────────
+        //
+        // Through the format's own `Save` and NOT through a literal, which is what CreateNewMaterial above
+        // does: it writes `{"Params":[],"Textures":[]}` straight out, past the serialiser that every other
+        // writer of a `.demat` goes through. That is a second statement of a file format, and a second
+        // statement drifts — the material the editor saves after touching one already carries parameter
+        // entries (`AOStrength` among them) that this literal has never heard of. All four cloud formats
+        // have a real `Save`, so there is exactly one statement of each of them and this is not the place
+        // to add a fifth.
+        if ( kind == CloudAssetKind::Type )
+        {
+            FinishCloudAsset(
+                 Assets::CloudTypeAsset::Save( path, NewCloudAsset::DefaultType( path.stem().string() ) ) );
+            return;
+        }
+
+        if ( kind == CloudAssetKind::Layout )
+        {
+            auto layout = NewCloudAsset::DefaultLayout();
+            if ( !layout )
+            {
+                FinishCloudAsset( Common::MakeFormattedError<bool>( "{}", layout.GetError() ) );
+                return;
+            }
+
+            FinishCloudAsset( Assets::CloudLayoutAsset::Save( path, layout.GetValue() ) );
+            return;
+        }
+
+        // ── The two that are voxels, and cost seconds ──────────────────────────────────────────────────
+        //
+        // MEASURED, NOT REASONED (Debug, this machine, minimum of three interleaved runs): the default
+        // 128^3 noise volume takes 8 730 ms to generate (spread 255 ms) and the shipped modelling recipe
+        // 1 585 ms (spread 9 ms). Both are three orders of magnitude past a frame, so neither can run in
+        // this handler — an editor that stops answering for nine seconds is indistinguishable from one
+        // that has hung, and the artist's next move is to click the item again.
+        //
+        // std::async, matching CloudNoiseVolumePanel and CloudModellingVolumePanel, which run these same
+        // two bakes this same way: copying how the neighbouring systems do it rather than inventing a
+        // third way. The JobSystem would buy nothing here either — GenerateCloudNoiseVolume already splits
+        // itself across one thread per hardware thread, so a pool worker would only nest two pools.
+        m_CloudBakeProgress.store( 0.0f );
+        m_CloudBakeCancelled.store( false );
+        m_CloudBakeRunning = true;
+
+        m_CloudBake = std::async( std::launch::async,
+                                  [this, path, kind]() -> Common::BoolResultStr
+                                  {
+                                      // SAVED ON THE WORKER, and it is safe for a reason worth stating: all four
+                                      // `Save`s are pure file I/O plus a log line — no AssetManager, no ECS, no
+                                      // GPU — which is exactly the set a job is forbidden to touch. Handing 8 MiB
+                                      // back to the main thread to write there would only move the disk stall into
+                                      // the frame.
+                                      if ( kind == CloudAssetKind::NoiseVolume )
+                                      {
+                                          auto volume = NewCloudAsset::DefaultNoiseVolume( &m_CloudBakeProgress );
+                                          if ( !volume )
+                                              return Common::MakeFormattedError<bool>( "{}", volume.GetError() );
+
+                                          return Assets::CloudNoiseVolumeAsset::Save( path, volume.GetValue() );
+                                      }
+
+                                      auto body = NewCloudAsset::DefaultModellingVolume(
+                                           [this]( float fraction )
+                                           {
+                                               m_CloudBakeProgress.store( fraction );
+                                               return !m_CloudBakeCancelled.load();
+                                           } );
+                                      if ( !body )
+                                          return Common::MakeFormattedError<bool>( "{}", body.GetError() );
+
+                                      return Assets::CloudModellingVolumeAsset::Save( path, body.GetValue() );
+                                  } );
+    }
+
+    void FileExplorerPanel::PollCloudAssetBake()
+    {
+        if ( !m_CloudBakeRunning || !m_CloudBake.valid() )
+            return;
+
+        if ( m_CloudBake.wait_for( std::chrono::seconds( 0 ) ) != std::future_status::ready )
+            return;
+
+        const Common::BoolResultStr written = m_CloudBake.get();
+        m_CloudBakeRunning                  = false;
+        FinishCloudAsset( written );
+    }
+
+    void FileExplorerPanel::FinishCloudAsset( const Common::BoolResultStr& written )
+    {
+        if ( !written )
+        {
+            // NEVER SILENT (contract §1.4). `Save` refuses an unwritable directory, a full disk and data
+            // that would not load back, each with the reason; a "New ..." item that sometimes produces no
+            // file and says nothing is worse than no item at all.
+            LOG_ERROR( "[Assets] '{}' could not be created: {}", m_CloudBakePath, written.GetError() );
+            m_FileOpStatus = "Could not create '" + m_CloudBakeLabel + "': " + written.GetError();
+            return;
+        }
+
+        QueueRefresh();
+
+        // OPENED STRAIGHT AWAY, because creating one of these is the only way to reach its editor at all:
+        // the four cloud documents are contextual, keyed on an asset handle, and have no View-menu entry,
+        // so until a file exists there is nothing for the double-click seam to open. RequestCloudDocument
+        // logs its own failures with the path.
+        if ( m_AssetManager &&
+             RequestCloudDocument( m_AssetManager, m_CloudBakePath ) != CloudDocumentRequest::Requested )
+        {
+            m_FileOpStatus = "Created '" + m_CloudBakeLabel + "' but it would not open — the log says why.";
+            return;
+        }
+
+        // The status line is the RED error line; a success has the file, the opened document and Save's own
+        // log entry to show for itself, so it clears rather than colours one.
+        m_FileOpStatus.clear();
+    }
+
+    void FileExplorerPanel::DrawCloudAssetBakeStatus()
+    {
+        if ( !m_CloudBakeRunning )
+            return;
+
+        const std::string line = "Creating '" + m_CloudBakeLabel + "' - this takes a few seconds.";
+        ImGui::TextUnformatted( line.c_str() );
+        ImGui::ProgressBar( m_CloudBakeProgress.load(), ImVec2( -1.0f, 0.0f ) );
     }
 
     void FileExplorerPanel::RemoveDirectory( DirectoryInformation* directory, bool removeFromParent )
@@ -717,6 +913,7 @@ namespace Desert::Editor
             if ( ImGui::SmallButton( "x##clearFileOp" ) )
                 m_FileOpStatus.clear();
         }
+        DrawCloudAssetBakeStatus();
 
         // Advance the material-thumbnail capture state machine once per frame (renders + reads back the
         // pending material; see AssetThumbnailRenderer).
@@ -1160,6 +1357,49 @@ namespace Desert::Editor
                                     createGraph( ShaderGraph::Domain::Surface );
                                 if ( ImGui::MenuItem( "Post Process" ) )
                                     createGraph( ShaderGraph::Domain::PostProcess );
+                                ImGui::EndMenu();
+                            }
+
+                            // THE FOUR CLOUD FORMATS. Until this menu existed not one of them could be
+                            // created: all four editors are contextual documents keyed on an asset handle,
+                            // so the double-click seam had nothing to open and an artist could edit the
+                            // twenty-one shipped assets and author none of their own.
+                            //
+                            // A submenu for the reason "New Shader Graph" is one — four more top-level
+                            // items would be half the menu.
+                            if ( ImGui::BeginMenu( "New Cloud Asset" ) )
+                            {
+                                // Disabled while a volume is being generated: only one creation is tracked
+                                // at a time, and a second click would detach the first bake's thread.
+                                ImGui::BeginDisabled( m_CloudBakeRunning );
+
+                                if ( ImGui::MenuItem( "Cloud Type" ) )
+                                    CreateNewCloudAsset( CloudAssetKind::Type );
+                                if ( ImGui::IsItemHovered() )
+                                    ImGui::SetTooltip( "A kind of cloud: altitudes, silhouette curve, "
+                                                       "density. Starts from the built-in congestus." );
+
+                                if ( ImGui::MenuItem( "Cloud Layout" ) )
+                                    CreateNewCloudAsset( CloudAssetKind::Layout );
+                                if ( ImGui::IsItemHovered() )
+                                    ImGui::SetTooltip( "A blank 512x512 painting of where clouds are. "
+                                                       "Draw on it in the layout document." );
+
+                                if ( ImGui::MenuItem( "Cloud Noise Volume" ) )
+                                    CreateNewCloudAsset( CloudAssetKind::NoiseVolume );
+                                if ( ImGui::IsItemHovered() )
+                                    ImGui::SetTooltip( "The 3D noise cloud edges are eroded with, 128^3 "
+                                                       "RGBA8. Generated in the background - it takes "
+                                                       "several seconds and a progress bar appears above." );
+
+                                if ( ImGui::MenuItem( "Cloud Modelling Volume" ) )
+                                    CreateNewCloudAsset( CloudAssetKind::ModellingVolume );
+                                if ( ImGui::IsItemHovered() )
+                                    ImGui::SetTooltip( "A hero cloud's sculpted body, 128x64x128. Starts "
+                                                       "from the shipped congestus and is baked in the "
+                                                       "background." );
+
+                                ImGui::EndDisabled();
                                 ImGui::EndMenu();
                             }
 
