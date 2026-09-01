@@ -192,7 +192,49 @@ namespace Desert::Graphic
             }
         }
 
+        // Whether these two specs would be served the SAME cached pipeline. This is the cache's entire
+        // correctness condition, stated once so it can be asserted without a device: two specs that differ in
+        // anything the backend reads must NOT share, and two that differ only in something it never reads
+        // must. Exposed for `Desert/Tests/Engine/PipelineCacheKey`, which pins one field per assertion so the
+        // next field added to GraphicsPipelineSpecification cannot fall out of the key quietly — which is how
+        // UseLoadRenderPass, the vertex layout, the line width and the back stencil face all went missing.
+        NO_DISCARD static bool SharesPipeline( const GraphicsPipelineSpecification& a,
+                                               const GraphicsPipelineSpecification& b )
+        {
+            return MakeKey( a ) == MakeKey( b );
+        }
+
+        // Equal keys must hash equally; the test asserts this alongside SharesPipeline so a future key field
+        // added to `operator==` but forgotten in KeyHash is caught. (An unequal-but-colliding hash is legal.)
+        NO_DISCARD static size_t HashOf( const GraphicsPipelineSpecification& s )
+        {
+            return KeyHash{}( MakeKey( s ) );
+        }
+
     private:
+        // THE KEY MUST NAME EVERY FIELD THE BACKEND READS WHEN IT BUILDS THE PIPELINE. Anything the backend
+        // reads but the key omits means two different GPU objects collapse onto one cache entry, and whichever
+        // spec asked first silently wins for both. That is not hypothetical: `UseLoadRenderPass` picks
+        // GetVKRenderPassLoad() over GetVKRenderPass() (VulkanPipeline.cpp:387), and MeshRenderer draws the
+        // same shader with it both false and true depending on whether the frame went through the deferred
+        // path, so the two collided exactly.
+        //
+        // What is deliberately NOT here, and why — this list is the contract, so extend it consciously:
+        //   * DebugName: names an object, never changes one. Hashing it would fork a pipeline per label.
+        //   * VertexBufferElement::Name and ::Normalized: the backend builds attributes from Type and Offset
+        //     only (VulkanPipeline.cpp:242-250), so two layouts differing only in a name ARE the same pipeline.
+        //   * VertexPullingConfig's contents: only its ENGAGEMENT reaches the backend — it short-circuits the
+        //     vertex input to empty and ignores Layout entirely (VulkanPipeline.cpp:215). Nothing outside
+        //     Pipeline.hpp and the Vulkan backend reads the config back, so the contents cannot be observed
+        //     through a shared pipeline.
+        //   * LineWidth: DYNAMIC. VK_DYNAMIC_STATE_LINE_WIDTH is declared (VulkanPipeline.cpp:284) and
+        //     vkCmdSetLineWidth is issued per draw (VulkanRenderer.cpp:443), so Vulkan ignores the baked
+        //     value outright and two specs differing only in it really are one pipeline. Hashing it would
+        //     fork a pipeline per width for no effect. This one was on the list of "missing" fields until
+        //     the backend was read; it is here as a decision, not an oversight.
+        //
+        // The cache's contract is "specs that produce an equivalent GPU object may share one". A caller that
+        // reads its own values back out of pipeline->GetSpecification() is therefore asking the wrong question.
         struct Key
         {
             const void* Shader        = nullptr;
@@ -209,8 +251,17 @@ namespace Desert::Graphic
             uint32_t    PatchPoints   = 0;
             int         BlendSrc      = 0;
             int         BlendDst      = 0;
-            int         StencilState  = 0; // packed compare + fail/pass/depthfail ops
-            uint32_t    StencilRef    = 0;
+            // One signature per face over the WHOLE StencilOpState: the four ops, both masks and the
+            // reference. The old key packed four ops of the FRONT face only, so a spec that differed in the
+            // back face, or in either mask, took another spec's pipeline — and all of compareMask, writeMask
+            // and reference are baked into the pipeline (VulkanPipeline.cpp:455-464), not set per draw.
+            uint64_t StencilFrontSig = 0;
+            uint64_t StencilBackSig  = 0;
+            bool     LoadRenderPass  = false;
+            bool     VertexPulling   = false; // engaged-ness only; see the note above
+            uint32_t LayoutStride    = 0;
+            uint32_t LayoutElements  = 0;
+            uint64_t LayoutSignature = 0; // FNV-1a over (Type, Offset) of every element, in order
 
             bool operator==( const Key& ) const = default;
         };
@@ -237,8 +288,12 @@ namespace Desert::Graphic
                 mix( static_cast<size_t>( k.PatchPoints ) );
                 mix( static_cast<size_t>( k.BlendSrc ) );
                 mix( static_cast<size_t>( k.BlendDst ) );
-                mix( static_cast<size_t>( k.StencilState ) );
-                mix( static_cast<size_t>( k.StencilRef ) );
+                mix( static_cast<size_t>( k.StencilFrontSig ) );
+                mix( static_cast<size_t>( k.StencilBackSig ) );
+                mix( ( k.LoadRenderPass ? 1u : 0u ) | ( k.VertexPulling ? 2u : 0u ) );
+                mix( static_cast<size_t>( k.LayoutStride ) );
+                mix( static_cast<size_t>( k.LayoutElements ) );
+                mix( static_cast<size_t>( k.LayoutSignature ) );
                 return h;
             }
         };
@@ -262,11 +317,46 @@ namespace Desert::Graphic
             k.BlendDst     = s.BlendEnable ? static_cast<int>( s.DstColorBlendFactor ) : 0;
             if ( s.StencilTestEnabled )
             {
-                k.StencilState = static_cast<int>( s.StencilFront.CompareOp ) |
-                                 ( static_cast<int>( s.StencilFront.FailOp ) << 4 ) |
-                                 ( static_cast<int>( s.StencilFront.PassOp ) << 8 ) |
-                                 ( static_cast<int>( s.StencilFront.DepthFailOp ) << 12 );
-                k.StencilRef = s.StencilFront.Reference;
+                const auto pack = []( const StencilOpState& f )
+                {
+                    uint64_t   sig = 1469598103934665603ull;
+                    const auto mix = [&sig]( uint64_t v )
+                    {
+                        sig ^= v;
+                        sig *= 1099511628211ull;
+                    };
+                    mix( static_cast<uint64_t>( f.CompareOp ) );
+                    mix( static_cast<uint64_t>( f.FailOp ) );
+                    mix( static_cast<uint64_t>( f.PassOp ) );
+                    mix( static_cast<uint64_t>( f.DepthFailOp ) );
+                    mix( f.CompareMask );
+                    mix( f.WriteMask );
+                    mix( f.Reference );
+                    return sig;
+                };
+                k.StencilFrontSig = pack( s.StencilFront );
+                k.StencilBackSig  = pack( s.StencilBack );
+            }
+
+            k.LoadRenderPass = s.UseLoadRenderPass;
+            k.VertexPulling  = s.PullingConfig.has_value();
+
+            // Vertex pulling makes the backend ignore Layout outright, so folding it in here would fork
+            // pipelines that are in fact identical.
+            if ( !k.VertexPulling && s.Layout )
+            {
+                k.LayoutStride   = s.Layout->GetStride();
+                k.LayoutElements = s.Layout->GetElementCount();
+
+                uint64_t sig = 1469598103934665603ull;
+                for ( const auto& e : *s.Layout )
+                {
+                    sig ^= static_cast<uint64_t>( e.Type );
+                    sig *= 1099511628211ull;
+                    sig ^= static_cast<uint64_t>( e.Offset );
+                    sig *= 1099511628211ull;
+                }
+                k.LayoutSignature = sig;
             }
             return k;
         }
