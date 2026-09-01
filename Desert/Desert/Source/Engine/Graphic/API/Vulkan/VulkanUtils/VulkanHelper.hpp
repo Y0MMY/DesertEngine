@@ -57,8 +57,10 @@ namespace Desert::Graphic::API::Vulkan
         VkResult res = ( f );                                                                                     \
         if ( res != VK_SUCCESS )                                                                                  \
         {                                                                                                         \
-            return Common::MakeFormattedError<VkResult>( std::string(#f ) + std::string( " -> result: {}" ),    \
-                                                         VkResultToString( res ) );                               \
+            /* The stringified call is an ARGUMENT, never the format string: `#f` is arbitrary source             \
+               text, so a brace anywhere in it would be parsed as a placeholder and throw - from inside           \
+               the code reporting a Vulkan failure. */                                                            \
+            return Common::MakeFormattedError<VkResult>( "{} -> result: {}", #f, VkResultToString( res ) );       \
         }                                                                                                         \
         else                                                                                                      \
         {                                                                                                         \

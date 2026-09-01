@@ -8,6 +8,8 @@
 
 #include <spdlog/fmt/fmt.h>
 
+#include <utility>
+
 namespace Common
 {
     template <typename T, typename ErrorCodeType = int>
@@ -19,7 +21,8 @@ namespace Common
 
     template <typename T, typename ErrorCodeType = int, typename... Args>
     ResultWithCodes<T, ErrorCodeType> MakeFormattedErrorWithCodes( std::initializer_list<ErrorCodeType> errorCodes,
-                                                                   std::string_view format, Args&&... args );
+                                                                   fmt::format_string<Args...>          format,
+                                                                   Args&&... args );
     template <typename T = bool, typename ErrorCodeType = int>
     auto MakeSuccessWithCodes( const T& value );
 
@@ -46,17 +49,31 @@ namespace Common
             {
             }
 
+            // The format string is checked by the COMPILER (see Common/Core/Logger.hpp for the full why).
+            // This constructor builds the message of a FAILURE, so a mismatched brace count here threw
+            // `fmt::format_error` at the one moment the code was already handling something going wrong -
+            // and nothing catches it. A genuinely runtime format must say so with `fmt::runtime(...)`.
+            //
+            // The `const std::string&` overload above still wins for a single non-literal argument, so a
+            // message that merely CONTAINS braces and formats nothing is unaffected, exactly as before.
             template <typename... Args>
-            explicit Error( std::initializer_list<ErrorCodeType> errorCodes, std::string_view format,
+            explicit Error( std::initializer_list<ErrorCodeType> errorCodes, fmt::format_string<Args...> format,
                             Args&&... args )
-                 : m_ErrorMessage( fmt::vformat( format, fmt::make_format_args( args... ) ) ),
+                 : m_ErrorMessage( fmt::format( format, std::forward<Args>( args )... ) ),
                    m_ErrorCodes( errorCodes )
             {
             }
 
+            // The format string is checked by the COMPILER (see Common/Core/Logger.hpp for the full why).
+            // This constructor builds the message of a FAILURE, so a mismatched brace count here threw
+            // `fmt::format_error` at the one moment the code was already handling something going wrong -
+            // and nothing catches it. A genuinely runtime format must say so with `fmt::runtime(...)`.
+            //
+            // The `const std::string&` overload above still wins for a single non-literal argument, so a
+            // message that merely CONTAINS braces and formats nothing is unaffected, exactly as before.
             template <typename... Args>
-            explicit Error( std::string_view format, Args&&... args )
-                 : m_ErrorMessage( fmt::vformat( format, fmt::make_format_args( args... ) ) )
+            explicit Error( fmt::format_string<Args...> format, Args&&... args )
+                 : m_ErrorMessage( fmt::format( format, std::forward<Args>( args )... ) )
             {
             }
 
@@ -215,8 +232,9 @@ namespace Common
         friend auto MakeSuccessWithCodes( const U& value );
 
         template <typename U, typename E, typename... Args>
-        friend ResultWithCodes<U, E> MakeFormattedErrorWithCodes( std::initializer_list<E> errorCodes,
-                                                                  std::string_view format, Args&&... args );
+        friend ResultWithCodes<U, E> MakeFormattedErrorWithCodes( std::initializer_list<E>    errorCodes,
+                                                                  fmt::format_string<Args...> format,
+                                                                  Args&&... args );
     };
 
     template <typename T, typename ErrorCodeType>
@@ -227,9 +245,12 @@ namespace Common
              typename ResultWithCodes<T, ErrorCodeType>::Error( errorCodes, message ) );
     }
 
+    // Like MakeFormattedError in ResultStr.hpp: the format has to stay a format string across this
+    // boundary, or the check it carries is thrown away here on behalf of every caller.
     template <typename T, typename ErrorCodeType, typename... Args>
     ResultWithCodes<T, ErrorCodeType> MakeFormattedErrorWithCodes( std::initializer_list<ErrorCodeType> errorCodes,
-                                                                   std::string_view format, Args&&... args )
+                                                                   fmt::format_string<Args...>          format,
+                                                                   Args&&... args )
     {
         return ResultWithCodes<T, ErrorCodeType>( typename ResultWithCodes<T, ErrorCodeType>::Error(
              errorCodes, format, std::forward<Args>( args )... ) );
@@ -249,8 +270,8 @@ namespace Common
     }
 
     template <typename T, typename ErrorCodeType = int, typename... Args>
-    ResultWithCodes<T, ErrorCodeType> MakeFormattedErrorWithSingleCode( ErrorCodeType    errorCode,
-                                                                        std::string_view format, Args&&... args )
+    ResultWithCodes<T, ErrorCodeType>
+    MakeFormattedErrorWithSingleCode( ErrorCodeType errorCode, fmt::format_string<Args...> format, Args&&... args )
     {
         return MakeFormattedErrorWithCodes<T, ErrorCodeType>( { errorCode }, format,
                                                               std::forward<Args>( args )... );

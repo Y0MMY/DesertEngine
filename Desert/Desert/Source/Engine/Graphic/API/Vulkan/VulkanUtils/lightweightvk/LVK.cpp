@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <cstdio>
 #include "LVK.hpp"
 
 #include <assert.h>
@@ -176,12 +177,21 @@ uint32_t lvk::getTextureBytesPerPlane(uint32_t width, uint32_t height, lvk::Form
 
 bool lvk::Assert(bool cond, const char* file, int line, const char* format, ...) {
     if (!cond) {
+        // The 68 LVK_ASSERT_MSG call sites are printf-shaped ("%d", "%s") because this is vendored code,
+        // so the message is rendered by vsnprintf and then handed to the logger as an ARGUMENT.
+        //
+        // It used to be handed over as a fmt FORMAT STRING with the va_list as its only argument, which was
+        // wrong three ways at once: fmt does not know "%d", so no call site's values have ever appeared;
+        // the va_list was passed to fmt as if it were a formattable value; and LVK_VERIFY puts the
+        // STRINGIFIED CONDITION here, so a condition containing a brace would have thrown from inside an
+        // assertion. The line above it had the same disease - "%s:%d" printed literally, so no assertion
+        // has ever named its own file or line.
+        char    message[1024];
         va_list ap;
         va_start(ap, format);
-        LOG_WARN("[LVK] Assertion failed in %s:%d: ", file, line);
-        LOG_WARN(format, ap);
-        LOG_WARN("\n");
+        std::vsnprintf( message, sizeof( message ), format, ap );
         va_end(ap);
+        LOG_WARN( "[LVK] Assertion failed in {}:{}: {}", file, line, message );
         assert(false);
     }
     return cond;

@@ -107,7 +107,9 @@ namespace Desert::Core
                                                Graphic::Shader::GetStringShaderStage( stage ),
                                                result.GetErrorMessage(),
                                                shaderPath );
-            LOG_ERROR( errorMsg );
+            // "{}", not the message itself: a shaderc diagnostic quotes the offending GLSL, so it can
+            // contain braces, and passing it as a FORMAT string would throw while reporting a compile error.
+            LOG_ERROR( "{}", errorMsg );
             return Common::MakeError<std::vector<uint32_t>>( errorMsg );
         }
 

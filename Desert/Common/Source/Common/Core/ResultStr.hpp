@@ -7,6 +7,8 @@
 
 #include <spdlog/fmt/fmt.h>
 
+#include <utility>
+
 namespace Common
 {
     template <typename T>
@@ -16,7 +18,7 @@ namespace Common
     ResultStr<T> MakeError( const std::string& message );
 
     template <typename T = bool, typename... Args>
-    ResultStr<T> MakeFormattedError( std::string&& format, Args&&... args );
+    ResultStr<T> MakeFormattedError( fmt::format_string<Args...> format, Args&&... args );
 
     template <typename T = bool>
     auto MakeSuccess( T&& value );
@@ -34,9 +36,16 @@ namespace Common
             {
             }
 
+            // The format string is checked by the COMPILER (see Common/Core/Logger.hpp for the full why).
+            // This constructor builds the message of a FAILURE, so a mismatched brace count here threw
+            // `fmt::format_error` at the one moment the code was already handling something going wrong -
+            // and nothing catches it. A genuinely runtime format must say so with `fmt::runtime(...)`.
+            //
+            // The `const std::string&` overload above still wins for a single non-literal argument, so a
+            // message that merely CONTAINS braces and formats nothing is unaffected, exactly as before.
             template <typename... Args>
-            explicit Error( std::string_view format, Args&&... args )
-                 : m_ErrorMessage( fmt::vformat( format, fmt::make_format_args( args... ) ) )
+            explicit Error( fmt::format_string<Args...> format, Args&&... args )
+                 : m_ErrorMessage( fmt::format( format, std::forward<Args>( args )... ) )
             {
             }
 
@@ -124,7 +133,7 @@ namespace Common
         friend auto MakeSuccess( U&& value );
 
         template <typename U, typename... Args>
-        friend ResultStr<U> MakeFormattedError( std::string&& format, Args&&... args );
+        friend ResultStr<U> MakeFormattedError( fmt::format_string<Args...> format, Args&&... args );
     };
 
     template <typename T>
@@ -133,10 +142,15 @@ namespace Common
         return ResultStr<T>( typename ResultStr<T>::Error( message ) );
     }
 
+    // THE FORMAT STRING HAS TO STAY A FORMAT STRING ALL THE WAY DOWN. This took `std::string&&`, which
+    // erased its compile-time nature at exactly this boundary: every call site below it was writing a
+    // literal, and every one of them lost its checking here. That is why the whole conversion showed up as
+    // errors on this one line - the template was instantiating the checked constructor with a runtime
+    // string, from every caller in the engine at once.
     template <typename T, typename... Args>
-    ResultStr<T> MakeFormattedError( std::string&& format, Args&&... args )
+    ResultStr<T> MakeFormattedError( fmt::format_string<Args...> format, Args&&... args )
     {
-        return ResultStr<T>( typename ResultStr<T>::Error( std::move( format ), std::forward<Args>( args )... ) );
+        return ResultStr<T>( typename ResultStr<T>::Error( format, std::forward<Args>( args )... ) );
     }
 
     template <typename T>
