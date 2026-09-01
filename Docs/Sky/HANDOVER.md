@@ -157,9 +157,14 @@ and multiplies them by `1e-20` at `:154-159` purely to keep the reflected descri
 the forward shader. The cubes reach only the forward PBR materials (`MaterialPBRBase.cpp:118-131`) and
 `StaticMeshGlass.shader:162`, which is drawn in the Transparency stage in both paths.
 
-**And every scene in the repository that has a `VolumetricCloud` component is Deferred** — all 36 of
-them carry `RenderingPath: 1`; the only two Forward scenes are `MAT_ProbeShadows` and
-`MAT_ProbeUnlitShadows`, and neither has clouds. So a cloud term added to this bake today would be
+**And every scene in the repository that has a `VolumetricCloud` component is Deferred** — all 37 of
+them (36 when this was written; one has landed since) carry `RenderingPath: 1`; the only two Forward
+scenes are `MAT_ProbeShadows` and `MAT_ProbeUnlitShadows`, and neither has clouds. Re-counted
+2026-09-01 by the lead, with one addition the original count missed: **three scenes write no
+`RenderingPath` at all** (`MainMenu`, `Terrain_Grass`, `Terrain_MatProbe`) and inherit the C++ default,
+which is `Deferred` — so the split is 51 Deferred to 2 Forward, not 50 to 3. A `.desce` carries only
+the fields that differ from the defaults, so counting a render path by grepping the scene files alone
+undercounts it every time. So a cloud term added to this bake today would be
 invisible in every scene the feature exists for. That is a dead setting under DEV_CONTRACT §1.3, and it
 is why this item did not ship as written.
 

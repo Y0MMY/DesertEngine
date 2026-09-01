@@ -384,6 +384,14 @@ namespace Desert::Graphic::System
         // ---------------------------------------------------------------------------------------------
         // START ONE IF WHAT IS ON THE DEVICE IS NOT WHAT IS WANTED
         // ---------------------------------------------------------------------------------------------
+        // A REFUSAL APPLIES TO THE PARAMETERS THAT EARNED IT, AND IS LIFTED THE MOMENT THEY MOVE. See the
+        // member's declaration for what the permanent version of this flag cost: an artist cannot reach a
+        // positive thickness without passing through zero, and zero is rejected, so the latch fired during
+        // ordinary editing and disabled every cloud knob for the rest of the session.
+        if ( m_ModellingFailed && ( m_FailedOriginKm != wantedOrigin ||
+                                    !Assets::CloudProceduralParamsEqual( m_FailedParams, wanted ) ) )
+            m_ModellingFailed = false;
+
         if ( !m_ModellingBake.valid() && !m_ModellingFailed )
         {
             const bool sameSet =
@@ -402,6 +410,8 @@ namespace Desert::Graphic::System
                 if ( auto valid = Assets::ValidateCloudProceduralParams( wanted ); !valid )
                 {
                     m_ModellingFailed = true;
+                    m_FailedParams    = wanted;
+                    m_FailedOriginKm  = wantedOrigin;
                     LOG_ERROR( "[Clouds] The cloud layer cannot be turned into a modelling volume: {}",
                                valid.GetError() );
                     return m_ModellingValid;
@@ -446,7 +456,11 @@ namespace Desert::Graphic::System
 
             if ( !baked )
             {
+                // The parameters blamed here are the ones the FINISHED bake was started for, which is what
+                // m_Pending* hold — `wanted` may already have moved on while the worker ran.
                 m_ModellingFailed = true;
+                m_FailedParams    = m_PendingParams;
+                m_FailedOriginKm  = m_PendingOriginKm;
                 LOG_ERROR( "[Clouds] The procedural modelling volume could not be baked: {}", baked.GetError() );
                 return m_ModellingValid;
             }
@@ -472,7 +486,11 @@ namespace Desert::Graphic::System
             m_ModellingVolume = Image3D::Create( spec );
             if ( !m_ModellingVolume )
             {
+                // A device allocation failure is about the SIZE, which is fixed, so blaming the pending
+                // parameters keeps the retry honest: moving a knob is a fresh attempt, not a loop.
                 m_ModellingFailed = true;
+                m_FailedParams    = m_PendingParams;
+                m_FailedOriginKm  = m_PendingOriginKm;
                 LOG_ERROR( "[Clouds] The {}x{}x{} RGBA8 procedural modelling volume could not be created on "
                            "the device; the clouds will not render for this view.",
                            Assets::kCloudProceduralVolumeWidth, Assets::kCloudProceduralVolumeHeight,

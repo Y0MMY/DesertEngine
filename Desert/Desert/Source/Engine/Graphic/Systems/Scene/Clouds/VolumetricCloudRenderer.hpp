@@ -405,7 +405,19 @@ namespace Desert::Graphic::System
 
         // Latched so a bake that cannot be started, or an image that cannot be created, is said once per
         // scene rather than sixty times a second.
-        bool m_ModellingFailed = false;
+        //
+        // THE LATCH IS TIED TO THE PARAMETERS THAT TRIPPED IT, and that is not a refinement — without it
+        // the flag never cleared and the whole modelling block below it was skipped for the rest of the
+        // session. An artist dragging Layer Thickness, Blend Radius, Profile Depth or Region Size passes
+        // through zero on the way to the value they want, and every one of those is rejected by
+        // ValidateCloudProceduralParams; Placement Density does the same when dragged past 8. So ONE frame
+        // in the middle of an ordinary gesture killed every cloud parameter until the editor was
+        // restarted, with nothing on screen to say so — the owner reported it as "I turn the knobs in
+        // Details and there is no effect". Remembering WHICH parameters failed keeps the "said once"
+        // property for a value that stays broken, while a knob moved to anything else retries.
+        bool                               m_ModellingFailed = false;
+        Assets::CloudProceduralFieldParams m_FailedParams{};
+        glm::vec2                          m_FailedOriginKm{ 0.0f };
         // WHAT THE VOLUME WAS BUILT FROM ON THE ASSET SIDE, and it takes two values rather than one. The
         // handle answers "is this still the type the artist chose"; the generation answers "is the FILE
         // behind that type still the one I read", which is what makes an edit in the Cloud Type panel show

@@ -36,9 +36,21 @@ namespace Desert::Core
         Anisotropic = 3,
     };
 
-    // Rendering path. Forward = the classic one-pass lit shading (default, always works). Deferred = a
-    // G-buffer pass + a screen-space lighting pass, which scales to many dynamic lights (city lamps/windows)
-    // and unlocks screen-space GI/AO. Built incrementally behind this toggle so Forward stays the safe path.
+    // Rendering path. Forward = the classic one-pass lit shading. Deferred = a G-buffer pass + a
+    // screen-space lighting pass, which scales to many dynamic lights (city lamps/windows) and unlocks
+    // screen-space GI/AO.
+    //
+    // DEFERRED IS THE DEFAULT AND WHAT ESSENTIALLY EVERYTHING RUNS. Counted 2026-09-01 over
+    // Editor/Resources/Assets/Scenes: 48 scenes write RenderingPath 1, three write nothing and inherit
+    // the default (also Deferred), and exactly two — MAT_ProbeShadows and MAT_ProbeUnlitShadows — are
+    // Forward. So 51 of 53. This comment used to describe Forward as "the default" and "the safe path",
+    // which had not been true for a long time and made the two paths look interchangeable.
+    //
+    // They are not interchangeable, and the difference is not only performance: the deferred composite's
+    // ambient term is a flat constant plus SSGI (DeferredLighting.shader:396) and reads NEITHER
+    // environment cube. Baked sky IBL therefore reaches skinned meshes, custom-shader meshes and glass —
+    // all of which the deferred path still draws forward — but not ordinary static opaque geometry.
+    // Docs/Sky/HANDOVER.md item 2 has the measurement and the reason it blocks a feature.
     enum class RenderPath : int
     {
         Forward  = 0,
@@ -143,7 +155,7 @@ namespace Desert::Core
         // See Editor::EditorPreferences (OutlineColor/Width/Smoothness/EnableOutline), pushed to the
         // renderer each frame via SceneRenderer::SetOutlineSettings.
 
-        // Rendering path (Forward default; Deferred is built incrementally behind this toggle).
+        // Rendering path. Default is Deferred — see the enum's own comment for what that costs.
         PROPERTY( DisplayName( "Render Path" ), Category( "Rendering" ) )
         RenderPath RenderingPath = RenderPath::Deferred;
 

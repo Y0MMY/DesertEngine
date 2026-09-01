@@ -375,6 +375,11 @@ namespace Desert::Editor
         const auto& label = field.DisplayName();
         bool        changed = false;
 
+        // Kept OUT of `changed` on purpose — see the reset button below. The widget switch assigns to
+        // `changed` unconditionally, so anything set before it cannot survive; this is OR-ed back in at
+        // the single return.
+        bool resetToDefault = false;
+
         // The default value of THIS field, if the owning type provided a default instance.
         const void* defFieldPtr =
              defaultObject ? static_cast<const std::byte*>( defaultObject ) + field.Offset : nullptr;
@@ -494,7 +499,16 @@ namespace Desert::Editor
             if ( ImGui::SmallButton( ICON_MDI_BACKUP_RESTORE ) )
             {
                 std::memcpy( p, defFieldPtr, field.Size );
-                changed = true;
+                // NOT `changed = true`, and this is the whole defect this variable used to carry: the
+                // widget switch below runs on the SAME frame and every scalar case ASSIGNS
+                // (`changed = ImGui::SliderFloat(...)`), which returns false because the click landed on
+                // this button and not on the widget. The reset's flag was overwritten before the function
+                // could return it — for Bool, Int, UInt, Float, Double, Vec3 and Vec4, i.e. for every type
+                // this button is allowed to appear on. The memcpy still ran, so the number snapped back on
+                // screen and the button LOOKED alive, while the caller was told nothing changed: no undo
+                // entry, no multi-select broadcast, no apply. Reported by the owner as "нажимаю вернуть к
+                // исходному — ничего не происходит", which is exactly right.
+                resetToDefault = true;
             }
             ImGui::PopStyleColor( 2 );
             if ( ImGui::IsItemHovered() )
@@ -1280,7 +1294,7 @@ namespace Desert::Editor
 
         ImGui::PopID();
 
-        return changed && !field.Meta.ReadOnly;
+        return ( changed || resetToDefault ) && !field.Meta.ReadOnly;
     }
 
     bool PropertyEditorBuilder::Draw( void* object, const TypeInfo& type, const Assets::AssetManager* assetMgr,

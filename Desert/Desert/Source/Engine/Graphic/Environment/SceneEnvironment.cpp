@@ -59,7 +59,13 @@ namespace Desert::Graphic
         ComputeImagesSpecification processingInfo;
         processingInfo.InputHandle = panorama;
         processingInfo.ShaderName  = "PanoramaToCubemap";
-        processingInfo.Tag   = "TODO"; // texturePanorama->GetImage()->GetImageSpecification().Tag + "_" + "Cross";
+        // The tag becomes the image's own name AND the compute pipeline's Vulkan debug label
+        // (ComputeImages.cpp:103 and :116). It is NOT a cache key — PipelineCache deliberately does not
+        // hash DebugName — so a shared name collides with nothing, which is exactly why the literal
+        // "TODO" that used to sit here survived: it broke only the GPU capture, and only at the moment
+        // someone was reading one. Two different compute dispatches both labelled "TODO" is the least
+        // useful thing a capture of this 727 ms bake chain can say.
+        processingInfo.Tag       = "EnvRadianceCross";
         processingInfo.Width = kEnvFaceMapSize * 4;
         processingInfo.Height    = kEnvFaceMapSize * 3;
         processingInfo.MipLevels = 1u;
@@ -73,8 +79,8 @@ namespace Desert::Graphic
         ComputeImagesSpecification processingInfo;
         processingInfo.InputHandle = panorama;
         processingInfo.ShaderName  = "DiffuseIrradiance";
-        processingInfo.Tag =
-             "TODO"; // texturePanorama->GetImage()->GetImageSpecification().Tag + "_" + "Irradiance";
+        // Names the 301.8 ms stage of the bake — see the note in ConvertPanoramaToCubemapCross.
+        processingInfo.Tag       = "EnvDiffuseIrradiance";
         processingInfo.Width     = kIrradianceMapSize * 4;
         processingInfo.Height    = kIrradianceMapSize * 3;
         processingInfo.MipLevels = 1u;
