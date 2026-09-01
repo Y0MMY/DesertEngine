@@ -67,8 +67,15 @@ namespace Desert::Physics
         PhysicsWorld( const PhysicsWorld& )            = delete;
         PhysicsWorld& operator=( const PhysicsWorld& ) = delete;
 
-        bool Init();
+        // @p gravityCmPerS2 is the DOWNWARD magnitude in centimetres per second squared (Earth = 981), and
+        // it has no default on purpose: the caller owns the value, and a default here is how the scene's
+        // own setting came to be ignored in the first place.
+        bool Init( float gravityCmPerS2 );
         void Shutdown();
+
+        // Applies a new gravity to a running world. Called when the scene's setting changes so the knob is
+        // honest while playing, instead of only at the next Play.
+        void SetGravity( float gravityCmPerS2 );
 
         // Advance the simulation by dt seconds (fixed-step accumulated internally).
         void Step( float dt );

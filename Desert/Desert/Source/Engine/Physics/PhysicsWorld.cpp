@@ -122,7 +122,7 @@ namespace Desert::Physics
     PhysicsWorld::PhysicsWorld()  = default;
     PhysicsWorld::~PhysicsWorld() { Shutdown(); }
 
-    bool PhysicsWorld::Init()
+    bool PhysicsWorld::Init( float gravityCmPerS2 )
     {
         if ( m_Impl )
             return true;
@@ -150,9 +150,21 @@ namespace Desert::Physics
         m_Impl->System.Init( kMaxBodies, kNumBodyMutexes, kMaxBodyPairs, kMaxContactConstraints,
                              m_Impl->BroadPhaseLayerInterface, m_Impl->ObjectVsBroadPhaseFilter,
                              m_Impl->ObjectLayerPairFilter );
-        m_Impl->System.SetGravity( JPH::Vec3( 0.0f, -981.0f, 0.0f ) ); // cm/s^2 — 1 world unit = 1 cm
+        SetGravity( gravityCmPerS2 );
         m_Impl->Bodies = &m_Impl->System.GetBodyInterface();
         return true;
+    }
+
+    void PhysicsWorld::SetGravity( float gravityCmPerS2 )
+    {
+        if ( !m_Impl )
+            return;
+
+        // Down is -Y, and the magnitude arrives in centimetres per second squared because one world unit is
+        // one centimetre. The value used to be the literal -981 right here, which made SceneSettings::Gravity
+        // a knob that moved nothing: it was authored, saved into 45 scenes and read by no one, while 39 of
+        // those scenes carried a metre-era 9.81 that was harmless only because of that.
+        m_Impl->System.SetGravity( JPH::Vec3( 0.0f, -gravityCmPerS2, 0.0f ) );
     }
 
     void PhysicsWorld::Shutdown()

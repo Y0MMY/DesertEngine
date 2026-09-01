@@ -62,7 +62,16 @@ namespace Desert::ECS
             if ( !m_World )
             {
                 m_World = std::make_unique<Physics::PhysicsWorld>();
-                m_World->Init();
+                m_AppliedGravity = m_Scene ? m_Scene->GetSettings().Gravity : Core::SceneSettings{}.Gravity;
+                m_World->Init( m_AppliedGravity );
+            }
+            else if ( m_Scene && m_Scene->GetSettings().Gravity != m_AppliedGravity )
+            {
+                // The setting is live: dragging it in Details changes the fall of everything already
+                // simulating, rather than waiting for the next Play. Compared rather than assigned every
+                // frame so Jolt is not told the same number sixty times a second.
+                m_AppliedGravity = m_Scene->GetSettings().Gravity;
+                m_World->SetGravity( m_AppliedGravity );
             }
 
             // Create a Jolt body for any physics entity that doesn't have one yet (uses its authored pose).
@@ -234,5 +243,7 @@ namespace Desert::ECS
     private:
         Core::Scene*                           m_Scene = nullptr;
         std::unique_ptr<Physics::PhysicsWorld> m_World;
+        // Last value handed to the world, so a change in SceneSettings can be noticed without asking Jolt.
+        float m_AppliedGravity = 0.0f;
     };
 } // namespace Desert::ECS

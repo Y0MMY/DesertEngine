@@ -1000,6 +1000,87 @@ namespace Desert::Migration
         }
     } // namespace
 
+    GravityUnitsMigrationReport MigrateGravityUnitsV8ToV9( std::optional<rfl::Generic>& settings )
+    {
+        GravityUnitsMigrationReport report;
+
+        if ( !settings.has_value() )
+            return report; // a scene with no Settings block states no gravity; nothing to restate
+
+        const auto fields = settings.value().to_object();
+        if ( !fields.has_value() )
+        {
+            LOG_WARN( "[SceneMigration] the Settings block is {0}, not an object - the scene's gravity "
+                      "could not be restated in centimetres and stays as it is",
+                      Describe( settings.value() ) );
+            return report;
+        }
+
+        // Earth, in the two spellings the repository actually contains. Compared with a tolerance because
+        // both arrived through a float round-trip: 9.81 is stored as 9.8100004196167 and the value the
+        // earlier x100 produced is 981.0000419616699.
+        constexpr double kEarthMetres      = 9.81;
+        constexpr double kEarthCentimetres = 981.0;
+        constexpr double kTolerance        = 0.01;
+
+        rfl::Generic::Object kept;
+        for ( const auto& [key, value] : fields.value() )
+        {
+            if ( key != "Gravity" )
+            {
+                kept[key] = value;
+                continue;
+            }
+
+            // AsFiniteNumber, not to_double: a hand-edited scene writes "Gravity":981, which reflect-cpp
+            // parses as int64 and to_double() then refuses - the same trap the sky migration documents.
+            const auto number = AsFiniteNumber( value );
+            if ( !number.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] Settings.Gravity is {0}, not a finite number - it is left "
+                          "exactly as it is and the scene still states no usable gravity",
+                          Describe( value ) );
+                kept[key] = value;
+                continue;
+            }
+
+            report.Found  = true;
+            report.Before = static_cast<float>( number.value() );
+
+            if ( std::abs( number.value() - kEarthMetres ) < kTolerance )
+            {
+                report.Scaled = true;
+                report.After  = static_cast<float>( kEarthCentimetres );
+                kept[key]     = kEarthCentimetres;
+            }
+            else if ( std::abs( number.value() - kEarthCentimetres ) < kTolerance )
+            {
+                // Already centimetres. Rewritten anyway when it carries the earlier pass's rounding, so the
+                // repository stops storing the arithmetic of a migration instead of a value.
+                report.Tidied = ( number.value() != kEarthCentimetres );
+                report.After  = static_cast<float>( kEarthCentimetres );
+                kept[key]     = kEarthCentimetres;
+            }
+            else
+            {
+                // Neither Earth in metres nor Earth in centimetres. A threshold cannot tell a deliberate
+                // low-gravity level from a forgotten metre-era value, so this refuses to guess and says so.
+                report.Unrecognised = true;
+                report.After        = report.Before;
+                kept[key]           = value;
+                LOG_WARN( "[SceneMigration] Settings.Gravity is {0}, which is neither Earth in metres "
+                          "({1}) nor Earth in centimetres ({2}) - it is LEFT UNCHANGED because guessing "
+                          "which was meant would silently rescale a deliberately authored value. If this "
+                          "scene predates centimetres, its gravity is a hundred times too weak and wants "
+                          "editing by hand",
+                          number.value(), kEarthMetres, kEarthCentimetres );
+            }
+        }
+
+        settings = rfl::Generic( kept );
+        return report;
+    }
+
     MaterialPathMigrationReport MigrateMaterialPathV7ToV8( std::vector<Assets::EntityData>& entities,
                                                            const std::filesystem::path&     assetsRoot )
     {
@@ -1195,6 +1276,15 @@ namespace Desert::Migration
         {
             report.MaterialPathRaised = true;
             report.MaterialPath       = MigrateMaterialPathV7ToV8( scene.Entities, assetsRoot );
+        }
+
+        // Independent of every step above: it touches the scene-wide Settings block and no entity payload,
+        // and no earlier step reads or writes Gravity. Order is irrelevant here; it sits last because it is
+        // newest.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionGravityUnits )
+        {
+            report.GravityUnitsRaised = true;
+            report.GravityUnits       = MigrateGravityUnitsV8ToV9( scene.Settings );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

@@ -179,6 +179,28 @@ int main( int argc, char** argv )
                 std::cout << "; OUTSIDE the assets root, left absolute: " << name;
             std::cout << ")";
         }
+        if ( report.GravityUnitsRaised )
+        {
+            std::cout << " scene v" << Desert::Migration::kSceneVersionMaterialPath << "->v"
+                      << Desert::Migration::kSceneVersionGravityUnits << " (";
+            if ( !report.GravityUnits.Found )
+                std::cout << "stamp only - the scene states no gravity";
+            else if ( report.GravityUnits.Scaled )
+                std::cout << "gravity " << report.GravityUnits.Before << " -> " << report.GravityUnits.After
+                          << " cm/s2 (metre-era value, x100)";
+            else if ( report.GravityUnits.Unrecognised )
+                // Named rather than counted, for the same reason the two steps above name what they could
+                // not fix: this is the one case the operator has to look at by hand.
+                std::cout << "gravity " << report.GravityUnits.Before
+                          << " LEFT UNCHANGED - neither Earth in metres nor in centimetres, so it was not "
+                             "guessed at";
+            else if ( report.GravityUnits.Tidied )
+                std::cout << "gravity " << report.GravityUnits.Before << " -> " << report.GravityUnits.After
+                          << " cm/s2 (already centimetres; dropped the earlier pass's rounding)";
+            else
+                std::cout << "gravity already " << report.GravityUnits.After << " cm/s2, unchanged";
+            std::cout << ")";
+        }
         if ( report.UnitsRaised )
             std::cout << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
                       << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected

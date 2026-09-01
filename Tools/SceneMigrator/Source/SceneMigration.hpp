@@ -66,6 +66,11 @@ namespace Desert::Migration
     //   8             - a material is named by a path RELATIVE to the assets root, like the three cloud
     //                   asset classes already were. The absolute paths the saver used to write carried one
     //                   developer's home directory into every scene in the repository
+    //   9             - the scene's gravity is stated in CENTIMETRES per second squared, like every other
+    //                   length in the file. 39 scenes carried the metre-era 9.81 under a centimetre stamp,
+    //                   a hundred times too weak, and were only harmless because nothing read the field:
+    //                   the physics world set its gravity from a literal instead. That literal is gone in
+    //                   the same change, so the value now has to be right
     inline constexpr int kSceneVersionSky             = 1;
     inline constexpr int kSceneVersionTonemap         = 2;
     inline constexpr int kSceneVersionCloudNoise      = 3;
@@ -74,12 +79,13 @@ namespace Desert::Migration
     inline constexpr int kSceneVersionCloudSet        = 6;
     inline constexpr int kSceneVersionTerrainMaterial = 7;
     inline constexpr int kSceneVersionMaterialPath    = 8;
+    inline constexpr int kSceneVersionGravityUnits    = 9;
 
     // The last step this tool knows and the generation the engine requires are ONE number, and this is
     // where that is checked. If a schema step is ever added here without raising Core::kSceneVersion, the
     // tool would stamp files at a version the loader refuses - every scene in the repository would stop
     // opening at once, and the file that caused it would look correct in isolation.
-    static_assert( kSceneVersionMaterialPath == kSceneVersion,
+    static_assert( kSceneVersionGravityUnits == kSceneVersion,
                    "the last migration step and the engine's required scene version must be the same "
                    "generation - raise Core::kSceneVersion in Engine/Core/Serialize/SceneFormat.hpp" );
 
@@ -430,6 +436,44 @@ namespace Desert::Migration
     MaterialPathMigrationReport MigrateMaterialPathV7ToV8( std::vector<Assets::EntityData>& entities,
                                                            const std::filesystem::path&     assetsRoot );
 
+    // What MigrateGravityUnitsV8ToV9 did to one file.
+    struct GravityUnitsMigrationReport
+    {
+        bool  Found  = false; // the Settings block named a Gravity at all
+        bool  Scaled = false; // it was the metre-era value and was multiplied by 100
+        bool  Tidied = false; // it was already centimetres, but carried the float noise of an earlier x100
+        float Before = 0.0F;
+        float After  = 0.0F;
+
+        // Set when the value is neither recognisably metre-era nor recognisably centimetre-era. It is left
+        // EXACTLY as it is and named, because guessing which one it meant is the silent substitution §1.4
+        // forbids: a deliberately weak gravity and a forgotten metre-era one look identical to a threshold.
+        bool Unrecognised = false;
+    };
+
+    // Restates the scene's gravity in centimetres per second squared.
+    //
+    // WHY THIS IS NOT A UNITVERSION STEP even though it is a units fix. UnitVersion is already at its
+    // current generation on every one of these files - the metres-to-centimetres pass ran and stamped them
+    // - and this key was simply not in its list. Reusing UnitVersion would mean claiming the world unit
+    // changed again, which would send every length in every scene through a second x100 (see the header's
+    // note on why the sky and unit steps were deliberately given separate integers).
+    //
+    // WHY IT MATCHES VALUES INSTEAD OF SCALING EVERYTHING. Both populations are in the tree at once: 39
+    // files at the metre-era 9.81 and 6 already at ~981. A blanket x100 would put the correct ones at
+    // 98100. So the two Earth values are recognised exactly (within 0.01) and everything else is refused
+    // and reported rather than guessed at - a scene authored at 50 cm/s^2 for a low-gravity level must not
+    // be "corrected" to 5000.
+    //
+    // Also normalises 981.0000419616699 - which is precisely 9.8100004196167 x 100, the arithmetic
+    // signature of the earlier pass - back to a clean 981, so the repository stops carrying the rounding
+    // of a migration in its data.
+    //
+    // PURE - no GPU, no filesystem, no global state.
+    //
+    // SHELF LIFE: this raises v8 to v9 and nothing else. It is deleted once no v8 file remains.
+    GravityUnitsMigrationReport MigrateGravityUnitsV8ToV9( std::optional<rfl::Generic>& settings );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -452,11 +496,15 @@ namespace Desert::Migration
         TerrainMaterialMigrationReport TerrainMaterial;
         bool                        MaterialPathRaised = false; // the schema was below kSceneVersionMaterialPath
         MaterialPathMigrationReport MaterialPath;
+        // the schema was below kSceneVersionGravityUnits
+        bool                        GravityUnitsRaised = false;
+        GravityUnitsMigrationReport GravityUnits;
 
         bool Changed() const
         {
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
-                   CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised;
+                   CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised ||
+                   GravityUnitsRaised;
         }
     };
 

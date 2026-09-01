@@ -430,9 +430,13 @@ TEST( SceneMaterialPathMigration, MigrateSceneRunsTheStepForAV7FileAndStampsItAt
 TEST( SceneMaterialPathMigration, AFileAlreadyAtTheHeadIsNotMigratedAgain )
 {
     SceneSerialized scene;
-    scene.SceneName    = "V8";
-    scene.UnitVersion  = Desert::Migration::kUnitVersion;
-    scene.SceneVersion = kSceneVersionMaterialPath;
+    scene.SceneName   = "AtTheHead";
+    scene.UnitVersion = Desert::Migration::kUnitVersion;
+    // kSceneVersion, NOT kSceneVersionMaterialPath. This test stamped step 8's own integer while step 8
+    // happened to be the newest, so the two were the same number and the difference was invisible. Adding
+    // step 9 made a file stamped 8 exactly what this test says it is not - one with a migration still owed -
+    // and `Changed()` went true. What the test means is "at the HEAD", so it has to say the head.
+    scene.SceneVersion = kSceneVersion;
     scene.Entities.push_back( MeshEntity( "A", "StaticMesh", Paths( { "Materials/M.demat" } ) ) );
 
     const auto report = MigrateScene( scene, kAssetsRoot );
@@ -447,7 +451,12 @@ TEST( SceneMaterialPathMigration, AFileAlreadyAtTheHeadIsNotMigratedAgain )
 TEST( SceneMaterialPathMigration, TheStepHasItsOwnVersionIntegerAboveTheOneBeforeIt )
 {
     EXPECT_GT( kSceneVersionMaterialPath, kSceneVersionTerrainMaterial );
-    EXPECT_EQ( kSceneVersion, kSceneVersionMaterialPath );
+
+    // It used to also assert `kSceneVersion == kSceneVersionMaterialPath`. That was true only while this
+    // was the NEWEST step, which is not a property of the step - it expired the moment step 9 landed. Being
+    // at or below the head is the durable statement; the newest step asserts equality in its own suite, and
+    // SceneMigration.hpp's static_assert is what actually pins the pair.
+    EXPECT_LE( kSceneVersionMaterialPath, kSceneVersion );
 }
 
 // ── The repository, swept ──────────────────────────────────────────────────────────────────────────
