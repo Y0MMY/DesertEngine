@@ -103,6 +103,34 @@ the horizon the quotient of two half-precision transmittances is an infinity.
 
 Component flag, default off as UE ships it, bit-for-bit no-op when off.
 
+**Reconnaissance done 2026-09-01 by the teamlead; nothing implemented, tree left clean.** Four facts
+that were not in this section, each verified against today's `dev` rather than reasoned about:
+
+- **The two branch files really do merge, and they build.** Publishing `Image2D* TransmittanceLut` on
+  `AtmosphereEnv` and `m_Atmosphere.TransmittanceLut = m_LutsValid ? m_TransmittanceLut.get() : nullptr`
+  in `SkyboxRenderer.cpp` (anchor: the line ending `kMultiScatterLutSize );`) were applied, compiled
+  warning-free, and then REVERTED — a published handle with no consumer is a dead field (DC §1.3), so
+  they belong in the change that reads them and nowhere else.
+- **The outer-space illuminance has to be published too, and NOT recovered by division.**
+  `AtmosphereEnv` carries `SunIlluminanceOnGround` and `SunTransmittanceAtGround` but not their
+  quotient's numerator; it lives in `SunLightFx::OuterSpaceIlluminance` and is used at
+  `SkyboxRenderer.cpp:558`. Dividing the two published values back out is what to avoid: at a low sun
+  the transmittance reaches zero channel by channel, so the reconstruction is an infinity in whichever
+  channel went first — the same hazard the branch's ratio had, arriving through a different door.
+- **Descriptor 14 is free** (0-13 are taken; `kCloudSkyOcclusionBinding` is 13, the noise slots are
+  3/10/11/12). And the sampler must be bound ALWAYS, gate or no gate, with the fallback-texture pattern
+  `kCloudDistantSkyLightBinding` uses: an unfilled descriptor makes the set invalid, and this backend
+  answers an invalid set by skipping the whole dispatch — every cloud disappears with nothing logged.
+- **`CloudGpuPayload` has no spare slot.** It is packed tight behind a chain of `offsetof` static_asserts,
+  and `Aerial` is a `vec3` and deliberately last (that is what keeps the block at 268 bytes instead of
+  272). A new `vec4` shifts every offset behind it and the GLSL block has to match exactly.
+
+**And the expectation, written before the work rather than after it.** Р13 (D-31) closed the whole
+"change the composition of the noise" avenue with eight measured refusals and named the binding
+constraint as a number: a 657 m line integral against a 160 m correlation length. **Item 1 does not move
+that number** — it is light along the ray to the sun, not shape. Р9 priced the lighting branch at 16x
+extinction for the same 2.8x. A ninth measured refusal is a likely and acceptable outcome here.
+
 ### Item 2 — clouds in the IBL bake: **STILL OPEN, and never started anywhere**
 
 Not in the branch, not on `dev`. `ComputeImages::BakeProceduralPanorama` (`ComputeImages.cpp:37`) binds
