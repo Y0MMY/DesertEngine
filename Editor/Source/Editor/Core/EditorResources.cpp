@@ -2,6 +2,25 @@
 
 namespace Desert::Editor
 {
+    // The editor's text glyph ranges: ImGui's GetGlyphRangesCyrillic() with General Punctuation added.
+    //
+    // WHY IT IS SPELLED OUT rather than merged at runtime: ImFontAtlas does NOT copy the range array, it
+    // stores the pointer and reads it at Build(). A locally-built range therefore produces an atlas full of
+    // garbage, which is the classic way to get this wrong. A file-scope `static const` cannot dangle.
+    //
+    // WHY GENERAL PUNCTUATION IS HERE: without it the editor cannot draw an em dash, an ellipsis or a
+    // typographic quote — they sit above U+00FF, where the Latin block ends, and render as the missing-glyph
+    // box. That produced an unwritten "never type a dash" rule, enforced by nothing and recorded only in a
+    // comment inside one unrelated panel, which the next person would have learned about from a user.
+    static const ImWchar s_TextRanges[] = {
+         0x0020, 0x00FF, // Basic Latin + Latin Supplement
+         0x0400, 0x052F, // Cyrillic + Cyrillic Supplement
+         0x2000, 0x206F, // General Punctuation: em/en dash, ellipsis, typographic quotes
+         0x2DE0, 0x2DFF, // Cyrillic Extended-A
+         0xA640, 0xA69F, // Cyrillic Extended-B
+         0,
+    };
+
     bool    EditorResources::s_Initialized = false;
     ImFont* EditorResources::s_IconFont    = nullptr;
     ImFont* EditorResources::s_RegularFont = nullptr;
@@ -25,16 +44,16 @@ namespace Desert::Editor
         textConfig.PixelSnapH        = true;
         textConfig.RasterizerMultiply = 1.10f;
 
-        const ImWchar* cyrillic = io.Fonts->GetGlyphRangesCyrillic();
+        const ImWchar* textRanges = s_TextRanges;
 
-        s_BoldFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Bold.ttf", 16.0F, &textConfig,
-                                                   cyrillic );
+        s_BoldFont =
+             io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Bold.ttf", 16.0F, &textConfig, textRanges );
 
-        s_ExtraBoldFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Bold.ttf", 22.0F, &textConfig,
-                                                        cyrillic );
+        s_ExtraBoldFont =
+             io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Bold.ttf", 22.0F, &textConfig, textRanges );
 
-        s_RegularFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Regular.ttf", 18.0F, &textConfig,
-                                                      cyrillic );
+        s_RegularFont =
+             io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Regular.ttf", 18.0F, &textConfig, textRanges );
 
         if ( !s_RegularFont)
         {

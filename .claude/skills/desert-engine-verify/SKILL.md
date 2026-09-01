@@ -35,12 +35,17 @@ export VK_LAYER_PATH="$B/share/vulkan/explicit_layer.d"
 export DYLD_FALLBACK_LIBRARY_PATH="$B/lib"
 
 cd Editor && ../build/Bin/Debug/Editor --project Desert.deproj \
-    --scene Resources/Assets/Scenes/Clouds/Clouds_PartlyCloudy.desce \
+    --scene Resources/Assets/Scenes/Clouds_Protocol.desce \
     --shot /tmp/out.png --shot-frames 90 \
     --camera 0,200,0 --look 0,0.9,-1
 ```
 
 - `--camera x,y,z` world units (1 unit = 1 cm), `--look x,y,z` a direction, need not be normalized.
+- **The scenes are FLAT under `Resources/Assets/Scenes/`** — there is no `Clouds/` subdirectory, and the
+  only subdirectory is `Autosave/`. This example cited `Scenes/Clouds/Clouds_PartlyCloudy.desce` for a
+  long time and no such file has ever existed; anyone copying it got Р5's refusal (`--scene ... does not
+  exist; refusing to capture a different scene under that name`) and had to go looking. `find
+  Resources/Assets/Scenes -name '*.desce'` is the reliable way to pick one.
 - **`--shot-frames` matters.** Volumetric clouds accumulate over ~10 frames, so a shot taken on
   frame 1 is a picture of the dither. 90 is a safe default.
 - It segfaults during teardown afterwards — a known shutdown bug. The PNG is already written.

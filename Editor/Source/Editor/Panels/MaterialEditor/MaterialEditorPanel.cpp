@@ -78,11 +78,6 @@ namespace Desert::Editor
         // What a shader of this domain draws INSTEAD, as a clause following the shader's own name. The half
         // of "no preview here" that is actually useful: being told a pane cannot show something is only
         // half an answer while nobody says where to look for it.
-        //
-        // ASCII ONLY, here and in every other string this file puts on screen. The editor's fonts are built
-        // with GetGlyphRangesCyrillic() (EditorResources.cpp), whose Latin block stops at U+00FF: an em dash
-        // or an ellipsis character is outside it and draws as a missing glyph. A message explaining a blank
-        // pane cannot afford to be the thing that renders wrong.
         const char* WhatTheDomainDrawsInstead( ::Desert::Core::Formats::ShaderDomain domain )
         {
             using D = ::Desert::Core::Formats::ShaderDomain;
