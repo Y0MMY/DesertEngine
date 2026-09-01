@@ -369,3 +369,11 @@ a changed asset header, an unrelated translation unit — before rebuilding the 
 it: the BASELINE was wrong, because it was the first ever run of the editor in that worktree. Discard
 it and shoot again. The same signature had been attributed to shader recompilation by an earlier
 task, and that attribution was wrong.
+
+**And never trust the first render after a SHADER edit either — for a different reason.** §5a recommends
+swapping a `.shader` over rebuilding, because the shaders are cooked at runtime. The cook cache is
+content-addressed, so an edited shader misses it and is compiled during that load. Measured 2026-09-01:
+one run immediately after editing a compute shader differed from its baseline on **100 % of pixels** and
+never reproduced — five later runs of the same shader were byte-identical to the baseline. Discard the
+first run after any shader edit, exactly as for a fresh worktree, and take the second. A knockout that
+rests on one post-edit frame is not a knockout.
