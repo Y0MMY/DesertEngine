@@ -110,7 +110,10 @@ Reading the sheet:
   refuses to assemble rather than producing a sheet with a hole in it.
 - **It is 1/4 resolution.** It says WHERE to look; the full-size tile (`--keep-tiles`) is what you
   then look at, and pixel diffs are still taken on full frames.
-- **Commit the SHEET, not the tiles.** `Docs/Clouds/Shots` is already 508 MB of a 5.6 GB repository.
+- **Commit the SHEET, not the tiles.** `Docs/Clouds/Shots` is 563 MB against a 958 MB packed history —
+  the frames are three fifths of everything this repository has ever stored. (An earlier note here said
+  "508 MB of 5.6 GB"; the 5.6 came from measuring `.git` while a dozen agent worktrees each held a full
+  370 MB copy of the submodules, which is transient and not history at all.)
   Forty 1.2 MB frames per sweep is not a thing to keep; the tiles are deleted unless asked for, and
   the two or three that carry the argument are what get committed beside the sheet.
 
@@ -179,12 +182,23 @@ projects are only generated then:
 
 ```bash
 CI=true premake5 gmake
+# The tool half of the skip list is DERIVED, not typed. Hand-maintaining it drifted twice in opposite
+# directions: once it named three real suites as libraries and skipped 35 tests for a whole programme
+# (§7), once it fell four tools behind and every sweep built them to report NO-BINARY. `ls Tools`
+# cannot drift, because adding a tool is what creates the directory.
+TOOLS="|$(ls Tools | tr '\n' '|')"
 for f in *.make; do t="${f%.make}"
-  case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|Dlib|ReflectCpp|DesertHeaderTool|FbxMeshSplitter|ProjectHub|DShaderTool|PakTool|CloudVolumeBaker|ImageStat|LineJump|SceneMigrator|BuildAllTests|RunAllTests) continue;; esac
+  case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|Dlib|ReflectCpp|BuildAllTests|RunAllTests) continue;; esac
+  case "$TOOLS" in *"|$t|"*) continue;; esac
   make -f "$f" config=debug -j8 >/dev/null 2>&1
   [ -x "build/Bin/Tests/Debug/$t" ] && ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"
 done
 ```
+
+**A Release sweep needs the libraries built first.** `Common`, `Optick`, `ReflectCpp` and
+`MeshOptimizer` are skipped by the loop above but linked by the suites, and in a fresh tree Release has
+none of them — so all 88 report `BUILD-FAIL` for a reason that has nothing to do with the change under
+test. Build those four at `config=release` before the loop, or read the failure as your own.
 
 Three suites fire from changes nowhere near their name. Expect them and fix them with the truth,
 not by adjusting the number until it passes:
