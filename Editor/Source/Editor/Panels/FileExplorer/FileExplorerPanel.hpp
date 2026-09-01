@@ -1,10 +1,13 @@
 #pragma once
 
 #include "../IPanel.hpp"
+#include <Common/Core/ResultStr.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <ImGui/imgui.h>
+#include <atomic>
 #include <stack>
 #include <functional>
+#include <future>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -128,6 +131,24 @@ namespace Desert::Editor
         // Phase-4 engine integration: instantiate a prefab into the open scene; create a new material asset.
         void AddPrefabToScene( const std::string& prefabPath );
         void CreateNewMaterial();
+
+        /// Which of the four cloud formats a "New Cloud Asset" item creates.
+        ///
+        /// AN ENUM AND NOT FOUR METHODS, because everything around the creation — the unique name, the
+        /// directory, the refusal, the refresh, the document that opens afterwards — is identical for all
+        /// four and only the payload differs. Four methods would be four copies of that surround, which is
+        /// how three of them come to lack the error path.
+        enum class CloudAssetKind
+        {
+            Type,            ///< `.decloudtype` — numbers only; written in the handler
+            Layout,          ///< `.dclayout` — a blank painting; written in the handler
+            NoiseVolume,     ///< `.dcnv` — 8 MiB of voxels, GENERATED on a worker (8.7 s in Debug)
+            ModellingVolume, ///< `.dcmv` — 4 MiB of voxels, BAKED on a worker (1.6 s in Debug)
+        };
+
+        // Creates one cloud asset in the current directory under a unique name and opens its document.
+        // The two volume formats are generated on a worker; see m_CloudBake.
+        void CreateNewCloudAsset( CloudAssetKind kind );
         // UE-style "Capture Thumbnail": grab the current main-viewport rendered image, center-crop to a
         // square, downscale, and save it AS this asset's thumbnail (same DiskPath key the grid reads). Lets
         // the user frame the asset in the scene and use that exact view as the preview.
@@ -160,6 +181,18 @@ namespace Desert::Editor
     private:
         void CreateThumbnailPath( DirectoryInformation* directoryInfo, std::string& assetPath,
                                   std::string& AbsolutePath );
+
+        // Collects a finished cloud-volume generation, exactly once. Called from OnPreUpdate rather than
+        // from the render so that a collapsed or hidden Assets window still finishes what it started.
+        void PollCloudAssetBake();
+
+        // Reports the outcome of a creation and, on success, opens the new file's document. One place, so
+        // the cheap formats and the generated ones cannot come to report differently.
+        void FinishCloudAsset( const Common::BoolResultStr& written );
+
+        // The visible sign that a file is still being made. Without it the two volume formats look like a
+        // menu item that did nothing for several seconds.
+        void DrawCloudAssetBakeStatus();
 
     private:
         std::filesystem::path m_CurrentPath;
@@ -278,6 +311,27 @@ namespace Desert::Editor
         // Text-excerpt cache for the preview pane (loaded once per selection change, capped size).
         std::string m_PreviewTextPath;
         std::string m_PreviewText;
+
+        // ── Creating a cloud volume: the one generation this panel may have in flight ──────────────────
+        //
+        // A FUTURE RATHER THAN A RAW THREAD, and one rather than many. The future is what makes the result
+        // collected exactly once and the destructor able to guarantee that nothing is still writing into
+        // these members; the ONE is what makes that guarantee cheap — a second click would otherwise
+        // overwrite the future, detach a running thread, and leave it storing into a progress counter a
+        // different bake is already reading. The four menu items are disabled while this is true.
+        std::future<Common::BoolResultStr> m_CloudBake;
+        bool                               m_CloudBakeRunning = false;
+
+        /// 0..1, written by the worker and read by the frame — hence atomic.
+        std::atomic<float> m_CloudBakeProgress{ 0.0f };
+
+        /// Asks a running `.dcmv` bake to stop. It is what makes the destructor bounded rather than a wait
+        /// on a whole bake; `GenerateCloudNoiseVolume` has no such hook, so a `.dcnv` in flight is waited
+        /// out in full — see the destructor.
+        std::atomic<bool> m_CloudBakeCancelled{ false };
+
+        std::string m_CloudBakePath;  ///< where the running creation will write
+        std::string m_CloudBakeLabel; ///< its file name, for the status line
     };
 
 } // namespace Desert::Editor
