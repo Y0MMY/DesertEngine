@@ -131,21 +131,88 @@ constraint as a number: a 657 m line integral against a 160 m correlation length
 that number** — it is light along the ray to the sun, not shape. Р9 priced the lighting branch at 16x
 extinction for the same 2.8x. A ninth measured refusal is a likely and acceptable outcome here.
 
-### Item 2 — clouds in the IBL bake: **STILL OPEN, and never started anywhere**
+### Item 2 — clouds in the IBL bake: **BLOCKED ON ITS CONSUMER, and the cost was never the problem**
 
 Not in the branch, not on `dev`. `ComputeImages::BakeProceduralPanorama` (`ComputeImages.cpp:37`) binds
 the sky parameter block and the two atmosphere LUTs and nothing else, and
 `Programs/Compute/BakeProceduralSky.shader` includes only `Atmosphere.glslh`, `SkyMedium.glslh` and
-`SkyScattering.glslh` — there is no cloud term to switch on. That panorama is the sole source of the
-scene's diffuse irradiance and prefiltered specular (`SceneEnvironment.cpp:85-118`), so the recorded
-symptom stands unchanged: **ground ambient carries a clear sky under a solid overcast.**
+`SkyScattering.glslh` — there is no cloud term to switch on. All of that is still true.
 
-**One premise of the old plan is now false.** This section said the bake "must NOT spin up a second
-live SceneRenderer (see the one-SceneRenderer-per-frame rule)". That rule was repealed: renderers lease
-a slot from `Engine/Core/RendererSlotPool.hpp` and several live views are legal
-(`SceneRenderer.hpp:77-83`). The recorded decision — a dedicated low-budget bake path on the bake's own
-cadence — may still be the right one on cost, but it no longer rests on a prohibition. Re-argue it
-rather than cite a rule that no longer exists.
+**What was NOT true is the sentence that made it worth fixing.** This section said the panorama "is the
+sole source of the scene's diffuse irradiance and prefiltered specular", and concluded that the ground
+ambient therefore carries a clear sky under an overcast. Measured 2026-09-01 (Р15), by zeroing the baked
+panorama in the bake shader and rendering the same scene again:
+
+| scene | render path | pixels changed by `panorama x 0` |
+|---|---|---|
+| `Clouds_ShadowsOnGround` | Deferred | **0 of 980 480**, three independent runs, byte-identical |
+| `SIL_Stratus` | Deferred | **0 of 980 480** |
+| `Sky_PhysicalShowcase` | Deferred | **0 of 980 480** |
+| `MAT_ProbeShadows` | Forward | 370 579 of 980 480 (37.80 %), max 56/255, bias -7.39 |
+
+The repeat-shot noise floor of every one of those scenes is 0 pixels, so the zeroes are real. The cause
+is `Programs/Deferred/DeferredLighting.shader:396` — `vec3 ambient = albedo * ao * (vec3(0.08) +
+indirect)`. **The deferred path reads neither cube.** `StaticMeshGBuffer.shader:117-119` declares them
+and multiplies them by `1e-20` at `:154-159` purely to keep the reflected descriptor layout identical to
+the forward shader. The cubes reach only the forward PBR materials (`MaterialPBRBase.cpp:118-131`) and
+`StaticMeshGlass.shader:162`, which is drawn in the Transparency stage in both paths.
+
+**And every scene in the repository that has a `VolumetricCloud` component is Deferred** — all 36 of
+them carry `RenderingPath: 1`; the only two Forward scenes are `MAT_ProbeShadows` and
+`MAT_ProbeUnlitShadows`, and neither has clouds. So a cloud term added to this bake today would be
+invisible in every scene the feature exists for. That is a dead setting under DEV_CONTRACT §1.3, and it
+is why this item did not ship as written.
+
+**Fix the consumer first.** Until the deferred composite's flat `0.08` becomes the irradiance cube, the
+bake has no reader worth feeding. The payoff after that is real and was measured the same way: replacing
+the baked dome with a neutral one at 45 % radiance — a stand-in for a stratus deck — moves the same
+37.80 % of the Forward frame by up to 28/255 and drops the ground's mean saturation from 0.103 to 0.041.
+The blue on the shaded side is exactly what the symptom describes, and it does go away.
+
+**The cost objection is dead, and this is the number that kills it.** The old plan assumed a full march
+into the panorama was expensive and reached for a cheap dedicated path. Measured on
+`Clouds_ShadowsOnGround`, Debug, MoltenVK, machine shared, minimum of five interleaved runs:
+
+| stage of ONE bake, Medium 1024x512 | ms |
+|---|---|
+| panorama dispatch (32-sample atmosphere march) | 28.5 (pooled min over 15 runs: 12.2) |
+| `PanoramaToCubemap` -> radiance cube | 32.0 |
+| `DiffuseIrradiance` (6 144 texels x 65 536 samples) | 301.8 |
+| `PrefilterEnvMap` (8.39 M texels x 1 024 samples) | 346.9 |
+| **total** | **727.5** |
+
+A bake already costs three quarters of a second and idles the device for all of it; the prefilter alone
+is 8.59 G texture samples. `Clouds: March` on the same scene is **1.709 ms** of GPU self time for a
+320x192 trace, i.e. **27.8 ns per ray**, so marching the panorama's 524 288 texels at the screen pass's
+own full fidelity is **14.6 ms — 2.0 % of one bake**. Against the densest march this project has
+recorded (7.589 ms, `Docs/GPU_TIMESTAMPS.md`) it is 64.8 ms, **8.9 %**. The marginal price of one more
+sample per panorama texel is **0.0868 ms** (32 -> 512 lever, fixed part ~9.4 ms).
+
+**So when this is picked up: march, do not approximate.** Cost does not discriminate between the three
+options, and an analytic cloud dome would be a SECOND model of the clouds beside the march — the mirror
+that drifts, which this project has already paid for once in the grey-clouds defect. The bake shader's
+own header says why: "the baked environment and the visible sky cannot drift apart."
+
+**Cadence: the sun trigger, extended by a cloud-parameter fingerprint, and explicitly NOT by wind.** The
+irradiance cube is a 65 536-sample cosine convolution per texel; it integrates the arrangement of the
+field away and responds only to the dome's mean, so advection changes nothing it can see. What does move
+it is coverage, cloud type, density, extinction, albedo and the sun. The prefiltered specular's mip 0 is
+the one surface that sees arrangement, and it must get the same clouds as the diffuse — they come from
+one panorama, and splitting them would be two sources of truth for one sky.
+
+**Two premises of the old plan are now false, not one.** The second, recorded earlier: this section said
+the bake "must NOT spin up a second live SceneRenderer (see the one-SceneRenderer-per-frame rule)". That
+rule was repealed — renderers lease a slot from `Engine/Core/RendererSlotPool.hpp` and several live views
+are legal (`SceneRenderer.hpp:77-83`).
+
+**And the seam this has to cross, for whoever scopes it next.** `EnvironmentManager::CreateProcedural`
+has exactly one caller, `SkyboxRenderer.cpp:651`, and `SkyboxRenderer` owns none of the cloud resources —
+the params SSBO, the per-renderer modelling volume and the shared noise volumes all belong to
+`VolumetricCloudRenderer`, its sibling under `SceneRenderer` (`SceneRenderer.cpp:117` and `:211`). There
+is no route from the clouds to the bake that does not add an argument to that call, so the change cannot
+be confined to `ComputeImages` + `SceneEnvironment` + the bake shader however it is designed. One more
+trap on the way: `CLOUD_PARAMS_BINDING` is 1 (`Common/CloudParams.glslh:27`) and so is
+`kSkyPayloadBinding`, so a bake that reads both blocks needs that `#define` to become overridable.
 
 ### The calibration anchor moved
 
@@ -211,6 +278,12 @@ From `Docs/Clouds/UE_VOLUMETRIC_CLOUDS_RESEARCH.md` §4 and `Docs/Clouds/NUBIS3_
   written, `--play` was added — without it the gameplay clock never advances and every captured frame
   is a frozen world, whatever the camera does. `--shot-frames N` sets the warm-up length; shoot at
   `--shot-frames 3` as well as the default when a change touches per-frame-in-flight state.)*
+- **The first shot after a SHADER edit is not evidence either** *(2026-09-01, Р15)*. The verify skill's
+  "swap a shader instead of rebuilding" A/B has the same trap as a fresh worktree. One run taken
+  immediately after editing `BakeProceduralSky.shader` differed from its baseline by **100 % of pixels**
+  and never reproduced: five later runs of the identical shader were byte-identical to the baseline. The
+  shader cache is content-addressed, so an edited shader misses it and is compiled at load — and that
+  first run is the one to throw away. Prime the variant with a throwaway capture, then measure.
 - **CI is `cancel-in-progress`** and Windows takes ~35 minutes. A second push while a run is in
   flight cancels it; a cancelled job is not evidence.
 - **`git stash` is shared across worktrees** on this machine, and so is the machine itself — timings
