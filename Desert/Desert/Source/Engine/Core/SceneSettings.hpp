@@ -40,19 +40,27 @@ namespace Desert::Core
     // screen-space lighting pass, which scales to many dynamic lights (city lamps/windows) and unlocks
     // screen-space GI/AO.
     //
-    // DEFERRED IS THE DEFAULT AND WHAT ESSENTIALLY EVERYTHING RUNS. Counted 2026-09-01 over
-    // Editor/Resources/Assets/Scenes: 48 scenes write RenderingPath 1, three write nothing and inherit
+    // DEFERRED IS THE DEFAULT AND WHAT ESSENTIALLY EVERYTHING RUNS. Recounted 2026-09-04 over
+    // Editor/Resources/Assets/Scenes: 46 scenes write RenderingPath 1, three write nothing and inherit
     // the default (also Deferred), and exactly two — MAT_ProbeShadows and MAT_ProbeUnlitShadows — are
-    // Forward. So 51 of 53. This comment used to describe Forward as "the default" and "the safe path",
-    // which had not been true for a long time and made the two paths look interchangeable.
+    // Forward. So 49 of 51. An earlier revision of this comment said "51 of 53"; that count swept in
+    // Autosave/, which holds two `_autosave.desce` copies of scenes already counted. Exclude that
+    // directory when counting anything about authored scenes. The comment also used to describe Forward
+    // as "the default" and "the safe path", which had not been true for a long time and made the two
+    // paths look interchangeable.
     //
-    // The two paths now share one ambient model: both compile Mesh/AmbientIBL.glslh, so the baked sky
-    // (diffuse irradiance + prefiltered specular + BRDF LUT) reaches ordinary static opaque geometry in
-    // the deferred composite exactly as it reaches the skinned, custom-shader and glass meshes that the
-    // deferred path still draws forward over it. Until 2026-09-03 it did not — the composite floored its
-    // ambient at a flat vec3(0.08) and read NEITHER cube, which is why the owner saw ground and buildings
-    // almost black under a bright sky and why flipping this one field lit them. Docs/Sky/HANDOVER.md
-    // item 2 records the measurement that pinned it.
+    // The two paths now share one ambient model AND one direct-lighting model: both compile
+    // Mesh/AmbientIBL.glslh and Mesh/DirectLighting.glslh. Until 2026-09-03 the composite floored its
+    // ambient at a flat vec3(0.08) and read NEITHER environment cube, which is why the owner saw ground
+    // and buildings almost black under a bright sky and why flipping this one field lit them; until
+    // 2026-09-04 the forward shaders also omitted the Lambertian 1/pi that the composite applied, making
+    // the same sun pi times brighter on that path. Docs/Sky/HANDOVER.md item 2 records the first
+    // measurement.
+    //
+    // WHAT STILL MAKES THE TWO DISAGREE ON THE GROUND is cloud shadow, and it is asymmetric by
+    // omission: CloudShadowFactor is applied in Programs/Deferred/DeferredLighting.shader and in no
+    // other shader, so the forward path and Terrain.shader stand in full sun under a cloud that darkens
+    // the deferred ground by a factor of 1.68 (64.93 against 109.11, measured by Р20).
     //
     // What still differs is what the G-buffer can carry: the deferred path shades from albedo, a single
     // world normal, metallic and roughness, so anything a forward shader does with per-material state

@@ -162,9 +162,15 @@ them (36 when this was written; one has landed since) carry `RenderingPath: 1`; 
 scenes are `MAT_ProbeShadows` and `MAT_ProbeUnlitShadows`, and neither has clouds. Re-counted
 2026-09-01 by the lead, with one addition the original count missed: **three scenes write no
 `RenderingPath` at all** (`MainMenu`, `Terrain_Grass`, `Terrain_MatProbe`) and inherit the C++ default,
-which is `Deferred` — so the split is 51 Deferred to 2 Forward, not 50 to 3. A `.desce` carries only
-the fields that differ from the defaults, so counting a render path by grepping the scene files alone
-undercounts it every time. So a cloud term added to this bake today would be
+which is `Deferred`. A `.desce` carries only the fields that differ from the defaults, so counting a
+render path by grepping the scene files alone undercounts it every time.
+
+**Corrected 2026-09-04, and the correction is the lead's own error.** That re-count said "51 Deferred
+to 2 Forward" and was wrong twice over: it swept in `Scenes/Autosave/`, which holds two
+`_autosave.desce` copies of scenes already counted. There are **51 authored scenes, not 53**, and the
+split is **49 Deferred to 2 Forward** — 46 write `RenderingPath: 1`, three inherit it. Exclude
+`Autosave/` when counting anything about authored scenes. Р20 caught this by measuring instead of
+believing the brief. So a cloud term added to this bake today would be
 invisible in every scene the feature exists for. That is a dead setting under DEV_CONTRACT §1.3, and it
 is why this item did not ship as written.
 
