@@ -46,11 +46,17 @@ namespace Desert::Core
     // Forward. So 51 of 53. This comment used to describe Forward as "the default" and "the safe path",
     // which had not been true for a long time and made the two paths look interchangeable.
     //
-    // They are not interchangeable, and the difference is not only performance: the deferred composite's
-    // ambient term is a flat constant plus SSGI (DeferredLighting.shader:396) and reads NEITHER
-    // environment cube. Baked sky IBL therefore reaches skinned meshes, custom-shader meshes and glass —
-    // all of which the deferred path still draws forward — but not ordinary static opaque geometry.
-    // Docs/Sky/HANDOVER.md item 2 has the measurement and the reason it blocks a feature.
+    // The two paths now share one ambient model: both compile Mesh/AmbientIBL.glslh, so the baked sky
+    // (diffuse irradiance + prefiltered specular + BRDF LUT) reaches ordinary static opaque geometry in
+    // the deferred composite exactly as it reaches the skinned, custom-shader and glass meshes that the
+    // deferred path still draws forward over it. Until 2026-09-03 it did not — the composite floored its
+    // ambient at a flat vec3(0.08) and read NEITHER cube, which is why the owner saw ground and buildings
+    // almost black under a bright sky and why flipping this one field lit them. Docs/Sky/HANDOVER.md
+    // item 2 records the measurement that pinned it.
+    //
+    // What still differs is what the G-buffer can carry: the deferred path shades from albedo, a single
+    // world normal, metallic and roughness, so anything a forward shader does with per-material state
+    // that the G-buffer has no channel for is unavailable to it.
     enum class RenderPath : int
     {
         Forward  = 0,

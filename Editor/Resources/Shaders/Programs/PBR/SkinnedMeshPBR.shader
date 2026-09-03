@@ -282,39 +282,11 @@ Shader "SkinnedMeshPBR"
         	return color;
         }
 
-        vec3 IBL(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albedo)
-        {
-        	// Sample diffuse irradiance at normal direction.
-        	vec3 irradiance = texture(u_EnvIrradianceTex, N).rgb;
-
-        	float cosLo = max(0.0, dot(N, view));
-
-        	// reflect(-view, N) = 2*dot(N,view)*N - view (unclamped, correct specular reflection)
-        	vec3 Lr = reflect(-view, N);
-
-        	// Calculate Fresnel term for ambient lighting.
-        	// Since we use pre-filtered cubemap(s) and irradiance is coming from many directions
-        	// use cosLo instead of angle with light's half-vector (cosLh above).
-        	// See: https://seblagarde.wordpress.com/2011/08/17/hello-world/
-        	vec3 F = fresnelSchlick(F0, cosLo);
-
-        	// Get diffuse contribution factor (as with direct lighting).
-        	vec3 kd = mix(vec3(1.0) - F, vec3(0.0), metalness);
-
-        	// Irradiance map contains exitant radiance assuming Lambertian BRDF, no need to scale by 1/PI here either.
-        	vec3 diffuseIBL = kd * albedo * irradiance;
-
-        	// Sample pre-filtered specular reflection environment at correct mipmap level.
-        	int specularTextureLevels = textureQueryLevels(u_EnvSpecularTex);
-        	vec3 specularIrradiance = textureLod(u_EnvSpecularTex, Lr, roughness * specularTextureLevels).rgb;
-
-        	// Split-sum approximation factors for Cook-Torrance specular BRDF.
-        	vec2 specularBRDF = texture(u_BRDFLUTTexture, vec2(cosLo, roughness)).rg;
-
-        	vec3 specularIBL = (F0 * specularBRDF.x + specularBRDF.y) * specularIrradiance;
-
-        	return diffuseIBL + specularIBL;
-        }
+        // The split-sum ambient — the SAME text the deferred lighting pass compiles, so a scene shaded
+        // through RenderingPath 0 and one shaded through RenderingPath 1 get one ambient model and not
+        // two. Included HERE and not with the other headers at the top because it names the three
+        // environment bindings declared just above.
+        #include <Mesh/AmbientIBL.glslh>
 
 
         void main() {
@@ -369,7 +341,7 @@ Shader "SkinnedMeshPBR"
 
         	vec3 F0 = mix(Fdielectric, m_Params.AlbedoColor, metalness);
         	vec3 light = Lightning(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor );
-        	vec3 ibl = IBL(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor);
+        	vec3 ibl = AmbientIBL(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor);
 
         	vec3 pointLight = vec3(0.0);
 
@@ -437,12 +409,13 @@ Shader "SkinnedMeshPBR"
             // Ambient occlusion attenuates only the ambient (IBL) term; emission is added unlit.
             vec3 emission = mat.EmissionColor.rgb * mat.MetalRoughEmission.z;
 
-            // Tiny anti-black epsilon only: real ambient now comes from IBL (HDR skybox OR the baked procedural
-            // sky). This just keeps fully-occluded faces from reading as pure-black holes when no environment is
-            // bound; it is intentionally far below the previous cold "floor" so it no longer double-counts ambient.
-            vec3 ambientFloor = m_Params.AlbedoColor * ao * vec3( 0.008, 0.009, 0.012 );
+            // The ambient, assembled by the shared header — the SAME call the deferred composite makes,
+            // so the two paths cannot floor, occlude or albedo-weight it differently. The forward path
+            // has no indirect-bounce gather, so it passes zero there; that is the only difference
+            // between the two call sites and it is visible in the argument list.
+            vec3 ambient = ComposeAmbient(ibl, m_Params.AlbedoColor, ao, vec3(0.0));
 
-            oColor = vec4( light * shadow + ibl * ao + pointLight + spotLight + emission + ambientFloor, 1.0);
+            oColor = vec4( light * shadow + ambient + pointLight + spotLight + emission, 1.0);
         }
     }
 }

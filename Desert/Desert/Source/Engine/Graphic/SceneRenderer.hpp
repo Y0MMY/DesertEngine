@@ -131,7 +131,14 @@ namespace Desert::Graphic
         // Selection-outline (Jump Flood) appearance. Editor-only: pushed each frame from EditorPreferences
         // (the outline is a viewport visualization, not a scene property, so it does not live in SceneSettings).
         void SetOutlineSettings( const glm::vec3& color, float width, float smoothness, bool enabled );
-        const std::optional<Environment>& GetEnvironment();
+        // BY VALUE, and it has to be. SkyboxRenderer::GetEnvironment() composes its answer — procedural
+        // bake or skybox-asset environment — and therefore returns a temporary; this used to hand back a
+        // reference to it, which dangled the instant the call returned. The forward path read that
+        // reference for a long time and mostly got away with it, because a just-freed stack frame usually
+        // still holds the bytes. The deferred composite's new environment read did not: it saw a valid
+        // irradiance handle beside a zeroed prefiltered one and correctly reported a half-baked
+        // environment. Found 2026-09-03 by the diagnostic that was supposed to catch a failed bake.
+        std::optional<Environment> GetEnvironment();
 
         // Procedural sky configuration (from the SkyAtmosphereComponent + the atmosphere sun, via the ECS).
         // sunDir is the direction TOWARD the sun, already normalized; bakeNow is the one-shot request from

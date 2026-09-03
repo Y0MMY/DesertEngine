@@ -148,6 +148,25 @@ Shader "StaticMeshGBuffer"
         	const float roughness = max(mat.MetalRoughEmission.y, 0.04);
 
         	// --- keep every forward binding statically referenced so reflection retains the identical layout ---
+        	//
+        	// WHY, spelled out, because these are the lines most likely to be deleted as dead — and because
+        	// the environment samplers among them are NOT what makes the deferred path read the sky. The
+        	// ambient lives in the composite (Deferred/DeferredLighting.shader), which is a separate
+        	// fullscreen material with a layout of its own; nothing here is ever sampled for light.
+        	//
+        	// This pass has no material. MeshRenderer draws it with StaticMaterialPBR, whose descriptor sets
+        	// were allocated from the FORWARD shader's reflection (StaticMaterialPBR.cpp:7 —
+        	// Material( "PBRMaterial", "StaticMeshPBR" )), and binds them against a pipeline layout built
+        	// from THIS shader's reflection (MeshRenderer.cpp:856 chooses m_StaticGBufferPipeline for the
+        	// same executor). Vulkan requires the two to be compatible. An unreferenced uniform does not
+        	// survive SPIR-V reflection, so a slot this shader has no use for can only be kept by touching
+        	// it — hence a sum scaled into oblivion and folded into an output so the optimiser cannot fold
+        	// it back out. Drop one and the layouts diverge; the validation layer reports "N total
+        	// descriptors vs M trying to bind" on a machine that has layers enabled, and silence on one
+        	// that does not.
+        	//
+        	// The relation is asserted rather than trusted: Desert/Tests/Engine/ShaderCacheKey,
+        	// TheGBufferShaderKeepsTheForwardMeshShadersDescriptorLayoutExactly.
         	float keep = 0.0;
         	keep += texture(u_ShadowMap0, uv).r + texture(u_ShadowMap1, uv).r
         	      + texture(u_ShadowMap2, uv).r + texture(u_ShadowMap3, uv).r;

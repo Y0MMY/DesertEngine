@@ -187,6 +187,40 @@ namespace
                                                      : ShaderReflection::BuildLayoutBindings( it->second );
     }
 
+    // Set 0 of a GRAPHICS shader as the PIPELINE LAYOUT sees it: both stages reflected into one
+    // ReflectionData, which is what VulkanShader does before it builds the VkDescriptorSetLayout. The
+    // per-stage helpers above answer "what does this stage read"; this one answers "what shape must a
+    // descriptor set have to be bindable to a pipeline built from this shader", and only the second
+    // question can compare two different shaders.
+    std::vector<VkDescriptorSetLayoutBinding> GraphicsSetZero( const std::filesystem::path& shaderFile )
+    {
+        const auto vertexSpirv =
+             CompileStage( StageSource( shaderFile, ShaderStage::Vertex ), shaderFile, shaderc_vertex_shader );
+        const auto fragmentSpirv =
+             CompileStage( StageSource( shaderFile, ShaderStage::Fragment ), shaderFile, shaderc_fragment_shader );
+        if ( vertexSpirv.empty() || fragmentSpirv.empty() )
+            return {};
+
+        ShaderResource::ReflectionData data;
+        auto diagnostics = ShaderReflection::ReflectStage( vertexSpirv, ShaderStage::Vertex, data );
+        EXPECT_TRUE( diagnostics.empty() ) << ( diagnostics.empty() ? "" : diagnostics.front() );
+        diagnostics = ShaderReflection::ReflectStage( fragmentSpirv, ShaderStage::Fragment, data );
+        EXPECT_TRUE( diagnostics.empty() ) << ( diagnostics.empty() ? "" : diagnostics.front() );
+
+        const auto it = data.ShaderDescriptorSets.find( 0 );
+        return it == data.ShaderDescriptorSets.end() ? std::vector<VkDescriptorSetLayoutBinding>{}
+                                                     : ShaderReflection::BuildLayoutBindings( it->second );
+    }
+
+    // Printable "binding:type" list, so a failure names the slot that diverged instead of a count.
+    std::string DescribeBindings( const std::vector<VkDescriptorSetLayoutBinding>& bindings )
+    {
+        std::ostringstream out;
+        for ( const auto& b : bindings )
+            out << b.binding << ':' << static_cast<int>( b.descriptorType ) << ' ';
+        return out.str();
+    }
+
     /**
      * The DECLARED SIZE of a storage block, in bytes, as the compiled SPIR-V says it is.
      *
@@ -579,23 +613,31 @@ TEST_F( ShaderRootFixture, TheCloudParameterBlockIsTheSameNumberOfBytesOnBothSid
     }
 }
 
-TEST_F( ShaderRootFixture, TheDeferredLightingPassDeclaresSeventeenDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheDeferredLightingPassDeclaresTwentyDescriptorsInSetZero )
 {
     // THE CONSUMER, and the pass this repository shares most widely — every deferred scene draws it, and
     // it is the one file the cloud work was told to touch as little as possible. Pinning its descriptor
     // set is how "as little as possible" becomes checkable: the count moves the day somebody adds a
     // binding to it, whether or not they meant to.
     //
-    // Seventeen, and they are every slot from 0 to 16 with none free in between: six G-buffer and scene
-    // samplers (1, 2, 3, 8, 9, 10), four cascade maps (5, 13, 14, 15), four uniform blocks (0, 4, 7, 12),
-    // two light SSBOs (6, 16) and the cloud shadow map (11). Two of those — 11 and 12 — are this task's,
-    // and they are the only two it added.
+    // Twenty. Slots 0..16 with none free in between: six G-buffer and scene samplers (1, 2, 3, 8, 9, 10),
+    // four cascade maps (5, 13, 14, 15), four uniform blocks (0, 4, 7, 12), two light SSBOs (6, 16) and
+    // the cloud shadow map (11) — plus the three the ambient needs (17, 18, 19). Was seventeen until
+    // 2026-09-03, when this pass stopped inventing its ambient out of a flat constant and started reading
+    // the same baked environment the forward mesh shaders read.
     const auto bindings = FragmentSetZero( ShaderPath( "Deferred/DeferredLighting.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 17u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 20u );
 
     EXPECT_TRUE( HasBinding( bindings, 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_CloudShadowMap
     EXPECT_TRUE( HasBinding( bindings, 12, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );         // CloudShadowUB
+
+    // THE AMBIENT'S OWN THREE, and the point of the whole change: a deferred composite that declares
+    // none of these cannot be reading the sky, whatever its ambient line says it is doing. That was
+    // exactly the state the owner saw as black ground under a bright sky.
+    EXPECT_TRUE( HasBinding( bindings, 17, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_EnvIrradianceTex
+    EXPECT_TRUE( HasBinding( bindings, 18, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_EnvSpecularTex
+    EXPECT_TRUE( HasBinding( bindings, 19, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_BRDFLUTTexture
 
     // And the cascade block it must NOT have disturbed: the same four maps at the same four slots, with
     // ShadowUB where PBR.glsl.frag mirrors it.
@@ -604,6 +646,38 @@ TEST_F( ShaderRootFixture, TheDeferredLightingPassDeclaresSeventeenDescriptorsIn
     EXPECT_TRUE( HasBinding( bindings, 14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
     EXPECT_TRUE( HasBinding( bindings, 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
     EXPECT_TRUE( HasBinding( bindings, 7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );
+}
+
+TEST_F( ShaderRootFixture, TheGBufferShaderKeepsTheForwardMeshShadersDescriptorLayoutExactly )
+{
+    // WHY StaticMeshGBuffer.shader multiplies three environment samples, four cascade maps and two light
+    // SSBOs by 1e-20 — the strangest-looking lines in the renderer, and the ones most likely to be
+    // deleted as dead by someone tidying up.
+    //
+    // The deferred G-buffer pass does NOT get a material of its own. MeshRenderer draws it with
+    // StaticMaterialPBR, whose descriptor sets were allocated from the FORWARD shader's reflection
+    // (StaticMaterialPBR.cpp:7 — Material( "PBRMaterial", "StaticMeshPBR" )), and binds them against a
+    // pipeline layout built from THIS shader's reflection (MeshRenderer.cpp:856 picks
+    // m_StaticGBufferPipeline for the same executor). Vulkan requires those two layouts to be compatible.
+    // An unreferenced uniform does not survive SPIR-V reflection, so the only way for the G-buffer shader
+    // to keep a slot it has no use for is to touch it — hence a sum scaled into oblivion and folded into
+    // an output so the optimiser cannot fold it back out.
+    //
+    // That makes the dummy a RELATION, not a workaround, and this is that relation asserted. It is not
+    // affected by the deferred composite gaining its own environment bindings: the composite is a
+    // separate fullscreen material with a separate layout, and the G-buffer pass still borrows the
+    // forward material's set. Delete the `keep` lines and this test fails with the slot that vanished —
+    // instead of the validation layer failing on a machine that happens to have layers on.
+    const auto forward = GraphicsSetZero( ShaderPath( "PBR/StaticMeshPBR.shader" ) );
+    const auto gbuffer = GraphicsSetZero( ShaderPath( "PBR/StaticMeshGBuffer.shader" ) );
+
+    ASSERT_FALSE( forward.empty() );
+    ASSERT_FALSE( gbuffer.empty() );
+
+    EXPECT_EQ( DescribeBindings( gbuffer ), DescribeBindings( forward ) )
+         << "StaticMeshGBuffer's set 0 no longer matches StaticMeshPBR's, but MeshRenderer still binds "
+            "one material's descriptor sets to both pipelines";
+    EXPECT_EQ( ShaderReflection::CountDescriptors( gbuffer ), ShaderReflection::CountDescriptors( forward ) );
 }
 
 TEST_F( ShaderRootFixture, TheBindingsComeOutSortedAndCountedTheWayTheLayerCounts )

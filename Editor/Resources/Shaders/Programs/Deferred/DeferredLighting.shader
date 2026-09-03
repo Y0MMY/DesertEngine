@@ -45,9 +45,28 @@ Shader "DeferredLighting"
         // (already temporally denoised there). Unused — and left bound to its dummy — in the other GI modes.
         Uniform(10) sampler2D u_GI;
 
+        // THE BAKED ENVIRONMENT — the same trio the forward mesh shaders bind, and the whole point of
+        // this pass having an ambient term at all. Until 2026-09-03 the deferred composite read NEITHER
+        // cube and floored its ambient at a flat vec3(0.08), so 51 of the repository's 53 scenes lit
+        // their ordinary static opaque geometry from a constant while the skinned meshes, the
+        // custom-shader meshes and the glass drawn forward over this very composite lit themselves from
+        // the sky. One material was shaded two ways depending on whether its mesh had a skeleton.
+        //
+        // New slots (17..19) rather than the forward path's 8..10: those three are already taken here by
+        // u_SSAO / u_GBufferEmissive / u_GI, and this pass shares no descriptor layout with the mesh
+        // shaders — it is a fullscreen quad with its own material. Only the NAMES have to match, because
+        // the material binds by name.
+        Uniform(17) samplerCube u_EnvIrradianceTex; // diffuse irradiance (cosine-convolved sky)
+        Uniform(18) samplerCube u_EnvSpecularTex;   // GGX-prefiltered radiance, roughness across mips
+        Uniform(19) sampler2D   u_BRDFLUTTexture;   // split-sum BRDF integration (cosLo, roughness)
+
         Out(0) vec4 oColor;
 
         const vec3 Fdielectric = vec3(0.04); // base reflectance for dielectrics (matches PBR.glsl.frag)
+
+        // The ambient model itself, shared verbatim with StaticMeshPBR / StaticMeshPBR_Instanced /
+        // SkinnedMeshPBR. Included after the three bindings above because it names them.
+        #include <Mesh/AmbientIBL.glslh>
 
         // Directional (sun) Cook-Torrance contribution — SAME BRDF as CalculatePointLight (energy-normalized diffuse
         // albedo/PI + GGX specular), just with a parallel light direction and no distance attenuation. Using the raw
@@ -392,8 +411,13 @@ Shader "DeferredLighting"
 
         	if (dbg == 6) { oColor = vec4(indirect, 1.0); return; } // Indirect GI only
 
-        	// Ambient = small flat sky term + the indirect bounce, modulated by receiver albedo and SSAO.
-        	vec3 ambient = albedo * ao * (vec3(0.08) + indirect);
+        	// Ambient = the BAKED ENVIRONMENT (split-sum IBL: diffuse irradiance + prefiltered specular)
+        	// plus the one-bounce indirect, attenuated by SSAO — assembled by the SAME shared function the
+        	// forward mesh shaders call, so a scene rendered through either RenderingPath gets one ambient
+        	// model. The only argument that differs there is `indirect`, which the forward path passes as
+        	// zero because it has no bounce gather.
+        	vec3 ibl     = AmbientIBL(view, N, F0, metallic, roughness, albedo);
+        	vec3 ambient = ComposeAmbient(ibl, albedo, ao, indirect);
 
         	// Self-illumination (view-independent) — added here (not lit) so HDR emissive reaches the composite
         	// and blooms, matching the forward path. GBufferEmissive is 0 where the material has none.
