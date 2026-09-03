@@ -27,6 +27,9 @@ Shader "DeferredLighting"
         #include <Mesh/PointLight.glslh>      // binding 6  (SSBO PointLightsUB) + CalculatePointLight + PBRFunctions
         #include <Mesh/Spotlight.glslh>       // binding 16 (SSBO SpotLightsUB)  + CalculateSpotLight
         #include <Mesh/LightsMetadata.glslh>  // binding 4  (UB LightsMetadata: point/spot/dir counts)
+        // THE direct-light BRDF, shared with the forward mesh shaders and with the point/spot headers
+        // above (which already include it). Named explicitly because this pass calls it directly.
+        #include <Mesh/DirectLighting.glslh>
 
         // The cloud shadow map's RECONSTRUCTION half only — the same text its producer compiles, so the
         // encode and the decode cannot drift apart. It declares no sampler and no parameter block, and
@@ -68,29 +71,12 @@ Shader "DeferredLighting"
         // SkinnedMeshPBR. Included after the three bindings above because it names them.
         #include <Mesh/AmbientIBL.glslh>
 
-        // Directional (sun) Cook-Torrance contribution — SAME BRDF as CalculatePointLight (energy-normalized diffuse
-        // albedo/PI + GGX specular), just with a parallel light direction and no distance attenuation. Using the raw
-        // albedo*NdotL*intensity Lambert here instead made the sun ~PI× too bright and washed out the point/spot lights.
-        vec3 CalculateDirectional(vec3 lightTravel, vec3 radiance, vec3 view, vec3 N, vec3 F0, float metalness,
-                                  float roughness, vec3 albedo)
-        {
-        	vec3  L = normalize(-lightTravel); // toward the sun
-        	float cosLi = max(dot(N, L), 0.0);
-        	if (cosLi <= 0.0) return vec3(0.0);
-
-        	vec3  H = normalize(view + L);
-        	float cosLh = max(dot(N, H), 0.0);
-        	float cosLo = max(dot(N, view), 0.0);
-
-        	float D   = DistributionGGX(cosLh, roughness);
-        	float Vis = VisibilitySmith(cosLi, cosLo, roughness);
-        	vec3  F   = fresnelSchlick(F0, max(dot(H, view), 0.0));
-
-        	vec3 specular = D * Vis * F;
-        	vec3 kd       = (1.0 - F) * (1.0 - metalness);
-        	vec3 diffuse  = kd * albedo / PI;
-        	return (diffuse + specular) * radiance * cosLi;
-        }
+        // The directional (sun) Cook-Torrance contribution used to be a local copy of the BRDF right here,
+        // with a comment recording that the raw albedo*NdotL*intensity Lambert made the sun ~PI× too bright
+        // and washed out the point/spot lights. The forward mesh shaders had shipped exactly that raw form
+        // for as long, so the comment described a defect that was live one file away. The copy is gone: the
+        // sun is now EvaluateDirectionalLight from Mesh/DirectLighting.glslh, which the forward path and the
+        // point/spot headers compile too. Included at the top with Mesh/PointLight.glslh, which pulls it in.
 
         Uniform(0) DeferredUB
         {
@@ -366,7 +352,8 @@ Shader "DeferredLighting"
         	vec3  L        = normalize(-u_LightDir.xyz);
         	float shadow   = ShadowFactor(worldPos, N, L) * CloudShadowFactor(worldPos);
         	vec3  radiance = u_LightColor.rgb * u_LightColor.a;
-        	vec3  result   = CalculateDirectional(u_LightDir.xyz, radiance, view, N, F0, metallic, roughness, albedo)
+        	vec3  result   = EvaluateDirectionalLight(u_LightDir.xyz, radiance, view, N, F0, metallic, roughness,
+        	                                          albedo)
         	               * shadow;
 
         	// Point lights (the city payoff): every source contributes full Cook-Torrance PBR (not shadowed yet).

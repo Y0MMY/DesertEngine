@@ -2,6 +2,7 @@
 #define SPOTLIGHT_GLSLH
 
 #include "PBRFunctions.glslh"
+#include "DirectLighting.glslh"
 
 // std430 layout — must match ShaderProtocols::SpotLightPayload (64 bytes).
 struct SpotLight {
@@ -30,6 +31,9 @@ float SpotConeFactor(SpotLight light, vec3 L)
     return clamp((cosTheta - light.cosOuter) / max(light.cosInner - light.cosOuter, 1e-4), 0.0, 1.0);
 }
 
+// Cone + distance falloff, then THE shared direct-light BRDF — see the note on CalculatePointLight.
+// A spot light differs from a point light only in the cone factor folded into its attenuation, and
+// from the sun only in having any attenuation at all; none of that is the BRDF's business.
 vec3 CalculateSpotLight(SpotLight light, vec3 worldPosition, vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albedo)
 {
     vec3  L    = light.position - worldPosition;
@@ -40,27 +44,10 @@ vec3 CalculateSpotLight(SpotLight light, vec3 worldPosition, vec3 view, vec3 N, 
     if (cone <= 0.0)
         return vec3(0.0);
 
-    vec3 H = normalize(view + L);
-
-    float cosLi = max(dot(N, L), 0.0);
-    float cosLh = max(dot(N, H), 0.0);
-    float cosLo = max(dot(N, view), 0.0);
-
-    if (cosLi <= 0.0)
-        return vec3(0.0);
-
     float attenuation = LightFalloffFactor(distance, 0.0, light.range, light.falloff) * cone;
     vec3  radiance    = light.color * light.intensity * attenuation;
 
-    float D   = DistributionGGX(cosLh, roughness);
-    float Vis = VisibilitySmith(cosLi, cosLo, roughness);
-    vec3  F   = fresnelSchlick(F0, max(dot(H, view), 0.0));
-
-    vec3 specular = D * Vis * F;
-    vec3 kd       = (1.0 - F) * (1.0 - metalness);
-    vec3 diffuse  = kd * albedo / PI;
-
-    return (diffuse + specular) * radiance * cosLi;
+    return EvaluateDirectLight(L, radiance, view, N, F0, metalness, roughness, albedo);
 }
 
 // Scalar "how much this spot light lands here" for the lighting debug view.

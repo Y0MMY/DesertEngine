@@ -1,0 +1,90 @@
+#ifndef DIRECT_LIGHTING_GLSLH
+#define DIRECT_LIGHTING_GLSLH
+
+// THE analytic-light term of this engine's PBR — one text, compiled by every shader and every light
+// type that has one. The companion of Mesh/AmbientIBL.glslh, and here for the same reason: a scene
+// picks which shading path runs with a single enum field, and while the paths carried their own copies
+// of this formula they disagreed.
+//
+// The defect: `Programs/PBR/StaticMeshPBR.shader` computed its sun diffuse as `kd * albedo` while
+// `Programs/Deferred/DeferredLighting.shader` computed it as `kd * albedo / PI`. The Lambertian BRDF is
+// albedo/PI — radiance out per irradiance in, over a hemisphere of PI steradians of projected solid
+// angle — so the deferred form was right and the forward form was PI times too bright on the sun. It
+// was VISIBLE: Clouds_Showcase from 0,200,0 looking just below the horizon rendered its ground at a
+// mean of 109/255 through the deferred path and 161/255 through the forward one, with the sky byte-
+// identical between them (clouds, fog, SSAO, GI and shadows all off, so the ground was the only thing
+// that could differ). The same disagreement lived INSIDE one shader: PointLight.glslh and
+// Spotlight.glslh already divided by PI, so the forward sun was PI times brighter than a point light of
+// equal intensity standing next to it, and DeferredLighting's own comment recorded that as the reason
+// it did not copy the forward form.
+//
+// Nothing downstream compensated it, which is what made the fix unconditional rather than a
+// re-authoring. Both paths receive the SAME DirectionLightComponent intensity (Scene.cpp fills one
+// payload; SceneRenderer hands it to the forward materials and to DeferredUB unchanged), the exposure
+// and tonemap chain is shared, and every scene in the repository authors its sun at either 1.0 or 22.0
+// with the two forward-path scenes (MAT_ProbeShadows, MAT_ProbeUnlitShadows) carrying exactly the 1.0
+// of their deferred siblings. There was no 1/PI hiding in the units.
+//
+// It declares no uniform block and no sampler on purpose: that makes it includable at any point in any
+// shader — PointLight.glslh includes it before the scene's light blocks even exist — and it also makes
+// it compile as C++, so Desert/Tests/Engine/DirectLighting asserts these properties on the shipped text
+// rather than on a paraphrase of it.
+//
+// Requires Mesh/PBRFunctions.glslh (PI, DistributionGGX, VisibilitySmith, fresnelSchlick) first.
+
+// The Cook-Torrance response of a surface to ONE analytic light.
+//
+//   L         — UNIT vector from the surface toward the light. Not normalized here: the point and spot
+//               callers already hold a normalized L (they needed its length for attenuation), and
+//               EvaluateDirectionalLight below normalizes for the two sun call sites. A caller that
+//               passes an unnormalized L gets a wrong cosine, not a rescued one.
+//   radiance  — the light's incident radiance at this surface, colour * intensity * whatever
+//               attenuation and cone the caller's own light model applies. The BRDF knows nothing
+//               about falloff.
+//   view      — unit vector from the surface toward the eye.
+//   N         — unit world-space shading normal.
+//   F0        — normal-incidence reflectance, mix(Fdielectric, albedo, metalness) at every call site.
+//   roughness — must already be clamped away from 0 by the caller (the GGX NDF divides by it).
+//
+// The diffuse half is `kd * albedo / PI` and the PI is THE POINT OF THIS FILE. This is the only place
+// in the engine's direct lighting where it appears, so the two paths cannot drift by a factor again,
+// and the sun cannot drift from the point lights.
+vec3 EvaluateDirectLight(vec3 L, vec3 radiance, vec3 view, vec3 N, vec3 F0, float metalness,
+                         float roughness, vec3 albedo)
+{
+	float cosLi = max(dot(N, L), 0.0);
+	if (cosLi <= 0.0)
+		return vec3(0.0);
+
+	vec3  H     = normalize(view + L);
+	float cosLh = max(dot(N, H), 0.0);
+	float cosLo = max(dot(N, view), 0.0);
+
+	// Normal distribution + the analytic G/(4 NdotL NdotV) visibility, so the 4 NdotL NdotV denominator
+	// of the microfacet specular BRDF is already folded in and is not applied again below.
+	float D   = DistributionGGX(cosLh, roughness);
+	float Vis = VisibilitySmith(cosLi, cosLo, roughness);
+	vec3  F   = fresnelSchlick(F0, max(dot(H, view), 0.0));
+
+	vec3 specular = D * Vis * F;
+
+	// Energy split: what Fresnel does not reflect is available to the diffuse lobe, and a conductor has
+	// no diffuse lobe at all.
+	vec3 kd      = (1.0 - F) * (1.0 - metalness);
+	vec3 diffuse = kd * albedo / PI; // Lambert BRDF = albedo/PI. NOT albedo.
+
+	return (diffuse + specular) * radiance * cosLi;
+}
+
+// The same response for a DIRECTIONAL light, whose payload gives the direction the light TRAVELS
+// (away from the source) rather than the direction toward it. Both sun call sites — the forward mesh
+// shaders' DirectionLightsUB and the deferred composite's DeferredUB.u_LightDir — carry it in that
+// form, so the negate-and-normalize belongs here beside them and not in two shaders.
+vec3 EvaluateDirectionalLight(vec3 lightTravel, vec3 radiance, vec3 view, vec3 N, vec3 F0,
+                              float metalness, float roughness, vec3 albedo)
+{
+	return EvaluateDirectLight(normalize(-lightTravel), radiance, view, N, F0, metalness, roughness,
+	                           albedo);
+}
+
+#endif // DIRECT_LIGHTING_GLSLH

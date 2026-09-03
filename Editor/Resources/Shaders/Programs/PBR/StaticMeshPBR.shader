@@ -90,6 +90,9 @@ Shader "StaticMeshPBR"
         #include <Mesh/PointLight.glslh>
         #include <Mesh/Spotlight.glslh>
         #include <Mesh/LightsMetadata.glslh>
+        // THE direct-light BRDF, shared with the deferred composite and with the point/spot headers
+        // above (which already include it). Named explicitly because this shader calls it directly.
+        #include <Mesh/DirectLighting.glslh>
 
         In(0) Vertex
         {
@@ -278,33 +281,26 @@ Shader "StaticMeshPBR"
         	vec3 Normal;
         } m_Params;
 
+        // The sun. Its Cook-Torrance response is the SAME text the deferred lighting pass compiles and
+        // the same text the point and spot lights compile — Mesh/DirectLighting.glslh. What used to be
+        // here was a fourth copy of that BRDF whose diffuse half read `kd * albedo` where every other
+        // copy in the engine read `kd * albedo / PI`, so this path's sun was PI times too bright: both
+        // against the physically-correct deferred composite and against a point light of equal
+        // intensity standing beside it in this very shader.
+        //
+        // The loop is kept rather than collapsed to an `if`: DirectionLightsUB holds exactly ONE light
+        // (Scene.cpp truncates past that and says so), and the count is the engine's own gate for
+        // whether the scene has a sun at all.
         vec3 Lightning(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albedo)
         {
         	vec3 color = vec3(0);
 
         	for(uint i = 0; i < lightsMetadata.DirectionLightCount; i++)
         	{
-        		vec3 Li = -directionLights.directionLights.Direction.xyz;
         		vec3 Lradiance = directionLights.directionLights.ColorIntensity.rgb
         		               * directionLights.directionLights.ColorIntensity.a;
-        		vec3 Lh = normalize(Li + view);
-
-        		float cosLi = max(0.0, dot(N, Li));
-        		float cosLh = max(0.0, dot(N, Lh));
-        		float cosLo = max(0.0, dot(N, view));
-
-        		vec3 F  = fresnelSchlick(F0, max(0.0, dot(Lh, view)));
-        		// Calculate normal distribution for specular BRDF.
-        		float D = DistributionGGX(cosLh, roughness);
-        		// Visibility = G/(4*NdotL*NdotV) computed analytically to avoid 0/0 at grazing angles.
-        		float Vis = VisibilitySmith(cosLi, cosLo, roughness);
-
-        		vec3 kd = (1.0 - F) * (1.0 - metalness);
-        		vec3 diffuseBRDF = kd * albedo;
-
-        		vec3 specularBRDF = F * D * Vis;
-
-        		color += (diffuseBRDF + specularBRDF) * Lradiance * cosLi;
+        		color += EvaluateDirectionalLight(directionLights.directionLights.Direction.xyz, Lradiance,
+        		                                  view, N, F0, metalness, roughness, albedo);
         	}
 
         	return color;
