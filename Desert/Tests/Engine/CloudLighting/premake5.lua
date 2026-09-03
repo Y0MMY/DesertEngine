@@ -14,7 +14,10 @@ project(test_name)
     --     AS C++ through CloudLightingReference.hpp. That is why the SHADER ROOT is on the include path:
     --     the test drives the exact text the cloud passes compile, so a passing test is a statement about
     --     the code the GPU runs.
-    -- Nothing to link — no renderer, no Vulkan.
+    -- No renderer and no Vulkan. Common is linked since Р18 because the multiple-scattering reference
+    -- reads the SHIPPED defaults out of ECS::VolumetricCloudData rather than restating them, and that
+    -- header's AssetHandle members pull in Common::UUID. A restated copy of four floats is exactly the
+    -- mirror-that-drifts this suite exists to prevent elsewhere.
     files {
         test_files,
     }
@@ -23,6 +26,7 @@ project(test_name)
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
         "%{wks.location}/Editor/Resources/Shaders",
+        "%{wks.location}/ThirdParty/reflect-cpp/include", -- reached through the cloud component's headers
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
@@ -43,6 +47,14 @@ project(test_name)
         defines { "DESERT_PLATFORM_MACOS" }
     filter "system:linux"
         defines { "DESERT_PLATFORM_LINUX" }
+    filter {}
+
+    -- Common: Common::UUID, behind the AssetHandle members of the cloud component.
+    -- Optick: Common's JobSystem registers its worker threads with the profiler.
+    links { "Common", "Optick" }
+
+    filter "system:not windows"
+        links { "ReflectCpp" }
     filter {}
 
     filter "configurations:Debug"

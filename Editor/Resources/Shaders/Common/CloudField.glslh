@@ -697,6 +697,78 @@ CloudFieldSample SampleCloudField( CloudFieldParams params, float heightFraction
 // — the extinction and the profile ramp. Р9 priced that: sixteen times the extinction shortens it to
 // 235 m and buys the same 2.8x of roughness, at the cost of every lighting number the programme has
 // calibrated. That is the next task, and it is a lighting task, not a noise one.
+//
+// ---------------------------------------------------------------------------------------------------
+// THE EXTINCTION WAS TAKEN AS THAT NEXT TASK AND MEASURED TO THE FRAME. IT DOES NOT PAY. Task Р18,
+// 2026-09-03.
+// ---------------------------------------------------------------------------------------------------
+//
+// THE SWEEP THE PARAGRAPH ABOVE ASKS FOR, taken with this file's own instrument — Desert/Tests/Engine/
+// CloudField's TheEyeLooksThroughMoreCloudThanTheErosionVariesOver, run once per extinction:
+//
+//     extinction /km        8      16      24      32      45      64
+//     penetration m       657     508     444     400     358     319
+//     vs decorrelation   4.11x   3.18x   2.77x   2.50x   2.24x   1.99x
+//     erosion adds m      4.1     6.7     6.1     8.0     9.1    11.3    (80 m lag)
+//     bare lumps m       94.3    93.1    94.2    93.2    92.7    90.6
+//
+// TWO CORRECTIONS TO Р9'S PRICE, and they point in opposite directions. The roughness is CHEAPER than
+// estimated — 2.76x arrives at eight times the extinction, not sixteen — and the penetration is far more
+// STUBBORN than 1/sigma: eight times the extinction shortens it 2.06x, not eight, because a ray meets
+// the cloud on the profile's ramp and a stronger medium merely stops a little earlier on the same slope.
+//
+// AND THE PRIZE IS FIVE METRES, WHICH IS THE WHOLE FINDING. The erosion's contribution goes 4.1 m ->
+// 9.1 m at an 80 m lag, on a silhouette whose bare lumps already carry 92.7 m: 4.4 % of the silhouette
+// becomes 9.8 % of it. The ratio doubles and the ABSOLUTE stays negligible, because the 657 m never
+// bound the silhouette — it bound the EROSION's share of a silhouette the modelling volume owns.
+//
+// MEASURED ON THE FRAME, Clouds_Showcase from the owner's own camera (0,200,0), six points, 90 frames,
+// noise floor zero (an explicit ExtinctionScale of 8 reproduced the default byte for byte at all six).
+// Tonal contrast on Р0's ruler, Tools/ImageStat:
+//
+//     point            8 /km   16 /km   45 /km
+//     zenith  -Z       0.238    0.234    0.242
+//     zenith  +Z       0.216    0.193    0.181   <- the WRONG way, and the largest move of the six
+//     mid     -Z       0.109    0.116    0.119
+//     mid     +Z       0.110    0.114    0.115
+//     horizon -Z       0.716    0.713    0.710
+//     horizon +Z       0.742    0.741    0.739
+//
+// Five and a half times the extinction moves five of six points by less than 0.01 and the sixth by
+// -0.035. Looking at the frames rather than the numbers says the same thing in the other direction: the
+// zenith's SILHOUETTE does gain a visible crenellation, and the BODY behind it is exactly as flat as it
+// was and slightly greyer. The complaint is about the body.
+//
+// WHY THE BODY DOES NOT MOVE, and this is where the chain that led here actually breaks. TWO KNOCKOUTS
+// ON THE SAME FRAME (mid -Z, Clouds_Showcase, the owner's camera), each one field of the component:
+//
+//     shipped                                    mean 0.736   contrast 0.109
+//     AmbientScale deleted                       mean 0.391   contrast 0.519   <- 4.8x
+//     MultiScatterOctaves 3 -> 1                 mean 0.726   contrast 0.117
+//
+// The second row removes the sky's ambient. The third removes THE WHOLE MULTIPLE-SCATTERING SERIES and
+// leaves single scattering alone. The ambient outweighs the entire series by about forty to one on Р0's
+// own ruler — so on the near field the approximation this task was about is barely participating, and
+// its extinction still less. The body is flat because it is lit by one full-sphere mean radiance through
+// one scalar occlusion per sample, which is a field with almost no structure in it.
+//
+// That reproduces D-25's knockout on the owner's scene, AFTER Р7's composition fix and Р12's occlusion
+// volume. Docs/Clouds/Shots/P18_showcase_mid_shipped.png against P18_showcase_mid_no_ambient.png.
+//
+// WHAT WOULD CHANGE THE ANSWER. Not the extinction and not the noise. The silhouette's roughness is
+// 92.7 m of LUMPS and 4.1 m of erosion, so a rougher silhouette is a question for
+// Assets::BakeCloudProceduralVolume and a content decision. The flat near-field BODY is the ambient
+// term, forty times the weight of everything the octaves do there.
+//
+// AND ONE QUALIFICATION THAT DOES NOT OVERTURN THE REFUSAL. On BROKEN cumulus — the same sky at coverage
+// 0.35 instead of 0.78 — raising the extinction to 45 together with the occlusion the reference says
+// belongs there (MultiScatterOcclusion 0.4847; see VolumetricCloudComponent.hpp) DOES visibly model the
+// lobes: a shaded underside and a crenellated top where there was a smooth ellipse
+// (Docs/Clouds/Shots/P18_broken_mid_ext08.png against P18_broken_mid_ext45_occ48.png). On the ruler it
+// is a draw across six points — +0.058 / -0.072 / -0.002 / -0.005 / +0.031 / +0.031 — and the -0.072 is
+// the sunward zenith, where the number falls because a thick cloud now correctly HIDES the sun whose
+// disc used to be the p95. That is a different sky from the one the complaint was made about, and moving
+// the default re-authorises three dozen scenes, so it is the owner's call and not this task's.
 
 // The up-rez: turn the low-frequency profile into something with a cloud's edge.
 //

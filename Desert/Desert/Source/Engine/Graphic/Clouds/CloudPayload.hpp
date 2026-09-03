@@ -697,10 +697,14 @@ namespace Desert::Graphic
         p.SunColour = glm::vec4(
              sunIrradiance, static_cast<float>( std::clamp( data.LightMarchSamples, 1, lightSampleCeiling ) ) );
         p.Ambient      = glm::vec4( ambient, physical ? 1.0f : 0.0f );
-        p.MultiScatter = glm::vec4( static_cast<float>( std::clamp( data.MultiScatterOctaves, 1, 3 ) ),
-                                    std::clamp( data.MultiScatterContribution, 0.0f, 1.0f ),
-                                    std::clamp( data.MultiScatterOcclusion, 0.0f, 1.0f ),
-                                    std::clamp( data.MultiScatterEccentricity, 0.0f, 1.0f ) );
+        // The ceiling is ECS::kCloudMultiScatterMaxOctaves and NOT a literal, for the reason the shadow
+        // ray's neighbour above gives: this clamp, the slider's Range and the clamp inside
+        // Common/CloudLighting.glslh are three copies of one number.
+        p.MultiScatter = glm::vec4(
+             static_cast<float>( std::clamp( data.MultiScatterOctaves, 1, ECS::kCloudMultiScatterMaxOctaves ) ),
+             std::clamp( data.MultiScatterContribution, 0.0f, 1.0f ),
+             std::clamp( data.MultiScatterOcclusion, 0.0f, 1.0f ),
+             std::clamp( data.MultiScatterEccentricity, 0.0f, 1.0f ) );
 
         // The aerial perspective is a coupling, not a dependency: without a volume the gate is 0 and the
         // shader composes the exact identity. The two scalars are read from AtmosphereEnv rather than

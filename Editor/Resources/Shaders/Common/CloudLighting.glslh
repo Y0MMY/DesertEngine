@@ -75,6 +75,146 @@ vec3 CloudScatterIntegral( vec3 scattering, float extinctionPerKm, float stepKm 
     return ( scattering - scattering * t ) / sigma;
 }
 
+// ---------------------------------------------------------------------------------------------------
+// THE MULTIPLE-SCATTERING SERIES — Wrenninge's octaves, as Unreal implements them
+// ---------------------------------------------------------------------------------------------------
+//
+// WHY THIS LIVES HERE AND NOT IN THE MARCH. It was fifty lines inside CloudRaymarch.shader's inner loop
+// until Р18, where nothing could reach it: the loop is the ONE part of the cloud lighting that no test
+// could drive, so the two relations that bound it — that a step cannot scatter more light toward the eye
+// than the source it integrates, and that more cloud between a sample and the sun means less light
+// arrives — were unasserted while every simpler property beside them was tested twice. Moving it into
+// this header compiles it as C++ with the rest (Desert/Tests/Engine/CloudLighting), which is the same
+// reason CloudScatterIntegral is here rather than written out at its call site.
+//
+// THE MOVE IS NOT BIT-EXACT AND THE DIFFERENCE IS NAMED RATHER THAN GLOSSED. The loop used to multiply
+// each octave's integral by the ray's transmittance and add it to the running luminance; it now sums the
+// octaves first and the caller multiplies once, which is t*(a+b+c) against t*a + t*b + t*c. Measured on
+// Clouds_Showcase, six points at 90 frames on a zero noise floor: 15 to 36 pixels of 980 480 differ, all
+// of them by 1/255, bias zero, and the pattern is uncorrelated (coherence 0.50). Four independent
+// renders of the new text reproduce each other exactly.
+//
+// WHAT IT APPROXIMATES. A cloud lit by single scattering alone is physically GREY: what makes a real one
+// white is light that has bounced inside it many times. Measured against a converged Monte Carlo of a
+// homogeneous lobe (the reference in Desert/Tests/Engine/CloudLighting), the first three scattering
+// orders carry only 27 % of what reaches the eye at the shipped extinction and 16 % at a physical one —
+// so this series is not "three orders", it is three TERMS standing in for all of them, and its weights
+// are inflated accordingly.
+//
+// THE THREE FACTORS ARE NOT BUILT THE SAME WAY, and the difference is Unreal's rather than an
+// inconsistency of ours. Scattering and extinction ACCUMULATE — each octave multiplies the previous
+// octave's coefficient by the current step, and only then is the step squared, giving 1, c, c^3
+// (VolumetricCloud.usf:388-393). The phase does NOT accumulate: every octave lerps from the BASE phase
+// toward isotropic, and it is only the lerp factor that is squared, giving 1, p, p^2
+// (VolumetricCloud.usf:422-429). Carrying the accumulating scheme over to the phase — which is what this
+// loop used to do — gives the third octave p^3 instead of p^2, and at the shipped eccentricity of 0.18
+// that is a weight of 0.0058 against 0.0324: six times closer to isotropic than the reference, which
+// shows up as a cloud whose silver lining is missing from its third order.
+//
+// ONE SHADOW RAY SERVES EVERY OCTAVE. That is the whole economy of the scheme: the expensive part is
+// finding how much material lies between a sample and the sun, and each order then reuses that number
+// with its own extinction scale. @p opticalDepth is that one measurement.
+//
+// WHAT AN OCTAVE COSTS, measured by Р18 so the next person does not have to guess before proposing more
+// of them. `Clouds: March` GPU self time out of the pass's own profiler line — never a frame-to-frame
+// difference — on Clouds_ShadowsOnGround at a 320x192 trace, Debug/MoltenVK, three arms interleaved in
+// one session on a SHARED machine and reported as the MINIMUM of four:
+//
+//     3 octaves, this file             14.395 ms   (spread 14.395 - 15.740, 9.3 %)
+//     3 octaves, the loop written out  14.523 ms   (spread 14.523 - 14.852, 2.3 %)
+//     1 octave,  this file             13.884 ms   (spread 13.884 - 14.587, 5.1 %)
+//
+// So moving the loop into this function costs NOTHING — the -0.128 ms is smaller than either arm's own
+// spread — and an octave is 0.256 ms, 1.8 % of the pass, or 4.2 ns per ray. Six octaves would therefore
+// be about +0.77 ms; Р18 measured that they make the picture WORSE and did not spend it.
+//
+// (The brief that set Р18 quoted 1.709 ms for this pass. The tree's own record is 12.695 ms for the same
+// pass at the same trace size and build — VolumetricCloudRenderer.cpp:67 — and this measurement lands
+// beside that one, not beside the brief's.)
+//
+// THE AMBIENT BELONGS TO THE FIRST ORDER ONLY. Unreal leaves it out of the octaves deliberately: the
+// approximation carries no occlusion of its own, so feeding an unoccluded ambient into every order
+// flattens the cloud into a uniform glow.
+
+// The ceiling on the octave count, in ONE place because THREE of them agreed only by inspection: the
+// slider's Range, the clamp in Graphic::PackCloudParams and the clamp here. This header cannot include
+// the C++ constant, so Desert/Tests/Engine/SettingConsumers reads this line's text and fails if
+// ECS::kCloudMultiScatterMaxOctaves ever parts company with it — the same arrangement, and for the same
+// reason, as CLOUD_LIGHT_MARCH_MAX_SAMPLES's neighbour in CloudRaymarch.shader.
+#define CLOUD_MAX_SCATTER_OCTAVES 3
+
+// The series' parameters, unpacked from u_CloudMultiScatter once per pixel. A struct rather than four
+// loose floats because the four are one calibration: the count decides how far the extinction ladder
+// reaches, and changing it without the steps moves the deepest octave by a square.
+struct CloudScatterSeries
+{
+    float Octaves;     // how many terms; clamped to CLOUD_MAX_SCATTER_OCTAVES
+    float ScatterStep; // MultiScatterContribution — how much less each order scatters
+    float ExtinctStep; // MultiScatterOcclusion    — how much less each order is absorbed
+    float PhaseStep;   // MultiScatterEccentricity — how much directionality each order keeps
+};
+
+// The in-scattered radiance one sample contributes across one step, summed over the series.
+//
+// NOT attenuated by the ray's transmittance: that belongs to the ray's history and not to the medium, and
+// keeping it out is what lets the bound below be stated at all ("this step cannot deliver more than the
+// source it integrates" is false the moment the answer carries a factor from somewhere else).
+//
+// @p sunRadiance   the sun's radiance at the top of the shadow ray, unattenuated
+// @p ambient       the sky's ambient radiance, already occluded by the caller's chosen geometry
+// @p opticalDepth  material between this sample and the sun, measured ONCE at the base extinction
+// @p phase         the base phase function evaluated at this ray's scattering angle
+// @p sigmaT        this sample's own extinction, per kilometre
+// @p albedo        the scattering albedo
+// @p stepKm        the length of the step being integrated
+vec3 CloudMultiScatterStep( CloudScatterSeries series, vec3 sunRadiance, vec3 ambient, float opticalDepth,
+                            float phase, float sigmaT, float albedo, float stepKm )
+{
+    int count = int( clamp( series.Octaves, 1.0f, float( CLOUD_MAX_SCATTER_OCTAVES ) ) );
+
+    float scatterFactor = 1.0f;
+    float extinctFactor = 1.0f;
+    float scatterStep   = clamp( series.ScatterStep, 0.0f, 1.0f );
+    float extinctStep   = clamp( series.ExtinctStep, 0.0f, 1.0f );
+
+    // UE's MsPhaseFactor. It starts at the authored step and is squared once per octave, and the octave
+    // USES it directly rather than a running product of it. The first octave is the base phase itself,
+    // which a factor of 1 expresses exactly.
+    float phaseStep   = clamp( series.PhaseStep, 0.0f, 1.0f );
+    float phaseFactor = 1.0f;
+
+    vec3 luminance = vec3( 0.0f, 0.0f, 0.0f );
+
+    for ( int octave = 0; octave < count; ++octave )
+    {
+        if ( octave > 0 )
+        {
+            scatterFactor *= scatterStep;
+            extinctFactor *= extinctStep;
+
+            scatterStep *= scatterStep;
+            extinctStep *= extinctStep;
+
+            phaseFactor = phaseStep;
+            phaseStep *= phaseStep;
+        }
+
+        float octavePhase   = mix( CLOUD_ISOTROPIC_PHASE, phase, phaseFactor );
+        float sunVisibility = exp( -opticalDepth * extinctFactor );
+
+        vec3 inScatter = sunRadiance * ( sunVisibility * octavePhase );
+        if ( octave == 0 )
+            inScatter += ambient;
+
+        float octaveExtinction = sigmaT * extinctFactor;
+        vec3  scattering       = inScatter * ( albedo * sigmaT * scatterFactor );
+
+        luminance += CloudScatterIntegral( scattering, octaveExtinction, stepKm );
+    }
+
+    return luminance;
+}
+
 // Ambient occlusion from the dimensional profile: deck p.144, `pow(1 - dimensional_profile, 0.5)`.
 //
 // It is a geometric argument rather than a fitted curve. Most of the ambient light a cloud receives comes
