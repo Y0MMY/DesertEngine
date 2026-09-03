@@ -409,7 +409,15 @@ Shader "CloudRaymarch"
             // a ceiling the march quietly reimposed.
             int   lightSamples = int(clamp(u_CloudSunColour.w, 1.0f, 64.0f));
             float stopT        = clamp(u_CloudMarch.y, 0.0f, 1.0f);
-            int   octaveCount  = int(clamp(u_CloudMultiScatter.x, 1.0f, 3.0f));
+
+            // The multiple-scattering series, unpacked once per pixel rather than per sample: the four
+            // fields are uniform over the whole dispatch, and rebuilding the struct inside the inner loop
+            // would put four loads under the hottest branch in the subsystem.
+            CloudScatterSeries series;
+            series.Octaves     = u_CloudMultiScatter.x;
+            series.ScatterStep = u_CloudMultiScatter.y;
+            series.ExtinctStep = u_CloudMultiScatter.z;
+            series.PhaseStep   = u_CloudMultiScatter.w;
 
             // The ambient a cloud sits in, resolved once per pixel rather than per step: in the physical
             // model it is the marched full-sphere mean scaled by the artist's factor, in the artistic
@@ -572,66 +580,19 @@ Shader "CloudRaymarch"
                                                   u_CloudPhase.z);
                         }
 
-                        // Wrenninge's multiple-scattering octaves, as Unreal implements them. Each order
-                        // scatters less, is absorbed less and is less directional than the one before it,
-                        // so the series falls away super-exponentially and three orders are enough.
-                        // Without this a cloud is lit by single scattering alone, which is physically grey:
-                        // what makes a real cloud white is light that has bounced inside it many times.
+                        // Wrenninge's multiple-scattering octaves, as Unreal implements them — the series
+                        // itself is Common/CloudLighting.glslh's CloudMultiScatterStep, which is where its
+                        // arrangement and its price are written down. It lives there rather than here so
+                        // that Desert/Tests/Engine/CloudLighting can drive it as C++ and bound it against a
+                        // converged Monte Carlo; inside this loop nothing could reach it.
                         //
-                        // THE THREE FACTORS ARE NOT BUILT THE SAME WAY, and the difference is Unreal's
-                        // rather than an inconsistency of ours. Scattering and extinction ACCUMULATE —
-                        // each octave multiplies the previous octave's coefficient by the current step,
-                        // and only then is the step squared, giving 1, c, c^3 (VolumetricCloud.usf:388-393).
-                        // The phase does NOT accumulate: every octave lerps from the BASE phase toward
-                        // isotropic, and it is only the lerp factor that is squared, giving 1, p, p^2
-                        // (VolumetricCloud.usf:422-429). Carrying the accumulating scheme over to the phase
-                        // — which is what this loop used to do — gives the third octave p^3 instead of p^2,
-                        // and at the shipped eccentricity of 0.18 that is a weight of 0.0058 against
-                        // 0.0324: six times closer to isotropic than the reference, which shows up as a
-                        // cloud whose silver lining is missing from its third order.
-                        float scatterFactor = 1.0f;
-                        float extinctFactor = 1.0f;
-                        float scatterStep   = clamp(u_CloudMultiScatter.y, 0.0f, 1.0f);
-                        float extinctStep   = clamp(u_CloudMultiScatter.z, 0.0f, 1.0f);
-
-                        // UE's MsPhaseFactor. It starts at the authored step and is squared once per
-                        // octave, and the octave USES it directly rather than a running product of it. The
-                        // first octave is the base phase itself, which a factor of 1 expresses exactly.
-                        float phaseStep   = clamp(u_CloudMultiScatter.w, 0.0f, 1.0f);
-                        float phaseFactor = 1.0f;
-
-                        for (int octave = 0; octave < octaveCount; ++octave)
-                        {
-                            if (octave > 0)
-                            {
-                                scatterFactor *= scatterStep;
-                                extinctFactor *= extinctStep;
-
-                                scatterStep *= scatterStep;
-                                extinctStep *= extinctStep;
-
-                                phaseFactor = phaseStep;
-                                phaseStep *= phaseStep;
-                            }
-
-                            float octavePhase   = mix(CLOUD_ISOTROPIC_PHASE, phase, phaseFactor);
-                            float sunVisibility = exp(-opticalDepth * extinctFactor);
-
-                            vec3 inScatter = u_CloudSunColour.rgb * (sunVisibility * octavePhase);
-
-                            // The sky's ambient belongs to the FIRST order only. Unreal leaves it out of
-                            // the octaves deliberately: the approximation carries no occlusion of its own,
-                            // so feeding an unoccluded ambient into every order flattens the cloud into a
-                            // uniform glow.
-                            if (octave == 0)
-                                inScatter += ambientRadiance * ambientOcclusion;
-
-                            float octaveExtinction = sigmaT * extinctFactor;
-                            vec3  scattering       = inScatter * (albedo * sigmaT * scatterFactor);
-
-                            luminance += transmittance *
-                                         CloudScatterIntegral(scattering, octaveExtinction, stepKm);
-                        }
+                        // The ray's transmittance is applied HERE and not inside, because it belongs to the
+                        // ray's history rather than to the medium — and keeping it out is what lets the
+                        // series be bounded by the source it integrates.
+                        luminance += transmittance *
+                                     CloudMultiScatterStep(series, u_CloudSunColour.rgb,
+                                                           ambientRadiance * ambientOcclusion, opticalDepth,
+                                                           phase, sigmaT, albedo, stepKm);
 
                         // Recorded BEFORE the ray is attenuated: the weight is how much this sample was
                         // able to contribute, not how much is left after it.

@@ -689,6 +689,13 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     // THREE, not one. A cloud lit by single scattering alone is physically grey; what makes a real one
     // white is light that has bounced inside it many times.
     EXPECT_EQ( DefaultOf<int32_t>( cloud, "MultiScatterOctaves" ), 3 );
+    // And the same relation the shadow ray's ceiling has, for the same reason: the Range, the payload's
+    // clamp and the clamp in Common/CloudLighting.glslh are three copies of one number. Р18 made them
+    // one constant while measuring whether more octaves buy anything — they do not, and the constant
+    // carries the measurement.
+    EXPECT_FLOAT_EQ( Find( cloud, "MultiScatterOctaves" )->Meta.RangeMax,
+                     static_cast<float>( Desert::ECS::kCloudMultiScatterMaxOctaves ) );
+    EXPECT_GE( Desert::ECS::kCloudMultiScatterMaxOctaves, DefaultOf<int32_t>( cloud, "MultiScatterOctaves" ) );
     // UE's shipped Multiscatter_Controls, channel for channel. The occlusion is the one that matters:
     // at 0.5 each successive order was absorbed twice as hard as it should be, light never reached the
     // core, and the cloud read grey rather than white.

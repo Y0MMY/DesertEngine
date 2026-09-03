@@ -70,6 +70,20 @@ namespace Desert::ECS
     // it is the plateau measured on OUR quadrature instead of copied from theirs.
     inline constexpr int32_t kCloudLightMarchMaxSamples = 64;
 
+    // The top of the multiple-scattering series, on exactly the terms above and for the same reason: the
+    // slider's Range, the clamp in Graphic::PackCloudParams and the clamp inside
+    // Common/CloudLighting.glslh's CloudMultiScatterStep are three copies of one number. They were three
+    // literal 3s and agreed only by inspection; Desert/Tests/Engine/SettingConsumers now reads the
+    // header's text and fails if they part company.
+    //
+    // THREE, AND Р18 MEASURED WHY IT CANNOT SIMPLY BE RAISED. Against a converged Monte Carlo of a
+    // homogeneous lobe, running the SHIPPED decay rule out to six octaves makes the picture WORSE, not
+    // better: each further octave's extinction factor is the previous one squared times the last step, so
+    // by the fourth it is 6.1e-5 and the term is a perfectly uniform glow with no direction and no
+    // gradient in it. Measured on the lobe at 45 /km, the tonal contrast error against the reference goes
+    // -0.228 at three octaves to -0.290 at six. More terms of this particular series buy flatness.
+    inline constexpr int32_t kCloudMultiScatterMaxOctaves = 3;
+
     struct VolumetricCloudData
     {
         REFLECT()
@@ -653,13 +667,74 @@ namespace Desert::ECS
                            "This is what makes a cloud opaque rather than merely visible. The cloud type "
                            "multiplies it: ice at a quarter of a cumulus, a storm at a third above it." ) )
         // EIGHT, NOT FORTY-FIVE, and the difference is the approximation rather than the physics. A real
-        // cumulus extinguishes at roughly 45 per kilometre, at which the optical depth toward the sun is
-        // ~25 everywhere inside the body and EVERY scattering order arrives at zero — the cloud renders
-        // uniformly grey. What makes a real one white is a random walk of photons at an albedo of
-        // 0.9999, which three octaves do not reproduce and are not meant to. This is therefore the
-        // EFFECTIVE extinction of the approximation: chosen so that a kilometre of cloud is opaque along
-        // the view ray while the shadow ray still resolves a lit top and a darker base. First set from a
-        // guess of 25 and corrected against the frame, which is the only instrument that measures it.
+        // cumulus extinguishes at roughly 45 per kilometre. This is therefore the EFFECTIVE extinction of
+        // the approximation: chosen so that a kilometre of cloud is opaque along the view ray while the
+        // shadow ray still resolves a lit top and a darker base. First set from a guess of 25 and
+        // corrected against the frame, which is the only instrument that measures it.
+        //
+        // ---- Р18, 2026-09-03: THE RAISE WAS ATTEMPTED, MEASURED AND REFUSED ----------------------------
+        //
+        // Task Р18 was set on the chain "the near field is soft <- the eye integrates 657 m <- the
+        // extinction is 8 and not 45 <- the multiple-scattering approximation cannot carry a physical
+        // extinction" (Common/CloudField.glslh, Р9/Р13). Both of the last two links are real. The first
+        // one is not, and that is the finding.
+        //
+        // MEASURED ON THE FRAME. Clouds_Showcase from the owner's camera at (0,200,0), six points, 90
+        // frames, on a noise floor of exactly zero — a scene carrying an explicit ExtinctionScale of 8
+        // reproduced the default byte for byte at all six. Tonal contrast, Tools/ImageStat:
+        //
+        //     point            8 /km   16 /km   45 /km
+        //     zenith  -Z       0.238    0.234    0.242
+        //     zenith  +Z       0.216    0.193    0.181   <- the WRONG way, and the largest of the six
+        //     mid     -Z       0.109    0.116    0.119
+        //     mid     +Z       0.110    0.114    0.115
+        //     horizon -Z       0.716    0.713    0.710
+        //     horizon +Z       0.742    0.741    0.739
+        //
+        // Five and a half times the extinction moves five of the six points by less than 0.01. The frames
+        // agree and say more than the numbers do: the zenith's SILHOUETTE gains a visible crenellation and
+        // the BODY behind it stays exactly as flat, slightly greyer. The owner's complaint is the body.
+        //
+        // WHY THE PRIZE IS SO SMALL. Desert/Tests/Engine/CloudField, run once per extinction, puts the
+        // penetration at 657 / 508 / 444 / 400 / 358 / 319 m for 8 / 16 / 24 / 32 / 45 / 64 — SUBLINEAR,
+        // because a ray meets cloud on the profile's ramp and a stronger medium only stops a little
+        // earlier on the same slope. What that buys is the erosion's share of the silhouette: 4.1 m ->
+        // 9.1 m at an 80 m lag, on lumps that already carry 92.7 m of it. The ratio more than doubles and
+        // the absolute is five metres.
+        //
+        // AND THE SENTENCE THIS COMMENT USED TO CARRY WAS WRONG IN ITS MECHANISM. It said that at a
+        // physical extinction "EVERY scattering order arrives at zero" and the cloud renders uniformly
+        // grey. Driven directly (Desert/Tests/Engine/CloudLighting), at an optical depth of 45 the three
+        // octaves' sun visibilities are 2.9e-20, 1.3e-5 and 0.495: the THIRD ARRIVES AT HALF, because its
+        // extinction factor is MultiScatterOcclusion^3 = 1/64. The greyness is real and the reason is the
+        // opposite of the one recorded — not an order that dies, but an order that survives EVERYWHERE
+        // EQUALLY. At that optical depth essentially all of the light the series delivers is the third
+        // octave's, and the third octave's phase sits 3 % of the way from isotropic toward the base one,
+        // so what reaches the eye is a nearly directionless glow of nearly uniform strength. The
+        // approximation does not go dark at a physical extinction; it goes FLAT. Against a converged
+        // Monte Carlo of a homogeneous lobe the tonal-contrast error is 0.04 at 8 /km and 0.23 to 0.51 at
+        // 45, and the reference moves the other way — a real lobe gets MORE modelled as it thickens.
+        //
+        // AND THE NEAR FIELD IS NOT LIT BY THIS TERM AT ALL, which is the knockout that settles it. Two
+        // single-field changes on the same frame (mid -Z, Clouds_Showcase, the owner's camera):
+        // deleting AmbientScale takes the mean 0.736 -> 0.391 and the tonal contrast 0.109 -> 0.519, while
+        // taking MultiScatterOctaves from 3 to 1 — removing the WHOLE multiple-scattering series — takes
+        // them 0.736 -> 0.726 and 0.109 -> 0.117. The sky's ambient outweighs the entire series by about
+        // forty to one there. Whatever this extinction does to the scattering, the near field is lit by
+        // the ambient, and the ambient is one full-sphere mean through one scalar per sample.
+        //
+        // WHAT WOULD CHANGE THE ANSWER. Not this number. The silhouette is 92.7 m of lump field and 4.1 m
+        // of erosion, so a rougher silhouette is a question for Assets::BakeCloudProceduralVolume; and the
+        // flat near-field body is the ambient term, which is D-25's finding standing after Р7 and Р12.
+        //
+        // ONE CASE WHERE RAISING IT DOES SOMETHING, recorded because it is a real measurement and not a
+        // reason to move the default. On BROKEN cumulus (the same sky at coverage 0.35) the pair
+        // "45 /km + MultiScatterOcclusion 0.4847" visibly models the lobes — a shaded underside and a
+        // crenellated top instead of a smooth ellipse (Docs/Clouds/Shots/P18_broken_mid_*). On the ruler
+        // it is a draw over six points, +0.058 / -0.072 / -0.002 / -0.005 / +0.031 / +0.031, and the one
+        // large negative is the sunward zenith where a thick cloud now correctly hides the sun that used
+        // to shine through as the p95. Moving this default re-authorises three dozen scenes (D-20, D-26),
+        // so it is the owner's decision; the numbers are in Docs/Clouds/ANALYSIS_APPROACH.md D-32.
         float ExtinctionScale = 8.0f;
 
         PROPERTY( DisplayName( "Near Fade Start Distance" ), Category( "Detail" ), Length,
@@ -846,7 +921,8 @@ namespace Desert::ECS
         // reaches 64 rather than stopping where the defect lived.
         int32_t LightMarchSamples = 32;
 
-        PROPERTY( DisplayName( "Multiple Scattering Octaves" ), Category( "Lighting" ), Range( 1, 3 ),
+        PROPERTY( DisplayName( "Multiple Scattering Octaves" ), Category( "Lighting" ),
+                  Range( 1, ::Desert::ECS::kCloudMultiScatterMaxOctaves ),
                   Tooltip( "How many scattering orders are approximated. ONE IS SINGLE SCATTERING, and a "
                            "cloud lit by single scattering alone is physically grey: the light that makes "
                            "a real cloud white has bounced many times inside it. Two or three is where it "
@@ -870,6 +946,28 @@ namespace Desert::ECS
         // exposed. At 0.5 each successive scattering order was absorbed twice as hard as it should be,
         // so light never reached the core and the cloud read grey rather than white. Halving it is what
         // lets the deeper orders light the body from inside.
+        //
+        // AND Р18 FOUND OUT WHAT IT IS PHYSICALLY, which is worth having because it is the one number in
+        // the series that has a right answer rather than a taste. With three octaves the deepest term's
+        // extinction factor is this value CUBED, so the length over which its light is attenuated is
+        // 1 / (sigma * occlusion^3). The medium's own diffusion length is 1 / (sigma * sqrt(3 (1-a)(1-a g)))
+        // — 1.10 km at the shipped extinction, and the similarity factor in it does NOT depend on sigma.
+        // Setting occlusion to the cube root of that factor, 0.4847, puts the two exactly on top of each
+        // other.
+        //
+        // THAT IS NOT AN IMPROVEMENT AT THE SHIPPED EXTINCTION, and the measurement is why 0.25 stays.
+        // Against a converged Monte Carlo of a homogeneous lobe (Desert/Tests/Engine/CloudLighting), at
+        // 8 /km the shipped 0.25 reproduces the reference's tonal contrast to -0.010 / -0.022 / +0.014
+        // over three view geometries, and 0.4847 overshoots to +0.215 / +0.184 / +0.214 while losing
+        // 5-77 % of the energy. At 45 /km the ranking reverses — 0.25 gives -0.228 / -0.426 / -0.432 and
+        // 0.4847 gives +0.016 / +0.044 / +0.032.
+        //
+        // WHAT THAT MEANS, and it is the reason ExtinctionScale is still 8: the octave series is
+        // accidentally right at the shipped extinction. A 1 km lobe at 8 /km has a diffusion length of
+        // 1.10 km, so "a uniform glow inside the body" IS very nearly the truth there and the deepest
+        // octave's 8 km attenuation length is close enough not to matter. At 45 /km the truth has
+        // structure at 195 m and the octave still spreads it over 1.42 km. The series was calibrated at
+        // the one extinction where its own flat-glow assumption happens to hold.
         float MultiScatterOcclusion = 0.25f;
 
         PROPERTY( DisplayName( "Multiple Scattering Eccentricity" ), Category( "Lighting" ), Range( 0.0f, 1.0f ),

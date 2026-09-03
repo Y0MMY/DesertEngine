@@ -206,7 +206,15 @@ namespace
 
     // The component's Extinction Scale default, per kilometre, and the transmittance at which a column
     // counts as cloudy.
-    constexpr float kExtinctionPerKm    = 8.0f;
+    //
+    // READ OUT OF THE COMPONENT SINCE Р18, and it was the literal 8 with a comment saying "the component's
+    // default" beside it. That is the mirror this suite exists to catch everywhere else: the penetration
+    // this file measures — 657 m, the number Р9 named as the binding constraint on how much surface a
+    // cloud can have — is a DIRECT function of this value, so a task that moved the extinction and did not
+    // notice this line would have left the whole finding asserted against the old medium while every
+    // sentence about it said otherwise.
+    const float kExtinctionPerKm = Desert::ECS::VolumetricCloudData{}.ExtinctionScale;
+
     constexpr float kOpaqueOpticalDepth = 0.6931472f; // half the sky behind it is hidden
 
     SkyCover MeasureSkyCover( float coverage, int columnsPerAxis, int heightSamples )

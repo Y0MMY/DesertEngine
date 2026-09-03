@@ -553,6 +553,42 @@ TEST( SettingConsumers, TheShaderClampsTheShadowRayAtTheSameCeilingTheSliderOffe
          << "payload packs. Expected to find:\n  " << expected;
 }
 
+// The same three-ceilings shape as the test above, for the multiple-scattering octave count.
+//
+// It was three literal 3s — the PROPERTY's Range, the std::clamp in Graphic::PackCloudParams and a clamp
+// written again in the march — and they agreed only because nobody had moved one. Р18 had reason to move
+// it (the question was whether more octaves recover what the approximation loses at a physical
+// extinction; measured, they make it worse, which is recorded on the constant itself), and the first
+// thing that question needs is for the three to be one.
+//
+// THE CLAMP IS IN THE HEADER, NOT THE SHADER, and the difference is the point of the change rather than
+// an accident of it: the series moved into Common/CloudLighting.glslh so a test could drive it as C++.
+// This assertion therefore reads a .glslh where its neighbour above reads a .shader.
+TEST( SettingConsumers, TheScatteringSeriesClampsItsOctavesAtTheSameCeilingTheSliderOffers )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() ) << "repository root not found from the test's working directory";
+
+    const std::string path   = root + "Editor/Resources/Shaders/Common/CloudLighting.glslh";
+    const std::string source = ReadFile( path );
+    ASSERT_FALSE( source.empty() ) << path << " is missing or empty";
+
+    const std::string expected =
+         "#define CLOUD_MAX_SCATTER_OCTAVES " + std::to_string( Desert::ECS::kCloudMultiScatterMaxOctaves );
+
+    EXPECT_NE( source.find( expected ), std::string::npos )
+         << "CloudLighting.glslh does not cap the multiple-scattering series at "
+         << Desert::ECS::kCloudMultiScatterMaxOctaves << ", which is the ceiling the slider offers and the "
+         << "payload packs. Expected to find:\n  " << expected;
+
+    // And the clamp actually USES the macro rather than repeating its value beside it — the failure mode
+    // the light march's own ceiling had, where the number was right in one place and written out in
+    // another.
+    EXPECT_NE( source.find( "float( CLOUD_MAX_SCATTER_OCTAVES )" ), std::string::npos )
+         << "CloudMultiScatterStep does not clamp against CLOUD_MAX_SCATTER_OCTAVES, so the macro above is "
+            "a comment rather than a ceiling";
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
