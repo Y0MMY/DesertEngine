@@ -63,11 +63,13 @@ namespace Desert::Graphic::System
                       const ShaderProtocols::PointLight& pointLights, const ShaderProtocols::SpotLight& spotLights,
                       const DeferredShadowInput& shadow, const std::shared_ptr<Image2D>& aoImage,
                       float giIntensity, bool ssaoEnabled, int giMode, const std::shared_ptr<Image2D>& giImage,
-                      const CloudShadowInput& cloudShadow )
+                      const CloudShadowInput& cloudShadow, const DeferredEnvironmentInput& environment )
         {
             const auto& target = m_TargetFramebuffer.lock();
             if ( !target || !gbuffer || !m_Pipeline || !m_Material )
                 return;
+
+            ReportEnvironmentGap( environment );
 
             auto renderPass = RenderPass::Create( {
                  .TargetFramebuffer = target,
@@ -82,14 +84,44 @@ namespace Desert::Graphic::System
             m_Material->Bind( gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
                               gbuffer->GetColorAttachmentImage( 2 ), gbuffer->GetColorAttachmentImage( 3 ),
                               lightDir, lightColor, cameraPos, debugMode, pointLights, spotLights, shadow, aoImage,
-                              giIntensity, ssaoEnabled, giMode, giImage, cloudShadow );
+                              giIntensity, ssaoEnabled, giMode, giImage, cloudShadow, environment );
             renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_Material->GetMaterialExecutor() );
             renderer.EndRenderPass();
         }
 
     private:
-        std::shared_ptr<Shader>                    m_Shader;
-        std::shared_ptr<GraphicsPipeline>          m_Pipeline;
-        std::unique_ptr<MaterialDeferredLighting>  m_Material;
+        // §1.4: a resource that did not arrive is logged with its reason, never quietly replaced. There is
+        // no "no environment" mode here — the ambient IS the environment, so an incomplete set means the
+        // IBL bake failed or never ran, and every static opaque surface in the frame is about to be shaded
+        // by whatever the descriptor fallback happens to be. Say which of the three is missing; a bake that
+        // produced two cubes and no LUT is a different failure from one that produced nothing.
+        //
+        // Edge-triggered, and per RENDERER instance rather than per process: a fullscreen pass runs every
+        // frame in every open viewport, so an unconditional log is 60 lines a second times the number of
+        // views, and a `static` one would let the second viewport's failure hide behind the first's.
+        void ReportEnvironmentGap( const DeferredEnvironmentInput& environment )
+        {
+            const bool complete = environment.IsComplete();
+            if ( complete == m_EnvironmentWasComplete )
+                return;
+            m_EnvironmentWasComplete = complete;
+
+            if ( !complete )
+                LOG_ERROR( "DeferredLighting: no baked environment to shade the ambient with — irradiance "
+                           "cube {}, prefiltered cube {}, BRDF LUT {}. Static opaque geometry will be lit "
+                           "by the descriptor fallback, and will not match the forward-drawn skinned, "
+                           "custom-shader and glass meshes in the same frame.",
+                           environment.Irradiance ? "present" : "MISSING",
+                           environment.Prefiltered ? "present" : "MISSING",
+                           environment.BrdfLut ? "present" : "MISSING" );
+        }
+
+        std::shared_ptr<Shader>                   m_Shader;
+        std::shared_ptr<GraphicsPipeline>         m_Pipeline;
+        std::unique_ptr<MaterialDeferredLighting> m_Material;
+
+        // Starts true so the first INCOMPLETE frame is the edge that logs; a renderer that never loses
+        // its environment says nothing at all.
+        bool m_EnvironmentWasComplete = true;
     };
 } // namespace Desert::Graphic::System

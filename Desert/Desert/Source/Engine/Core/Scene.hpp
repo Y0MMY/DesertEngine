@@ -79,7 +79,9 @@ namespace Desert::Core
 
         void Resize( const uint32_t width, const uint32_t height ) const;
 
-        [[nodiscard]] const std::optional<Graphic::Environment>& GetEnvironment() const;
+        // By value — see SceneRenderer::GetEnvironment(). The renderer composes this answer rather than
+        // storing it, so a reference here would outlive the object it names.
+        [[nodiscard]] std::optional<Graphic::Environment> GetEnvironment() const;
 
         [[nodiscard]] Graphic::SceneRenderer* GetSceneRenderer() const
         {

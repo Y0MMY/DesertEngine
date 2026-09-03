@@ -525,7 +525,7 @@ namespace Desert::Core
         return m_SceneRenderer->CreateEnvironment( filepath );
     }
 
-    const std::optional<Graphic::Environment>& Scene::GetEnvironment() const
+    std::optional<Graphic::Environment> Scene::GetEnvironment() const
     {
         return m_SceneRenderer->GetEnvironment();
     }

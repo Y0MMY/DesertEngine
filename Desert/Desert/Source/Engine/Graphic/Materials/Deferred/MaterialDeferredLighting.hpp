@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Materials/Material.hpp>
 #include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/TextureCubeProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
 
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
@@ -49,6 +50,26 @@ namespace Desert::Graphic
         bool  Enabled      = false;
     };
 
+    // THE BAKED SKY, as the deferred composite's ambient source — the same three images
+    // MeshRenderer::FrameState hands the forward PBR materials (MaterialPBRBase::UpdateEnvironment), and
+    // deliberately the same struct shape as the two above: data gathered by SceneRenderer, consumed here.
+    //
+    // All three or none. The split-sum ambient is not separable — the diffuse cube without the
+    // prefiltered one is an ambient with no reflections, and the prefiltered one without the LUT is a
+    // reflection with no Fresnel weight. A partial set is a bake that went wrong, and the consumer says
+    // so out loud rather than shading half a model.
+    struct DeferredEnvironmentInput
+    {
+        ImageCube* Irradiance  = nullptr; // cosine-convolved sky -> the diffuse half
+        ImageCube* Prefiltered = nullptr; // GGX-prefiltered radiance, roughness across mips
+        Image2D*   BrdfLut     = nullptr; // split-sum BRDF integration (cosLo, roughness)
+
+        bool IsComplete() const
+        {
+            return Irradiance != nullptr && Prefiltered != nullptr && BrdfLut != nullptr;
+        }
+    };
+
     // Fullscreen deferred-lighting material: binds the scene renderer's G-buffer color targets (albedo/metallic,
     // normal/roughness, world-position) + the sun (+ its CSM shadow maps) + ALL point & spot lights (uploaded
     // into the shared SSBO layout the mesh PBR shader also uses) + a debug-mode selector, driving
@@ -65,6 +86,9 @@ namespace Desert::Graphic
             m_SSAO            = m_MaterialExecutor->GetTexture2DProperty( "u_SSAO" ).get();
             m_GI              = m_MaterialExecutor->GetTexture2DProperty( "u_GI" ).get();
             m_CloudShadowMap  = m_MaterialExecutor->GetTexture2DProperty( "u_CloudShadowMap" ).get();
+            m_EnvIrradiance   = m_MaterialExecutor->GetTextureCubeProperty( "u_EnvIrradianceTex" ).get();
+            m_EnvSpecular     = m_MaterialExecutor->GetTextureCubeProperty( "u_EnvSpecularTex" ).get();
+            m_BrdfLut         = m_MaterialExecutor->GetTexture2DProperty( "u_BRDFLUTTexture" ).get();
         }
 
         // gA = Albedo+Metallic, gB = Normal+Roughness, gC = WorldPosition; lightDir.xyz = direction the sun
@@ -76,7 +100,8 @@ namespace Desert::Graphic
                    int debugMode, const ShaderProtocols::PointLight& pointLights,
                    const ShaderProtocols::SpotLight& spotLights, const DeferredShadowInput& shadow,
                    const std::shared_ptr<Image2D>& aoImage, float giIntensity, bool ssaoEnabled, int giMode,
-                   const std::shared_ptr<Image2D>& giImage, const CloudShadowInput& cloudShadow )
+                   const std::shared_ptr<Image2D>& giImage, const CloudShadowInput& cloudShadow,
+                   const DeferredEnvironmentInput& environment )
         {
             if ( m_GBufferA && gA )
                 m_GBufferA->SetImage( gA.get() );
@@ -92,6 +117,19 @@ namespace Desert::Graphic
             // bound here and the shader never samples it (the descriptor keeps its dummy image).
             if ( m_GI && giImage )
                 m_GI->SetImage( giImage.get() );
+
+            // The baked sky. Bound all-or-nothing, matching MaterialPBRBase::UpdateEnvironment's shape so
+            // the two paths cannot end up sampling different generations of the same bake. Incomplete is
+            // reported by the caller (DeferredLightingRenderer) — it is a bake failure, not a mode.
+            if ( environment.IsComplete() )
+            {
+                if ( m_EnvIrradiance )
+                    m_EnvIrradiance->SetTexture( environment.Irradiance );
+                if ( m_EnvSpecular )
+                    m_EnvSpecular->SetTexture( environment.Prefiltered );
+                if ( m_BrdfLut )
+                    m_BrdfLut->SetImage( environment.BrdfLut );
+            }
 
             SetLightDir( lightDir );
             SetLightColor( lightColor );
@@ -202,5 +240,9 @@ namespace Desert::Graphic
         Texture2DProperty* m_SSAO            = nullptr;
         Texture2DProperty* m_GI              = nullptr;
         Texture2DProperty* m_CloudShadowMap  = nullptr;
+
+        TextureCubeProperty* m_EnvIrradiance = nullptr;
+        TextureCubeProperty* m_EnvSpecular   = nullptr;
+        Texture2DProperty*   m_BrdfLut       = nullptr;
     };
 } // namespace Desert::Graphic

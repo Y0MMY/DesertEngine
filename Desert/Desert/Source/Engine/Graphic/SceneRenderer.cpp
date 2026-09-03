@@ -663,13 +663,45 @@ namespace Desert::Graphic
                 cloudShadow.Enabled      = true;
             }
 
+            // The baked sky the composite shades its ambient with — resolved from the SAME Environment
+            // and the SAME BRDF LUT that MeshRenderer::BuildFrameState hands the forward materials
+            // (MeshRenderer.cpp:1318-1329). One bake, one generation, both paths: gathering it a second
+            // way here would be the mirror that drifts, and the forward-drawn skinned/glass meshes
+            // composited over this pass a few lines below would eventually reflect a different sky from
+            // the wall behind them.
+            DeferredEnvironmentInput environment;
+            {
+                auto* imageService = Runtime::ResourceRegistry::GetImageService();
+                if ( const auto& env = GetEnvironment(); env.has_value() )
+                {
+                    if ( env->IrradianceMap.IsValid() )
+                        environment.Irradiance =
+                             static_cast<ImageCube*>( imageService->Resolve( env->IrradianceMap ) );
+                    if ( env->PreFilteredMap.IsValid() )
+                        environment.Prefiltered =
+                             static_cast<ImageCube*>( imageService->Resolve( env->PreFilteredMap ) );
+                }
+                if ( const auto& brdf = Renderer::GetInstance().GetBRDFTexture();
+                     brdf && brdf->GetImageHandle().IsValid() )
+                    environment.BrdfLut = static_cast<Image2D*>( imageService->Resolve( brdf->GetImageHandle() ) );
+            }
+
             // The RSM path pre-applies its intensity in GIResolve, so pass 0 there to avoid scaling twice;
             // the screen-space gather is scaled inside the lighting shader.
             const float giIntensity = ( m_GIMode == Core::GIMode::ScreenSpace ) ? m_GIIntensity : 0.0f;
-            UNIQUE_GET_AS( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
-                 ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
-                            GetPointLights(), GetSpotLights(), shadow, aoImage, giIntensity, m_EnableSSAO,
-                            static_cast<int>( m_GIMode ), giImage, cloudShadow );
+            {
+                // The composite ALONE. "Deferred: Lighting" above spans the whole deferred stage — the
+                // G-buffer fill, SSAO, the RSM, the forward-over draws, the copy and SSR — so its slope
+                // cannot price a change to this pass, and a frame-to-frame delta prices the machine.
+                // Its siblings (RSM, GIResolve, SSR) were already itemised; this was the one full-screen
+                // pass in the stage with no line of its own, which made the cost of the ambient
+                // unmeasurable at exactly the moment it acquired two cube samples and a LUT fetch.
+                DESERT_PROFILE_PASS( "Deferred: Composite" );
+                UNIQUE_GET_AS( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
+                     ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
+                                GetPointLights(), GetSpotLights(), shadow, aoImage, giIntensity, m_EnableSSAO,
+                                static_cast<int>( m_GIMode ), giImage, cloudShadow, environment );
+            }
 
             // Custom-shader (generic) meshes have no G-buffer variant — draw them forward OVER
             // the deferred composite (before the glass snapshot so glass refracts them too).
@@ -1195,7 +1227,7 @@ namespace Desert::Graphic
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems.at( "SkyboxSystem" ) )->GetAtmosphere();
     }
 
-    const std::optional<Environment>& SceneRenderer::GetEnvironment()
+    std::optional<Environment> SceneRenderer::GetEnvironment()
     {
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->GetEnvironment();
     }
