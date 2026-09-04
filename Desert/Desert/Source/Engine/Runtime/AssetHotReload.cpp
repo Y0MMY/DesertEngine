@@ -251,6 +251,14 @@ namespace Desert::Runtime
             // and a live parameter edit that reached only the static one would leave a character wearing
             // the previous value while the crate beside it updated. Nothing is built here — a path no
             // draw has asked for has nothing to refresh.
+            //
+            // It looks up THIS handle and does not walk an instance's parent chain, which changes what
+            // happens when a material-INSTANCE file is edited — and changes it for the better. `Get` used
+            // to resolve an instance to its PARENT's material, so an edited instance had its own params
+            // written over the parent's runtime material, and every sibling using that parent silently
+            // took them. An instance owns no runtime material, so the list is empty here, and the branch
+            // below does the correct thing instead: refresh the components, whose cached instances
+            // re-apply their overrides.
             const auto variants = materialService->GetBuiltVariants( handle );
 
             const bool custom       = asset->Data().UsesCustomShader();
