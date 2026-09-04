@@ -82,15 +82,9 @@ namespace Desert::Graphic
                                         bool enabled, int debugMode, bool showNormals,
                                         const glm::vec4& cascadeWorldPerTexel, bool lightingDebug )
     {
-        // Matches ShadowUB in PBR.glsl.frag.
-        constexpr uint32_t kMaxCascades = 4;
-        struct ShadowUBData
-        {
-            glm::mat4 LightViewProj[kMaxCascades];
-            glm::vec4 Params;           // x = bias, y = enabled, z = debug mode, w = cascade count
-            glm::vec4 DebugParams;      // x = show normals
-            glm::vec4 CascadeTexelWorld; // per-cascade world size of one shadow-map texel
-        } data;
+        // Matches the ShadowUB block of every mesh PBR shader; the mirror itself lives in the header so
+        // a test can compare it with the reflected GLSL block.
+        ShadowUBData data;
 
         const uint32_t n = numCascades < kMaxCascades ? numCascades : kMaxCascades;
         for ( uint32_t i = 0; i < kMaxCascades; ++i )
@@ -101,17 +95,15 @@ namespace Desert::Graphic
         data.CascadeTexelWorld = cascadeWorldPerTexel;
 
         auto* parent = instance->GetParentMaterial();
-        if ( auto* ub = parent->Get<UniformBufferProperty>( "ShadowUB" ) )
+        if ( auto* ub = parent->Get<UniformBufferProperty>( kShadowBlockName ) )
             ub->SetRawData( reinterpret_cast<const std::byte*>( &data ), sizeof( data ) );
 
         // Bind every cascade map (descriptors must stay valid each frame). Names u_ShadowMap0..3.
-        static const char* kNames[kMaxCascades] = { "u_ShadowMap0", "u_ShadowMap1", "u_ShadowMap2",
-                                                    "u_ShadowMap3" };
         for ( uint32_t i = 0; i < kMaxCascades; ++i )
         {
             Image2D* img = ( i < n ) ? cascadeMaps[i] : nullptr;
             if ( img )
-                if ( auto* tex = parent->Get<Texture2DProperty>( kNames[i] ) )
+                if ( auto* tex = parent->Get<Texture2DProperty>( kShadowMapNames[i] ) )
                     tex->SetImage( img );
         }
     }
@@ -121,13 +113,13 @@ namespace Desert::Graphic
     {
         auto* parent = instance->GetParentMaterial();
         if ( irradiance )
-            if ( auto* tex = parent->Get<TextureCubeProperty>( "u_EnvIrradianceTex" ) )
+            if ( auto* tex = parent->Get<TextureCubeProperty>( kEnvIrradianceName ) )
                 tex->SetTexture( irradiance );
         if ( prefiltered )
-            if ( auto* tex = parent->Get<TextureCubeProperty>( "u_EnvSpecularTex" ) )
+            if ( auto* tex = parent->Get<TextureCubeProperty>( kEnvSpecularName ) )
                 tex->SetTexture( prefiltered );
         if ( brdfLut )
-            if ( auto* tex = parent->Get<Texture2DProperty>( "u_BRDFLUTTexture" ) )
+            if ( auto* tex = parent->Get<Texture2DProperty>( kBrdfLutName ) )
                 tex->SetImage( brdfLut );
     }
 

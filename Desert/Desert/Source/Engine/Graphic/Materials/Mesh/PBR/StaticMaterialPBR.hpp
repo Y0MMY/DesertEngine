@@ -3,17 +3,10 @@
 #include <Engine/Graphic/Materials/Material.hpp>
 #include <Engine/Assets/Mesh/PBRSurfaceParams.hpp>
 
-#include <Engine/Core/Camera.hpp>
-#include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
-#include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
-#include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
-#include <Engine/Graphic/ShaderProtocols/DirectionLight.hpp>
+#include <glm/glm.hpp>
 
 namespace Desert::Graphic
 {
-    class Image2D;
-    class ImageCube;
-
     // Runtime PBR material. Its parameters live entirely in the reflected PBRSurfaceParams (no per-
     // parameter members or setters): MaterialFactory copies the data from the material asset, the
     // editor edits it via reflection, and the shader receives it automatically (see Bind()).
@@ -31,19 +24,11 @@ namespace Desert::Graphic
         // Index into this material's per-object Materials[] storage buffer for the next Bind/draw.
         void SetMaterialIndex( uint32_t index ) { m_MaterialIndex = index; }
 
-        // Per-frame scene data written into the shared executor uniform buffers (not per-parameter).
+        // The per-object model matrix. It is NOT scene state and so is not part of PBRSceneFrame: every
+        // other per-frame upload this material used to forward (camera, lights, cascades, environment,
+        // cloud shadow) now goes through PBRSceneFrame::ApplyTo, which is what makes it reach the
+        // skinned path too.
         static void UpdateTransform( MaterialInstance* instance, const glm::mat4& transform );
-        static void UpdateCamera( MaterialInstance* instance, const Core::Camera* camera );
-        static void UpdateLights( MaterialInstance* instance, const ShaderProtocols::PointLight& pointLights,
-                                  const ShaderProtocols::SpotLight&      spotLights,
-                                  const ShaderProtocols::DirectionLight& dirLights );
-        static void UpdateShadow( MaterialInstance* instance, const glm::mat4* cascadeViewProj,
-                                  Image2D* const* cascadeMaps, uint32_t numCascades, float bias, bool enabled,
-                                  int debugMode, bool showNormals, const glm::vec4& cascadeWorldPerTexel,
-                                  bool lightingDebug = false );
-        static void UpdateEnvironment( MaterialInstance* instance, ImageCube* irradiance, ImageCube* prefiltered,
-                                       Image2D* brdfLut );
-        static void UpdateCloudShadow( MaterialInstance* instance, const CloudShadowInput& cloudShadow );
 
     protected:
         // Lets a derived variant bind a different shader (e.g. the instanced StaticMeshPBR_Instanced) while

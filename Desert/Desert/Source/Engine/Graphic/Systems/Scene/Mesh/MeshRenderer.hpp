@@ -13,6 +13,7 @@
 #include <Engine/Graphic/Materials/Debug/MaterialOverdrawResolve.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/PBRSceneFrame.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/RenderGraphBuilder.hpp>
@@ -117,53 +118,16 @@ namespace Desert::Graphic::System
 
         using RenderSystem::RenderSystem;
 
-        // Everything the SCENE (not the object) contributes to a lit draw: the camera, the lights, the
-        // shadow cascades and the IBL. Gathered ONCE per frame and applied to whichever material instance
-        // is about to be bound.
-        //
-        // It is gathered in one place because it is one THING — and because it is the state that must
-        // eventually move out of the shared material and into a per-renderer descriptor set (see
-        // Docs/RENDERER_FRAME_STATE.md). Until then this is the single point every write goes through,
-        // rather than the same four calls copied at three call sites.
-        struct FrameState
-        {
-            const Core::Camera* Camera = nullptr;
+        // Gathers the scene's whole per-frame contribution (Graphic::PBRSceneFrame) from the scene
+        // renderer + this renderer's own cascade state. One place that knows what "per-frame scene state"
+        // IS; the snapshot itself lives beside the materials it is applied to, because it is their
+        // payload and not this renderer's private business.
+        PBRSceneFrame CaptureFrameState( const Core::Camera* camera ) const;
 
-            const ShaderProtocols::PointLight*     PointLights     = nullptr;
-            const ShaderProtocols::SpotLight*      SpotLights      = nullptr;
-            const ShaderProtocols::DirectionLight* DirectionLights = nullptr;
-
-            const glm::mat4* CascadeViewProj = nullptr; // kNumCascades entries
-            Image2D*         CascadeMaps[4]  = {};
-            glm::vec4        CascadeTexelWorld{ 0.0f };
-            float            ShadowBias      = 0.0f;
-            bool             ShadowsEnabled  = true;
-            int              ShadowDebugMode = 0;
-            bool             ShowNormals     = false;
-            bool             LightingDebug   = false;
-
-            ImageCube* IrradianceMap  = nullptr;
-            ImageCube* PrefilteredMap = nullptr;
-            Image2D*   BrdfLut        = nullptr;
-
-            // The cloud layer's shadow on the sun — the SECOND occluder, beside the cascades above. It
-            // belongs in this snapshot for the reason the snapshot exists: it is scene state, one per
-            // frame, and it has to reach the opaque pass, the glass pass and the RSM identically. While
-            // it did not, the only surfaces in the engine that received a cloud shadow were the ones a
-            // deferred composite happened to shade.
-            CloudShadowInput CloudShadow;
-
-            // Writes the whole snapshot onto @p instance's material. One call, so a new piece of frame
-            // state can never be applied at two of the three sites and forgotten at the third.
-            void ApplyTo( MaterialInstance* instance ) const;
-        };
-
-        // Gathers the snapshot from the scene renderer + this renderer's own cascade state. One place that
-        // knows what "per-frame scene state" IS.
-        FrameState CaptureFrameState( const Core::Camera* camera ) const;
-
-        // Cascaded shadow maps: number of directional-shadow cascades (frustum splits) + per-map resolution.
-        static constexpr uint32_t kNumCascades   = 4;
+        // Cascaded shadow maps: number of directional-shadow cascades (frustum splits) + per-map
+        // resolution. The count is the ShadowUB block's own, so the cascades this renderer fits and the
+        // cascades a shader can read are one number and cannot drift apart.
+        static constexpr uint32_t kNumCascades   = MaterialPBRBase::kMaxCascades;
         static constexpr uint32_t kShadowMapSize = 2048;
         // How far from the camera shadows are computed at all — in WORLD UNITS, and a world unit is a
         // centimetre. It was a bare 150.0f from the metre era, which capped every shadow at a metre and a

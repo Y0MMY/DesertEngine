@@ -2,6 +2,7 @@
 
 #include "MaterialPBRBase.hpp"
 #include "PBRPush.hpp"
+#include "PBRSceneFrame.hpp"
 
 #include <Engine/Graphic/ShaderProtocols/SkinnedMaterialUB.hpp>
 
@@ -16,19 +17,21 @@ namespace Desert::Graphic
         struct UpdateSkinnedMaterialPBRInfo
         {
             MaterialInstance* instance = nullptr;
-            Core::Camera*     MainCamera = nullptr;
-            glm::mat4         MeshTransform{ 1.0f };
 
-            ShaderProtocols::DirectionLight DirectionLights;
-            ShaderProtocols::PointLight     PointLights;
-            ShaderProtocols::SpotLight      SpotLights;
-            ShaderProtocols::SkinnedUB      SkinnedUB;
+            // The frame's whole SCENE contribution — camera, lights, cascades, environment and the
+            // cloud shadow — as MeshRenderer gathered it once for every lit draw in the frame. It is
+            // THE snapshot the static path applies, not a copy of the parts of it a skinned mesh was
+            // thought to need: this struct used to name the camera, the lights and the cloud shadow
+            // one by one, and the two it did not name (the shadow cascades and the environment cubes)
+            // silently never reached a skinned mesh at all.
+            //
+            // A REFERENCE, deliberately. It has no default, so this aggregate cannot be built without
+            // one — which is the same defect made impossible instead of merely fixed.
+            const PBRSceneFrame& Scene;
 
-            // The cloud layer's shadow on the sun, as SceneRenderer gathered it for this frame. A skinned
-            // mesh has no G-buffer variant, so it is drawn FORWARD over the deferred composite in every
-            // deferred scene — which is exactly why it received no cloud shadow at all while the only
-            // reader of the map was the composite itself.
-            CloudShadowInput CloudShadow;
+            glm::mat4 MeshTransform{ 1.0f };
+
+            ShaderProtocols::SkinnedUB SkinnedUB;
         };
 
         SkinnedMaterialPBR() : MaterialPBRBase( "SkinnedMaterialPBR", "SkinnedMeshPBR" )
@@ -41,7 +44,9 @@ namespace Desert::Graphic
         void Bind( const UpdateSkinnedMaterialPBRInfo& info );
 
     private:
-        void UpdateSkinnedUB( MaterialInstance* instance, const ShaderProtocols::SkinnedUB& skinnedUB );
+        // The ONLY thing this material adds to the shared PBR payload: the bone matrices. Everything
+        // else a skinned draw needs is scene state and arrives through PBRSceneFrame.
+        void UpdateSkinnedUB( const ShaderProtocols::SkinnedUB& skinnedUB );
 
         Assets::PBRSurfaceParams m_Data;
     };
