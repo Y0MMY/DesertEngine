@@ -204,7 +204,8 @@ namespace
 
     // Every resource PBRSceneFrame::ApplyTo fills, by the same name the applier looks it up under. The
     // camera and the light blocks come from the ShaderProtocols types that own those names; the shadow
-    // and environment names come from MaterialPBRBase, which is the writer. Nothing here is a literal
+    // and environment names come from MaterialPBRBase, which owns the CPU half of that contract and is
+    // what the writers in SceneLightingBinding.hpp look the blocks up under. Nothing here is a literal
     // repeated from the engine — a rename that reaches only one side fails to compile, not to pass.
     //
     // The cloud-shadow pair (u_CloudShadowMap / CloudShadowUB) is deliberately NOT here: ApplyTo writes it
@@ -264,6 +265,25 @@ TEST( PBRSceneFrame, TheSkinnedMaterialCannotBeBoundWithoutTheSnapshotTheStaticP
                    "a skinned draw must not be constructible without the frame's scene state" );
 
     EXPECT_FALSE( std::is_default_constructible_v<Info> );
+}
+
+// The other half of the same seam, and the reason the applier takes a Material and not a MaterialInstance:
+// a data-driven (shader-graph) draw HAS no instance. While the only entry point took one, the generic mesh
+// path could not be handed this snapshot at all and hand-filled three of its blocks instead — which is how
+// a graph material ticked "Lit" ended up with no environment, no cloud shadow and no punctual lights, and
+// a lighting model the graph compiler wrote for itself.
+TEST( PBRSceneFrame, TheApplierCanBeHandedAMaterialThatHasNoInstance )
+{
+    static_assert( std::is_invocable_v<void ( PBRSceneFrame::* )( Desert::Graphic::Material* ) const,
+                                       const PBRSceneFrame&, Desert::Graphic::Material*>,
+                   "the frame snapshot must be applicable to a bare Material — a MaterialInstance-only "
+                   "entry point is what left the generic mesh path filling its own descriptors" );
+
+    // And the instance overload survives, because the PBR queue draws through instances.
+    static_assert( std::is_invocable_v<void ( PBRSceneFrame::* )( Desert::Graphic::MaterialInstance* ) const,
+                                       const PBRSceneFrame&, Desert::Graphic::MaterialInstance*> );
+
+    SUCCEED();
 }
 
 // ---- The applier against the shaders ----------------------------------------------------------------

@@ -18,7 +18,7 @@
 
 namespace Desert::Graphic
 {
-    // CSM data the deferred lighting pass needs to shadow the sun (mirrors MaterialPBRBase::UpdateShadow).
+    // CSM data the deferred lighting pass needs to shadow the sun (mirrors Graphic::SceneShadowBind).
     struct DeferredShadowInput
     {
         const glm::mat4* CascadeVP            = nullptr; // [Count] light view-proj matrices
@@ -38,7 +38,7 @@ namespace Desert::Graphic
     // the light they attenuate.
 
     // THE BAKED SKY, as the deferred composite's ambient source — the same three images
-    // MeshRenderer::FrameState hands the forward PBR materials (MaterialPBRBase::UpdateEnvironment), and
+    // Graphic::PBRSceneFrame hands the forward PBR materials (Graphic::SceneEnvironmentBind), and
     // deliberately the same struct shape as the two above: data gathered by SceneRenderer, consumed here.
     //
     // All three or none. The split-sum ambient is not separable — the diffuse cube without the
@@ -104,7 +104,7 @@ namespace Desert::Graphic
             if ( m_GI && giImage )
                 m_GI->SetImage( giImage.get() );
 
-            // The baked sky. Bound all-or-nothing, matching MaterialPBRBase::UpdateEnvironment's shape so
+            // The baked sky. Bound all-or-nothing, matching Graphic::SceneEnvironmentBind's shape so
             // the two paths cannot end up sampling different generations of the same bake. Incomplete is
             // reported by the caller (DeferredLightingRenderer) — it is a bake failure, not a mode.
             if ( environment.IsComplete() )
@@ -162,7 +162,7 @@ namespace Desert::Graphic
         }
 
         // Uploads the CSM data into ShadowUB + binds the cascade maps (u_ShadowMap0..3) — mirrors
-        // MaterialPBRBase::UpdateShadow so the SAME sun shadows appear in the deferred path.
+        // Graphic::SceneShadowBind so the SAME sun shadows appear in the deferred path.
         void UploadShadow( const DeferredShadowInput& shadow )
         {
             struct ShadowUBData

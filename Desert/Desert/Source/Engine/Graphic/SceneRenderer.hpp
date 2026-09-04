@@ -277,7 +277,7 @@ namespace Desert::Graphic
 
         /// THE frame's cloud-shadow payload — the map, its projection, and the numbers a receiver needs
         /// to read it. Gathered HERE, once, and handed to every consumer: the deferred composite, the
-        /// forward PBR materials (through MeshRenderer::FrameState), the skinned material and the terrain
+        /// forward PBR materials (through Graphic::PBRSceneFrame), the skinned material and the terrain
         /// material. While the composite was the only reader, this gather sat inline in the deferred
         /// branch and the answer to "does this surface receive a cloud shadow" was "only if a deferred
         /// pass drew it".

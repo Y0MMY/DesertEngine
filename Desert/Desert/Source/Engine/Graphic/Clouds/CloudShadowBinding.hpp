@@ -36,7 +36,7 @@ namespace Desert::Graphic
      *                  material whose shader declares neither — that is not a fallback, it is how a
      *                  shared frame-state applier reaches materials of several shaders (the shadow
      *                  cascades and the environment cubes are bound the same way, in
-     *                  MaterialPBRBase::UpdateShadow / ::UpdateEnvironment).
+     *                  Graphic::SceneShadowBind / Graphic::SceneEnvironmentBind).
      */
     inline void CloudShadowBind( Material* material, const CloudShadowInput& cloudShadow )
     {

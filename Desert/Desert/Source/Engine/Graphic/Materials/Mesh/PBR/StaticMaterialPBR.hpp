@@ -24,10 +24,11 @@ namespace Desert::Graphic
         // Index into this material's per-object Materials[] storage buffer for the next Bind/draw.
         void SetMaterialIndex( uint32_t index ) { m_MaterialIndex = index; }
 
-        // The per-object model matrix. It is NOT scene state and so is not part of PBRSceneFrame: every
-        // other per-frame upload this material used to forward (camera, lights, cascades, environment,
-        // cloud shadow) now goes through PBRSceneFrame::ApplyTo, which is what makes it reach the
-        // skinned path too.
+        // The per-object model matrix. It is per-OBJECT, which is why it is still here and why the five
+        // per-FRAME forwarders that stood beside it (camera, lights, cascades, environment, cloud shadow)
+        // are not: those are PBRSceneFrame::ApplyTo's job now, and ApplyTo writes them through
+        // Engine/Graphic/Materials/SceneLightingBinding.hpp, which takes a Material and so reaches the
+        // skinned path and the generic (data-driven) mesh path as well as this one.
         static void UpdateTransform( MaterialInstance* instance, const glm::mat4& transform );
 
     protected:
