@@ -83,11 +83,64 @@ namespace Desert::Assets
     ///   * ABOVE, by the memory decision D-9 grants the whole subsystem. Docs/Clouds/CALIBRATION.md §A0
     ///     measured 20.67 MiB occupied before this volume existed and 4.00 MiB per sculpted body; 8.00 MiB
     ///     here leaves 35.33 MiB, which is still the EIGHT hero clouds phase A2 shipped. Variant C's
-    ///     512 x 512 x 32 would have been 32.00 MiB and would have cut that to six.
+    ///     512 x 512 x 32 would have been 32.00 MiB and would have COST six of those eight — the sentence
+    ///     here read "cut that to six", which is the number lost rather than the number left: 20.67 plus
+    ///     32.00 of 64 leaves 11.33 MiB, and that is TWO bodies.
     ///
     /// The vertical axis is the short one and is the LAYER, not a distance: 32 voxels spread over the
     /// shell's own thickness, so a 3.5 km layer gives 109 m of vertical resolution and a thin stratus deck
     /// gets the same 32 samples a cumulonimbus does.
+    ///
+    /// RAISING THE HORIZONTAL PAIR WAS BUILT, MEASURED AND REFUSED — the tenth refusal of the near-field
+    /// programme, and the one that closes the LAST place the complaint could have lived. 512 x 32 x 512 is
+    /// 32.00 MiB, four times this, and it is the honest variant to price: the vertical is already the finer
+    /// axis (109 m against 187.5 m), so doubling it too would spend 64 MiB to sharpen the axis that is not
+    /// the bottleneck. Against decision D-9's 64 MiB and CALIBRATION.md §A0's 20.67 MiB occupied before this
+    /// volume, 32 MiB leaves 11.33 MiB — TWO sculpted hero bodies at 4.00 MiB each, against the eight
+    /// phase A2 shipped.
+    ///
+    /// WHAT THE FOUR TIMES BOUGHT, on the shipped congestus at Coverage 0.35 through the whole seam
+    /// (Desert/Tests/Engine/CloudField's own surface-roughness instrument, which stops each column at unit
+    /// optical depth exactly as the march does):
+    ///
+    ///     voxel      penetration    silhouette roughness at a lag of
+    ///                               80 m     160 m     320 m
+    ///     187.5 m       657 m       94.3 m   181.5 m   343.2 m
+    ///      93.8 m       578 m       96.0 m   185.0 m   348.6 m
+    ///
+    /// **+1.7 m of silhouette on 94.3, 1.8 %, for four times the memory** — the same 1.8 % D-31 measured
+    /// for the fractal noise and refused, arrived at from the opposite end. The mechanism is Р9's ratio
+    /// and it is why this could not have worked: the silhouette is a LINE INTEGRAL over the 657 m the eye
+    /// looks through before the cloud is opaque, so structure shorter than that is averaged away before it
+    /// reaches the eye. Two voxels is 375 m at this resolution and 188 m at twice it — both far inside the
+    /// integral, so both are filtered. The voxel was never the binding constraint.
+    ///
+    /// AND IT IS NOT ONLY MEMORY. `Clouds: March` GPU SELF time out of the pass's own profiler line —
+    /// never a frame-to-frame difference — on `Clouds_Protocol` at 300 frames, the two binaries ALTERNATED
+    /// in one session because the machine is shared with other agents, minimum of three: **12.882 ms at
+    /// 256 against 14.722 ms at 512, +1.84 ms, +14.3 %**. The spreads are wide and honest about why — 256
+    /// ran 12.882 / 16.626 / 22.946 and 512 ran 15.063 / 14.722 / 16.674, with the later samples of each
+    /// taken while this session was compiling — which is exactly why the minimum is the statistic. The
+    /// march does not read more samples at 512; it reads the same ones out of a texture four times the
+    /// size, so this is cache and nothing else.
+    ///
+    /// THE BAKE PAYS TOO, and it is the one a user waits on: one 48 km region in Debug goes 6.84 s to
+    /// about 26 s, four times, on the count of voxels.
+    ///
+    /// WHAT WOULD CHANGE THE ANSWER: only a shorter integral. A sky whose penetration is a couple of
+    /// hundred metres — a genuinely broken cumulus field, or the physical extinction D-32 priced and left
+    /// to the owner — would put two voxels OUTSIDE the averaging, and this table would have to be taken
+    /// again there. Until then a finer volume is four times the memory for a fiftieth of the roughness it
+    /// was bought for.
+    ///
+    /// AND THE FRAMES SAY IT IN THE SHAPE THAT MATTERS, which the table alone cannot: the change is LIVE
+    /// and it is INVISIBLE. Six points on `Clouds_Showcase` from the owner's camera (0, 200, 0), 90 frames,
+    /// 1280 x 766, against a measured repeat floor of zero — 17.8 % to 36.7 % of pixels differ, so the
+    /// finer volume is unquestionably reaching the screen, while the largest delta anywhere is 15 of 255 at
+    /// the zenith and 2 of 255 at the horizon, and the mean is between 0.06 and 0.18 of one grey level. The
+    /// error field's coherence is 0.85 to 1.43 — a slowly-varying shift rather than added structure, which
+    /// is the instrument saying in its own units that nothing was sharpened. The zenith is still one soft
+    /// mass and the mid angle is still smooth lobes, and those are the two points the complaint lives at.
     inline constexpr uint32_t kCloudProceduralVolumeWidth  = 256u; // x, world east
     inline constexpr uint32_t kCloudProceduralVolumeHeight = 32u;  // y, up, spanning the layer exactly
     inline constexpr uint32_t kCloudProceduralVolumeDepth  = 256u; // z, world north
@@ -337,6 +390,47 @@ namespace Desert::Assets
      * ValidateCloudProceduralParams calls this, so there is one statement of the relations and not two.
      */
     Common::BoolResultStr ValidateCloudProceduralLayout( const CloudProceduralFieldParams& params );
+
+    /**
+     * @brief The narrowest HORIZONTAL half-extent a lump may be given, kilometres.
+     *
+     * THE RELATION IT STATES, AND IT WAS MISSING. `ValidateCloudProceduralParams` already refuses a volume
+     * FINER than the march — a voxel under half `ResolvableChordKm` fills the field with structure no ray
+     * can be relied on to sample. The opposite direction was never stated anywhere: the generator's own
+     * lump floor was `0.5 * ResolvableChordKm` — 62.5 m of radius, 125 m across — while trilinear filtering
+     * cannot express anything narrower than TWO VOXELS, 375 m at the shipped 48 km region. So the generator
+     * was authorised to emit lumps three times finer than the volume it writes them into, and what comes
+     * back out of the sampler for one of those is not a small cloud but a smear whose size is the filter's.
+     *
+     * IT IS MEASURED AND NOT ARGUED, AND THE SHIPPED SKY IS NOT WHERE THE DEFECT IS — which is worth
+     * saying plainly, because it is the difference between a repair and a regression risk. On the shipped
+     * congestus at Coverage 0.35 the narrowest lump `GenerateCloudProceduralBlobs` emits over one 48 km
+     * region is 459 m across, so this floor never bites and the baked field is unchanged to every digit the
+     * seam's own instruments report. What it guards is the RANGE the placement sliders already permit, and
+     * there the old floor let go completely — counted before this existed, at Coverage 1 so that the
+     * population is the whole field:
+     *
+     *     PlacementDensity 8                     38 of  11 904 lumps under two voxels   (0.3 %)
+     *     PlacementSizeVariety 1                 76 of   2 646                          (2.9 %)
+     *     the smallest cell the cell floor allows
+     *       (0.75 km)                        14 367 of  41 658                         (34.5 %)
+     *     all three at once                 177 168 of 188 640                         (93.9 %)
+     *
+     * THE LAST TWO ROWS ARE THE REASON THIS EXISTS AS WELL AS A COMMENT. The cell floor is argued as "four
+     * voxels is the narrowest CLUSTER the volume can carry with an inside and two edges" — and a cluster is
+     * six lobes, so a cell that clears that bound by construction is full of lobes that do not. A slider
+     * whose legal range produces a field the container cannot express is the dead-setting shape §1.3 of the
+     * contract names, one level down.
+     *
+     * WHY THE VERTICAL AXIS IS NOT FLOORED BY THE VOLUME. The horizontal voxel is `RegionSize / Width` and
+     * is a constant of the subsystem. The vertical one is `LayerThickness / Height` — the layer's own
+     * thickness spread over 32 rows — so it is 12.5 m for a stratus-only layer and 312 m for a layer that
+     * also holds a storm. Flooring a lump's height at one of THOSE would push a 400 m deck out of the band
+     * its own asset declares in order to fit the volume, which is changing the sky to suit the container.
+     * A thin type inside a tall layer is genuinely under-resolved vertically and no clamp can repair it;
+     * the vertical keeps the march's floor, and the band clamp above it stays the type's own authority.
+     */
+    float CloudProceduralLumpFloorKm( const CloudProceduralFieldParams& params );
 
     /**
      * @brief The lattice cell's two side lengths, kilometres — longer along the wind, shorter across it,
