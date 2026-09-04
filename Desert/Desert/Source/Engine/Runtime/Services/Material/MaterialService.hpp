@@ -2,11 +2,23 @@
 
 #include <Engine/Graphic/Materials/Material.hpp>
 #include <Engine/Graphic/Materials/MaterialOverrides.hpp>
+#include <Engine/Graphic/Materials/Mesh/MeshVertexPath.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
 #include <Engine/Runtime/Services/Material/MaterialIdentity.hpp>
 
+#include <array>
+
 namespace Desert::Runtime
 {
+    // Owns the runtime materials behind the `.demat` assets.
+    //
+    // A runtime material is identified by the PAIR (asset, vertex path), not by the asset alone. That is
+    // the difference between "an artist authors a surface" and "the renderer decides how the geometry is
+    // fetched": one `.demat` legitimately becomes a static material AND a skinned material AND an
+    // instanced one, all with the same parameters, because they are built from the same asset. Resolving
+    // an asset into ONE material — as this service used to — makes the material's class the vertex path,
+    // and a mesh on any other path then has nothing it can be drawn with. See
+    // Engine/Graphic/Materials/Mesh/MeshVertexPath.hpp for the four defects that followed from it.
     class MaterialService
     {
     public:
@@ -22,12 +34,24 @@ namespace Desert::Runtime
         // Register above.
         Common::BoolResultStr RegisterAsset( const std::shared_ptr<Assets::MaterialAsset>& materialAsset );
 
-        // Builds-on-miss from a shell. A material-INSTANCE handle resolves through its parent
-        // chain to the BASE material (an instance has no runtime Material of its own).
-        Graphic::Material*    Get( const Assets::AssetHandle& handle ) const;
-        Graphic::Material*    GetByExternalHandle( const Common::UUID& handle ) const;
-        Assets::AssetHandle   GetAssetHandleByExternal( const Common::UUID& uuid ) const;
-        void                  Clear();
+        // Builds-on-miss from a shell, for ONE vertex path. A material-INSTANCE handle resolves through
+        // its parent chain to the BASE material (an instance has no runtime Material of its own).
+        // Returns null when the asset resolves to nothing, or when its shader has no variant on that
+        // path (a custom DSL surface shader on the skinned path, say) — MaterialFactory names which.
+        //
+        // The default is Static because most callers ask "does this asset resolve to a material at all?"
+        // and any path answers that; the mesh renderers pass the path they are about to draw with.
+        Graphic::Material*  Get( const Assets::AssetHandle& handle,
+                                 Graphic::MeshVertexPath    path = Graphic::MeshVertexPath::Static ) const;
+        Graphic::Material*  GetByExternalHandle( const Common::UUID& handle ) const;
+        Assets::AssetHandle GetAssetHandleByExternal( const Common::UUID& uuid ) const;
+        void                Clear();
+
+        // Every runtime material ALREADY BUILT for this handle, one per path that has been asked for.
+        // Live editing has to reach all of them: a parameter edit that updated only the static material
+        // would leave the character wearing the old value, and that divergence is precisely what per-path
+        // material classes used to guarantee. Never builds; a path nobody has asked for is not returned.
+        std::vector<Graphic::Material*> GetBuiltVariants( const Assets::AssetHandle& handle ) const;
 
         // THE way render systems obtain a slot's runtime instance. Base material asset -> a plain
         // instance of it; material-INSTANCE asset -> an instance of the parent chain's base
@@ -35,7 +59,14 @@ namespace Desert::Runtime
         // when nothing resolves (caller falls back to its default material).
         // v1 note: instance assets override PARAMS only — texture overrides need per-instance
         // descriptors and are ignored by the batched path.
-        Graphic::MaterialInstancePtr CreateRuntimeInstance( const Assets::AssetHandle& handle ) const;
+        //
+        // The PATH is the caller's, because the caller is the one that knows what geometry it is about to
+        // draw. A skinned mesh component asks for Skinned and gets an instance of the same `.demat` the
+        // static twin beside it uses; before the path existed, it asked for "the" material, got the static
+        // one, and the renderer dropped it.
+        Graphic::MaterialInstancePtr
+        CreateRuntimeInstance( const Assets::AssetHandle& handle,
+                               Graphic::MeshVertexPath    path = Graphic::MeshVertexPath::Static ) const;
 
         // The same resolution as CreateRuntimeInstance, but delivered as NAMED VALUES instead of a runtime
         // instance — for a renderer that owns one material of its own and applies a material's parameters
@@ -91,10 +122,14 @@ namespace Desert::Runtime
         Common::BoolResultStr RefuseOnCollision( const Assets::AssetHandle&                    handle,
                                                  const std::shared_ptr<Assets::MaterialAsset>& incoming ) const;
 
-        uint32_t m_InvalidationVersion = 0;
-        mutable std::unordered_map<Assets::AssetHandle, std::shared_ptr<Graphic::Material>> m_Materials;
-        std::unordered_map<Common::UUID, Assets::AssetHandle>                               m_ExternalToInternal;
-        std::unordered_map<Assets::AssetHandle, std::shared_ptr<Assets::MaterialAsset>>     m_MaterialAssets;
+        // One slot per vertex path, built lazily. An array and not a second map because the paths are a
+        // closed set the renderer enumerates — a map would let a path exist that no draw can ask for.
+        using PathVariants = std::array<std::shared_ptr<Graphic::Material>, Graphic::kMeshVertexPathCount>;
+
+        uint32_t                                                                        m_InvalidationVersion = 0;
+        mutable std::unordered_map<Assets::AssetHandle, PathVariants>                   m_Materials;
+        std::unordered_map<Common::UUID, Assets::AssetHandle>                           m_ExternalToInternal;
+        std::unordered_map<Assets::AssetHandle, std::shared_ptr<Assets::MaterialAsset>> m_MaterialAssets;
 
         // Invalidated materials awaiting safe destruction (see Invalidate/CollectGarbage).
         std::vector<std::shared_ptr<Graphic::Material>> m_Graveyard;

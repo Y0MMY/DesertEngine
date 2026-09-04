@@ -1,6 +1,7 @@
 #include "MaterialSilhouette.hpp"
 
 #include <Engine/Graphic/ShaderProtocols/Camera.hpp>
+#include <Engine/Graphic/ShaderProtocols/SkinnedMaterialUB.hpp>
 
 namespace Desert::Graphic
 {
@@ -41,12 +42,20 @@ namespace Desert::Graphic
              ->SetRawData( reinterpret_cast<const std::byte*>( &cameraUB ), sizeof( cameraUB ) );
     }
 
-    void MaterialSilhouetteSkinned::SetBones( const std::vector<glm::mat4>& boneMatrices )
+    void MaterialSilhouetteSkinned::UploadBones( const std::vector<glm::mat4>& packedBoneMatrices )
     {
-        if ( boneMatrices.empty() )
+        if ( packedBoneMatrices.empty() )
             return;
-        if ( auto* sb = Get<StorageBufferProperty>( "Bones" ) )
-            sb->SetRawData( boneMatrices.data(),
-                            static_cast<uint32_t>( boneMatrices.size() * sizeof( glm::mat4 ) ) );
+        if ( auto* sb = Get<StorageBufferProperty>( ShaderProtocols::SkinnedUB::Name ) )
+            sb->SetRawData( packedBoneMatrices.data(),
+                            static_cast<uint32_t>( packedBoneMatrices.size() * sizeof( glm::mat4 ) ) );
+    }
+
+    void MaterialSilhouetteSkinned::SetBoneOffset( uint32_t firstBone )
+    {
+        // Offset 64 in Silhouette_Skinned's push block, straight after the transform that
+        // Renderer::RenderMesh writes; the whole reflected range is pushed per draw.
+        if ( m_MaterialExecutor )
+            m_MaterialExecutor->PushConstant( &firstBone, sizeof( uint32_t ), sizeof( glm::mat4 ) );
     }
 } // namespace Desert::Graphic

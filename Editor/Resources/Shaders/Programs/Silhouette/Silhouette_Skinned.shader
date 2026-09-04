@@ -15,9 +15,14 @@ Shader "Silhouette_Skinned"
 
         #include <Common/CameraUB.glslh>
 
+        // BoneOffset is this path's own field: ONE material serves every selected skinned mesh, so all
+        // their poses are packed into the single Bones buffer below and each draw names its slice here.
+        // Uploading per draw instead left every recorded draw reading the last mesh's pose — the same
+        // defect the forward and shadow skinned paths carried.
         PushConstant constants
         {
-            mat4 Transform;
+            mat4 Transform;  // offset 0
+            uint BoneOffset; // offset 64
         } m_PushConstants;
 
         // Same bone matrices the skinned mesh is rendered with, so the silhouette (hence the outline) matches the
@@ -30,10 +35,12 @@ Shader "Silhouette_Skinned"
 
         void main()
         {
-            mat4 skin = bones.BoneMatrices[a_BoneIndices.x] * a_BoneWeights.x +
-                        bones.BoneMatrices[a_BoneIndices.y] * a_BoneWeights.y +
-                        bones.BoneMatrices[a_BoneIndices.z] * a_BoneWeights.z +
-                        bones.BoneMatrices[a_BoneIndices.w] * a_BoneWeights.w;
+            // int, not uint: a_BoneIndices is ivec4 and GLSL will not mix the two silently.
+            int b = int(m_PushConstants.BoneOffset);
+            mat4 skin = bones.BoneMatrices[b + a_BoneIndices.x] * a_BoneWeights.x +
+                        bones.BoneMatrices[b + a_BoneIndices.y] * a_BoneWeights.y +
+                        bones.BoneMatrices[b + a_BoneIndices.z] * a_BoneWeights.z +
+                        bones.BoneMatrices[b + a_BoneIndices.w] * a_BoneWeights.w;
 
             gl_Position = cameraUB.Projection * cameraUB.View * m_PushConstants.Transform * ( skin * vec4(a_Position, 1.0) );
         }

@@ -15,7 +15,7 @@
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Animation/Skeleton.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 
 #include <Engine/Runtime/SelectionContext.hpp>
 
@@ -26,8 +26,11 @@ namespace Desert::ECS
     public:
         explicit MeshECSSystem() : System()
         {
-            m_DefaultMaterial        = std::make_shared<Graphic::StaticMaterialPBR>();
-            m_DefaultSkinnedMaterial = std::make_shared<Graphic::SkinnedMaterialPBR>();
+            // The fallback for a mesh with no material slot at all — one PBR surface per vertex path,
+            // the same surface on both. They are two objects and not one because a material owns the
+            // descriptor sets of ONE shader, and the two paths are two shaders (MeshVertexPath.hpp).
+            m_DefaultMaterial        = Graphic::MaterialPBR::Create( Graphic::MeshVertexPath::Static );
+            m_DefaultSkinnedMaterial = Graphic::MaterialPBR::Create( Graphic::MeshVertexPath::Skinned );
         }
 
         // Render-data collector (only touches mesh components' runtime caches) — safe to run concurrently with the other collectors.
@@ -473,8 +476,14 @@ namespace Desert::ECS
                              else
                                  for ( const auto& h : mesh.MaterialSlots )
                                  {
-                                     auto inst = Runtime::ResourceRegistry::GetMaterialService()
-                                                      ->CreateRuntimeInstance( h );
+                                     // THE SKINNED path of the SAME `.demat` the static twin uses. This
+                                     // argument is the whole fix: the slot names a surface, this system
+                                     // knows the geometry is skinned, and the pair resolves. Without it
+                                     // the service answered with a static material and MeshRenderer
+                                     // dropped the mesh without drawing anything.
+                                     auto inst =
+                                          Runtime::ResourceRegistry::GetMaterialService()->CreateRuntimeInstance(
+                                               h, Graphic::MeshVertexPath::Skinned );
                                      mesh.RuntimeMaterialInstances.push_back(
                                           inst ? std::move( inst )
                                                : m_DefaultSkinnedMaterial->CreateInstance() );
@@ -559,7 +568,7 @@ namespace Desert::ECS
         }
 
     private:
-        std::shared_ptr<Graphic::StaticMaterialPBR>  m_DefaultMaterial;
-        std::shared_ptr<Graphic::SkinnedMaterialPBR> m_DefaultSkinnedMaterial;
+        std::shared_ptr<Graphic::MaterialPBR> m_DefaultMaterial;
+        std::shared_ptr<Graphic::MaterialPBR> m_DefaultSkinnedMaterial;
     };
 } // namespace Desert::ECS

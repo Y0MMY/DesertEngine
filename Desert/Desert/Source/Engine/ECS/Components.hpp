@@ -14,9 +14,9 @@
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Common.hpp>
+#include <Engine/Core/Camera.hpp>
 #include <Engine/Core/Projection.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 
 #include <Engine/Animation/Animator.hpp>
 #include <Engine/Animation/FSM/AnimationStateMachine.hpp>

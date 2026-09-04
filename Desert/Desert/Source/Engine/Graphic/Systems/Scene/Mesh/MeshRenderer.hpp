@@ -11,8 +11,7 @@
 #include <Engine/Graphic/Materials/Debug/MaterialDebugLine.hpp>
 #include <Engine/Graphic/Materials/Debug/MaterialOverdraw.hpp>
 #include <Engine/Graphic/Materials/Debug/MaterialOverdrawResolve.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRSceneFrame.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
@@ -67,12 +66,16 @@ namespace Desert::Graphic::System
 
         struct SkinnedMeshRenderData
         {
-            class Desert::SkinnedMesh*         Mesh     = nullptr;
-            glm::mat4                          Transform = glm::mat4( 1.0f );
-            class Graphic::SkinnedMaterialPBR* Material  = nullptr; // parent material (for Bind/executor)
-            MaterialInstance*                  Instance  = nullptr; // instance applied during Bind
-            std::vector<glm::mat4>             BoneMatrices;        // animated pose, or bind pose (identity)
-            bool                               Outlined = false;
+            class Desert::SkinnedMesh* Mesh      = nullptr;
+            glm::mat4                  Transform = glm::mat4( 1.0f );
+            // The (surface x Skinned) material. It is SHARED with every other entity using the same
+            // `.demat`, which is why nothing per-object may be stored on it: the pose below is packed
+            // into a per-frame buffer and named by a push constant instead.
+            class Graphic::MaterialPBR* Material = nullptr;
+            MaterialInstance*           Instance = nullptr; // instance applied during Bind
+            std::vector<glm::mat4>      BoneMatrices;       // animated pose, or bind pose
+            bool                        Outlined    = false;
+            bool                        CastShadows = true;
         };
 
         // A UE-style Instanced Static Mesh: ONE mesh + ONE PBR material drawn N times. The transforms come
@@ -302,15 +305,18 @@ namespace Desert::Graphic::System
         bool                              m_GlassPass = false; // set true only while drawing the transparent glass pass
         // DEDICATED glass material (never drawn by the opaque passes) so its per-frame UB ring is written ONCE
         // per frame in the glass pass — sharing an opaque material across two passes/frame hangs the GPU.
-        std::unique_ptr<StaticMaterialPBR> m_GlassMaterial;
-        MaterialInstancePtr                m_GlassInstance;
+        // It is (Static x Glass) rather than its own class: what made it different from the opaque
+        // material was always the shader, and the shader is what the pair names.
+        std::shared_ptr<MaterialPBR> m_GlassMaterial;
+        MaterialInstancePtr          m_GlassInstance;
 
         // Reflective Shadow Map (G-buffer from the sun) — the off-screen bounce source for the RSM GI mode.
         // Its camera UB carries the SUN's matrices, so like glass it needs its OWN material: sharing one with
         // the opaque passes would write the same per-frame UB twice in a frame. m_RSMViewProj/m_RSMEye come
         // from cascade 1 in UpdateCascades(), so the pass draws through a STANDARD-Z matrix and needs its
         // own pipeline (m_RSMPipeline) rather than the reversed-Z G-buffer one — see SetupDeferredPass.
-        std::unique_ptr<StaticMaterialPBR> m_RSMMaterial;
+        // (Static x GBuffer) — the RSM is literally a G-buffer rasterized from the sun.
+        std::shared_ptr<MaterialPBR>       m_RSMMaterial;
         MaterialInstancePtr                m_RSMInstance;
         std::shared_ptr<GraphicsPipeline>  m_RSMPipeline;
         glm::mat4                          m_RSMViewProj = glm::mat4( 1.0f );
@@ -322,8 +328,8 @@ namespace Desert::Graphic::System
         // Auto-batching: identical (same parent material + same Mesh*) static meshes are collapsed into one
         // hardware-instanced draw via this shared material. Per-instance model matrices are packed into its
         // InstanceTransforms SSBO; the shared scene data (camera/lights/shadow/env) is uploaded once/frame.
-        std::unique_ptr<Graphic::StaticMaterialPBRInstanced> m_StaticInstancedMaterial;
-        MaterialInstancePtr                                  m_StaticInstancedInstance;
+        std::shared_ptr<Graphic::MaterialPBR> m_StaticInstancedMaterial;
+        MaterialInstancePtr                   m_StaticInstancedInstance;
 
         // Skinned
         std::shared_ptr<GraphicsPipeline> m_SkinnedPipeline;
@@ -354,6 +360,15 @@ namespace Desert::Graphic::System
         std::shared_ptr<GraphicsPipeline>        m_ShadowInstancedPipeline;
         std::shared_ptr<Shader>                  m_ShadowInstancedShader;
         std::unique_ptr<MaterialShadowInstanced> m_ShadowInstancedMaterial[kNumCascades];
+
+        // Skinned shadow caster: the (Skinned x ShadowDepth) cell, which did not exist — the cascade pass
+        // walked the static queue by name and a character cast nothing. One material per cascade, exactly
+        // like the two above, and every skinned caster's pose packed into its single Bones buffer.
+        // Optional — null if the Shadow_Skinned shader is missing, and then skinned shadows are simply off.
+        std::shared_ptr<GraphicsPipeline>      m_ShadowSkinnedPipeline;
+        std::shared_ptr<Shader>                m_ShadowSkinnedShader;
+        std::unique_ptr<MaterialShadowSkinned> m_ShadowSkinnedMaterial[kNumCascades];
+
         glm::mat4                         m_CascadeVP[kNumCascades] = { glm::mat4( 1.0f ) };
         // World-space size of one shadow-map texel per cascade (2*radius/res) — drives a cascade-correct
         // normal-offset/bias in the PBR shader instead of the old fixed world-unit constants.
@@ -398,9 +413,10 @@ namespace Desert::Graphic::System
         std::vector<InstancedMeshRenderData> m_InstancedQueue;
 
     private:
-        // fallbacks
-        std::unique_ptr<Graphic::StaticMaterialPBR>  m_StaticMaterialFallback;
-        std::unique_ptr<Graphic::SkinnedMaterialPBR> m_SkinnedMaterialFallback;
+        // m_StaticMaterialFallback and m_SkinnedMaterialFallback stood here. The first was constructed
+        // every Initialize() and read by nothing; the second was never even constructed. A mesh with no
+        // resolvable slot gets its fallback from MeshECSSystem, which is the one place that knows a slot
+        // failed to resolve — two fallbacks meant two answers to one question and only one of them ran.
 
         // ── Per-frame scratch (memory discipline: reuse, don't reallocate) ──────────────────
         // Cleared each use; capacity persists across frames so the steady state allocates nothing.
@@ -428,6 +444,10 @@ namespace Desert::Graphic::System
             uint32_t            First = 0;
         };
 
+        // Every skinned pose drawn in one pass, packed end to end; each draw names its slice with a
+        // BoneOffset push constant. ONE buffer per material per pass instead of one upload per draw,
+        // which is what makes a shared skinned material correct — see MaterialPBR.hpp.
+        std::vector<glm::mat4>                   m_ScratchBones;
         std::vector<glm::mat4>      m_ScratchInstTransforms; // geometry + shadow instanced SSBOs
         std::vector<PBRGpuMaterial> m_ScratchInstMaterials;
         std::vector<InstancedDraw>  m_ScratchInstDraws;

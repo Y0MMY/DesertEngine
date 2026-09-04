@@ -656,11 +656,16 @@ TEST_F( ShaderRootFixture, TheGBufferShaderKeepsTheForwardMeshShadersDescriptorL
     // SSBOs by 1e-20 — the strangest-looking lines in the renderer, and the ones most likely to be
     // deleted as dead by someone tidying up.
     //
-    // The deferred G-buffer pass does NOT get a material of its own. MeshRenderer draws it with
-    // StaticMaterialPBR, whose descriptor sets were allocated from the FORWARD shader's reflection
-    // (StaticMaterialPBR.cpp:7 — Material( "PBRMaterial", "StaticMeshPBR" )), and binds them against a
-    // pipeline layout built from THIS shader's reflection (MeshRenderer.cpp:856 picks
-    // m_StaticGBufferPipeline for the same executor). Vulkan requires those two layouts to be compatible.
+    // The deferred G-buffer pass does NOT get a material of its own. MeshRenderer draws it with the
+    // (Static x Forward) material, whose descriptor sets were allocated from the FORWARD shader's
+    // reflection (Graphic::MeshShaderFor(Static, Forward) == "StaticMeshPBR"), and binds them against a
+    // pipeline layout built from THIS shader's reflection — MeshRenderer::DrawStaticMeshes picks
+    // m_StaticGBufferPipeline for the same executor. Vulkan requires those two layouts to be compatible.
+    //
+    // Note that (Static x GBuffer) IS a real variant now and has its own material class instance (the RSM
+    // pass uses exactly that pair). What has NOT changed is which material the G-buffer pass binds: it
+    // still borrows the forward one's sets, so the dummy below is still load-bearing. Giving the pass its
+    // own material is the change that would retire it, and it has not been made.
     // An unreferenced uniform does not survive SPIR-V reflection, so the only way for the G-buffer shader
     // to keep a slot it has no use for is to touch it — hence a sum scaled into oblivion and folded into
     // an output so the optimiser cannot fold it back out.

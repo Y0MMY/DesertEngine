@@ -3,7 +3,7 @@
 
 #include <Engine/Assets/Mapper.hpp>
 
-#include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 
@@ -14,7 +14,7 @@
 
 namespace Desert::Graphic
 {
-    void MaterialFactory::ApplyPBRAsset( StaticMaterialPBR& material, const Assets::SurfaceMaterialAsset& asset )
+    void MaterialFactory::ApplyPBRAsset( MaterialPBR& material, const Assets::SurfaceMaterialAsset& asset )
     {
         // Build the backend's typed view from the material canon (single protocol -> optimized
         // hot-path struct). No per-parameter setters.
@@ -70,7 +70,8 @@ namespace Desert::Graphic
         }
     }
 
-    std::shared_ptr<Material> MaterialFactory::CreateMaterial( const Assets::MaterialAsset* asset )
+    std::shared_ptr<Material> MaterialFactory::CreateMaterial( const Assets::MaterialAsset* asset,
+                                                               MeshVertexPath               path )
     {
         if ( !asset )
             return nullptr;
@@ -89,12 +90,36 @@ namespace Desert::Graphic
         // `.demat` it thumbnails. Refusing here would break the correct uses to stop the incorrect one.
         // The refusal lives where the consumer IS known, in MeshRenderer::DrawGenericMeshes, which asks
         // Core::Formats::DrawnByMeshPath() and names the material it will not draw.
+        //
+        // "StaticMeshPBR" and "SkinnedMeshPBR" both mean THE PBR SURFACE and neither picks a vertex path
+        // any more — the path is the parameter above. An asset naming the skinned shader used to be
+        // answered with the static class here, which is where defect (1) in MeshVertexPath.hpp was born:
+        // MeshRenderer then looked for a skinned parent, found a static one, and dropped the mesh.
         if ( shaderName.empty() || shaderName == "StaticMeshPBR" || shaderName == "SkinnedMeshPBR" )
         {
-            auto pbrMaterial = std::make_shared<StaticMaterialPBR>();
+            auto pbrMaterial = MaterialPBR::Create( path, MeshPass::Forward );
+            if ( !pbrMaterial )
+                return nullptr; // MaterialPBR::Create already named the pair it could not build
             if ( const auto* pbr = dynamic_cast<const Assets::SurfaceMaterialAsset*>( asset ) )
                 ApplyPBRAsset( *pbrMaterial, *pbr );
             return pbrMaterial;
+        }
+
+        // A custom DSL surface shader exists only on the static path — it has no skinning stage and no
+        // instanced variant. Name the material, the shader AND the path, because the consequence is
+        // visible and misleading: the caller (MeshECSSystem) substitutes its default PBR material, so the
+        // mesh draws in plain grey rather than vanishing, and "my character is the wrong colour" is a
+        // different search from "my character is missing". The message was checked against a frame —
+        // it said "will not draw" and the mesh drew.
+        if ( path != MeshVertexPath::Static )
+        {
+            LOG_WARN( "[MaterialFactory] Material '{}' uses the custom shader '{}', which has no {} vertex "
+                      "variant (DSL surface shaders carry no skinning or instancing stage). The mesh asking "
+                      "for it will fall back to the default PBR material and render in the wrong colour; "
+                      "assign a PBR material to it, or author a {} variant of '{}'.",
+                      asset->GetMetadata().Filepath.generic_string(), shaderName, MeshVertexPathName( path ),
+                      MeshVertexPathName( path ), shaderName );
+            return nullptr;
         }
 
         auto ddm = std::make_shared<DataDrivenMaterial>( shaderName );
@@ -103,33 +128,4 @@ namespace Desert::Graphic
         return ddm;
     }
 
-    std::shared_ptr<MaterialInstance> MaterialFactory::CreateMaterialInstance( const Assets::MaterialAsset* asset,
-                                                                               const std::string& instanceName )
-    {
-        auto material = CreateMaterial( asset );
-        if ( !material )
-            return nullptr;
-
-        // Material parameters (and textures) are already taken from the asset's reflected data in
-        // CreateMaterial(); the instance simply references that material.
-        return material->CreateInstance( instanceName );
-    }
-
-    std::shared_ptr<Material> MaterialFactory::CreateDefaultPBRMaterial()
-    {
-        // MPROPERTY defaults in StaticMaterialPBR constructor handle initialization.
-        return std::make_shared<StaticMaterialPBR>();
-    }
-
-    std::shared_ptr<MaterialInstance> MaterialFactory::CreatePrimitiveMaterial( const std::string& name,
-                                                                                const glm::vec3&   color,
-                                                                                float metallic, float roughness )
-    {
-        auto pbrMaterial = std::make_shared<StaticMaterialPBR>();
-        pbrMaterial->Data().AlbedoColor     = glm::vec4( color, 1.0f );
-        pbrMaterial->Data().MetallicFactor  = metallic;
-        pbrMaterial->Data().RoughnessFactor = roughness;
-
-        return pbrMaterial->CreateInstance( name );
-    }
 } // namespace Desert::Graphic

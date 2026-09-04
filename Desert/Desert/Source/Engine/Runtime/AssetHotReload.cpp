@@ -10,7 +10,7 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 #include <Engine/Graphic/PipelineCache.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
@@ -247,23 +247,39 @@ namespace Desert::Runtime
             if ( !materialService )
                 continue;
 
-            auto* runtime = materialService->Get( handle );
+            // EVERY built variant, not "the" material: one `.demat` is now a material per vertex path,
+            // and a live parameter edit that reached only the static one would leave a character wearing
+            // the previous value while the crate beside it updated. Nothing is built here — a path no
+            // draw has asked for has nothing to refresh.
+            //
+            // It looks up THIS handle and does not walk an instance's parent chain, which changes what
+            // happens when a material-INSTANCE file is edited — and changes it for the better. `Get` used
+            // to resolve an instance to its PARENT's material, so an edited instance had its own params
+            // written over the parent's runtime material, and every sibling using that parent silently
+            // took them. An instance owns no runtime material, so the list is empty here, and the branch
+            // below does the correct thing instead: refresh the components, whose cached instances
+            // re-apply their overrides.
+            const auto variants = materialService->GetBuiltVariants( handle );
 
-            const bool classMatches =
-                 runtime && ( asset->Data().UsesCustomShader()
-                                   ? dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) != nullptr
-                                   : dynamic_cast<Graphic::StaticMaterialPBR*>( runtime ) != nullptr );
+            const bool custom       = asset->Data().UsesCustomShader();
+            bool       classMatches = !variants.empty();
+            for ( auto* runtime : variants )
+                classMatches =
+                     classMatches && ( custom ? dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) != nullptr
+                                              : dynamic_cast<Graphic::MaterialPBR*>( runtime ) != nullptr );
             const bool sameShader = classMatches && asset->GetShaderName() == oldShader;
 
-            if ( sameShader && !asset->Data().UsesCustomShader() )
+            if ( sameShader && !custom )
             {
-                Graphic::MaterialFactory::ApplyPBRAsset(
-                     *static_cast<Graphic::StaticMaterialPBR*>( runtime ), *asset );
+                for ( auto* runtime : variants )
+                    Graphic::MaterialFactory::ApplyPBRAsset( *static_cast<Graphic::MaterialPBR*>( runtime ),
+                                                             *asset );
             }
             else if ( sameShader )
             {
-                Graphic::MaterialFactory::ApplyShaderAsset(
-                     *static_cast<Graphic::DataDrivenMaterial*>( runtime ), *asset );
+                for ( auto* runtime : variants )
+                    Graphic::MaterialFactory::ApplyShaderAsset(
+                         *static_cast<Graphic::DataDrivenMaterial*>( runtime ), *asset );
             }
             else
             {

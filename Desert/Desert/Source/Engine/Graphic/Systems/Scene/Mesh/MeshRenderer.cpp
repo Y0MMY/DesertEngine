@@ -4,8 +4,6 @@
 #include <Engine/Graphic/ShadowCascades.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRPush.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/MaterialGlass.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/MaterialRSM.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Geometry/LODSelection.hpp>
 #include <Common/Core/Profiler.hpp>
@@ -38,7 +36,7 @@ namespace Desert::Graphic::System
         // Per-instance material override (MaterialPropertyBlock-style): start from the material's
         // reflected data and apply any overridden instance properties on top — generically, by name,
         // through reflection. Each drawn object thus gets its own effective material in the SSBO.
-        PBRGpuMaterial BuildEffectiveMaterial( StaticMaterialPBR* material, MaterialInstance* instance )
+        PBRGpuMaterial BuildEffectiveMaterial( MaterialPBR* material, MaterialInstance* instance )
         {
             Assets::PBRSurfaceParams data = material->Data();
 
@@ -104,15 +102,24 @@ namespace Desert::Graphic::System
             return BuildPBRGpuMaterial( data );
         }
 
-        // First slot instance whose parent is the batched PBR material. Slots holding a
-        // custom-shader material (DataDrivenMaterial, v3 per-slot shaders) belong to the
-        // generic path — they must never be fed into the PBR SSBO machinery. nullptr when
-        // the object has no PBR slot at all.
-        MaterialInstance* FirstPBRSlot( const std::vector<MaterialInstance*>& slots )
+        // First slot instance whose parent is a PBR material ON THE GIVEN VERTEX PATH. Slots holding a
+        // custom-shader material (DataDrivenMaterial, v3 per-slot shaders) belong to the generic path —
+        // they must never be fed into the PBR SSBO machinery. nullptr when the object has no such slot.
+        //
+        // The PATH argument is what makes one function serve both queues. Its skinned half used to be a
+        // second, hand-written loop inside SubmitMesh looking for a different CLASS, and the two answered
+        // differently about the same `.demat`: the static loop found a material, the skinned one found
+        // nothing, and a character with authored materials was silently dropped.
+        MaterialInstance* FirstPBRSlot( const std::vector<MaterialInstance*>& slots, MeshVertexPath path )
         {
             for ( auto* inst : slots )
-                if ( inst && dynamic_cast<StaticMaterialPBR*>( inst->GetParentMaterial() ) )
+            {
+                if ( !inst )
+                    continue;
+                auto* pbr = dynamic_cast<MaterialPBR*>( inst->GetParentMaterial() );
+                if ( pbr && pbr->VertexPath() == path )
                     return inst;
+            }
             return nullptr;
         }
     } // namespace
@@ -149,16 +156,14 @@ namespace Desert::Graphic::System
         if ( !SetupOverdrawPass() )
             LOG_WARN( "[MeshRenderer] Overdraw debug view unavailable (shaders missing)." );
 
-        m_StaticMaterialFallback =
-             std::make_unique<Graphic::StaticMaterialPBR>();
-
         // Shared instanced material for auto-batching (only usable if the instanced pipeline/shader exist).
         // One instance is created up front; the per-frame scene data + the packed InstanceTransforms/Materials
         // SSBOs are written into it in DrawStaticMeshes before the instanced draws are recorded.
         if ( m_StaticInstancedPipeline )
         {
-            m_StaticInstancedMaterial = std::make_unique<Graphic::StaticMaterialPBRInstanced>();
-            m_StaticInstancedInstance = m_StaticInstancedMaterial->CreateInstance( "StaticInstancedBatch" );
+            m_StaticInstancedMaterial = MaterialPBR::Create( MeshVertexPath::Instanced );
+            if ( m_StaticInstancedMaterial )
+                m_StaticInstancedInstance = m_StaticInstancedMaterial->CreateInstance( "StaticInstancedBatch" );
         }
 
         return BOOLSUCCESS;
@@ -176,10 +181,12 @@ namespace Desert::Graphic::System
         m_SilhouetteMaskFramebuffer.reset();
         m_ShadowPipeline.reset();
         m_ShadowInstancedPipeline.reset();
+        m_ShadowSkinnedPipeline.reset();
         for ( uint32_t i = 0; i < kNumCascades; ++i )
         {
             m_ShadowMaterial[i].reset();
             m_ShadowInstancedMaterial[i].reset();
+            m_ShadowSkinnedMaterial[i].reset();
             m_CascadeFB[i].reset();
         }
     }
@@ -504,10 +511,10 @@ namespace Desert::Graphic::System
         {
             if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() )
                 continue;
-            MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots );
+            MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots, MeshVertexPath::Static );
             if ( !pbrInst )
                 continue;
-            auto* mat = static_cast<StaticMaterialPBR*>( pbrInst->GetParentMaterial() );
+            auto*          mat = static_cast<MaterialPBR*>( pbrInst->GetParentMaterial() );
             PBRGpuMaterial gm = BuildEffectiveMaterial( mat, pbrInst );
             if ( gm.GlassTint.a <= 0.001f )
                 continue; // opaque -> drawn by the opaque pass, not here
@@ -544,7 +551,7 @@ namespace Desert::Graphic::System
         for ( uint32_t i = 0; i < static_cast<uint32_t>( glassObjs.size() ); ++i )
         {
             const auto* obj = glassObjs[i];
-            StaticMaterialPBR::UpdateTransform( gi, obj->Transform );
+            MaterialPBR::UpdateTransform( gi, obj->Transform );
             m_GlassMaterial->SetMaterialIndex( i );
             m_GlassMaterial->Bind( gi );
             renderer.RenderMesh( m_StaticGlassPipeline.get(), obj->Mesh, obj->Transform,
@@ -574,11 +581,11 @@ namespace Desert::Graphic::System
         {
             if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() )
                 continue;
-            MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots );
+            MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots, MeshVertexPath::Static );
             if ( !pbrInst )
                 continue;
             PBRGpuMaterial gm =
-                 BuildEffectiveMaterial( static_cast<StaticMaterialPBR*>( pbrInst->GetParentMaterial() ), pbrInst );
+                 BuildEffectiveMaterial( static_cast<MaterialPBR*>( pbrInst->GetParentMaterial() ), pbrInst );
             if ( gm.GlassTint.a > 0.001f )
                 continue;
             objs.push_back( &data );
@@ -612,7 +619,7 @@ namespace Desert::Graphic::System
         for ( uint32_t i = 0; i < static_cast<uint32_t>( objs.size() ); ++i )
         {
             const auto* obj = objs[i];
-            StaticMaterialPBR::UpdateTransform( ri, obj->Transform );
+            MaterialPBR::UpdateTransform( ri, obj->Transform );
             m_RSMMaterial->SetMaterialIndex( i );
             m_RSMMaterial->Bind( ri );
             renderer.RenderMesh( m_RSMPipeline.get(), obj->Mesh, obj->Transform,
@@ -647,8 +654,8 @@ namespace Desert::Graphic::System
         // Group draws by material so each material's per-object data fills ONE storage buffer, indexed
         // per draw (GPU-scene style). Objects of the same material that wrote a shared buffer per-draw
         // would otherwise collapse to the last writer.
-        std::vector<std::pair<StaticMaterialPBR*, std::vector<const StaticMeshRenderData*>>> groups;
-        const auto groupFor = [&]( StaticMaterialPBR* mat ) -> std::vector<const StaticMeshRenderData*>&
+        std::vector<std::pair<MaterialPBR*, std::vector<const StaticMeshRenderData*>>> groups;
+        const auto groupFor = [&]( MaterialPBR* mat ) -> std::vector<const StaticMeshRenderData*>&
         {
             for ( auto& [m, v] : groups )
                 if ( m == mat )
@@ -667,8 +674,8 @@ namespace Desert::Graphic::System
             // (DataDrivenMaterial) are not PBR — their submeshes were routed to the generic
             // path at submit and are masked out of this draw; an object with NO PBR slot at
             // all has nothing for this path to do.
-            if ( MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots ) )
-                groupFor( static_cast<StaticMaterialPBR*>( pbrInst->GetParentMaterial() ) ).push_back( &data );
+            if ( MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots, MeshVertexPath::Static ) )
+                groupFor( static_cast<MaterialPBR*>( pbrInst->GetParentMaterial() ) ).push_back( &data );
         }
 
         // Accumulators for the auto-instanced path (shared across ALL material groups). The shared instanced
@@ -715,7 +722,7 @@ namespace Desert::Graphic::System
             {
                 ObjDraw od;
                 od.Obj  = obj;
-                od.Inst = FirstPBRSlot( *obj->MaterialSlots );
+                od.Inst = FirstPBRSlot( *obj->MaterialSlots, MeshVertexPath::Static );
                 od.Gm   = BuildEffectiveMaterial( mat, od.Inst );
                 if ( ( od.Gm.GlassTint.a > 0.001f ) != m_GlassPass )
                     continue;
@@ -805,7 +812,7 @@ namespace Desert::Graphic::System
                 {
                     // Per-object work: transform (push constant) + material index + descriptor bind.
                     DESERT_PROFILE_SCOPE( "Mesh: PerObject Setup" );
-                    StaticMaterialPBR::UpdateTransform( inst, obj->Transform );
+                    MaterialPBR::UpdateTransform( inst, obj->Transform );
                     mat->SetMaterialIndex( i );
                     mat->Bind( inst );
                 }
@@ -838,7 +845,7 @@ namespace Desert::Graphic::System
             {
                 if ( !ism.Mesh || !ism.Material || !ism.Transforms || ism.Transforms->empty() )
                     continue;
-                auto* mat = static_cast<StaticMaterialPBR*>( ism.Material->GetParentMaterial() );
+                auto* mat = static_cast<MaterialPBR*>( ism.Material->GetParentMaterial() );
                 if ( !mat )
                     continue;
 
@@ -870,7 +877,7 @@ namespace Desert::Graphic::System
                                 static_cast<uint32_t>( instMaterials.size() * sizeof( PBRGpuMaterial ) ) );
 
             frameState.ApplyTo( instInst );
-            StaticMaterialPBR::UpdateTransform( instInst, glm::mat4( 1.0f ) ); // unused by the instanced VS
+            MaterialPBR::UpdateTransform( instInst, glm::mat4( 1.0f ) ); // unused by the instanced VS
 
             for ( const auto& d : instDraws )
             {
@@ -910,17 +917,67 @@ namespace Desert::Graphic::System
                 pipeline = p.get();
         }
 
-        for ( const auto& data : m_SkinnedQueue )
+        // Grouped by material, exactly like DrawStaticMeshes — and for the same two reasons, which the
+        // skinned path did not have before and paid for twice:
+        //
+        //   * the per-object GPU materials fill ONE Materials[] buffer indexed per draw, so instance
+        //     overrides survive. The old path built its entry from the parent material's data and never
+        //     read the instance, so a tinted character rendered untinted;
+        //   * every pose in the group is packed end to end into ONE Bones buffer and each draw names its
+        //     slice with a push constant. The old path uploaded a pose per draw into a buffer the
+        //     already-recorded draws still pointed at, so two skinned meshes sharing a material both
+        //     rendered in the pose of whichever was submitted last.
+        std::vector<std::pair<MaterialPBR*, std::vector<const SkinnedMeshRenderData*>>> groups;
+        const auto groupFor = [&]( MaterialPBR* mat ) -> std::vector<const SkinnedMeshRenderData*>&
         {
-            if ( !data.Mesh || !data.Material || !data.Instance )
-                continue;
+            for ( auto& [m, v] : groups )
+                if ( m == mat )
+                    return v;
+            groups.emplace_back( mat, std::vector<const SkinnedMeshRenderData*>{} );
+            return groups.back().second;
+        };
+        for ( const auto& data : m_SkinnedQueue )
+            if ( data.Mesh && data.Material && data.Instance )
+                groupFor( data.Material ).push_back( &data );
 
-            data.Material->Bind( { .instance      = data.Instance,
-                                   .Scene         = frameState,
-                                   .MeshTransform = data.Transform,
-                                   .SkinnedUB     = { .BoneMatrices = data.BoneMatrices } } );
+        auto& bones        = m_ScratchBones;
+        auto& gpuMaterials = m_ScratchGpuMaterials;
 
-            renderer.RenderMesh( pipeline, data.Mesh, data.Transform, data.Material->GetMaterialExecutor() );
+        for ( auto& [mat, objects] : groups )
+        {
+            bones.clear();
+            gpuMaterials.clear();
+            gpuMaterials.reserve( objects.size() );
+
+            std::vector<uint32_t> boneOffsets;
+            boneOffsets.reserve( objects.size() );
+            for ( const auto* obj : objects )
+            {
+                boneOffsets.push_back( static_cast<uint32_t>( bones.size() ) );
+                bones.insert( bones.end(), obj->BoneMatrices.begin(), obj->BoneMatrices.end() );
+                gpuMaterials.push_back( BuildEffectiveMaterial( mat, obj->Instance ) );
+            }
+
+            // Both buffers at FINAL size before any draw is recorded, so the descriptor points at the
+            // buffer the draws will actually read (a later grow reallocates it).
+            mat->UploadBones( bones.data(), bones.size() );
+            if ( auto* sb = mat->Get<StorageBufferProperty>( "Materials" ) )
+                sb->SetRawData( gpuMaterials.data(),
+                                static_cast<uint32_t>( gpuMaterials.size() * sizeof( PBRGpuMaterial ) ) );
+
+            // Shared per-frame scene state once per group, as the static path does.
+            frameState.ApplyTo( objects[0]->Instance );
+
+            for ( uint32_t i = 0; i < static_cast<uint32_t>( objects.size() ); ++i )
+            {
+                const auto* obj = objects[i];
+                MaterialPBR::UpdateTransform( obj->Instance, obj->Transform );
+                mat->SetMaterialIndex( i );
+                mat->SetBoneOffset( boneOffsets[i] );
+                mat->Bind( obj->Instance );
+
+                renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor() );
+            }
         }
     }
 
@@ -1045,7 +1102,13 @@ namespace Desert::Graphic::System
         if ( !m_RSMPipeline )
             return false;
 
-        m_RSMMaterial = std::make_unique<MaterialRSM>();
+        // (Static x GBuffer): the RSM reuses the G-buffer shader and its pipeline, rasterized from the
+        // sun. A DEDICATED material (rather than the objects' own) because this pass writes a camera UB
+        // holding the SUN's matrices, and two writes to one per-frame UB in a frame is the hazard the
+        // glass pass was split out to avoid.
+        m_RSMMaterial = MaterialPBR::Create( MeshVertexPath::Static, MeshPass::GBuffer );
+        if ( !m_RSMMaterial )
+            return false;
         m_RSMInstance = m_RSMMaterial->CreateInstance();
         return true;
     }
@@ -1085,7 +1148,11 @@ namespace Desert::Graphic::System
         // descriptor-layout-compatible with the glass pipeline because Glass.glsl.frag declares the same
         // bindings as StaticMeshPBR. Being separate from every opaque material, its per-frame ring is written
         // exactly once per frame (here) — no double-update hang.
-        m_GlassMaterial = std::make_unique<MaterialGlass>();
+        // (Static x Glass): same surface, same plumbing, a shader whose fragment stage refracts the
+        // composited scene. Dedicated for the per-frame-UB reason above.
+        m_GlassMaterial = MaterialPBR::Create( MeshVertexPath::Static, MeshPass::Glass );
+        if ( !m_GlassMaterial )
+            return false;
         m_GlassInstance = m_GlassMaterial->CreateInstance();
         return m_GlassMaterial && m_GlassInstance;
     }
@@ -1256,6 +1323,35 @@ namespace Desert::Graphic::System
 
             for ( uint32_t i = 0; i < kNumCascades; ++i )
                 m_ShadowInstancedMaterial[i] = std::make_unique<MaterialShadowInstanced>();
+        }
+
+        // SKINNED caster (optional): same depth-only state and the same standard-Z convention, but the
+        // skinned vertex layout and a vertex stage that skins before projecting. Without this cell the
+        // cascade pass had nothing it could draw a skinned mesh WITH, which is half of why a character
+        // cast no shadow; the other half is the queue the pass walks (RegisterShadowPass).
+        m_ShadowSkinnedShader = Runtime::ResourceRegistry::GetShaderService()->GetByName(
+             MeshShaderFor( MeshVertexPath::Skinned, MeshPass::ShadowDepth ) );
+        if ( m_ShadowSkinnedShader )
+        {
+            GraphicsPipelineSpecification sspec = spec;
+            sspec.DebugName                     = "ShadowPipelineSkinned";
+            sspec.Layout                        = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                                    { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                                    { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                                    { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                                    { Graphic::ShaderDataType::Float2, "a_TextureCoord" },
+                                                    { Graphic::ShaderDataType::Int4, "a_BoneIndices" },
+                                                    { Graphic::ShaderDataType::Float4, "a_BoneWeights" } };
+            sspec.Shader                        = m_ShadowSkinnedShader;
+            m_ShadowSkinnedPipeline             = GraphicsPipeline::Create( sspec );
+            m_ShadowSkinnedPipeline->Invalidate();
+
+            for ( uint32_t i = 0; i < kNumCascades; ++i )
+                m_ShadowSkinnedMaterial[i] = std::make_unique<MaterialShadowSkinned>();
+        }
+        else
+        {
+            LOG_WARN( "[MeshRenderer] Shadow_Skinned shader missing — skinned meshes will cast no shadow." );
         }
 
         return true;
@@ -1462,6 +1558,42 @@ namespace Desert::Graphic::System
                              renderer.RenderMesh( m_ShadowPipeline.get(), g.Mesh, g.Transform,
                                                   m_ShadowMaterial[c]->GetMaterialExecutor(), 1, 0, 0,
                                                   ComputeLOD( g.Transform, g.Mesh, /*forced*/ -1 ) );
+
+                     // SKINNED casters. The cascade pass walked m_StaticQueue and m_GenericQueue by name
+                     // and simply had no line about skinned meshes, so a character was lit by the sun,
+                     // outlined correctly when selected, and cast nothing on the ground it stood on.
+                     //
+                     // Parameterized by the vertex path rather than added as a fourth special case: the
+                     // caster is (path x ShadowDepth) and this is that cell. Every pose in the cascade is
+                     // packed into ONE buffer on the cascade's own material and each draw names its slice,
+                     // for the same reason the forward skinned path does it — a per-draw upload would
+                     // leave the earlier recorded draws reading the last caster's pose.
+                     if ( m_ShadowSkinnedPipeline && m_ShadowSkinnedMaterial[c] && !m_SkinnedQueue.empty() )
+                     {
+                         auto* skinMat = m_ShadowSkinnedMaterial[c].get();
+                         skinMat->SetLightMatrix( glm::mat4( 1.0f ), m_CascadeVP[c] );
+
+                         auto& skinBones = m_ScratchBones;
+                         skinBones.clear();
+                         std::vector<std::pair<const SkinnedMeshRenderData*, uint32_t>> casters;
+                         for ( const auto& sd : m_SkinnedQueue )
+                         {
+                             if ( !sd.Mesh || !sd.CastShadows || sd.BoneMatrices.empty() )
+                                 continue;
+                             casters.emplace_back( &sd, static_cast<uint32_t>( skinBones.size() ) );
+                             skinBones.insert( skinBones.end(), sd.BoneMatrices.begin(), sd.BoneMatrices.end() );
+                         }
+                         if ( !casters.empty() )
+                         {
+                             skinMat->UploadBones( skinBones );
+                             for ( const auto& [sd, boneOffset] : casters )
+                             {
+                                 skinMat->SetBoneOffset( boneOffset );
+                                 renderer.RenderMesh( m_ShadowSkinnedPipeline.get(), sd->Mesh, sd->Transform,
+                                                      skinMat->GetMaterialExecutor() );
+                             }
+                         }
+                     }
 
                      // Instanced path.
                      if ( instancingOn && !batches.empty() )
@@ -1721,14 +1853,32 @@ namespace Desert::Graphic::System
                              // rendered with (animated or bind) so the outline tracks the posed shape.
                              if ( m_SilhouetteSkinnedPipeline && m_SilhouetteSkinnedMaterial )
                              {
+                                 // Poses packed once, sliced per draw — the shape every skinned path in
+                                 // this renderer now shares. Uploading inside the loop meant a
+                                 // multi-selection of skinned meshes outlined them all in the last
+                                 // one's pose.
+                                 auto& outlineBones = m_ScratchBones;
+                                 outlineBones.clear();
+                                 std::vector<std::pair<const SkinnedMeshRenderData*, uint32_t>> outlined;
                                  for ( const auto& sd : m_SkinnedQueue )
                                  {
-                                     if ( !sd.Outlined || !sd.Mesh )
+                                     if ( !sd.Outlined || !sd.Mesh || sd.BoneMatrices.empty() )
                                          continue;
+                                     outlined.emplace_back( &sd, static_cast<uint32_t>( outlineBones.size() ) );
+                                     outlineBones.insert( outlineBones.end(), sd.BoneMatrices.begin(),
+                                                          sd.BoneMatrices.end() );
+                                 }
+                                 if ( !outlined.empty() )
+                                 {
                                      m_SilhouetteSkinnedMaterial->UpdateCamera( camera );
-                                     m_SilhouetteSkinnedMaterial->SetBones( sd.BoneMatrices );
-                                     renderer.RenderMesh( m_SilhouetteSkinnedPipeline.get(), sd.Mesh, sd.Transform,
-                                                          m_SilhouetteSkinnedMaterial->GetMaterialExecutor() );
+                                     m_SilhouetteSkinnedMaterial->UploadBones( outlineBones );
+                                     for ( const auto& [sd, boneOffset] : outlined )
+                                     {
+                                         m_SilhouetteSkinnedMaterial->SetBoneOffset( boneOffset );
+                                         renderer.RenderMesh( m_SilhouetteSkinnedPipeline.get(), sd->Mesh,
+                                                              sd->Transform,
+                                                              m_SilhouetteSkinnedMaterial->GetMaterialExecutor() );
+                                     }
                                  }
                              }
                          },
@@ -1769,31 +1919,34 @@ namespace Desert::Graphic::System
                 skinnedData.Transform    = data.Transform;
                 skinnedData.BoneMatrices = data.BoneMatrices;
                 skinnedData.Outlined     = data.Outlined;
+                skinnedData.CastShadows  = data.CastShadows;
                 if ( data.MaterialSlots && !data.MaterialSlots->empty() )
                 {
-                    // Custom-shader slot materials are not usable here: a skinned mesh needs the
-                    // skinning vertex stage, which generic DSL surface shaders don't have. Take
-                    // the first slot whose parent IS the skinned PBR material (mirrors the
-                    // static path's FirstPBRSlot guard); warn once so the fallback isn't silent.
-                    for ( auto* inst : *data.MaterialSlots )
+                    // THE SAME selector the static queue uses, asked for the SKINNED path. It used to be
+                    // a second loop hunting a different C++ CLASS, and since MaterialFactory could not
+                    // produce that class from an asset under any circumstances, an imported character
+                    // with its own materials matched nothing and was dropped without drawing.
+                    if ( auto* inst = FirstPBRSlot( *data.MaterialSlots, MeshVertexPath::Skinned ) )
                     {
-                        if ( !inst )
-                            continue;
-                        if ( auto* pbr = dynamic_cast<SkinnedMaterialPBR*>( inst->GetParentMaterial() ) )
-                        {
-                            skinnedData.Instance = inst;
-                            skinnedData.Material = pbr;
-                            break;
-                        }
+                        skinnedData.Instance = inst;
+                        skinnedData.Material = static_cast<MaterialPBR*>( inst->GetParentMaterial() );
                     }
-                    if ( !skinnedData.Material )
+                    else
                     {
-                        static bool s_WarnedCustomSkinned = false;
-                        if ( !s_WarnedCustomSkinned )
+                        // A consistency guard, not the custom-shader case: MeshECSSystem substitutes its
+                        // default skinned PBR material for any slot that fails to resolve, so every slot
+                        // reaching here should already carry a skinned-path parent. If one does not, the
+                        // producer and this queue disagree about what a skinned slot IS, and drawing it
+                        // through the skinned pipeline with a static material's descriptor sets is a
+                        // layout mismatch — so the mesh is dropped and the disagreement is named.
+                        static bool s_WarnedNoSkinnedSlot = false;
+                        if ( !s_WarnedNoSkinnedSlot )
                         {
-                            LOG_WARN( "Skinned meshes don't support custom-shader materials (no skinning "
-                                      "stage in surface shaders) — mesh skipped. Assign a PBR material." );
-                            s_WarnedCustomSkinned = true;
+                            LOG_WARN( "[MeshRenderer] A skinned mesh arrived with slots but none whose parent "
+                                      "is a PBR material on the SKINNED vertex path; the mesh is dropped. "
+                                      "MeshECSSystem is expected to have substituted its default skinned "
+                                      "material, so this means the two disagree." );
+                            s_WarnedNoSkinnedSlot = true;
                         }
                     }
                 }
