@@ -727,6 +727,24 @@ namespace Desert::ECS
         // of erosion, so a rougher silhouette is a question for Assets::BakeCloudProceduralVolume; and the
         // flat near-field body is the ambient term, which is D-25's finding standing after Р7 and Р12.
         //
+        // AND THE AMBIENT HALF OF THAT SENTENCE IS NOW CLOSED — Р19 followed it and it is a dead end, so
+        // the next person should not spend a second task there. The sky term is flat because the SKY LIGHT
+        // is flat: it is the only path by which sky light of any order reaches a sample, and the
+        // all-orders response of a body in a uniform surround at this component's own ScatteringAlbedo of
+        // 0.98 varies by 1.7 % across the whole body, because the medium is near radiative equilibrium
+        // with what surrounds it. Occluding it "correctly" — the exact first-order answer — is 45 times
+        // more structured than the truth and 2.6 times too dark, and on the frame it is Р18's AmbientScale
+        // knockout wearing the occluder's clothes. Measured in Desert/Tests/Engine/CloudLighting and in
+        // Docs/Clouds/ANALYSIS_APPROACH.md D-33.
+        //
+        // THE ONE THING THAT TIES THE TWO HALVES TOGETHER, and it is THIS number after all: the flatness
+        // is the medium's, not the sky's. On the same lobe at 45 /km the all-orders sky response has a
+        // relative contrast of 0.273 against 0.017 at 8 — the sky light DOES model a body at a physical
+        // extinction, and the sky-occlusion term, already pinned on its floor, delivers a constant there.
+        // Both halves of this subsystem's lighting are calibrated for 8 /km and both fail at 45, in
+        // opposite directions. That is a reason to revisit the pair together if this default ever moves,
+        // not a reason to move it.
+        //
         // ONE CASE WHERE RAISING IT DOES SOMETHING, recorded because it is a real measurement and not a
         // reason to move the default. On BROKEN cumulus (the same sky at coverage 0.35) the pair
         // "45 /km + MultiScatterOcclusion 0.4847" visibly models the lobes — a shaded underside and a
@@ -997,6 +1015,19 @@ namespace Desert::ECS
                   Tooltip( "Scales the sky's ambient contribution to the clouds. White is the full "
                            "contribution; black lights them by the sun alone and leaves their shadowed "
                            "sides black." ) )
+        // WHITE, AND LOWERING IT IS NOT HOW THE CLOUDS GET THEIR FORM BACK — said here because this is the
+        // field two tasks in a row have reached for. Deleting it is the largest single knockout in the
+        // subsystem (D-25, D-32: mean 0.736 -> 0.391, tonal contrast 0.109 -> 0.519 on Clouds_Showcase at
+        // mid elevation), which reads as "the ambient is what flattens the picture". It is, and the
+        // contrast that appears when it goes is the sun's, uncovered rather than created; what actually
+        // happens to the frame is that it loses half its light and goes warm — the sky is its only cool
+        // contributor.
+        //
+        // Р19 measured what a CORRECTLY occluded ambient would look like instead of removing it, and the
+        // answer is that this term is already close to the best a single scalar can do: at a cloud's own
+        // albedo the all-orders sky-light response over a body varies by 1.7 %, so there is almost no form
+        // in the sky light to recover. Docs/Clouds/ANALYSIS_APPROACH.md D-33 and
+        // Desert/Tests/Engine/CloudLighting carry the numbers and the frames.
         glm::vec3 AmbientScale = { 1.0f, 1.0f, 1.0f };
 
         // ---- Shadows --------------------------------------------------------------------------------

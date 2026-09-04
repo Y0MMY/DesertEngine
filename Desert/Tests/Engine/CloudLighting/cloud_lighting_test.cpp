@@ -1242,6 +1242,326 @@ TEST( CloudMultiScatterSeries, TheSeriesTracksTheConvergedMarchAtTheSHIPPEDExtin
             "rewriting around the new numbers -- do not delete it, restate it";
 }
 
+// ---------------------------------------------------------------------------------------------------
+// WHY THE SKY-LIGHT TERM HAS A FLOOR — the measurement that stops the next person removing it
+// ---------------------------------------------------------------------------------------------------
+//
+// CloudSkyOcclusion bottoms at CLOUD_SKY_LOWER_HEMISPHERE, so however much cloud stands over a sample it
+// still receives half the sky's mean radiance. That reads like a modelling error, and Р19 was set to find
+// out whether removing it is where the clouds' missing FORM comes from. It is not, and the reason is
+// physical rather than a matter of taste.
+//
+// THE AMBIENT TERM IS THE ONLY PLACE ALL ORDERS OF SKY LIGHT ENTER. CloudMultiScatterStep adds @p ambient
+// to octave 0 alone, so the number the march multiplies stands for every order of sky light at once — not
+// for the first. The truth it should be judged against is therefore the ALL-ORDERS response of a body
+// sitting in a surround of uniform radiance, and that quantity is nearly featureless: at a cloud's own
+// scattering albedo the medium is close to radiative equilibrium with whatever surrounds it, and
+// equilibrium has no shape by definition. The measurement below puts numbers on it.
+//
+// The estimator is Р18's, one line different: instead of next-event estimation toward the sun, a path
+// that leaves the body collects the surround. Its albedo-zero limit is the single-scattering sphere
+// integral, computed here independently, which is what pins it before anything is measured with it.
+namespace
+{
+    // Equal-area directions on the sphere, deterministic. Used for the single-scattering integral so that
+    // half the comparison carries no Monte Carlo noise at all.
+    std::vector<dvec3> FibonacciSphere( int count )
+    {
+        std::vector<dvec3> directions;
+        directions.reserve( count );
+
+        const double golden = kPi * ( 3.0 - std::sqrt( 5.0 ) );
+        for ( int i = 0; i < count; ++i )
+        {
+            const double y      = 1.0 - 2.0 * ( ( i + 0.5 ) / count );
+            const double radius = std::sqrt( std::max( 0.0, 1.0 - y * y ) );
+            directions.push_back( dvec3( radius * std::cos( golden * i ), y, radius * std::sin( golden * i ) ) );
+        }
+        return directions;
+    }
+
+    // The FIRST-ORDER sky light at @p p: the sphere-mean of the transmittance toward the surround. No
+    // cosine weighting anywhere in it — a volume element has no normal, and the quantity the march wants
+    // is a mean RADIANCE rather than an irradiance.
+    double SingleScatterSkyResponse( const ReferenceLobe& lobe, const dvec3& p, const std::vector<dvec3>& dirs )
+    {
+        double sum = 0.0;
+        for ( const dvec3& d : dirs )
+            sum += std::exp( -lobe.SigmaPerKm * ExitDistanceKm( lobe, p, d ) );
+        return sum / static_cast<double>( dirs.size() );
+    }
+
+    // ALL orders of sky light at @p p under a surround of uniform radiance 1. A uniform direction is drawn
+    // — which IS the 1/4pi sphere integral — and the path walks until it either leaves the body, collecting
+    // the surround, or scatters and carries on with the albedo as its throughput.
+    //
+    // The uniform draw is SampleHG at zero asymmetry, which draws cos(theta) uniformly on [-1, 1]: reusing
+    // the sampler the suite already pins beats adding a second one that could be wrong on its own.
+    double AllOrderSkyResponse( const ReferenceLobe& lobe, const dvec3& p, double g, int paths, Rng& rng )
+    {
+        double total = 0.0;
+
+        for ( int path = 0; path < paths; ++path )
+        {
+            dvec3  d          = SampleHG( dvec3( 0.0, 0.0, 1.0 ), 0.0, rng );
+            dvec3  x          = p;
+            double throughput = 1.0;
+
+            for ( int bounce = 0; bounce < 1024; ++bounce )
+            {
+                const double step = -std::log( 1.0 - rng.Next() ) / lobe.SigmaPerKm;
+                if ( step >= ExitDistanceKm( lobe, x, d ) )
+                {
+                    total += throughput; // it reached the surround
+                    break;
+                }
+
+                x += d * step;
+                throughput *= lobe.Albedo;
+
+                // Russian roulette rather than a hard cut, for the reason TraceOnePath gives: at an albedo
+                // near one a cut deletes exactly the orders that make a cloud white.
+                if ( throughput < 0.01 )
+                {
+                    if ( rng.Next() > 0.5 )
+                        break;
+                    throughput *= 2.0;
+                }
+
+                d = SampleHG( d, g, rng );
+            }
+        }
+
+        return total / static_cast<double>( paths );
+    }
+
+    // Points on a lattice inside the lobe, pulled in to 0.9 of the radius for the reason kDiscFraction
+    // gives: at the very rim every model agrees on "no cloud" and a pile of agreeing ones would sit in the
+    // percentiles that are supposed to be measuring the body.
+    std::vector<dvec3> LobeInteriorPoints( const ReferenceLobe& lobe, int perAxis )
+    {
+        std::vector<dvec3> points;
+        const double       reach = 0.9 * lobe.RadiusKm;
+
+        for ( int k = 0; k < perAxis; ++k )
+            for ( int j = 0; j < perAxis; ++j )
+                for ( int i = 0; i < perAxis; ++i )
+                {
+                    const dvec3 p( ( ( i + 0.5 ) / perAxis * 2.0 - 1.0 ) * reach,
+                                   ( ( j + 0.5 ) / perAxis * 2.0 - 1.0 ) * reach,
+                                   ( ( k + 0.5 ) / perAxis * 2.0 - 1.0 ) * reach );
+                    if ( glm::dot( p, p ) <= reach * reach )
+                        points.push_back( p );
+                }
+        return points;
+    }
+
+    double RelativeContrast( std::vector<double> values )
+    {
+        std::sort( values.begin(), values.end() );
+        auto q = [&]( double f )
+        { return values[std::min( values.size() - 1, static_cast<size_t>( f * values.size() ) )]; };
+        const double lo = q( 0.05 );
+        const double hi = q( 0.95 );
+        return ( hi + lo ) > 1e-12 ? ( hi - lo ) / ( hi + lo ) : 0.0;
+    }
+
+    double MeanOf( const std::vector<double>& values )
+    {
+        double sum = 0.0;
+        for ( double v : values )
+            sum += v;
+        return sum / static_cast<double>( values.size() );
+    }
+
+    double RmsDifference( const std::vector<double>& a, const std::vector<double>& b )
+    {
+        double sum = 0.0;
+        for ( size_t i = 0; i < a.size(); ++i )
+            sum += ( a[i] - b[i] ) * ( a[i] - b[i] );
+        return std::sqrt( sum / static_cast<double>( a.size() ) );
+    }
+
+    // The three answers, evaluated over the same interior points so they can be differenced pointwise.
+    struct SkyResponses
+    {
+        std::vector<double> Shipped;     // CloudSkyOcclusion driven exactly as the march drives it
+        std::vector<double> SingleOrder; // the sphere-mean transmittance: exact, and first order only
+        std::vector<double> AllOrders;   // the converged reference
+    };
+
+    SkyResponses MeasureSkyResponses( const ReferenceLobe& lobe, double g, int perAxis, int paths )
+    {
+        const std::vector<dvec3> points = LobeInteriorPoints( lobe, perAxis );
+        const std::vector<dvec3> dirs   = FibonacciSphere( 512 );
+
+        SkyResponses out;
+        for ( const dvec3& p : points )
+        {
+            // THE SHIPPED PIPELINE, DRIVEN ON THIS LOBE and not restated: the column straight up is what
+            // CloudSkyOcclusionVolume.shader integrates, CloudSkyDiffuseTransmittance is what it stores,
+            // and CloudSkyOcclusion is what the march composes out of it.
+            const double tauUp = lobe.SigmaPerKm * ExitDistanceKm( lobe, p, dvec3( 0.0, 1.0, 0.0 ) );
+            out.Shipped.push_back(
+                 CloudSkyOcclusion( CloudSkyDiffuseTransmittance( static_cast<float>( tauUp ) ), 1.0f ) );
+
+            out.SingleOrder.push_back( SingleScatterSkyResponse( lobe, p, dirs ) );
+
+            Rng rng( 7717u + static_cast<std::uint64_t>( out.AllOrders.size() ) * 104729u );
+            out.AllOrders.push_back( AllOrderSkyResponse( lobe, p, g, paths, rng ) );
+        }
+        return out;
+    }
+
+    constexpr int kSkyGrid  = 7;
+    constexpr int kSkyPaths = 2000;
+} // namespace
+
+TEST( CloudSkyOcclusion, TheEstimatorsAlbedoZeroLimitIsTheSingleScatteringSphereIntegral )
+{
+    // THE INSTRUMENT IS PINNED BEFORE ANYTHING IS MEASURED WITH IT, the same discipline
+    // TheMonteCarloReferencesFirstOrderIsTheAnalyticSingleScattering applies to the sun's estimator. With
+    // the albedo at zero a path can only escape or die, so the estimator must reproduce the deterministic
+    // sphere-mean of exp(-tau) — which shares no line of code with it.
+    ReferenceLobe lobe;
+    lobe.Albedo = 0.0;
+
+    const SkyResponses r = MeasureSkyResponses( lobe, 0.8, 5, kSkyPaths );
+
+    const double rms = RmsDifference( r.AllOrders, r.SingleOrder );
+    std::printf( "[CloudSkyOcclusion] albedo 0: path tracer mean %.5f, sphere integral mean %.5f, rms %.5f\n",
+                 MeanOf( r.AllOrders ), MeanOf( r.SingleOrder ), rms );
+
+    EXPECT_LT( rms, 0.02 ) << "the two evaluations of one quantity disagree by " << rms
+                           << "; it was 0.005 when this was written, and every number in the test below "
+                              "rests on this one";
+}
+
+TEST( CloudSkyOcclusion, TheSkyLightHasNoFormToGiveAtACloudsOwnAlbedoWhichIsWhyTheTermHasAFloor )
+{
+    // Р19'S RESULT, and it is a REFUSAL: the flat near-field body Р18 traced to the ambient term cannot be
+    // fixed inside that term, because at a cloud's own albedo the sky light physically has no form in it.
+    //
+    // Three answers over the same interior points of one lobe:
+    //
+    //   all orders  the truth — what the march's ambient stands for, since CloudMultiScatterStep adds the
+    //               ambient to octave 0 and nothing else carries sky light at all.
+    //   one order   the sphere-mean transmittance. This is what "occlude the sky light correctly" means if
+    //               you mean it literally, and it is what a richer occlusion volume would converge to.
+    //   shipped     CloudSkyOcclusion on the vertical column, floor and all.
+    //
+    // The truth is nearly CONSTANT and the literal answer is not. That is the whole finding.
+    ReferenceLobe lobe;
+    const double  g = 0.8;
+
+    const SkyResponses r = MeasureSkyResponses( lobe, g, kSkyGrid, kSkyPaths );
+
+    const double allMean = MeanOf( r.AllOrders );
+    const double oneMean = MeanOf( r.SingleOrder );
+    const double shipMean = MeanOf( r.Shipped );
+
+    const double allContrast  = RelativeContrast( r.AllOrders );
+    const double oneContrast  = RelativeContrast( r.SingleOrder );
+    const double shipContrast = RelativeContrast( r.Shipped );
+
+    std::printf( "[CloudSkyOcclusion] lobe R %.2f km, sigma %.0f /km, albedo %.2f, %zu interior points\n",
+                 lobe.RadiusKm, lobe.SigmaPerKm, lobe.Albedo, r.AllOrders.size() );
+    std::printf( "[CloudSkyOcclusion] %-12s %10s %14s\n", "answer", "mean", "rel-contrast" );
+    std::printf( "[CloudSkyOcclusion] %-12s %10.4f %14.4f\n", "all orders", allMean, allContrast );
+    std::printf( "[CloudSkyOcclusion] %-12s %10.4f %14.4f\n", "one order", oneMean, oneContrast );
+    std::printf( "[CloudSkyOcclusion] %-12s %10.4f %14.4f\n", "shipped", shipMean, shipContrast );
+    std::printf( "[CloudSkyOcclusion] rms to truth: shipped %.4f, one order %.4f\n",
+                 RmsDifference( r.Shipped, r.AllOrders ), RmsDifference( r.SingleOrder, r.AllOrders ) );
+
+    // THE FINDING. At the component's own albedo the body is within a few per cent of being lit uniformly
+    // by the sky, everywhere, including its core: it is close to radiative equilibrium with its surround.
+    // Measured 0.017 when this was written, against 0.79 for the one-order answer.
+    EXPECT_LT( allContrast, 0.05 ) << "the all-orders sky response over the body now varies by "
+                                   << allContrast
+                                   << "; it was 0.017. If this has genuinely risen, the sky term can carry "
+                                      "form after all and Р19's refusal wants revisiting";
+
+    // AND THE LITERAL ANSWER IS AN ORDER MORE STRUCTURED THAN THE TRUTH, which is the sentence that stops
+    // the obvious fix. A volume that occluded the sky light exactly — both hemispheres, lateral neighbours
+    // and all — would converge to `one order` and would therefore model the body's shading an order of
+    // magnitude too strongly, as well as far too dark.
+    EXPECT_GT( oneContrast, 10.0 * allContrast )
+         << "single scattering is no longer markedly more structured than the truth (" << oneContrast
+         << " against " << allContrast << ")";
+
+    // THE RELATION THAT KEEPS THE FLOOR. Judged against what the term actually stands for, the shipped
+    // form — floor included — is CLOSER to the truth than the physically exact first-order occlusion is.
+    // Measured 0.398 against 0.814. Anything proposing to remove CLOUD_SKY_LOWER_HEMISPHERE has to come
+    // here and beat this number rather than argue from the geometry.
+    EXPECT_LT( RmsDifference( r.Shipped, r.AllOrders ), RmsDifference( r.SingleOrder, r.AllOrders ) )
+         << "the shipped occlusion is no longer the better of the two approximations to the all-orders "
+            "sky light; if a third one is now in the file, this comparison wants rewriting around it";
+
+    // THE MECHANISM, NAMED RATHER THAN ASSERTED AS A NUMBER: it is the ALBEDO that flattens the response,
+    // so lowering it must bring the form back. A body that is genuinely absorbing does have a dark core
+    // under a uniform sky; a cloud, at 0.98, does not.
+    ReferenceLobe absorbing = lobe;
+    absorbing.Albedo        = 0.5;
+
+    const SkyResponses dark        = MeasureSkyResponses( absorbing, g, 5, kSkyPaths );
+    const double       darkContrast = RelativeContrast( dark.AllOrders );
+
+    std::printf( "[CloudSkyOcclusion] the same body at albedo 0.50: rel-contrast %.4f\n", darkContrast );
+
+    EXPECT_GT( darkContrast, 4.0 * allContrast )
+         << "the flatness is supposed to be the albedo's doing, but halving the albedo moved the contrast "
+            "from "
+         << allContrast << " only to " << darkContrast;
+
+    // THE ENERGY BOUND Р19 WAS ASKED FOR, on the truth itself rather than on the model: a point in a body
+    // lit by a surround of radiance 1 can receive no more than 1 and no less than 0, at every point.
+    for ( double v : r.AllOrders )
+    {
+        EXPECT_GE( v, 0.0 );
+        EXPECT_LE( v, 1.0 );
+    }
+}
+
+TEST( CloudSkyOcclusion, TheSkyLightGAINSFormAtAPhysicalExtinctionAndTheTermGoesTheOtherWay )
+{
+    // THE CONDITION ON Р19'S REFUSAL, and it is the same tether D-32 found on the octave series: both
+    // halves of this subsystem's lighting are calibrated for the SHIPPED 8 /km and both fail at a cumulus'
+    // physical ~45, in opposite directions.
+    //
+    // Thicken the medium and the sky light acquires form — a path from the core needs many more
+    // scatterings to reach the surround, so the albedo's 0.98 is applied many more times and the core
+    // genuinely goes dark. Measured on the same lobe: the all-orders response's relative contrast rises
+    // from 0.017 at 8 /km to 0.273 at 45. And the shipped term does the OPPOSITE: its stored
+    // transmittance is already numerically zero at 8 /km, so at 45 it is pinned flat on
+    // CLOUD_SKY_LOWER_HEMISPHERE and delivers a constant 0.500 with a contrast of 0.002.
+    //
+    // So "the sky light cannot carry form" is a statement about THIS medium, not about sky light. If the
+    // extinction ever moves, this term is the second thing that has to be rebuilt, and the first is the
+    // octave series (TheSeriesTracksTheConvergedMarchAtTheSHIPPEDExtinctionAndNotAtAPHYSICALOne).
+    ReferenceLobe shippedMedium;
+    ReferenceLobe physicalMedium;
+    physicalMedium.SigmaPerKm = 45.0;
+
+    const SkyResponses atShipped  = MeasureSkyResponses( shippedMedium, 0.8, 5, kSkyPaths );
+    const SkyResponses atPhysical = MeasureSkyResponses( physicalMedium, 0.8, 5, kSkyPaths );
+
+    const double truthAt8   = RelativeContrast( atShipped.AllOrders );
+    const double truthAt45  = RelativeContrast( atPhysical.AllOrders );
+    const double termAt8    = RelativeContrast( atShipped.Shipped );
+    const double termAt45   = RelativeContrast( atPhysical.Shipped );
+
+    std::printf( "[CloudSkyOcclusion] %-8s %14s %14s\n", "sigma", "truth contr", "term contr" );
+    std::printf( "[CloudSkyOcclusion] %-8.0f %14.4f %14.4f\n", shippedMedium.SigmaPerKm, truthAt8, termAt8 );
+    std::printf( "[CloudSkyOcclusion] %-8.0f %14.4f %14.4f\n", physicalMedium.SigmaPerKm, truthAt45, termAt45 );
+
+    EXPECT_GT( truthAt45, 10.0 * truthAt8 )
+         << "the sky light no longer gains form as the medium thickens (" << truthAt45 << " against "
+         << truthAt8 << "), which is the mechanism Р19's refusal rests on";
+
+    EXPECT_LT( termAt45, termAt8 ) << "the shipped term is supposed to FLATTEN as the medium thickens -- it "
+                                      "runs out of range at its own floor -- and it no longer does";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
