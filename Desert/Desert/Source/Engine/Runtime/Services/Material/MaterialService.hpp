@@ -8,17 +8,30 @@
 
 #include <array>
 
+namespace Desert::Graphic
+{
+    class MaterialPBR;
+}
+
 namespace Desert::Runtime
 {
     // Owns the runtime materials behind the `.demat` assets.
     //
-    // A runtime material is identified by the PAIR (asset, vertex path), not by the asset alone. That is
-    // the difference between "an artist authors a surface" and "the renderer decides how the geometry is
-    // fetched": one `.demat` legitimately becomes a static material AND a skinned material AND an
-    // instanced one, all with the same parameters, because they are built from the same asset. Resolving
-    // an asset into ONE material — as this service used to — makes the material's class the vertex path,
-    // and a mesh on any other path then has nothing it can be drawn with. See
-    // Engine/Graphic/Materials/Mesh/MeshVertexPath.hpp for the four defects that followed from it.
+    // A runtime material is identified by the TRIPLE (asset, vertex path, pass), not by the asset alone.
+    // That is the difference between "an artist authors a surface" and "the renderer decides how the
+    // geometry is fetched and what the fragment stage writes": one `.demat` legitimately becomes a static
+    // material AND a skinned material AND an instanced one AND a G-buffer one, all with the same
+    // parameters, because they are built from the same asset. Resolving an asset into ONE material — as
+    // this service used to — makes the material's class the vertex path, and a mesh on any other path then
+    // has nothing it can be drawn with. See Engine/Graphic/Materials/Mesh/MeshVertexPath.hpp for the four
+    // defects that followed from it.
+    //
+    // THE PASS IS PART OF THE KEY BECAUSE THE DESCRIPTOR LAYOUT IS. A Graphic::Material is one shader's
+    // descriptor sets plus a parameter payload, and the shader is `MeshShaderFor(path, pass)` — so a pass
+    // with no material of its own has to bind a NEIGHBOURING cell's sets against its own pipeline layout,
+    // which Vulkan only tolerates while the two shaders reflect to identical layouts. The deferred
+    // G-buffer pass did that, and StaticMeshGBuffer.shader had to declare (and epsilon-touch) fourteen
+    // bindings it never read so that the borrow stayed legal. The pass axis is what retires that.
     class MaterialService
     {
     public:
@@ -34,23 +47,51 @@ namespace Desert::Runtime
         // Register above.
         Common::BoolResultStr RegisterAsset( const std::shared_ptr<Assets::MaterialAsset>& materialAsset );
 
-        // Builds-on-miss from a shell, for ONE vertex path. A material-INSTANCE handle resolves through
-        // its parent chain to the BASE material (an instance has no runtime Material of its own).
-        // Returns null when the asset resolves to nothing, or when its shader has no variant on that
-        // path (a custom DSL surface shader on the skinned path, say) — MaterialFactory names which.
+        // Builds-on-miss from a shell, for ONE (vertex path, pass) cell. A material-INSTANCE handle
+        // resolves through its parent chain to the BASE material (an instance has no runtime Material of
+        // its own). Returns null when the asset resolves to nothing, or when its shader has no variant in
+        // that cell (a custom DSL surface shader on the skinned path, say) — MaterialFactory names which.
         //
-        // The default is Static because most callers ask "does this asset resolve to a material at all?"
-        // and any path answers that; the mesh renderers pass the path they are about to draw with.
+        // The defaults are (Static, Forward) because most callers ask "does this asset resolve to a
+        // material at all?" and any cell answers that; the mesh renderers pass the cell they are about to
+        // draw with.
         Graphic::Material*  Get( const Assets::AssetHandle& handle,
-                                 Graphic::MeshVertexPath    path = Graphic::MeshVertexPath::Static ) const;
+                                 Graphic::MeshVertexPath    path = Graphic::MeshVertexPath::Static,
+                                 Graphic::MeshPass          pass = Graphic::MeshPass::Forward ) const;
         Graphic::Material*  GetByExternalHandle( const Common::UUID& handle ) const;
         Assets::AssetHandle GetAssetHandleByExternal( const Common::UUID& uuid ) const;
         void                Clear();
 
-        // Every runtime material ALREADY BUILT for this handle, one per path that has been asked for.
-        // Live editing has to reach all of them: a parameter edit that updated only the static material
-        // would leave the character wearing the old value, and that divergence is precisely what per-path
-        // material classes used to guarantee. Never builds; a path nobody has asked for is not returned.
+        // The SAME `.demat` and the SAME vertex path, drawn into a different PASS — built on miss, exactly
+        // as Get does. This is how a render pass that owns no material asks for one: it holds the runtime
+        // material a mesh slot resolved to (forward), and needs the sibling whose descriptor sets were
+        // allocated from ITS OWN shader's reflection.
+        //
+        // It exists rather than the renderer calling Get(handle, path, pass) because the renderer does not
+        // have the handle: a draw carries MaterialInstance* slots, not asset handles. Answering from the
+        // material keeps the asset->material table the single place that knows which `.demat` a runtime
+        // material came from.
+        //
+        // Null when the engine has no shader for the requested cell, or when @p built is not service-owned
+        // — ask Owns() first if the two need telling apart, because they need different handling and a
+        // caller that treats them alike either drops geometry or draws it with the wrong textures.
+        Graphic::MaterialPBR* GetPassVariant( const Graphic::MaterialPBR* built, Graphic::MeshPass pass ) const;
+
+        // Whether this runtime material came from a `.demat` this service holds. FALSE for a material a
+        // renderer built for itself — the glass pass, the RSM pass, the instanced batch material, and
+        // MeshECSSystem's default material, which stands in for every mesh whose slot does not resolve.
+        //
+        // It exists because "GetPassVariant returned null" has two causes and only one of them is an
+        // error. Found by rendering, not by reading: a deferred scene containing a mesh with no material
+        // slot lost that mesh entirely, because its default material has no asset and so no sibling for
+        // any other pass. The caller now recognises that case and draws it with a material of its own.
+        bool Owns( const Graphic::Material* material ) const;
+
+        // Every runtime material ALREADY BUILT for this handle, one per (path, pass) cell that has been
+        // asked for. Live editing has to reach all of them: a parameter edit that updated only the static
+        // forward material would leave the character wearing the old value — and would leave a deferred
+        // scene's G-buffer material holding the previous textures, which is the same defect one axis over.
+        // Never builds; a cell nobody has asked for is not returned.
         std::vector<Graphic::Material*> GetBuiltVariants( const Assets::AssetHandle& handle ) const;
 
         // THE way render systems obtain a slot's runtime instance. Base material asset -> a plain
@@ -122,14 +163,34 @@ namespace Desert::Runtime
         Common::BoolResultStr RefuseOnCollision( const Assets::AssetHandle&                    handle,
                                                  const std::shared_ptr<Assets::MaterialAsset>& incoming ) const;
 
-        // One slot per vertex path, built lazily. An array and not a second map because the paths are a
-        // closed set the renderer enumerates — a map would let a path exist that no draw can ask for.
-        using PathVariants = std::array<std::shared_ptr<Graphic::Material>, Graphic::kMeshVertexPathCount>;
+        // One slot per (vertex path x pass) cell, built lazily. An array and not a second map because both
+        // axes are closed sets the renderer enumerates — a map would let a cell exist that no draw can ask
+        // for. Most cells stay empty for most assets: a scene with no skinned geometry and no deferred path
+        // builds exactly one material per `.demat`, because nothing ever asks for the others.
+        static constexpr size_t kVariantCount = Graphic::kMeshVertexPathCount * Graphic::kMeshPassCount;
+        using PathVariants                    = std::array<std::shared_ptr<Graphic::Material>, kVariantCount>;
+
+        static constexpr size_t VariantSlot( Graphic::MeshVertexPath path, Graphic::MeshPass pass )
+        {
+            return static_cast<size_t>( path ) * Graphic::kMeshPassCount + static_cast<size_t>( pass );
+        }
 
         uint32_t                                                                        m_InvalidationVersion = 0;
         mutable std::unordered_map<Assets::AssetHandle, PathVariants>                   m_Materials;
         std::unordered_map<Common::UUID, Assets::AssetHandle>                           m_ExternalToInternal;
         std::unordered_map<Assets::AssetHandle, std::shared_ptr<Assets::MaterialAsset>> m_MaterialAssets;
+
+        // Which `.demat` a built runtime material came from — the inverse of m_Materials, and the only way
+        // GetPassVariant can answer without the caller carrying an asset handle it does not have.
+        //
+        // It is an INDEX and not a second source of truth: m_Materials decides which materials exist, and
+        // every one of the four places that changes it (Register, the lazy build in Get, Invalidate,
+        // Clear) updates this in the same statement. No test can hold it to that — building a runtime
+        // material needs a device, so a headless suite cannot construct this class at all — so what keeps
+        // it honest is that a stale entry is not silent: GetPassVariant would hand a render pass a
+        // material that is on its way to the graveyard, and the pass would draw with descriptors the next
+        // CollectGarbage destroys. That is why Invalidate erases here and not in CollectGarbage.
+        mutable std::unordered_map<const Graphic::Material*, Assets::AssetHandle> m_BuiltToAsset;
 
         // Invalidated materials awaiting safe destruction (see Invalidate/CollectGarbage).
         std::vector<std::shared_ptr<Graphic::Material>> m_Graveyard;

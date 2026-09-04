@@ -2,6 +2,7 @@
 
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
 #include <Common/Core/Logger.hpp>
@@ -19,13 +20,23 @@ namespace Desert::Runtime
         if ( const auto refusal = RefuseOnCollision( handle, materialAsset ); !refusal )
             return refusal;
 
-        // Eager build of the STATIC variant only. The other paths are built on the first draw that asks
-        // for them: a scene with no skinned geometry must not pay for a skinned descriptor set per
-        // material, and a path built eagerly for an asset nobody skins is a resource with no reader.
-        auto material =
-             Graphic::MaterialFactory::CreateMaterial( materialAsset.get(), Graphic::MeshVertexPath::Static );
+        // Eager build of the (Static x Forward) cell only. The other cells are built on the first draw
+        // that asks for them: a scene with no skinned geometry must not pay for a skinned descriptor set
+        // per material, a forward scene must not pay for a G-buffer one, and a cell built eagerly for an
+        // asset nobody draws that way is a resource with no reader.
+        auto material = Graphic::MaterialFactory::CreateMaterial(
+             materialAsset.get(), Graphic::MeshVertexPath::Static, Graphic::MeshPass::Forward );
 
-        m_Materials[handle][static_cast<size_t>( Graphic::MeshVertexPath::Static )] = material;
+        // The same file re-registering (RefuseOnCollision lets that through deliberately) replaces the
+        // cell, so the material this overwrites stops existing. Its address would otherwise stay in the
+        // reverse index and be handed to a render pass as a live sibling.
+        auto& cell =
+             m_Materials[handle][VariantSlot( Graphic::MeshVertexPath::Static, Graphic::MeshPass::Forward )];
+        if ( cell )
+            m_BuiltToAsset.erase( cell.get() );
+        if ( material )
+            m_BuiltToAsset[material.get()] = handle;
+        cell                     = material;
         m_MaterialAssets[handle] = materialAsset; // keep the shell too
 
         m_ExternalToInternal[materialAsset->GetMaterialUUID()] = handle;
@@ -79,8 +90,8 @@ namespace Desert::Runtime
                                                  want.generic_string() );
     }
 
-    Graphic::Material* MaterialService::Get( const Assets::AssetHandle& handle,
-                                             Graphic::MeshVertexPath    path ) const
+    Graphic::Material* MaterialService::Get( const Assets::AssetHandle& handle, Graphic::MeshVertexPath path,
+                                             Graphic::MeshPass pass ) const
     {
         // Material-instance assets resolve through the parent chain to the BASE material: an
         // instance never builds a runtime Material of its own (its overrides live on the
@@ -103,23 +114,45 @@ namespace Desert::Runtime
             break;
         }
 
-        const size_t slot = static_cast<size_t>( path );
+        const size_t slot = VariantSlot( path, pass );
         if ( auto it = m_Materials.find( current ); it != m_Materials.end() && it->second[slot] )
             return it->second[slot].get();
 
-        // Lazy build: a shell is registered but this PATH's runtime material (with its bound textures)
-        // isn't built yet. Every path builds from the same asset, so the surface is the same by
+        // Lazy build: a shell is registered but this CELL's runtime material (with its bound textures)
+        // isn't built yet. Every cell builds from the same asset, so the surface is the same by
         // construction rather than by anyone remembering to copy it across.
         if ( auto ait = m_MaterialAssets.find( current ); ait != m_MaterialAssets.end() )
         {
-            auto material = Graphic::MaterialFactory::CreateMaterial( ait->second.get(), path );
+            auto material = Graphic::MaterialFactory::CreateMaterial( ait->second.get(), path, pass );
             if ( !material )
-                return nullptr; // MaterialFactory named the material and the path it refused
+                return nullptr; // MaterialFactory named the material and the cell it refused
             auto* raw                  = material.get();
+            m_BuiltToAsset[raw]        = current;
             m_Materials[current][slot] = std::move( material );
             return raw;
         }
         return nullptr;
+    }
+
+    Graphic::MaterialPBR* MaterialService::GetPassVariant( const Graphic::MaterialPBR* built,
+                                                           Graphic::MeshPass           pass ) const
+    {
+        if ( !built )
+            return nullptr;
+
+        const auto it = m_BuiltToAsset.find( built );
+        if ( it == m_BuiltToAsset.end() )
+            return nullptr; // not service-owned: a renderer's own dedicated material has no `.demat`
+
+        // The VERTEX PATH comes from the material itself and is not a second argument, because it is not
+        // the caller's to choose: the geometry already decided it when the slot resolved. Only the pass
+        // changes here, which is exactly the axis a render pass owns.
+        return dynamic_cast<Graphic::MaterialPBR*>( Get( it->second, built->VertexPath(), pass ) );
+    }
+
+    bool MaterialService::Owns( const Graphic::Material* material ) const
+    {
+        return material && m_BuiltToAsset.count( material ) != 0;
     }
 
     std::vector<Graphic::Material*> MaterialService::GetBuiltVariants( const Assets::AssetHandle& handle ) const
@@ -218,6 +251,7 @@ namespace Desert::Runtime
         // Was an empty body. The graveyard goes with the rest: at shutdown there is no next frame to
         // collect it, and its materials own descriptor pools that must not outlive the device.
         m_Materials.clear();
+        m_BuiltToAsset.clear();
         m_MaterialAssets.clear();
         m_ExternalToInternal.clear();
         m_Graveyard.clear();
@@ -232,12 +266,20 @@ namespace Desert::Runtime
         // in flight) may still reference their descriptor pools — destroying them now invalidates
         // the command buffer (-> device lost).
         //
-        // EVERY path, not the static one: an asset whose shader changed is a different material on all
-        // of them, and a surviving skinned variant would keep drawing the old shader with no way left to
-        // notice — the graveyard is the only thing that retires it.
+        // EVERY cell, not the static forward one: an asset whose shader changed is a different material on
+        // all of them, and a surviving skinned or G-buffer variant would keep drawing the old shader with
+        // no way left to notice — the graveyard is the only thing that retires it.
+        //
+        // The reverse index is dropped HERE and not in CollectGarbage: a graveyarded material is still
+        // alive (frames in flight reference its pools) but it is no longer THE material for this asset,
+        // and GetPassVariant answering from it would hand a render pass a sibling of a material that is
+        // about to be destroyed.
         for ( auto& variant : it->second )
             if ( variant )
+            {
+                m_BuiltToAsset.erase( variant.get() );
                 m_Graveyard.push_back( std::move( variant ) );
+            }
         m_Materials.erase( it );
         ++m_InvalidationVersion; // cached instance sets rebuild on their next system tick
     }

@@ -331,6 +331,77 @@ TEST_F( ShaderRootFixture, TheForwardVariantsAreOneSurfacePlusExactlyThePathsOwn
     }
 }
 
+// ---- The layout belongs to the CELL, not to a neighbouring cell -------------------------------------
+
+// THE RELATION THIS REPLACED A COMMENT WITH. A `Graphic::Material` is one shader's descriptor sets plus a
+// payload, and the shader is `MeshShaderFor(path, pass)` — so a descriptor layout is a property of the
+// CELL. A pass that owns no material has to bind a neighbouring cell's sets against its own pipeline
+// layout, which Vulkan tolerates only while the two shaders reflect identically, and the deferred
+// G-buffer pass did exactly that: `StaticMeshGBuffer.shader` declared four cascade maps, three
+// environment samplers, two light SSBOs, the lights-metadata block, the directional-light block, ShadowUB
+// and the cloud-shadow pair — fourteen descriptors it never read — and multiplied all of them by 1e-20 so
+// that SPIR-V reflection would keep them. `MaterialService` keys by (asset x path x PASS) now, so the
+// pass binds its own cell's sets and the padding is gone.
+//
+// Two assertions, and the second is the one that fires if somebody puts the padding back:
+//
+//   * where two cells of ONE path declare the same slot, they must give it the same NAME. A material
+//     writes by name and a pipeline binds by number, so a slot that means `u_NormalTexture` in one cell
+//     and something else in another is a texture bound into the wrong sampler with nothing to notice it.
+//   * the G-buffer cell is a PROPER subset of its path's forward cell. Subset, because it shades the same
+//     surface and can read nothing the surface does not have; PROPER, because a G-buffer write reads no
+//     lights, no cascades and no environment — and a G-buffer set that has grown back to the forward
+//     set's size is a shader padded to borrow somebody else's descriptors.
+TEST_F( ShaderRootFixture, TheGBufferCellIsAProperSubsetOfItsPathsForwardSurface )
+{
+    std::map<MeshPass, std::map<uint32_t, std::string>> bindings;
+    for ( const auto pass : { MeshPass::Forward, MeshPass::GBuffer, MeshPass::Glass } )
+    {
+        const char* name = MeshShaderFor( MeshVertexPath::Static, pass );
+        ASSERT_NE( name, nullptr ) << Desert::Graphic::MeshPassName( pass );
+        bindings[pass] = BindingMap( SetZero( ReflectGraphics( ShaderFileFor( name ) ) ) );
+        ASSERT_FALSE( bindings[pass].empty() ) << name;
+    }
+
+    // One numbering across the passes of a path.
+    for ( const auto& [slot, name] : bindings[MeshPass::GBuffer] )
+    {
+        for ( const auto pass : { MeshPass::Forward, MeshPass::Glass } )
+        {
+            const auto it = bindings[pass].find( slot );
+            if ( it == bindings[pass].end() )
+                continue;
+            EXPECT_EQ( it->second, name )
+                 << "binding " << slot << " is '" << name << "' in the G-buffer cell and '" << it->second
+                 << "' in the " << Desert::Graphic::MeshPassName( pass ) << " cell of the same path";
+        }
+    }
+
+    // Subset...
+    for ( const auto& [slot, name] : bindings[MeshPass::GBuffer] )
+    {
+        const auto it = bindings[MeshPass::Forward].find( slot );
+        ASSERT_NE( it, bindings[MeshPass::Forward].end() )
+             << "the G-buffer cell declares binding " << slot << " ('" << name
+             << "') that its path's forward cell does not — the two shade one surface, so this is a "
+                "resource no `.demat` can fill";
+        EXPECT_EQ( it->second, name );
+    }
+
+    // ...and PROPER — for the G-buffer cell AND for the glass cell, which carried the same padding for the
+    // same reason and had ALREADY had a material of its own when it was written. Glass is not a subset of
+    // the forward cell (it reads the composited scene for refraction, which no forward binding is), so
+    // what is asserted for both is the SIZE: a pass that declares as much as the lit forward pass is a
+    // pass padded to keep another cell's material bindable against it, which is what the pass axis exists
+    // to retire.
+    for ( const auto pass : { MeshPass::GBuffer, MeshPass::Glass } )
+    {
+        EXPECT_LT( bindings[pass].size(), bindings[MeshPass::Forward].size() )
+             << "the " << Desert::Graphic::MeshPassName( pass )
+             << " cell declares as much as the forward cell: " << Describe( bindings[pass] );
+    }
+}
+
 // The caster variants, on the same terms. A caster is depth, so its set is small; the point is that the
 // skinned caster added the SKINNED path's binding and nothing else — a caster that quietly grew a surface
 // binding would need the surface's descriptors bound to it, which the cascade pass does not do.

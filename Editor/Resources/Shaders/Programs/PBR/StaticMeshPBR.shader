@@ -2,7 +2,10 @@ Shader "StaticMeshPBR"
 {
     // The standard surface shader. Surface domain like any other DSL shader — it appears in the
     // material shader picker naturally (no hardcoded editor entry); the ONLY special thing about it
-    // is the optimized backend (StaticMaterialPBR: SSBO batching) the renderer picks by name.
+    // is the optimized backend the renderer picks by name — Graphic::MaterialPBR, which carries per-object
+    // parameters as rows of a shared `Materials[]` storage buffer named by a push constant, so identical
+    // meshes collapse into one instanced draw. (The class named here used to be `StaticMaterialPBR`, one of
+    // five that were a shading model times a vertex path; see Materials/Mesh/MeshVertexPath.hpp.)
     //
     // v4 material protocol: the schema below is the SINGLE source of truth for what a PBR material
     // stores. Every .demat persists these as generic ShaderParams/ShaderTextures (same protocol as

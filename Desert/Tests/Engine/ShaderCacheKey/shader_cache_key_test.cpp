@@ -650,41 +650,53 @@ TEST_F( ShaderRootFixture, TheDeferredLightingPassDeclaresTwentyDescriptorsInSet
     EXPECT_TRUE( HasBinding( bindings, 7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );
 }
 
-TEST_F( ShaderRootFixture, TheGBufferShaderKeepsTheForwardMeshShadersDescriptorLayoutExactly )
+TEST_F( ShaderRootFixture, TheGBufferShaderDeclaresOnlyWhatAGBufferWriteActuallyReads )
 {
-    // WHY StaticMeshGBuffer.shader multiplies three environment samples, four cascade maps and two light
-    // SSBOs by 1e-20 — the strangest-looking lines in the renderer, and the ones most likely to be
-    // deleted as dead by someone tidying up.
+    // WHAT THIS REPLACED, because the change is the interesting part. Until the deferred pass got a
+    // material of its own, this file asserted the OPPOSITE relation — that StaticMeshGBuffer's set 0 was
+    // byte-identical to StaticMeshPBR's — and StaticMeshGBuffer.shader carried fourteen descriptors it
+    // never read, each touched through a `keep` sum multiplied by 1e-20 so SPIR-V reflection would not
+    // drop it. That was not decoration: MeshRenderer drew the pass with the (Static x Forward) material,
+    // whose sets are allocated from the FORWARD shader's reflection, against a pipeline layout built from
+    // THIS shader's, and Vulkan requires the two to be compatible.
     //
-    // The deferred G-buffer pass does NOT get a material of its own. MeshRenderer draws it with the
-    // (Static x Forward) material, whose descriptor sets were allocated from the FORWARD shader's
-    // reflection (Graphic::MeshShaderFor(Static, Forward) == "StaticMeshPBR"), and binds them against a
-    // pipeline layout built from THIS shader's reflection — MeshRenderer::DrawStaticMeshes picks
-    // m_StaticGBufferPipeline for the same executor. Vulkan requires those two layouts to be compatible.
+    // MaterialService now keys a runtime material by (asset x vertex path x PASS), so the G-buffer pass
+    // binds sets allocated from its own shader. The old assertion would now be actively wrong — it would
+    // demand that the pass go on declaring four cascade maps it cannot sample and two light SSBOs nothing
+    // fills — so it is replaced rather than relaxed.
     //
-    // Note that (Static x GBuffer) IS a real variant now and has its own material class instance (the RSM
-    // pass uses exactly that pair). What has NOT changed is which material the G-buffer pass binds: it
-    // still borrows the forward one's sets, so the dummy below is still load-bearing. Giving the pass its
-    // own material is the change that would retire it, and it has not been made.
-    // An unreferenced uniform does not survive SPIR-V reflection, so the only way for the G-buffer shader
-    // to keep a slot it has no use for is to touch it — hence a sum scaled into oblivion and folded into
-    // an output so the optimiser cannot fold it back out.
-    //
-    // That makes the dummy a RELATION, not a workaround, and this is that relation asserted. It is not
-    // affected by the deferred composite gaining its own environment bindings: the composite is a
-    // separate fullscreen material with a separate layout, and the G-buffer pass still borrows the
-    // forward material's set. Delete the `keep` lines and this test fails with the slot that vanished —
-    // instead of the validation layer failing on a machine that happens to have layers on.
-    const auto forward = GraphicsSetZero( ShaderPath( "PBR/StaticMeshPBR.shader" ) );
+    // THE RELATION NOW: a pass that shades nothing declares the SURFACE and nothing else. Stated as an
+    // exact set, because "fewer than the forward shader" would still pass with one cascade map left
+    // behind, and a lighting descriptor in a pass with no lighting is a slot the material has no data for.
     const auto gbuffer = GraphicsSetZero( ShaderPath( "PBR/StaticMeshGBuffer.shader" ) );
-
-    ASSERT_FALSE( forward.empty() );
     ASSERT_FALSE( gbuffer.empty() );
 
-    EXPECT_EQ( DescribeBindings( gbuffer ), DescribeBindings( forward ) )
-         << "StaticMeshGBuffer's set 0 no longer matches StaticMeshPBR's, but MeshRenderer still binds "
-            "one material's descriptor sets to both pipelines";
-    EXPECT_EQ( ShaderReflection::CountDescriptors( gbuffer ), ShaderReflection::CountDescriptors( forward ) );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( gbuffer ), 5u )
+         << "StaticMeshGBuffer's set 0 is " << DescribeBindings( gbuffer )
+         << " — a G-buffer write reads the camera, the material rows and the surface's three maps, and a "
+            "sixth descriptor is either a lighting slot that came back or a surface input nobody fills";
+
+    EXPECT_TRUE( HasBinding( gbuffer, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );          // CameraUB (vertex)
+    EXPECT_TRUE( HasBinding( gbuffer, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );          // Materials[]
+    EXPECT_TRUE( HasBinding( gbuffer, 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_AlbedoTexture
+    EXPECT_TRUE( HasBinding( gbuffer, 12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_NormalTexture
+    EXPECT_TRUE( HasBinding( gbuffer, 18, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_OpacityTexture
+
+    // And the two the deferred composite owns, named individually because they are the ones a reader is
+    // most likely to put back "so the G-buffer can shade the ambient". It cannot: it writes attributes and
+    // Deferred/DeferredLighting.shader shades them, on its own material with its own layout.
+    EXPECT_FALSE( HasBinding( gbuffer, 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ) // u_ShadowMap0
+         << "the G-buffer pass declares a cascade map; it shades nothing and samples none";
+    EXPECT_FALSE( HasBinding( gbuffer, 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ) // u_EnvIrradianceTex
+         << "the G-buffer pass declares the irradiance cube; the ambient lives in the deferred composite";
+
+    // The forward shader is the control: it still declares everything a lit draw needs, so a G-buffer set
+    // this small is the PASS shrinking and not the whole family losing its lighting.
+    const auto forward = GraphicsSetZero( ShaderPath( "PBR/StaticMeshPBR.shader" ) );
+    ASSERT_FALSE( forward.empty() );
+    EXPECT_GT( ShaderReflection::CountDescriptors( forward ), ShaderReflection::CountDescriptors( gbuffer ) );
+    EXPECT_TRUE( HasBinding( forward, 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( forward, 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
 }
 
 TEST_F( ShaderRootFixture, TheBindingsComeOutSortedAndCountedTheWayTheLayerCounts )
