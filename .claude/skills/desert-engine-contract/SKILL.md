@@ -12,11 +12,21 @@ description: >
 
 # The delivery contract
 
-From `Docs/Clouds/DEV_CONTRACT.md`, written for the sky-and-clouds programme and applied to the
-repository generally. That document is the authority and carries the history of why each rule
-exists — usually a specific defect. This is its operative core. The full original (Russian) is
-bundled next to this file as `DEV_CONTRACT.md` — read it when a rule's wording or its history
-matters.
+**This applies to the whole repository, not to one programme.** The rules were first written down
+for the sky-and-clouds work, which is where the defects that motivate them were paid for, but every
+one of them is about how code is delivered here and none of them is about clouds.
+
+The authority is the file bundled next to this one, **`DEV_CONTRACT.md`** (Russian) — read it when a
+rule's wording or its history matters, because it carries the specific defect behind each rule. This
+SKILL.md is its operative core.
+
+**The contract used to live at `Docs/Clouds/DEV_CONTRACT.md` and no longer does.** `Docs/` was taken
+out of version control on 2026-09-04 — it is a working directory for one person on one machine and
+is not shared. The bundled copy here is now the only tracked one, and it was promoted from the
+Docs copy at that moment because the bundle had gone stale: 260 lines against 343, missing among
+other things the MoltenVK environment variables without which the editor dies before its first
+frame. **If you edit the contract, edit it here.** Any surviving citation of `Docs/Clouds/DEV_CONTRACT.md`
+in a source comment points at a path a fresh clone does not have.
 
 **How to use it:** the rules in §1 are absolute; a change that breaks one is returned regardless of
 how good the rest is. Everything else is judgement, and the contract says which way to lean.
@@ -192,6 +202,6 @@ is deleted, not kept "in case we roll back". Rolling back is called `git revert`
 
 ## Related
 
-- `Docs/Clouds/DEV_CONTRACT.md` — the authority, with the history behind each rule.
+- `DEV_CONTRACT.md`, bundled beside this file — the authority, with the history behind each rule.
 - `desert-engine-verify` — how to prove a change works (§2.3, §2.3.1, §2.4 of the contract).
 - `desert-engine-dev` — how the engine is built: architecture, conventions, footguns.
