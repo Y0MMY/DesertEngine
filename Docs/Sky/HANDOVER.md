@@ -209,6 +209,12 @@ own full fidelity is **14.6 ms — 2.0 % of one bake**. Against the densest marc
 recorded (7.589 ms, `Docs/GPU_TIMESTAMPS.md`) it is 64.8 ms, **8.9 %**. The marginal price of one more
 sample per panorama texel is **0.0868 ms** (32 -> 512 lever, fixed part ~9.4 ms).
 
+> ⚠️ **THE 1.709 ms IS AN OUTLIER AND THE 2.0 % THAT FOLLOWS FROM IT IS WRONG.** The tree's own record
+> for the same pass on the same trace is **12.695 ms** (`VolumetricCloudRenderer.cpp:67`, minimum of six
+> interleaved runs), and Р18 independently measured 14.395 ms. Р15 then measured the panorama march
+> directly rather than extrapolating it: **+95.3 ms, 15.3 % of a bake** — see "What Р15 measured" below.
+> The conclusion of this paragraph survived the error; its arithmetic did not.
+
 **So when this is picked up: march, do not approximate.** Cost does not discriminate between the three
 options, and an analytic cloud dome would be a SECOND model of the clouds beside the march — the mirror
 that drifts, which this project has already paid for once in the grey-clouds defect. The bake shader's
