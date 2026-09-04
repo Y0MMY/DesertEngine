@@ -1,6 +1,14 @@
 Shader "SkinnedMeshPBR"
 {
-    // Specialized C++ material (see StaticMeshPBR.shader) — not assignable via MaterialComponent.
+    // The SKINNED vertex path of the standard PBR surface — not a different material, the same one.
+    // Every binding below the vertex stage is StaticMeshPBR's, slot for slot, because a surface does not
+    // change when the geometry under it is skinned; the only thing this path adds is binding 1 (Bones)
+    // and the BoneOffset push field. Desert/Tests/Engine/MeshVertexPath asserts exactly that against the
+    // reflected SPIR-V, so a binding added to one forward variant and not the others is caught there.
+    //
+    // It carries no Domain/Properties block on purpose: a `.demat` names a SURFACE and never a vertex
+    // path, so this shader must not appear in the material picker. StaticMeshPBR owns the schema and the
+    // renderer chooses the path from the geometry (Graphic::MeshShaderFor).
 
     Vertex
     {
@@ -14,11 +22,17 @@ Shader "SkinnedMeshPBR"
 
         #include <Common/CameraUB.glslh>
 
-        // Must match PBR.glsl.frag / Static.glsl.vert push block.
+        // Transform + MaterialIndex are the shared mesh push block (byte-identical to StaticMeshPBR's, and
+        // the fragment stage below repeats it). BoneOffset is this PATH's own field and is why one
+        // material can draw every skinned mesh in the frame: the poses are packed end to end into the one
+        // Bones buffer and each draw names its slice here. A push constant is snapshotted per draw, which
+        // a storage buffer is not — storing the pose on the material instead made two skinned meshes
+        // render with the pose of whichever was submitted last.
         PushConstant PushConstants
         {
             mat4 Transform;     // offset 0
             uint MaterialIndex; // offset 64
+            uint BoneOffset;    // offset 68  first bone of THIS draw inside BoneMatrices[]
         } m_PushConstants;
 
         // raw-glsl: implicit (shared) layout kept — std430 would change the bone matrix offsets.
@@ -41,11 +55,13 @@ Shader "SkinnedMeshPBR"
             // ------------------------------------------------------------
             // 1. GPU Skinning
             // ------------------------------------------------------------
+            // int, not uint: a_BoneIndices is ivec4 and GLSL will not mix the two silently.
+            int b = int(m_PushConstants.BoneOffset);
             mat4 skinMatrix =
-                  bones.BoneMatrices[a_BoneIndices.x] * a_BoneWeights.x +
-                  bones.BoneMatrices[a_BoneIndices.y] * a_BoneWeights.y +
-                  bones.BoneMatrices[a_BoneIndices.z] * a_BoneWeights.z +
-                  bones.BoneMatrices[a_BoneIndices.w] * a_BoneWeights.w;
+                  bones.BoneMatrices[b + a_BoneIndices.x] * a_BoneWeights.x +
+                  bones.BoneMatrices[b + a_BoneIndices.y] * a_BoneWeights.y +
+                  bones.BoneMatrices[b + a_BoneIndices.z] * a_BoneWeights.z +
+                  bones.BoneMatrices[b + a_BoneIndices.w] * a_BoneWeights.w;
 
             vec4 skinnedPosition = skinMatrix * vec4(a_Position, 1.0);
             vec3 skinnedNormal   = mat3(skinMatrix) * a_Normal;
@@ -103,13 +119,15 @@ Shader "SkinnedMeshPBR"
 
         Out(0) vec4 oColor;
 
-        // Shared push-constant block. Must be byte-for-byte identical to the one in Static.glsl.vert /
-        // Skinned.glsl.vert. Per-object material data lives in the Materials[] storage buffer (GPU-scene
-        // style); the push constant only carries the per-object index into it.
+        // Shared push-constant block. Must be byte-for-byte identical to the VERTEX stage's block above —
+        // Vulkan requires one push-constant block per pipeline, so BoneOffset is declared here too even
+        // though the fragment stage has no use for it. Per-object material data lives in the Materials[]
+        // storage buffer (GPU-scene style); the push constant only carries the per-object index into it.
         PushConstant PushConstants
         {
         	mat4 Transform;     // offset 0   (vertex)
         	uint MaterialIndex; // offset 64  index into Materials[]
+        	uint BoneOffset;    // offset 68  (vertex only; declared here to keep the blocks identical)
         } pc;
 
         // One entry per drawn object (std430). Filled on the CPU each frame (per-object / per-instance).
@@ -295,8 +313,17 @@ Shader "SkinnedMeshPBR"
             vec3  sunDir = normalize(-directionLights.directionLights.Direction.xyz); // toward the sun
             int   cascade;
             float shadow = ShadowFactor(inVertex.WorldPosition, m_Params.Normal, sunDir, cascade);
+            // Per-mesh "Receive Shadows" toggle rides ExtraParams.w (1 = don't receive sun shadows).
+            // It was in StaticMeshPBR and NOT here, which is the drift a per-path material class makes
+            // invisible: both stages read the same GpuMaterial, and only one of them honoured this bit.
+            if (mat.ExtraParams.w > 0.5)
+                shadow = 1.0;
 
             // TWO OCCLUDERS OF ONE SUN, multiplied — exactly as the deferred composite assembles it.
+            // AFTER the per-mesh toggle and not before it, because the toggle is a CASCADE toggle: the
+            // G-buffer carries no such bit, so the deferred path shades every surface with the cloud
+            // layer regardless, and a mesh that opted out of geometry shadows must not become the one
+            // surface in the scene whose shading depends on which path drew it.
             shadow *= CloudShadowFactor(inVertex.WorldPosition);
 
             // Lighting debug (Scene Settings -> Debug -> Light Debug): each source gets a distinct color, the

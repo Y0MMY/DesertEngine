@@ -12,7 +12,7 @@
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Material/MaterialService.hpp>
 #include <Engine/Runtime/Services/Shader/ShaderService.hpp>
@@ -631,9 +631,13 @@ namespace Desert::Editor
         // The runtime Material is built ONCE and cached by the service; rebuilding an instance of it would
         // faithfully reproduce the old values. Apply* is what pushes the new ones in — and it is also what
         // re-binds textures, which is why binding a texture here shows on the mesh without a reload.
-        if ( auto* runtime = materialService->Get( asset.GetMetadata().Handle ) )
+        // EVERY built variant of it, one per vertex path. A `.demat` is a surface and the renderer builds
+        // one material per path from it, so an edit that reached only the static one would show on the
+        // crate and not on the character wearing the same material — the exact divergence the per-path
+        // material classes used to make unavoidable.
+        for ( auto* runtime : materialService->GetBuiltVariants( asset.GetMetadata().Handle ) )
         {
-            if ( auto* pbr = dynamic_cast<Graphic::StaticMaterialPBR*>( runtime ) )
+            if ( auto* pbr = dynamic_cast<Graphic::MaterialPBR*>( runtime ) )
                 Graphic::MaterialFactory::ApplyPBRAsset( *pbr, asset );
             else if ( auto* ddm = dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) )
                 Graphic::MaterialFactory::ApplyShaderAsset( *ddm, asset );

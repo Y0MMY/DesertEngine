@@ -29,6 +29,12 @@ namespace Desert::Graphic
         MaterialSilhouetteSkinned();
 
         void UpdateCamera( const Core::Camera* camera );
-        void SetBones( const std::vector<glm::mat4>& boneMatrices );
+
+        // Every selected skinned mesh's pose, packed end to end, uploaded ONCE; each draw then names its
+        // slice with SetBoneOffset. It used to be one upload per mesh into a buffer the already-recorded
+        // draws still pointed at, so outlining two skinned meshes at once drew both in the second one's
+        // pose. Same shape as the forward and shadow skinned paths — see MaterialPBR.hpp.
+        void UploadBones( const std::vector<glm::mat4>& packedBoneMatrices );
+        void SetBoneOffset( uint32_t firstBone );
     };
 } // namespace Desert::Graphic

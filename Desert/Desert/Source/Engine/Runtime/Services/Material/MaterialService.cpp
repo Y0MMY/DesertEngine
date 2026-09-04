@@ -19,9 +19,13 @@ namespace Desert::Runtime
         if ( const auto refusal = RefuseOnCollision( handle, materialAsset ); !refusal )
             return refusal;
 
-        auto material = Graphic::MaterialFactory::CreateMaterial( materialAsset.get() );
+        // Eager build of the STATIC variant only. The other paths are built on the first draw that asks
+        // for them: a scene with no skinned geometry must not pay for a skinned descriptor set per
+        // material, and a path built eagerly for an asset nobody skins is a resource with no reader.
+        auto material =
+             Graphic::MaterialFactory::CreateMaterial( materialAsset.get(), Graphic::MeshVertexPath::Static );
 
-        m_Materials[handle]      = material;
+        m_Materials[handle][static_cast<size_t>( Graphic::MeshVertexPath::Static )] = material;
         m_MaterialAssets[handle] = materialAsset; // keep the shell too
 
         m_ExternalToInternal[materialAsset->GetMaterialUUID()] = handle;
@@ -75,7 +79,8 @@ namespace Desert::Runtime
                                                  want.generic_string() );
     }
 
-    Graphic::Material* MaterialService::Get( const Assets::AssetHandle& handle ) const
+    Graphic::Material* MaterialService::Get( const Assets::AssetHandle& handle,
+                                             Graphic::MeshVertexPath    path ) const
     {
         // Material-instance assets resolve through the parent chain to the BASE material: an
         // instance never builds a runtime Material of its own (its overrides live on the
@@ -98,21 +103,39 @@ namespace Desert::Runtime
             break;
         }
 
-        if ( auto it = m_Materials.find( current ); it != m_Materials.end() )
-            return it->second.get();
+        const size_t slot = static_cast<size_t>( path );
+        if ( auto it = m_Materials.find( current ); it != m_Materials.end() && it->second[slot] )
+            return it->second[slot].get();
 
-        // Lazy build: a shell was registered but the runtime material (with its bound textures) isn't built.
+        // Lazy build: a shell is registered but this PATH's runtime material (with its bound textures)
+        // isn't built yet. Every path builds from the same asset, so the surface is the same by
+        // construction rather than by anyone remembering to copy it across.
         if ( auto ait = m_MaterialAssets.find( current ); ait != m_MaterialAssets.end() )
         {
-            auto material        = Graphic::MaterialFactory::CreateMaterial( ait->second.get() );
-            auto* raw            = material.get();
-            m_Materials[current] = std::move( material );
+            auto material = Graphic::MaterialFactory::CreateMaterial( ait->second.get(), path );
+            if ( !material )
+                return nullptr; // MaterialFactory named the material and the path it refused
+            auto* raw                  = material.get();
+            m_Materials[current][slot] = std::move( material );
             return raw;
         }
         return nullptr;
     }
 
-    Graphic::MaterialInstancePtr MaterialService::CreateRuntimeInstance( const Assets::AssetHandle& handle ) const
+    std::vector<Graphic::Material*> MaterialService::GetBuiltVariants( const Assets::AssetHandle& handle ) const
+    {
+        std::vector<Graphic::Material*> out;
+        const auto                      it = m_Materials.find( handle );
+        if ( it == m_Materials.end() )
+            return out;
+        for ( const auto& variant : it->second )
+            if ( variant )
+                out.push_back( variant.get() );
+        return out;
+    }
+
+    Graphic::MaterialInstancePtr MaterialService::CreateRuntimeInstance( const Assets::AssetHandle& handle,
+                                                                         Graphic::MeshVertexPath    path ) const
     {
         // Collect the instance chain child -> base (depth-capped cycle guard), then create one
         // runtime instance of the base material and apply overrides base-first so the NEAREST
@@ -134,7 +157,7 @@ namespace Desert::Runtime
             current = parent;
         }
 
-        auto* base = Get( current );
+        auto* base = Get( current, path );
         if ( !base )
             return nullptr;
 
@@ -205,10 +228,16 @@ namespace Desert::Runtime
         auto it = m_Materials.find( handle );
         if ( it == m_Materials.end() )
             return;
-        // Keep the material alive until CollectGarbage(): the frame being recorded (and frames
-        // in flight) may still reference its descriptor pools — destroying them now invalidates
+        // Keep the materials alive until CollectGarbage(): the frame being recorded (and frames
+        // in flight) may still reference their descriptor pools — destroying them now invalidates
         // the command buffer (-> device lost).
-        m_Graveyard.push_back( std::move( it->second ) );
+        //
+        // EVERY path, not the static one: an asset whose shader changed is a different material on all
+        // of them, and a surviving skinned variant would keep drawing the old shader with no way left to
+        // notice — the graveyard is the only thing that retires it.
+        for ( auto& variant : it->second )
+            if ( variant )
+                m_Graveyard.push_back( std::move( variant ) );
         m_Materials.erase( it );
         ++m_InvalidationVersion; // cached instance sets rebuild on their next system tick
     }

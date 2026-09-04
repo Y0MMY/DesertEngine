@@ -31,7 +31,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBRBase.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRSceneFrame.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 #include <Engine/Graphic/ShaderProtocols/Camera.hpp>
 #include <Engine/Graphic/ShaderProtocols/DirectionLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/Metadata.hpp>
@@ -53,9 +53,9 @@
 #include <vector>
 
 using Desert::Core::Formats::ShaderStage;
+using Desert::Graphic::MaterialPBR;
 using Desert::Graphic::MaterialPBRBase;
 using Desert::Graphic::PBRSceneFrame;
-using Desert::Graphic::SkinnedMaterialPBR;
 using namespace Desert::Graphic::API::Vulkan;
 
 namespace
@@ -247,25 +247,33 @@ namespace
 
 // ---- The payload ------------------------------------------------------------------------------------
 
-// THE relation, in the only form in which it can be stated at compile time: the skinned material's
-// lighting payload is not a payload of its own that happens to carry the same fields — it IS the snapshot
-// the static path applies, and there is no way to bind a skinned mesh without one.
-TEST( PBRSceneFrame, TheSkinnedMaterialCannotBeBoundWithoutTheSnapshotTheStaticPathApplies )
+// THE relation, in the only form in which it can be stated at compile time — and it got STRONGER when
+// the vertex path became a parameter instead of a class.
+//
+// It used to read: the skinned material's Bind() payload IS the static path's snapshot type, and a
+// reference member makes it impossible to build one without a snapshot. That guarded a real defect (a
+// hand-picked list of four uploads where the scene had six), but it guarded it at the level of a struct,
+// and the struct existed only because the skinned material was a DIFFERENT CLASS with a Bind() of its own.
+//
+// There is one class now. A skinned draw and a static draw call the same Bind with the same argument, so
+// a payload the skinned path could receive differently no longer exists to be wrong. That is asserted
+// against the TYPE, which is the whole of the claim: if these ever split again, every "one applier serves
+// all of them" assertion below stops meaning what it says.
+TEST( PBRSceneFrame, TheSkinnedAndStaticDrawsGoThroughOneBindWithOneArgument )
 {
-    using Info = SkinnedMaterialPBR::UpdateSkinnedMaterialPBRInfo;
+    static_assert( std::is_same_v<decltype( MaterialPBR::Create( Desert::Graphic::MeshVertexPath::Static ) ),
+                                  decltype( MaterialPBR::Create( Desert::Graphic::MeshVertexPath::Skinned ) )>,
+                   "a skinned material and a static one must be the same type — one surface, two paths" );
 
-    static_assert( std::is_same_v<decltype( Info::Scene ), const PBRSceneFrame&>,
-                   "the skinned Bind() payload must carry THE scene snapshot, not a copy of the parts of "
-                   "it someone thought a skinned mesh needs — that copy is exactly how the cascades and "
-                   "the environment cubes went missing" );
+    // Exactly ONE Bind, taking the instance PBRSceneFrame::ApplyTo was applied to. A second overload
+    // taking a skinned-specific payload is how the cascades and the environment cubes went missing the
+    // first time: it named four of the six things a lit draw needs and nothing could notice.
+    static_assert(
+         std::is_invocable_v<void ( MaterialPBR::* )( const Desert::Graphic::MaterialInstance* ), MaterialPBR&,
+                             const Desert::Graphic::MaterialInstance*>,
+         "MaterialPBR::Bind must take the instance, the same one PBRSceneFrame::ApplyTo was applied to" );
 
-    // A reference member has no default, so the aggregate cannot be built without a snapshot. This is the
-    // defect made impossible rather than merely fixed: a future field added to PBRSceneFrame reaches the
-    // skinned path by construction.
-    static_assert( !std::is_default_constructible_v<Info>,
-                   "a skinned draw must not be constructible without the frame's scene state" );
-
-    EXPECT_FALSE( std::is_default_constructible_v<Info> );
+    SUCCEED();
 }
 
 // The other half of the same seam, and the reason the applier takes a Material and not a MaterialInstance:
