@@ -119,6 +119,9 @@ namespace Desert::Assets
         m_Submeshes.shrink_to_fit();
         m_MorphTargets.shrink_to_fit();
 
+        // Same reason as SkinnedMeshAsset::Unload: the flag is what EnsureLoaded asks before deciding to
+        // parse, so an emptied asset that still reports "ready" is one nobody will ever reload.
+        m_IsReadyForUse = false;
         return BOOLSUCCESS;
     }
 

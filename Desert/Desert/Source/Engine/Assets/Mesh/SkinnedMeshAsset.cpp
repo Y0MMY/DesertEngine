@@ -98,6 +98,11 @@ namespace Desert::Assets
         for ( const auto& mt : data.MorphTargets )
             m_MorphTargets.push_back( MorphTarget{ mt.Name, mt.DeltaPositions, mt.DeltaNormals } );
 
+        // StaticMeshAsset::Load has always ended this way; this one never did, so IsReadyForUse stayed false
+        // for the whole session and every `if (!IsReadyForUse()) Load()` in the engine re-read and re-parsed
+        // the entire .skmesh. MeshService::GetAsset is on the per-frame path, so the cost was a full JSON
+        // parse of the character PER FRAME, silently, on top of the mesh being invisible.
+        m_IsReadyForUse = true;
         return BOOLSUCCESS;
     }
 
@@ -113,6 +118,10 @@ namespace Desert::Assets
         m_Submeshes.shrink_to_fit();
         m_MorphTargets.shrink_to_fit();
 
+        // The flag is what EnsureLoaded asks before deciding to parse, so an emptied asset that still
+        // reports "ready" is an asset nobody will ever reload — the same never-recovers shape as the
+        // dependency this file just stopped losing.
+        m_IsReadyForUse = false;
         return BOOLSUCCESS;
     }
 } // namespace Desert::Assets

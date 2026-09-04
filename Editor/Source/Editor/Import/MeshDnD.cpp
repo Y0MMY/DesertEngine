@@ -66,6 +66,43 @@ namespace Desert::Editor::MeshDnD
             }
         }
 
+        // The cook's own suffix for a rig, spelled here because Common::Constants::Extensions has no entry
+        // for it and AssetPreloader's scan list carries the same literal.
+        constexpr const char* kSkeletonExtension = ".skeleton";
+
+        // Register every cooked skeleton (Cooked/Meshes/*.skeleton) into the AssetManager so a
+        // just-imported RIGGED mesh finds its rig THIS session.
+        //
+        // WHY THIS HAS TO EXIST AT ALL: AssetPreloader.cpp was, until now, the only place in the engine that
+        // ever constructed a SkeletonAsset. A drop that cooks a new .skmesh also cooks its .skeleton, and
+        // nothing put that file in the manager — so the mesh's signature matched nothing, MeshFactory
+        // refused to build it, and the character only appeared after a relaunch. Same shape as the textures
+        // and materials above: the cook wrote a file the session cannot see.
+        void RegisterCookedSkeletons( Assets::AssetManager& mgr )
+        {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            const fs::path  root = Common::Constants::Path::MESH_PATH_COOKED;
+            if ( !fs::exists( root, ec ) )
+                return;
+
+            for ( const auto& f : fs::recursive_directory_iterator( root, ec ) )
+            {
+                if ( !f.is_regular_file( ec ) || f.path().extension() != kSkeletonExtension )
+                    continue;
+
+                const std::string p = f.path().generic_string();
+                if ( mgr.FindByPath<Assets::SkeletonAsset>( p ) )
+                    continue; // idempotent: a drop re-scans the whole directory every time
+
+                // Eager, like the preloader's scan: a skeleton is small, and its signature is what every
+                // skinned mesh in the project is matched against — an unloaded one reports 0 and matches
+                // nothing.
+                if ( !mgr.CreateAsset<Assets::SkeletonAsset>( Assets::AssetPriority::Low, p ) )
+                    LOG_ERROR( "Cooked skeleton '{}' could not be registered.", p );
+            }
+        }
+
         // Create + register a freshly-imported mesh's materials so their stable external id
         // (PBRSurfaceParams::MaterialId, baked into each submesh) resolves in MaterialService THIS session.
         // Without this the materials would only register on the NEXT launch (AssetPreloader scan) and a
@@ -137,17 +174,29 @@ namespace Desert::Editor::MeshDnD
 
     namespace
     {
-        // Finalize a SKINNED mesh asset so its GPU build works. A preloader shell is lazy (loadAfterCreate=false)
-        // → its skeleton signature was 0 when ResolveDependencies first ran, so the skeleton is UNRESOLVED.
-        // Load it (fills the signature), re-resolve the skeleton, then (re)Register so MeshFactory::CreateSkinned
-        // builds with the skeleton in place — otherwise Get() returns null and the character never renders.
+        // Finalize a SKINNED mesh asset so its GPU build works.
+        //
+        // The rig goes in FIRST. A shell's skeleton is matched by a signature that only exists once the
+        // .skmesh is parsed, so the load below is the moment the lookup becomes possible — and the lookup
+        // can only succeed against skeletons the manager already holds. On a fresh import that file was
+        // written seconds ago by the cook and is in nobody's registry.
+        //
+        // This used to spell the load as `Load()` followed by `ResolveDependencies()`. Those two statements
+        // are now one call, because the second is the one that gets forgotten (AssetBase::EnsureLoaded), and
+        // MeshService's own lazy path forgot it for every mesh that was not dropped by hand.
         Assets::AssetHandle FinalizeSkinned( Assets::AssetManager&                     mgr,
                                              const std::shared_ptr<Assets::MeshAsset>& asset,
                                              const std::string&                        sourcePath )
         {
-            if ( !asset->IsReadyForUse() )
-                asset->Load();
-            asset->ResolveDependencies( mgr );
+            RegisterCookedSkeletons( mgr );
+
+            if ( const auto loaded = asset->EnsureLoaded( mgr ); !loaded )
+            {
+                LOG_ERROR( "Skinned mesh '{}' could not be finalized: {}", asset->GetMetadata().Filepath.string(),
+                           loaded.GetError() );
+                return Common::UUID::Null();
+            }
+
             Runtime::ResourceRegistry::GetMeshService()->Register( asset ); // rebuild with the resolved skeleton
             RegisterCookedTextures( mgr );
             RegisterCookedMaterials( mgr, sourcePath );
@@ -178,7 +227,12 @@ namespace Desert::Editor::MeshDnD
 
         if ( isSkinned )
         {
-            auto created = mgr.CreateAsset<Assets::SkinnedMeshAsset>( Assets::AssetPriority::High, skinnedStr );
+            // Created as an UNPARSED shell on purpose: loading here would resolve the skeleton against a
+            // manager that does not hold the rig yet — the cook wrote the .skeleton one line ago — and the
+            // resolve would then never be repeated. FinalizeSkinned registers the rig and loads, in that
+            // order, and is the only place either happens.
+            auto created = mgr.CreateAsset<Assets::SkinnedMeshAsset>( Assets::AssetPriority::High, skinnedStr,
+                                                                      /*loadAfterCreate=*/false );
             if ( !created )
                 return { Common::UUID::Null(), false };
             return { FinalizeSkinned( mgr, created, sourcePath ), true };
