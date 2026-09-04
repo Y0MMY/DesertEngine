@@ -3,8 +3,8 @@
 // Everything below the bindings is a CALL into a text the rest of the engine already compiles:
 // Mesh/AmbientIBL.glslh for the ambient, Mesh/DirectLighting.glslh for the sun and for every
 // analytic light, Mesh/PointLight.glslh and Mesh/Spotlight.glslh for the two punctual light models,
-// Common/CloudShadowReceiver.glslh for the cloud layer's shadow on the sun. That is the whole point
-// of the file and the reason it is a file.
+// Mesh/CascadedShadow.glslh for opaque geometry's shadow on the sun and Common/CloudShadowReceiver.glslh
+// for the cloud layer's. That is the whole point of the file and the reason it is a file.
 //
 // What was here before was a formula, written by the graph compiler into every generated shader:
 //
@@ -30,18 +30,12 @@
 // ------------------------------------------------------------------------------------------------
 // WHAT IS NOT HERE, and why it is not an oversight.
 //
-// CASCADED SHADOWS. `ShadowFactor` is NOT a shared text: it exists as three separate copies, inside
-// Programs/PBR/StaticMeshPBR.shader, Programs/PBR/SkinnedMeshPBR.shader and
-// Programs/Deferred/DeferredLighting.shader. Including a fourth copy here to give the graph geometry
-// shadows would create exactly the defect this file exists to remove. The C++ half is already done —
-// Graphic::PBRSceneFrame::ApplyTo writes ShadowUB and binds u_ShadowMap0..3 to any material that
-// declares them, generic materials included — so extracting those three copies into one header is a
-// GLSL-only change, and the graph picks it up by adding two lines here. Until then a graph material
-// receives the cloud's shadow and not the geometry's, and the difference is stated in the Node Graph
-// panel beside the Lit checkbox rather than left for a frame to reveal.
-//
-// THE LIGHTING DEBUG VIEWS. Show Normals and Light Debug are driven by ShadowUB's u_DebugParams,
-// which is cascade state; they follow the cascades.
+// THE DEBUG VIEWS. Show Normals, Light Debug and the two cascade views are early RETURNS out of a
+// fragment shader's main() — StaticMeshPBR writes a visualization to oColor and stops. This file is a
+// function that returns a colour to be composited with the graph's own emission and alpha, so it has
+// nowhere to stop. The deferred composite does not implement the cascade views either (its debug modes
+// are a separate, G-buffer-driven set), so a lit graph surface is not alone in this and the omission
+// costs an artist a debug view, not a difference in how the surface is lit.
 
 #ifndef GRAPH_SURFACE_LIGHTING_GLSLH
 #define GRAPH_SURFACE_LIGHTING_GLSLH
@@ -81,6 +75,32 @@ Uniform(21) CloudShadowUB
 // Included HERE and not above because it names the two bindings just declared.
 #include <Common/CloudShadowReceiver.glslh>
 
+// The cascaded shadow of opaque geometry — the SECOND occluder of the same sun, and the one a graph
+// material did not receive until Д20. Its five bindings, at the slots free in THIS layout:
+//
+//   * the ShadowUB block and the first two maps take 7 / 5 / 13, the numbers the four mesh shaders use;
+//   * the last two maps CANNOT take the mesh shaders' 14 / 15, because in a shader-graph layout those
+//     hold DirectionLightsUB and TimeUB, which no mesh shader declares. They take 22 and 23 — above the
+//     cloud pair and still below ShaderGraph::kGraphTextureBinding, so however many textures an artist
+//     puts in a graph they cannot land on one of these. The deferred composite already numbers the IBL
+//     trio 17/18/19 against the mesh shaders' 8/9/10 for the same kind of reason: a shared text names
+//     resources, a layout numbers them, and only the names have to agree because every material in this
+//     engine binds by name.
+Uniform(5) sampler2D u_ShadowMap0;
+Uniform(13) sampler2D u_ShadowMap1;
+Uniform(22) sampler2D u_ShadowMap2;
+Uniform(23) sampler2D u_ShadowMap3;
+Uniform(7) ShadowUB
+{
+	mat4 u_LightViewProj[4];
+	vec4 u_ShadowParams;      // x = bias, y = enabled (>0.5), z = debug mode (0/1/2), w = cascade count
+	vec4 u_DebugParams;       // x = show normals (>0.5), y = light debug (>0.5); z,w reserved
+	vec4 u_CascadeTexelWorld; // per-cascade world size of one shadow-map texel (x..w = cascade 0..3)
+};
+
+// Included HERE and not above because it names the five bindings just declared.
+#include <Mesh/CascadedShadow.glslh>
+
 // Normal-incidence reflectance of a dielectric — the same 0.04 every other surface shader in this
 // engine mixes toward albedo by metalness.
 const vec3 GRAPH_FDIELECTRIC = vec3(0.04);
@@ -113,9 +133,8 @@ vec3 ShadeGraphSurface(vec3 worldPos, vec3 N, vec3 view, vec3 albedo, float meta
 	vec3 ibl     = AmbientIBL(view, N, F0, metalness, roughness, albedo);
 	vec3 ambient = ComposeAmbient(ibl, albedo, ao, vec3(0.0)); // no indirect gather on this path
 
-	// The sun, occluded by the cloud layer. Only the DIRECTIONAL term is occluded — the ambient is
-	// the whole sky dome and a cloud deck occludes it with a different geometry (see
-	// Common/CloudShadowReceiver.glslh).
+	// The sun. Only the DIRECTIONAL term is occluded — the ambient is the whole sky dome and both
+	// occluders below attenuate one direction (see Common/CloudShadowReceiver.glslh).
 	vec3 sun = vec3(0.0);
 	for (uint i = 0; i < lightsMetadata.DirectionLightCount; i++)
 	{
@@ -124,7 +143,19 @@ vec3 ShadeGraphSurface(vec3 worldPos, vec3 N, vec3 view, vec3 albedo, float meta
 		sun += EvaluateDirectionalLight(directionLights.directionLights.Direction.xyz, radiance, view, N,
 		                                F0, metalness, roughness, albedo);
 	}
-	sun *= CloudShadowFactor(worldPos);
+
+	// TWO OCCLUDERS OF ONE SUN, multiplied, in the order and with the meaning StaticMeshPBR and the
+	// deferred composite use: the cascades occlude it with opaque geometry, the cloud layer with a
+	// volume, and a surface can be in either, both or neither. `Direction` is the direction the light
+	// TRAVELS, so the vector toward the sun is its negation — the same normalize(-Direction) the mesh
+	// shaders hand to ShadowFactor, and getting it backwards self-shadows every lit face instead of
+	// every unlit one.
+	//
+	// There is no per-mesh Receive Shadows override here: that flag rides a StaticMesh material's
+	// ExtraParams.w and a graph material has no such field, so a graph surface always receives.
+	int cascade = -1;
+	sun *= ShadowFactor(worldPos, N, normalize(-directionLights.directionLights.Direction.xyz), cascade)
+	     * CloudShadowFactor(worldPos);
 
 	vec3 punctual = vec3(0.0);
 	for (uint i = 0; i < lightsMetadata.PointLightCount; i++)

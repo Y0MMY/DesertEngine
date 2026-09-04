@@ -32,9 +32,9 @@ namespace Desert::Editor
         };
 
         // Where the graph's OWN textures start in the descriptor set. Above every engine binding a
-        // generated shader can declare (the highest is the cloud shadow block at 21), because the
-        // parser numbers a Properties block's textures upward from this base one at a time and a
-        // collision between two GLSL declarations at one binding is silent — see the note at the
+        // generated shader can declare (the highest are the last two cascade shadow maps at 22 and 23),
+        // because the parser numbers a Properties block's textures upward from this base one at a time
+        // and a collision between two GLSL declarations at one binding is silent — see the note at the
         // Properties emitter in ShaderGraph.cpp.
         constexpr unsigned kGraphTextureBinding = 24;
 

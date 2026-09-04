@@ -27,6 +27,7 @@
 #include <gtest/gtest.h>
 
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBRBase.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRSceneFrame.hpp>
@@ -392,6 +393,109 @@ TEST_F( ShaderRootFixture, TheShadowBlockIsTheSameBytesInTheApplierAndInEveryMes
              << shader.Path << "'s ShadowUB is " << block->second.Size << " bytes and the struct the "
              << "applier fills it from is " << sizeof( MaterialPBRBase::ShadowUBData );
     }
+}
+
+// ---- The cascade text against everyone who compiles it ----------------------------------------------
+
+namespace
+{
+    // Every `.shader` in the tree whose FRAGMENT stage compiles @p header, found by walking the tree and
+    // resolving each one's include closure with the engine's own resolver.
+    //
+    // DERIVED, and that is the whole value of it. A typed list of consumers is a list somebody has to
+    // remember to extend, and forgetting is the defect: Д20 found ShadowFactor written out four times
+    // because each new consumer copied the body it could see instead of naming a text, and two of the
+    // four had silently fallen a fix behind by the time anyone diffed them.
+    std::vector<std::filesystem::path> ShadersCompiling( const char* header )
+    {
+        std::vector<std::filesystem::path> consumers;
+        for ( const auto& entry : std::filesystem::recursive_directory_iterator( "Resources/Shaders/Programs" ) )
+        {
+            if ( !entry.is_regular_file() || entry.path().extension() != ".shader" )
+                continue;
+
+            // A shader with no fragment stage (a depth-only or compute program) is not a consumer and
+            // must not make StageSource's EXPECT_NE fire on the way to finding that out.
+            auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( ReadFile( entry.path() ) );
+            if ( !parsed.IsSuccess() )
+                continue;
+            const auto stage = parsed.GetValue().Stages.find( ShaderStage::Fragment );
+            if ( stage == parsed.GetValue().Stages.end() )
+                continue;
+
+            for ( const auto& include : Desert::Core::CollectShaderIncludes( stage->second, entry.path() ) )
+            {
+                if ( include.filename() == header )
+                {
+                    consumers.push_back( entry.path() );
+                    break;
+                }
+            }
+        }
+        std::sort( consumers.begin(), consumers.end() );
+        return consumers;
+    }
+
+    // The five resources Mesh/CascadedShadow.glslh reads, under the names Graphic::SceneShadowBind writes
+    // them. Taken from MaterialPBRBase rather than spelt out, so a rename that reaches only one side fails
+    // to compile instead of failing to be checked.
+    std::vector<std::string> CascadeBindingNames()
+    {
+        std::vector<std::string> names{ MaterialPBRBase::kShadowBlockName };
+        for ( uint32_t c = 0; c < MaterialPBRBase::kMaxCascades; ++c )
+            names.emplace_back( MaterialPBRBase::kShadowMapNames[c] );
+        return names;
+    }
+} // namespace
+
+TEST_F( ShaderRootFixture, EveryShaderCompilingTheCascadeTextDeclaresTheFiveBindingsItReads )
+{
+    // THE RELATION Д20 exists to assert, and it is deliberately not "StaticMeshPBR has ShadowUB".
+    //
+    // Mesh/CascadedShadow.glslh declares no binding of its own — it cannot, because its consumers have
+    // genuinely different layouts (the deferred composite already numbers the IBL trio 17/18/19 against
+    // the mesh shaders' 8/9/10, and a shader-graph layout holds DirectionLightsUB and TimeUB at the 14/15
+    // two of the maps use elsewhere). What it has instead is a CONTRACT: the includer declares these five
+    // names, at whatever slots are free in its own set, and the engine binds by name.
+    //
+    // A contract stated only in a comment is a contract nobody checks. Both sides of this one are derived:
+    // the consumers by walking the tree for whoever compiles the text, the names from the C++ that writes
+    // them. Add a sixth consumer and it is tested the moment it includes the header; add a fifth cascade
+    // and every consumer is required to declare it.
+    const auto consumers = ShadersCompiling( "CascadedShadow.glslh" );
+
+    // Vacuous success is the failure mode of every derived-set test. Five is what the tree holds today —
+    // the three mesh PBR shaders, the deferred composite and the shader graph's lit surface — and a floor
+    // rather than an equality so that a sixth consumer is not, by itself, a broken test.
+    ASSERT_GE( consumers.size(), 5u ) << "nothing in the tree compiles Mesh/CascadedShadow.glslh";
+
+    const auto expected = CascadeBindingNames();
+    for ( const auto& shader : consumers )
+    {
+        const auto declared = DeclaredNames( GraphicsSetZero( shader ) );
+        ASSERT_FALSE( declared.empty() ) << shader.string();
+
+        for ( const auto& name : expected )
+            EXPECT_TRUE( declared.count( name ) != 0 )
+                 << shader.string() << " compiles Mesh/CascadedShadow.glslh but does not declare '" << name
+                 << "', which the text reads and Graphic::SceneShadowBind fills. Declared: "
+                 << Describe( declared );
+    }
+}
+
+TEST_F( ShaderRootFixture, TheLitShaderGraphSurfaceIsOneOfThoseConsumers )
+{
+    // Named on its own because it is the ONE consumer whose membership is the point of Д20 rather than a
+    // consequence of it. A lit graph surface received the ambient, the BRDF, the punctual lights and the
+    // cloud shadow after Д16 and still stood in full sun under a wall that shadowed the PBR sphere beside
+    // it, because ShadowFactor was the one term that was not a shared text.
+    const auto consumers = ShadersCompiling( "CascadedShadow.glslh" );
+
+    const bool graph = std::any_of( consumers.begin(), consumers.end(), []( const std::filesystem::path& p )
+                                    { return p.parent_path().filename() == "Graph"; } );
+
+    EXPECT_TRUE( graph ) << "no shader-graph surface compiles the cascade text — a graph material ticked "
+                            "\"Lit\" is shadowed by clouds and not by geometry again";
 }
 
 int main( int argc, char** argv )

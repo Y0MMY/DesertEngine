@@ -471,11 +471,12 @@ TEST( ShaderGraphCompiler, TheSurfaceOutputCarriesTheAttributesTheSharedModelCon
 TEST( ShaderGraphCompiler, TheGraphsOwnTexturesCannotLandOnAnEngineBinding )
 {
     // The generated shader declares engine blocks at fixed slots (LightsMetadata 4, the point and spot
-    // buffers 6 and 16, the IBL trio 8/9/10, DirectionLightsUB 14, TimeUB 15, the cloud pair 20/21) and
-    // the parser numbers a Properties block's textures upward from ONE base. While that base was 2, the
-    // third texture in a graph would have been declared at binding 4 on top of LightsMetadata — two GLSL
-    // declarations on one descriptor, which nothing reports.
-    EXPECT_GT( SG::kGraphTextureBinding, 21u );
+    // buffers 6 and 16, the IBL trio 8/9/10, DirectionLightsUB 14, TimeUB 15, the cloud pair 20/21 and,
+    // since Д20, the five cascade bindings 5/7/13/22/23) and the parser numbers a Properties block's
+    // textures upward from ONE base. While that base was 2, the third texture in a graph would have been
+    // declared at binding 4 on top of LightsMetadata — two GLSL declarations on one descriptor, which
+    // nothing reports. 23 is now the highest engine slot, so the base has to clear it and not 21.
+    EXPECT_GT( SG::kGraphTextureBinding, 23u );
 
     SG::Document doc = LitSurfaceDoc();
     auto         tex = SG::MakeNode( doc, "TextureSample" );

@@ -523,11 +523,11 @@ namespace Desert::Editor
         if ( ImGui::Combo( "##domain", &domainIdx, kDomains, 2 ) )
             ChangeDomain( static_cast<SG::Domain>( domainIdx ) );
 
-        // The scene's shading model — Surface only. The tooltip states BOTH halves of what ticking
-        // this box does: it used to give a Lambert of the graph compiler's own with a flat ambient
-        // and no shadow of any kind, and an artist could only learn that from the picture. It now
-        // gives the engine's own model, and the one thing that still differs from a standard
-        // material — geometry shadows — is named here rather than discovered.
+        // The scene's shading model — Surface only. The tooltip used to carry a third paragraph naming
+        // what ticking this box did NOT give ("cascaded shadows from scene geometry"), because ticking
+        // it produced a Lambert of the graph compiler's own and an artist could only learn the gap from
+        // the picture. Д20 made ShadowFactor one shared text and the gap closed, so the paragraph is
+        // gone rather than left to describe a difference that no longer exists.
         if ( m_Doc.DomainEnum() == SG::Domain::Surface )
         {
             ImGui::SameLine();
@@ -535,11 +535,10 @@ namespace Desert::Editor
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Shade this surface with the engine's standard model: the baked sky "
                                    "(image-based ambient), the sun and every point/spot light through "
-                                   "the same BRDF a PBR material uses, and the cloud layer's shadow.\n\n"
+                                   "the same BRDF a PBR material uses, and both occluders of the sun — "
+                                   "cascaded shadows from scene geometry and the cloud layer.\n\n"
                                    "Feed Metallic / Roughness / Occlusion on the Surface Output node; "
-                                   "unwired they default to a standard material's 0 / 0.5 / 1.\n\n"
-                                   "NOT included: cascaded shadows from scene geometry. A lit graph "
-                                   "material is shadowed by clouds but not by objects." );
+                                   "unwired they default to a standard material's 0 / 0.5 / 1." );
         }
 
         ImGui::SameLine();
