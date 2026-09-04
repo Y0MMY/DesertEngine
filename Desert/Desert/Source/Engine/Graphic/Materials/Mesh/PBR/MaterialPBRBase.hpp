@@ -47,11 +47,9 @@ namespace Desert::Graphic
         MaterialPBRBase( std::string&& debugName, std::string&& shaderName );
         ~MaterialPBRBase() override = default;
 
-        static void UpdatePointLights( MaterialInstance* instance, const ShaderProtocols::PointLight& lights );
-        static void UpdateSpotLights( MaterialInstance* instance, const ShaderProtocols::SpotLight& lights );
-        static void UpdateDirectionLights( MaterialInstance* instance, const ShaderProtocols::DirectionLight& lights );
-        static void UpdateLightsMetadata( MaterialInstance* instance, const ShaderProtocols::PointLight& point,
-                                          const ShaderProtocols::SpotLight&      spot,
-                                          const ShaderProtocols::DirectionLight& dir );
+        // The per-type splits of UpdateLights (point / spot / directional / counts) used to live here as
+        // four more protected statics. Nothing outside this class ever called one, and the counts must be
+        // written with the buffers they count anyway, so they are one function in
+        // Engine/Graphic/Materials/SceneLightingBinding.hpp now.
     };
 } // namespace Desert::Graphic

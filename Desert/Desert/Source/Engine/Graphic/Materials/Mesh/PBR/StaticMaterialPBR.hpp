@@ -31,19 +31,12 @@ namespace Desert::Graphic
         // Index into this material's per-object Materials[] storage buffer for the next Bind/draw.
         void SetMaterialIndex( uint32_t index ) { m_MaterialIndex = index; }
 
-        // Per-frame scene data written into the shared executor uniform buffers (not per-parameter).
+        // The per-object transform. It is per-OBJECT, which is why it is still here and why the five
+        // per-FRAME appliers that stood beside it are not: those were forwarders to MaterialPBRBase
+        // with no caller left once MeshRenderer::FrameState::ApplyTo started writing the snapshot
+        // through Engine/Graphic/Materials/SceneLightingBinding.hpp, which reaches a Material directly
+        // and therefore reaches the generic mesh path as well.
         static void UpdateTransform( MaterialInstance* instance, const glm::mat4& transform );
-        static void UpdateCamera( MaterialInstance* instance, const Core::Camera* camera );
-        static void UpdateLights( MaterialInstance* instance, const ShaderProtocols::PointLight& pointLights,
-                                  const ShaderProtocols::SpotLight&      spotLights,
-                                  const ShaderProtocols::DirectionLight& dirLights );
-        static void UpdateShadow( MaterialInstance* instance, const glm::mat4* cascadeViewProj,
-                                  Image2D* const* cascadeMaps, uint32_t numCascades, float bias, bool enabled,
-                                  int debugMode, bool showNormals, const glm::vec4& cascadeWorldPerTexel,
-                                  bool lightingDebug = false );
-        static void UpdateEnvironment( MaterialInstance* instance, ImageCube* irradiance, ImageCube* prefiltered,
-                                       Image2D* brdfLut );
-        static void UpdateCloudShadow( MaterialInstance* instance, const CloudShadowInput& cloudShadow );
 
     protected:
         // Lets a derived variant bind a different shader (e.g. the instanced StaticMeshPBR_Instanced) while

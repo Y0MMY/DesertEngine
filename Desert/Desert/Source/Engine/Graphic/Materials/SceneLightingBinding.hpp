@@ -1,0 +1,185 @@
+#pragma once
+
+#include <Engine/Core/Camera.hpp>
+#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/TextureCubeProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
+#include <Engine/Graphic/ShaderProtocols/Camera.hpp>
+#include <Engine/Graphic/ShaderProtocols/DirectionLight.hpp>
+#include <Engine/Graphic/ShaderProtocols/Metadata.hpp>
+#include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
+#include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
+
+#include <glm/glm.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+
+namespace Desert::Graphic
+{
+    class Image2D;
+    class ImageCube;
+
+    // ------------------------------------------------------------------------------------------------
+    // THE ONE WRITER of each per-frame scene block a shader can receive: the camera, the light payloads,
+    // the shadow cascades and the IBL trio. Same shape and same reason as Graphic::CloudShadowBind next
+    // door — every material in this engine binds by NAME, so one function serves every shader that
+    // declares the block, whatever slot number it chose for it.
+    //
+    // These bodies used to be static members of MaterialPBRBase taking a MaterialInstance*, which each
+    // immediately turned into GetParentMaterial(). That signature is what kept them out of reach of the
+    // generic (data-driven) mesh path, which draws through a Material with no instance at all — and the
+    // consequence was not "generic materials get a bit less". It was that MeshRenderer::DrawGenericMeshes
+    // grew its OWN filler for the three blocks it happened to need (CameraUB, TimeUB, DirectionLightsUB),
+    // which is a second implementation of the same job, and the blocks it did not think of — the
+    // environment cubes, the light counts, the point and spot buffers, the cloud shadow — reached the PBR
+    // materials and nothing else. A custom-shader mesh therefore could not be lit like the mesh beside it
+    // however its shader was written.
+    //
+    // EVERY LOOKUP IS GUARDED. A material whose shader does not declare a block gets nothing written and
+    // no complaint: that is not a silent fallback, it is the whole mechanism by which one frame-state
+    // applier serves the PBR shaders, the terrain, an unlit graph material and the text system's SDF
+    // quads. `LightsMetadata` in particular used to be dereferenced unguarded, which was a null crash
+    // waiting for the first material without it — and the first material without it is every unlit
+    // generic shader the moment it is handed the same snapshot.
+    // ------------------------------------------------------------------------------------------------
+
+    /// The camera block (Common/CameraUB.glslh: mat4 Projection, mat4 View, vec3 CameraPos).
+    inline void SceneCameraBind( Material* material, const Core::Camera* camera )
+    {
+        if ( !material || !camera )
+            return;
+
+        ShaderProtocols::Camera data;
+        data.Projection = camera->GetProjectionMatrix();
+        data.View       = camera->GetViewMatrix();
+        data.CameraPos  = camera->GetPosition();
+
+        if ( auto* ub = material->Get<UniformBufferProperty>( ShaderProtocols::Camera::Name ) )
+        {
+            // The block ends in a vec3, so its reflected size (140) is smaller than the C++ struct's
+            // padded sizeof (144). Clamp, or the last write runs four bytes past the buffer.
+            const size_t size = std::min( sizeof( data ), static_cast<size_t>( ub->GetUniform()->GetSize() ) );
+            ub->SetRawData( reinterpret_cast<const std::byte*>( &data ), size );
+        }
+    }
+
+    /// Seconds since engine start, for any shader declaring `TimeUB { vec4 TimeData; }` — the shader
+    /// graph's Time node is the reason it exists. x = seconds, yzw reserved.
+    inline void SceneTimeBind( Material* material, float seconds )
+    {
+        if ( !material )
+            return;
+        if ( auto* ub = material->Get<UniformBufferProperty>( "TimeUB" ) )
+        {
+            const glm::vec4 data( seconds, 0.0f, 0.0f, 0.0f );
+            const size_t    size = std::min( sizeof( data ), static_cast<size_t>( ub->GetUniform()->GetSize() ) );
+            ub->SetRawData( reinterpret_cast<const std::byte*>( &data ), size );
+        }
+    }
+
+    /// The three light payloads plus the counts every consumer loops over. Written together because a
+    /// count that disagrees with its buffer reads past the end of it.
+    inline void SceneLightsBind( Material* material, const ShaderProtocols::PointLight& point,
+                                 const ShaderProtocols::SpotLight&      spot,
+                                 const ShaderProtocols::DirectionLight& dir )
+    {
+        if ( !material )
+            return;
+
+        // Point and spot lights live in unbounded std430 storage buffers. An EMPTY list is not written:
+        // the consumer loops 0..count and the count below is zero, so a stale buffer is never read, and
+        // writing nothing keeps the descriptor's own allocation in place.
+        if ( !point.PointLights.empty() )
+            if ( auto* sb = material->Get<StorageBufferProperty>( point.Name ) )
+                sb->SetRawData( reinterpret_cast<const std::byte*>( point.PointLights.data() ),
+                                static_cast<uint32_t>( point.PointLights.size() *
+                                                       sizeof( ShaderProtocols::PointLightPayload ) ) );
+
+        if ( !spot.SpotLights.empty() )
+            if ( auto* sb = material->Get<StorageBufferProperty>( spot.Name ) )
+                sb->SetRawData( reinterpret_cast<const std::byte*>( spot.SpotLights.data() ),
+                                static_cast<uint32_t>( spot.SpotLights.size() *
+                                                       sizeof( ShaderProtocols::SpotLightPayload ) ) );
+
+        if ( !dir.DirectionLights.empty() )
+            if ( auto* ub = material->Get<UniformBufferProperty>( dir.Name ) )
+            {
+                const size_t size =
+                     std::min( dir.DirectionLights.size() * sizeof( ShaderProtocols::DirectionLightPayload ),
+                               static_cast<size_t>( ub->GetUniform()->GetSize() ) );
+                ub->SetRawData( reinterpret_cast<const std::byte*>( dir.DirectionLights.data() ), size );
+            }
+
+        // `Name` is a static member and not part of the object, so the block is just the three counts.
+        const uint32_t counts[3] = { static_cast<uint32_t>( dir.DirectionLights.size() ),
+                                     static_cast<uint32_t>( point.PointLights.size() ),
+                                     static_cast<uint32_t>( spot.SpotLights.size() ) };
+        if ( auto* ub = material->Get<UniformBufferProperty>( ShaderProtocols::LightsMetadata::Name ) )
+            ub->SetRawData( reinterpret_cast<const std::byte*>( counts ), sizeof( counts ) );
+    }
+
+    /// The cascaded directional shadow maps (R32F light-space depth) and their per-cascade light
+    /// view-projections, bias, enable flag and debug switches — the `ShadowUB` block plus u_ShadowMap0..3.
+    inline void SceneShadowBind( Material* material, const glm::mat4* cascadeViewProj, Image2D* const* cascadeMaps,
+                                 uint32_t numCascades, float bias, bool enabled, int debugMode, bool showNormals,
+                                 const glm::vec4& cascadeWorldPerTexel, bool lightingDebug )
+    {
+        if ( !material || !cascadeViewProj || !cascadeMaps )
+            return;
+
+        constexpr uint32_t kMaxCascades = 4;
+        struct ShadowUBData
+        {
+            glm::mat4 LightViewProj[kMaxCascades];
+            glm::vec4 Params;            // x = bias, y = enabled, z = debug mode, w = cascade count
+            glm::vec4 DebugParams;       // x = show normals, y = lighting debug
+            glm::vec4 CascadeTexelWorld; // per-cascade world size of one shadow-map texel
+        } data;
+
+        const uint32_t n = numCascades < kMaxCascades ? numCascades : kMaxCascades;
+        for ( uint32_t i = 0; i < kMaxCascades; ++i )
+            data.LightViewProj[i] = ( i < n ) ? cascadeViewProj[i] : glm::mat4( 1.0f );
+        data.Params =
+             glm::vec4( bias, enabled ? 1.0f : 0.0f, static_cast<float>( debugMode ), static_cast<float>( n ) );
+        data.DebugParams       = glm::vec4( showNormals ? 1.0f : 0.0f, lightingDebug ? 1.0f : 0.0f, 0.0f, 0.0f );
+        data.CascadeTexelWorld = cascadeWorldPerTexel;
+
+        if ( auto* ub = material->Get<UniformBufferProperty>( "ShadowUB" ) )
+            ub->SetRawData( reinterpret_cast<const std::byte*>( &data ), sizeof( data ) );
+
+        // Every cascade map, every frame: descriptors must stay valid for the set being recorded.
+        static const char* kNames[kMaxCascades] = { "u_ShadowMap0", "u_ShadowMap1", "u_ShadowMap2",
+                                                    "u_ShadowMap3" };
+        for ( uint32_t i = 0; i < kMaxCascades; ++i )
+        {
+            Image2D* img = ( i < n ) ? cascadeMaps[i] : nullptr;
+            if ( img )
+                if ( auto* tex = material->Get<Texture2DProperty>( kNames[i] ) )
+                    tex->SetImage( img );
+        }
+    }
+
+    /// The IBL inputs of Mesh/AmbientIBL.glslh: the diffuse irradiance and prefiltered specular cubes and
+    /// the split-sum BRDF LUT. Each is bound only when it exists, so a scene with no baked environment
+    /// keeps the descriptor's dummy cube rather than an undefined one.
+    inline void SceneEnvironmentBind( Material* material, ImageCube* irradiance, ImageCube* prefiltered,
+                                      Image2D* brdfLut )
+    {
+        if ( !material )
+            return;
+
+        if ( irradiance )
+            if ( auto* tex = material->Get<TextureCubeProperty>( "u_EnvIrradianceTex" ) )
+                tex->SetTexture( irradiance );
+        if ( prefiltered )
+            if ( auto* tex = material->Get<TextureCubeProperty>( "u_EnvSpecularTex" ) )
+                tex->SetTexture( prefiltered );
+        if ( brdfLut )
+            if ( auto* tex = material->Get<Texture2DProperty>( "u_BRDFLUTTexture" ) )
+                tex->SetImage( brdfLut );
+    }
+} // namespace Desert::Graphic

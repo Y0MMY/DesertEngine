@@ -153,8 +153,18 @@ namespace Desert::Graphic::System
             // deferred composite happened to shade.
             CloudShadowInput CloudShadow;
 
-            // Writes the whole snapshot onto @p instance's material. One call, so a new piece of frame
-            // state can never be applied at two of the three sites and forgotten at the third.
+            // Writes the whole snapshot onto @p material. One call, so a new piece of frame state can
+            // never be applied at some sites and forgotten at the others. Every block is written by
+            // NAME and every lookup is guarded, which is what lets the same snapshot serve a PBR
+            // material, a lit shader-graph material, an unlit one and the text system's SDF quads: a
+            // shader that does not declare a block simply does not receive it.
+            //
+            // This overload is the one that matters. While the only entry point took a MaterialInstance,
+            // the generic (data-driven) mesh path — which has no instance — could not be handed the
+            // snapshot at all, and filled three of its blocks itself and the rest not at all. That is
+            // why a custom-shader mesh had no environment, no cloud shadow and no punctual lights
+            // however its shader was written.
+            void ApplyTo( Material* material ) const;
             void ApplyTo( MaterialInstance* instance ) const;
         };
 

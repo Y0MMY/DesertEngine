@@ -6,6 +6,8 @@
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRPush.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialGlass.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialRSM.hpp>
+#include <Engine/Graphic/Materials/SceneLightingBinding.hpp>
+#include <Engine/Graphic/Clouds/CloudShadowBinding.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Geometry/LODSelection.hpp>
 #include <Common/Core/Profiler.hpp>
@@ -233,17 +235,17 @@ namespace Desert::Graphic::System
         if ( !targetFb || !camera )
             return;
 
-        // Engine-filled CameraUB (matches Common/CameraUB.glslh: mat4 Projection, View; vec3 CameraPos).
-        struct CameraUBData
-        {
-            glm::mat4 Projection;
-            glm::mat4 View;
-            glm::vec4 CameraPos;
-        };
-        CameraUBData cam{};
-        cam.Projection = camera->GetProjectionMatrix();
-        cam.View       = camera->GetViewMatrix();
-        cam.CameraPos  = glm::vec4( camera->GetPosition(), 1.0f );
+        // THE SAME per-frame scene snapshot the PBR queue is drawn with — camera, lights, cascades, the
+        // baked environment and the cloud shadow — gathered once here as it is there.
+        //
+        // What stood in its place was three hand-written fills (CameraUB, TimeUB, DirectionLightsUB) and
+        // nothing else, so a custom-shader mesh could not receive the environment cubes, the light counts,
+        // the point and spot buffers or the cloud shadow map at all. A lit shader-graph material was
+        // therefore obliged to invent a lighting model out of the one light payload it could see, which is
+        // exactly what it did: a flat ambient constant, an unnormalized Lambert and full sun under a
+        // cloud. Every one of those blocks is bound by NAME and guarded, so this costs the shaders that
+        // do not declare them nothing.
+        const FrameState frameState = CaptureFrameState( camera );
 
         const VertexBufferLayout meshLayout = { { Graphic::ShaderDataType::Float3, "a_Position" },
                                                 { Graphic::ShaderDataType::Float3, "a_Normal" },
@@ -350,44 +352,9 @@ namespace Desert::Graphic::System
             if ( !pipeline )
                 continue;
 
-            if ( auto* camUB = material->Get<UniformBufferProperty>( "CameraUB" ) )
-            {
-                // CameraUB ends in a vec3 (CameraPos) -> reflected size (140) < sizeof(cam) (144 padded).
-                // Clamp to the real buffer size; the first 140 bytes (Proj/View/CameraPos.xyz) are valid.
-                const size_t sz =
-                     std::min( sizeof( cam ), static_cast<size_t>( camUB->GetUniform()->GetSize() ) );
-                camUB->SetRawData( reinterpret_cast<const std::byte*>( &cam ), sz );
-            }
-
-            // Engine-filled TimeUB (opt-in: any shader declaring `uniform TimeUB { vec4 TimeData; }`
-            // gets it — the shader-graph Time node relies on this). x = seconds since engine start.
-            if ( auto* timeUB = material->Get<UniformBufferProperty>( "TimeUB" ) )
-            {
-                static const auto s_TimeOrigin = std::chrono::steady_clock::now();
-                const float       seconds      = std::chrono::duration<float>(
-                                             std::chrono::steady_clock::now() - s_TimeOrigin )
-                                             .count();
-                const glm::vec4 timeData( seconds, 0.0f, 0.0f, 0.0f );
-                const size_t    sz = std::min( sizeof( timeData ),
-                                               static_cast<size_t>( timeUB->GetUniform()->GetSize() ) );
-                timeUB->SetRawData( reinterpret_cast<const std::byte*>( &timeData ), sz );
-            }
-
-            // Engine-filled DirectionLightsUB (opt-in, same PBR payload layout): generic shaders that
-            // want lighting (the shader graph's Lit mode) declare the UB and receive the scene's
-            // directional light — previously only PBR materials got light data.
-            if ( auto* lightsUB =
-                      material->Get<UniformBufferProperty>( ShaderProtocols::DirectionLight::Name ) )
-            {
-                const auto& dirLights = m_SceneRenderer->GetDirectionLights().DirectionLights;
-                if ( !dirLights.empty() )
-                {
-                    const size_t sz = std::min(
-                         dirLights.size() * sizeof( ShaderProtocols::DirectionLightPayload ),
-                         static_cast<size_t>( lightsUB->GetUniform()->GetSize() ) );
-                    lightsUB->SetRawData( reinterpret_cast<const std::byte*>( dirLights.data() ), sz );
-                }
-            }
+            // The scene's whole contribution, by name and guarded — one call, the same one the PBR
+            // materials get. A shader that declares only CameraUB receives only CameraUB.
+            frameState.ApplyTo( material );
 
             // A shader-override draw does not own its material: m_GenericMaterials keys one material
             // per SHADER, so several entities share it within a frame and each draw has to restate its
@@ -1341,23 +1308,40 @@ namespace Desert::Graphic::System
         return frame;
     }
 
+    void MeshRenderer::FrameState::ApplyTo( Material* material ) const
+    {
+        if ( !material )
+            return;
+
+        SceneCameraBind( material, Camera );
+
+        // Engine time, for any shader declaring TimeUB — the shader graph's Time node. It belongs in the
+        // snapshot for the same reason everything else here does: it is per-frame scene state, and while
+        // it was filled only inside DrawGenericMeshes it was the shape of the problem rather than an
+        // exception to it.
+        {
+            static const auto s_TimeOrigin = std::chrono::steady_clock::now();
+            SceneTimeBind(
+                 material,
+                 std::chrono::duration<float>( std::chrono::steady_clock::now() - s_TimeOrigin ).count() );
+        }
+
+        if ( PointLights && SpotLights && DirectionLights )
+            SceneLightsBind( material, *PointLights, *SpotLights, *DirectionLights );
+
+        Image2D* maps[4] = { CascadeMaps[0], CascadeMaps[1], CascadeMaps[2], CascadeMaps[3] };
+        SceneShadowBind( material, CascadeViewProj, maps, kNumCascades, ShadowBias, ShadowsEnabled,
+                         ShadowDebugMode, ShowNormals, CascadeTexelWorld, LightingDebug );
+
+        SceneEnvironmentBind( material, IrradianceMap, PrefilteredMap, BrdfLut );
+        CloudShadowBind( material, CloudShadow );
+    }
+
     void MeshRenderer::FrameState::ApplyTo( MaterialInstance* instance ) const
     {
         if ( !instance )
             return;
-
-        StaticMaterialPBR::UpdateCamera( instance, Camera );
-        if ( PointLights && SpotLights && DirectionLights )
-            StaticMaterialPBR::UpdateLights( instance, *PointLights, *SpotLights, *DirectionLights );
-
-        // The const_cast is the shape of the old API (it takes a mutable pointer array); the snapshot
-        // itself is read-only, which is the point.
-        Image2D* maps[4] = { CascadeMaps[0], CascadeMaps[1], CascadeMaps[2], CascadeMaps[3] };
-        StaticMaterialPBR::UpdateShadow( instance, CascadeViewProj, maps, kNumCascades, ShadowBias, ShadowsEnabled,
-                                         ShadowDebugMode, ShowNormals, CascadeTexelWorld, LightingDebug );
-
-        StaticMaterialPBR::UpdateEnvironment( instance, IrradianceMap, PrefilteredMap, BrdfLut );
-        StaticMaterialPBR::UpdateCloudShadow( instance, CloudShadow );
+        ApplyTo( instance->GetParentMaterial() );
     }
 
     void MeshRenderer::UpdateCascades()

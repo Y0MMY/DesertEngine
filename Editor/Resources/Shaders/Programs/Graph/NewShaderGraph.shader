@@ -5,7 +5,7 @@ Shader "NewShaderGraph"
 
     Properties Binding(1)
     {
-        Color     fdf ("fdf") = (0.8, 0.4, 0.1, 1.0)
+        Color     BaseColor ("BaseColor") = (0.8, 0.4, 0.1, 1.0)
     }
 
     State
@@ -27,7 +27,7 @@ Shader "NewShaderGraph"
 
         void main()
         {
-            vec4 n0 = u_Material.fdf;
+            vec4 n0 = u_Material.BaseColor;
             vec4 albedo = n0;
             o_Color = vec4( albedo.rgb + ( vec4( 0.0 ) ).rgb, albedo.a * ( 1.0 ) );
         }

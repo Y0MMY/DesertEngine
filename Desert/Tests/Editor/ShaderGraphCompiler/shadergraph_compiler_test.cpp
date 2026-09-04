@@ -133,7 +133,9 @@ TEST( ShaderGraphCompiler, DomainSurvivesSerializationRoundTrip )
     const std::string json = SG::Serialize( PostProcessDoc() );
     auto              back = SG::Deserialize( json );
     ASSERT_TRUE( back.IsSuccess() ) << back.GetError();
-    EXPECT_EQ( back.GetValue().DomainEnum(), SG::Domain::PostProcess );
+    EXPECT_EQ( back.GetValue().Doc.DomainEnum(), SG::Domain::PostProcess );
+    // A document this build wrote needs nothing done to it.
+    EXPECT_EQ( back.GetValue().MigratedPins, 0 );
 }
 
 // A .dgraph written before the Domain field existed (no "Domain" key) defaults to Surface.
@@ -389,6 +391,170 @@ TEST( ShaderGraphCompiler, OutOfDomainNodeIsRejected )
     const auto compiled = SG::CompileToDShader( doc );
     ASSERT_FALSE( compiled.IsSuccess() );
     EXPECT_NE( compiled.GetError().find( "Scene Color" ), std::string::npos ) << compiled.GetError();
+}
+
+// ======================================================================= the lit surface ======
+//
+// A Surface graph with Lit ticked used to carry a lighting model written by THIS COMPILER: a flat
+// `vec3( 0.12 )` ambient that read no environment, `albedo * cos` with no division by PI, and no
+// cloud shadow. All three were defects the engine had already fixed by making the term one shared
+// text (Р16, Р20, Р21) — the graph was a fourth copy nobody had migrated.
+
+namespace
+{
+    SG::Document LitSurfaceDoc()
+    {
+        SG::Document doc = SurfaceDoc();
+        doc.Name         = "TestLit";
+        doc.Lit          = true;
+        return doc;
+    }
+} // namespace
+
+TEST( ShaderGraphCompiler, ALitSurfaceCallsTheSharedModelAndWritesNoFormulaOfItsOwn )
+{
+    const auto compiled = SG::CompileToDShader( LitSurfaceDoc() );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    const std::string& src = compiled.GetValue();
+
+    // The whole model behind one include and one call.
+    EXPECT_NE( src.find( "Common/GraphSurfaceLighting.glslh" ), std::string::npos ) << src;
+    EXPECT_NE( src.find( "ShadeGraphSurface(" ), std::string::npos ) << src;
+
+    // And not one line of lighting arithmetic left in the generated text. These are the exact three
+    // fragments the old emitter wrote, so this fails if any of them is reintroduced here rather than
+    // fixed in the shared header where every other surface would get it too.
+    EXPECT_EQ( src.find( "vec3( 0.12 )" ), std::string::npos ) << "the flat ambient constant is back";
+    EXPECT_EQ( src.find( "max( dot( N, L ), 0.0 )" ), std::string::npos )
+         << "the graph is computing its own Lambert term again";
+    EXPECT_EQ( src.find( "ColorIntensity" ), std::string::npos )
+         << "the graph is unpacking the light payload itself instead of calling the shared model";
+
+    // The lit vertex contract carries what the model needs: world position and eye position, not only
+    // a normal. A surface that knows only its normal cannot be given a cloud shadow or a point light.
+    EXPECT_NE( src.find( "GRAPH_LIT" ), std::string::npos );
+    EXPECT_NE( src.find( "v_WorldPos" ), std::string::npos );
+    EXPECT_NE( src.find( "v_CameraPos" ), std::string::npos );
+
+    // Unwired, the material attributes fall back to the standard material's schema defaults.
+    EXPECT_NE( src.find( "albedo.rgb, 0.0, 0.5, 1.0" ), std::string::npos ) << src;
+}
+
+TEST( ShaderGraphCompiler, AnUnlitSurfaceIsUntouchedByTheShadingModel )
+{
+    const auto compiled = SG::CompileToDShader( SurfaceDoc() ); // Lit defaults to false
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    const std::string& src = compiled.GetValue();
+
+    EXPECT_EQ( src.find( "GraphSurfaceLighting" ), std::string::npos ) << src;
+    EXPECT_EQ( src.find( "ShadeGraphSurface" ), std::string::npos ) << src;
+    EXPECT_EQ( src.find( "GRAPH_LIT" ), std::string::npos ) << src;
+}
+
+TEST( ShaderGraphCompiler, TheSurfaceOutputCarriesTheAttributesTheSharedModelConsumes )
+{
+    const SG::NodeSpec* spec = SG::FindSpec( "SurfaceOutput" );
+    ASSERT_NE( spec, nullptr );
+
+    // Both shared texts take metalness and roughness, and the ambient takes an occlusion factor. The
+    // ORDER is part of the contract: pins are stored positionally in a .dgraph, so the three added by
+    // Д16 are appended after Alpha and the first three keep their indices.
+    ASSERT_EQ( spec->Inputs.size(), 6u );
+    EXPECT_STREQ( spec->Inputs[0].Name, "Albedo" );
+    EXPECT_STREQ( spec->Inputs[1].Name, "Emission" );
+    EXPECT_STREQ( spec->Inputs[2].Name, "Alpha" );
+    EXPECT_STREQ( spec->Inputs[3].Name, "Metallic" );
+    EXPECT_STREQ( spec->Inputs[4].Name, "Roughness" );
+    EXPECT_STREQ( spec->Inputs[5].Name, "Occlusion" );
+}
+
+TEST( ShaderGraphCompiler, TheGraphsOwnTexturesCannotLandOnAnEngineBinding )
+{
+    // The generated shader declares engine blocks at fixed slots (LightsMetadata 4, the point and spot
+    // buffers 6 and 16, the IBL trio 8/9/10, DirectionLightsUB 14, TimeUB 15, the cloud pair 20/21) and
+    // the parser numbers a Properties block's textures upward from ONE base. While that base was 2, the
+    // third texture in a graph would have been declared at binding 4 on top of LightsMetadata — two GLSL
+    // declarations on one descriptor, which nothing reports.
+    EXPECT_GT( SG::kGraphTextureBinding, 21u );
+
+    SG::Document doc = LitSurfaceDoc();
+    auto         tex = SG::MakeNode( doc, "TextureSample" );
+    tex.ParamName    = "u_Mask";
+    doc.Nodes.push_back( std::move( tex ) );
+
+    const auto compiled = SG::CompileToDShader( doc );
+    ASSERT_TRUE( compiled.IsSuccess() ) << compiled.GetError();
+    EXPECT_NE( compiled.GetValue().find( "TextureBinding(24)" ), std::string::npos ) << compiled.GetValue();
+}
+
+// ========================================================================== the migration =====
+
+TEST( ShaderGraphCompiler, ADocumentWrittenAgainstTheOlderCatalogueGrowsTheMissingPins )
+{
+    // A .dgraph exactly as builds before Д16 wrote it: a Surface Output with the three inputs the
+    // catalogue had then. Verbatim rather than generated, because a document produced by THIS build can
+    // never be short — the thing under test is a file on someone's disk.
+    const std::string legacy =
+         R"({"Name":"Legacy","NextId":8,"Domain":0,"Lit":true,"Nodes":[)"
+         R"({"Id":1,"Kind":"ColorConst","ParamName":"","Value":[0.5,0.5,0.5,1.0],"X":0.0,"Y":0.0,)"
+         R"("Inputs":[],"Outputs":[{"Id":2,"Name":"Color","Type":2}]},)"
+         R"({"Id":3,"Kind":"SurfaceOutput","ParamName":"","Value":[1.0,1.0,1.0,1.0],"X":320.0,"Y":0.0,)"
+         R"("Inputs":[{"Id":4,"Name":"Albedo","Type":2},{"Id":5,"Name":"Emission","Type":2},)"
+         R"({"Id":6,"Name":"Alpha","Type":0}],"Outputs":[]}],)"
+         R"("Links":[{"Id":7,"From":2,"To":4}]})";
+
+    auto loaded = SG::Deserialize( legacy );
+    ASSERT_TRUE( loaded.IsSuccess() ) << loaded.GetError();
+
+    // Reported, never silent — the panel logs this number and puts it in the status line.
+    EXPECT_EQ( loaded.GetValue().MigratedPins, 3 );
+
+    const SG::Document& doc = loaded.GetValue().Doc;
+
+    const SG::Node* output = nullptr;
+    for ( const auto& node : doc.Nodes )
+        if ( node.Kind == "SurfaceOutput" )
+            output = &node;
+    ASSERT_NE( output, nullptr );
+    ASSERT_EQ( output->Inputs.size(), 6u );
+
+    // THE PROPERTY that makes appending safe, and the reason the migration refuses anything else: the
+    // pins that were already there keep their index AND their id, so the saved link still lands on
+    // Albedo rather than on whatever now occupies index 0.
+    EXPECT_EQ( output->Inputs[0].Id, 4u );
+    EXPECT_EQ( output->Inputs[2].Id, 6u );
+    ASSERT_EQ( doc.Links.size(), 1u );
+    EXPECT_EQ( doc.Links[0].To, output->Inputs[0].Id );
+
+    // New ids come out of the document's own allocator, so nothing collides with what is already there.
+    EXPECT_GE( output->Inputs[3].Id, 8u );
+    EXPECT_NE( output->Inputs[3].Id, output->Inputs[4].Id );
+    EXPECT_GT( doc.NextId, output->Inputs[5].Id );
+
+    // And it compiles — which is the whole point, because ValidateGraph rejects a node whose pin count
+    // disagrees with its kind. Without the migration every .dgraph in existence stopped compiling.
+    EXPECT_TRUE( SG::CompileToDShader( doc ).IsSuccess() );
+}
+
+TEST( ShaderGraphCompiler, MigrationRefusesToRewriteAGraphThatIsNotMerelyOld )
+{
+    // Appending is safe BECAUSE what is stored is a prefix of the catalogue. A node whose pins were
+    // renamed, retyped or reordered is not an old document, it is a wrong one, and inventing the tail of
+    // it would turn a diagnosable file into a silently different graph. It is left alone so
+    // ValidateGraph names it.
+    SG::Document doc    = LitSurfaceDoc();
+    SG::Node*    output = nullptr;
+    for ( auto& node : doc.Nodes )
+        if ( node.Kind == "SurfaceOutput" )
+            output = &node;
+    ASSERT_NE( output, nullptr );
+
+    output->Inputs.resize( 2 );
+    output->Inputs[1].Name = "NotEmission";
+
+    EXPECT_EQ( SG::MigrateToCatalogue( doc ), 0 );
+    EXPECT_EQ( output->Inputs.size(), 2u );
+    EXPECT_FALSE( SG::CompileToDShader( doc ).IsSuccess() );
 }
 
 int main( int argc, char** argv )
