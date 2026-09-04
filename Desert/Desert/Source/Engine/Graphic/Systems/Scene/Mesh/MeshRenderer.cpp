@@ -927,6 +927,10 @@ namespace Desert::Graphic::System
         const auto  camera      = m_SceneRenderer->GetMainCamera();
         const auto& pointLights = m_SceneRenderer->GetPointLights();
         const auto& spotLights  = m_SceneRenderer->GetSpotLights();
+        // The frame's cloud shadow, from the one gather. Skinned meshes have no G-buffer variant, so in
+        // a deferred scene they are drawn FORWARD over the composite and receive nothing the composite
+        // computed — this is the only route by which the layer's shadow reaches them.
+        const CloudShadowInput cloudShadow = m_SceneRenderer->GetCloudShadowInput();
 
         // Deferred forward-over-composite: a LOAD-render-pass variant of the skinned pipeline (built once via
         // the pipeline cache), so skinned meshes draw OVER the deferred scene instead of clearing it. Same
@@ -952,7 +956,8 @@ namespace Desert::Graphic::System
                                    .DirectionLights = m_SceneRenderer->GetDirectionLights(),
                                    .PointLights     = pointLights,
                                    .SpotLights      = spotLights,
-                                   .SkinnedUB       = { .BoneMatrices = data.BoneMatrices } } );
+                                   .SkinnedUB       = { .BoneMatrices = data.BoneMatrices },
+                                   .CloudShadow     = cloudShadow } );
 
             renderer.RenderMesh( pipeline, data.Mesh, data.Transform, data.Material->GetMaterialExecutor() );
         }
@@ -1328,6 +1333,11 @@ namespace Desert::Graphic::System
              brdf && brdf->GetImageHandle().IsValid() )
             frame.BrdfLut = static_cast<Image2D*>( imageService->Resolve( brdf->GetImageHandle() ) );
 
+        // The cloud layer's shadow, from the SAME gather the deferred composite reads
+        // (SceneRenderer::GetCloudShadowInput). Filled by ExecuteCloudShadowMap() before the render graph
+        // records, so it is final by the time any mesh pass runs — in both render paths.
+        frame.CloudShadow = m_SceneRenderer->GetCloudShadowInput();
+
         return frame;
     }
 
@@ -1347,6 +1357,7 @@ namespace Desert::Graphic::System
                                          ShadowDebugMode, ShowNormals, CascadeTexelWorld, LightingDebug );
 
         StaticMaterialPBR::UpdateEnvironment( instance, IrradianceMap, PrefilteredMap, BrdfLut );
+        StaticMaterialPBR::UpdateCloudShadow( instance, CloudShadow );
     }
 
     void MeshRenderer::UpdateCascades()

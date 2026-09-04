@@ -293,6 +293,24 @@ Shader "Terrain"
         // unassigned => white fallback (Manual layers show everywhere until painted).
         Uniform(5) sampler2D u_SplatMap;
 
+        // THE CLOUD LAYER'S SHADOW ON THE WORLD. The terrain is the surface this feature is FOR — a deck
+        // of cumulus drifting over open ground is the whole picture — and it is the surface that never
+        // received it: the wrapper lived inside the deferred composite, and a terrain is drawn by neither
+        // render path's mesh shaders. Slots 6/7 are the first free ones in this shader's own small layout;
+        // they need not (and do not) match the mesh shaders' 20/21, because only the NAMES are shared and
+        // every material binds by name (Graphic::CloudShadowBind).
+        Uniform(6) sampler2D u_CloudShadowMap;
+        Uniform(7) CloudShadowUB
+        {
+        	mat4 u_CloudShadowWorldToMap;
+        	// x = the kilometres the map's clip z spans, y = 1 when the map is real and must be read,
+        	// z = the UV width of the border fade, w = the artist's shadow strength.
+        	vec4 u_CloudShadowParams;
+        };
+
+        // THE receiver, shared verbatim with the deferred composite and the mesh shaders.
+        #include <Common/CloudShadowReceiver.glslh>
+
         // Triplanar sample: project onto the three world planes and blend by the (squared) normal so steep faces
         // don't stretch. scale = tiles per world unit.
         vec3 Triplanar( sampler2D tex, vec3 wpos, vec3 n, float scale )
@@ -380,7 +398,12 @@ Shader "Terrain"
             float gloss = mix( 0.0, 0.5, clamp( wSnow, 0.0, 1.0 ) );
             float spec  = pow( max( dot( N, H ), 0.0 ), mix( 16.0, 90.0, gloss ) ) * gloss;
 
-            vec3 lit = albedo * ( ambient + sun * ndl ) + sun * spec * ndl;
+            // The cloud layer attenuates the SUN and nothing else: the hemisphere ambient above is the
+            // whole sky dome, which a deck occludes with a different geometry than a direction. Same
+            // split the deferred composite and the mesh shaders make.
+            float cloudShadow = CloudShadowFactor( v_WorldPos );
+
+            vec3 lit = albedo * ( ambient + sun * ndl * cloudShadow ) + sun * spec * ndl * cloudShadow;
 
             o_Color = vec4( lit * u_Mat.Tint.rgb, 1.0 );
         }

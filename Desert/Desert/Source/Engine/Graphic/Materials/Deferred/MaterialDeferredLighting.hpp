@@ -5,6 +5,7 @@
 #include <Engine/Graphic/Materials/Properties/TextureCubeProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
 
+#include <Engine/Graphic/Clouds/CloudShadowBinding.hpp>
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
@@ -28,27 +29,13 @@ namespace Desert::Graphic
         glm::vec4        CascadeWorldPerTexel = glm::vec4( 1.0f );
     };
 
-    // THE CLOUD LAYER'S SHADOW ON THE WORLD — a SECOND, independent occluder of the same sun, and a
-    // separate struct from DeferredShadowInput on purpose. The cascades are a depth comparison against
-    // opaque geometry; this is a volumetric transmittance reconstructed from one texel of one map. They
-    // share nothing but the light they attenuate, and folding them into one block would have put a cloud
-    // parameter inside the layout PBR.glsl.frag mirrors for its cascades.
-    //
-    // `Map` null, or `Enabled` false, is the ordinary state: no cloud component, clouds off, casting off,
-    // strength zero, or a renderer whose scene has no sky at all. The material then leaves the sampler on
-    // its dummy image and the shader is told not to read it.
-    struct CloudShadowInput
-    {
-        Image2D*  Map = nullptr;
-        glm::mat4 WorldToMap{ 1.0f };
-        float     FarDepthKm = 0.0f;
-        float     Strength   = 0.0f;
-        // A PROPERTY OF THE MAP THAT WAS BUILT, not a constant, since the quality tier scales the extent
-        // the fade's fixed world width is a fraction of. Zero is the right default for the same reason
-        // Strength's is: the fields only mean anything once Enabled is true.
-        float BorderFadeUv = 0.0f;
-        bool  Enabled      = false;
-    };
+    // CloudShadowInput — the cloud layer's shadow, a SECOND independent occluder of the same sun — used
+    // to be declared right here, which is precisely why nothing but this pass ever received it. It now
+    // lives beside the uniform block it packs into (Engine/Graphic/Clouds/CloudShadowPayload.hpp), where
+    // the forward mesh materials and the terrain can reach it too. It is a separate struct from
+    // DeferredShadowInput on purpose: the cascades are a depth comparison against opaque geometry, this
+    // is a volumetric transmittance reconstructed from one texel of one map, and they share nothing but
+    // the light they attenuate.
 
     // THE BAKED SKY, as the deferred composite's ambient source — the same three images
     // MeshRenderer::FrameState hands the forward PBR materials (MaterialPBRBase::UpdateEnvironment), and
@@ -85,7 +72,6 @@ namespace Desert::Graphic
             m_GBufferEmissive = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferEmissive" ).get();
             m_SSAO            = m_MaterialExecutor->GetTexture2DProperty( "u_SSAO" ).get();
             m_GI              = m_MaterialExecutor->GetTexture2DProperty( "u_GI" ).get();
-            m_CloudShadowMap  = m_MaterialExecutor->GetTexture2DProperty( "u_CloudShadowMap" ).get();
             m_EnvIrradiance   = m_MaterialExecutor->GetTextureCubeProperty( "u_EnvIrradianceTex" ).get();
             m_EnvSpecular     = m_MaterialExecutor->GetTextureCubeProperty( "u_EnvSpecularTex" ).get();
             m_BrdfLut         = m_MaterialExecutor->GetTexture2DProperty( "u_BRDFLUTTexture" ).get();
@@ -207,24 +193,13 @@ namespace Desert::Graphic
             }
         }
 
-        // Uploads the cloud layer's shadow into CloudShadowUB + binds the map. Nothing is bound when the
-        // layer is not casting: the sampler keeps its dummy image and `Params.y` is 0, which is the one
-        // number the shader tests before it fetches — so a scene with no clouds costs one uniform upload
-        // of eighty bytes and not a texture read per pixel.
+        // Uploads the cloud layer's shadow into CloudShadowUB + binds the map, through the SAME writer
+        // the forward PBR materials and the terrain material use (Graphic::CloudShadowBind). This pass
+        // used to pack the block itself; the packing is now one function beside the block it fills, so
+        // the two render paths cannot be told different things about one map.
         void UploadCloudShadow( const CloudShadowInput& cloudShadow )
         {
-            const bool live = cloudShadow.Enabled && cloudShadow.Map != nullptr && cloudShadow.Strength > 0.0f;
-
-            CloudShadowUniforms data;
-            data.WorldToMap = live ? cloudShadow.WorldToMap : glm::mat4( 1.0f );
-            data.Params     = glm::vec4( cloudShadow.FarDepthKm, live ? 1.0f : 0.0f, cloudShadow.BorderFadeUv,
-                                         cloudShadow.Strength );
-
-            if ( auto* ub = Get<UniformBufferProperty>( "CloudShadowUB" ) )
-                ub->SetRawData( reinterpret_cast<const std::byte*>( &data ), sizeof( data ) );
-
-            if ( live && m_CloudShadowMap )
-                m_CloudShadowMap->SetImage( cloudShadow.Map );
+            CloudShadowBind( this, cloudShadow );
         }
 
         MPROPERTY( glm::vec4, LightDir,   "u_LightDir",   ( glm::vec4( 0.0f, -1.0f, 0.0f, 0.0f ) ) )
@@ -239,7 +214,6 @@ namespace Desert::Graphic
         Texture2DProperty* m_GBufferEmissive = nullptr;
         Texture2DProperty* m_SSAO            = nullptr;
         Texture2DProperty* m_GI              = nullptr;
-        Texture2DProperty* m_CloudShadowMap  = nullptr;
 
         TextureCubeProperty* m_EnvIrradiance = nullptr;
         TextureCubeProperty* m_EnvSpecular   = nullptr;

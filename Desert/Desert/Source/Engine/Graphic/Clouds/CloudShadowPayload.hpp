@@ -12,6 +12,10 @@
 
 namespace Desert::Graphic
 {
+    // Forward-declared rather than included: CloudShadowInput below only borrows the map, and this header
+    // is compiled as-is by Desert/Tests/Engine/CloudShadow, which has no renderer to link against.
+    class Image2D;
+
     /**
      * The C++ half of the cloud shadow map: the numbers that size it, the projection that aims it, and
      * the two blocks that carry it to the GPU.
@@ -202,6 +206,61 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudShadowUniforms, WorldToMap ) == 0 );
     static_assert( offsetof( CloudShadowUniforms, Params ) == 64 );
     static_assert( sizeof( CloudShadowUniforms ) == 80 );
+
+    /**
+     * WHAT A RENDERER GATHERED ABOUT THIS FRAME'S MAP, before any material has been told about it — the
+     * single payload every consumer of the cloud shadow receives.
+     *
+     * It lives HERE, beside the uniform block it packs into, and not in a material header, because there
+     * is no longer one consumer. Until Р21 the only shader in the tree that read the map was the deferred
+     * composite, so this struct sat inside MaterialDeferredLighting.hpp and the forward mesh shaders, the
+     * glass pass and the terrain stood in full sun under a deck that shaded the ground beside them. Now
+     * SceneRenderer gathers ONE of these per frame (SceneRenderer::GetCloudShadowInput) and the deferred
+     * material, the PBR materials and the terrain material are all handed the same one.
+     *
+     * `Map` null, or `Enabled` false, is the ordinary state: no cloud component, clouds off, casting off,
+     * strength zero, or a renderer whose scene has no sky at all. Consumers then leave the sampler on its
+     * dummy image and the shader is told not to read it.
+     */
+    struct CloudShadowInput
+    {
+        Image2D*  Map = nullptr;
+        glm::mat4 WorldToMap{ 1.0f };
+        float     FarDepthKm = 0.0f;
+        float     Strength   = 0.0f;
+        // A PROPERTY OF THE MAP THAT WAS BUILT, not a constant, since the quality tier scales the extent
+        // the fade's fixed world width is a fraction of. Zero is the right default for the same reason
+        // Strength's is: the fields only mean anything once Enabled is true.
+        float BorderFadeUv = 0.0f;
+        bool  Enabled      = false;
+
+        /// Whether there is a map to read at all. The ONE predicate — a consumer that spelled it out for
+        /// itself would be free to spell it differently, and the symptom of that is one render path
+        /// shading with a shadow the other has switched off.
+        bool IsLive() const
+        {
+            return Enabled && Map != nullptr && Strength > 0.0f;
+        }
+    };
+
+    /**
+     * The gathered payload as the shader's uniform block — the ONE place `CloudShadowUniforms` is ever
+     * filled, and the reason it is a function rather than four lines at each consumer.
+     *
+     * PURE: no GPU, no material, no globals, so Desert/Tests/Engine/CloudShadow drives it directly. The
+     * `live` flag is what `Params.y` means to Common/CloudShadowReceiver.glslh, and it is computed from
+     * the input rather than trusted from it, so a caller that sets `Enabled` with no map bound gets a
+     * shader that does not fetch instead of a fetch from a dummy image.
+     */
+    inline CloudShadowUniforms CloudShadowPackUniforms( const CloudShadowInput& input )
+    {
+        const bool live = input.IsLive();
+
+        CloudShadowUniforms data;
+        data.WorldToMap = live ? input.WorldToMap : glm::mat4( 1.0f );
+        data.Params     = glm::vec4( input.FarDepthKm, live ? 1.0f : 0.0f, input.BorderFadeUv, input.Strength );
+        return data;
+    }
 
     /// One world component of the map's centre, snapped to the coarse grid. The C++ mirror of
     /// CloudShadowSnapToGrid in Common/CloudShadowMap.glslh; the test compiles both and asserts they agree

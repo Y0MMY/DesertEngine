@@ -4,6 +4,7 @@
 #include <Engine/Assets/MaterialAsset.hpp>
 
 #include <Engine/Core/Camera.hpp>
+#include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/DirectionLight.hpp>
@@ -35,6 +36,12 @@ namespace Desert::Graphic
         // the (precomputed) split-sum BRDF LUT.
         static void UpdateEnvironment( MaterialInstance* instance, ImageCube* irradiance, ImageCube* prefiltered,
                                        Image2D* brdfLut );
+        // Binds the cloud layer's shadow — the sun's SECOND occluder, beside the cascades above. The
+        // payload is the one SceneRenderer gathered for the whole frame, and it is written through the
+        // one shared writer (Graphic::CloudShadowBind), so a forward-shaded surface and a deferred-shaded
+        // one cannot be told different things about the same map. Until Р21 this call did not exist and
+        // the deferred composite was the only consumer in the engine.
+        static void UpdateCloudShadow( MaterialInstance* instance, const CloudShadowInput& cloudShadow );
 
     protected:
         MaterialPBRBase( std::string&& debugName, std::string&& shaderName );

@@ -10,6 +10,7 @@ namespace Desert::Graphic
         UpdateCamera( info.instance, info.MainCamera );
         UpdateLights( info.instance, info.PointLights, info.SpotLights, info.DirectionLights );
         UpdateSkinnedUB( info.instance, info.SkinnedUB );
+        UpdateCloudShadow( info.instance, info.CloudShadow );
 
         // Single-object material buffer (the skinned path draws one mesh at a time).
         const PBRGpuMaterial gpuMaterial = BuildPBRGpuMaterial( m_Data );

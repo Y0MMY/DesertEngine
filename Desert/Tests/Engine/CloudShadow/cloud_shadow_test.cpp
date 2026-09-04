@@ -37,6 +37,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <vector>
 
 using namespace Desert::Tests::CloudShadowRef;
@@ -877,6 +881,242 @@ TEST( CloudShadowMap, ClipAndUvAreOneMapping )
         EXPECT_NEAR( uvOut.x, uvIn, 1e-6f );
         EXPECT_EQ( static_cast<int>( uvOut.x * static_cast<float>( resolution ) ), i );
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// PAIR 5: THE TWO RENDER PATHS. Every surface the sun lights reads ONE map through ONE text.
+//
+// The defect this was written for, and it is the same shape as the four above. `CloudShadowFactor` was
+// declared inside Programs/Deferred/DeferredLighting.shader and nowhere else in the tree, so the ONLY
+// surfaces in the engine that received a cloud shadow were the ones a deferred composite happened to
+// shade. Everything drawn forward — every scene on RenderingPath 0, and in a deferred scene the skinned
+// meshes, the glass and the terrain, all of which are drawn forward OVER the composite — stood in full
+// sun under a deck that was visibly shading the ground beside them. Measured on the ground of
+// Clouds_Showcase from 0,200,0 with clouds on: 64.93/255 deferred against 109.11/255 forward, a factor
+// of 1.68, and the whole of what remained between the paths after the ambient (Р16) and the direct-light
+// BRDF (Р20) were made one text each.
+//
+// A numeric comparison here would be theatre — it would call one C++ function twice and present the
+// agreement as evidence. What can actually regress is a shader growing its own copy of the wrapper, or a
+// material packing the uniform block itself, and both are facts about SOURCES. So that is what these
+// read.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    std::filesystem::path RepositoryRoot()
+    {
+        // The test binary lives in build/Bin/Tests/<config>; walk up to the repository root.
+        std::filesystem::path root = std::filesystem::current_path();
+        for ( int up = 0; up < 8 && !std::filesystem::exists( root / "Editor" / "Resources" / "Shaders" ); ++up )
+            root = root.parent_path();
+        return root;
+    }
+
+    std::string ReadFile( const std::filesystem::path& file )
+    {
+        std::ifstream      in( file, std::ios::binary );
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        return buffer.str();
+    }
+
+    // The same text with its `//` comments removed, so the notes that QUOTE a deleted form (this codebase
+    // records its defects at the site) are not read as code.
+    std::string StripLineComments( const std::string& source )
+    {
+        std::istringstream in( source );
+        std::ostringstream out;
+        std::string        line;
+        while ( std::getline( in, line ) )
+        {
+            const std::size_t comment = line.find( "//" );
+            if ( comment != std::string::npos )
+                line.erase( comment );
+            out << line << '\n';
+        }
+        return out.str();
+    }
+} // namespace
+
+TEST( CloudShadowReceiver, EverySunLitShaderReachesTheOneSharedFactor )
+{
+    const std::filesystem::path root = RepositoryRoot();
+    ASSERT_TRUE( std::filesystem::exists( root / "Editor" / "Resources" / "Shaders" ) )
+         << "could not find Editor/Resources/Shaders above " << std::filesystem::current_path();
+
+    const std::filesystem::path shaders = root / "Editor" / "Resources" / "Shaders";
+
+    // Every shader in the tree that shades a surface with the DIRECTIONAL light, and therefore every
+    // shader a cloud must be able to stand in front of. The G-buffer pass is here for a different reason
+    // and is asserted separately below.
+    const char* kConsumers[] = {
+         "Programs/Deferred/DeferredLighting.shader",   // the deferred composite
+         "Programs/PBR/StaticMeshPBR.shader",           // the forward sun
+         "Programs/PBR/StaticMeshPBR_Instanced.shader", // foliage / instanced statics
+         "Programs/PBR/SkinnedMeshPBR.shader",          // drawn FORWARD even in Deferred
+         "Programs/PBR/StaticMeshGlass.shader",         // drawn FORWARD over the composite
+         "Programs/Terrain/Terrain.shader",             // drawn by neither mesh path
+         // The blades, because the LAWN is here: Terrain.shader and Grass.shader are authored to read as
+         // one material, and shading one and not the other turns a field into bright fuzz over dark soil.
+         "Programs/Grass/Grass.shader",
+    };
+
+    for ( const char* relative : kConsumers )
+    {
+        const std::filesystem::path file = shaders / relative;
+        ASSERT_TRUE( std::filesystem::exists( file ) ) << file.string();
+
+        const std::string source = ReadFile( file );
+
+        EXPECT_NE( source.find( "Common/CloudShadowReceiver.glslh" ), std::string::npos )
+             << relative << " does not compile the shared cloud-shadow receiver";
+        EXPECT_NE( StripLineComments( source ).find( "CloudShadowFactor(" ), std::string::npos )
+             << relative << " does not attenuate its sun by CloudShadowFactor(worldPos)";
+        // The receiver names three symbols the includer owes it. A shader that includes the text without
+        // declaring them does not link, but it fails at cook time on one machine and this fails here.
+        for ( const char* symbol : { "u_CloudShadowMap", "u_CloudShadowWorldToMap", "u_CloudShadowParams" } )
+            EXPECT_NE( source.find( symbol ), std::string::npos )
+                 << relative << " includes the receiver without declaring " << symbol;
+    }
+}
+
+TEST( CloudShadowReceiver, NoShaderReconstructsTheShadowForItself )
+{
+    // The construction stated as the thing that must stay true: the reconstruction calls
+    // (CloudShadowTransmittance / CloudShadowBorderFade / CloudShadowDepthKm / CloudShadowClipToUv)
+    // appear in exactly TWO files of code in the whole shader tree — the receiver that consumes the map
+    // and the producer that fills it — and nowhere else. One shader assembling them itself is how this
+    // subsystem came to have a single consumer in the first place.
+    const std::filesystem::path shaders = RepositoryRoot() / "Editor" / "Resources" / "Shaders";
+    ASSERT_TRUE( std::filesystem::exists( shaders ) );
+
+    int receivers = 0;
+    for ( const auto& entry : std::filesystem::recursive_directory_iterator( shaders ) )
+    {
+        if ( !entry.is_regular_file() )
+            continue;
+        const std::string ext = entry.path().extension().string();
+        if ( ext != ".shader" && ext != ".glslh" )
+            continue;
+
+        const std::string name = entry.path().filename().string();
+        // The receiver IS the reconstruction's reader; CloudShadowMap.glslh defines it; the producer
+        // marches it. Everyone else must go through the receiver.
+        if ( name == "CloudShadowReceiver.glslh" )
+        {
+            receivers++;
+            continue;
+        }
+        if ( name == "CloudShadowMap.glslh" || name == "CloudShadowMap.shader" )
+            continue;
+
+        const std::string code = StripLineComments( ReadFile( entry.path() ) );
+        EXPECT_EQ( code.find( "CloudShadowTransmittance(" ), std::string::npos )
+             << name << " reconstructs the cloud shadow itself instead of calling CloudShadowFactor";
+        EXPECT_EQ( code.find( "CloudShadowBorderFade(" ), std::string::npos )
+             << name << " applies the border fade itself instead of calling CloudShadowFactor";
+    }
+
+    EXPECT_EQ( receivers, 1 ) << "Common/CloudShadowReceiver.glslh was not found under the shader root";
+}
+
+TEST( CloudShadowReceiver, NoMaterialPacksTheUniformBlockForItself )
+{
+    // The C++ half of the same relation. `CloudShadowUniforms` is filled in exactly ONE place —
+    // CloudShadowPackUniforms, beside the struct — and reaches a descriptor set through exactly one
+    // writer, CloudShadowBind. A material that assembles the block itself is free to decide differently
+    // what `Params.y` means, and the symptom is one render path shading with a shadow the other has
+    // switched off.
+    const std::filesystem::path engine = RepositoryRoot() / "Desert" / "Desert" / "Source";
+    ASSERT_TRUE( std::filesystem::exists( engine ) ) << engine.string();
+
+    int declarations = 0;
+    int writers      = 0;
+    for ( const auto& entry : std::filesystem::recursive_directory_iterator( engine ) )
+    {
+        if ( !entry.is_regular_file() )
+            continue;
+        const std::string ext = entry.path().extension().string();
+        if ( ext != ".cpp" && ext != ".hpp" )
+            continue;
+
+        const std::string name = entry.path().filename().string();
+        // The struct and the function that fills it.
+        if ( name == "CloudShadowPayload.hpp" )
+        {
+            declarations++;
+            continue;
+        }
+        // The one place a filled block reaches a descriptor set.
+        if ( name == "CloudShadowBinding.hpp" )
+        {
+            writers++;
+            continue;
+        }
+
+        const std::string code = StripLineComments( ReadFile( entry.path() ) );
+        EXPECT_EQ( code.find( "CloudShadowUniforms" ), std::string::npos )
+             << name << " builds the cloud-shadow uniform block itself; call CloudShadowBind instead";
+    }
+
+    EXPECT_EQ( declarations, 1 ) << "Engine/Graphic/Clouds/CloudShadowPayload.hpp was not found";
+    EXPECT_EQ( writers, 1 ) << "Engine/Graphic/Clouds/CloudShadowBinding.hpp was not found";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The packing itself: what the shader is told, from what the renderer gathered.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CloudShadowReceiver, TheShaderIsToldToFetchExactlyWhenThereIsSomethingToFetch )
+{
+    // `Params.y` is the one number Common/CloudShadowReceiver.glslh tests before it touches the sampler,
+    // so it must be 1 in exactly the states where a map is really bound. FOUR ways to be off, and each
+    // of them was a real state in this engine: no cloud component at all, the layer switched off, the
+    // layer not casting, and the artist's strength at zero.
+    Desert::Graphic::Image2D* const kMap =
+         reinterpret_cast<Desert::Graphic::Image2D*>( static_cast<std::uintptr_t>( 0x1000 ) );
+
+    Desert::Graphic::CloudShadowInput live;
+    live.Map          = kMap;
+    live.WorldToMap   = glm::mat4( 2.0f );
+    live.FarDepthKm   = 120.0f;
+    live.Strength     = 0.75f;
+    live.BorderFadeUv = 0.02f;
+    live.Enabled      = true;
+
+    EXPECT_TRUE( live.IsLive() );
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudShadowPackUniforms( live ).Params.y, 1.0f );
+
+    // Every field the shader reads is the one it was handed — no re-derivation from a constant that no
+    // longer describes this frame's map.
+    const Desert::Graphic::CloudShadowUniforms packed = Desert::Graphic::CloudShadowPackUniforms( live );
+    EXPECT_FLOAT_EQ( packed.Params.x, live.FarDepthKm );
+    EXPECT_FLOAT_EQ( packed.Params.z, live.BorderFadeUv );
+    EXPECT_FLOAT_EQ( packed.Params.w, live.Strength );
+    EXPECT_EQ( packed.WorldToMap, live.WorldToMap );
+
+    Desert::Graphic::CloudShadowInput off = live;
+    off.Enabled                           = false;
+    EXPECT_FALSE( off.IsLive() );
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudShadowPackUniforms( off ).Params.y, 0.0f );
+
+    off     = live;
+    off.Map = nullptr;
+    EXPECT_FALSE( off.IsLive() );
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudShadowPackUniforms( off ).Params.y, 0.0f );
+
+    off          = live;
+    off.Strength = 0.0f;
+    EXPECT_FALSE( off.IsLive() );
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudShadowPackUniforms( off ).Params.y, 0.0f );
+
+    // A default-constructed payload — what a scene with no sky at all produces — is off, and its matrix
+    // is the identity rather than uninitialised memory.
+    const Desert::Graphic::CloudShadowInput none;
+    EXPECT_FALSE( none.IsLive() );
+    EXPECT_FLOAT_EQ( Desert::Graphic::CloudShadowPackUniforms( none ).Params.y, 0.0f );
+    EXPECT_EQ( Desert::Graphic::CloudShadowPackUniforms( none ).WorldToMap, glm::mat4( 1.0f ) );
 }
 
 int main( int argc, char** argv )

@@ -23,6 +23,12 @@ namespace Desert::Graphic
             ShaderProtocols::PointLight     PointLights;
             ShaderProtocols::SpotLight      SpotLights;
             ShaderProtocols::SkinnedUB      SkinnedUB;
+
+            // The cloud layer's shadow on the sun, as SceneRenderer gathered it for this frame. A skinned
+            // mesh has no G-buffer variant, so it is drawn FORWARD over the deferred composite in every
+            // deferred scene — which is exactly why it received no cloud shadow at all while the only
+            // reader of the map was the composite itself.
+            CloudShadowInput CloudShadow;
         };
 
         SkinnedMaterialPBR() : MaterialPBRBase( "SkinnedMaterialPBR", "SkinnedMeshPBR" )

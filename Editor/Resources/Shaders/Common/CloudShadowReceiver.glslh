@@ -1,0 +1,86 @@
+// THE CLOUD LAYER'S SHADOW AS A RECEIVER SEES IT — one text, compiled by every shader that shades a
+// surface with the sun.
+//
+// Why it is a header and not five copies. The engine shades the same materials in the same scene through
+// two paths a scene picks with a single enum field, and the deferred path additionally draws several
+// classes of geometry FORWARD over its own composite (skinned meshes, glass, custom-shader meshes) plus
+// a terrain that has never gone through either mesh shader. While this wrapper lived inside
+// Programs/Deferred/DeferredLighting.shader it was the ONLY place in the tree that read the map: every
+// forward-shaded scene, every skinned mesh, every piece of glass and every terrain stood in full sun
+// under a cloud deck that was shading the ground beside it. Measured on the ground of Clouds_Showcase,
+// clouds on: 64.93/255 through the deferred path against 109.11/255 through the forward one — a factor
+// of 1.68, and the whole of what remained between the two paths after Р16 and Р20 shared the ambient and
+// the direct-light BRDF. The cure is the one those tasks used: not a test that the copies still agree,
+// but a single copy that cannot disagree.
+//
+// It is split from Common/CloudShadowMap.glslh rather than living inside it, and the split is forced
+// rather than stylistic: that file is included by the PRODUCER too, and the producer declares
+// `u_CloudShadowMap` as a writeonly image2D it stores into. A receiver function naming the same symbol
+// as a sampler2D cannot be in the file the producer compiles.
+//
+// WHAT THE INCLUDER OWES IT — the same contract Mesh/AmbientIBL.glslh has with its three environment
+// bindings. This file declares no binding of its own, because the slot numbers differ between the
+// consumers (the deferred composite is a fullscreen material with its own layout; the mesh shaders share
+// one with the G-buffer pass; the terrain has a small layout of its own). The includer must declare, at
+// whatever slots are free in ITS layout:
+//
+//     Uniform(a) sampler2D u_CloudShadowMap;
+//     Uniform(b) CloudShadowUB {
+//         mat4 u_CloudShadowWorldToMap;
+//         vec4 u_CloudShadowParams;
+//     };
+//
+// The NAMES are what has to match, and they do because every material binds by name — see
+// Graphic::CloudShadowBind, which is the single C++ writer of both.
+
+#ifndef CLOUD_SHADOW_RECEIVER_GLSLH
+#define CLOUD_SHADOW_RECEIVER_GLSLH
+
+// The map's RECONSTRUCTION half — the same text its producer compiles, so the encode and the decode
+// cannot drift apart. Its march stays inert here because a receiver defines no
+// CLOUD_SHADOW_SAMPLE_EXTINCTION: there is no cloud field, no noise volume and no profile table anywhere
+// near a lighting pass.
+#include <Common/CloudShadowMap.glslh>
+
+// 1 = full sun, 0 = fully shaded by cloud. A MULTIPLIER on the direct sun term, never a replacement for
+// the cascades: they occlude the sun with opaque geometry, this occludes it with a volume, and a surface
+// can be in either, both or neither.
+//
+// ONE FETCH, NO CASCADE, NO DEPTH COMPARE. The map's texel is not an occluder distance — it is
+// (frontDepthKm, meanExtinctionPerKm, maxOpticalDepth), and Common/CloudShadowMap.glslh turns that triple
+// into a transmittance at whatever depth this receiver sits at. That is what makes it correct for a
+// mountain top INSIDE the layer as well as for the ground under it.
+//
+// ONLY THE DIRECTIONAL TERM. The ambient is the whole sky dome, which a cloud deck occludes with a
+// different geometry (a hemisphere, not a direction) and which UE answers with a separate Sky AO volume.
+// Folding a directional occlusion into an omnidirectional term would darken the shaded side of every
+// object under a cloud by an amount nothing in the world justifies.
+//
+// Costs one uniform compare in every scene that has no clouds — the sampler is then on its dummy image
+// and is never touched.
+float CloudShadowFactor(vec3 worldPos)
+{
+	if (u_CloudShadowParams.y < 0.5)
+		return 1.0;
+
+	// The perspective divide is written out even though the map's projection is ORTHOGRAPHIC and its w is
+	// identically 1: the day a consumer is handed a different projection this line is already correct,
+	// and the divide costs nothing against the texture fetch below it.
+	vec4 mapClip = u_CloudShadowWorldToMap * vec4(worldPos, 1.0);
+	mapClip     /= max(mapClip.w, 1e-6);
+	vec2 uv      = CloudShadowClipToUv(mapClip.xy);
+
+	// Outside the covered square there is no answer, and inventing one is worse than saying so: the
+	// shadow is faded out over the last few texels so the map's boundary is a gradient rather than a
+	// straight line of light across the terrain. See CLOUD_SHADOWMAP_BORDER_FADE_KM.
+	float border = CloudShadowBorderFade(uv, u_CloudShadowParams.z);
+	if (border <= 0.0)
+		return 1.0;
+
+	float depthKm       = CloudShadowDepthKm(mapClip.z, u_CloudShadowParams.x);
+	float transmittance = CloudShadowTransmittance(texture(u_CloudShadowMap, uv).rgb, depthKm,
+	                                               u_CloudShadowParams.w);
+	return mix(1.0, transmittance, border);
+}
+
+#endif // CLOUD_SHADOW_RECEIVER_GLSLH

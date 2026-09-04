@@ -8,6 +8,7 @@
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/AtmosphereEnv.hpp>
+#include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
 #include <Engine/Graphic/SunLightFx.hpp>
 #include <Engine/Graphic/WindEnv.hpp>
@@ -267,6 +268,18 @@ namespace Desert::Graphic
         {
             return m_SpotLight;
         }
+
+        /// THE frame's cloud-shadow payload — the map, its projection, and the numbers a receiver needs
+        /// to read it. Gathered HERE, once, and handed to every consumer: the deferred composite, the
+        /// forward PBR materials (through MeshRenderer::FrameState), the skinned material and the terrain
+        /// material. While the composite was the only reader, this gather sat inline in the deferred
+        /// branch and the answer to "does this surface receive a cloud shadow" was "only if a deferred
+        /// pass drew it".
+        ///
+        /// Valid after ExecuteCloudShadowMap() has run for this frame — which is before the render graph
+        /// records, so every pass in the frame may ask. Returns the default (disabled, no map) whenever
+        /// the layer is absent, off, not casting or at zero strength.
+        CloudShadowInput GetCloudShadowInput() const;
 
     private:
         // Which view this renderer is; see the constructor. Held as a lease so the slot goes back when

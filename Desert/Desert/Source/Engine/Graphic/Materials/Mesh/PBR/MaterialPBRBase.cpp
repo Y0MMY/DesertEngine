@@ -2,6 +2,7 @@
 
 #include <Engine/Assets/Mapper.hpp>
 
+#include <Engine/Graphic/Clouds/CloudShadowBinding.hpp>
 #include <Engine/Graphic/ShaderProtocols/Camera.hpp>
 #include <Engine/Graphic/ShaderProtocols/Metadata.hpp>
 #include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
@@ -128,6 +129,13 @@ namespace Desert::Graphic
         if ( brdfLut )
             if ( auto* tex = parent->Get<Texture2DProperty>( "u_BRDFLUTTexture" ) )
                 tex->SetImage( brdfLut );
+    }
+
+    void MaterialPBRBase::UpdateCloudShadow( MaterialInstance* instance, const CloudShadowInput& cloudShadow )
+    {
+        if ( !instance )
+            return;
+        CloudShadowBind( instance->GetParentMaterial(), cloudShadow );
     }
 
     void MaterialPBRBase::UpdateLightsMetadata( MaterialInstance* instance, const ShaderProtocols::PointLight& point,

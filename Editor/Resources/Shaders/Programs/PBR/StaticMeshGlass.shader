@@ -114,6 +114,18 @@ Shader "StaticMeshGlass"
         Uniform(18) sampler2D  u_OpacityTexture;
         Uniform(19) sampler2D  u_SceneColor; // copy of the composited opaque scene (for refraction)
 
+        // THE CLOUD LAYER'S SHADOW ON THE WORLD — at the same slots as the four other mesh shaders. Glass
+        // is drawn FORWARD over the deferred composite, so like the skinned meshes it never saw the map.
+        // The only direct sun term this shader has is the specular hotspot below, and that is what the
+        // factor multiplies: a cloud between the sun and the glass takes the highlight away with it.
+        Uniform(20) sampler2D u_CloudShadowMap;
+        Uniform(21) CloudShadowUB {
+        	mat4 u_CloudShadowWorldToMap;
+        	vec4 u_CloudShadowParams;
+        };
+
+        #include <Common/CloudShadowReceiver.glslh>
+
         void main()
         {
         	GpuMaterial mat = materials[pc.MaterialIndex];
@@ -136,7 +148,8 @@ Shader "StaticMeshGlass"
         	// Sun specular highlight (glass is smooth -> a tight hotspot).
         	vec3  L        = normalize(-directionLights.directionLights.Direction.xyz);
         	vec3  H        = normalize(V + L);
-        	float spec     = pow(max(dot(N, H), 0.0), 128.0) * directionLights.directionLights.ColorIntensity.a;
+        	float spec     = pow(max(dot(N, H), 0.0), 128.0) * directionLights.directionLights.ColorIntensity.a
+        	               * CloudShadowFactor(inVertex.WorldPosition);
 
         	// --- keep every forward binding statically referenced so reflection retains the identical layout ---
         	float keep = 0.0;
