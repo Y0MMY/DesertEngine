@@ -1456,8 +1456,8 @@ TEST( CloudSkyOcclusion, TheSkyLightHasNoFormToGiveAtACloudsOwnAlbedoWhichIsWhyT
 
     const SkyResponses r = MeasureSkyResponses( lobe, g, kSkyGrid, kSkyPaths );
 
-    const double allMean = MeanOf( r.AllOrders );
-    const double oneMean = MeanOf( r.SingleOrder );
+    const double allMean  = MeanOf( r.AllOrders );
+    const double oneMean  = MeanOf( r.SingleOrder );
     const double shipMean = MeanOf( r.Shipped );
 
     const double allContrast  = RelativeContrast( r.AllOrders );
@@ -1476,8 +1476,7 @@ TEST( CloudSkyOcclusion, TheSkyLightHasNoFormToGiveAtACloudsOwnAlbedoWhichIsWhyT
     // THE FINDING. At the component's own albedo the body is within a few per cent of being lit uniformly
     // by the sky, everywhere, including its core: it is close to radiative equilibrium with its surround.
     // Measured 0.017 when this was written, against 0.79 for the one-order answer.
-    EXPECT_LT( allContrast, 0.05 ) << "the all-orders sky response over the body now varies by "
-                                   << allContrast
+    EXPECT_LT( allContrast, 0.05 ) << "the all-orders sky response over the body now varies by " << allContrast
                                    << "; it was 0.017. If this has genuinely risen, the sky term can carry "
                                       "form after all and Р19's refusal wants revisiting";
 
@@ -1503,7 +1502,7 @@ TEST( CloudSkyOcclusion, TheSkyLightHasNoFormToGiveAtACloudsOwnAlbedoWhichIsWhyT
     ReferenceLobe absorbing = lobe;
     absorbing.Albedo        = 0.5;
 
-    const SkyResponses dark        = MeasureSkyResponses( absorbing, g, 5, kSkyPaths );
+    const SkyResponses dark         = MeasureSkyResponses( absorbing, g, 5, kSkyPaths );
     const double       darkContrast = RelativeContrast( dark.AllOrders );
 
     std::printf( "[CloudSkyOcclusion] the same body at albedo 0.50: rel-contrast %.4f\n", darkContrast );
@@ -1545,18 +1544,18 @@ TEST( CloudSkyOcclusion, TheSkyLightGAINSFormAtAPhysicalExtinctionAndTheTermGoes
     const SkyResponses atShipped  = MeasureSkyResponses( shippedMedium, 0.8, 5, kSkyPaths );
     const SkyResponses atPhysical = MeasureSkyResponses( physicalMedium, 0.8, 5, kSkyPaths );
 
-    const double truthAt8   = RelativeContrast( atShipped.AllOrders );
-    const double truthAt45  = RelativeContrast( atPhysical.AllOrders );
-    const double termAt8    = RelativeContrast( atShipped.Shipped );
-    const double termAt45   = RelativeContrast( atPhysical.Shipped );
+    const double truthAt8  = RelativeContrast( atShipped.AllOrders );
+    const double truthAt45 = RelativeContrast( atPhysical.AllOrders );
+    const double termAt8   = RelativeContrast( atShipped.Shipped );
+    const double termAt45  = RelativeContrast( atPhysical.Shipped );
 
     std::printf( "[CloudSkyOcclusion] %-8s %14s %14s\n", "sigma", "truth contr", "term contr" );
     std::printf( "[CloudSkyOcclusion] %-8.0f %14.4f %14.4f\n", shippedMedium.SigmaPerKm, truthAt8, termAt8 );
     std::printf( "[CloudSkyOcclusion] %-8.0f %14.4f %14.4f\n", physicalMedium.SigmaPerKm, truthAt45, termAt45 );
 
     EXPECT_GT( truthAt45, 10.0 * truthAt8 )
-         << "the sky light no longer gains form as the medium thickens (" << truthAt45 << " against "
-         << truthAt8 << "), which is the mechanism Р19's refusal rests on";
+         << "the sky light no longer gains form as the medium thickens (" << truthAt45 << " against " << truthAt8
+         << "), which is the mechanism Р19's refusal rests on";
 
     EXPECT_LT( termAt45, termAt8 ) << "the shipped term is supposed to FLATTEN as the medium thickens -- it "
                                       "runs out of range at its own floor -- and it no longer does";
