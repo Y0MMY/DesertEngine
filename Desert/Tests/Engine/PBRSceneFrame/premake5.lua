@@ -20,6 +20,9 @@ project(test_name)
     files {
         test_files,
         "%{wks.location}/Desert/Desert/Source/Engine/Core/ShaderCompiler/DShader/DShaderParser.cpp",
+        -- CollectShaderIncludes: the cascade-text relation derives its consumer set by resolving
+        -- each shader's include closure with the engine's own resolver rather than listing them.
+        "%{wks.location}/Desert/Desert/Source/Engine/Core/ShaderCompiler/ShaderCacheKey.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanShaderReflection.cpp",
     }
 

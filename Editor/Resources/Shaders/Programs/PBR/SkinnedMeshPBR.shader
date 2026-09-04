@@ -137,7 +137,9 @@ Shader "SkinnedMeshPBR"
         	DirectionLight 		directionLights;
         } directionLights;
 
-        // Cascaded directional shadow maps (R32F light-space depth, one per cascade) + per-cascade light VP.
+        // The cascaded shadow's five bindings, at slots free in THIS layout. The text that reads them is
+        // one file for every shader in the engine that shades a surface with the sun —
+        // Mesh/CascadedShadow.glslh, included right below because it names what is declared here.
         Uniform(5) sampler2D u_ShadowMap0;
         Uniform(13) sampler2D u_ShadowMap1;
         Uniform(14) sampler2D u_ShadowMap2;
@@ -145,96 +147,11 @@ Shader "SkinnedMeshPBR"
         Uniform(7) ShadowUB {
         	mat4 u_LightViewProj[4];
         	vec4 u_ShadowParams;      // x = bias, y = enabled (>0.5), z = debug mode (0/1/2), w = cascade count
-        	vec4 u_DebugParams;       // x = show normals (>0.5); y,z,w reserved
+        	vec4 u_DebugParams;       // x = show normals (>0.5), y = light debug (>0.5); z,w reserved
         	vec4 u_CascadeTexelWorld; // per-cascade world size of one shadow-map texel (x..w = cascade 0..3)
         };
 
-        // Runtime cascade index can't index a sampler array here, so branch over the 4 named maps.
-        float sampleShadowMap(int c, vec2 uv)
-        {
-        	if (c == 0) return texture(u_ShadowMap0, uv).r;
-        	if (c == 1) return texture(u_ShadowMap1, uv).r;
-        	if (c == 2) return texture(u_ShadowMap2, uv).r;
-        	return texture(u_ShadowMap3, uv).r;
-        }
-        ivec2 shadowMapSize(int c)
-        {
-        	if (c == 0) return textureSize(u_ShadowMap0, 0);
-        	if (c == 1) return textureSize(u_ShadowMap1, 0);
-        	if (c == 2) return textureSize(u_ShadowMap2, 0);
-        	return textureSize(u_ShadowMap3, 0);
-        }
-        vec3 cascadeDebugColor(int c)
-        {
-        	if (c == 0) return vec3(1.0, 0.35, 0.35);
-        	if (c == 1) return vec3(0.35, 1.0, 0.35);
-        	if (c == 2) return vec3(0.35, 0.55, 1.0);
-        	if (c == 3) return vec3(1.0, 0.95, 0.35);
-        	return vec3(0.4); // outside all cascades
-        }
-
-        // First cascade (tightest→loosest) whose light-space projection contains worldPos. -1 = outside all.
-        int chooseCascade(vec3 worldPos)
-        {
-        	for (int c = 0; c < int(u_ShadowParams.w); ++c)
-        	{
-        		vec4 lc  = u_LightViewProj[c] * vec4(worldPos, 1.0);
-        		vec3 ndc = lc.xyz / lc.w;
-        		vec2 uv  = ndc.xy * 0.5 + 0.5;
-        		if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0 && ndc.z <= 1.0)
-        			return c;
-        	}
-        	return -1;
-        }
-
-        // N = world-space surface normal, L = world-space direction TOWARD the sun (both normalized).
-        // Picks the cascade covering worldPos and PCF-samples it. `cascadeOut` returns the chosen cascade (-1
-        // if outside all / disabled) for the debug visualization.
-        float ShadowFactor(vec3 worldPos, vec3 N, vec3 L, out int cascadeOut)
-        {
-        	cascadeOut = -1;
-        	if (u_ShadowParams.y < 0.5)
-        		return 1.0;
-
-        	int c = chooseCascade(worldPos);
-        	cascadeOut = c;
-        	if (c < 0)
-        		return 1.0;
-
-        	float NdotL = max(dot(N, L), 0.0);
-
-        	// Normal-offset bias scaled by the CHOSEN cascade's world-per-texel: a few texels along the normal,
-        	// widening at grazing angles. Cascade-correct (tight near cascades get a small offset, far ones large)
-        	// instead of the old fixed world-unit constants.
-        	float texelWorld   = u_CascadeTexelWorld[c];
-        	float normalOffset = (1.5 + 2.5 * (1.0 - NdotL)) * texelWorld;
-        	vec3  samplePos    = worldPos + N * normalOffset;
-
-        	vec4 lightClip = u_LightViewProj[c] * vec4(samplePos, 1.0);
-        	vec3 ndc = lightClip.xyz / lightClip.w;
-        	vec2 uv = ndc.xy * 0.5 + 0.5;
-        	// Shadow maps are rendered through the engine's negative-height (Y-flipped) viewport -> flip Y.
-        	uv.y = 1.0 - uv.y;
-
-        	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0)
-        		return 1.0;
-
-        	float currentDepth = ndc.z;
-        	float bias = clamp(u_ShadowParams.x * (1.0 - NdotL) * 4.0, u_ShadowParams.x, 0.02);
-
-        	// 3x3 PCF for soft edges.
-        	float shadow = 0.0;
-        	vec2 texel = 1.0 / vec2(shadowMapSize(c));
-        	for (int y = -1; y <= 1; ++y)
-        	{
-        		for (int x = -1; x <= 1; ++x)
-        		{
-        			float closest = sampleShadowMap(c, uv + vec2(x, y) * texel);
-        			shadow += (currentDepth - bias > closest) ? 0.0 : 1.0;
-        		}
-        	}
-        	return shadow / 9.0;
-        }
+        #include <Mesh/CascadedShadow.glslh>
 
         // Environment maps
         Uniform(8) samplerCube u_EnvSpecularTex;

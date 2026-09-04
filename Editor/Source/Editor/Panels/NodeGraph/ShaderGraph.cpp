@@ -554,10 +554,11 @@ namespace Desert::Editor::ShaderGraph
         // and that base sits above every engine binding a generated shader can declare. It used to be
         // 2, which was safe only while the engine blocks a graph could receive were DirectionLightsUB
         // (14) and TimeUB (15) — thirteen textures away. A lit surface now also declares
-        // LightsMetadata (4), the point and spot storage buffers (6, 16), the IBL trio (8, 9, 10) and
-        // the cloud shadow pair (20, 21), so the third texture in a graph would have landed on top of
-        // LightsMetadata. Nothing would have said so: two GLSL declarations at one binding is a
-        // descriptor the engine writes twice and a shader that reads whichever it got.
+        // LightsMetadata (4), the point and spot storage buffers (6, 16), the IBL trio (8, 9, 10), the
+        // cloud shadow pair (20, 21) and the five cascade bindings (5, 7, 13, 22, 23), so the third
+        // texture in a graph would have landed on top of LightsMetadata. Nothing would have said so:
+        // two GLSL declarations at one binding is a descriptor the engine writes twice and a shader
+        // that reads whichever it got.
         if ( !textures.empty() || !colorParams.empty() || !floatParams.empty() )
         {
             out << "    Properties";

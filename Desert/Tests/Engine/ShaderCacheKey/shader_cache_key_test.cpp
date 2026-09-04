@@ -827,9 +827,12 @@ TEST_F( ShaderRootFixture, ALitGraphSurfaceCompilesEverySharedShadingTextTheMesh
 
     // Vacuous success is the failure mode of every membership test: a closure that came back empty, or a
     // Mesh/ that stopped being where the shared texts live, would pass the loop above without checking
-    // anything. Six is what the directory holds today, and the assertion is a floor rather than an
-    // equality so that adding a shared text is not, by itself, a broken test.
-    EXPECT_GE( shared, 6 ) << "the mesh shader's closure no longer names the shared shading texts";
+    // anything. Seven is what StaticMeshPBR's closure names today — six after Д16, plus
+    // Mesh/CascadedShadow.glslh, which is exactly the automatic membership this test was written to give:
+    // Д20 extracted ShadowFactor into Mesh/ and the graph was REQUIRED to compile it without a line of
+    // this test changing. The assertion is a floor rather than an equality so that adding the next shared
+    // text is not, by itself, a broken test.
+    EXPECT_GE( shared, 7 ) << "the mesh shader's closure no longer names the shared shading texts";
 }
 
 TEST_F( ShaderRootFixture, TheLitGraphSurfaceIsHANDEDTheSceneITSHADESWITH )
@@ -855,6 +858,17 @@ TEST_F( ShaderRootFixture, TheLitGraphSurfaceIsHANDEDTheSceneITSHADESWITH )
     EXPECT_TRUE( HasBinding( bindings, 6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );          // PointLightsUB
     EXPECT_TRUE( HasBinding( bindings, 16, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // SpotLightsUB
     EXPECT_TRUE( HasBinding( bindings, 14, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );         // DirectionLightsUB
+
+    // The five cascade bindings Д20 added. Two of them are NOT at the mesh shaders' numbers and cannot be:
+    // 14 and 15 hold DirectionLightsUB and TimeUB in a shader-graph layout, which no mesh shader declares.
+    // The NAMES are what the engine binds by, and Tests/Engine/PBRSceneFrame asserts those against the C++
+    // writer for every consumer of the shared text; what is pinned here is that the numbers this layout
+    // chose are the ones it still has.
+    EXPECT_TRUE( HasBinding( bindings, 7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );          // ShadowUB
+    EXPECT_TRUE( HasBinding( bindings, 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );  // u_ShadowMap0
+    EXPECT_TRUE( HasBinding( bindings, 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_ShadowMap1
+    EXPECT_TRUE( HasBinding( bindings, 22, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_ShadowMap2
+    EXPECT_TRUE( HasBinding( bindings, 23, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_ShadowMap3
 
     // The graph's own textures start at kGraphTextureBinding (24) and count upward, so none of the slots
     // above can be taken by a Properties block however many textures an artist adds. Distinctness is the

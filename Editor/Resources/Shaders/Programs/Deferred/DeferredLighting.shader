@@ -138,102 +138,21 @@ Shader "DeferredLighting"
         	return indirect / float(SAMPLES);
         }
 
-        // Cascaded directional shadow maps (identical layout to PBR.glsl.frag so the same CSM data drives both).
+        // The cascaded shadow's five bindings, at slots free in THIS layout. The text that reads them is
+        // one file for every shader in the engine that shades a surface with the sun —
+        // Mesh/CascadedShadow.glslh, included right below because it names what is declared here.
         Uniform(5) sampler2D u_ShadowMap0;
         Uniform(13) sampler2D u_ShadowMap1;
         Uniform(14) sampler2D u_ShadowMap2;
         Uniform(15) sampler2D u_ShadowMap3;
         Uniform(7) ShadowUB {
         	mat4 u_LightViewProj[4];
-        	vec4 u_ShadowParams;      // x = bias, y = enabled (>0.5), z = debug mode, w = cascade count
-        	vec4 u_DebugParams;
-        	vec4 u_CascadeTexelWorld; // per-cascade world size of one shadow-map texel
+        	vec4 u_ShadowParams;      // x = bias, y = enabled (>0.5), z = debug mode (0/1/2), w = cascade count
+        	vec4 u_DebugParams;       // x = show normals (>0.5), y = light debug (>0.5); z,w reserved
+        	vec4 u_CascadeTexelWorld; // per-cascade world size of one shadow-map texel (x..w = cascade 0..3)
         };
 
-        float sampleShadowMap(int c, vec2 uv)
-        {
-        	if (c == 0) return texture(u_ShadowMap0, uv).r;
-        	if (c == 1) return texture(u_ShadowMap1, uv).r;
-        	if (c == 2) return texture(u_ShadowMap2, uv).r;
-        	return texture(u_ShadowMap3, uv).r;
-        }
-        ivec2 shadowMapSize(int c)
-        {
-        	if (c == 0) return textureSize(u_ShadowMap0, 0);
-        	if (c == 1) return textureSize(u_ShadowMap1, 0);
-        	if (c == 2) return textureSize(u_ShadowMap2, 0);
-        	return textureSize(u_ShadowMap3, 0);
-        }
-        int chooseCascade(vec3 worldPos)
-        {
-        	for (int c = 0; c < int(u_ShadowParams.w); ++c)
-        	{
-        		vec4 lc  = u_LightViewProj[c] * vec4(worldPos, 1.0);
-        		vec3 ndc = lc.xyz / lc.w;
-        		vec2 uv  = ndc.xy * 0.5 + 0.5;
-        		if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0 && ndc.z <= 1.0)
-        			return c;
-        	}
-        	return -1;
-        }
-        // PCF-samples ONE cascade; 1 (lit) when outside so the caller's blend/fallback takes over.
-        float sampleCascade(int c, vec3 worldPos, vec3 N, float NdotL)
-        {
-        	float texelWorld   = u_CascadeTexelWorld[c];
-        	float normalOffset = (1.5 + 2.5 * (1.0 - NdotL)) * texelWorld;
-        	vec3  samplePos    = worldPos + N * normalOffset;
-
-        	vec4 lightClip = u_LightViewProj[c] * vec4(samplePos, 1.0);
-        	vec3 ndc = lightClip.xyz / lightClip.w;
-        	vec2 uv = ndc.xy * 0.5 + 0.5;
-        	uv.y = 1.0 - uv.y; // shadow maps rendered through the negative-height (Y-flipped) viewport
-
-        	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0)
-        		return 1.0;
-
-        	float currentDepth = ndc.z;
-        	float bias = clamp(u_ShadowParams.x * (1.0 - NdotL) * 4.0, u_ShadowParams.x, 0.02);
-
-        	float shadow = 0.0;
-        	vec2 texel = 1.0 / vec2(shadowMapSize(c));
-        	for (int y = -1; y <= 1; ++y)
-        		for (int x = -1; x <= 1; ++x)
-        		{
-        			float closest = sampleShadowMap(c, uv + vec2(x, y) * texel);
-        			shadow += (currentDepth - bias > closest) ? 0.0 : 1.0;
-        		}
-        	return shadow / 9.0;
-        }
-
-        // N = surface normal, L = direction TOWARD the sun (both normalized). 1 = lit, 0 = fully shadowed.
-        // Cross-fades into the next (looser) cascade near the tight cascade's border so the seam doesn't
-        // pop/flicker as the camera moves — the deferred-path counterpart of StaticMeshPBR's ShadowFactor.
-        float ShadowFactor(vec3 worldPos, vec3 N, vec3 L)
-        {
-        	if (u_ShadowParams.y < 0.5)
-        		return 1.0;
-        	int c = chooseCascade(worldPos);
-        	if (c < 0)
-        		return 1.0;
-
-        	float NdotL  = max(dot(N, L), 0.0);
-        	float shadow = sampleCascade(c, worldPos, N, NdotL);
-
-        	const float kBand = 0.10;
-        	int cascadeCount = int(u_ShadowParams.w);
-        	if (c + 1 < cascadeCount)
-        	{
-        		vec4  lc   = u_LightViewProj[c] * vec4(worldPos, 1.0);
-        		vec2  uv   = (lc.xy / lc.w) * 0.5 + 0.5;
-        		float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-        		if (edge < kBand)
-        		{
-        			float next = sampleCascade(c + 1, worldPos, N, NdotL);
-        			shadow = mix(next, shadow, clamp(edge / kBand, 0.0, 1.0));
-        		}
-        	}
-        	return shadow;
-        }
+        #include <Mesh/CascadedShadow.glslh>
 
         // THE CLOUD LAYER'S SHADOW ON THE WORLD — a second, independent occluder of the same sun.
         // Declared here, evaluated by the shared receiver text below: the wrapper used to live in this
@@ -328,7 +247,12 @@ Shader "DeferredLighting"
         	// a directional occlusion into an omnidirectional term would darken the shaded side of every
         	// object under a cloud by an amount nothing in the world justifies.
         	vec3  L        = normalize(-u_LightDir.xyz);
-        	float shadow   = ShadowFactor(worldPos, N, L) * CloudShadowFactor(worldPos);
+        	// `cascade` is the chosen cascade index, which this pass has no debug view for — the forward
+        	// mesh shaders tint by it under Scene Settings -> Debug -> Cascades and the deferred composite's
+        	// debug modes are a different, G-buffer-driven set. Read and dropped rather than given a second
+        	// ShadowFactor overload, because a second overload is how the four copies started.
+        	int   cascade  = -1;
+        	float shadow   = ShadowFactor(worldPos, N, L, cascade) * CloudShadowFactor(worldPos);
         	vec3  radiance = u_LightColor.rgb * u_LightColor.a;
         	vec3  result   = EvaluateDirectionalLight(u_LightDir.xyz, radiance, view, N, F0, metallic, roughness,
         	                                          albedo)
