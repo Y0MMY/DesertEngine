@@ -850,6 +850,69 @@ float CloudSampleDensity( CloudFieldParams params, CloudFieldSample field, vec3 
     return clamp( density * field.DensityScale, 0.0f, 1.0f );
 }
 
+// Optical depth from a sample toward the sun.
+//
+// IT LIVES HERE, IN THE HEADER, BECAUSE THERE ARE TWO MARCHES NOW. It was written inside
+// Programs/Clouds/CloudRaymarch.shader while the eye was the only thing that lit a cloud; the sky's
+// environment bake (Programs/Compute/BakeProceduralSky.shader) lights the same field for the panorama,
+// and a copy of this quadrature beside the original is precisely the mirror this project has already paid
+// for once — a C++ mirror of a gradient that drifted from the shader's own formula and turned every cloud
+// grey. One text, two callers, and the seam's C++ tests can drive it.
+//
+// The samples are placed on a SQUARED distribution — Unreal's arrangement, and the reason is physical
+// rather than aesthetic: transmittance is dominated by the material immediately around the sample, so
+// uniform spacing spends most of its samples where the answer has already converged. Each segment's
+// contribution is weighted by its own length, so the sum is a genuine integral and not a biased average.
+//
+// WHAT THAT DISTRIBUTION COSTS, and the defect it hid for a phase: the FIRST segment is
+// @p marchKm / sampleCount^2 — quadratic in the count, not linear. The near field is therefore the one
+// thing that does NOT survive lengthening the ray. At 500 m and six samples the first step was 13.9 m; the
+// ray was then taken to 15 km for parity with Unreal's ShadowTracingDistance and the count was left at
+// six, making it 417 m — a first step that walks straight out of the cloud the sample sits in and reports
+// it transparent to the sun. Rendered, that was a sunward zenith highlight 4.4x the converged answer in
+// linear radiance. Convergence needs about thirty samples on THIS quadrature; see
+// ECS::kCloudLightMarchMaxSamples and Docs/Clouds/CALIBRATION.md section OE-FIX. Anyone shortening
+// @p marchKm again may lower the count with it, and by the square.
+float CloudLightOpticalDepth( CloudLayer layer, CloudFieldParams params, vec3 positionKm, vec3 toSun,
+                              float marchKm, int sampleCount, float extinctionPerKm )
+{
+    float accumulated = 0.0f;
+    float previous    = 0.0f;
+    float invCount    = 1.0f / float( sampleCount );
+
+    for ( int i = 1; i <= sampleCount; ++i )
+    {
+        float normalized = float( i ) * invCount;
+        float current    = normalized * normalized;
+        float segment    = current - previous;
+
+        vec3 samplePos = positionKm + toSun * ( marchKm * ( previous + segment * 0.5f ) );
+
+        // Leaving the shell ends the march. Without this the samples keep accumulating against a height
+        // fraction clamped to 1, which draws a shadow from cloud that is not there.
+        float radius = length( samplePos );
+        if ( radius > layer.TopRadiusKm || radius < layer.BottomRadiusKm )
+            break;
+
+        float heightFraction = CloudHeightFraction( layer, samplePos );
+        vec3  fieldPos       = vec3( samplePos.x, length( samplePos ) - layer.BottomRadiusKm, samplePos.z );
+
+        CloudFieldSample field   = SampleCloudField( params, heightFraction, fieldPos );
+        float            density = CloudSampleDensity( params, field, fieldPos );
+
+        // THE EXTINCTION IS THE SAMPLE'S, NOT THE LAYER'S, and it has to be read here as well as in the
+        // view march. A shadow ray from a congestus tower passes through the stratocumulus deck beneath
+        // it: with one extinction for the whole shell the deck would shade the tower as if it were made of
+        // the tower's own material, and the ice of a cirrus at a quarter of a cumulus' opacity would cast
+        // a cumulus' shadow.
+        accumulated += density * extinctionPerKm * field.ExtinctionFactor * segment;
+        previous = current;
+    }
+
+    // The weights above are fractions of the march, so the whole length scales the sum exactly once, here.
+    return accumulated * marchKm;
+}
+
 #endif // CLOUD_SAMPLE_NOISE && CLOUD_SAMPLE_MODELLING && CLOUD_SAMPLE_AUTHORED
 
 #endif // CLOUD_FIELD_GLSLH

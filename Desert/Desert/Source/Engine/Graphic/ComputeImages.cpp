@@ -36,8 +36,9 @@ namespace Desert::Graphic
 
     std::shared_ptr<Image2D> ComputeImages::BakeProceduralPanorama( uint32_t width, uint32_t height,
                                                                     ShaderResources::StorageBuffer* skyParams,
-                                                                    Image2D* transmittanceLut,
-                                                                    Image2D* multiScatterLut )
+                                                                    Image2D*                transmittanceLut,
+                                                                    Image2D*                multiScatterLut,
+                                                                    const CloudBakeBinding& clouds )
     {
         const auto shader = GetComputeShader( "BakeProceduralSky" );
         if ( !shader || !skyParams )
@@ -86,6 +87,68 @@ namespace Desert::Graphic
                             multiScatterLut
                                  ? multiScatterLut
                                  : fallbacks.GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F ).get() );
+
+        // ---- THE CLOUD LAYER -------------------------------------------------------------------------
+        //
+        // EVERY ONE OF THESE IS WRITTEN ON EVERY PATH, whether the layer exists or not. A declared
+        // descriptor that nobody writes makes the set INVALID, and VulkanPipelineCompute answers an
+        // invalid set by returning without dispatching — so a scene with no clouds would come back with an
+        // uninitialised panorama and a black environment, and nothing anywhere would say why. The gate is
+        // the push constant below and nothing else.
+        //
+        // The parameter buffers are the SKY renderer's: the cloud renderer's own are per-frame resources
+        // written by the passes inside the frame, and this bake is issued before them.
+        auto* volumeFallback = fallbacks.GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get();
+
+        // THE TWO BLOCKS ARE BOUND WHETHER OR NOT THERE ARE CLOUDS, and that is the whole content of this
+        // branch. A cloudless scene — two of the repository's fifty-one, plus every asset thumbnail and
+        // every mesh preview — still has these two descriptors declared by the shader, so leaving them
+        // unwritten would invalidate the set and cost that scene its ENTIRE environment, not its clouds.
+        // The caller creates both at initialization and uploads to them on every path, so a null here is a
+        // failed allocation and not a state: it is the one case that has to be said out loud.
+        if ( clouds.Params && clouds.Authored )
+        {
+            pipeline->SetStorageBuffer( kSkyBakeCloudParamsBinding, clouds.Params );
+            pipeline->SetStorageBuffer( kSkyBakeCloudAuthoredBinding, clouds.Authored );
+        }
+        else
+        {
+            LOG_ERROR( "[SkyAtmosphere] The environment bake has no cloud parameter buffer to bind "
+                       "(params={}, authored={}). Both are created with the sky's own, so this is an "
+                       "allocation failure — the dispatch below will be skipped for an invalid descriptor "
+                       "set and the environment will come back black.",
+                       clouds.Params != nullptr, clouds.Authored != nullptr );
+        }
+
+        const bool cloudsBound = clouds.Marched && clouds.Params != nullptr && clouds.Authored != nullptr;
+
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+        {
+            Image3D* noise = cloudsBound ? clouds.Noise[slot] : nullptr;
+            pipeline->SetInput( kSkyBakeCloudNoiseBindings[slot], noise ? noise : volumeFallback );
+        }
+
+        pipeline->SetInput( kSkyBakeCloudModellingBinding,
+                            cloudsBound && clouds.Modelling ? clouds.Modelling : volumeFallback );
+        pipeline->SetInput( kSkyBakeCloudAuthoredAtlasBinding,
+                            cloudsBound && clouds.AuthoredAtlas ? clouds.AuthoredAtlas : volumeFallback );
+        pipeline->SetInput( kSkyBakeCloudSkyOcclusionBinding,
+                            cloudsBound && clouds.SkyOcclusion && clouds.SkyOcclusionVolume
+                                 ? clouds.SkyOcclusionVolume
+                                 : volumeFallback );
+        pipeline->SetInput( kSkyBakeDistantSkyLightBinding,
+                            clouds.DistantSkyLight
+                                 ? clouds.DistantSkyLight
+                                 : fallbacks.GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F ).get() );
+
+        // x marches, y reads the sky-occlusion volume, z is the aerial perspective's start depth. The
+        // second is ANDed with the buffers above for the reason the march's own gate is: a layer whose
+        // flag is on but whose volume was not written must fall back to the profile term rather than read
+        // an image nobody filled.
+        const glm::vec4 cloudPush{ cloudsBound ? 1.0f : 0.0f,
+                                   cloudsBound && clouds.SkyOcclusion && clouds.SkyOcclusionVolume ? 1.0f : 0.0f,
+                                   std::max( clouds.AerialStartDepthKm, 0.0f ), 0.0f };
+        pipeline->SetPushConstants( &cloudPush, static_cast<uint32_t>( sizeof( cloudPush ) ) );
 
         pipeline->Dispatch( std::max( 1u, width / kWorkGroupSize ), std::max( 1u, height / kWorkGroupSize ),
                             1u );

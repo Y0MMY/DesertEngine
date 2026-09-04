@@ -9,8 +9,14 @@ project(test_name)
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
     -- The units under test are header-only pure math: Engine/Graphic/SkyRules.hpp, SkyPayload.hpp,
-    -- AtmosphereEnv.hpp, SkySettings.hpp. No renderer, no GPU, nothing to link — AtmosphereEnv only
-    -- FORWARD-declares the storage buffer it carries a handle to, which is exactly what makes it testable.
+    -- AtmosphereEnv.hpp, SkySettings.hpp. No renderer, no GPU — AtmosphereEnv only FORWARD-declares the
+    -- storage buffer it carries a handle to, which is exactly what makes it testable.
+    --
+    -- ...and Clouds/CloudEnvironmentBake.hpp since Р15, because the panorama carries the clouds now and
+    -- "when is the environment stale" stopped being a question about the sun alone. That header reaches
+    -- CloudPayload.hpp and through it the cloud COMPONENT, whose AssetHandle members pull in Common::UUID
+    -- and whose PROPERTY macros pull in reflect-cpp — hence the include path and the three links below.
+    -- Restating the payload here instead would be a mirror of the exact struct the fingerprint hashes.
     files {
         test_files,
     }
@@ -18,7 +24,16 @@ project(test_name)
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+        "%{wks.location}/ThirdParty/reflect-cpp/include", -- reached through the cloud component's headers
     }
+
+    -- Common: Common::UUID, behind the AssetHandle members of the cloud component.
+    -- Optick: Common's JobSystem registers its worker threads with the profiler.
+    links { "Common", "Optick" }
+
+    filter "system:not windows"
+        links { "ReflectCpp" }
+    filter {}
 
     for name, path in pairs(deps.Common.IncludeDir) do
         includedirs { path }

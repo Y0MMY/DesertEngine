@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Engine/Graphic/Clouds/CloudEnvironmentBake.hpp>
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Runtime/ImageHandle.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
@@ -41,11 +42,16 @@ namespace Desert::Graphic
         // texels when the payload's model lane says physical. Pass nullptr on the gradient model — the
         // bake then binds fallbacks and the physical branch is never taken.
         //
+        // @p clouds is the caller's cloud layer, marched into the SAME panorama by the SAME field the
+        // screen pass marches — see Engine/Graphic/Clouds/CloudEnvironmentBake.hpp for why the argument
+        // exists at all: this call is the only route from the clouds to the bake, and the alternative was
+        // a second, analytic model of the clouds standing beside the march.
+        //
         // The panorama size is authored (SkyAtmosphereData::EnvironmentResolution) rather than a constant
         // because this cost is paid PER LIVE SceneRenderer, and the editor keeps several of those.
         static Environment CreateProcedural( uint32_t panoramaWidth, uint32_t panoramaHeight,
                                              ShaderResources::StorageBuffer* skyParams, Image2D* transmittanceLut,
-                                             Image2D* multiScatterLut );
+                                             Image2D* multiScatterLut, const CloudBakeBinding& clouds );
 
     private:
         static std::shared_ptr<ImageCube>

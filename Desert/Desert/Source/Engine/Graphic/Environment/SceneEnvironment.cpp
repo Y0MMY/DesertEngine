@@ -90,13 +90,17 @@ namespace Desert::Graphic
 
     Environment EnvironmentManager::CreateProcedural( uint32_t panoramaWidth, uint32_t panoramaHeight,
                                                       ShaderResources::StorageBuffer* skyParams,
-                                                      Image2D* transmittanceLut, Image2D* multiScatterLut )
+                                                      Image2D* transmittanceLut, Image2D* multiScatterLut,
+                                                      const CloudBakeBinding& clouds )
     {
         auto* imageService = Runtime::ResourceRegistry::GetImageService();
 
-        // Bake the atmosphere into an equirect HDR panorama, then run the standard IBL pipeline on it.
+        // Bake the atmosphere AND the cloud layer standing in it into one equirect HDR panorama, then run
+        // the standard IBL pipeline on it. The clouds go in HERE, at the producer, rather than into any of
+        // the three stages below: the diffuse irradiance and the prefiltered specular both descend from
+        // this one image, and giving them the clouds separately would be two sources of truth for one sky.
         auto panorama = ComputeImages::BakeProceduralPanorama( panoramaWidth, panoramaHeight, skyParams,
-                                                               transmittanceLut, multiScatterLut );
+                                                               transmittanceLut, multiScatterLut, clouds );
         if ( !panorama )
             return {};
         const auto panoramaHandle =

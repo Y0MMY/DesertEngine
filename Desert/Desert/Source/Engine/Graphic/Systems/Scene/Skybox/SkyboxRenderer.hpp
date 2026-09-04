@@ -203,10 +203,32 @@ namespace Desert::Graphic::System
         SkySettings   m_Sky;
         AtmosphereEnv m_Atmosphere;
 
+        // THE CLOUD LAYER'S TWO BLOCKS, AS THE BAKE'S DISPATCH READS THEM.
+        //
+        // The bytes are the VolumetricCloudRenderer's — it packs them from the component, and the bake
+        // marches the same block the screen march does. The BUFFERS are this renderer's, and that is not
+        // duplicated state but a consequence of when the two dispatches run: the cloud renderer's own
+        // parameter buffer is non-persistent, so it carries one copy per (frame x renderer slot), and it
+        // is written by the passes INSIDE the frame — this bake is issued before them, from
+        // SceneRenderer::OnUpdate. Writing that buffer here would put two values into one frame's copy
+        // with a dispatch reading it in between.
+        //
+        // PERSISTENT IS STILL WRONG for them, for the ordinary reason: several SceneRenderers are live at
+        // once (Docs/RENDERER_FRAME_STATE.md), and a shared block would let a thumbnail's sky bake with a
+        // preview's clouds.
+        std::shared_ptr<ShaderResources::StorageBuffer> m_CloudBakeParams;
+        std::shared_ptr<ShaderResources::StorageBuffer> m_CloudBakeAuthored;
+
         // Baked sky IBL (radiance/irradiance/prefiltered cubes) generated from the procedural atmosphere.
         Environment m_ProceduralEnv;
         glm::vec3   m_BakedSunDir = glm::vec3( 0.0f, 1.0f, 0.0f );
         bool        m_BakeRequested = false;
+
+        // What the environment on the device was baked from, on the CLOUD side —
+        // Graphic::CloudEnvironmentFingerprint of the field the panorama saw. 0 means "no clouds", which
+        // is also the value of a scene that has never had any, so the first bake of a cloudless sky is not
+        // charged for one. See ShouldRebakeSkyEnvironment: this is the half of the trigger the sun is not.
+        uint64_t m_BakedCloudFingerprint = 0;
 
         // Debounce state (see SkyEnvironmentRebakeMayRun). m_SecondsSinceSunMoved is how long the sun has
         // held still, m_SecondsSinceStale how long a rebake has been wanted; the first collapses a drag
