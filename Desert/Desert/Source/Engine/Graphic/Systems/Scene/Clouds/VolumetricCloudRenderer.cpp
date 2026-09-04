@@ -499,6 +499,13 @@ namespace Desert::Graphic::System
                 return false;
             }
 
+            // WHAT THE SKY'S ENVIRONMENT BAKE ASKS ABOUT, and it is deliberately NOT "the volume was
+            // rebuilt": a rebuild happens every time the camera crosses a snap of the lump lattice, and
+            // the irradiance cube cannot see the field move. Asked through the same canonical comparison
+            // the cache above uses, so the two cannot come to different conclusions about what changed.
+            if ( !m_ModellingValid || !Assets::CloudProceduralParamsEqual( m_ModellingParams, m_PendingParams ) )
+                ++m_ModellingShapeGeneration;
+
             m_ModellingParams   = m_PendingParams;
             m_ModellingOriginKm = m_PendingOriginKm;
             m_ModellingValid    = true;
@@ -749,6 +756,75 @@ namespace Desert::Graphic::System
         return std::clamp( m_Data.ShadowStrength, 0.0f, 1.0f );
     }
 
+    bool VolumetricCloudRenderer::BuildFieldPayload( CloudGpuPayload& payload )
+    {
+        // Without a sky there is no sun to light the clouds and no ambient to fill their shadowed sides.
+        const AtmosphereEnv& atmosphere = m_SceneRenderer->GetAtmosphere();
+        if ( !atmosphere.Valid )
+            return false;
+
+        // THE SPECIES COME FIRST, and the order is load-bearing rather than tidy: the volumes a layer
+        // binds are named by its TYPES, so the set has to be resolved before there is anything to look
+        // them up with.
+        CloudTypeShape      shapes[kCloudSpeciesSlots]{};
+        Assets::AssetHandle handles[kCloudSpeciesSlots]{};
+        const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
+
+        if ( !EnsureNoiseVolumes( handles, speciesCount ) )
+            return false;
+        if ( !EnsureModellingVolume() )
+            return false;
+
+        // THE TIER'S TWO CEILINGS COME FROM ONE CALL for every consumer, because the passes march the same
+        // field and a shadow ray of two different lengths in one frame is the class of disagreement
+        // §2.3.1 of the contract is about.
+        const CloudQualityScale quality = CloudQualityFor( m_Quality );
+
+        payload = PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
+                                   CloudRegionBinding{ m_ModellingOriginKm, m_ModellingParams.RegionSizeKm },
+                                   quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor, m_NoiseSlots );
+        return true;
+    }
+
+    CloudEnvironmentBake VolumetricCloudRenderer::BuildEnvironmentBake()
+    {
+        DESERT_PROFILE_SCOPE( "Clouds: BuildEnvironmentBake" );
+
+        CloudEnvironmentBake bake{};
+
+        // THE SAME ZERO-COST LADDER THE TWO DISPATCHES HAVE, and it is checked before any allocation
+        // rather than after: the editor builds a SceneRenderer for every asset thumbnail and every mesh
+        // preview, none of them has a sky, and none of them may pay for a modelling volume here.
+        if ( !m_Present || !m_Data.Enabled )
+            return bake;
+
+        if ( !BuildFieldPayload( bake.Params ) )
+            return bake;
+
+        // Slot A, on the same terms the two in-frame passes build it on. A hero cloud is part of the
+        // field, so it lights the world through the environment for the same reason it shades the ground.
+        BuildAuthoredPayload( bake.Params );
+        bake.Authored = m_AuthoredPayload;
+
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+            bake.Noise[slot] = m_NoiseVolume[slot];
+
+        bake.Modelling     = m_ModellingVolume.get();
+        bake.AuthoredAtlas = m_AuthoredAtlas;
+
+        // THE PREVIOUS FRAME'S VOLUME, and it can be nothing else: this runs before the frame's own
+        // dispatch of it. The first bake of a scene therefore marches with the profile-driven occlusion
+        // the layer would fall back to anyway, and the fingerprint below carries the flag so that the
+        // frame the volume appears asks for one more bake rather than leaving a permanently brighter dome.
+        bake.SkyOcclusionValid  = m_SkyOcclusionValid && m_SkyOcclusionVolume != nullptr;
+        bake.SkyOcclusionVolume = m_SkyOcclusionVolume.get();
+
+        bake.Marched = true;
+        bake.Fingerprint =
+             CloudEnvironmentFingerprint( bake.Params, true, bake.SkyOcclusionValid, m_ModellingShapeGeneration );
+        return bake;
+    }
+
     void VolumetricCloudRenderer::ExecuteShadowMapInFrame()
     {
         DESERT_PROFILE_PASS( "Clouds: ShadowMap" );
@@ -788,22 +864,10 @@ namespace Desert::Graphic::System
         if ( !EnsureShadowMap( resolution ) )
             return;
 
-        // THE SPECIES COME FIRST NOW, and the order is load-bearing rather than tidy: the volumes a layer
-        // binds are named by its TYPES, so the set has to be resolved before there is anything to look
-        // them up with.
-        CloudTypeShape      shapes[kCloudSpeciesSlots]{};
-        Assets::AssetHandle handles[kCloudSpeciesSlots]{};
-        const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
-
-        if ( !EnsureNoiseVolumes( handles, speciesCount ) )
-            return;
-        if ( !EnsureModellingVolume() )
+        CloudGpuPayload payload{};
+        if ( !BuildFieldPayload( payload ) )
             return;
 
-        const CloudGpuPayload payload =
-             PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
-                              CloudRegionBinding{ m_ModellingOriginKm, m_ModellingParams.RegionSizeKm },
-                              quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor, m_NoiseSlots );
         m_ShadowParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         // Slot A, for the shadow map as well as for the eye: a hero cloud shades the ground under it
@@ -1189,6 +1253,11 @@ namespace Desert::Graphic::System
 
         m_HasFrameResult = false;
 
+        // Cleared with it, and read by the NEXT frame's environment bake rather than by anything here: a
+        // frame that skipped this pass must leave "there is no sky-occlusion volume to read" behind it,
+        // not the answer of the last frame that ran.
+        m_SkyOcclusionValid = false;
+
         if ( !m_MarchPipeline || !m_ResolvePipeline || !m_CompositePipeline || !m_ParamsBuffer ||
              !m_ResolveParamsBuffer )
             return;
@@ -1219,27 +1288,11 @@ namespace Desert::Graphic::System
         // RESOLVED AGAIN RATHER THAN CACHED FROM EnsureModellingVolume. Two hash-map probes per slot
         // against handles that have not moved is not worth a member that can disagree with the volume it
         // was built beside — and the one thing that must not diverge is exactly the set whose channels the
-        // volume carries.
-        //
-        // AND IT IS RESOLVED BEFORE THE NOISE, because the volumes a layer binds are named by its TYPES.
-        CloudTypeShape      shapes[kCloudSpeciesSlots]{};
-        Assets::AssetHandle handles[kCloudSpeciesSlots]{};
-        const uint32_t      speciesCount = ResolveSpecies( shapes, handles );
-
-        if ( !EnsureNoiseVolumes( handles, speciesCount ) )
+        // volume carries. BuildFieldPayload is the one place that sequence is written.
+        CloudGpuPayload payload{};
+        if ( !BuildFieldPayload( payload ) )
             return;
 
-        if ( !EnsureModellingVolume() )
-            return;
-
-        // THE SAME CEILING THE SHADOW MAP'S BLOCK GOT, from the same one call, because the two passes march
-        // the same field and a shadow ray of two different lengths in one frame is the class of
-        // disagreement §2.3.1 of the contract is about.
-        const CloudQualityScale quality = CloudQualityFor( m_Quality );
-        const CloudGpuPayload   payload =
-             PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
-                              CloudRegionBinding{ m_ModellingOriginKm, m_ModellingParams.RegionSizeKm },
-                              quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor, m_NoiseSlots );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         // Slot A. Rebuilt here rather than reused from the shadow map's call: the two dispatches sit on
@@ -1307,6 +1360,10 @@ namespace Desert::Graphic::System
 
             skyOcclusionReady = true;
         }
+
+        // Published for the NEXT frame's environment bake, which runs before this pass and can therefore
+        // only ask about the volume this frame leaves behind.
+        m_SkyOcclusionValid = skyOcclusionReady;
 
         CloudPush push{};
         push.InverseViewProjection = glm::inverse( viewProjection );

@@ -24,7 +24,16 @@
 // ComputePipeline::SetStorageBuffer takes the binding as an explicit argument and never consults the
 // shader's reflection, so this number and Graphic::kCloudParamsBinding must be the same one. A mismatch
 // lands the buffer on a different descriptor rather than on an error.
+//
+// OVERRIDABLE, because one pass reads this block ALONGSIDE a block that also wants binding 1. The sky's
+// environment bake (Programs/Compute/BakeProceduralSky.shader) marches the clouds into the panorama and
+// therefore binds BOTH this buffer and the sky payload, whose Graphic::kSkyPayloadBinding is likewise 1 —
+// two blocks on one descriptor is not a diagnosable failure, it is one of them reading the other's bytes.
+// Every other consumer leaves the default alone, so the number the subsystem has always meant by "the
+// cloud parameters" is unchanged, and the C++ side of each pass names its own constant.
+#ifndef CLOUD_PARAMS_BINDING
 #define CLOUD_PARAMS_BINDING 1
+#endif
 
 layout( std430, binding = CLOUD_PARAMS_BINDING ) readonly buffer CloudParamsBuffer
 {

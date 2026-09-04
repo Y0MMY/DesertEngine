@@ -447,6 +447,146 @@ TEST( CloudFieldCoverage, AtZeroTheSkyIsGenuinelyClear )
 }
 
 // ---------------------------------------------------------------------------------------------------
+// CloudLightOpticalDepth — the quadrature that lights every sample of every march
+// ---------------------------------------------------------------------------------------------------
+//
+// IT MOVED INTO Common/CloudField.glslh IN Р15, and that is why it is testable at all. It was written
+// inside Programs/Clouds/CloudRaymarch.shader while the eye was the only thing that lit a cloud; the
+// sky's environment bake (Programs/Compute/BakeProceduralSky.shader) now lights the same field for the
+// IBL panorama, and a copy of this quadrature beside the original would be the mirror that drifts —
+// which this project has already paid for once, in the grey-clouds defect. One text, two callers, and
+// this suite compiles it as C++ through the same seam it compiles the producer through.
+//
+// What follows are RELATIONS, not values. The quadrature is a six-to-thirty-sample approximation of an
+// integral, so no spot number is worth pinning; what has to hold is that it behaves like an optical
+// depth.
+
+namespace
+{
+    /// The shell the modelling volume was baked over, as the march builds it. The planet radius is the
+    /// component's default, because the curvature is what makes `length(samplePos)` the altitude.
+    CloudLayer LayerForBoundVolume()
+    {
+        const Desert::Assets::CloudProceduralFieldParams& volume = ModellingVolume().Params;
+        return CloudMakeLayer( Desert::ECS::VolumetricCloudData{}.PlanetRadius, volume.LayerBottomKm,
+                               volume.LayerThicknessKm );
+    }
+
+    /// A planet-centred position at @p altitudeKm above the layer's base, over the column (@p x, @p z).
+    vec3 SampleAt( const CloudLayer& layer, float x, float z, float altitudeKm )
+    {
+        return vec3( x, layer.BottomRadiusKm + altitudeKm, z );
+    }
+
+    /// The MEAN optical depth toward a sun straight overhead, over a grid spanning one horizontal period
+    /// of the field, taken from a sample halfway up the layer. The grid is the whole population rather
+    /// than a neighbourhood, exactly as MeasureSkyCover's is.
+    float MeanSunOpticalDepth( float coverage, int columnsPerAxis, float extinctionPerKm, int sampleCount = 32 )
+    {
+        CloudFieldParams params = ParamsAtCoverage( coverage );
+        const CloudLayer layer  = LayerForBoundVolume();
+        const float      thick  = ModellingVolume().Params.LayerThicknessKm;
+
+        double total = 0.0;
+        for ( int iz = 0; iz < columnsPerAxis; ++iz )
+        {
+            for ( int ix = 0; ix < columnsPerAxis; ++ix )
+            {
+                const float x = OriginKm().x + PeriodKm() * ( static_cast<float>( ix ) + 0.5f ) / columnsPerAxis;
+                const float z = OriginKm().y + PeriodKm() * ( static_cast<float>( iz ) + 0.5f ) / columnsPerAxis;
+
+                total += CloudLightOpticalDepth( layer, params, SampleAt( layer, x, z, thick * 0.1f ),
+                                                 vec3( 0.0f, 1.0f, 0.0f ), thick, sampleCount, extinctionPerKm );
+            }
+        }
+        return static_cast<float>( total / ( columnsPerAxis * columnsPerAxis ) );
+    }
+} // namespace
+
+TEST( CloudSunTransmittance, MoreCloudMeansMoreMaterialBetweenASampleAndTheSun )
+{
+    // THE RELATION THE ENVIRONMENT BAKE RESTS ON. A sky the coverage slider has filled must put MORE
+    // material between a cloud's base and the sun than an emptier one does — which is what makes the deck
+    // shade its own underside, and therefore what makes an overcast bake a duller ambient than a clear
+    // sky. Asserted as a monotonicity over the whole period rather than as a value, because the
+    // quadrature is an approximation and any single number would be pinning the approximation.
+    // SIXTEEN AND NOT MORE: 256 columns of a periodic field is the whole population at a resolution that
+    // resolves a per-cent change in the mean, and every column costs a 32-sample march through a baked
+    // volume — the sweep is the most expensive thing in this suite as it stands.
+    constexpr int   kColumns = 16;
+    constexpr float kSlack   = 1e-4f; // one part in ten thousand of a typical optical depth
+
+    float previous = -1.0f;
+
+    std::printf( "[CloudField] coverage  mean sun optical depth (zenith, from 10%% up the layer)\n" );
+    for ( int step = 0; step <= 10; ++step )
+    {
+        const float coverage = 0.10f * static_cast<float>( step );
+        const float tau      = MeanSunOpticalDepth( coverage, kColumns, kExtinctionPerKm );
+
+        std::printf( "[CloudField]     %.2f    %.4f\n", coverage, tau );
+
+        EXPECT_GE( tau, previous - kSlack ) << "Coverage " << coverage
+                                            << " put LESS cloud between the sample and the sun than the "
+                                               "setting below it";
+        previous = std::max( previous, tau );
+    }
+
+    // And the two ends are genuinely different skies, not a flat line that satisfies monotonicity for
+    // free — a test that only checks an ordering passes on a function that returns a constant.
+    EXPECT_GT( MeanSunOpticalDepth( 1.0f, kColumns, kExtinctionPerKm ),
+               MeanSunOpticalDepth( 0.1f, kColumns, kExtinctionPerKm ) * 2.0f );
+}
+
+TEST( CloudSunTransmittance, ItIsLinearInTheExtinctionAndZeroInAnEmptySky )
+{
+    // The medium's opacity multiplies the integrand and nothing else, so doubling it doubles the answer
+    // EXACTLY — which is the bound that catches a stray factor of anything creeping into the shadow ray
+    // without catching a legitimate retuning of the medium.
+    constexpr int kColumns = 16;
+
+    const float single = MeanSunOpticalDepth( 0.6f, kColumns, kExtinctionPerKm );
+    const float twice  = MeanSunOpticalDepth( 0.6f, kColumns, kExtinctionPerKm * 2.0f );
+
+    ASSERT_GT( single, 0.0f ) << "the fixture put no cloud over the grid at all";
+    EXPECT_NEAR( twice, single * 2.0f, single * 1e-4f );
+
+    // A clear sky costs the sun nothing. Not an approximation: at Coverage 0 the generator places no
+    // lumps, so every sample of the quadrature finds a profile of exactly zero.
+    EXPECT_FLOAT_EQ( MeanSunOpticalDepth( 0.0f, kColumns, kExtinctionPerKm ), 0.0f );
+}
+
+TEST( CloudSunTransmittance, ARayCannotCollectMoreThanTheSolidMediumItCrosses )
+{
+    // THE BOUND, and it is the one assertion here that no amount of retuning can legitimately break: a
+    // sample's density is at most 1 and the species' factor is bounded by the producer, so the optical
+    // depth of a march of length L is at most L * extinction * factor. A quadrature that over-counts a
+    // segment — the failure a squared sample distribution invites, because its weights must sum to one —
+    // shows up here and nowhere else.
+    constexpr int    kColumns = 16;
+    const CloudLayer layer    = LayerForBoundVolume();
+    const float      thick    = ModellingVolume().Params.LayerThicknessKm;
+    CloudFieldParams params   = ParamsAtCoverage( 1.0f );
+
+    const float bound = thick * kExtinctionPerKm * DefaultShape().ExtinctionFactor;
+
+    for ( int iz = 0; iz < kColumns; ++iz )
+    {
+        for ( int ix = 0; ix < kColumns; ++ix )
+        {
+            const float x = OriginKm().x + PeriodKm() * ( static_cast<float>( ix ) + 0.5f ) / kColumns;
+            const float z = OriginKm().y + PeriodKm() * ( static_cast<float>( iz ) + 0.5f ) / kColumns;
+
+            const float tau = CloudLightOpticalDepth( layer, params, SampleAt( layer, x, z, thick * 0.1f ),
+                                                      vec3( 0.0f, 1.0f, 0.0f ), thick, 32, kExtinctionPerKm );
+
+            EXPECT_GE( tau, 0.0f ) << "column " << ix << ", " << iz;
+            EXPECT_LE( tau, bound * 1.0001f ) << "column " << ix << ", " << iz;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
 // CloudSampleDensity — the erosion, and the weighting that makes it an erosion rather than a subtraction
 // ---------------------------------------------------------------------------------------------------
 

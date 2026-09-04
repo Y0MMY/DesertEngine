@@ -26,8 +26,10 @@
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
+#include <Engine/Graphic/Clouds/CloudEnvironmentBake.hpp>
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudSkyOcclusionPayload.hpp>
+#include <Engine/Graphic/SkyPayload.hpp>
 
 #include <Common/Core/Constants.hpp>
 
@@ -691,6 +693,66 @@ TEST_F( ShaderRootFixture, TheBindingsComeOutSortedAndCountedTheWayTheLayerCount
     for ( size_t i = 1; i < bindings.size(); ++i )
         EXPECT_LT( bindings[i - 1].binding, bindings[i].binding );
 
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), bindings.size() );
+}
+
+TEST_F( ShaderRootFixture, TheEnvironmentBakeReadsTheSkyAndTheCloudsOnTwoDIFFERENTDESCRIPTORS )
+{
+    // THE MINE THIS TEST EXISTS FOR, and it is one line of arithmetic rather than a rendering failure.
+    // Graphic::kSkyPayloadBinding is 1, and Common/CloudParams.glslh's CLOUD_PARAMS_BINDING defaults to 1
+    // as well. The environment bake is the ONE pass in the engine that reads both blocks, so if the cloud
+    // header's number were not overridable the two would land on one descriptor — and the symptom is not
+    // an error but one of the blocks reading the other's bytes, which renders as a sky whose clouds are
+    // shaped by the atmosphere's ozone density.
+    //
+    // Both numbers below come from the C++ constants, and the reflection reads the SHADER, so this
+    // asserts the two statements of the layout against each other rather than either against a literal.
+    ASSERT_NE( Desert::Graphic::kSkyBakeCloudParamsBinding, Desert::Graphic::kSkyPayloadBinding )
+         << "the bake would bind the cloud block and the sky block to one descriptor";
+
+    const auto bindings = ComputeSetZero( ShaderPath( "Compute/BakeProceduralSky.shader" ) );
+
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kSkyPayloadBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the sky payload
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kSkyBakeCloudParamsBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // the cloud payload
+}
+
+TEST_F( ShaderRootFixture, TheEnvironmentBakeMarchesTheSameFIELDTheScreenMarchDoes )
+{
+    // THE RELATION, not the count. What makes the baked environment agree with the visible sky is that
+    // both marches sample the SAME field: the same four noise volumes, the same modelling volume, the
+    // same hero-cloud atlas and instance list, the same sky-light occlusion volume. A bake that erased
+    // one of them would light the world with a sky nobody can see — no error anywhere, just an ambient
+    // that does not fit the frame, which is the failure shape the shadow map's own binding assertions
+    // exist to catch.
+    //
+    // The NUMBERS differ from the march's on purpose (the bake's set already holds the sky's own four
+    // descriptors), so what is asserted is that every resource the march binds has a counterpart here and
+    // that the counterpart is the constant C++ hands to SetInput.
+    const auto bindings = ComputeSetZero( ShaderPath( "Compute/BakeProceduralSky.shader" ) );
+
+    for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
+    {
+        EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kSkyBakeCloudNoiseBindings[slot],
+                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) )
+             << "noise volume " << slot;
+    }
+
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kSkyBakeCloudModellingBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kSkyBakeCloudAuthoredAtlasBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kSkyBakeCloudAuthoredBinding,
+                             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kSkyBakeDistantSkyLightBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kSkyBakeCloudSkyOcclusionBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+
+    // EVERY DESCRIPTOR IS DISTINCT, which is the property the two blocks above nearly broke and which no
+    // amount of per-binding checking states: the reflection would happily report one binding satisfying
+    // two of the expectations above.
     EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), bindings.size() );
 }
 

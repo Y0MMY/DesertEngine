@@ -117,9 +117,18 @@ namespace Desert::Graphic
     // throttle, and it is a number a test can pin instead of a frame count nobody can reason about.
     //
     // @p bakedSunDir / @p currentSunDir are toward-sun directions; they need not be normalized.
+    //
+    // THE SUN IS NOT THE ONLY THING THE PANORAMA SEES. Since the clouds are marched into it
+    // (Programs/Compute/BakeProceduralSky.shader), a sky whose sun has not moved can still be a different
+    // sky: coverage, cloud type, density, extinction and albedo all change what the dome radiates.
+    // @p bakedCloudFingerprint / @p currentCloudFingerprint are Graphic::CloudEnvironmentFingerprint of
+    // the field the panorama on the device was baked from and of this frame's, and 0 means "no clouds" —
+    // so deleting the layer rebakes exactly as adding it does. Wind and the modelling region's origin are
+    // deliberately absent from that number; the reason is written where it is computed.
     inline bool ShouldRebakeSkyEnvironment( const glm::vec3& bakedSunDir, const glm::vec3& currentSunDir,
                                             float thresholdDeg, bool autoRebake, bool hasEnvironment,
-                                            bool explicitRequest )
+                                            bool explicitRequest, uint64_t bakedCloudFingerprint,
+                                            uint64_t currentCloudFingerprint )
     {
         if ( explicitRequest )
             return true;
@@ -131,6 +140,12 @@ namespace Desert::Graphic
 
         if ( !autoRebake )
             return false;
+
+        // Checked BEFORE the sun, because it is exact where the sun's test is a threshold: the clouds
+        // either are the ones that were baked or they are not, and an artist dragging Coverage while the
+        // sun stands still would otherwise see nothing happen.
+        if ( bakedCloudFingerprint != currentCloudFingerprint )
+            return true;
 
         const float baked   = glm::length( bakedSunDir );
         const float current = glm::length( currentSunDir );

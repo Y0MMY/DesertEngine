@@ -164,6 +164,12 @@ namespace Desert::Graphic
         // GetWind()/WindEnv.
         const AtmosphereEnv& GetAtmosphere() const;
 
+        // This view's cloud field, prepared for the sky's environment bake. The bake is SkyboxRenderer's
+        // and the field is VolumetricCloudRenderer's — two sibling systems that share no resource — so the
+        // route between them is here, exactly like GetAtmosphere() above going the other way. See
+        // Engine/Graphic/Clouds/CloudEnvironmentBake.hpp for what crosses.
+        CloudEnvironmentBake BuildCloudEnvironmentBake();
+
         // How many SceneRenderers are alive right now. Every one of them pays for its own baked sky
         // environment, which is why the bake announces its cost with this number beside it.
         static uint32_t GetLiveRendererCount();

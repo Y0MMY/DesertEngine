@@ -12,11 +12,13 @@ than from archaeology. `dev` is at **`cdf09cc5`**, every merge green on macOS + 
 
 ---
 
-## 1. Cloud light parity — one item shipped, two still open
+## 1. Cloud light parity — two items shipped, ONE still open
 
-**Rewritten 2026-09-01 (Д6) against `dev` @ `8c6589ed`.** The section this replaces described the work
-as in flight, and had been wrong since 2026-08-18. **Items 1 and 2 below are still open and this
-section is their only record in the repository** — do not delete it until they are closed.
+**Rewritten 2026-09-01 (Д6) against `dev` @ `8c6589ed`; item 2 closed 2026-09-04 by Р15.** The section
+this replaces described the work as in flight, and had been wrong since 2026-08-18. **Item 1 below is
+still open and this section is its only record in the repository** — do not delete it until it is
+closed. Item 2's entry is kept in full because two of the corrections inside it are about how the
+measuring was got wrong, which is worth more than the item was.
 
 ### The worktree is gone, and none of its code can be merged
 
@@ -131,7 +133,15 @@ constraint as a number: a 657 m line integral against a 160 m correlation length
 that number** — it is light along the ray to the sun, not shape. Р9 priced the lighting branch at 16x
 extinction for the same 2.8x. A ninth measured refusal is a likely and acceptable outcome here.
 
-### Item 2 — clouds in the IBL bake: **BLOCKED ON ITS CONSUMER, and the cost was never the problem**
+### Item 2 — clouds in the IBL bake: **CLOSED by Р15 (2026-09-04)**
+
+> **SHIPPED.** `BakeProceduralSky.shader` marches the cloud layer into the panorama with the same field,
+> the same lighting and the same sun-transmittance quadrature the screen pass uses;
+> `EnvironmentManager::CreateProcedural` and `ComputeImages::BakeProceduralPanorama` take a
+> `Graphic::CloudBakeBinding`, and `VolumetricCloudRenderer::BuildEnvironmentBake()` is the seam
+> (`Engine/Graphic/Clouds/CloudEnvironmentBake.hpp`). **What it cost and what it bought is at the end of
+> this section**; everything between here and there is the history that led to it and is kept because the
+> two corrections in it are still worth reading.
 
 Not in the branch, not on `dev`. `ComputeImages::BakeProceduralPanorama` (`ComputeImages.cpp:37`) binds
 the sky parameter block and the two atmosphere LUTs and nothing else, and
@@ -224,6 +234,63 @@ is no route from the clouds to the bake that does not add an argument to that ca
 be confined to `ComputeImages` + `SceneEnvironment` + the bake shader however it is designed. One more
 trap on the way: `CLOUD_PARAMS_BINDING` is 1 (`Common/CloudParams.glslh:27`) and so is
 `kSkyPayloadBinding`, so a bake that reads both blocks needs that `#define` to become overridable.
+
+### What Р15 measured, and what it cost (2026-09-04)
+
+Both traps above were real and both were crossed as described: the seam is `SceneRenderer::
+BuildCloudEnvironmentBake()` -> `VolumetricCloudRenderer::BuildEnvironmentBake()`, and
+`CLOUD_PARAMS_BINDING` is now `#ifndef`-guarded with the bake overriding it to 4.
+
+**THE COST.** `Clouds_ShadowsOnGround`, Debug, MoltenVK, Medium (1024x512), the machine shared with
+another agent. The two configurations were interleaved inside one session — four rounds of
+(2 runs with the cloud march, 2 runs with the march compiled out of the shader) — and each editor launch
+bakes twice, so **sixteen samples of each**. Wall time around `EnvironmentManager::CreateProcedural`,
+which is exact because every dispatch in it is the immediate compute path (submit and wait on a fence);
+the log line prints it on every bake now.
+
+| | with the cloud march | control (march compiled out) | delta |
+|---|---|---|---|
+| minimum of 16 | **717.7 ms** | **622.4 ms** | **+95.3 ms** |
+| median of 16 | 743.5 ms | 653.2 ms | +90.3 ms |
+| range | 717.7 – 784.1 | 622.4 – 669.3 | — |
+
+**+95.3 ms is 15.3 % of a cloudless bake**, which is inside the 15 % the lead's own recalculation
+predicted and nowhere near the 2 % the earlier brief claimed from the 1.709 ms outlier. Note it scales
+with the PANORAMA and not with the viewport: `EnvironmentResolution::High` is 2048x1024, four times the
+texels, so ~380 ms there.
+
+**WHAT IT BOUGHT**, same scene, Deferred, 1280x766, repeat-shot noise floor **0 pixels in both
+configurations** (measured, not assumed):
+
+| frame | pixels changed | max delta | mean saturation, control -> clouds |
+|---|---|---|---|
+| ground filling the frame (`--camera 0,4000,16000 --look 0,-0.28,-1`) | 925 147 / 980 480 (94.36 %) | 48/255 | 0.413 -> 0.247 |
+| horizon, both azimuths | ~288 000 / 980 480 (29.4 %) | 41/255 | 0.295 -> 0.166 (lower half) |
+| zenith and mid, both azimuths — no geometry in frame | **0** | 0 | — |
+
+The zeroes are the important row: the term lands on lit geometry and on nothing else, which is exactly
+where a change to the baked ambient may land. The direction is the one the symptom describes — the blue
+cast on the shaded side goes, and the saturation with it — but it goes by getting BRIGHTER, not darker
+(mean luminance 0.275 -> 0.329). A sunlit cumulus deck is a brighter dome than clear sky and a far less
+saturated one; the "neutral dome at 45 % radiance" stand-in this section proposed had the saturation
+right and the sign of the luminance wrong.
+
+**Three decisions worth not re-deriving.**
+
+* The cadence is the sun **and** `Graphic::CloudEnvironmentFingerprint` — the packed block with the wind
+  and the region's origin zeroed, plus a counter the renderer bumps when the modelling volume is rebuilt
+  from genuinely different parameters. Coverage, the cloud types, the seed and the layout are NOT in the
+  packed block at all (they are consumed by the CPU bake), so a fingerprint over the block alone would
+  have missed the most important knob on the panel. Wind and the region origin are excluded on purpose,
+  and `Desert/Tests/Engine/SkyRules` asserts both directions.
+* The sky-occlusion volume is written by a pass INSIDE the frame and the bake runs before it, so the
+  first bake of a scene necessarily misses it. Rather than diverge from the screen march, the flag is
+  part of the fingerprint: the frame the volume appears asks for exactly one more bake. Both bakes are
+  visible in any headless run's log.
+* Aerial perspective on the baked clouds is INTEGRATED (`SkyApIntegrateSegment`) instead of fetched from
+  the camera aerial-perspective volume, because a panorama has no view frustum to froxelize. Same
+  integrand, same art-direction tint, same mean-of-three alpha — one model evaluated exactly rather than
+  through a 32x32x16 interpolation.
 
 ### The calibration anchor moved
 

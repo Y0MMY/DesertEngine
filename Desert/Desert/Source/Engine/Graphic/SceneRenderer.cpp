@@ -1227,6 +1227,12 @@ namespace Desert::Graphic
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems.at( "SkyboxSystem" ) )->GetAtmosphere();
     }
 
+    CloudEnvironmentBake SceneRenderer::BuildCloudEnvironmentBake()
+    {
+        return UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
+             ->BuildEnvironmentBake();
+    }
+
     std::optional<Environment> SceneRenderer::GetEnvironment()
     {
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->GetEnvironment();

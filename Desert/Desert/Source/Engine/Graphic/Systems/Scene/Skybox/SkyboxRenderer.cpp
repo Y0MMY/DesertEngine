@@ -9,6 +9,8 @@
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include <chrono>
+
 namespace Desert::Graphic::System
 {
     namespace
@@ -87,6 +89,17 @@ namespace Desert::Graphic::System
             // mesh preview, a thumbnail, another scene view) from overwriting this one's sky.
             m_SkyParams = ShaderResources::StorageBuffer::Create( "SkyBuffer", kSkyPayloadBytes,
                                                                   kSkyPayloadBinding, /*persistent=*/false );
+
+            // The cloud layer's two blocks, for the environment bake alone — see the members' declaration
+            // for why the bytes are the cloud renderer's and the buffers are this one's. Created here
+            // rather than lazily so that "the scene has clouds" and "the bake can carry them" are never
+            // two different answers: a scene that has none writes a zero payload it never reads, which is
+            // 268 bytes per frame in flight and no dispatch at all.
+            m_CloudBakeParams = ShaderResources::StorageBuffer::Create(
+                 "SkyBakeCloudParams", kCloudPayloadBytes, kSkyBakeCloudParamsBinding, /*persistent=*/false );
+            m_CloudBakeAuthored = ShaderResources::StorageBuffer::Create(
+                 "SkyBakeCloudAuthored", static_cast<uint32_t>( sizeof( CloudAuthoredPayload ) ),
+                 kSkyBakeCloudAuthoredBinding, /*persistent=*/false );
 
             // The physical atmosphere's LUT pipelines. Built up front (they are two small compute
             // pipelines); the IMAGES stay lazy, so a scene on
@@ -601,9 +614,16 @@ namespace Desert::Graphic::System
             m_SecondsSinceSunMoved += dt;
         }
 
+        // THIS VIEW'S CLOUD LAYER, asked for BEFORE the trigger rather than after it, because it IS half
+        // of the trigger: the panorama carries the clouds now, so a sky whose sun has not moved can still
+        // be a different sky. The call resolves the layer's species and guarantees its volumes, which is
+        // work the frame is about to do anyway a few lines later — and nothing at all in a scene with no
+        // cloud component, which is what every asset thumbnail and mesh preview is.
+        const CloudEnvironmentBake clouds = m_SceneRenderer->BuildCloudEnvironmentBake();
+
         if ( !ShouldRebakeSkyEnvironment( m_BakedSunDir, m_SunDir, m_Sky.RebakeSunAngleThreshold,
                                           m_Sky.AutoRebakeEnvironment, static_cast<bool>( m_ProceduralEnv ),
-                                          explicitRequest ) )
+                                          explicitRequest, m_BakedCloudFingerprint, clouds.Fingerprint ) )
         {
             m_SecondsSinceStale = 0.0f;
             return;
@@ -648,9 +668,43 @@ namespace Desert::Graphic::System
             return;
         }
 
-        Environment baked = EnvironmentManager::CreateProcedural( size.Width, size.Height, m_SkyParams.get(),
-                                                                  physical ? m_TransmittanceLut.get() : nullptr,
-                                                                  physical ? m_MultiScatterLut.get() : nullptr );
+        // The cloud block goes onto THIS renderer's buffers here — see the members' declaration for why
+        // they are not the cloud renderer's own. A layer that is not marched still writes: a storage
+        // buffer whose bytes were never set is uninitialised device memory behind a valid descriptor, and
+        // the shader's gate is what stops it being read, not the absence of an upload.
+        CloudBakeBinding cloudBinding;
+        if ( m_CloudBakeParams && m_CloudBakeAuthored )
+        {
+            m_CloudBakeParams->SetData( &clouds.Params, kCloudPayloadBytes );
+            m_CloudBakeAuthored->SetData( &clouds.Authored, static_cast<uint32_t>( sizeof( clouds.Authored ) ) );
+
+            cloudBinding.Params   = m_CloudBakeParams.get();
+            cloudBinding.Authored = m_CloudBakeAuthored.get();
+        }
+
+        cloudBinding.Marched      = clouds.Marched;
+        cloudBinding.SkyOcclusion = clouds.SkyOcclusionValid;
+        // The atmosphere's own knob, carried because the bake INTEGRATES the air in front of a cloud
+        // instead of fetching the camera aerial-perspective volume the screen march reads — a panorama has
+        // no view frustum to froxelize. Without it a scene that pushes the haze out would still see it in
+        // its reflections.
+        cloudBinding.AerialStartDepthKm = m_Sky.AerialPerspectiveStartDepthKm;
+        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+            cloudBinding.Noise[slot] = clouds.Noise[slot];
+        cloudBinding.Modelling          = clouds.Modelling;
+        cloudBinding.AuthoredAtlas      = clouds.AuthoredAtlas;
+        cloudBinding.SkyOcclusionVolume = clouds.SkyOcclusionVolume;
+        cloudBinding.DistantSkyLight    = m_Atmosphere.DistantSkyLight;
+
+        // WALL TIME AROUND THE WHOLE CHAIN, printed rather than assumed. Every dispatch below is the
+        // immediate compute path — submit and wait on a fence — so this number is the GPU's, and it is the
+        // one that says what a rebake costs the frame it lands in. The cloud march is the only thing that
+        // has ever been added to it, so it is also the measurement of this feature.
+        const auto bakeStarted = std::chrono::steady_clock::now();
+
+        Environment baked = EnvironmentManager::CreateProcedural(
+             size.Width, size.Height, m_SkyParams.get(), physical ? m_TransmittanceLut.get() : nullptr,
+             physical ? m_MultiScatterLut.get() : nullptr, cloudBinding );
         if ( !baked )
         {
             // Keep the previous environment and say why; the user can retry with the Bake button. Do NOT
@@ -673,7 +727,20 @@ namespace Desert::Graphic::System
             imageService->Unregister( previous.PreFilteredMap );
         }
 
-        m_BakedSunDir = m_SunDir;
+        m_BakedSunDir           = m_SunDir;
+        m_BakedCloudFingerprint = clouds.Fingerprint;
+
+        const double bakeMs =
+             std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - bakeStarted ).count();
+
+        LOG_INFO( "[SkyAtmosphere] Environment baked at {}x{} in {:.1f} ms — {}. The device is idle for all "
+                  "of it, which is why the trigger is the sun and the cloud settings and not the frame.",
+                  size.Width, size.Height, bakeMs,
+                  clouds.Marched ? ( cloudBinding.SkyOcclusion ? "clouds marched into the panorama, "
+                                                                 "sky-occlusion volume read"
+                                                               : "clouds marched into the panorama, "
+                                                                 "profile-driven ambient occlusion" )
+                                 : "sky only (this view has no cloud layer)" );
     }
 
     void SkyboxRenderer::RegisterPasses( RenderGraphBuilder& builder )

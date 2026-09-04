@@ -6,6 +6,7 @@
 // Engine/Graphic/SkyRules.hpp, SkyPayload.hpp, AtmosphereEnv.hpp, SkySettings.hpp.
 
 #include <Engine/Graphic/AtmosphereEnv.hpp>
+#include <Engine/Graphic/Clouds/CloudEnvironmentBake.hpp>
 #include <Engine/Graphic/ColorTemperature.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
 #include <Engine/Graphic/SkyRules.hpp>
@@ -22,6 +23,10 @@ using Desert::ECS::SkyAtmosphereData;
 using Desert::ECS::SkyEnvironmentResolution;
 using Desert::Graphic::AdvanceTimeOfDay;
 using Desert::Graphic::BytesToMiB;
+using Desert::Graphic::CloudEnvironmentFingerprint;
+using Desert::Graphic::CloudGpuPayload;
+using Desert::Graphic::CloudRegionBinding;
+using Desert::Graphic::CloudTypeShape;
 using Desert::Graphic::EnvironmentPanoramaSize;
 using Desert::Graphic::EvaluateAtmosphere;
 using Desert::Graphic::kSkyPackedVec4Count;
@@ -29,6 +34,7 @@ using Desert::Graphic::kSkyPayloadBytes;
 using Desert::Graphic::kSkyRebakeMaxDeferSeconds;
 using Desert::Graphic::kSkyRebakeSettleSeconds;
 using Desert::Graphic::MakeSkySettings;
+using Desert::Graphic::PackCloudParams;
 using Desert::Graphic::PackSky;
 using Desert::Graphic::PlanetRadiusToWorldUnits;
 using Desert::Graphic::ResolveSkyMode;
@@ -118,6 +124,10 @@ TEST( TimeOfDay, ClockAdvancesWrapsAndFreezes )
 
 namespace
 {
+    // What Graphic::CloudEnvironmentFingerprint answers for a view with no cloud layer. The rebake rule
+    // is written for the general case, so most of the tests below hold the cloud half still.
+    constexpr uint64_t kNoClouds = 0ull;
+
     // A toward-sun direction @p degrees away from straight up, in the XY plane.
     glm::vec3 SunAt( float degrees )
     {
@@ -131,7 +141,7 @@ TEST( Rebake, ExplicitRequestAlwaysBakes )
     for ( const bool autoRebake : { true, false } )
         for ( const bool hasEnv : { true, false } )
             EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, autoRebake, hasEnv,
-                                                     /*explicitRequest=*/true ) );
+                                                     /*explicitRequest=*/true, kNoClouds, kNoClouds ) );
 }
 
 TEST( Rebake, FirstBakeHappensEvenWithAutoRebakeOff )
@@ -139,7 +149,7 @@ TEST( Rebake, FirstBakeHappensEvenWithAutoRebakeOff )
     // Without this the scene has no ambient light at all. "Auto Rebake off" is a request to stop
     // RE-baking, not a request to render an unlit world.
     EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, /*autoRebake=*/false,
-                                             /*hasEnvironment=*/false, false ) );
+                                             /*hasEnvironment=*/false, false, kNoClouds, kNoClouds ) );
 }
 
 TEST( RebakeDebounce, ADragCollapsesIntoOneBakeWhenItEnds )
@@ -188,15 +198,17 @@ TEST( RebakeDebounce, EitherConditionIsEnoughAndNeitherGoesBackwards )
 
 TEST( Rebake, ThresholdIsHonouredOnBothSides )
 {
-    EXPECT_FALSE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 4.9f ), 5.0f, true, true, false ) );
-    EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 5.1f ), 5.0f, true, true, false ) );
+    EXPECT_FALSE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 4.9f ), 5.0f, true, true, false, kNoClouds,
+                                              kNoClouds ) );
+    EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 5.1f ), 5.0f, true, true, false, kNoClouds,
+                                             kNoClouds ) );
 }
 
 TEST( Rebake, AutoRebakeOffSuppressesSunMovement )
 {
     for ( const float move : { 1.0f, 45.0f, 179.0f } )
         EXPECT_FALSE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( move ), 5.0f, /*autoRebake=*/false,
-                                                  /*hasEnvironment=*/true, false ) );
+                                                  /*hasEnvironment=*/true, false, kNoClouds, kNoClouds ) );
 }
 
 TEST( Rebake, AntipodalSunsDoNotProduceNaN )
@@ -206,9 +218,10 @@ TEST( Rebake, AntipodalSunsDoNotProduceNaN )
 
     // acos() of a dot product that lands on -1 - 1e-7 in float is NaN, and NaN compares false against
     // every threshold — which would silently disable rebaking forever rather than loudly break.
-    EXPECT_TRUE( ShouldRebakeSkyEnvironment( up, down, 5.0f, true, true, false ) );
-    EXPECT_TRUE( ShouldRebakeSkyEnvironment( up * 3.0f, down * 7.0f, 5.0f, true, true, false ) );
-    EXPECT_FALSE( ShouldRebakeSkyEnvironment( up, up, 5.0f, true, true, false ) );
+    EXPECT_TRUE( ShouldRebakeSkyEnvironment( up, down, 5.0f, true, true, false, kNoClouds, kNoClouds ) );
+    EXPECT_TRUE(
+         ShouldRebakeSkyEnvironment( up * 3.0f, down * 7.0f, 5.0f, true, true, false, kNoClouds, kNoClouds ) );
+    EXPECT_FALSE( ShouldRebakeSkyEnvironment( up, up, 5.0f, true, true, false, kNoClouds, kNoClouds ) );
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -542,6 +555,182 @@ TEST( ColorTemperature, MatchesUnrealsConversionAndBehavesPhysically )
     // The conversion clamps to its published domain rather than extrapolating the fit.
     EXPECT_EQ( ColorFromTemperature( 100.0f ), ColorFromTemperature( 1000.0f ) );
     EXPECT_EQ( ColorFromTemperature( 50000.0f ), ColorFromTemperature( 15000.0f ) );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The clouds' half of the rebake trigger
+// ---------------------------------------------------------------------------------------------------
+//
+// Since Р15 the panorama the IBL chain descends from is marched with the cloud layer in it
+// (Programs/Compute/BakeProceduralSky.shader), so "the environment is stale" stopped being a question
+// about the sun alone. What follows tests the RELATION rather than any number: which changes to the
+// field the fingerprint must see, and — the harder half — which it must NOT, because a bake idles the
+// device for three quarters of a second and two of the block's fields move every frame of every scene
+// that has a breeze in it or a camera that walks.
+
+namespace
+{
+    // A sky that is ordinary rather than interesting: what is measured below is which CHANGES move the
+    // fingerprint, so the baseline only has to be a valid packed block.
+    Desert::Graphic::AtmosphereEnv CloudTestAtmosphere()
+    {
+        Desert::Graphic::AtmosphereEnv env;
+        env.Valid                  = true;
+        env.SunDirection           = glm::normalize( glm::vec3( 0.3f, 0.8f, 0.2f ) );
+        env.SunIrradiance          = glm::vec3( 8.0f, 7.4f, 6.6f );
+        env.SunIlluminanceOnGround = glm::vec3( 8.0f, 7.4f, 6.6f );
+        env.ZenithRadiance         = glm::vec3( 0.20f, 0.28f, 0.44f );
+        env.GroundRadiance         = glm::vec3( 0.10f, 0.10f, 0.09f );
+        return env;
+    }
+
+    CloudTypeShape CloudTestShape()
+    {
+        // VALUE-INITIALISED, and the brace is load-bearing: CloudTypeShape is an aggregate with no
+        // default member initialisers, so `CloudTypeShape shape;` leaves the anvil fields indeterminate —
+        // and CloudTypeSetEnvelopeKm reads them, which puts stack garbage into the layer's envelope and
+        // therefore into the fingerprint. The first draft of this suite did exactly that and reported the
+        // wind exclusion as broken.
+        CloudTypeShape shape{};
+        shape.BaseAltitudeKm   = 1.5f;
+        shape.TopAltitudeKm    = 3.5f;
+        shape.DetailCharacter  = 0.5f;
+        shape.DetailFactor     = 1.0f;
+        shape.DensityFactor    = 1.0f;
+        shape.ExtinctionFactor = 1.0f;
+        return shape;
+    }
+
+    // @p wind and @p regionOrigin are the two things the fingerprint must ignore, so they are arguments
+    // rather than constants — a helper that could not vary them could not state the property.
+    uint64_t CloudTestFingerprint( const Desert::ECS::VolumetricCloudData& data, const glm::vec3& wind,
+                                   const glm::vec2& regionOrigin, bool skyOcclusionValid = false,
+                                   uint32_t shapeGeneration = 0u )
+    {
+        const CloudTypeShape shape      = CloudTestShape();
+        const auto           atmosphere = CloudTestAtmosphere();
+
+        const CloudGpuPayload payload =
+             PackCloudParams( data, &shape, 1u, atmosphere, wind, CloudRegionBinding{ regionOrigin, 30.0f } );
+        return CloudEnvironmentFingerprint( payload, /*marched=*/true, skyOcclusionValid, shapeGeneration );
+    }
+} // namespace
+
+TEST( CloudEnvironmentCadence, NoCloudsIsZeroAndCloudsNeverAre )
+{
+    // The two states have to be tellable apart, or deleting the layer would leave its overcast baked into
+    // the scene's ambient with nothing to trigger a rebake.
+    const CloudGpuPayload empty{};
+    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, false, 0u ), 0ull );
+    EXPECT_EQ( CloudEnvironmentFingerprint( empty, /*marched=*/false, true, 7u ), 0ull );
+
+    Desert::ECS::VolumetricCloudData data;
+    EXPECT_NE( CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ) ), 0ull );
+}
+
+TEST( CloudEnvironmentCadence, WindAndTheRegionOriginAreDeliberatelyInvisible )
+{
+    // THIS IS THE DECISION THE WHOLE FUNCTION EXISTS FOR. The diffuse irradiance cube is a 65 536-sample
+    // cosine convolution per texel: it integrates the ARRANGEMENT of the field away and responds only to
+    // the dome's mean, so advection moves nothing it can see. And the modelling region's origin follows
+    // the CAMERA. A fingerprint that saw either would idle the device for three quarters of a second
+    // every time the wind blew or a player walked three kilometres — the same feature, shipped as a
+    // stutter.
+    Desert::ECS::VolumetricCloudData data;
+
+    const uint64_t base = CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ) );
+
+    for ( const float km : { 0.5f, 40.0f, 5000.0f } )
+    {
+        EXPECT_EQ( CloudTestFingerprint( data, glm::vec3( km, 0.0f, -km ) * 100000.0f, glm::vec2( 0.0f ) ), base )
+             << "wind " << km << " km";
+        EXPECT_EQ( CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( km, -km ) ), base )
+             << "region origin " << km << " km";
+    }
+}
+
+TEST( CloudEnvironmentCadence, EveryMaterialKnobTheMarchReadsIsSeen )
+{
+    // The half of the trigger that lives in the packed block: what the cloud is MADE OF and how it is lit.
+    // Taken through the WHOLE block rather than field by field, so a parameter appended to
+    // CloudGpuPayload tomorrow is in the fingerprint the moment it exists.
+    Desert::ECS::VolumetricCloudData data;
+    const uint64_t                   base = CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ) );
+
+    const auto moved = [&]( const Desert::ECS::VolumetricCloudData& changed, const char* what )
+    { EXPECT_NE( CloudTestFingerprint( changed, glm::vec3( 0.0f ), glm::vec2( 0.0f ) ), base ) << what; };
+
+    Desert::ECS::VolumetricCloudData density = data;
+    density.DensityScale                     = data.DensityScale * 1.5f + 0.1f;
+    moved( density, "Density Scale" );
+
+    Desert::ECS::VolumetricCloudData extinction = data;
+    extinction.ExtinctionScale                  = data.ExtinctionScale * 1.5f + 0.1f;
+    moved( extinction, "Extinction Scale" );
+
+    Desert::ECS::VolumetricCloudData albedo = data;
+    albedo.ScatteringAlbedo                 = data.ScatteringAlbedo * 0.5f;
+    moved( albedo, "Scattering Albedo" );
+
+    Desert::ECS::VolumetricCloudData detail = data;
+    detail.DetailStrength                   = data.DetailStrength * 0.5f + 0.05f;
+    moved( detail, "Detail Strength" );
+
+    Desert::ECS::VolumetricCloudData phase = data;
+    phase.PhaseG                           = data.PhaseG * 0.5f;
+    moved( phase, "Phase G" );
+}
+
+TEST( CloudEnvironmentCadence, WhereTheCloudIsArrivesThroughTheShapeGeneration )
+{
+    // Coverage, the cloud types, the seed, the placement lattice and the painted layout decide WHERE cloud
+    // is, and NONE of them is in the packed block at all — they are consumed on the CPU by
+    // Assets::BakeCloudProceduralVolume and reach the march only as the contents of the modelling volume.
+    // A fingerprint over the block alone would therefore miss the most important knob on the panel, which
+    // is exactly the dead-trigger shape DEV_CONTRACT §1.3 is about.
+    Desert::ECS::VolumetricCloudData data;
+
+    const uint64_t base = CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u );
+
+    // Every distinct rebuild of the volume's SHAPE is a distinct environment, and they do not collide with
+    // each other.
+    std::array<uint64_t, 4> seen{ base, 0ull, 0ull, 0ull };
+    for ( uint32_t generation = 1; generation <= 3; ++generation )
+    {
+        seen[generation] = CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, generation );
+        for ( uint32_t earlier = 0; earlier < generation; ++earlier )
+            EXPECT_NE( seen[generation], seen[earlier] ) << generation << " vs " << earlier;
+    }
+}
+
+TEST( CloudEnvironmentCadence, TheSkyOcclusionVolumeIsPartOfIt )
+{
+    // The volume is written by a pass INSIDE the frame and the bake runs before it, so the first bake of
+    // a scene necessarily marches without it and the dome comes out brighter than the visible sky by the
+    // whole of the layer's self-occlusion. Carrying the flag in the fingerprint is what makes the frame it
+    // appears ask for one more bake instead of leaving that difference standing for the session.
+    Desert::ECS::VolumetricCloudData data;
+
+    EXPECT_NE( CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), /*skyOcclusion=*/false ),
+               CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), /*skyOcclusion=*/true ) );
+}
+
+TEST( Rebake, CloudsMovingRebakeAStillSun )
+{
+    // The two halves of the trigger are independent, and this is the half that did not exist before: an
+    // artist dragging Coverage while the sun stands still has to see the ambient follow.
+    EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, /*autoRebake=*/true,
+                                             /*hasEnvironment=*/true, /*explicitRequest=*/false, 0x1234ull,
+                                             0x5678ull ) );
+
+    // ...and an unchanged sky under an unchanged sun still bakes nothing.
+    EXPECT_FALSE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, true, true, false, 0x1234ull,
+                                              0x1234ull ) );
+
+    // Auto Rebake off suppresses the cloud half exactly as it suppresses the sun's, because it means "stop
+    // following the sky", not "stop following one part of it".
+    EXPECT_FALSE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, /*autoRebake=*/false, true,
+                                              false, 0x1234ull, 0x5678ull ) );
 }
 
 int main( int argc, char** argv )

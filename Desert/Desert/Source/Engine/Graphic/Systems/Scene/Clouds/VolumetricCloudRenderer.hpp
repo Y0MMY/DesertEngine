@@ -5,6 +5,7 @@
 #include <Engine/Assets/CloudProceduralVolume.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
+#include <Engine/Graphic/Clouds/CloudEnvironmentBake.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 #include <Engine/Graphic/Clouds/CloudQuality.hpp>
@@ -151,6 +152,26 @@ namespace Desert::Graphic::System
         /// only reads this number still gets the right answer.
         float GetShadowStrength() const;
 
+        /**
+         * @brief This view's cloud field, prepared for the sky's environment bake.
+         *
+         * The panorama the IBL chain is built from is marched with the SAME field, the SAME lighting and
+         * the SAME quadrature the screen pass uses, so it is this object that has to answer — the
+         * parameters, the modelling volume and the noise volumes are its, and SkyboxRenderer owns none of
+         * them. See Engine/Graphic/Clouds/CloudEnvironmentBake.hpp for the seam.
+         *
+         * CALLED OUTSIDE THE FRAME, from SceneRenderer::OnUpdate, before anything this class dispatches.
+         * It therefore does the same three steps every dispatch here does — resolve the species, guarantee
+         * the volumes they name, pack the block — through the one function all of them share, and blocks
+         * on the first modelling bake exactly as the frame does.
+         *
+         * @return a result whose Marched is false when this view has no clouds to bake: no component, the
+         *         layer off, no atmosphere to light it, or a resource that could not be built. The
+         *         panorama is then the sky alone, and the caller must still bind fallbacks for every
+         *         descriptor the bake declares.
+         */
+        CloudEnvironmentBake BuildEnvironmentBake();
+
     private:
         bool CreatePipelines();
         // Allocates (or reallocates) all SIX images the pass owns: the quarter-resolution scatter and
@@ -191,6 +212,24 @@ namespace Desert::Graphic::System
         // failure, and a false answer makes the march fall back to the profile-driven occlusion rather
         // than sampling an image nobody wrote.
         bool EnsureSkyOcclusionVolume();
+
+        /**
+         * The three steps every dispatch of this subsystem takes before it can bind anything: resolve the
+         * layer's species, guarantee the volumes they name and the modelling volume they are baked into,
+         * and pack the parameter block from all of it.
+         *
+         * ONE FUNCTION AND NOT THREE COPIES OF THE SEQUENCE. The shadow map, the march and the sky's
+         * environment bake all need exactly this, in exactly this order, with exactly these arguments —
+         * and "both ends of a chain look right, one link in between silently loses something" is the
+         * defect shape this repository has recorded seven instances of in one day. The quality tier's two
+         * ceilings in particular have to reach every one of them: a shadow ray of two different lengths in
+         * one frame is a disagreement no test of either end would find.
+         *
+         * @param payload written only when this returns true.
+         * @return false, having logged the reason where there was one, when the field cannot be built at
+         *         all — no atmosphere, no camera, or a volume that could not be created.
+         */
+        bool BuildFieldPayload( CloudGpuPayload& payload );
 
         /**
          * The types in this layer's four slots, packed down to a prefix, with the empty ones removed and
@@ -319,6 +358,14 @@ namespace Desert::Graphic::System
         std::shared_ptr<Image3D> m_SkyOcclusionVolume;
         bool                     m_SkyOcclusionFailed = false;
 
+        // Whether the volume above holds a reconstruction that may be READ, as distinct from existing.
+        // The march has always needed this and carried it as a local; the sky's environment bake needs it
+        // too, and that one runs OUTSIDE the frame, before this pass, so it can only ask about the
+        // previous frame. Cleared at the top of every ExecuteInFrame so that a frame which skipped the
+        // pass leaves "no volume" rather than a stale yes — the bake would otherwise shade a panorama with
+        // a transmittance field written for a sky that has since been switched off.
+        bool m_SkyOcclusionValid = false;
+
         // BORROWED, not owned: Runtime::CloudNoiseService owns every noise volume and shares one upload
         // across all views. A raw pointer says that plainly, where a shared_ptr here would suggest this
         // renderer has a say in the image's lifetime and would keep an unloaded volume alive on the device.
@@ -385,6 +432,16 @@ namespace Desert::Graphic::System
         Assets::CloudProceduralFieldParams m_ModellingParams{};
         glm::vec2                          m_ModellingOriginKm{ 0.0f };
         bool                               m_ModellingValid = false;
+
+        // HOW MANY TIMES THE VOLUME HAS BEEN REBUILT FROM GENUINELY DIFFERENT PARAMETERS — the region's
+        // ORIGIN excluded, because that follows the camera. It exists for the sky's environment bake and
+        // for nothing else: coverage, the cloud types, the seed, the placement lattice and the painted
+        // layout decide WHERE cloud is, none of them is in the packed block the fingerprint hashes, and a
+        // trigger that could not see them would leave a scene's ambient describing the weather the sky had
+        // when it was opened. Comparing through Assets::CloudProceduralParamsEqual rather than restating
+        // which fields matter is what keeps it from drifting from the cache above it, which asks the same
+        // question one line later for a different reason.
+        uint32_t m_ModellingShapeGeneration = 0;
 
         // The content hash of the painting already complained about, so a layout the layer cannot honour is
         // named ONCE rather than sixty times a second. MUTABLE because BuildProceduralParams is const and
