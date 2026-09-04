@@ -16,6 +16,9 @@
 
 #include "SkyMediumReference.hpp"
 
+// AtmosphereEnv for the two radii it publishes to consumers that do not bind the sky parameter buffer —
+// asserted below against the shader's own SkyMakeAtmParams rather than trusted.
+#include <Engine/Graphic/AtmosphereEnv.hpp>
 #include <Engine/Graphic/SkyGroundTransmittance.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
 
@@ -587,6 +590,332 @@ TEST( SkyMedium, RaySphereDistancesAgreeWithTheGeometry )
 
     // The radius along a vertical ray is linear in t — the anchor for the closed-form test above.
     EXPECT_NEAR( Ref::SkyRadiusAlongRay( p.BottomRadiusKm, 1.0f, 12.5f ), p.BottomRadiusKm + 12.5f, 1e-2f );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// READING THE TRANSMITTANCE LUT AT A SAMPLE'S OWN ALTITUDE (Р14)
+//
+// The volumetric cloud march's default sun colour is `OuterSpaceIlluminance x T(ground)` — one colour for
+// a shell that is kilometres tall. With VolumetricCloudData::PerSampleAtmosphereTransmittance on, the
+// packer sends the OUTER-SPACE illuminance and both marches of the field multiply by T at the sample's
+// own altitude instead, through SkyRadiusAtAltitude and SkyTransmittanceLutUvClamped below.
+//
+// EVERYTHING HERE IS A RELATION AND NOT A SPOT VALUE, because every failure this reader can have is a
+// relation failure: an altitude taken from the wrong shell's floor, a zenith taken from the world's +Y
+// instead of the sample's own, a uv that saturates into a REPEAT sampler's wrap. None of those changes a
+// single value into an obviously wrong one — they change the SHAPE of the answer over altitude.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // SkyboxRenderer::kTransmittanceLutWidth / kTransmittanceLutHeight, which is what the march's own
+    // textureSize() reports to it.
+    constexpr int kLutWidth  = 256;
+    constexpr int kLutHeight = 64;
+
+    // THE LUT ITSELF, marched by the same text the GPU marches. Built once and reused, because a table of
+    // 16 384 forty-step integrals is the expensive part of this file and every test below wants the same
+    // one.
+    const std::vector<glm::vec3>& TransmittanceTable( const Ref::SkyAtmParams& p )
+    {
+        static const std::vector<glm::vec3> table = [&p]
+        {
+            std::vector<glm::vec3> t( static_cast<size_t>( kLutWidth ) * kLutHeight );
+            for ( int y = 0; y < kLutHeight; ++y )
+            {
+                for ( int x = 0; x < kLutWidth; ++x )
+                {
+                    // The fill's own texel-centre convention: Programs/Sky/SkyTransmittanceLut.shader
+                    // writes texel (x, y) for the parameters at uv = (x + 0.5) / size.
+                    const glm::vec2 uv( ( static_cast<float>( x ) + 0.5f ) / static_cast<float>( kLutWidth ),
+                                        ( static_cast<float>( y ) + 0.5f ) / static_cast<float>( kLutHeight ) );
+                    const Ref::SkyTransmittanceLutCoord c =
+                         Ref::SkyTransmittanceLutParamsFromUv( p.BottomRadiusKm, p.TopRadiusKm, uv );
+                    t[static_cast<size_t>( y ) * kLutWidth + x] = Ref::SkyTransmittanceToTop(
+                         p, c.ViewHeightKm, c.ViewZenithCos, Ref::SKY_TRANSMITTANCE_SAMPLE_COUNT );
+                }
+            }
+            return t;
+        }();
+        return table;
+    }
+
+    // A BILINEAR FETCH WITH REPEAT WRAPPING, which is the only kind this engine has: VulkanImage.cpp
+    // creates every sampler REPEAT on all three axes and there is no CLAMP_TO_EDGE to fall back on. That
+    // is why this helper wraps rather than clamps — modelling the sampler honestly is the whole point,
+    // and a helper that clamped would make the texel-centre guard untestable by hiding its absence.
+    glm::vec3 SampleLutRepeat( const Ref::SkyAtmParams& p, glm::vec2 uv )
+    {
+        const std::vector<glm::vec3>& table = TransmittanceTable( p );
+
+        auto wrap = []( int i, int n ) { return ( ( i % n ) + n ) % n; };
+
+        const float fx = uv.x * static_cast<float>( kLutWidth ) - 0.5f;
+        const float fy = uv.y * static_cast<float>( kLutHeight ) - 0.5f;
+
+        const int   x0 = static_cast<int>( std::floor( fx ) );
+        const int   y0 = static_cast<int>( std::floor( fy ) );
+        const float tx = fx - static_cast<float>( x0 );
+        const float ty = fy - static_cast<float>( y0 );
+
+        auto texel = [&]( int x, int y )
+        { return table[static_cast<size_t>( wrap( y, kLutHeight ) ) * kLutWidth + wrap( x, kLutWidth )]; };
+
+        const glm::vec3 a = glm::mix( texel( x0, y0 ), texel( x0 + 1, y0 ), tx );
+        const glm::vec3 b = glm::mix( texel( x0, y0 + 1 ), texel( x0 + 1, y0 + 1 ), tx );
+        return glm::mix( a, b, ty );
+    }
+
+    // What the marches do, in one place: the sample's radius, the reader's uv, the fetch.
+    glm::vec3 PerSampleTransmittance( const Ref::SkyAtmParams& p, float altitudeKm, float sunZenithCos )
+    {
+        const float     viewHeightKm = Ref::SkyRadiusAtAltitude( p.BottomRadiusKm, p.TopRadiusKm, altitudeKm );
+        const glm::vec2 uv           = Ref::SkyTransmittanceLutUvClamped(
+             p.BottomRadiusKm, p.TopRadiusKm, viewHeightKm, sunZenithCos,
+             glm::vec2( static_cast<float>( kLutWidth ), static_cast<float>( kLutHeight ) ) );
+        return SampleLutRepeat( p, uv );
+    }
+} // namespace
+
+TEST( SkyPerSampleSunTransmittance, TheSampleRadiusStaysInsideTheShellTheMappingIsDefinedOver )
+{
+    // A DOMAIN GUARD, not a correction. The mapping's rho is sqrt((r - Rb)(r + Rb)) and its d is a
+    // distance to the top shell: a radius below the ground or above the atmosphere makes both imaginary,
+    // and a cloud layer authored at 70 km under a 60 km atmosphere is an AUTHORABLE state rather than a
+    // bug in the reader. The shadow ray can also step below its own start when that start is on the
+    // layer's base, which is where a negative altitude comes from.
+    const Ref::SkyAtmParams p = EarthParams();
+
+    for ( const float altitudeKm : { -5.0f, -0.001f, 0.0f, 2.0f, 12.0f, 59.0f, 60.0f, 1000.0f } )
+    {
+        const float r = Ref::SkyRadiusAtAltitude( p.BottomRadiusKm, p.TopRadiusKm, altitudeKm );
+        EXPECT_GE( r, p.BottomRadiusKm ) << "altitude " << altitudeKm;
+        EXPECT_LE( r, p.TopRadiusKm ) << "altitude " << altitudeKm;
+    }
+
+    // And inside the shell it is the altitude, exactly — the guard must not be a clamp that also rounds.
+    for ( const float altitudeKm : { 0.0f, 0.5f, 4.0f, 20.0f } )
+        EXPECT_FLOAT_EQ( Ref::SkyRadiusAtAltitude( p.BottomRadiusKm, p.TopRadiusKm, altitudeKm ),
+                         p.BottomRadiusKm + altitudeKm );
+}
+
+TEST( SkyPerSampleSunTransmittance, TheReaderNeverHandsARepeatSamplerAUvThatWraps )
+{
+    // THE RELATION BETWEEN THE READER AND THE SAMPLER IT FEEDS. Every sampler this engine creates is
+    // REPEAT (VulkanImage.cpp asserts it), and the mapping saturates at BOTH ends under conditions an
+    // ordinary scene reaches: uv.x = 1 for every sun below the sample's horizon, uv.x = 0 for a sun at
+    // the sample's own zenith. A bilinear fetch at exactly 0 or 1 blends the two ENDS of the table, which
+    // are the brightest and the darkest transmittance it holds.
+    //
+    // Half a texel in is what CLAMP_TO_EDGE would give, and asserting the band rather than the fetch is
+    // what makes this a statement about the reader instead of about one sun.
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec2 size( static_cast<float>( kLutWidth ), static_cast<float>( kLutHeight ) );
+    const glm::vec2 texel = 0.5f / size;
+
+    for ( const float altitudeKm : { 0.0f, 0.01f, 2.0f, 5.0f, 12.0f, 59.9f } )
+    {
+        const float viewHeightKm = Ref::SkyRadiusAtAltitude( p.BottomRadiusKm, p.TopRadiusKm, altitudeKm );
+
+        for ( const float elevation : { 90.0f, 60.0f, 30.0f, 5.0f, 0.5f, 0.0f, -0.5f, -10.0f, -90.0f } )
+        {
+            const float     mu = SunDirectionAtElevation( elevation ).y;
+            const glm::vec2 uv =
+                 Ref::SkyTransmittanceLutUvClamped( p.BottomRadiusKm, p.TopRadiusKm, viewHeightKm, mu, size );
+
+            EXPECT_GE( uv.x, texel.x ) << "altitude " << altitudeKm << ", elevation " << elevation;
+            EXPECT_LE( uv.x, 1.0f - texel.x ) << "altitude " << altitudeKm << ", elevation " << elevation;
+            EXPECT_GE( uv.y, texel.y ) << "altitude " << altitudeKm << ", elevation " << elevation;
+            EXPECT_LE( uv.y, 1.0f - texel.y ) << "altitude " << altitudeKm << ", elevation " << elevation;
+        }
+    }
+}
+
+TEST( SkyPerSampleSunTransmittance, MoreAirBetweenTheSampleAndSpaceMeansLessSunReachesIt )
+{
+    // THE RELATION THE WHOLE FEATURE IS, and it is a MONOTONICITY rather than a value: a sample that
+    // stands higher has strictly less air above it, so the sun that reaches it cannot be dimmer. Read
+    // through the FULL reader — the radius guard, the mapping, the texel-centre clamp and a REPEAT
+    // bilinear fetch of a real LUT — so that any of those four getting it wrong shows here.
+    //
+    // Checked against a saboteur: dropping the texel clamp, inverting the altitude, or basing it on the
+    // top radius instead of the bottom each turn this red, and none of them changes a single spot value
+    // into anything that looks wrong on its own.
+    const Ref::SkyAtmParams p = EarthParams();
+
+    for ( const float elevation : { 90.0f, 45.0f, 20.0f, 10.0f, 5.0f, 2.0f, 0.5f } )
+    {
+        const float mu = SunDirectionAtElevation( elevation ).y;
+
+        glm::vec3 previous( -1.0f );
+        for ( const float altitudeKm : { 0.0f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f, 12.0f, 20.0f, 40.0f } )
+        {
+            const glm::vec3 t = PerSampleTransmittance( p, altitudeKm, mu );
+
+            for ( int c = 0; c < 3; ++c )
+            {
+                // A transmittance is a probability of survival: it may not amplify, and it may not fall
+                // as the sample climbs out of the air that was absorbing it. The tolerance is the LUT's
+                // own quantisation, not a fudge — the table is 256 columns wide.
+                EXPECT_GE( t[c], 0.0f ) << "elevation " << elevation << ", altitude " << altitudeKm;
+                EXPECT_LE( t[c], 1.0f ) << "elevation " << elevation << ", altitude " << altitudeKm;
+                EXPECT_GE( t[c], previous[c] - 1e-4f ) << "channel " << c << " falls with altitude at elevation "
+                                                       << elevation << ", altitude " << altitudeKm;
+            }
+            previous = t;
+        }
+    }
+}
+
+TEST( SkyPerSampleSunTransmittance, AtTheGroundItIsTheColourTheOneColourPathAlreadyApplies )
+{
+    // THE RELATION THAT MAKES THE FLAG A GENERALISATION RATHER THAN A RECALIBRATION. At altitude zero the
+    // per-sample form must be the value the shipped path already multiplies the sun by. If it were not,
+    // turning the flag on would not be "the atmosphere, taken where the cloud is" — it would be a
+    // different sun, and every number in Docs/Clouds/CALIBRATION.md would be re-based by an amount
+    // nobody chose.
+    //
+    // The tolerance is the LUT's, not the integrator's: the shipped path evaluates the march directly
+    // while the per-sample path reads a 256x64 table of it, so they agree to the table's resolution.
+    const Ref::SkyAtmParams p = EarthParams();
+
+    for ( const float elevation : { 90.0f, 60.0f, 30.0f, 10.0f, 5.0f, 1.0f } )
+    {
+        const float     mu      = SunDirectionAtElevation( elevation ).y;
+        const glm::vec3 shipped = Ref::SkyTransmittanceAtGroundToSun( p, mu );
+        const glm::vec3 here    = PerSampleTransmittance( p, Ref::SKY_PLANET_RADIUS_OFFSET_KM, mu );
+
+        for ( int c = 0; c < 3; ++c )
+            EXPECT_NEAR( here[c], shipped[c], 0.02f ) << "elevation " << elevation << " channel " << c;
+    }
+}
+
+TEST( SkyPerSampleSunTransmittance, TheGainIsSmallAtNoonAndLargeAndBlueAtALowSun )
+{
+    // THE SIZE OF THE THING, pinned so that a later change which quietly neuters it fails here rather
+    // than in a frame nobody re-shot. These are the numbers that decide whether the feature is worth its
+    // fetch, and they are what the report quotes.
+    const Ref::SkyAtmParams p = EarthParams();
+
+    auto gain = [&]( float elevationDeg, float altitudeKm )
+    {
+        const float     mu     = SunDirectionAtElevation( elevationDeg ).y;
+        const glm::vec3 ground = Ref::SkyTransmittanceAtGroundToSun( p, mu );
+        const glm::vec3 up     = PerSampleTransmittance( p, altitudeKm, mu );
+        return glm::vec3( up.x / ground.x, up.y / ground.y, up.z / ground.z );
+    };
+
+    // At noon over a deck at two kilometres the sun is a few per cent brighter and slightly bluer — a
+    // change of one or two 8-bit levels on a lit cloud top, which is around the noise floor of a frame.
+    const glm::vec3 noon = gain( 90.0f, 2.0f );
+    EXPECT_GT( noon.x, 1.0f );
+    EXPECT_LT( noon.x, 1.05f );
+    EXPECT_GT( noon.z, noon.x ) << "the gain is not bluer than it is redder, so Rayleigh is not driving it";
+    EXPECT_LT( noon.z, 1.15f );
+
+    // At five degrees — the golden hour, where the whole point of the feature is — the same deck is
+    // TENS of per cent brighter and much bluer, because the slant path through the low, dense air it is
+    // standing above is many times longer.
+    const glm::vec3 low = gain( 5.0f, 2.0f );
+    EXPECT_GT( low.x, 1.15f );
+    EXPECT_GT( low.z, 1.7f );
+    EXPECT_GT( low.z / low.x, noon.z / noon.x )
+         << "the colour shift does not grow as the sun descends, which is the entire mechanism";
+
+    // And it grows with altitude at a fixed sun: a cirrus at eight kilometres sees more of the change
+    // than a cumulus base at one.
+    EXPECT_GT( gain( 5.0f, 8.0f ).z, gain( 5.0f, 1.0f ).z );
+}
+
+TEST( SkyPerSampleSunTransmittance, TheLutHasNoPlanetShadowSoItsReaderMustApplyOneItself )
+{
+    // FOUND BY A FRAME, NOT BY READING THE CODE, and recorded here so the next reader of this LUT does
+    // not have to find it again. The mapping stores the transmittance from a radius to SPACE along a
+    // zenith angle. It has NO state for "the ray is blocked by the planet": SkyDistanceToTop keeps
+    // returning the top-shell root through the ground, so a sun below the sample's horizon simply
+    // saturates the uv at its last column — the grazing ray.
+    //
+    // Read that way, a night sky lights its clouds with the GRAZING transmittance instead of nothing. It
+    // is small in absolute terms and almost entirely red, so it renders as a blood-red deck rather than a
+    // dark one. Both marches therefore multiply by Common/SkyScattering.glslh's SkyPlanetShadow — the
+    // SAME term the sky multiplies its own sun by, so a cloud and the sky behind it cross the terminator
+    // at one rate instead of two.
+    const Ref::SkyAtmParams p = EarthParams();
+
+    for ( const float altitudeKm : { 0.01f, 2.0f, 5.0f, 8.0f } )
+    {
+        const float viewHeightKm = p.BottomRadiusKm + altitudeKm;
+
+        // The sample's OWN horizon, which dips further below the horizontal the higher it stands.
+        const float sinHorizon = -std::sqrt(
+             std::max( 1.0f - ( p.BottomRadiusKm / viewHeightKm ) * ( p.BottomRadiusKm / viewHeightKm ), 0.0f ) );
+
+        // Above it the ray reaches space; below it the planet is in the way. Both halves asserted,
+        // because a test that only checked the blocked side would pass on a function that always says yes.
+        EXPECT_FALSE( Ref::SkyIntersectsGround( viewHeightKm, sinHorizon + 0.01f, p.BottomRadiusKm ) )
+             << "altitude " << altitudeKm;
+        EXPECT_TRUE( Ref::SkyIntersectsGround( viewHeightKm, sinHorizon - 0.01f, p.BottomRadiusKm ) )
+             << "altitude " << altitudeKm;
+
+        // AND WHAT THE FETCH RETURNS INSTEAD OF NOTHING. Every below-horizon sun saturates the mapping,
+        // so the clamped read lands on the LAST COLUMN whatever the elevation. Its value is the leak, and
+        // the two assertions are its size and its colour: per cents of the sun in RED against essentially
+        // nothing in blue, which is why the symptom in the frame is a deck that glows dark red at night
+        // rather than one that is merely a little too bright.
+        const glm::vec3 leak = PerSampleTransmittance( p, altitudeKm, sinHorizon - 0.2f );
+
+        EXPECT_GT( leak.x, 0.015f ) << "altitude " << altitudeKm;
+        EXPECT_GT( leak.x, leak.y * 5.0f )
+             << "the leak is no longer overwhelmingly RED at altitude " << altitudeKm
+             << ", so the symptom this test describes has changed and the frame should be re-shot";
+    }
+}
+
+TEST( SkyPerSampleSunTransmittance, AWrappingFetchAtTheSaturatedEndWouldReturnMostOfTheZenithSun )
+{
+    // THE HAZARD THE TEXEL-CENTRE CLAMP PREVENTS, measured rather than asserted. The two ends of the
+    // table are the two EXTREMES of the quantity, so a bilinear blend of them is the worst possible
+    // answer — and at uv.x exactly 1 a REPEAT sampler returns exactly that blend.
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec3 wrapped = SampleLutRepeat( p, glm::vec2( 1.0f, 0.18f ) );
+    const glm::vec3 honest  = SampleLutRepeat(
+         p, glm::vec2( ( static_cast<float>( kLutWidth ) - 0.5f ) / static_cast<float>( kLutWidth ), 0.18f ) );
+
+    EXPECT_LT( honest.y, 0.05f ) << "the last column is no longer the grazing ray";
+    EXPECT_GT( wrapped.y - honest.y, 0.35f )
+         << "a wrapping fetch at the saturated end no longer differs materially from the correct one, so "
+            "either the LUT's ends have changed meaning or this test has stopped measuring the hazard";
+}
+
+TEST( SkyPerSampleSunTransmittance, TheAtmosphereEnvPublishesTheShellTheLutWasWrittenOver )
+{
+    // THE MIRROR. AtmosphereEnv publishes the two radii for consumers that do not bind the sky parameter
+    // buffer — the cloud march is the first — and it derives them in C++ while the LUT was written from
+    // SkyMakeAtmParams inside the shader. Two derivations of one shell is exactly the pair this project
+    // keeps finding, and a disagreement here is not an error anywhere: it is a transmittance sampled at
+    // the wrong uv, which looks like a tuning problem.
+    for ( const float planetRadiusWorld : { 636000000.0f, 100000000.0f, 1200000000.0f } )
+    {
+        for ( const float atmosphereHeightKm : { 60.0f, 100.0f, 8.0f, 0.0f } )
+        {
+            Desert::Graphic::SkySettings sky{};
+            sky.PlanetRadius       = planetRadiusWorld;
+            sky.AtmosphereHeightKm = atmosphereHeightKm;
+
+            const Desert::Graphic::SkyGpuPayload payload =
+                 Desert::Graphic::PackSky( glm::vec3( 0.0f, 1.0f, 0.0f ), sky );
+            const Ref::SkyAtmParams shader =
+                 Ref::SkyMakeAtmParams( payload.MediumRayleigh, payload.MediumMie, payload.MediumMieAbsorption,
+                                        payload.MediumOzone, payload.MediumGround, payload.MediumTentPlanet );
+
+            EXPECT_FLOAT_EQ( Desert::Graphic::AtmosphereBottomRadiusKm( sky ), shader.BottomRadiusKm )
+                 << "planet " << planetRadiusWorld << ", height " << atmosphereHeightKm;
+            EXPECT_FLOAT_EQ( Desert::Graphic::AtmosphereTopRadiusKm( sky ), shader.TopRadiusKm )
+                 << "planet " << planetRadiusWorld << ", height " << atmosphereHeightKm;
+        }
+    }
 }
 
 int main( int argc, char** argv )

@@ -883,8 +883,43 @@ namespace Desert::ECS
         //
         // Read by Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.cpp, which decides whether
         // to dispatch Editor/Resources/Shaders/Programs/Clouds/CloudSkyOcclusionVolume.shader, and by
-        // Editor/Resources/Shaders/Programs/Clouds/CloudRaymarch.shader through CloudPush::SkyOcclusion.
+        // Editor/Resources/Shaders/Programs/Clouds/CloudRaymarch.shader through CloudPush::Frame.
         bool SkyOcclusionVolume = true;
+
+        PROPERTY( DisplayName( "Per Sample Atmosphere Transmittance" ), Category( "Lighting" ),
+                  Tooltip( "Re-evaluate how much of the sun the ATMOSPHERE has already absorbed at every "
+                           "sample's own altitude, instead of using the single value computed on the "
+                           "ground.\n\nOff, the whole shell — kilometres of it — is lit by the colour the "
+                           "sun has at sea level, so a deck at four kilometres is reddened by air it is "
+                           "standing above. On, each sample reads the atmosphere's transmittance LUT at "
+                           "its own height and zenith angle, which brightens and de-reddens cloud with "
+                           "altitude; the difference is largest at a low sun and vanishes at noon.\n\nOff "
+                           "by default, as Unreal ships it: it adds one texture fetch to every sample of "
+                           "the view march. Needs the Physical Atmosphere sky model — with the artistic "
+                           "gradient there is no transmittance to read and the flag does nothing." ) )
+        // DEFAULT OFF, WHICH IS UNREAL'S DEFAULT for the same field
+        // (UVolumetricCloudComponent::bUsePerSampleAtmosphericLightTransmittance), and the frame with it
+        // off is byte-for-byte the frame without this feature: the packer sends the same ground-level sun
+        // colour it always sent, and every march's gate is a flag that skips the fetch entirely. That is
+        // what makes an A/B a property of one binary rather than of two.
+        //
+        // WHAT IT ACTUALLY CHANGES. UE's default sun colour for clouds is
+        // `OuterSpaceIlluminance * T(groundLevel)` — one colour for the whole shell, which this engine
+        // packs at Graphic::PackCloudParams from AtmosphereEnv::SunIlluminanceOnGround. Turning this on
+        // swaps the base for AtmosphereEnv::SunOuterSpaceIlluminance and moves the transmittance into the
+        // march, where it becomes `T(sample)` — the ABSOLUTE form, with no division anywhere. The ratio
+        // form `T(sample)/T(ground)` is what an engine whose base was NOT already multiplied by T(ground)
+        // would need, and it is an infinity at a low sun in whichever channel's transmittance reaches zero
+        // first.
+        //
+        // Read by Engine/Graphic/Clouds/CloudPayload.hpp, which chooses which of the two illuminances the
+        // parameter block carries, and applied by BOTH marches of the field: the screen march
+        // (Editor/Resources/Shaders/Programs/Clouds/CloudRaymarch.shader, through CloudPush::Frame) and
+        // the environment bake (Editor/Resources/Shaders/Programs/Compute/BakeProceduralSky.shader,
+        // through CloudBakeBinding::PerSampleSunTransmittance). Both, because they share the ONE packed
+        // block: a bake that did not apply the transmittance would light the IBL panorama with the sun's
+        // outer-space illuminance and nothing else.
+        bool PerSampleAtmosphereTransmittance = false;
 
         PROPERTY( DisplayName( "Light March Distance" ), Category( "Lighting" ), Length,
                   Range( 10000.0f, 2000000.0f ),

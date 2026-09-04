@@ -20,6 +20,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -693,6 +694,127 @@ TEST( CloudGeometryTwoTier, TheMarchRunsTheseConstantsAndNotACopyOfThem )
          << "the march divides out its own fine step again instead of taking CloudGeometry.glslh's";
     EXPECT_NE( march.find( "CLOUD_DISTANCE_TO_MAX_STEPS_KM" ), std::string::npos )
          << "the march no longer takes its saturation distance from CloudGeometry.glslh";
+
+    // AND THE SAMPLE'S OWN VERTICAL, for the same reason: the two functions below are only worth
+    // asserting if the per-sample sun transmittance reads THESE and not a local `normalize(pos)` and
+    // `pos.y - radius`. The second of those is the world-Y reading, which agrees near the camera and is
+    // 1.77 km wrong at the layer's far reach.
+    EXPECT_NE( march.find( "CloudLocalUp(" ), std::string::npos )
+         << "the march derives its own local zenith again instead of taking CloudGeometry.glslh's";
+    EXPECT_NE( march.find( "CloudAltitudeKm(" ), std::string::npos )
+         << "the march derives its own sample altitude again instead of taking CloudGeometry.glslh's";
+
+    // THE READER IS THE SKY'S, and this is the assertion that keeps it from being copied. The domain
+    // guard, the planet's shadow and the texel-centre clamp the engine's REPEAT samplers make mandatory
+    // all live in SkySunAtAltitude — one text, compiled as C++ by Desert/Tests/Engine/SkyScattering, and
+    // shared with the environment bake so the visible deck and the baked one cannot drift.
+    EXPECT_NE( march.find( "SkySunAtAltitude(" ), std::string::npos )
+         << "the march re-derives the transmittance LUT's read instead of taking SkyScattering.glslh's, "
+            "which is the arrangement that keeps it in step with the environment bake";
+
+    // THE SAME TEXT, IN THE OTHER PASS THAT MARCHES THIS FIELD. Both light the field from ONE packed
+    // block, and PerSampleAtmosphereTransmittance changes what that block's SunColour MEANS. A bake that
+    // does not apply the transmittance would light the IBL panorama with the sun as seen from space.
+    const std::string bake =
+         ReadFile( root + "Editor/Resources/Shaders/Programs/Compute/BakeProceduralSky.shader" );
+    ASSERT_FALSE( bake.empty() ) << "BakeProceduralSky.shader could not be read";
+
+    EXPECT_NE( bake.find( "SkySunAtAltitude(" ), std::string::npos )
+         << "the environment bake marches the cloud field without applying the per-sample sun "
+            "transmittance the packed block it reads may have been prepared for";
+}
+
+// ------------------------------------------------------------------------------------------------------
+// THE SAMPLE'S OWN VERTICAL — the two functions anything that reads a function of the sun's ELEVATION at a
+// sample has to go through.
+//
+// The failure they exist to prevent is the one CloudHeightFraction's own comment describes, one level up:
+// near the camera the local zenith and the world's +Y agree to within rounding, so a frame taken from the
+// ground endorses the wrong function completely. What breaks is the FAR deck, and only in a quantity that
+// depends on the sun's angle rather than on the sample's height.
+// ------------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // The horizontal reach a layer's Max View Distance can span. The shipped default is 60 km; the
+    // slider's top is 150, and 150 is what makes the tilt below biggest.
+    constexpr float kFarReachKm = 150.0f;
+
+    // A point at the same ALTITUDE as one overhead, displaced along the planet's surface by an arc of
+    // @p arcKm. Built from the angle rather than from a translation, so the altitude is exact by
+    // construction and the test is about the function rather than about the fixture.
+    vec3 PointAtArc( float radiusKm, float arcKm )
+    {
+        const float theta = arcKm / kPlanetKm;
+        return vec3( radiusKm * std::sin( theta ), radiusKm * std::cos( theta ), 0.0f );
+    }
+} // namespace
+
+TEST( CloudGeometryVertical, TheLocalZenithTiltsOverTheLayersOwnReach )
+{
+    // Overhead it IS the world's up, which is what makes the mistake invisible from the ground.
+    const vec3 overhead = CloudLocalUp( vec3( 0.0f, kBottomKm, 0.0f ) );
+    EXPECT_NEAR( overhead.x, 0.0f, 1e-6f );
+    EXPECT_NEAR( overhead.y, 1.0f, 1e-6f );
+    EXPECT_NEAR( overhead.z, 0.0f, 1e-6f );
+
+    // At the layer's own far reach it is not, and by more than a degree — which is the whole reason a
+    // per-sample sun angle is taken from the SAMPLE. atan(150 / 6360) = 1.351 degrees.
+    const vec3  far     = CloudLocalUp( PointAtArc( kBottomKm, kFarReachKm ) );
+    const float tiltDeg = std::acos( std::clamp( far.y, -1.0f, 1.0f ) ) * 180.0f / 3.14159265358979f;
+
+    EXPECT_GT( tiltDeg, 1.0f ) << "the local zenith at " << kFarReachKm
+                               << " km is within a degree of the world's up, so the far deck would be "
+                                  "given the near deck's sun angle";
+    EXPECT_NEAR( tiltDeg, 1.351f, 0.01f );
+
+    // Unit length at every reach — anything that dots it against a direction reads a cosine, and a
+    // non-unit "cosine" is a transmittance sampled at the wrong zenith.
+    for ( const float arcKm : { 0.0f, 1.0f, 40.0f, kFarReachKm, 1000.0f } )
+        EXPECT_NEAR( length( CloudLocalUp( PointAtArc( kBottomKm, arcKm ) ) ), 1.0f, 1e-5f );
+}
+
+TEST( CloudGeometryVertical, TheAltitudeFollowsTheCurvatureAndTheWorldYDoesNot )
+{
+    const CloudLayer layer = MakeTestLayer();
+
+    // Overhead, the two agree exactly. This is the reading a close-up frame gives.
+    const vec3 overhead = vec3( 0.0f, kBottomKm, 0.0f );
+    EXPECT_NEAR( CloudAltitudeKm( layer, overhead ), kBottomKm - kPlanetKm, 1e-3f );
+    EXPECT_NEAR( overhead.y - kPlanetKm, kBottomKm - kPlanetKm, 1e-3f );
+
+    // At the far reach they do not. The altitude is still the layer's base — the point was placed on that
+    // sphere — while the world Y has fallen by the sagitta, 1.77 km of a 5 km base.
+    const vec3  far      = PointAtArc( kBottomKm, kFarReachKm );
+    const float altitude = CloudAltitudeKm( layer, far );
+    const float naive    = far.y - kPlanetKm;
+
+    EXPECT_NEAR( altitude, kBottomKm - kPlanetKm, 1e-2f );
+    EXPECT_LT( naive, altitude - 1.5f ) << "the world-Y reading at " << kFarReachKm
+                                        << " km is not measurably below the true altitude, so this "
+                                           "fixture no longer separates the two";
+    EXPECT_NEAR( altitude - naive, 1.769f, 0.02f );
+
+    // MONOTONIC IN THE RADIUS, which is what catches a sign or a swapped subtraction: a sample further
+    // from the planet centre is higher, whatever direction it lies in.
+    float previous = -1.0f;
+    for ( const float radiusKm : { kPlanetKm, kBottomKm, 0.5f * ( kBottomKm + kTopKm ), kTopKm } )
+    {
+        const float here = CloudAltitudeKm( layer, PointAtArc( radiusKm, kFarReachKm ) );
+        EXPECT_GT( here, previous );
+        previous = here;
+    }
+}
+
+TEST( CloudGeometryVertical, TheAltitudeIsNeverNegative )
+{
+    const CloudLayer layer = MakeTestLayer();
+
+    // The view march never places a sample below the shell, but the SHADOW ray's first segment can step
+    // below its own start, and a negative altitude reaching an atmosphere LUT is a coordinate outside the
+    // mapping's domain rather than a slightly wrong one.
+    for ( const float radiusKm : { 0.0f, 1.0f, kPlanetKm * 0.5f, kPlanetKm - 1.0f, kPlanetKm } )
+        EXPECT_GE( CloudAltitudeKm( layer, vec3( 0.0f, radiusKm, 0.0f ) ), 0.0f ) << "radius " << radiusKm;
 }
 
 int main( int argc, char** argv )

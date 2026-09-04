@@ -169,11 +169,25 @@ namespace Desert::Graphic
     // THE SKY-LIGHT OCCLUSION VOLUME (Engine/Graphic/Clouds/CloudSkyOcclusionPayload.hpp): 128 x 16 x 128
     // RGBA16F over the modelling volume's own region, .r holding the diffuse transmittance of the cloud
     // ABOVE that column at that altitude. Bound on the same terms as the distant sky light and the aerial
-    // perspective volume — ALWAYS, fallback included, gated by CloudPush::SkyOcclusion.x — because a
+    // perspective volume — ALWAYS, fallback included, gated by CloudPush::Frame.x — because a
     // declared sampler with no image is an invalid descriptor set and this backend answers one by skipping
     // the dispatch. 13 rather than 8: the authored buffer and its atlas took 8 and 9, and noise volumes 1
     // to 3 took 10 to 12.
     inline constexpr uint32_t kCloudSkyOcclusionBinding = 13;
+    // THE ATMOSPHERE'S TRANSMITTANCE LUT (Programs/Sky/SkyTransmittanceLut.shader): 256x64 of what
+    // survives the trip from a point in the atmosphere to space, in Bruneton's (r, mu) mapping. Read only
+    // when CloudPush::Frame.y is 1, i.e. when the layer asked for per-sample atmospheric sun transmittance
+    // AND the sky actually baked the pair.
+    //
+    // ALWAYS BOUND, fallback included, on the terms every sampler above is bound on: a declared sampler
+    // with no image is an INVALID descriptor set rather than an unused one, and this backend answers one
+    // by skipping the whole dispatch — every cloud in the frame would disappear with nothing in the log.
+    //
+    // THE ENVIRONMENT BAKE NEEDS NO NUMBER OF ITS OWN. Programs/Compute/BakeProceduralSky.shader marches
+    // the same field and already binds the same LUT as the SKY's own resource
+    // (Graphic::kSkyTransmittanceLutBinding), so it applies this feature through that descriptor and only
+    // its gate travels — see CloudBakeBinding::PerSampleSunTransmittance.
+    inline constexpr uint32_t kCloudSunTransmittanceLutBinding = 14;
 
     /**
      * @brief The FOUR noise volumes a layer can bind, by descriptor number, in the order CloudGpuPayload::
@@ -229,19 +243,33 @@ namespace Desert::Graphic
         //        UP twice — deriving it from the quarter size would be off by a pixel on odd viewports and
         //        would shear the whole jitter pattern by half a texel along the right and bottom edges.
         glm::vec4 Trace;
-        // x = 1 when the sky-light occlusion volume was dispatched for THIS frame and must be read, 0
-        //     otherwise. y, z, w are unwritten — a push constant is laid out in vec4s and this is the only
-        //     scalar the gate needs.
+        // WHAT THIS FRAME'S RESOURCES ACTUALLY ARE, as opposed to what the artist asked for. Every lane
+        // here is a property of the FRAME and not of the weather, which is why they are in the push
+        // constant rather than in the parameter block beside the artist's fields: a component flag can be
+        // on while the resource it names does not exist (no atmosphere, a failed allocation, a bake that
+        // has not run), and a march that read an image nobody wrote would shade the sky with uninitialised
+        // device memory.
         //
-        // A GATE AND NOT A REGION, which is the whole reason the volume costs one float here: it shares the
-        // procedural modelling volume's frame exactly, so its origin and side are already on the wire as
-        // CloudGpuPayload::Region and a copy of them here would be the same two numbers travelling twice.
+        // x = 1 when the sky-light occlusion volume was dispatched for THIS frame and must be read.
+        //     A GATE AND NOT A REGION, which is the whole reason the volume costs one float here: it
+        //     shares the procedural modelling volume's frame exactly, so its origin and side are already
+        //     on the wire as CloudGpuPayload::Region and a copy of them here would be the same two numbers
+        //     travelling twice.
+        // y = 1 when the atmosphere's transmittance LUT was baked for THIS frame AND the layer asked for
+        //     per-sample atmospheric sun transmittance. When it is 1, CloudGpuPayload::SunColour carries
+        //     the sun's OUTER-SPACE illuminance and the march applies T(sample) itself; when it is 0 the
+        //     same field carries the ground-level product and the march applies nothing. The two always
+        //     agree because Graphic::CloudUsesPerSampleSunTransmittance decides both.
+        // z, w = the atmosphere shell's bottom and top radii, kilometres from the planet centre — the
+        //     domain of the LUT's Bruneton mapping, which its reader has to reproduce exactly. They come
+        //     from AtmosphereEnv rather than from the cloud component for the reason the aerial
+        //     perspective's two scalars do: they describe the SKY's resource, and a second authored copy
+        //     is how a fill and a read end up disagreeing about a mapping. Written unconditionally and
+        //     read only when y is 1.
         //
-        // IT IS A PROPERTY OF THE FRAME AND NOT OF THE WEATHER, which is why it is here rather than in the
-        // parameter block beside the artist's fields: the component's flag can be on while the dispatch
-        // did not happen (no atmosphere, a failed allocation), and a march that read a volume nobody wrote
-        // would shade the sky with uninitialised device memory.
-        glm::vec4 SkyOcclusion;
+        // THE MEMBER USED TO BE CALLED SkyOcclusion and used to carry one lane. Renaming it is what keeps
+        // the other three from being three unnamed floats hiding under a name that describes the first.
+        glm::vec4 Frame;
     };
 
     static_assert( sizeof( CloudPush ) == 112,
@@ -574,6 +602,34 @@ namespace Desert::Graphic
         return resolved;
     }
 
+    /**
+     * @brief Does this frame light the shell sample by sample, or with one colour?
+     *
+     * THE ONE PLACE THE QUESTION IS ANSWERED, and it has to be one place because three decisions hang off
+     * it in three different files: PackCloudParams below chooses WHICH illuminance the parameter block
+     * carries, VolumetricCloudRenderer chooses whether to raise CloudPush::Frame.y and bind the real LUT,
+     * and the same renderer tells the environment bake through CloudEnvironmentBake. Those are the classic
+     * pair this project keeps finding — individually correct, silently catastrophic when they disagree,
+     * because the block would then carry the outer-space illuminance (an order of magnitude brighter at a
+     * low sun) while a march applied no transmittance to it at all.
+     *
+     * ALL FOUR CONDITIONS ARE LOAD-BEARING:
+     *   * the artist asked for it;
+     *   * there is an evaluated atmosphere at all;
+     *   * the transmittance LUT has actually been marched this frame — a null handle means the pair has
+     *     not been baked, and the fallback texture bound in its place is not an atmosphere;
+     *   * the DISTANT SKY LIGHT exists, which is this packer's existing definition of "the physical model
+     *     is running". Without it the block carries SunIrradiance — the SKY's elevation-tinted disc
+     *     brightness, never multiplied by any transmittance — and swapping THAT for an outer-space
+     *     illuminance would not be a refinement, it would be a different quantity.
+     */
+    inline bool CloudUsesPerSampleSunTransmittance( const ECS::VolumetricCloudData& data,
+                                                    const AtmosphereEnv&            atmosphere )
+    {
+        return data.PerSampleAtmosphereTransmittance && atmosphere.Valid &&
+               atmosphere.TransmittanceLut != nullptr && atmosphere.DistantSkyLight != nullptr;
+    }
+
     inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const CloudTypeShape* shapes,
                                             uint32_t speciesCount, const AtmosphereEnv& atmosphere,
                                             const glm::vec3&          windOffsetWorld,
@@ -613,8 +669,20 @@ namespace Desert::Graphic
 
         if ( atmosphere.Valid )
         {
-            sunDirection  = atmosphere.SunDirection;
-            sunIrradiance = physical ? atmosphere.SunIlluminanceOnGround : atmosphere.SunIrradiance;
+            sunDirection = atmosphere.SunDirection;
+            // THE SUN THE SHELL IS LIT BY, and which of the three it is depends on how far the marches are
+            // going to carry the atmosphere themselves.
+            //
+            //   * no physical model      -> the SKY's own elevation-tinted disc brightness;
+            //   * physical, one colour   -> illuminance x T(ground), which is UE's default and applies the
+            //                               atmosphere ONCE, at sea level, to a shell kilometres tall;
+            //   * physical, per sample   -> the OUTER-SPACE illuminance, with T moved into the march so
+            //                               every sample gets the transmittance at its OWN altitude. The
+            //                               absolute form and not a ratio: the base already has T(ground)
+            //                               divided out of it by construction, because it never had it.
+            sunIrradiance = CloudUsesPerSampleSunTransmittance( data, atmosphere )
+                                 ? atmosphere.SunOuterSpaceIlluminance
+                                 : ( physical ? atmosphere.SunIlluminanceOnGround : atmosphere.SunIrradiance );
             ambient       = physical ? data.AmbientScale : data.AmbientScale * atmosphere.ZenithRadiance;
         }
 

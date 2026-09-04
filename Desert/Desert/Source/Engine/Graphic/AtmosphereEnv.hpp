@@ -4,10 +4,37 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
+
 namespace Desert::Graphic
 {
     class Image2D;
     class Image3D;
+
+    // One world unit is one centimetre, so a kilometre is 100 000 of them. The C++ mirror of
+    // Common/SkyMedium.glslh's SKY_WORLD_UNITS_PER_KM, and Desert/Tests/Engine/SkyMedium asserts the two
+    // agree by compiling that header as C++ and comparing the radii both sides derive.
+    inline constexpr float kSkyWorldUnitsPerKm = 100000.0f;
+
+    // The atmosphere shell's two radii, from the planet centre, in kilometres — the domain of every
+    // Bruneton mapping in Common/SkyMedium.glslh.
+    //
+    // WHY THEY EXIST IN C++ AT ALL. A consumer that samples the transmittance LUT has to reproduce the
+    // LUT's own parameterisation, and that parameterisation takes the two radii. Passes that bind the sky
+    // parameter buffer read them out of it (SkyMakeAtmParams); a pass that does not bind it — the cloud
+    // march — needs them on its own wire, and AtmosphereEnv is where the sky publishes what other passes
+    // consume. The two lines below are SkyMakeAtmParams' own, and the SkyMedium suite pins that.
+    inline float AtmosphereBottomRadiusKm( const SkySettings& sky )
+    {
+        return sky.PlanetRadius / kSkyWorldUnitsPerKm;
+    }
+
+    inline float AtmosphereTopRadiusKm( const SkySettings& sky )
+    {
+        // The 0.1 km floor is the shader's, not a guess: a shell of zero height gives the mapping an H of
+        // zero, and every uv it produces is then a division by the epsilon guard rather than a coordinate.
+        return AtmosphereBottomRadiusKm( sky ) + std::max( sky.AtmosphereHeightKm, 0.1f );
+    }
 
     // Per-frame, EVALUATED state of the sky — the runtime form other renderers consume via
     // SceneRenderer::GetAtmosphere(), mirroring WindEnv / GetWind(). Its reason for existing is that the
@@ -57,6 +84,20 @@ namespace Desert::Graphic
         // was calibrated against.
         glm::vec3 SunIlluminanceOnGround{ 0.0f };
 
+        // The SAME sun light's illuminance BEFORE the atmosphere takes its cut — the directional light's
+        // authored Color x Intensity, i.e. exactly the numerator of the product above.
+        //
+        // IT IS PUBLISHED RATHER THAN RECOVERED BY DIVISION, and that is the whole reason it is here. A
+        // consumer that wants to re-apply the transmittance at its own altitude needs the pre-atmosphere
+        // quantity, and `SunIlluminanceOnGround / SunTransmittanceAtGround` looks like it produces it: at
+        // a low sun the transmittance goes to zero CHANNEL BY CHANNEL — blue first — so the reconstruction
+        // is an infinity in whichever channel went first, in exactly the frames (sunrise, sunset) the
+        // per-sample treatment is for.
+        //
+        // Its consumer is the volumetric cloud march's per-sample atmospheric sun transmittance
+        // (Graphic::PackCloudParams), which multiplies it by T(sample) instead of by T(ground).
+        glm::vec3 SunOuterSpaceIlluminance{ 0.0f };
+
         // false when there is no enabled sky component, or no atmosphere sun to drive it. A consumer that
         // draws anyway is drawing against last frame's sun.
         bool Valid = false;
@@ -91,6 +132,23 @@ namespace Desert::Graphic
         // The dome fields above (ZenithRadiance / GroundRadiance) are the ARTISTIC-GRADIENT model's
         // ambient and are untouched by this: one per SkyModel, on purpose.
         Image2D* DistantSkyLight = nullptr;
+
+        // OPAQUE handle to this frame's TRANSMITTANCE LUT — 256x64 of what survives the trip from a point
+        // in the atmosphere to space along a given zenith angle (Programs/Sky/SkyTransmittanceLut.shader),
+        // in Bruneton's (r, mu) mapping. Non-owning, same contract as the three handles above: the
+        // SkyboxRenderer of this SceneRenderer owns it, and it is NULL EXACTLY WHEN THE PAIR HAS NOT BEEN
+        // BAKED — the artistic-gradient model, a sky that is switched off, or an allocation that failed.
+        //
+        // ITS READER MUST REPRODUCE THE MAPPING, which is why the two radii travel beside it: the mapping
+        // is a function of the shell, and a consumer that took the shell from anywhere else would be the
+        // second source of truth the aerial-perspective handle's own note warns about.
+        Image2D* TransmittanceLut = nullptr;
+
+        // The shell the LUT above is parameterised over, kilometres from the planet centre. Meaningful
+        // only when TransmittanceLut is non-null; zero otherwise, which is a domain no mapping accepts and
+        // therefore not a plausible-looking wrong answer.
+        float TransmittanceLutBottomRadiusKm = 0.0f;
+        float TransmittanceLutTopRadiusKm    = 0.0f;
     };
 
     // The C++ half of "share the computation": the quantities below are read off the same gradient the

@@ -288,8 +288,16 @@ namespace
          // THE RENDERER AND NOT THE PAYLOAD, and the difference is the point: this field never reaches the
          // parameter block at all. It decides whether ExecuteInFrame dispatches the sky-light occlusion
          // volume, and what the march is told is only whether that dispatch HAPPENED — a property of the
-         // frame rather than of the weather, on CloudPush::SkyOcclusion.
+         // frame rather than of the weather, on CloudPush::Frame.
          { "SkyOcclusionVolume", kCloudRenderer },
+         // THE PAYLOAD AND NOT THE RENDERER, which is the opposite of the row above and for a reason worth
+         // stating: this field changes WHAT THE PARAMETER BLOCK MEANS. With it on, SunColour.rgb is the
+         // sun's outer-space illuminance and both marches of the field apply the atmosphere themselves;
+         // with it off, the same field is the ground-level product. The renderer reads the field too — it
+         // raises CloudPush::Frame.y, binds the LUT, and tells the environment bake — but it does so
+         // through the packer's own CloudUsesPerSampleSunTransmittance, so the packer is where the
+         // decision lives.
+         { "PerSampleAtmosphereTransmittance", kCloudPayload },
          { "AerialPerspectiveStartDistance", kCloudPayload },
          { "AerialPerspectiveFadeDistance", kCloudPayload },
          { "LightMarchDistance", kCloudPayload },

@@ -967,6 +967,88 @@ TEST( SkyDistantLight, FallsAsTheSunSets )
     EXPECT_LT( previousLuminance, 0.05f );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// SkySunAtAltitude — the sun at a point INSIDE the atmosphere, minus the fetch (Р14)
+//
+// The two passes that march the volumetric cloud field read the transmittance LUT through this, and they
+// read it through the SAME text so that a visible deck and the deck baked into the IBL panorama cannot
+// drift apart. What is asserted here is the composition — that it is the sky's own terminator and the
+// clamped uv, not a second opinion about either.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( SkySunAtPointReader, ItIsTheSkysOwnTerminatorAndNotASecondOpinionAboutIt )
+{
+    // THE RELATION THAT KEEPS A CLOUD AND THE SKY BEHIND IT ON ONE TERMINATOR. A hard ray-sphere test
+    // here would be defensible on its own and would still be a seam: the deck would switch off instantly
+    // against a sky fading over SKY_TERMINATOR_HALF_WIDTH_COS. Asserting equality with SkyPlanetShadow —
+    // rather than asserting "it is zero at night" — is what makes that structural.
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec2 lutSize( 256.0f, 64.0f );
+
+    for ( const float altitudeKm : { 0.0f, 0.01f, 2.0f, 5.0f, 12.0f } )
+    {
+        const float radius = p.BottomRadiusKm + altitudeKm;
+
+        for ( const float mu : { 1.0f, 0.5f, 0.05f, 0.0f, -0.001f, -0.002f, -0.05f, -0.5f, -1.0f } )
+        {
+            const Ref::SkySunAtPoint sun =
+                 Ref::SkySunAtAltitude( p.BottomRadiusKm, p.TopRadiusKm, altitudeKm, mu, lutSize );
+
+            EXPECT_FLOAT_EQ( sun.PlanetShadow, Ref::SkyPlanetShadow( radius, mu, p.BottomRadiusKm ) )
+                 << "altitude " << altitudeKm << ", mu " << mu;
+
+            // And the uv is the mapping's, clamped — not the mapping's, raw. The band is half a texel,
+            // which is what CLAMP_TO_EDGE would give and what this engine's REPEAT samplers will not.
+            EXPECT_FLOAT_EQ(
+                 sun.Uv.x,
+                 Ref::SkyTransmittanceLutUvClamped( p.BottomRadiusKm, p.TopRadiusKm, radius, mu, lutSize ).x )
+                 << "altitude " << altitudeKm << ", mu " << mu;
+        }
+    }
+}
+
+TEST( SkySunAtPointReader, TheShadowAndTheFetchSwitchOffTogetherAtTheSamplesOwnHorizon )
+{
+    // A SAMPLE'S HORIZON IS NOT THE WORLD'S, and this is the half of the relation a ground-level test
+    // cannot see: at eight kilometres the sun is still up at an elevation of -2.8 degrees. A reader that
+    // used a fixed zero here would darken a high deck while the sky behind it was still lit.
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec2 lutSize( 256.0f, 64.0f );
+
+    for ( const float altitudeKm : { 0.01f, 2.0f, 8.0f, 20.0f } )
+    {
+        const float radius = p.BottomRadiusKm + altitudeKm;
+        const float horizonCos =
+             -std::sqrt( std::max( 1.0f - ( p.BottomRadiusKm / radius ) * ( p.BottomRadiusKm / radius ), 0.0f ) );
+
+        // A whole band below its own horizon is night, and the reader says so with an exact zero — which
+        // is what lets both marches take an early return instead of a diverged fetch.
+        const Ref::SkySunAtPoint night =
+             Ref::SkySunAtAltitude( p.BottomRadiusKm, p.TopRadiusKm, altitudeKm, horizonCos - 0.01f, lutSize );
+        EXPECT_FLOAT_EQ( night.PlanetShadow, 0.0f ) << "altitude " << altitudeKm;
+
+        // And a band above it is full sun, not a fraction of one.
+        const Ref::SkySunAtPoint day =
+             Ref::SkySunAtAltitude( p.BottomRadiusKm, p.TopRadiusKm, altitudeKm, horizonCos + 0.01f, lutSize );
+        EXPECT_FLOAT_EQ( day.PlanetShadow, 1.0f ) << "altitude " << altitudeKm;
+
+        // The horizon rises with altitude in the only sense that matters: a HIGHER sample still sees the
+        // sun at an elevation where a lower one no longer does. Without this the whole per-sample
+        // treatment would be indistinguishable from evaluating it once at the ground.
+        if ( altitudeKm > 1.0f )
+        {
+            const float groundRadius  = p.BottomRadiusKm + 0.01f;
+            const float groundHorizon = -std::sqrt( std::max(
+                 1.0f - ( p.BottomRadiusKm / groundRadius ) * ( p.BottomRadiusKm / groundRadius ), 0.0f ) );
+            EXPECT_LT( horizonCos, groundHorizon )
+                 << "the sample's horizon does not dip further with altitude, so the reader has stopped "
+                    "distinguishing a high deck from the ground";
+        }
+    }
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

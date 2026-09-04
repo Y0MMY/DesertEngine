@@ -171,6 +171,36 @@ float CloudHeightFraction( CloudLayer layer, vec3 positionKm )
     return clamp( altitude / thickness, 0.0f, 1.0f );
 }
 
+// THE LOCAL ZENITH at a sample, which is not the world's +Y and is not the camera's.
+//
+// Positions in this frame are measured from the planet centre, so the direction "up" at a sample is the
+// direction of the sample itself. Over the shell's reach that is not a pedantic distinction: at the
+// hundred and fifty kilometres a layer's Max View Distance can span, the local vertical has tilted by
+// atan(150 / 6360) = 1.35 degrees, so a ray toward the sun leaves the far deck at a measurably different
+// zenith angle than it leaves the near one. Anything that reads a function of the SUN'S ELEVATION at a
+// sample — an atmospheric transmittance, an ozone column — has to ask the sample, not the camera.
+//
+// No epsilon guard and none needed: a position in this frame has a magnitude of a planet radius, and the
+// only way to hand this the origin is to hand it the planet's own centre.
+vec3 CloudLocalUp( vec3 positionKm )
+{
+    return normalize( positionKm );
+}
+
+// How high a sample stands above the GROUND, kilometres — not above the layer's base, which is what
+// CloudHeightFraction measures. The two differ by the layer's bottom altitude, and the distinction
+// matters to anything that has to place the sample inside a shell that is not the cloud's: the atmosphere
+// is measured from the planet surface and a cloud deck is five kilometres up it.
+//
+// Floored at zero rather than allowed negative. The march never places a sample below the shell, but the
+// SHADOW ray's first segment can step below its start when the start is on the base itself, and a
+// negative altitude reaching a LUT parameterisation is a coordinate outside its domain rather than a
+// slightly wrong one.
+float CloudAltitudeKm( CloudLayer layer, vec3 positionKm )
+{
+    return max( length( positionKm ) - layer.PlanetRadiusKm, 0.0f );
+}
+
 // ---------------------------------------------------------------------------------------------------
 // THE STEP SCHEDULE, ALL FOUR NUMBERS OF IT
 // ---------------------------------------------------------------------------------------------------

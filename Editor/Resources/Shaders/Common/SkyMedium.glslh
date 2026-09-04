@@ -248,6 +248,51 @@ SkyTransmittanceLutCoord SkyTransmittanceLutParamsFromUv(float bottomRadiusKm, f
     return c;
 }
 
+// ---- Reading the transmittance LUT at an arbitrary point in the atmosphere -------------------------
+// The two above are the LUT's OWN mapping and its inverse. The two below are what a consumer standing
+// somewhere inside the shell needs on top of them, and they are here rather than at the consumer because
+// Desert/Tests/Engine/SkyMedium compiles this file as C++ and can therefore assert the relations they
+// have to satisfy — which a function written inside a `.shader` cannot be.
+//
+// Their first consumer is the volumetric cloud march's per-sample atmospheric sun transmittance
+// (ECS::VolumetricCloudData::PerSampleAtmosphereTransmittance), in both of the passes that march the
+// cloud field.
+
+// The radius the atmosphere's LUTs are read at for a sample standing @p altitudeKm above the GROUND.
+//
+// THE CLAMP IS A DOMAIN GUARD, not a correction. The mapping's rho is sqrt((r - Rb)(r + Rb)) and its d is
+// a distance to the top shell: a radius below the ground or above the atmosphere makes both imaginary,
+// and a cloud layer authored at 70 km under a 60 km atmosphere is an AUTHORABLE state rather than a bug
+// in this file. The low end matters too — a shadow ray's first segment can step below its own start when
+// that start is on the layer's base.
+float SkyRadiusAtAltitude(float bottomRadiusKm, float topRadiusKm, float altitudeKm)
+{
+    return clamp(bottomRadiusKm + altitudeKm, bottomRadiusKm, topRadiusKm);
+}
+
+// SkyTransmittanceLutUvFromParams, clamped to the texel centres of a LUT of @p lutSize texels.
+//
+// AND THIS IS NOT A ROUNDING NICETY. Every sampler this engine creates is REPEAT on all three axes
+// (VulkanImage.cpp asserts it) — there is no CLAMP_TO_EDGE to fall back on — and the mapping saturates at
+// BOTH ends under conditions an ordinary scene reaches:
+//
+//   * uv.x = 1 for every sun below the sample's own horizon. A REPEAT bilinear fetch at exactly 1.0 lands
+//     half on the last texel (grazing, transmittance ~0) and half on the first (straight up, ~0.95): half
+//     the zenith sun, applied at the moment the answer should be darkest.
+//   * uv.x = 0 exactly for a sun at the sample's own zenith, which wraps the other way and replaces half
+//     of the brightest transmittance in the table with the darkest — noon, in other words, and the
+//     failure would be a cloud lit at half strength at midday.
+//
+// @p lutSize is passed in rather than written as a constant so that the caller can take it from
+// textureSize() and it cannot drift from the image actually bound.
+vec2 SkyTransmittanceLutUvClamped(float bottomRadiusKm, float topRadiusKm, float viewHeightKm,
+                                  float viewZenithCos, vec2 lutSize)
+{
+    vec2 uv    = SkyTransmittanceLutUvFromParams(bottomRadiusKm, topRadiusKm, viewHeightKm, viewZenithCos);
+    vec2 texel = 0.5f / max(lutSize, vec2(1.0f, 1.0f));
+    return clamp(uv, texel, vec2(1.0f, 1.0f) - texel);
+}
+
 // ---- The multi-scattering LUT parameterisation -----------------------------------------------------
 // Simpler than the transmittance mapping on purpose: 32x32 is too coarse for horizon warping to pay,
 // so x is the sun zenith cosine linearly and y is the altitude linearly (lifted off the exact surface,

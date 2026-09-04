@@ -164,8 +164,24 @@ Shader "CloudRaymarch"
         //
         // ALWAYS BOUND, fallback included, on the terms every sampler here is bound on: a declared sampler
         // with no image is an INVALID descriptor set, and this backend answers one by silently skipping
-        // the dispatch. u_CloudSkyOcclusion.x decides whether it is read.
+        // the dispatch. u_CloudFrame.x decides whether it is read.
         Uniform(13) sampler3D u_CloudSkyOcclusionVolume;
+
+        // THE ATMOSPHERE'S TRANSMITTANCE LUT — 256x64 RGBA16F of what survives the trip from a point in
+        // the atmosphere to space along a given zenith angle, marched by
+        // Programs/Sky/SkyTransmittanceLut.shader in Bruneton's (r, mu) mapping and read here through
+        // Common/SkyScattering.glslh's SkySunAtAltitude — the exact inverse of the mapping the LUT was
+        // written under, clamped to the texel centres it was written at.
+        //
+        // WHAT IT IS FOR. u_CloudSunColour is ONE colour for the whole shell. Unreal's default computes it
+        // as `SunOuterSpaceIlluminance * T(groundLevel)` and so does this engine, which means a deck four
+        // kilometres up is lit through four kilometres of air it is standing above. With u_CloudFrame.y
+        // raised, the packer sends the OUTER-SPACE illuminance instead and this pass applies T at the
+        // sample's own altitude and its own local zenith — the absolute form, with no ratio and therefore
+        // no division by a transmittance that reaches zero at a low sun.
+        //
+        // ALWAYS BOUND, fallback included, on the terms every sampler above is bound on.
+        Uniform(14) sampler2D u_CloudSunTransmittanceLut;
 
         // The seam's three callbacks. Declared here, next to the samplers, because Common/CloudField.glslh
         // must stay free of samplers to remain compilable as C++ by its tests.
@@ -194,13 +210,64 @@ Shader "CloudRaymarch"
             //      pass cannot derive: imageSize() reports the quarter-res target it writes, and the two
             //      round-ups that produced it are not invertible on an odd viewport.
             vec4 u_CloudTrace;
+            // WHAT THIS FRAME'S RESOURCES ARE, as opposed to what the artist asked for. Graphic::CloudPush
+            // ::Frame, member for member.
+            //
             // x = 1 when the sky-light occlusion volume was written for THIS frame and must be read. Its
-            // region and side are NOT here: the volume shares the modelling volume's frame exactly, so
-            // u_CloudRegion already carries both and a second copy would be one fact on the wire twice.
-            vec4 u_CloudSkyOcclusion;
+            //     region and side are NOT here: the volume shares the modelling volume's frame exactly, so
+            //     u_CloudRegion already carries both and a second copy would be one fact on the wire twice.
+            // y = 1 when u_CloudSunTransmittanceLut holds this frame's atmosphere AND the layer asked for
+            //     per-sample sun transmittance. It also says WHAT u_CloudSunColour.rgb IS: the sun's
+            //     outer-space illuminance when 1, the ground-level product when 0.
+            // z, w = the atmosphere shell's bottom and top radii, kilometres from the planet centre.
+            //     Written whatever y says, read only when y is 1.
+            vec4 u_CloudFrame;
         };
 
         LocalSize(8, 8, 1);
+
+        // THE SUN'S COLOUR AT A SAMPLE, which is one colour for the whole shell unless the layer asked
+        // otherwise.
+        //
+        // THE TWO THINGS THE LUT IS ASKED FOR ARE BOTH THE SAMPLE'S OWN, and that is the entire content of
+        // this function:
+        //
+        //   * its ALTITUDE ABOVE THE GROUND, measured from the planet centre and therefore following the
+        //     curvature. The cloud shell's frame and the atmosphere's differ by where their floors are, so
+        //     the altitude is taken against the cloud layer's planet radius and then re-based onto the
+        //     atmosphere's — two shells, one ground.
+        //   * its LOCAL ZENITH, which at the hundred and fifty kilometres a layer can span has tilted by
+        //     1.35 degrees from the camera's. Taking the world's +Y here would give the far deck the near
+        //     deck's sun angle, which is the same class of mistake CloudHeightFraction's own comment
+        //     describes for the height.
+        //
+        // Everything else — the domain guard on the radius, the planet's own shadow, the texel-centre
+        // clamp the engine's REPEAT samplers make mandatory — is SkySunAtAltitude's, shared with the
+        // environment bake so the visible deck and the baked one cannot drift apart. The early return
+        // below the terminator is the night fast path and not an optimisation of the general case: below
+        // the band every lane in the dispatch takes it, so the fetch is skipped rather than diverged.
+        //
+        // textureLod AND NOT texture, for the reason every other fetch in this file gives: a compute
+        // shader has no derivatives, so the implicit level of detail is undefined.
+        vec3 CloudSunColourAt(CloudLayer layer, vec3 positionKm, vec3 toSun)
+        {
+            if (u_CloudFrame.y < 0.5f)
+                return u_CloudSunColour.rgb;
+
+            float sunZenithCos = clamp(dot(CloudLocalUp(positionKm), toSun), -1.0f, 1.0f);
+
+            // textureSize() and not a literal 256x64, so the clamp cannot drift from the image the
+            // renderer actually bound.
+            SkySunAtPoint sun = SkySunAtAltitude(u_CloudFrame.z, u_CloudFrame.w,
+                                                 CloudAltitudeKm(layer, positionKm), sunZenithCos,
+                                                 vec2(textureSize(u_CloudSunTransmittanceLut, 0)));
+
+            if (sun.PlanetShadow <= 0.0f)
+                return vec3(0.0f, 0.0f, 0.0f);
+
+            return u_CloudSunColour.rgb *
+                   (sun.PlanetShadow * textureLod(u_CloudSunTransmittanceLut, sun.Uv, 0.0f).rgb);
+        }
 
         // The sun-transmittance quadrature is Common/CloudField.glslh's — see the note there. It moved out
         // of this file when the sky's environment bake began lighting the same field, because a second copy
@@ -505,7 +572,7 @@ Shader "CloudRaymarch"
                         // upper half of the sample's own body, so applying both would count that material
                         // twice and darken a cloud's own core for a reason nobody could find later.
                         float ambientOcclusion = CloudAmbientOcclusion(field.Profile, u_CloudPhase.z);
-                        if (u_CloudSkyOcclusion.x > 0.5f)
+                        if (u_CloudFrame.x > 0.5f)
                         {
                             // The WIND-SHIFTED position, because that is the frame the volume was traced
                             // in — the same subtraction Common/CloudField.glslh makes on its own way into
@@ -535,8 +602,12 @@ Shader "CloudRaymarch"
                         // The ray's transmittance is applied HERE and not inside, because it belongs to the
                         // ray's history rather than to the medium — and keeping it out is what lets the
                         // series be bounded by the source it integrates.
+                        // THE SUN THIS SAMPLE SEES. Resolved once per sample and handed to the series as
+                        // its source, because the atmosphere between this point and the sun is the same
+                        // atmosphere whether the light arriving is first-order or third — the octave loop
+                        // inside CloudMultiScatterStep would otherwise repeat the fetch per order.
                         luminance += transmittance *
-                                     CloudMultiScatterStep(series, u_CloudSunColour.rgb,
+                                     CloudMultiScatterStep(series, CloudSunColourAt(layer, samplePos, toSun),
                                                            ambientRadiance * ambientOcclusion, opticalDepth,
                                                            phase, sigmaT, albedo, stepKm);
 
