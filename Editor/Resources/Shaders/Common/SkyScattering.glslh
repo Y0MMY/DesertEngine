@@ -233,6 +233,51 @@ float SkyPlanetShadow(float radiusKm, float sunZenithCos, float bottomRadiusKm)
     return x * x * (3.0f - 2.0f * x);
 }
 
+// ---- The sun, as seen from a point INSIDE the atmosphere -------------------------------------------
+//
+// Everything a consumer needs to turn the sun's OUTER-SPACE illuminance into the illuminance at a point
+// in the shell, EXCEPT the texture fetch — which cannot live in text that compiles as C++, and which is
+// the only part that differs between the two passes that use this.
+//
+// WHY IT EXISTS AS ONE TEXT. Two passes march the volumetric cloud field — the screen march
+// (Programs/Clouds/CloudRaymarch.shader) and the environment bake
+// (Programs/Compute/BakeProceduralSky.shader) — and both light it from the SAME packed block. When
+// ECS::VolumetricCloudData::PerSampleAtmosphereTransmittance is on, that block carries the outer-space
+// illuminance and each pass owes the atmosphere's cut at the sample's own altitude. Two copies of this
+// arithmetic is the mirror that drifts, and this subsystem has already paid for that shape more than
+// once; one copy, compiled as C++ by Desert/Tests/Engine/SkyScattering, is the answer.
+//
+// THE TWO PIECES ARE RETURNED TOGETHER because they are one decision: the LUT's parameterisation stores
+// "transmittance from a radius to space along a zenith angle" and has NO state for "the planet is in the
+// way", so for a sun below the sample's horizon the mapping simply saturates at its grazing column.
+// Fetched without the shadow, a night sky lights its clouds with per cents of the sun — almost all of it
+// RED, so the deck glows dark red rather than going dark.
+//
+// SkyPlanetShadow AND NOT A RAY TEST OF OUR OWN, which is the whole point of reusing the sky's function:
+// it is what this file multiplies the sun by for every sky pixel, so a cloud and the sky BEHIND IT switch
+// the sun off at the same rate and over the same 0.11-degree band. A hard SkyIntersectsGround here would
+// be correct and would still be a seam — the deck going out instantly against a sky fading over a
+// terminator.
+struct SkySunAtPoint
+{
+    vec2  Uv;           // where to fetch the transmittance LUT, clamped to its texel centres
+    float PlanetShadow; // 0 in full shadow, 1 in full sun, smooth across the terminator band
+};
+
+// @p altitudeKm above the GROUND (not above any layer's base), @p sunZenithCos against the point's OWN
+// local zenith, @p lutSize the transmittance LUT's dimensions in texels.
+SkySunAtPoint SkySunAtAltitude(float bottomRadiusKm, float topRadiusKm, float altitudeKm,
+                               float sunZenithCos, vec2 lutSize)
+{
+    float viewHeightKm = SkyRadiusAtAltitude(bottomRadiusKm, topRadiusKm, altitudeKm);
+
+    SkySunAtPoint sun;
+    sun.PlanetShadow = SkyPlanetShadow(viewHeightKm, sunZenithCos, bottomRadiusKm);
+    sun.Uv           = SkyTransmittanceLutUvClamped(bottomRadiusKm, topRadiusKm, viewHeightKm, sunZenithCos,
+                                                    lutSize);
+    return sun;
+}
+
 // ---- The camera aerial-perspective volume's parameterisation (Hillaire section 5.4) ----------------
 // A froxel volume in the camera's frustum: x and y are the screen, z is DISTANCE ALONG THE RAY, and each
 // texel holds the atmosphere between the camera and that distance. The two mappings below are the whole

@@ -819,6 +819,12 @@ namespace Desert::Graphic::System
         bake.SkyOcclusionValid  = m_SkyOcclusionValid && m_SkyOcclusionVolume != nullptr;
         bake.SkyOcclusionVolume = m_SkyOcclusionVolume.get();
 
+        // WHAT THE BLOCK ABOVE MEANS, asked of the same function PackCloudParams asked. BuildFieldPayload
+        // has just chosen which illuminance SunColour carries; the bake marches that block and has to
+        // apply the matching transmittance, or the panorama is lit by the sun as seen from space.
+        bake.PerSampleSunTransmittance =
+             CloudUsesPerSampleSunTransmittance( m_Data, m_SceneRenderer->GetAtmosphere() );
+
         bake.Marched = true;
         bake.Fingerprint =
              CloudEnvironmentFingerprint( bake.Params, true, bake.SkyOcclusionValid, m_ModellingShapeGeneration );
@@ -1370,9 +1376,22 @@ namespace Desert::Graphic::System
         push.CameraPosition = glm::vec4( camera->GetPosition(), static_cast<float>( m_FrameIndex & 0xFFFFu ) );
         push.Trace          = glm::vec4( static_cast<float>( subPixel.X ), static_cast<float>( subPixel.Y ),
                                          static_cast<float>( m_HalfWidth ), static_cast<float>( m_HalfHeight ) );
-        // THE GATE IS "WAS IT WRITTEN", not "was it asked for". A layer whose flag is on but whose volume
-        // failed to allocate must fall back to the profile term, not read an image nobody filled.
-        push.SkyOcclusion = glm::vec4( skyOcclusionReady ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f );
+        // THE GATES ARE "WAS IT WRITTEN", not "was it asked for". A layer whose flag is on but whose volume
+        // failed to allocate must fall back to the profile term, not read an image nobody filled; and a
+        // layer that asked for per-sample sun transmittance under an artistic-gradient sky has no LUT to
+        // read at all.
+        //
+        // THE SECOND GATE IS NOT DECIDED HERE. CloudUsesPerSampleSunTransmittance is what PackCloudParams
+        // asked when it chose which illuminance to put in the block, and asking it again with the same two
+        // arguments is what keeps the two answers from being two answers.
+        const bool perSampleSun = CloudUsesPerSampleSunTransmittance( m_Data, atmosphere );
+
+        // The radii are written whatever the gate says. They are two numbers on a wire that is paid for
+        // either way — a push constant is laid out in vec4s — and a lane that changes meaning with a gate
+        // is harder to read than one that is simply ignored.
+        push.Frame =
+             glm::vec4( skyOcclusionReady ? 1.0f : 0.0f, perSampleSun ? 1.0f : 0.0f,
+                        atmosphere.TransmittanceLutBottomRadiusKm, atmosphere.TransmittanceLutTopRadiusKm );
 
         Image2D* depthImage = target->GetDepthAttachmentImage().get();
 
@@ -1432,12 +1451,21 @@ namespace Desert::Graphic::System
 
         // The sky-light occlusion volume, on the same always-bound terms as the two samplers above and for
         // the same reason. When the layer does not want it the image does not exist at all, so the
-        // fallback is what the descriptor points at and push.SkyOcclusion.x is 0.
+        // fallback is what the descriptor points at and push.Frame.x is 0.
         m_MarchPipeline->SetInput(
              kCloudSkyOcclusionBinding,
              skyOcclusionReady
                   ? m_SkyOcclusionVolume.get()
                   : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
+
+        // The atmosphere's transmittance LUT, again always bound and for the fourth time for the same
+        // reason. The handle is the sky's — a scene on the artistic gradient, or one whose LUTs have not
+        // been baked, publishes null and gets the fallback, which is exactly the case push.Frame.y is 0 in.
+        m_MarchPipeline->SetInput(
+             kCloudSunTransmittanceLutBinding,
+             atmosphere.TransmittanceLut
+                  ? atmosphere.TransmittanceLut
+                  : FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA8F ).get() );
 
         m_MarchPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 

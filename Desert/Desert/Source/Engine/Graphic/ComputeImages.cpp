@@ -141,13 +141,20 @@ namespace Desert::Graphic
                                  ? clouds.DistantSkyLight
                                  : fallbacks.GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F ).get() );
 
-        // x marches, y reads the sky-occlusion volume, z is the aerial perspective's start depth. The
-        // second is ANDed with the buffers above for the reason the march's own gate is: a layer whose
-        // flag is on but whose volume was not written must fall back to the profile term rather than read
-        // an image nobody filled.
+        // x marches, y reads the sky-occlusion volume, z is the aerial perspective's start depth, w applies
+        // the atmosphere's transmittance at each cloud sample's own altitude. The last three are ANDed with
+        // the buffers above for the reason the march's own gates are: a layer whose flag is on but whose
+        // resource was not written must fall back rather than read an image nobody filled.
+        //
+        // w IS ALSO ANDed WITH transmittanceLut, and that is not belt and braces. The cloud renderer raised
+        // it because the SKY published a LUT; this function is the last place that can see whether the LUT
+        // it is BINDING is that one or the fallback texture, and a fallback read as an atmosphere is a
+        // transmittance of whatever colour the fallback happens to be.
+        const bool perSampleSun = cloudsBound && clouds.PerSampleSunTransmittance && transmittanceLut != nullptr;
+
         const glm::vec4 cloudPush{ cloudsBound ? 1.0f : 0.0f,
                                    cloudsBound && clouds.SkyOcclusion && clouds.SkyOcclusionVolume ? 1.0f : 0.0f,
-                                   std::max( clouds.AerialStartDepthKm, 0.0f ), 0.0f };
+                                   std::max( clouds.AerialStartDepthKm, 0.0f ), perSampleSun ? 1.0f : 0.0f };
         pipeline->SetPushConstants( &cloudPush, static_cast<uint32_t>( sizeof( cloudPush ) ) );
 
         pipeline->Dispatch( std::max( 1u, width / kWorkGroupSize ), std::max( 1u, height / kWorkGroupSize ),

@@ -485,7 +485,7 @@ TEST_F( ShaderRootFixture, TheCloudShadowMapDeclaresNineDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
 }
 
-TEST_F( ShaderRootFixture, TheCloudMarchDeclaresFourteenDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheCloudMarchDeclaresFifteenDescriptorsInSetZero )
 {
     // THE VIEW MARCH, pinned on the same terms and for the same reason, and it was NOT pinned before slot
     // A landed — which is precisely why it is worth doing now: two of its ten descriptors are new, both
@@ -502,10 +502,15 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresFourteenDescriptorsInSetZero )
     //
     // FOURTEEN SINCE Р4. The one that arrived is the SKY-LIGHT OCCLUSION VOLUME at binding 13, and it is
     // bound on exactly the terms this note describes: ALWAYS, fallback included, even in the default scene
-    // where the layer's flag is off and CloudPush::SkyOcclusion.x tells the march not to read it.
+    // where the layer's flag is off and CloudPush::Frame.x tells the march not to read it.
+    //
+    // FIFTEEN SINCE Р14. The one that arrived is the ATMOSPHERE'S TRANSMITTANCE LUT at binding 14 — the
+    // SKY's texture, read by the cloud march so that the sun's colour can be re-evaluated at each sample's
+    // own altitude instead of once at sea level. Bound on the same terms again, and in the shipped scene
+    // it is the FALLBACK that is bound, because the field it serves is off by default.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 14u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 15u );
 
     for ( std::uint32_t slot = 0; slot < Desert::Graphic::kCloudSpeciesSlots; ++slot )
     {
@@ -544,6 +549,23 @@ TEST_F( ShaderRootFixture, TheCloudMarchDeclaresFourteenDescriptorsInSetZero )
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sculpted body
     EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudSkyOcclusionBinding,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the sky-light occlusion volume
+    EXPECT_TRUE( HasBinding( bindings, Desert::Graphic::kCloudSunTransmittanceLutBinding,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // the atmosphere transmittance LUT
+
+    // AND IT MUST NOT COLLIDE WITH ANYTHING ALREADY THERE. Stated as an assertion because the bindings are
+    // handed to SetInput verbatim and a duplicate number does not fail anywhere: it lands one resource on
+    // top of another, and what the march then samples is whichever of the two the renderer bound last.
+    for ( const std::uint32_t taken :
+          { Desert::Graphic::kCloudOutputBinding, Desert::Graphic::kCloudParamsBinding,
+            Desert::Graphic::kCloudSceneDepthBinding, Desert::Graphic::kCloudNoiseBinding,
+            Desert::Graphic::kCloudDistantSkyLightBinding, Desert::Graphic::kCloudAerialPerspectiveBinding,
+            Desert::Graphic::kCloudGuideOutputBinding, Desert::Graphic::kCloudModellingBinding,
+            Desert::Graphic::kCloudAuthoredBinding, Desert::Graphic::kCloudAuthoredAtlasBinding,
+            Desert::Graphic::kCloudNoiseBindings[1], Desert::Graphic::kCloudNoiseBindings[2],
+            Desert::Graphic::kCloudNoiseBindings[3], Desert::Graphic::kCloudSkyOcclusionBinding } )
+    {
+        EXPECT_NE( Desert::Graphic::kCloudSunTransmittanceLutBinding, taken );
+    }
 }
 
 TEST_F( ShaderRootFixture, TheSkyOcclusionVolumesProducerAndConsumerAgreeAboutTheFieldTheyIntegrate )

@@ -447,6 +447,21 @@ namespace Desert::Graphic::System
                       kMultiScatterLutSize );
         }
 
+        // THE TRANSMITTANCE LUT, published for consumers that do not bind the sky parameter buffer.
+        //
+        // Gated on m_LutsValid and not on the pipeline existing, on the same contract as the aerial
+        // perspective volume and the distant sky light below: a non-null handle IS the statement "this
+        // texture has been marched", and a consumer that sampled it before the first dispatch would shade
+        // its frame with uninitialised device memory. The two radii travel with it because the LUT's
+        // Bruneton mapping is a function of the shell and its reader has to reproduce that mapping — the
+        // same argument the aerial-perspective volume's two scalars are published under.
+        if ( m_LutsValid )
+        {
+            m_Atmosphere.TransmittanceLut               = m_TransmittanceLut.get();
+            m_Atmosphere.TransmittanceLutBottomRadiusKm = AtmosphereBottomRadiusKm( m_Sky );
+            m_Atmosphere.TransmittanceLutTopRadiusKm    = AtmosphereTopRadiusKm( m_Sky );
+        }
+
         // The Sky-View LUT, every frame: it depends on the camera's altitude and the sun, which the
         // cached pair deliberately does not. The sky pass samples the previous frame's fill (this slot
         // runs after the graph recorded the Sky pass) — invisible at 192x104 of slowly-varying sky.
@@ -563,6 +578,12 @@ namespace Desert::Graphic::System
             // so the fog's directional lobe reads the sun on the ground instead of re-deriving it from a
             // light list it has no business walking (UE publishes it on the View UB for the same reason).
             m_Atmosphere.SunIlluminanceOnGround = fx.OuterSpaceIlluminance * m_Atmosphere.SunTransmittanceAtGround;
+
+            // THE NUMERATOR OF THAT PRODUCT, published rather than left to be divided back out. A consumer
+            // that re-applies the transmittance at its own altitude — the cloud march's per-sample path —
+            // needs the pre-atmosphere illuminance, and recovering it as ground / T(ground) is an infinity
+            // at a low sun, where T reaches zero channel by channel.
+            m_Atmosphere.SunOuterSpaceIlluminance = fx.OuterSpaceIlluminance;
 
             // A sun below the horizon is a legal authored state (it is night), but it is also what an
             // inverted Translation looks like — and that mistake shipped in four scenes. Say it once, with
@@ -684,6 +705,10 @@ namespace Desert::Graphic::System
 
         cloudBinding.Marched      = clouds.Marched;
         cloudBinding.SkyOcclusion = clouds.SkyOcclusionValid;
+        // WHAT THE BLOCK ABOVE MEANS. The cloud renderer decided it when it packed the block; carrying it
+        // is what stops the bake from marching a SunColour that is the sun before the atmosphere and
+        // applying no atmosphere to it.
+        cloudBinding.PerSampleSunTransmittance = clouds.PerSampleSunTransmittance;
         // The atmosphere's own knob, carried because the bake INTEGRATES the air in front of a cloud
         // instead of fetching the camera aerial-perspective volume the screen march reads — a panorama has
         // no view frustum to froxelize. Without it a scene that pushes the haze out would still see it in

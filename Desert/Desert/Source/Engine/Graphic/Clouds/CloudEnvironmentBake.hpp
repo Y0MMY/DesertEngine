@@ -75,6 +75,17 @@ namespace Desert::Graphic
         /// first bake precedes, so the first bake of a scene necessarily misses it and has to be redone.
         bool SkyOcclusionValid = false;
 
+        /// Whether CloudGpuPayload::SunColour below carries the sun's OUTER-SPACE illuminance, so that the
+        /// bake must apply the atmosphere's transmittance at each sample's own altitude itself.
+        ///
+        /// IT TRAVELS BECAUSE THE BLOCK IS SHARED AND ITS MEANING IS NOT SELF-DESCRIBING. Params is the
+        /// same block the screen march reads, and Graphic::CloudUsesPerSampleSunTransmittance changes what
+        /// SunColour MEANS rather than adding a field beside it. A bake that took the block and applied no
+        /// transmittance would light the whole IBL panorama with the sun as seen from space — several times
+        /// the ground-level colour at a low sun — and it would look like an exposure bug, not like a
+        /// missing multiply.
+        bool PerSampleSunTransmittance = false;
+
         CloudGpuPayload      Params{};
         CloudAuthoredPayload Authored{};
 
@@ -99,6 +110,12 @@ namespace Desert::Graphic
     {
         bool Marched      = false;
         bool SkyOcclusion = false;
+
+        /// CloudEnvironmentBake::PerSampleSunTransmittance, carried through. The bake shader needs no
+        /// descriptor of its own for it: it already binds the SKY's transmittance LUT
+        /// (Graphic::kSkyTransmittanceLutBinding) and already derives the shell's two radii from the sky
+        /// parameter block it reads, so only the gate crosses this seam.
+        bool PerSampleSunTransmittance = false;
 
         /// The atmosphere's Aerial Perspective Start Depth, kilometres. It reaches the screen march baked
         /// into the aerial-perspective volume; the bake integrates the air itself and so has to be told.
@@ -140,6 +157,11 @@ namespace Desert::Graphic
      * sun. Taking the WHOLE block minus the two exclusions is what makes this hard to get wrong later: a
      * parameter added to CloudGpuPayload is in the fingerprint the moment it exists, where an enumerated
      * list of fields would silently miss it.
+     *
+     * PER-SAMPLE SUN TRANSMITTANCE NEEDS NO INPUT OF ITS OWN HERE, and that is worth stating because the
+     * sky-occlusion flag beside it does. Turning it on replaces SunColour in the block — the ground-level
+     * product becomes the outer-space illuminance — so it is already inside the bytes below. The
+     * sky-occlusion flag is not in them at all, which is why it is a parameter.
      *
      * AND WHAT THE BLOCK CANNOT SEE ARRIVES AS @p shapeGeneration. Coverage, the cloud types, the seed,
      * the placement lattice and the painted layout decide WHERE cloud is, and none of them is in the

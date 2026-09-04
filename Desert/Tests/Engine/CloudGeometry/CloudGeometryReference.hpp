@@ -31,6 +31,7 @@ namespace Desert::Tests::CloudGeometryRef
         using glm::length;
         using glm::max;
         using glm::min;
+        using glm::normalize;
         using glm::sqrt;
 
 #include <Common/CloudGeometry.glslh>

@@ -480,6 +480,7 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "PhaseBlend",
          "AmbientOcclusionStrength",
          "SkyOcclusionVolume",
+         "PerSampleAtmosphereTransmittance",
          "LightMarchDistance",
          "LightMarchSamples",
          "MultiScatterOctaves",
@@ -498,7 +499,7 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 52u );
+    EXPECT_EQ( cloud.Fields.size(), 53u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
     EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 9u );
@@ -519,7 +520,12 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     // ONLY field that feature added. What it chooses is which geometry AmbientOcclusionStrength measures,
     // so the strength stayed one knob with one meaning; a second strength beside it would have been a
     // parameter whose only job is to say the same thing twice.
-    EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 15u );
+    //
+    // SIXTEEN SINCE Р14, and the row that arrived is Per Sample Atmosphere Transmittance — again a bool
+    // and again the only field its feature added. It chooses WHERE the atmosphere's cut is taken, not how
+    // much of it: there is no strength beside it, because a physical transmittance scaled by taste is a
+    // knob that hides the calibration rather than a parameter.
+    EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 16u );
     // THE SHADOWS GROUP IS TWO ROWS AND NOT FOUR. The map's extent and resolution are engine constants
     // like the step schedule (they trade cost against quality identically in every scene, and the extent
     // is DERIVED from the march's own resolvable chord). The sky-light occlusion under a deck is a
@@ -663,6 +669,13 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
             "default of 1.0 is calibrated for the volume's geometry, not the profile term's";
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "AmbientOcclusionStrength" ), 1.0f )
          << "the strength no longer matches the geometry SkyOcclusionVolume's default selects";
+    // OFF, WHICH IS UNREAL'S DEFAULT for the same field and the reason the whole calibration below is
+    // still readable: every number this programme has measured was measured against the sun colour
+    // `OuterSpaceIlluminance x T(ground)`, and turning this on replaces that colour everywhere in the
+    // shell at once. A default of true would silently re-base CALIBRATION.md.
+    EXPECT_FALSE( DefaultOf<bool>( cloud, "PerSampleAtmosphereTransmittance" ) )
+         << "the per-sample atmospheric sun transmittance is on by default, which moves every frame this "
+            "programme has calibrated against and is not what Unreal ships";
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartMaxDistance" ), 35000000.0f );
     // FIFTEEN kilometres, not the five hundred metres this line used to assert, and the change was
     // forced by a measurement rather than chosen: a shadow ray that starts inside a two-kilometre cloud
@@ -833,6 +846,85 @@ TEST( VolumetricCloudPayload, ALegalNearFadeSurvivesThePackerUnchangedAndInKilom
 
     EXPECT_FLOAT_EQ( fromCamera.Fade.w, 0.0f );
     EXPECT_FLOAT_EQ( fromCamera.Fade.z, 5.0f );
+}
+
+// THE SUN THE BLOCK CARRIES AND THE TRANSMITTANCE EACH MARCH APPLIES ARE ONE DECISION SPELT THREE TIMES.
+//
+// Graphic::PackCloudParams chooses WHICH illuminance goes on the wire; VolumetricCloudRenderer chooses
+// whether to raise CloudPush::Frame.y so the screen march multiplies by T(sample), and whether to tell
+// the environment bake the same through CloudEnvironmentBake::PerSampleSunTransmittance. If those ever
+// disagree the frame is not slightly wrong — it is the outer-space illuminance with no atmosphere applied
+// to it at all, which at a low sun is several times the light the scene is exposed for.
+//
+// They cannot disagree because Graphic::CloudUsesPerSampleSunTransmittance answers for all three, and what
+// is asserted here is that the packer really does defer to it — over every combination of the flag and the
+// two handles whose presence the answer depends on.
+TEST( VolumetricCloudPayload, TheSunColourAndThePerSampleGateAgreeOnEveryCombination )
+{
+    // Opaque handles: AtmosphereEnv holds them as forward-declared pointers and the packer only ever
+    // tests them against null, so a distinct non-null address is a complete stand-in for a real image.
+    auto* const lut      = reinterpret_cast<Desert::Graphic::Image2D*>( 0x1000 );
+    auto* const skyLight = reinterpret_cast<Desert::Graphic::Image2D*>( 0x2000 );
+
+    // Three visibly different sun quantities, so an assertion below cannot pass by two of them colliding.
+    const glm::vec3 outerSpace( 8.0f, 7.0f, 6.0f );
+    const glm::vec3 onGround( 4.0f, 2.0f, 1.0f ); // outerSpace x a plausible low-sun transmittance
+    const glm::vec3 skyDisc( 0.5f, 0.4f, 0.3f );
+
+    for ( const bool flag : { false, true } )
+    {
+        for ( const bool haveLut : { false, true } )
+        {
+            for ( const bool haveSkyLight : { false, true } )
+            {
+                for ( const bool valid : { false, true } )
+                {
+                    Desert::Graphic::AtmosphereEnv atmosphere{};
+                    atmosphere.Valid                    = valid;
+                    atmosphere.SunOuterSpaceIlluminance = outerSpace;
+                    atmosphere.SunIlluminanceOnGround   = onGround;
+                    atmosphere.SunIrradiance            = skyDisc;
+                    atmosphere.TransmittanceLut         = haveLut ? lut : nullptr;
+                    atmosphere.DistantSkyLight          = haveSkyLight ? skyLight : nullptr;
+
+                    Desert::ECS::VolumetricCloudData data;
+                    data.PerSampleAtmosphereTransmittance = flag;
+
+                    const bool perSample = Desert::Graphic::CloudUsesPerSampleSunTransmittance( data, atmosphere );
+
+                    // The gate may only fire when all four conditions hold — that is the renderers'
+                    // contract for binding the real LUT rather than the fallback texture.
+                    EXPECT_EQ( perSample, flag && valid && haveLut && haveSkyLight );
+
+                    const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
+                         data, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
+
+                    const glm::vec3 packed( payload.SunColour );
+
+                    // WHICH sun the block carries, in the same three cases the packer distinguishes. An
+                    // invalid atmosphere is black on every path, which is the "no sky component" state.
+                    const glm::vec3 expected = !valid         ? glm::vec3( 0.0f )
+                                               : perSample    ? outerSpace
+                                               : haveSkyLight ? onGround
+                                                              : skyDisc;
+
+                    EXPECT_FLOAT_EQ( packed.x, expected.x )
+                         << "flag " << flag << ", lut " << haveLut << ", skyLight " << haveSkyLight << ", valid "
+                         << valid;
+                    EXPECT_FLOAT_EQ( packed.y, expected.y );
+                    EXPECT_FLOAT_EQ( packed.z, expected.z );
+
+                    // AND THE ONE THAT MATTERS MOST: the outer-space illuminance may reach the GPU ONLY
+                    // when a march is going to apply a transmittance to it. Stated separately from the
+                    // table above because this is the failure that is dangerous rather than merely wrong.
+                    if ( packed == outerSpace && outerSpace != onGround )
+                        EXPECT_TRUE( perSample )
+                             << "the block carries the sun's colour before the atmosphere while the march "
+                                "is told to apply no atmosphere to it";
+                }
+            }
+        }
+    }
 }
 
 TEST( VolumetricCloudPayload, TheEnvelopeContainsEveryTypeItIsBuiltFrom )

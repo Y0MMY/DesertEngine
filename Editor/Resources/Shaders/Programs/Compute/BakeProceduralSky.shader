@@ -169,6 +169,14 @@ Shader "BakeProceduralSky"
             // z = the atmosphere's Aerial Perspective Start Depth in kilometres. It reaches the screen
             //     march baked into the aerial-perspective volume; this pass integrates the air itself and
             //     therefore has to be told, or a scene that pushes the haze out would still see it here.
+            // w = 1 when u_CloudSunColour.rgb carries the sun's OUTER-SPACE illuminance and this pass must
+            //     apply the atmosphere's transmittance at each cloud sample's own altitude itself. It is
+            //     the SCREEN march's gate again (CloudPush::Frame.y), carried because both passes light
+            //     the field from ONE packed block: with the flag on and this lane at 0 the panorama would
+            //     be lit by the sun as seen from space, which at a low sun is several times the light the
+            //     scene is exposed for and reads as an exposure bug rather than a missing multiply.
+            //     No binding travels with it — this pass already samples the SKY's own transmittance LUT
+            //     at binding 2 and already derives the shell's radii from the sky block it reads.
             vec4 u_BakeClouds;
         };
 
@@ -221,6 +229,35 @@ Shader "BakeProceduralSky"
             vec3  Luminance;
             float Transmittance;
         };
+
+        // THE SUN A CLOUD SAMPLE SEES, and it is Programs/Clouds/CloudRaymarch.shader's function of the
+        // same name with one difference: the shell's two radii come from the sky block this pass already
+        // reads rather than from a push constant, because this pass binds the sky and that one does not.
+        // The arithmetic between them is SkySunAtAltitude's, once, in Common/SkyScattering.glslh.
+        //
+        // WHY THIS PASS NEEDS IT AT ALL. The panorama is marched from the SAME packed block the screen
+        // march reads, and ECS::VolumetricCloudData::PerSampleAtmosphereTransmittance changes what
+        // u_CloudSunColour MEANS rather than adding a field beside it. A bake that ignored the lane would
+        // light every cloud in the IBL chain with the sun as seen from space.
+        vec3 CloudSunColourAtForBake(SkyAtmParams atm, CloudLayer layer, vec3 positionKm, vec3 toSun)
+        {
+            if (u_BakeClouds.w < 0.5f)
+                return u_CloudSunColour.rgb;
+
+            float sunZenithCos = clamp(dot(CloudLocalUp(positionKm), toSun), -1.0f, 1.0f);
+
+            SkySunAtPoint sun = SkySunAtAltitude(atm.BottomRadiusKm, atm.TopRadiusKm,
+                                                 CloudAltitudeKm(layer, positionKm), sunZenithCos,
+                                                 vec2(textureSize(u_TransmittanceLut, 0)));
+
+            if (sun.PlanetShadow <= 0.0f)
+                return vec3(0.0f, 0.0f, 0.0f);
+
+            // textureLod and not texture, for the reason every other fetch in this file gives: a compute
+            // shader has no derivatives, so the implicit level of detail is undefined.
+            return u_CloudSunColour.rgb *
+                   (sun.PlanetShadow * textureLod(u_TransmittanceLut, sun.Uv, 0.0f).rgb);
+        }
 
         CloudBakeResult MarchCloudsForBake(SkyPacked s, SkyAtmParams atm, vec3 dir, float jitter)
         {
@@ -384,8 +421,12 @@ Shader "BakeProceduralSky"
                                                   u_CloudPhase.z);
                         }
 
+                        // The sun THIS sample sees, on the screen march's own terms — see the note at
+                        // CloudSunColourAtForBake for why the bake owes this and cannot take the block's
+                        // colour verbatim.
                         luminance += transmittance *
-                                     CloudMultiScatterStep(series, u_CloudSunColour.rgb,
+                                     CloudMultiScatterStep(series,
+                                                           CloudSunColourAtForBake(atm, layer, samplePos, sunDir),
                                                            ambientRadiance * ambientOcclusion, opticalDepth,
                                                            phase, sigmaT, albedo, stepKm);
 
