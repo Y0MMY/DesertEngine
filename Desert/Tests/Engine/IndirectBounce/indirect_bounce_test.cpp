@@ -24,8 +24,11 @@
 
 #include "IndirectBounceReference.hpp"
 
+#include <Common/Core/Units.hpp>
+
 #include <glm/gtc/epsilon.hpp>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -72,8 +75,14 @@ namespace
     // assertion is about the whole BRDF and not a half of it isolated by a trick.
     float BounceDirectionalAlbedo( float albedo, float roughness, float distance )
     {
-        const float cosLi   = glm::max( glm::dot( kEmitterN, kSunL ), 0.0f );
-        const float falloff = 1.0f + distance * distance;
+        const float cosLi = glm::max( glm::dot( kEmitterN, kSunL ), 0.0f );
+
+        // ASKED OF THE SHIPPED TEXT, NOT RETYPED. This used to read `1.0f + distance * distance`, a
+        // second copy of the shader's softening living in the test — and the moment that softening's
+        // units were repaired (a bare 1.0 meant one square CENTIMETRE in a centimetre world), three
+        // assertions here started dividing by a constant the shader no longer used and were measuring
+        // nothing. Both sides now call one function, so they cannot disagree about it again.
+        const float falloff = BounceFalloff( distance * distance );
 
         constexpr int   kTheta = 128;
         constexpr int   kPhi   = 512;
@@ -116,6 +125,37 @@ namespace
         return buffer.str();
     }
 } // namespace
+
+// ---------------------------------------------------------------------------------------------------
+// THE SOFTENING IS A LENGTH, AND THE LENGTH IS A METRE.
+// ---------------------------------------------------------------------------------------------------
+
+// Every other assertion in this file divides BounceFalloff back out, so all of them are blind to what it
+// actually is — which is how a bare `1.0` survived the 2026-08-04 switch to centimetre world units and
+// left screen-space GI four orders of magnitude below anything a frame could show, with GIIntensity a
+// dead setting in 49 scenes. That defect could not fail a single test here, and the mutation proves it:
+// restoring `1.0 + d2` leaves the other nine green.
+//
+// So the softening gets its own assertion, and it is about MEANING rather than about a constant: the
+// bounce is at half strength one METRE from its emitter. Written through Common::Units so that the next
+// unit migration has to walk past it.
+TEST( IndirectBounce, TheSofteningLengthIsOneMetreAndNotOneWorldUnit )
+{
+    EXPECT_NEAR( BounceFalloff( 0.0f ), 1.0f, 1e-6f ) << "a coincident emitter must stay finite at 1x";
+
+    const float oneMetre = Common::Units::Metres( 1.0f );
+    EXPECT_NEAR( BounceFalloff( oneMetre * oneMetre ), 2.0f, 1e-4f )
+         << "the bounce is supposed to be at HALF strength one metre away; it is at half strength "
+         << std::sqrt( 1.0f )
+         << " world units instead, which is what a bare `1.0 + d2` gives in a "
+            "centimetre world";
+
+    // And the direction of the mistake, stated so it cannot come back as the opposite error: one
+    // centimetre must be nearly free, not half.
+    const float oneCm = Common::Units::Cm( 1.0f );
+    EXPECT_LT( BounceFalloff( oneCm * oneCm ), 1.001f )
+         << "a centimetre of separation is attenuating the bounce as if it were a metre";
+}
 
 // ---------------------------------------------------------------------------------------------------
 // THE bound. One assertion that catches a spurious factor of anything, and this one was PI.
@@ -269,15 +309,25 @@ TEST( IndirectBounce, ALambertianEmitterHandsOnItsAlbedoOverPiAndNotItsAlbedo )
     // directly in front of it facing back, dielectric with F0 = 0 so Schlick contributes nothing at
     // normal incidence.
     //
-    //   outgoing radiance = albedo / PI          coupling = 1 * 1 / (1 + 1*1)
+    //   outgoing radiance = albedo / PI          coupling = 1 * 1 / BounceFalloff(d2)
     //
-    // so a white emitter one unit away hands on 1/(2*PI) = 0.15915. The deleted form hands on 0.5.
+    // THE COUPLING IS ASKED FOR, NOT ASSUMED. This assertion used to read `1/(2*PI)`, which is the answer
+    // only while the softening happens to evaluate to 2 at unit distance — true of `1.0 + d*d` and of
+    // nothing else. Repairing that softening's units (a bare 1.0 meant one square CENTIMETRE in a
+    // centimetre world) left this expectation measuring the old constant instead of the property it
+    // names, and it failed by exactly the ratio of the two softenings. The property is the 1/PI; the
+    // coupling is BounceFalloff's business and is divided out rather than predicted.
+    const float     kPi = 3.14159265358979f;
     const glm::vec3 straightUp( 0.0f, 0.0f, 1.0f );
-    const glm::vec3 bounce = EvaluateBounceSample( ReceiverAt( straightUp, 1.0f ), -straightUp, kEmitterPos,
+    const float     kDistance = 1.0f;
+
+    const glm::vec3 bounce = EvaluateBounceSample( ReceiverAt( straightUp, kDistance ), -straightUp, kEmitterPos,
                                                    kEmitterN, glm::vec3( 1.0f ), glm::vec3( 0.0f ), 0.0f,
                                                    kRoughness, straightUp, glm::vec3( 1.0f ) );
 
-    EXPECT_NEAR( bounce.r, 1.0f / ( 2.0f * 3.14159265358979f ), 1e-5f );
+    // Lambert's 1/PI, and nothing else, once the coupling is removed. The deleted form hands on 1.0 here
+    // — PI times too much — which is what this test exists to catch.
+    EXPECT_NEAR( bounce.r * BounceFalloff( kDistance * kDistance ), 1.0f / kPi, 1e-5f );
 }
 
 // ---------------------------------------------------------------------------------------------------
