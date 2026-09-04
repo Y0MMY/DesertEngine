@@ -207,6 +207,20 @@ Shader "Grass"
         }
         u;
 
+        // THE CLOUD LAYER'S SHADOW ON THE WORLD. The blades are here because the LAWN is: Terrain.shader
+        // and this shader are authored to read as one material (the ground tint tracks GrassBrightness
+        // for exactly that reason), and a deck that takes the sun off the terrain and leaves it on the
+        // blades turns a field into bright fuzz over dark soil. Slots 4/5 are the first free ones in this
+        // shader's own layout; only the NAMES are shared with the other receivers.
+        Uniform(4) sampler2D u_CloudShadowMap;
+        Uniform(5) CloudShadowUB
+        {
+            mat4 u_CloudShadowWorldToMap;
+            vec4 u_CloudShadowParams;
+        };
+
+        #include <Common/CloudShadowReceiver.glslh>
+
         void main()
         {
             float t = v_UV.y; // height fraction along the blade
@@ -247,12 +261,17 @@ Shader "Grass"
             // straight from the sky.
             float wrap = ndl * 0.8 + 0.2;
 
+            // Everything below that is multiplied by `sun` is sunlight and is attenuated by the cloud
+            // layer; `ambient` is the sky dome and is not. Same split the terrain, the mesh shaders and
+            // the deferred composite make.
+            float cloudShadow = CloudShadowFactor( v_WorldPos );
+
             vec3 ambient = vec3( 0.17, 0.24, 0.15 );
-            vec3 lit     = base * ( ambient + sun * wrap ) * ao;
+            vec3 lit     = base * ( ambient + sun * wrap * cloudShadow ) * ao;
 
             // SSS: sun behind the thin blade glows through toward the viewer (stronger at the tip).
             float trans = pow( max( dot( V, -L ), 0.0 ), 3.0 ) * ( 0.3 + 0.7 * t );
-            lit += sun * trans * vec3( 0.22, 0.36, 0.10 ) * u.GrassTint.rgb;
+            lit += sun * trans * cloudShadow * vec3( 0.22, 0.36, 0.10 ) * u.GrassTint.rgb;
 
             o_Color = vec4( lit, 1.0 );
         }

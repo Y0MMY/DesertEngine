@@ -1,6 +1,7 @@
 #include "TerrainRenderer.hpp"
 
 #include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Graphic/Clouds/CloudShadowBinding.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Core/Formats/ImageFormat.hpp>
@@ -336,6 +337,13 @@ namespace Desert::Graphic::System
                      if ( auto* terrainUB = m_Material->Get<UniformBufferProperty>( "TerrainUB" ) )
                          terrainUB->SetRawData( reinterpret_cast<const std::byte*>( &ub ), sizeof( ub ) );
 
+                     // The cloud layer's shadow on the sun this terrain is lit by — the SAME payload the
+                     // deferred composite and the forward mesh materials receive, written by the same
+                     // one writer. A terrain is drawn by neither render path's mesh shaders, so while
+                     // the map's only reader was the deferred composite a terrain never darkened under a
+                     // cloud at all: the ground beside it did and it did not.
+                     CloudShadowBind( m_Material.get(), m_SceneRenderer->GetCloudShadowInput() );
+
                      // Material params: reset to #pragma defaults, then apply this entity's overrides by name.
                      m_Material->ApplyDefaults();
                      for ( const auto& [name, value] : t.Overrides.Params )
@@ -420,6 +428,12 @@ namespace Desert::Graphic::System
                  ub.GrassTint = glm::vec4( glm::vec3( gt->GrassTint.x ), 0.0f );
                  if ( auto* gub = m_GrassMaterial->Get<UniformBufferProperty>( "GrassUB" ) )
                      gub->SetRawData( reinterpret_cast<const std::byte*>( &ub ), sizeof( ub ) );
+
+                 // The blades take the SAME cloud shadow as the lawn under them. Terrain.shader and
+                 // Grass.shader are authored to read as one material (the ground tint tracks the blade
+                 // brightness from a single slider for exactly that reason), so shading one and not the
+                 // other turns a field into bright fuzz over dark soil.
+                 CloudShadowBind( m_GrassMaterial.get(), m_SceneRenderer->GetCloudShadowInput() );
 
                  m_GrassMaterial->ApplyDefaults();
                  if ( gt->SplatMap )

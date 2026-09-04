@@ -146,6 +146,13 @@ namespace Desert::Graphic::System
             ImageCube* PrefilteredMap = nullptr;
             Image2D*   BrdfLut        = nullptr;
 
+            // The cloud layer's shadow on the sun — the SECOND occluder, beside the cascades above. It
+            // belongs in this snapshot for the reason the snapshot exists: it is scene state, one per
+            // frame, and it has to reach the opaque pass, the glass pass and the RSM identically. While
+            // it did not, the only surfaces in the engine that received a cloud shadow were the ones a
+            // deferred composite happened to shade.
+            CloudShadowInput CloudShadow;
+
             // Writes the whole snapshot onto @p instance's material. One call, so a new piece of frame
             // state can never be applied at two of the three sites and forgotten at the third.
             void ApplyTo( MaterialInstance* instance ) const;

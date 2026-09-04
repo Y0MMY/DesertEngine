@@ -50,6 +50,11 @@ namespace Desert::Graphic
         MaterialPBRBase::UpdateEnvironment( instance, irradiance, prefiltered, brdfLut );
     }
 
+    void StaticMaterialPBR::UpdateCloudShadow( MaterialInstance* instance, const CloudShadowInput& cloudShadow )
+    {
+        MaterialPBRBase::UpdateCloudShadow( instance, cloudShadow );
+    }
+
     void StaticMaterialPBR::Bind( const MaterialInstance* instance )
     {
         if ( !m_MaterialExecutor )

@@ -642,26 +642,11 @@ namespace Desert::Graphic
             }
 
             // The cloud layer's shadow on the world — a SECOND occluder of the same sun, filled by
-            // ExecuteCloudShadowMap() before the graph recorded. Left at its default (disabled, no map)
-            // whenever the layer is absent, off, not casting or at zero strength, which is what the
-            // renderer's own gate answers; the material then binds nothing and the shader never fetches.
-            CloudShadowInput cloudShadow;
-            if ( auto* clouds =
-                      UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] );
-                 clouds && clouds->HasShadowMap() )
-            {
-                const CloudShadowMapView& view = clouds->GetShadowMapView();
-
-                cloudShadow.Map          = clouds->GetShadowMapImage();
-                cloudShadow.WorldToMap   = view.WorldToMap;
-                cloudShadow.FarDepthKm   = view.FarDepthKm;
-                cloudShadow.Strength     = clouds->GetShadowStrength();
-                // FROM THE VIEW AND NOT FROM THE CONSTANT, because the quality tier scales the map's
-                // extent and the fade is a fixed WORLD width across it — a consumer reading a fixed UV
-                // would put the gradient in the wrong place on every tier but one.
-                cloudShadow.BorderFadeUv = view.BorderFadeUv;
-                cloudShadow.Enabled      = true;
-            }
+            // ExecuteCloudShadowMap() before the graph recorded. The SAME payload the forward mesh
+            // materials and the terrain material are handed (GetCloudShadowInput), gathered once: this
+            // used to be gathered inline right here, and that is exactly why nothing outside this branch
+            // ever received a cloud shadow.
+            const CloudShadowInput cloudShadow = GetCloudShadowInput();
 
             // The baked sky the composite shades its ambient with — resolved from the SAME Environment
             // and the SAME BRDF LUT that MeshRenderer::BuildFrameState hands the forward materials
@@ -1505,6 +1490,34 @@ namespace Desert::Graphic
     {
         UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
              ->ExecuteShadowMapInFrame();
+    }
+
+    CloudShadowInput SceneRenderer::GetCloudShadowInput() const
+    {
+        CloudShadowInput cloudShadow;
+
+        // `find` rather than `operator[]`: this is a const observer and must not insert an empty system
+        // into the map on the way to answering "is there one".
+        const auto it = m_RenderSystems.find( "VolumetricCloudSystem" );
+        if ( it == m_RenderSystems.end() )
+            return cloudShadow;
+
+        auto* clouds = UNIQUE_GET_AS( System::VolumetricCloudRenderer, it->second );
+        if ( !clouds || !clouds->HasShadowMap() )
+            return cloudShadow;
+
+        const CloudShadowMapView& view = clouds->GetShadowMapView();
+
+        cloudShadow.Map        = clouds->GetShadowMapImage();
+        cloudShadow.WorldToMap = view.WorldToMap;
+        cloudShadow.FarDepthKm = view.FarDepthKm;
+        cloudShadow.Strength   = clouds->GetShadowStrength();
+        // FROM THE VIEW AND NOT FROM THE CONSTANT, because the quality tier scales the map's extent and
+        // the fade is a fixed WORLD width across it — a consumer reading a fixed UV would put the
+        // gradient in the wrong place on every tier but one.
+        cloudShadow.BorderFadeUv = view.BorderFadeUv;
+        cloudShadow.Enabled      = true;
+        return cloudShadow;
     }
 
     void SceneRenderer::ExecuteTransparency()

@@ -4,6 +4,7 @@
 #include <Engine/Assets/Mesh/PBRSurfaceParams.hpp>
 
 #include <Engine/Core/Camera.hpp>
+#include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/DirectionLight.hpp>
@@ -42,6 +43,7 @@ namespace Desert::Graphic
                                   bool lightingDebug = false );
         static void UpdateEnvironment( MaterialInstance* instance, ImageCube* irradiance, ImageCube* prefiltered,
                                        Image2D* brdfLut );
+        static void UpdateCloudShadow( MaterialInstance* instance, const CloudShadowInput& cloudShadow );
 
     protected:
         // Lets a derived variant bind a different shader (e.g. the instanced StaticMeshPBR_Instanced) while

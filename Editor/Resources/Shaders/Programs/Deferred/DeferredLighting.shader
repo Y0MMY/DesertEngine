@@ -31,12 +31,6 @@ Shader "DeferredLighting"
         // above (which already include it). Named explicitly because this pass calls it directly.
         #include <Mesh/DirectLighting.glslh>
 
-        // The cloud shadow map's RECONSTRUCTION half only — the same text its producer compiles, so the
-        // encode and the decode cannot drift apart. It declares no sampler and no parameter block, and
-        // its march stays inert because this pass does not define CLOUD_SHADOW_SAMPLE_EXTINCTION: there
-        // is no cloud field, no noise volume and no profile table anywhere near the deferred pass.
-        #include <Common/CloudShadowMap.glslh>
-
         In(0) vec2 v_TexCoord;
 
         Uniform(1) sampler2D u_GBufferC; // rgb = world position
@@ -229,15 +223,10 @@ Shader "DeferredLighting"
         	return shadow;
         }
 
-        // THE CLOUD LAYER'S SHADOW ON THE WORLD — a second, independent occluder of the same sun,
-        // multiplying the cascades' answer rather than replacing it. The cascades occlude the sun with
-        // opaque geometry; this occludes it with a volume, and a surface can be in either, both or
-        // neither.
-        //
-        // ONE FETCH, NO CASCADE, NO DEPTH COMPARE. The map's texel is not an occluder distance — it is
-        // (frontDepthKm, meanExtinctionPerKm, maxOpticalDepth), and Common/CloudShadowMap.glslh turns
-        // that triple into a transmittance at whatever depth this receiver sits at. That is what makes it
-        // correct for a mountain top INSIDE the layer as well as for the ground under it.
+        // THE CLOUD LAYER'S SHADOW ON THE WORLD — a second, independent occluder of the same sun.
+        // Declared here, evaluated by the shared receiver text below: the wrapper used to live in this
+        // file and this file ALONE, which is exactly why no forward-shaded surface in the engine ever
+        // received a cloud shadow. See Common/CloudShadowReceiver.glslh.
         Uniform(11) sampler2D u_CloudShadowMap;
         Uniform(12) CloudShadowUB {
         	mat4 u_CloudShadowWorldToMap;
@@ -246,32 +235,9 @@ Shader "DeferredLighting"
         	vec4 u_CloudShadowParams;
         };
 
-        // 1 = full sun, 0 = fully shaded by cloud. Costs one uniform compare in every scene that has no
-        // clouds — the sampler is then on its dummy image and is never touched.
-        float CloudShadowFactor(vec3 worldPos)
-        {
-        	if (u_CloudShadowParams.y < 0.5)
-        		return 1.0;
-
-        	// The perspective divide is written out even though the map's projection is ORTHOGRAPHIC and
-        	// its w is identically 1: the day a consumer is handed a different projection this line is
-        	// already correct, and the divide costs nothing against the texture fetch below it.
-        	vec4 mapClip = u_CloudShadowWorldToMap * vec4(worldPos, 1.0);
-        	mapClip     /= max(mapClip.w, 1e-6);
-        	vec2 uv      = CloudShadowClipToUv(mapClip.xy);
-
-        	// Outside the covered square there is no answer, and inventing one is worse than saying so:
-        	// the shadow is faded out over the last few texels so the map's boundary is a gradient rather
-        	// than a straight line of light across the terrain. See CLOUD_SHADOWMAP_BORDER_FADE_UV.
-        	float border = CloudShadowBorderFade(uv, u_CloudShadowParams.z);
-        	if (border <= 0.0)
-        		return 1.0;
-
-        	float depthKm       = CloudShadowDepthKm(mapClip.z, u_CloudShadowParams.x);
-        	float transmittance = CloudShadowTransmittance(texture(u_CloudShadowMap, uv).rgb, depthKm,
-        	                                               u_CloudShadowParams.w);
-        	return mix(1.0, transmittance, border);
-        }
+        // THE receiver, shared verbatim with the forward mesh shaders, the glass pass and the terrain.
+        // Included after the two bindings above because it names them.
+        #include <Common/CloudShadowReceiver.glslh>
 
         // Heat ramp for the Light-Complexity debug view: 0 -> dark blue, up through cyan/green/yellow -> red.
         // Standard "jet"-style piecewise map so overlapping light volumes read as hotter pixels.

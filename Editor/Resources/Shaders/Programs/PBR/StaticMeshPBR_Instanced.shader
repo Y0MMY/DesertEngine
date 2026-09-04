@@ -238,6 +238,21 @@ Shader "StaticMeshPBR_Instanced"
         Uniform(12) sampler2D u_NormalTexture;
         Uniform(18) sampler2D u_OpacityTexture; // alpha-cutout mask (foliage); unused when cutoff == 0 (16/17 = light SSBOs)
 
+        // THE CLOUD LAYER'S SHADOW ON THE WORLD — the sun's SECOND occluder, at the same slots as in
+        // StaticMeshPBR / SkinnedMeshPBR / StaticMeshGlass / StaticMeshGBuffer. See
+        // Common/CloudShadowReceiver.glslh.
+        Uniform(20) sampler2D u_CloudShadowMap;
+        Uniform(21) CloudShadowUB {
+        	mat4 u_CloudShadowWorldToMap;
+        	// x = the kilometres the map's clip z spans, y = 1 when the map is real and must be read,
+        	// z = the UV width of the border fade, w = the artist's shadow strength.
+        	vec4 u_CloudShadowParams;
+        };
+
+        // THE receiver, shared verbatim with the deferred composite. Included HERE because it names the
+        // two bindings above.
+        #include <Common/CloudShadowReceiver.glslh>
+
         struct Params
         {
         	vec3 AlbedoColor;
@@ -352,6 +367,9 @@ Shader "StaticMeshPBR_Instanced"
             vec3  sunDir = normalize(-directionLights.directionLights.Direction.xyz); // toward the sun
             int   cascade;
             float shadow = ShadowFactor(inVertex.WorldPosition, m_Params.Normal, sunDir, cascade);
+
+            // TWO OCCLUDERS OF ONE SUN, multiplied — exactly as the deferred composite assembles it.
+            shadow *= CloudShadowFactor(inVertex.WorldPosition);
 
             // Lighting debug (Scene Settings -> Debug -> Light Debug): each source gets a distinct color, the
             // surface is tinted by the sources reaching it (weighted by attenuation * NdotL), brightness = light

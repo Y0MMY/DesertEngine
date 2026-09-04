@@ -275,6 +275,25 @@ Shader "StaticMeshPBR"
         Uniform(12) sampler2D u_NormalTexture;
         Uniform(18) sampler2D u_OpacityTexture; // alpha-cutout mask (foliage); unused when cutoff == 0 (16/17 = light SSBOs)
 
+        // THE CLOUD LAYER'S SHADOW ON THE WORLD — the sun's SECOND occluder, beside the cascades above.
+        // 20/21 and not 19: 19 is the glass shader's u_SceneColor, and StaticMeshGlass shares this
+        // material's plumbing, so one slot number per thing across all four mesh shaders is worth more
+        // than the tightest packing. StaticMeshGBuffer.shader declares the same two and touches them
+        // through its `keep` epsilon — MeshRenderer binds ONE material's descriptor sets to both
+        // pipelines, so the layouts must stay identical (ShaderCacheKey asserts it).
+        Uniform(20) sampler2D u_CloudShadowMap;
+        Uniform(21) CloudShadowUB {
+        	mat4 u_CloudShadowWorldToMap;
+        	// x = the kilometres the map's clip z spans, y = 1 when the map is real and must be read,
+        	// z = the UV width of the border fade, w = the artist's shadow strength.
+        	vec4 u_CloudShadowParams;
+        };
+
+        // THE receiver, shared verbatim with the deferred composite — so a scene shaded through
+        // RenderingPath 0 and one shaded through RenderingPath 1 get one cloud shadow and not two.
+        // Included HERE and not with the headers at the top because it names the two bindings above.
+        #include <Common/CloudShadowReceiver.glslh>
+
         struct Params
         {
         	vec3 AlbedoColor;
@@ -392,6 +411,13 @@ Shader "StaticMeshPBR"
             // Per-mesh "Receive Shadows" toggle rides ExtraParams.w (1 = don't receive sun shadows).
             if (mat.ExtraParams.w > 0.5)
                 shadow = 1.0;
+
+            // TWO OCCLUDERS OF ONE SUN, multiplied — exactly as the deferred composite assembles it.
+            // AFTER the per-mesh toggle and not before it, because the toggle is a CASCADE toggle: the
+            // G-buffer carries no such bit, so the deferred path shades every surface with the cloud
+            // layer regardless, and a mesh that opted out of geometry shadows must not become the one
+            // surface in the scene whose shading depends on which path drew it.
+            shadow *= CloudShadowFactor(inVertex.WorldPosition);
 
             // Lighting debug (Scene Settings -> Debug -> Light Debug): each source gets a distinct color, the
             // surface is tinted by the sources reaching it (weighted by attenuation * NdotL), brightness = light

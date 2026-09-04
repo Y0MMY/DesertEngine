@@ -120,6 +120,14 @@ Shader "StaticMeshGBuffer"
         Uniform(11) sampler2D  u_AlbedoTexture;
         Uniform(12) sampler2D  u_NormalTexture;
         Uniform(18) sampler2D  u_OpacityTexture;
+        // The forward shaders' cloud-shadow pair. This pass shades nothing, so neither is READ here —
+        // they are kept for the same reason the seven above them are, and touched by the same epsilon.
+        Uniform(20) sampler2D  u_CloudShadowMap;
+        Uniform(21) CloudShadowUB
+        {
+        	mat4 u_CloudShadowWorldToMap;
+        	vec4 u_CloudShadowParams;
+        };
 
         void main()
         {
@@ -175,6 +183,10 @@ Shader "StaticMeshGBuffer"
         	keep += float(lightsMetadata.DirectionLightCount);
         	if (lightsMetadata.PointLightCount > 0u) keep += pointLights[0].intensity; // binding 6
         	if (lightsMetadata.SpotLightCount  > 0u) keep += spotLights[0].intensity;  // binding 16
+        	// The cloud shadow pair (20/21). The DEFERRED composite is what reads them on this path — it
+        	// shades the G-buffer this pass writes — so here they exist purely to keep the layout equal to
+        	// StaticMeshPBR's.
+        	keep += texture(u_CloudShadowMap, uv).r + u_CloudShadowParams.y + u_CloudShadowWorldToMap[0][0];
         	keep *= 1e-20;
 
         	// Material-complexity proxy (heat-mapped by the DeferredLighting debug branch): count the textures
