@@ -432,6 +432,13 @@ namespace Desert::Assets
         }
     } // namespace
 
+    float CloudProceduralLumpFloorKm( const CloudProceduralFieldParams& params )
+    {
+        // TWO BOUNDS AND THE VOLUME'S IS THE LARGER ONE, which is the whole finding — see the header.
+        const float voxelKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
+        return std::max( 0.5f * params.ResolvableChordKm, voxelKm );
+    }
+
     glm::vec2 CloudProceduralCellExtentKm( const CloudProceduralFieldParams& params,
                                            const CloudProceduralSpecies&     species )
     {
@@ -441,6 +448,19 @@ namespace Desert::Assets
         // species with a 50 m cell and the generator produced 4 180 731 lumps for one 48 km region, which
         // took a minute to place and could never have been baked. Four voxels is the narrowest cluster the
         // volume can carry with an inside and two edges.
+        //
+        // AND IT IS A BOUND ON THE CLUSTER, WHICH IS NOT A BOUND ON A LUMP — measured, because the sentence
+        // above reads as though it were. A cluster is six lobes; at exactly this floor (0.75 km at the
+        // shipped region) 34.5 % of the lumps came out under the two voxels the volume can express, the
+        // narrowest at 130 m against 375. What makes that sentence true is CloudProceduralLumpFloorKm,
+        // applied per lump at the emission site. This floor still earns its place — it is what keeps the
+        // lump COUNT finite — but it is not the relation it was read as.
+        //
+        // NOR DOES IT BIND ON ANYTHING IN THE REPOSITORY. Every cloud scene here carries a 12 km Weather
+        // Tile, so the lattice is 3 km and a cell is `3 km * PlacementScale`; the smallest Placement Scale
+        // in the shipped library is the altocumulus' 0.30, giving 0.90 km against this 0.75 km. The floor
+        // is live and it clamps — a species asked for 0.375 km bakes byte-for-byte identically to one asked
+        // for 0.75 km — but no authored sky is standing on it.
         const float voxelKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
         const float floorKm = std::max( 4.0f * voxelKm, 2.0f * params.ResolvableChordKm );
 
@@ -1088,7 +1108,13 @@ namespace Desert::Assets
                     float lumpWobbleAlong[kBlobsPerCluster];
                     float lumpWobbleAcross[kBlobsPerCluster];
 
-                    const float lumpFloorKm = 0.5f * params.ResolvableChordKm;
+                    // TWO FLOORS, BECAUSE THEY ANSWER TWO DIFFERENT QUESTIONS — see
+                    // CloudProceduralLumpFloorKm. Horizontally a lump has to survive the VOLUME, whose
+                    // voxel is a fixed RegionSize/Width; vertically it has to survive the MARCH, because
+                    // the volume's rows are spread over the layer and their height is therefore the
+                    // layer's business rather than a constant.
+                    const float lumpFloorKm  = CloudProceduralLumpFloorKm( params );
+                    const float marchFloorKm = 0.5f * params.ResolvableChordKm;
 
                     for ( uint32_t step = 0; step < stackCount; ++step )
                     {
@@ -1141,7 +1167,7 @@ namespace Desert::Assets
                         lumpVerticalKm[step] =
                              std::max( std::min( kLumpVerticalOverHorizontal * radius * rampFactor * wobbleUp,
                                                  0.5f * bandFullKm ),
-                                       lumpFloorKm );
+                                       marchFloorKm );
                     }
 
                     // The travel is what is left of the band once both end lumps have been let in, divided
@@ -1220,10 +1246,12 @@ namespace Desert::Assets
                                                    shape.BaseAltitudeKm + upKm,
                                                    clusterXZ.y + along.y * offsetAlong + across.y * offsetAcross );
 
-                        // THE LUMP IS NEVER THINNER THAN THE MARCH CAN FIND, on any axis. It is a clamp and not
-                        // an assertion because the inputs are an artist's: a type authored with a 40 m band is
-                        // a legal thing to write in a `.decloudtype`, and the honest answer is a lobe the march
-                        // can see rather than speckle or a refusal to draw the sky.
+                        // THE LUMP IS NEVER THINNER THAN THE VOLUME CAN CARRY, on both horizontal axes — and
+                        // that used to say "than the march can find", which is a different and smaller number.
+                        // It is a clamp and not an assertion because the inputs are an artist's: a type
+                        // authored with a 40 m band is a legal thing to write in a `.decloudtype`, and the
+                        // honest answer is a lobe the volume can hold rather than speckle or a refusal to draw
+                        // the sky.
                         //
                         // THE WOBBLE SCALES THE LUMP AND DOES NOT RESHAPE IT. Two draws vary the plan-view
                         // outline, and the vertical radius takes their GEOMETRIC MEAN — so `radii.y` over the
@@ -1259,14 +1287,21 @@ namespace Desert::Assets
                         // looks like. The strength decides how far it spreads and how much matter is in it.
                         const float spread = baseRadiusKm * ( 0.60f + 0.40f * fill ) * size * densityScale *
                                              radiusGain * ( 1.0f + kAnvilSpreadPerStrength * shape.AnvilStrength );
-                        const float floorKm = 0.5f * params.ResolvableChordKm;
 
+                        // THE CANOPY IS A LUMP AND IS FLOORED LIKE ONE, from the two floors the tower
+                        // already uses rather than from a second copy of `0.5 * ResolvableChordKm` — which
+                        // is what stood here, and which is the same one-quantity-stated-twice this file
+                        // removes everywhere else. Its THICKNESS takes the march's floor for the reason a
+                        // lump's vertical radius does: the volume's rows belong to the layer, not to a
+                        // constant of the subsystem.
+                        //
                         // THE CANOPY IS DRAWN OUT WITH THE CLUSTER IT CAPS, by the same `stretch`. A storm in
                         // an anisotropic lattice whose tower was a band and whose anvil was a circle would be
                         // two bodies, and the anvil's own thickness is the one radius it authors itself.
-                        anvil.RadiiKm = glm::vec3( std::max( spread * stretch, floorKm ),
-                                                   std::max( shape.AnvilThicknessKm, floorKm ),
-                                                   std::max( spread * kAnvilAcrossOverAlong / stretch, floorKm ) );
+                        anvil.RadiiKm =
+                             glm::vec3( std::max( spread * stretch, lumpFloorKm ),
+                                        std::max( shape.AnvilThicknessKm, marchFloorKm ),
+                                        std::max( spread * kAnvilAcrossOverAlong / stretch, lumpFloorKm ) );
 
                         anvil.RotationDeg = glm::vec3( 0.0f, yawDeg, 0.0f );
                         anvil.Weight      = 1.0f;

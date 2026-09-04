@@ -2,9 +2,10 @@
 // properties the phase is judged on.
 //
 // WHAT IS UNDER TEST. Engine/Assets/CloudProceduralVolume.cpp: the hash that puts lumps in the sky, the
-// bake that turns them into a camera-centric periodic volume, and the two relations it is obliged to keep
-// — that no lump is thinner than the march can find, and that nothing inside the region moves when the
-// region scrolls.
+// bake that turns them into a camera-centric periodic volume, and the three relations it is obliged to
+// keep — that no lump is thinner than the march can find, that no lump is NARROWER THAN THE VOLUME CAN
+// CARRY (the other half of the same statement, and the half nothing asserted until Р22), and that nothing
+// inside the region moves when the region scrolls.
 //
 // EACH TEST HERE WAS VERIFIED BY BREAKING THE THING IT CLAIMS TO MEASURE, and the record of which breaks
 // turned it red is in Docs/Clouds/CALIBRATION.md §E5. A break that changes nothing is a hole in the suite,
@@ -373,6 +374,104 @@ TEST( CloudProceduralField, NoGeneratedLumpIsThinnerThanTheMarchCanFindAtAnyTier
                          item.Name, blobs.size(), smallest * 1000.0f, 2.0f * smallest / tierChordKm,
                          tierChordKm * 1000.0f );
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 3a. AND NO LUMP IS NARROWER THAN THE VOLUME CAN CARRY — THE OTHER HALF OF THE SAME RELATION
+// ---------------------------------------------------------------------------------------------------
+//
+// TWO SIEVES STAND BETWEEN A LUMP AND THE EYE AND THE SUITE ONLY EVER CHECKED ONE. Test 3 above asserts a
+// lump clears the MARCH's search lattice; `ValidateCloudProceduralParams` asserts the volume is not FINER
+// than that lattice. Neither says anything about the direction that actually binds: a lump has to survive
+// the VOLUME first, and trilinear filtering cannot express a feature narrower than two voxels — 375 m at
+// the shipped 48 km region against the 125 m the march resolves. The generator's floor was the march's,
+// so it authorised lumps three times finer than the container they are written into, and what a sampler
+// returns for one of those is not a small cloud but a smear the size of the filter.
+//
+// IT IS ASSERTED OVER THE KNOBS' OWN RANGES AND NOT ONLY AT THE SHIPPED POINT, AND THAT IS THE WHOLE
+// DESIGN OF THIS TEST. At the defaults the old floor never bit — the narrowest lump the shipped congestus
+// emits is 459 m — so a test pinned there goes green over every sky below. Counted before the floor
+// existed, at Coverage 1 so the population is the whole field: `PlacementDensity` at 8 gives 38 of 11 904
+// lumps under two voxels, `PlacementSizeVariety` at 1 gives 76 of 2 646, the smallest cell the cell floor
+// permits gives 14 367 of 41 658 (34.5 %) with the narrowest at 130 m, and all three together give
+// 177 168 of 188 640 (93.9 %). Every one of those settings is inside a slider's own published range.
+//
+// THE COMPANION CLAIM, and it is the one the cell floor was making without delivering: a cluster on the
+// smallest cell `CloudProceduralCellExtentKm` permits is four voxels wide, and its argument is that four
+// voxels is "the narrowest cluster the volume can carry with an inside and two edges". A cluster is six
+// lobes, so that bound says nothing about a lobe — at that exact cell a third of the lobes were under two
+// voxels. The floor below is what makes the cell floor's own sentence true.
+TEST( CloudProceduralField, NoGeneratedLumpIsNarrowerThanTheVolumeCanCarry )
+{
+    const CloudProceduralFieldParams shipped = MakeParams();
+
+    const float voxelKm = shipped.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
+    const float floorKm = Desert::Assets::CloudProceduralLumpFloorKm( shipped );
+
+    std::printf( "[CloudProceduralField] voxel %.1f m; the volume expresses %.0f m, the march finds %.0f m; "
+                 "the lump floor is %.0f m across\n",
+                 voxelKm * 1000.0f, 2000.0f * voxelKm, shipped.ResolvableChordKm * 1000.0f, 2000.0f * floorKm );
+
+    // THE FLOOR IS THE LARGER OF THE TWO BOUNDS, stated as a relation so that neither can be dropped by a
+    // later edit. It is not "the floor is 187.5 m" — that would be this test checking its own arithmetic.
+    EXPECT_GE( floorKm, 0.5f * shipped.ResolvableChordKm )
+         << "the lump floor no longer clears the march's search lattice, so a lump can be placed that only "
+            "the ray's jitter will ever find";
+    EXPECT_GE( 2.0f * floorKm, 2.0f * voxelKm )
+         << "the lump floor no longer clears two voxels, so the generator may write a feature the trilinear "
+            "sampler cannot express and the volume returns a smear of the filter's own size";
+
+    // EVERY PLACEMENT KNOB AT BOTH ENDS OF ITS RANGE, plus the smallest cell the cell floor permits — the
+    // four settings the census found sub-voxel lumps under. `Coverage` is held at 1 so that every lattice
+    // cell is alive and the population is the whole field rather than a sample of it.
+    struct Case
+    {
+        const char* Name;
+        float       CellKm;
+        float       Density;
+        float       Scatter;
+        float       Variety;
+    };
+
+    for ( const Case& item : { Case{ "shipped", 3.00f, 1.75f, 1.00f, 0.75f },
+                               Case{ "smallest cell the floor allows", 0.75f, 1.75f, 1.00f, 0.75f },
+                               Case{ "cell below that floor", 0.20f, 1.75f, 1.00f, 0.75f },
+                               Case{ "densest", 3.00f, 8.00f, 1.00f, 0.75f },
+                               Case{ "widest size spread", 3.00f, 1.75f, 1.00f, 1.00f },
+                               Case{ "all three at once", 0.75f, 8.00f, 4.00f, 1.00f } } )
+    {
+        CloudProceduralFieldParams params = MakeParams();
+        params.Coverage                   = 1.0f;
+        params.Species[0].CellKm          = item.CellKm;
+        params.PlacementDensity           = item.Density;
+        params.PlacementScatter           = item.Scatter;
+        params.PlacementSizeVariety       = item.Variety;
+
+        const glm::vec2 origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+
+        const std::vector<CloudModellingBlob> blobs = GenerateCloudProceduralBlobs( params, 0u, origin );
+        ASSERT_FALSE( blobs.empty() ) << item.Name << " placed nothing at full coverage";
+
+        float narrowestKm = blobs.front().RadiiKm.x;
+        long  underVoxels = 0;
+
+        for ( const CloudModellingBlob& blob : blobs )
+        {
+            const float narrowHorizontalKm = std::min( blob.RadiiKm.x, blob.RadiiKm.z );
+            narrowestKm                    = std::min( narrowestKm, narrowHorizontalKm );
+
+            if ( 2.0f * narrowHorizontalKm < 2.0f * voxelKm )
+                ++underVoxels;
+        }
+
+        std::printf( "[CloudProceduralField] %-30s %6zu lumps, narrowest %5.0f m = %.2f voxels, %ld under two\n",
+                     item.Name, blobs.size(), 2000.0f * narrowestKm, 2.0f * narrowestKm / voxelKm, underVoxels );
+
+        EXPECT_EQ( underVoxels, 0 )
+             << item.Name << ": " << underVoxels << " of " << blobs.size()
+             << " lumps are narrower than the two voxels the volume can express — the narrowest is "
+             << 2000.0f * narrowestKm << " m against " << 2000.0f * voxelKm << " m";
     }
 }
 
