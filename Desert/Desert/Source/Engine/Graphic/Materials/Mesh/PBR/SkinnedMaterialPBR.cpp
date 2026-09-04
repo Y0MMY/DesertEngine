@@ -7,10 +7,13 @@ namespace Desert::Graphic
 {
     void SkinnedMaterialPBR::Bind( const UpdateSkinnedMaterialPBRInfo& info )
     {
-        UpdateCamera( info.instance, info.MainCamera );
-        UpdateLights( info.instance, info.PointLights, info.SpotLights, info.DirectionLights );
-        UpdateSkinnedUB( info.instance, info.SkinnedUB );
-        UpdateCloudShadow( info.instance, info.CloudShadow );
+        // The whole scene contribution in ONE call, through the SAME applier and from the SAME snapshot
+        // the static meshes are lit by. What used to stand here was a hand-picked list of four uploads;
+        // the cascades and the environment cubes were not on it, so a skinned mesh was the one class of
+        // geometry in the engine that received neither.
+        info.Scene.ApplyTo( info.instance );
+
+        UpdateSkinnedUB( info.SkinnedUB );
 
         // Single-object material buffer (the skinned path draws one mesh at a time).
         const PBRGpuMaterial gpuMaterial = BuildPBRGpuMaterial( m_Data );
@@ -28,14 +31,11 @@ namespace Desert::Graphic
         Material::Bind( info.instance );
     }
 
-    void SkinnedMaterialPBR::UpdateSkinnedUB( MaterialInstance* instance, const ShaderProtocols::SkinnedUB& skinnedUB )
+    void SkinnedMaterialPBR::UpdateSkinnedUB( const ShaderProtocols::SkinnedUB& skinnedUB )
     {
-        static ShaderProtocols::SkinnedUB SkinnedUB;
-        SkinnedUB.BoneMatrices = skinnedUB.BoneMatrices;
-
-        if ( auto* prop = Get<StorageBufferProperty>( SkinnedUB.Name ) )
-            prop->SetRawData( SkinnedUB.BoneMatrices.data(),
-                              sizeof( glm::mat4 ) * SkinnedUB.BoneMatrices.size() );
+        if ( auto* prop = Get<StorageBufferProperty>( ShaderProtocols::SkinnedUB::Name ) )
+            prop->SetRawData( skinnedUB.BoneMatrices.data(),
+                              static_cast<uint32_t>( sizeof( glm::mat4 ) * skinnedUB.BoneMatrices.size() ) );
     }
 
 } // namespace Desert::Graphic

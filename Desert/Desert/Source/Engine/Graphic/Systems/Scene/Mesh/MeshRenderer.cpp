@@ -560,7 +560,7 @@ namespace Desert::Graphic::System
             sb->SetRawData( gpuMats.data(),
                             static_cast<uint32_t>( gpuMats.size() * sizeof( PBRGpuMaterial ) ) );
 
-        // The whole scene contribution in one snapshot (see MeshRenderer::FrameState) — the glass pass
+        // The whole scene contribution in one snapshot (see Graphic::PBRSceneFrame) — the glass pass
         // needs every part of it, including the env cube + BRDF bindings it epsilon-touches.
         MaterialInstance* gi = m_GlassInstance.get();
         CaptureFrameState( camera ).ApplyTo( gi );
@@ -678,7 +678,7 @@ namespace Desert::Graphic::System
         // The scene's whole contribution to a lit draw, gathered ONCE (camera, lights, shadow cascades and
         // the resolved IBL cubes + BRDF LUT). Applied per material GROUP below, not per object: only the
         // transform is per-object, and it rides a push constant.
-        const FrameState frameState = CaptureFrameState( camera );
+        const PBRSceneFrame frameState = CaptureFrameState( camera );
 
         // Group draws by material so each material's per-object data fills ONE storage buffer, indexed
         // per draw (GPU-scene style). Objects of the same material that wrote a shared buffer per-draw
@@ -923,14 +923,15 @@ namespace Desert::Graphic::System
         if ( m_SkinnedQueue.empty() )
             return;
 
-        auto&       renderer    = Renderer::GetInstance();
-        const auto  camera      = m_SceneRenderer->GetMainCamera();
-        const auto& pointLights = m_SceneRenderer->GetPointLights();
-        const auto& spotLights  = m_SceneRenderer->GetSpotLights();
-        // The frame's cloud shadow, from the one gather. Skinned meshes have no G-buffer variant, so in
-        // a deferred scene they are drawn FORWARD over the composite and receive nothing the composite
-        // computed — this is the only route by which the layer's shadow reaches them.
-        const CloudShadowInput cloudShadow = m_SceneRenderer->GetCloudShadowInput();
+        auto&      renderer = Renderer::GetInstance();
+        const auto camera   = m_SceneRenderer->GetMainCamera();
+
+        // The SAME snapshot, from the SAME gather, that lights every static mesh in this frame — the
+        // cascades and the environment cubes included. Skinned meshes have no G-buffer variant, so in a
+        // deferred scene they are drawn FORWARD over the composite and receive nothing the composite
+        // computed: this is the only route by which the sun's shadows, the baked sky and the cloud
+        // layer's shadow reach them at all.
+        const PBRSceneFrame frameState = CaptureFrameState( camera );
 
         // Deferred forward-over-composite: a LOAD-render-pass variant of the skinned pipeline (built once via
         // the pipeline cache), so skinned meshes draw OVER the deferred scene instead of clearing it. Same
@@ -950,14 +951,10 @@ namespace Desert::Graphic::System
             if ( !data.Mesh || !data.Material || !data.Instance )
                 continue;
 
-            data.Material->Bind( { .instance        = data.Instance,
-                                   .MainCamera      = camera,
-                                   .MeshTransform   = data.Transform,
-                                   .DirectionLights = m_SceneRenderer->GetDirectionLights(),
-                                   .PointLights     = pointLights,
-                                   .SpotLights      = spotLights,
-                                   .SkinnedUB       = { .BoneMatrices = data.BoneMatrices },
-                                   .CloudShadow     = cloudShadow } );
+            data.Material->Bind( { .instance      = data.Instance,
+                                   .Scene         = frameState,
+                                   .MeshTransform = data.Transform,
+                                   .SkinnedUB     = { .BoneMatrices = data.BoneMatrices } } );
 
             renderer.RenderMesh( pipeline, data.Mesh, data.Transform, data.Material->GetMaterialExecutor() );
         }
@@ -1300,9 +1297,9 @@ namespace Desert::Graphic::System
         return true;
     }
 
-    MeshRenderer::FrameState MeshRenderer::CaptureFrameState( const Core::Camera* camera ) const
+    PBRSceneFrame MeshRenderer::CaptureFrameState( const Core::Camera* camera ) const
     {
-        FrameState frame;
+        PBRSceneFrame frame;
         frame.Camera = camera;
 
         frame.PointLights     = &m_SceneRenderer->GetPointLights();
@@ -1339,25 +1336,6 @@ namespace Desert::Graphic::System
         frame.CloudShadow = m_SceneRenderer->GetCloudShadowInput();
 
         return frame;
-    }
-
-    void MeshRenderer::FrameState::ApplyTo( MaterialInstance* instance ) const
-    {
-        if ( !instance )
-            return;
-
-        StaticMaterialPBR::UpdateCamera( instance, Camera );
-        if ( PointLights && SpotLights && DirectionLights )
-            StaticMaterialPBR::UpdateLights( instance, *PointLights, *SpotLights, *DirectionLights );
-
-        // The const_cast is the shape of the old API (it takes a mutable pointer array); the snapshot
-        // itself is read-only, which is the point.
-        Image2D* maps[4] = { CascadeMaps[0], CascadeMaps[1], CascadeMaps[2], CascadeMaps[3] };
-        StaticMaterialPBR::UpdateShadow( instance, CascadeViewProj, maps, kNumCascades, ShadowBias, ShadowsEnabled,
-                                         ShadowDebugMode, ShowNormals, CascadeTexelWorld, LightingDebug );
-
-        StaticMaterialPBR::UpdateEnvironment( instance, IrradianceMap, PrefilteredMap, BrdfLut );
-        StaticMaterialPBR::UpdateCloudShadow( instance, CloudShadow );
     }
 
     void MeshRenderer::UpdateCascades()
