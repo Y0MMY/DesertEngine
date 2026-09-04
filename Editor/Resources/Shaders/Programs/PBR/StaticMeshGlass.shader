@@ -62,12 +62,19 @@ Shader "StaticMeshGlass"
         // clear glass — Fresnel-bright reflective edges + a sun specular highlight + see-through centre (alpha from
         // transmission). Background TINT + screen-space REFRACTION are v2 (need the scene colour bound as a texture).
         //
-        // CRITICAL: declares the SAME descriptor bindings as PBR.glsl.frag (shared StaticMaterialPBR set, 17
-        // descriptors) and references each via a ~0 epsilon so SPIR-V reflection keeps the identical layout.
-
-        #include <Mesh/PointLight.glslh>
-        #include <Mesh/Spotlight.glslh>
-        #include <Mesh/LightsMetadata.glslh>
+        // IT DECLARES WHAT IT READS AND NOTHING ELSE. This file used to declare twelve descriptors it never
+        // sampled — the four cascade maps, ShadowUB, the irradiance cube, the BRDF LUT, the albedo and
+        // opacity maps, the two light SSBOs and the lights-metadata block — and touch every one through a
+        // `keep` sum multiplied by 1e-20, so that its reflected layout would stay identical to the forward
+        // mesh shader's. The comment that stood here said why: the pass was drawn with the shared
+        // StaticMaterialPBR descriptor set.
+        //
+        // Neither half of that is true any more, and the second half stopped being true before the first.
+        // The glass pass has held its OWN material since it was split out (MeshRenderer::RenderGlassManual,
+        // MaterialPBR::Create(Static, Glass)), so its sets already came from this shader's reflection; the
+        // only code that would have bound a forward material against the glass pipeline was reached through
+        // MeshRenderer::m_GlassPass, a flag no line in the engine ever set to true. So the padding was
+        // holding a layout equal for a borrow that had already stopped happening.
 
         In(0) Vertex
         {
@@ -95,23 +102,11 @@ Shader "StaticMeshGlass"
         struct DirectionLight { vec4 Direction; vec4 ColorIntensity; };
         Uniform(3) DirectionLightsUB { DirectionLight directionLights; } directionLights;
 
-        Uniform(5) sampler2D u_ShadowMap0;
-        Uniform(13) sampler2D u_ShadowMap1;
-        Uniform(14) sampler2D u_ShadowMap2;
-        Uniform(15) sampler2D u_ShadowMap3;
-        Uniform(7) ShadowUB
-        {
-        	mat4 u_LightViewProj[4];
-        	vec4 u_ShadowParams;
-        	vec4 u_DebugParams;
-        	vec4 u_CascadeTexelWorld;
-        };
+        // The specular cube is the ONE environment binding glass reads: it is a mirror term at grazing
+        // angles, not an ambient (Desert/Tests/Engine/AmbientIBL says the same thing from the other side).
+        // Slots keep the numbers the rest of the mesh family uses; the gaps are what this pass does not need.
         Uniform(8) samplerCube u_EnvSpecularTex;
-        Uniform(9) samplerCube u_EnvIrradianceTex;
-        Uniform(10) sampler2D  u_BRDFLUTTexture;
-        Uniform(11) sampler2D  u_AlbedoTexture;
         Uniform(12) sampler2D  u_NormalTexture;
-        Uniform(18) sampler2D  u_OpacityTexture;
         Uniform(19) sampler2D  u_SceneColor; // copy of the composited opaque scene (for refraction)
 
         // THE CLOUD LAYER'S SHADOW ON THE WORLD — at the same slots as the four other mesh shaders. Glass
@@ -151,18 +146,6 @@ Shader "StaticMeshGlass"
         	float spec     = pow(max(dot(N, H), 0.0), 128.0) * directionLights.directionLights.ColorIntensity.a
         	               * CloudShadowFactor(inVertex.WorldPosition);
 
-        	// --- keep every forward binding statically referenced so reflection retains the identical layout ---
-        	float keep = 0.0;
-        	keep += texture(u_ShadowMap0, inVertex.Texcoord).r + texture(u_ShadowMap1, inVertex.Texcoord).r
-        	      + texture(u_ShadowMap2, inVertex.Texcoord).r + texture(u_ShadowMap3, inVertex.Texcoord).r;
-        	keep += texture(u_EnvSpecularTex, N).r + texture(u_EnvIrradianceTex, N).r + texture(u_BRDFLUTTexture, inVertex.Texcoord).r;
-        	keep += texture(u_AlbedoTexture, inVertex.Texcoord).r + texture(u_OpacityTexture, inVertex.Texcoord).r;
-        	keep += u_ShadowParams.x + u_LightViewProj[0][0][0] + mat.AlbedoAO.r + mat.MetalRoughEmission.r + mat.EmissionColor.r;
-        	keep += float(lightsMetadata.DirectionLightCount);
-        	if (lightsMetadata.PointLightCount > 0u) keep += pointLights[0].intensity;
-        	if (lightsMetadata.SpotLightCount  > 0u) keep += spotLights[0].intensity;
-        	keep *= 1e-20;
-
         	// --- Screen-space REFRACTION: sample the composited scene behind the glass, bent by the surface normal
         	// (so objects behind the sphere show through, distorted by IOR) + tinted. ---
         	vec2 screenUV   = gl_FragCoord.xy / vec2(textureSize(u_SceneColor, 0));
@@ -178,7 +161,7 @@ Shader "StaticMeshGlass"
 
         	// Written opaque (the refraction already carries the background); the transmission factor only trims the
         	// reflection strength for very clear glass.
-        	oColor = vec4(color + keep, 1.0);
+        	oColor = vec4(color, 1.0);
         }
     }
 }

@@ -695,6 +695,11 @@ namespace Desert::Graphic::System
         instMaterials.clear();
         instDraws.clear();
 
+        // The one renderer-owned forward material the G-buffer pass's spare material is serving in this
+        // pass, so a second distinct one is noticed instead of silently sharing the spare's Materials[]
+        // buffer. Local, because the question is per pass and not per frame.
+        const MaterialPBR* unownedServed = nullptr;
+
         for ( auto& [mat, objects] : groups )
         {
             if ( objects.empty() )
@@ -717,14 +722,15 @@ namespace Desert::Graphic::System
             // the batch entry and the per-object SSBO (it used to be rebuilt up to three times).
             // Transparency split (per-object so instance-level Transmission overrides are honoured): a material
             // with Transmission > 0 is GLASS — skipped by every opaque pass (forward + deferred G-buffer) and
-            // drawn ONLY by the glass pass (m_GlassPass), which composites forward over the scene with blending.
+            // drawn ONLY by RenderGlassManual, which holds its own (Static x Glass) material and composites
+            // forward over the scene with blending.
             for ( const auto* obj : objects )
             {
                 ObjDraw od;
                 od.Obj  = obj;
                 od.Inst = FirstPBRSlot( *obj->MaterialSlots, MeshVertexPath::Static );
                 od.Gm   = BuildEffectiveMaterial( mat, od.Inst );
-                if ( ( od.Gm.GlassTint.a > 0.001f ) != m_GlassPass )
+                if ( od.Gm.GlassTint.a > 0.001f )
                     continue;
                 if ( od.Inst )
                     for ( const auto& [pname, prop] : od.Inst->GetPropertySet().GetProperties() )
@@ -777,6 +783,64 @@ namespace Desert::Graphic::System
             if ( singles.empty() )
                 continue;
 
+            // WHICH MATERIAL RECORDS THE DRAW. The group is keyed by the (surface x Static x Forward)
+            // material a mesh slot resolved to, but the deferred pass rasterizes with the G-buffer
+            // pipeline — whose layout comes from StaticMeshGBuffer's reflection, not StaticMeshPBR's. A
+            // material is one shader's descriptor sets plus a payload, so the sets have to come from the
+            // shader that is about to be bound: this asks the service for the SAME `.demat` on the SAME
+            // vertex path in the G-buffer pass, and the twin carries the same parameters and the same
+            // textures because it is built from the same asset.
+            //
+            // Until this existed the pass borrowed the forward material's sets, and the borrow was legal
+            // only because StaticMeshGBuffer.shader declared — and multiplied by 1e-20 — fourteen
+            // descriptors it never reads. That dummy is gone with this.
+            MaterialPBR* drawMat = mat;
+            if ( m_DeferredGeometry )
+            {
+                auto* materials = Runtime::ResourceRegistry::GetMaterialService();
+                if ( materials->Owns( mat ) )
+                {
+                    drawMat = materials->GetPassVariant( mat, MeshPass::GBuffer );
+                }
+                else
+                {
+                    // A material a RENDERER built rather than a `.demat` — in practice only
+                    // MeshECSSystem's default, standing in for a mesh whose slot did not resolve. It has
+                    // no asset, so the service has no sibling of it; this pass keeps one of its own. See
+                    // SetupGBufferPass for why one is enough, and this is the check that says so.
+                    if ( unownedServed && unownedServed != mat )
+                    {
+                        static bool s_WarnedSecondUnowned = false;
+                        if ( !s_WarnedSecondUnowned )
+                        {
+                            s_WarnedSecondUnowned = true;
+                            LOG_ERROR( "[MeshRenderer] A second renderer-owned mesh material reached the "
+                                       "deferred pass in one frame. Both groups would fill ONE Materials[] "
+                                       "buffer and the last one recorded would decide the colours of both. "
+                                       "The G-buffer pass keeps a single spare material because the engine "
+                                       "had exactly one such material (MeshECSSystem's default); it now has "
+                                       "more, and this pass needs one spare per material." );
+                        }
+                    }
+                    unownedServed = mat;
+                    drawMat       = m_GBufferUnownedMaterial.get();
+                }
+
+                if ( !drawMat )
+                {
+                    // Not a quiet skip: the objects in this group simply would not appear in a deferred
+                    // scene, which reads as "my mesh is invisible" and not as "one material has no
+                    // G-buffer variant". Once per material, because this runs every frame.
+                    static std::unordered_set<const MaterialPBR*> s_WarnedNoGBufferVariant;
+                    if ( s_WarnedNoGBufferVariant.insert( mat ).second )
+                        LOG_ERROR( "[MeshRenderer] No (Static x GBuffer) material for a mesh material; its "
+                                   "{} object(s) are NOT drawn into the G-buffer and will be missing from "
+                                   "the deferred scene. MaterialFactory logged which shader refused.",
+                                   singles.size() );
+                    continue;
+                }
+            }
+
             // ---- Classic per-object path (singletons / wireframe) ----
             // Fill this material's per-object storage buffer (one GpuMaterial per drawn object).
             auto& gpuMaterials = m_ScratchGpuMaterials;
@@ -791,17 +855,22 @@ namespace Desert::Graphic::System
                 gpuMaterials.push_back( gm );
             }
 
-            if ( auto* sb = mat->Get<StorageBufferProperty>( "Materials" ) )
+            if ( auto* sb = drawMat->Get<StorageBufferProperty>( "Materials" ) )
                 sb->SetRawData( gpuMaterials.data(),
                                 static_cast<uint32_t>( gpuMaterials.size() * sizeof( PBRGpuMaterial ) ) );
 
             // SHARED per-frame scene data (camera / lights / shadow / env) is written ONCE per material
-            // group, NOT per mesh: these Update* all write the PARENT material's buffers (shared by every
+            // group, NOT per mesh: these Update* all write the drawn material's buffers (shared by every
             // instance) and depend only on scene-global state. Only the transform is per-object (push
             // constant), so it stays in the draw loop below.
+            //
+            // The MATERIAL overload, because the material that records the draw is not always the
+            // instance's parent — in the G-buffer pass it is the pass's own twin. Every write is by block
+            // NAME and guarded, so a G-buffer material that declares only the camera receives only the
+            // camera, and the fourteen blocks it no longer has cost it nothing.
             {
                 DESERT_PROFILE_SCOPE( "Mesh: SharedSceneSetup (1x/group)" );
-                frameState.ApplyTo( singles[0].Inst );
+                frameState.ApplyTo( static_cast<Material*>( drawMat ) );
             }
 
             for ( uint32_t i = 0; i < static_cast<uint32_t>( singles.size() ); ++i )
@@ -813,24 +882,25 @@ namespace Desert::Graphic::System
                     // Per-object work: transform (push constant) + material index + descriptor bind.
                     DESERT_PROFILE_SCOPE( "Mesh: PerObject Setup" );
                     MaterialPBR::UpdateTransform( inst, obj->Transform );
-                    mat->SetMaterialIndex( i );
-                    mat->Bind( inst );
+                    drawMat->SetMaterialIndex( i );
+                    // The INSTANCE still comes from the forward slot, and that is correct rather than
+                    // convenient: an instance carries the per-object Transform this Bind pushes plus the
+                    // overrides, and both are looked up by NAME in whichever material is binding. What the
+                    // instance must NOT be is a second descriptor set — it never was.
+                    drawMat->Bind( inst );
                 }
 
                 {
                     // The actual draw call (bind pipeline + descriptor sets + vkCmdDrawIndexed).
                     DESERT_PROFILE_SCOPE( "Mesh: RenderMesh (draw)" );
-                    // Deferred: the same material data binds, but the pipeline writes the G-buffer (MRT) instead
-                    // of shading. Otherwise forward (wireframe variant when enabled).
-                    auto* pipeline = ( m_GlassPass && m_StaticGlassPipeline )
-                                          ? m_StaticGlassPipeline.get()
-                                          : ( m_DeferredGeometry && m_StaticGBufferPipeline )
-                                                ? m_StaticGBufferPipeline.get()
-                                                : ( m_Wireframe && m_StaticWireframePipeline )
-                                                      ? m_StaticWireframePipeline.get()
-                                                      : m_StaticPipeline.get();
+                    // Deferred: the G-buffer twin's sets bind against the G-buffer pipeline, which writes
+                    // the MRT instead of shading. Otherwise forward (wireframe variant when enabled).
+                    auto* pipeline =
+                         ( m_DeferredGeometry && m_StaticGBufferPipeline ) ? m_StaticGBufferPipeline.get()
+                         : ( m_Wireframe && m_StaticWireframePipeline )    ? m_StaticWireframePipeline.get()
+                                                                           : m_StaticPipeline.get();
                     const uint32_t lod = ComputeLOD( obj->Transform, obj->Mesh, obj->ForcedLOD, obj->LODBias );
-                    renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor(), 1, 0,
+                    renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, drawMat->GetMaterialExecutor(), 1, 0,
                                          obj->HiddenSubmeshes, lod );
                 }
             }
@@ -1110,6 +1180,25 @@ namespace Desert::Graphic::System
         if ( !m_RSMMaterial )
             return false;
         m_RSMInstance = m_RSMMaterial->CreateInstance();
+
+        // (Static x GBuffer) for the meshes whose FORWARD material is not service-owned. There is exactly
+        // one such material in the engine — MeshECSSystem::m_DefaultMaterial, which stands in for every
+        // mesh whose slot does not resolve — and it has no `.demat`, so MaterialService has no sibling of
+        // it to hand out. Without this the deferred pass drew nothing for those meshes: measured on
+        // Resources/Assets/Scenes/MAT_ProbeDeferredNoSlot.desce, a Cornell box with the material stripped
+        // off one cube, and the cube vanished.
+        //
+        // ONE material is enough and that is a property of the engine, not an assumption: a MeshRenderer
+        // draws one scene's queue, a scene has one MeshECSSystem, and a MeshECSSystem has one default
+        // material. DrawStaticMeshes checks it — a second distinct unowned material in one pass would
+        // share this material's Materials[] buffer and the last group to fill it would win.
+        //
+        // It needs no textures: the default material has none either, so both sample the backend's
+        // fallbacks and the surface is identical. What it supplies is the descriptor SETS, allocated from
+        // the G-buffer shader's own reflection.
+        m_GBufferUnownedMaterial = MaterialPBR::Create( MeshVertexPath::Static, MeshPass::GBuffer );
+        if ( !m_GBufferUnownedMaterial )
+            return false;
         return true;
     }
 

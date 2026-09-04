@@ -57,18 +57,26 @@ Shader "StaticMeshGBuffer"
 
     Fragment
     {
-        // Deferred G-buffer WRITE pass. It shades NOTHING — it writes the material attributes into two MRT targets:
+        // Deferred G-buffer WRITE pass. It shades NOTHING — it writes the material attributes into four MRT targets:
         //   GBufferA (RGBA8F)  = Albedo.rgb + Metallic.a
         //   GBufferB (RGBA32F) = world Normal.rgb + Roughness.a
+        //   GBufferC (RGBA32F) = world position.xyz + texture count
+        //   GBufferEmissive    = HDR self-illumination
         //
-        // CRITICAL: this fragment declares the EXACT SAME descriptor bindings as the forward PBR.glsl.frag, because
-        // it is drawn with the SHARED StaticMaterialPBR descriptor set (19 descriptors). If it declared fewer, the
-        // pipeline layout wouldn't match the bound set (VUID-vkCmdDrawIndexed-None-02697 -> device lost). SPIR-V
-        // reflection drops UNUSED bindings, so every binding is referenced through a ~0 epsilon at the end of main().
-
-        #include <Mesh/PointLight.glslh>      // binding 6  (SSBO pointLights[])
-        #include <Mesh/Spotlight.glslh>       // binding 16 (SSBO spotLights[])
-        #include <Mesh/LightsMetadata.glslh>  // binding 4  (UB lightsMetadata)
+        // IT DECLARES WHAT IT READS AND NOTHING ELSE, which is a recent state of affairs. Until the deferred pass
+        // got a material of its own, MeshRenderer drew it with the (Static x Forward) material — whose descriptor
+        // sets are allocated from StaticMeshPBR's reflection — bound against a pipeline layout built from THIS
+        // shader's. Vulkan requires those to be compatible, and SPIR-V reflection drops unreferenced bindings, so
+        // this file had to declare four cascade maps, three environment samplers, two light SSBOs, the lights
+        // metadata block, the directional light block, ShadowUB and the cloud-shadow pair — fourteen descriptors it
+        // never reads — and touch every one of them through a `keep` sum scaled by 1e-20 so the optimiser could not
+        // remove them again. MaterialService now keys a runtime material by (asset x vertex path x PASS), the
+        // G-buffer pass binds its own cell's sets, and none of that is needed.
+        //
+        // The relation that replaced it is asserted, not commented: Desert/Tests/Engine/ShaderCacheKey checks that
+        // this shader declares EXACTLY the surface inputs a G-buffer write needs, and Desert/Tests/Engine/
+        // MeshVertexPath checks that no mesh shader declares a binding whose data no material of its own cell
+        // could supply.
 
         In(0) Vertex
         {
@@ -100,34 +108,14 @@ Shader "StaticMeshGBuffer"
         };
         ReadBuffer(2) Materials { GpuMaterial materials[]; };
 
-        struct DirectionLight { vec4 Direction; vec4 ColorIntensity; };
-        Uniform(3) DirectionLightsUB { DirectionLight directionLights; } directionLights;
-
-        Uniform(5) sampler2D u_ShadowMap0;
-        Uniform(13) sampler2D u_ShadowMap1;
-        Uniform(14) sampler2D u_ShadowMap2;
-        Uniform(15) sampler2D u_ShadowMap3;
-        Uniform(7) ShadowUB
-        {
-        	mat4 u_LightViewProj[4];
-        	vec4 u_ShadowParams;
-        	vec4 u_DebugParams;
-        	vec4 u_CascadeTexelWorld;
-        };
-        Uniform(8) samplerCube u_EnvSpecularTex;
-        Uniform(9) samplerCube u_EnvIrradianceTex;
-        Uniform(10) sampler2D  u_BRDFLUTTexture;
+        // The surface's own three maps, at the SAME slots the forward mesh shaders use them at. The numbers
+        // are deliberately unchanged and deliberately not compacted to 0,1,2: the whole mesh shader family
+        // names one surface, and a reader comparing two of them should see the albedo map at the same
+        // binding in both. A sparse set is not a problem for Vulkan, and the gaps are the record of what
+        // this pass does NOT need.
         Uniform(11) sampler2D  u_AlbedoTexture;
         Uniform(12) sampler2D  u_NormalTexture;
         Uniform(18) sampler2D  u_OpacityTexture;
-        // The forward shaders' cloud-shadow pair. This pass shades nothing, so neither is READ here —
-        // they are kept for the same reason the seven above them are, and touched by the same epsilon.
-        Uniform(20) sampler2D  u_CloudShadowMap;
-        Uniform(21) CloudShadowUB
-        {
-        	mat4 u_CloudShadowWorldToMap;
-        	vec4 u_CloudShadowParams;
-        };
 
         void main()
         {
@@ -155,40 +143,6 @@ Shader "StaticMeshGBuffer"
         	const float metallic  = mat.MetalRoughEmission.x;
         	const float roughness = max(mat.MetalRoughEmission.y, 0.04);
 
-        	// --- keep every forward binding statically referenced so reflection retains the identical layout ---
-        	//
-        	// WHY, spelled out, because these are the lines most likely to be deleted as dead — and because
-        	// the environment samplers among them are NOT what makes the deferred path read the sky. The
-        	// ambient lives in the composite (Deferred/DeferredLighting.shader), which is a separate
-        	// fullscreen material with a layout of its own; nothing here is ever sampled for light.
-        	//
-        	// This pass has no material. MeshRenderer draws it with StaticMaterialPBR, whose descriptor sets
-        	// were allocated from the FORWARD shader's reflection (StaticMaterialPBR.cpp:7 —
-        	// Material( "PBRMaterial", "StaticMeshPBR" )), and binds them against a pipeline layout built
-        	// from THIS shader's reflection (MeshRenderer.cpp:856 chooses m_StaticGBufferPipeline for the
-        	// same executor). Vulkan requires the two to be compatible. An unreferenced uniform does not
-        	// survive SPIR-V reflection, so a slot this shader has no use for can only be kept by touching
-        	// it — hence a sum scaled into oblivion and folded into an output so the optimiser cannot fold
-        	// it back out. Drop one and the layouts diverge; the validation layer reports "N total
-        	// descriptors vs M trying to bind" on a machine that has layers enabled, and silence on one
-        	// that does not.
-        	//
-        	// The relation is asserted rather than trusted: Desert/Tests/Engine/ShaderCacheKey,
-        	// TheGBufferShaderKeepsTheForwardMeshShadersDescriptorLayoutExactly.
-        	float keep = 0.0;
-        	keep += texture(u_ShadowMap0, uv).r + texture(u_ShadowMap1, uv).r
-        	      + texture(u_ShadowMap2, uv).r + texture(u_ShadowMap3, uv).r;
-        	keep += texture(u_EnvSpecularTex, N).r + texture(u_EnvIrradianceTex, N).r + texture(u_BRDFLUTTexture, uv).r;
-        	keep += directionLights.directionLights.ColorIntensity.a + u_ShadowParams.x + u_LightViewProj[0][0][0];
-        	keep += float(lightsMetadata.DirectionLightCount);
-        	if (lightsMetadata.PointLightCount > 0u) keep += pointLights[0].intensity; // binding 6
-        	if (lightsMetadata.SpotLightCount  > 0u) keep += spotLights[0].intensity;  // binding 16
-        	// The cloud shadow pair (20/21). The DEFERRED composite is what reads them on this path — it
-        	// shades the G-buffer this pass writes — so here they exist purely to keep the layout equal to
-        	// StaticMeshPBR's.
-        	keep += texture(u_CloudShadowMap, uv).r + u_CloudShadowParams.y + u_CloudShadowWorldToMap[0][0];
-        	keep *= 1e-20;
-
         	// Material-complexity proxy (heat-mapped by the DeferredLighting debug branch): count the textures
         	// this material actually samples — a bound map is a real texture, an absent one is a 1x1 dummy.
         	// Stashed in the otherwise-unused GBufferC.w so it costs no extra target.
@@ -197,7 +151,7 @@ Shader "StaticMeshGBuffer"
         	if (nrmSize.x > 1)                          texCount++; // normal map (nrmSize computed above)
         	if (textureSize(u_OpacityTexture, 0).x > 1) texCount++;
 
-        	oGBufferA = vec4(albedo + keep, metallic);
+        	oGBufferA = vec4(albedo, metallic);
         	oGBufferB = vec4(N, roughness);
         	oGBufferC = vec4(inVertex.WorldPosition, float(texCount));
         	// Emissive is view-independent self-illumination; the deferred lighting resolve ADDS it, matching the

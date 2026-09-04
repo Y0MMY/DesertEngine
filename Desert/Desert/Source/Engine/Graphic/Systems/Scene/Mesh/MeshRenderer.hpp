@@ -302,7 +302,11 @@ namespace Desert::Graphic::System
         bool                              m_DeferredGeometry = false; // set true only while drawing the G-buffer pass
         std::shared_ptr<Shader>           m_StaticGlassShader;
         std::shared_ptr<GraphicsPipeline> m_StaticGlassPipeline;
-        bool                              m_GlassPass = false; // set true only while drawing the transparent glass pass
+        // `bool m_GlassPass` stood here, described as "set true only while drawing the transparent glass
+        // pass". No line in the engine ever set it, so its two readers were a transparency test that could
+        // only ever mean "skip glass" and a pipeline branch nothing could reach — and the unreachable
+        // branch was the one that would have bound a FORWARD material against the glass pipeline, which is
+        // the only reason StaticMeshGlass.shader was padded to the forward layout. Both are gone.
         // DEDICATED glass material (never drawn by the opaque passes) so its per-frame UB ring is written ONCE
         // per frame in the glass pass — sharing an opaque material across two passes/frame hangs the GPU.
         // It is (Static x Glass) rather than its own class: what made it different from the opaque
@@ -321,6 +325,12 @@ namespace Desert::Graphic::System
         std::shared_ptr<GraphicsPipeline>  m_RSMPipeline;
         glm::mat4                          m_RSMViewProj = glm::mat4( 1.0f );
         glm::vec3                          m_RSMEye      = glm::vec3( 0.0f );
+
+        // (Static x GBuffer) for meshes whose FORWARD material is not one MaterialService owns — in
+        // practice only MeshECSSystem's default material, which stands in for a mesh whose slot did not
+        // resolve. It has no `.demat`, so it has no sibling in any other pass, and the deferred pass
+        // dropped those meshes entirely until this existed. See SetupGBufferPass for why ONE is enough.
+        std::shared_ptr<MaterialPBR> m_GBufferUnownedMaterial;
 
         std::shared_ptr<Shader>   m_GeometryShader;
         std::shared_ptr<Shader>   m_InstancedGeometryShader;

@@ -71,7 +71,7 @@ namespace Desert::Graphic
     }
 
     std::shared_ptr<Material> MaterialFactory::CreateMaterial( const Assets::MaterialAsset* asset,
-                                                               MeshVertexPath               path )
+                                                               MeshVertexPath path, MeshPass pass )
     {
         if ( !asset )
             return nullptr;
@@ -97,7 +97,7 @@ namespace Desert::Graphic
         // MeshRenderer then looked for a skinned parent, found a static one, and dropped the mesh.
         if ( shaderName.empty() || shaderName == "StaticMeshPBR" || shaderName == "SkinnedMeshPBR" )
         {
-            auto pbrMaterial = MaterialPBR::Create( path, MeshPass::Forward );
+            auto pbrMaterial = MaterialPBR::Create( path, pass );
             if ( !pbrMaterial )
                 return nullptr; // MaterialPBR::Create already named the pair it could not build
             if ( const auto* pbr = dynamic_cast<const Assets::SurfaceMaterialAsset*>( asset ) )
@@ -105,20 +105,22 @@ namespace Desert::Graphic
             return pbrMaterial;
         }
 
-        // A custom DSL surface shader exists only on the static path — it has no skinning stage and no
-        // instanced variant. Name the material, the shader AND the path, because the consequence is
-        // visible and misleading: the caller (MeshECSSystem) substitutes its default PBR material, so the
-        // mesh draws in plain grey rather than vanishing, and "my character is the wrong colour" is a
-        // different search from "my character is missing". The message was checked against a frame —
-        // it said "will not draw" and the mesh drew.
-        if ( path != MeshVertexPath::Static )
+        // A custom DSL surface shader exists only on the static FORWARD cell — it has no skinning stage,
+        // no instanced variant and no G-buffer variant (a deferred scene draws it forward over the
+        // composite, see MeshRenderer::RenderGenericManual). Name the material, the shader AND the path,
+        // because the consequence is visible and misleading: the caller (MeshECSSystem) substitutes its
+        // default PBR material, so the mesh draws in plain grey rather than vanishing, and "my character
+        // is the wrong colour" is a different search from "my character is missing". The message was
+        // checked against a frame — it said "will not draw" and the mesh drew.
+        if ( path != MeshVertexPath::Static || pass != MeshPass::Forward )
         {
-            LOG_WARN( "[MaterialFactory] Material '{}' uses the custom shader '{}', which has no {} vertex "
-                      "variant (DSL surface shaders carry no skinning or instancing stage). The mesh asking "
-                      "for it will fall back to the default PBR material and render in the wrong colour; "
-                      "assign a PBR material to it, or author a {} variant of '{}'.",
+            LOG_WARN( "[MaterialFactory] Material '{}' uses the custom shader '{}', which exists only on "
+                      "(Static x Forward) — there is no ({} x {}) variant of it (DSL surface shaders carry "
+                      "no skinning, instancing or G-buffer stage). The mesh asking for it will fall back to "
+                      "the default PBR material and render in the wrong colour; assign a PBR material to "
+                      "it, or author a ({} x {}) variant of '{}'.",
                       asset->GetMetadata().Filepath.generic_string(), shaderName, MeshVertexPathName( path ),
-                      MeshVertexPathName( path ), shaderName );
+                      MeshPassName( pass ), MeshVertexPathName( path ), MeshPassName( pass ), shaderName );
             return nullptr;
         }
 
