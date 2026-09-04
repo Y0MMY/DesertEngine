@@ -649,8 +649,8 @@ namespace Desert::Graphic
             const CloudShadowInput cloudShadow = GetCloudShadowInput();
 
             // The baked sky the composite shades its ambient with — resolved from the SAME Environment
-            // and the SAME BRDF LUT that MeshRenderer::BuildFrameState hands the forward materials
-            // (MeshRenderer.cpp:1318-1329). One bake, one generation, both paths: gathering it a second
+            // and the SAME BRDF LUT that MeshRenderer::CaptureFrameState hands the forward materials
+            // (through Graphic::PBRSceneFrame). One bake, one generation, both paths: gathering it a second
             // way here would be the mirror that drifts, and the forward-drawn skinned/glass meshes
             // composited over this pass a few lines below would eventually reflect a different sky from
             // the wall behind them.

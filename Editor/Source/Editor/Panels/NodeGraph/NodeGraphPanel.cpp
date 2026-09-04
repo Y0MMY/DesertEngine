@@ -9,6 +9,7 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <imgui-node-editor/imgui_node_editor.h>
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <format>
 
 namespace ed = ax::NodeEditor;
 
@@ -237,10 +239,22 @@ namespace Desert::Editor
             m_StatusIsError = true;
             return;
         }
-        m_Doc            = parsed.GetValue();
+        m_Doc            = parsed.GetValue().Doc;
         m_ApplyPositions = true;
         m_Status         = "Loaded " + std::filesystem::path( fullPath ).filename().string();
         m_StatusIsError  = false;
+
+        // A migration is never silent (contract §4.7): it says which file, and how many pins moved.
+        // The graph is NOT written back here — a load that rewrites the artist's file before they
+        // have looked at it is worse than one that waits for Save, and the document in memory is
+        // already the new form, so nothing downstream sees the old one.
+        if ( const int migrated = parsed.GetValue().MigratedPins; migrated > 0 )
+        {
+            LOG_INFO( "[ShaderGraph] '{}' was written against an older node catalogue: {} pin(s) "
+                      "appended to bring it up to date. Save the graph to persist them.",
+                      fullPath, migrated );
+            m_Status += std::format( " (+{} new pin(s) from the current catalogue)", migrated );
+        }
 
         // Loaded, not edited — see the note in NewGraph.
         m_LastFingerprint = StructuralFingerprint( m_Doc );
@@ -509,11 +523,23 @@ namespace Desert::Editor
         if ( ImGui::Combo( "##domain", &domainIdx, kDomains, 2 ) )
             ChangeDomain( static_cast<SG::Domain>( domainIdx ) );
 
-        // Lambert from the scene's directional light (DirectionLightsUB) — Surface only.
+        // The scene's shading model — Surface only. The tooltip states BOTH halves of what ticking
+        // this box does: it used to give a Lambert of the graph compiler's own with a flat ambient
+        // and no shadow of any kind, and an artist could only learn that from the picture. It now
+        // gives the engine's own model, and the one thing that still differs from a standard
+        // material — geometry shadows — is named here rather than discovered.
         if ( m_Doc.DomainEnum() == SG::Domain::Surface )
         {
             ImGui::SameLine();
             ImGui::Checkbox( "Lit", &m_Doc.Lit );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Shade this surface with the engine's standard model: the baked sky "
+                                   "(image-based ambient), the sun and every point/spot light through "
+                                   "the same BRDF a PBR material uses, and the cloud layer's shadow.\n\n"
+                                   "Feed Metallic / Roughness / Occlusion on the Surface Output node; "
+                                   "unwired they default to a standard material's 0 / 0.5 / 1.\n\n"
+                                   "NOT included: cascaded shadows from scene geometry. A lit graph "
+                                   "material is shadowed by clouds but not by objects." );
         }
 
         ImGui::SameLine();

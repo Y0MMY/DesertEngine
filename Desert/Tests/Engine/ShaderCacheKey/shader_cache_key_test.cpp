@@ -756,6 +756,129 @@ TEST_F( ShaderRootFixture, TheEnvironmentBakeMarchesTheSameFIELDTheScreenMarchDo
     EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), bindings.size() );
 }
 
+// ---- The shader graph's lit surface against the standard mesh shader --------------------------------
+
+namespace
+{
+    // Is @p include one of the engine's SHARED SHADING TEXTS — the files whose whole purpose is that
+    // every shader that shades a surface compiles the same one?
+    //
+    // DERIVED, not typed. Everything under Resources/Shaders/Mesh is such a text by construction: that
+    // directory holds the ambient (AmbientIBL.glslh), the direct-light BRDF (DirectLighting.glslh), the
+    // two punctual light models and the BRDF pieces they share, and nothing else has ever been put there.
+    // Common/CloudShadowReceiver.glslh is named on top because it is the same kind of file and lives in
+    // Common only under duress — its producer includes Common/CloudShadowMap.glslh and declares
+    // u_CloudShadowMap as a writeonly image2D, so the receiver cannot sit beside it.
+    //
+    // A typed list would drift, and drifting is the whole failure mode: the next shared text somebody
+    // extracts must reach the graph too, and nobody will remember to add it here.
+    bool IsSharedShadingText( const std::filesystem::path& include )
+    {
+        if ( include.parent_path().filename() == "Mesh" )
+            return true;
+        return include.filename() == "CloudShadowReceiver.glslh";
+    }
+
+    std::vector<std::filesystem::path> FragmentIncludes( const std::filesystem::path& shaderFile )
+    {
+        return CollectShaderIncludes( StageSource( shaderFile, ShaderStage::Fragment ), shaderFile );
+    }
+} // namespace
+
+TEST_F( ShaderRootFixture, ALitGraphSurfaceCompilesEverySharedShadingTextTheMeshShaderDoes )
+{
+    // THE RELATION Д16 exists to assert, and it is deliberately not "the graph calls AmbientIBL".
+    //
+    // A shader-graph material is a surface an artist ticked "Lit" on. Until this test, ticking it produced
+    // a lighting model the graph COMPILER wrote into the generated file: a flat `vec3( 0.12 )` ambient
+    // that read no environment, a Lambert term that did not divide albedo by PI, and no cloud shadow at
+    // all — three defects the engine had already fixed, in Р16, Р20 and Р21 respectively, by making each
+    // term ONE text. The graph was a fourth copy that nobody had migrated, so all three lived on in it.
+    //
+    // What is asserted is therefore membership, not behaviour: every shared shading text the standard mesh
+    // shader compiles, the lit graph surface compiles as well. That fails the day somebody extracts a new
+    // one into Mesh/ and wires it into StaticMeshPBR only — which is exactly how the graph fell behind the
+    // first time.
+    const auto mesh  = FragmentIncludes( ShaderPath( "PBR/StaticMeshPBR.shader" ) );
+    const auto graph = FragmentIncludes( ShaderPath( "Graph/MatLitConst.shader" ) );
+
+    ASSERT_FALSE( mesh.empty() );
+    ASSERT_FALSE( graph.empty() );
+
+    const auto compiles = [&graph]( const std::filesystem::path& header )
+    {
+        for ( const auto& include : graph )
+            if ( include.filename() == header.filename() )
+                return true;
+        return false;
+    };
+
+    int shared = 0;
+    for ( const auto& include : mesh )
+    {
+        if ( !IsSharedShadingText( include ) )
+            continue;
+        ++shared;
+        EXPECT_TRUE( compiles( include ) )
+             << "StaticMeshPBR shades with " << include.filename().string()
+             << " and the lit shader-graph surface does not — a graph material is lit by a model of its "
+                "own again";
+    }
+
+    // Vacuous success is the failure mode of every membership test: a closure that came back empty, or a
+    // Mesh/ that stopped being where the shared texts live, would pass the loop above without checking
+    // anything. Six is what the directory holds today, and the assertion is a floor rather than an
+    // equality so that adding a shared text is not, by itself, a broken test.
+    EXPECT_GE( shared, 6 ) << "the mesh shader's closure no longer names the shared shading texts";
+}
+
+TEST_F( ShaderRootFixture, TheLitGraphSurfaceIsHANDEDTheSceneITSHADESWITH )
+{
+    // The other half of the same relation: compiling the shared texts is worth nothing if the descriptors
+    // they read are not in the set. Each of these is a resource the graph's generated shader could not
+    // have received before — MeshRenderer's generic path filled CameraUB, TimeUB and DirectionLightsUB by
+    // hand and nothing else, so an environment cube or a cloud shadow map had no route to a data-driven
+    // material at all.
+    //
+    // Numbers, not names, because that is what a descriptor set is; they are the SAME numbers the four
+    // mesh shaders use for the same things, which is a property worth keeping even though every material
+    // in this engine binds by name.
+    const auto bindings = GraphicsSetZero( ShaderPath( "Graph/MatLitConst.shader" ) );
+    ASSERT_FALSE( bindings.empty() );
+
+    EXPECT_TRUE( HasBinding( bindings, 8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );  // u_EnvSpecularTex
+    EXPECT_TRUE( HasBinding( bindings, 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );  // u_EnvIrradianceTex
+    EXPECT_TRUE( HasBinding( bindings, 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_BRDFLUTTexture
+    EXPECT_TRUE( HasBinding( bindings, 20, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_CloudShadowMap
+    EXPECT_TRUE( HasBinding( bindings, 21, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );         // CloudShadowUB
+    EXPECT_TRUE( HasBinding( bindings, 4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );          // LightsMetadata
+    EXPECT_TRUE( HasBinding( bindings, 6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );          // PointLightsUB
+    EXPECT_TRUE( HasBinding( bindings, 16, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // SpotLightsUB
+    EXPECT_TRUE( HasBinding( bindings, 14, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );         // DirectionLightsUB
+
+    // The graph's own textures start at kGraphTextureBinding (24) and count upward, so none of the slots
+    // above can be taken by a Properties block however many textures an artist adds. Distinctness is the
+    // property that says so, and it is the one a per-slot check cannot state.
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), bindings.size() );
+}
+
+TEST_F( ShaderRootFixture, AnUnlitGraphSurfaceReceivesNoneOfIt )
+{
+    // The boundary is real and not a matter of degree: an unlit graph shader is a DIFFERENT domain of
+    // shading, it declares no lighting resource at all, and the change that gave the lit branch the
+    // engine's model must not have quietly given the unlit branch a lighting descriptor it will never
+    // read. (The Metallic/Roughness/Occlusion pins are likewise not evaluated for an unlit graph — the
+    // nodes behind them would otherwise be emitted into a shader that discards the result.)
+    const auto includes = FragmentIncludes( ShaderPath( "Graph/MatConst.shader" ) );
+    for ( const auto& include : includes )
+        EXPECT_FALSE( IsSharedShadingText( include ) )
+             << "an unlit graph surface compiles " << include.filename().string();
+
+    const auto bindings = GraphicsSetZero( ShaderPath( "Graph/MatConst.shader" ) );
+    EXPECT_FALSE( HasBinding( bindings, 20, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+    EXPECT_FALSE( HasBinding( bindings, 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

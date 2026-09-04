@@ -1,13 +1,25 @@
 #pragma once
 
+#include <Engine/Core/Camera.hpp>
+#include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBRBase.hpp>
+#include <Engine/Graphic/ShaderProtocols/DirectionLight.hpp>
+#include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
+#include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
+
+#include <glm/glm.hpp>
 
 namespace Desert::Graphic
 {
+    class Image2D;
+    class ImageCube;
+
     /**
      * Everything the SCENE (not the object) contributes to a lit PBR draw: the camera, the lights, the
      * shadow cascades, the IBL environment and the cloud layer's shadow. Gathered ONCE per frame
-     * (MeshRenderer::CaptureFrameState) and applied to whichever material instance is about to be bound.
+     * (MeshRenderer::CaptureFrameState) and applied to whichever material is about to be bound — with or
+     * without an instance, which is what lets the data-driven (shader-graph) queue be drawn with the same
+     * snapshot the PBR queue is.
      *
      * It lives beside the materials rather than inside MeshRenderer because it is the PAYLOAD of the PBR
      * materials — a material's Bind() can then require the WHOLE snapshot instead of being handed a
@@ -60,13 +72,22 @@ namespace Desert::Graphic
         // were the ones a deferred composite happened to shade.
         CloudShadowInput CloudShadow;
 
-        // Writes the whole snapshot onto @p instance's material. One call, so a new piece of frame
-        // state can never be applied at four of the five sites and forgotten at the fifth.
+        // Writes the whole snapshot onto @p material. One call, so a new piece of frame state can never
+        // be applied at four of the five sites and forgotten at the fifth.
         //
         // It reaches materials of several different shaders (StaticMeshPBR, StaticMeshPBR_Instanced,
-        // StaticMeshGlass, SkinnedMeshPBR), which need not declare these resources at the same SLOT
-        // NUMBERS — every write goes through Material::Get by NAME, which is what makes one applier
-        // able to serve all of them.
+        // StaticMeshGlass, SkinnedMeshPBR, a generated shader-graph shader), which need not declare these
+        // resources at the same SLOT NUMBERS — every write goes through Material::Get by NAME and every
+        // lookup is guarded, which is what makes one applier able to serve all of them AND to cost the
+        // ones that declare nothing nothing at all: an unlit graph material, the Unlit shader and the
+        // text system's SDF quads receive exactly what they ask for.
+        //
+        // The MATERIAL overload is the one that matters. While the only entry point took a
+        // MaterialInstance, the generic (data-driven) mesh path — which has no instance — could not be
+        // handed the snapshot at all, and hand-filled three of its blocks and none of the rest. That is
+        // why a custom-shader mesh had no environment, no cloud shadow and no punctual lights however
+        // its shader was written.
+        void ApplyTo( Material* material ) const;
         void ApplyTo( MaterialInstance* instance ) const;
     };
 } // namespace Desert::Graphic

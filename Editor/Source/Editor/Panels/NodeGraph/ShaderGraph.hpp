@@ -31,6 +31,13 @@ namespace Desert::Editor
             PostProcess = 1, // full-screen effect over the rendered scene color (fullscreen triangle)
         };
 
+        // Where the graph's OWN textures start in the descriptor set. Above every engine binding a
+        // generated shader can declare (the highest is the cloud shadow block at 21), because the
+        // parser numbers a Properties block's textures upward from this base one at a time and a
+        // collision between two GLSL declarations at one binding is silent — see the note at the
+        // Properties emitter in ShaderGraph.cpp.
+        constexpr unsigned kGraphTextureBinding = 24;
+
         // Bit for one domain; a NodeSpec lists the domains it belongs to as a mask.
         constexpr unsigned DomainBit( Domain d )
         {
@@ -117,8 +124,31 @@ namespace Desert::Editor
         // names) come back as the error string.
         Common::ResultStr<std::string> CompileToDShader( const Document& doc );
 
+        // Bring every node in @p doc up to the CURRENT catalogue by appending the pins its kind has
+        // grown since the document was written, and return how many pins were appended.
+        //
+        // Pins are stored positionally in a .dgraph and links reference them by id, so a pin that is
+        // APPENDED changes nothing that already exists: index 0..n-1 keep their meaning and every
+        // saved link still lands where it landed. That is also the limit of what can be repaired
+        // here — a node whose stored pins are not a PREFIX of the catalogue's (a renamed pin, a
+        // changed type, a reorder) is left exactly as it is, so ValidateGraph rejects it by name
+        // instead of this function quietly rewriting the artist's graph into something else.
+        //
+        // Pure: takes a document, returns a document, touches no file and no global state.
+        int MigrateToCatalogue( Document& doc );
+
+        // A document as it came off disk, plus what had to change to make it current. Deserialize
+        // hands back both TOGETHER and not a bare Document, because a silent migration is the thing
+        // the contract forbids: the caller cannot be given the new document without also being told
+        // how much of it is new.
+        struct Loaded
+        {
+            Document Doc;
+            int      MigratedPins = 0;
+        };
+
         // .dgraph (JSON) round-trip.
-        std::string                  Serialize( const Document& doc );
-        Common::ResultStr<Document>  Deserialize( const std::string& json );
+        std::string               Serialize( const Document& doc );
+        Common::ResultStr<Loaded> Deserialize( const std::string& json );
     } // namespace ShaderGraph
 } // namespace Desert::Editor

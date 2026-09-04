@@ -28,12 +28,29 @@ namespace Desert::Editor::ShaderGraph
     static constexpr unsigned SURFACE = DomainBit( Domain::Surface );
     static constexpr unsigned POST    = DomainBit( Domain::PostProcess );
 
+    // The catalogue is a TABLE and is kept as one: one node per visual row, pins grouped on their own
+    // line. Left to itself clang-format explodes every entry into eleven lines of one field each,
+    // because the braced initializer no longer fits a line once a node has six pins — 250 lines of
+    // vertical noise for a list whose whole value is being scannable side by side. Same reason
+    // PipelineCache.hpp and TProperty.hpp fence their tables.
+    // clang-format off
     const std::vector<NodeSpec>& Specs()
     {
         static const std::vector<NodeSpec> s_Specs = {
             // ---- domain-specific: outputs & special inputs ----
+            // The MATERIAL ATTRIBUTES a lit surface hands the engine's shading model, in the order
+            // they were added: Albedo/Emission/Alpha first, then the three the shared PBR texts need
+            // (Mesh/AmbientIBL.glslh and Mesh/DirectLighting.glslh both take metalness and roughness,
+            // and the ambient takes an occlusion factor). APPENDED and never reordered — a saved
+            // .dgraph stores pins positionally, and MigrateToCatalogue below can only grow a node
+            // whose stored pins are still a prefix of this list.
             { "SurfaceOutput", "Surface Output", RGBA( 150, 90, 60, 255 ),
-              { { "Albedo", ValueType::Color }, { "Emission", ValueType::Color }, { "Alpha", ValueType::Float } },
+              { { "Albedo", ValueType::Color },
+                { "Emission", ValueType::Color },
+                { "Alpha", ValueType::Float },
+                { "Metallic", ValueType::Float },
+                { "Roughness", ValueType::Float },
+                { "Occlusion", ValueType::Float } },
               {}, false, false, false, SURFACE },
             { "PostProcessOutput", "Post Process Output", RGBA( 150, 90, 60, 255 ),
               { { "Color", ValueType::Color } }, {}, false, false, false, POST },
@@ -86,6 +103,7 @@ namespace Desert::Editor::ShaderGraph
         };
         return s_Specs;
     }
+    // clang-format on
 
     const NodeSpec* FindSpec( const std::string& kind )
     {
@@ -496,6 +514,7 @@ namespace Desert::Editor::ShaderGraph
 
         Compiler compiler( doc );
         std::string albedo, emission, alpha, sceneOut;
+        std::string metallic, roughness, occlusion;
         if ( domain == Domain::PostProcess )
         {
             sceneOut = compiler.InputExpr( *output, 0, "vec4( 0.0 )" );
@@ -505,6 +524,17 @@ namespace Desert::Editor::ShaderGraph
             albedo   = compiler.InputExpr( *output, 0, "vec4( 0.8, 0.8, 0.8, 1.0 )" );
             emission = compiler.InputExpr( *output, 1, "vec4( 0.0 )" );
             alpha    = compiler.InputExpr( *output, 2, "1.0" );
+            // Only when the surface is lit: an unlit graph has no shading model to feed, and asking
+            // for these would emit the nodes behind them into a shader that never reads the result.
+            // The fallbacks are the schema defaults of the standard material (StaticMeshPBR's
+            // Properties block), so an unwired Metallic/Roughness/Occlusion pin and an untouched
+            // PBR material describe the same surface.
+            if ( doc.Lit )
+            {
+                metallic  = compiler.InputExpr( *output, 3, "0.0" );
+                roughness = compiler.InputExpr( *output, 4, "0.5" );
+                occlusion = compiler.InputExpr( *output, 5, "1.0" );
+            }
         }
         if ( !compiler.error.empty() )
             return Common::MakeError<std::string>( compiler.error );
@@ -519,13 +549,22 @@ namespace Desert::Editor::ShaderGraph
 
         // Exposed properties block — shared across domains (post-process effects can expose params too).
         // Scene texture (post-process) sits at set 0 / binding 0, so params start at Binding(1).
+        //
+        // The graph's own textures are numbered from kGraphTextureBinding UPWARD, one per texture,
+        // and that base sits above every engine binding a generated shader can declare. It used to be
+        // 2, which was safe only while the engine blocks a graph could receive were DirectionLightsUB
+        // (14) and TimeUB (15) — thirteen textures away. A lit surface now also declares
+        // LightsMetadata (4), the point and spot storage buffers (6, 16), the IBL trio (8, 9, 10) and
+        // the cloud shadow pair (20, 21), so the third texture in a graph would have landed on top of
+        // LightsMetadata. Nothing would have said so: two GLSL declarations at one binding is a
+        // descriptor the engine writes twice and a shader that reads whichever it got.
         if ( !textures.empty() || !colorParams.empty() || !floatParams.empty() )
         {
             out << "    Properties";
             if ( !colorParams.empty() || !floatParams.empty() )
                 out << " Binding(1)";
             if ( !textures.empty() )
-                out << " TextureBinding(2)";
+                out << std::format( " TextureBinding({})", kGraphTextureBinding );
             out << "\n    {\n";
             for ( const auto* n : colorParams )
                 out << std::format( "        Color     {} (\"{}\") = ({}, {}, {}, {})\n", n->ParamName,
@@ -584,23 +623,32 @@ namespace Desert::Editor::ShaderGraph
         out << "    Fragment\n    {\n";
         out << "        layout( location = 0 ) in vec2 v_UV;\n";
         if ( doc.Lit )
+        {
             out << "        layout( location = 1 ) in vec3 v_Normal;\n";
+            out << "        layout( location = 2 ) in vec3 v_WorldPos;\n";
+            out << "        layout( location = 3 ) in vec3 v_CameraPos;\n";
+        }
         out << "        layout( location = 0 ) out vec4 o_Color;\n";
         if ( usesTime )
             out << "\n        #include <Common/TimeUB.glslh>\n";
+        // THE shading model, and the generator writes not one line of it. Everything a lit surface
+        // needs — the bindings, the ambient, the sun, the punctual lights and the cloud shadow — is
+        // behind this include, which is itself only calls into the engine's shared lighting texts.
+        // What stood here instead was a formula of this compiler's own: a flat vec3( 0.12 ) ambient,
+        // a Lambert cosine that did not divide albedo by PI, and no cloud shadow at all — three
+        // defects the engine had already fixed in the texts this now calls.
         if ( doc.Lit )
-            out << "\n        #include <Common/DirectionLightsUB.glslh>\n";
+            out << "\n        #include <Common/GraphSurfaceLighting.glslh>\n";
         out << "\n        void main()\n        {\n";
         out << compiler.body.str();
         out << std::format( "            vec4 albedo = {};\n", albedo );
         if ( doc.Lit )
         {
             out << "            vec3 N = normalize( v_Normal );\n";
-            out << "            vec3 L = normalize( -directionLights.directionLights.Direction.xyz );\n";
-            out << "            vec3 lightCol = directionLights.directionLights.ColorIntensity.rgb *\n"
-                   "                            directionLights.directionLights.ColorIntensity.a;\n";
-            out << "            vec3 shaded = albedo.rgb * ( vec3( 0.12 ) + max( dot( N, L ), 0.0 ) * "
-                   "lightCol );\n";
+            out << "            vec3 view = normalize( v_CameraPos - v_WorldPos );\n";
+            out << std::format( "            vec3 shaded = ShadeGraphSurface( v_WorldPos, N, view, "
+                                "albedo.rgb, {}, {}, {} );\n",
+                                metallic, roughness, occlusion );
             out << std::format(
                  "            o_Color = vec4( shaded + ( {} ).rgb, albedo.a * ( {} ) );\n", emission,
                  alpha );
@@ -635,17 +683,54 @@ namespace Desert::Editor::ShaderGraph
         return Common::MakeSuccess( out.str() );
     }
 
+    // ---------------------------------------------------------------- migration ---------------
+    int MigrateToCatalogue( Document& doc )
+    {
+        int added = 0;
+
+        // Appends the pins of @p catalogue that @p stored does not have yet, but ONLY while what is
+        // stored is a prefix of the catalogue: same names, same types, in the same order. Anything
+        // else is a document this function must not touch (see the header).
+        const auto grow = [&]( std::vector<Pin>& stored, const std::vector<NodeSpec::PinSpec>& catalogue )
+        {
+            if ( stored.size() >= catalogue.size() )
+                return;
+            for ( size_t i = 0; i < stored.size(); ++i )
+                if ( stored[i].Name != catalogue[i].Name ||
+                     stored[i].Type != static_cast<int>( catalogue[i].Type ) )
+                    return;
+            for ( size_t i = stored.size(); i < catalogue.size(); ++i )
+            {
+                stored.push_back( { doc.NextId++, catalogue[i].Name, static_cast<int>( catalogue[i].Type ) } );
+                ++added;
+            }
+        };
+
+        for ( auto& node : doc.Nodes )
+        {
+            const NodeSpec* spec = FindSpec( node.Kind );
+            if ( !spec )
+                continue; // unknown kind: ValidateGraph names it; inventing pins for it would not help
+            grow( node.Inputs, spec->Inputs );
+            grow( node.Outputs, spec->Outputs );
+        }
+        return added;
+    }
+
     // ---------------------------------------------------------------- serialization -----------
     std::string Serialize( const Document& doc )
     {
         return rfl::json::write( doc );
     }
 
-    Common::ResultStr<Document> Deserialize( const std::string& json )
+    Common::ResultStr<Loaded> Deserialize( const std::string& json )
     {
         auto parsed = rfl::json::read<Document, rfl::DefaultIfMissing>( json );
         if ( !parsed )
-            return Common::MakeError<Document>( std::format( "bad .dgraph: {}", parsed.error().what() ) );
-        return Common::MakeSuccess( parsed.value() );
+            return Common::MakeError<Loaded>( std::format( "bad .dgraph: {}", parsed.error().what() ) );
+
+        Loaded loaded{ parsed.value(), 0 };
+        loaded.MigratedPins = MigrateToCatalogue( loaded.Doc );
+        return Common::MakeSuccess( std::move( loaded ) );
     }
 } // namespace Desert::Editor::ShaderGraph
