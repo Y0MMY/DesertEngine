@@ -30,6 +30,10 @@ Shader "DeferredLighting"
         // THE direct-light BRDF, shared with the forward mesh shaders and with the point/spot headers
         // above (which already include it). Named explicitly because this pass calls it directly.
         #include <Mesh/DirectLighting.glslh>
+        // The one-bounce estimate GatherIndirectGI below is built from — direct light seen a second time,
+        // so it is the SAME BRDF, reached through the same text. Must follow DirectLighting.glslh, which it
+        // calls.
+        #include <Mesh/IndirectBounce.glslh>
 
         In(0) vec2 v_TexCoord;
 
@@ -87,10 +91,24 @@ Shader "DeferredLighting"
         	return fract((p3.x + p3.y) * p3.z);
         }
 
-        // One-bounce screen-space GI: gather nearby G-buffer texels, treat each as a little emitter of the SUN light
-        // it directly reflects (its albedo * N·sun), and accumulate what reaches this surface (form-factor: both
-        // facing each other, inverse-square falloff). This is the colour-bleed term (a red wall tints the floor red).
-        // Screen-space only (no extra passes / no lit-colour feedback); misses off-screen + point-lit bounces.
+        // One-bounce screen-space GI: gather nearby G-buffer texels, work out how much of the SUN each of
+        // them reflects TOWARD this surface, and accumulate it. This is the colour-bleed term (a red wall tints
+        // the floor red). Screen-space only (no extra passes / no lit-colour feedback); misses off-screen and
+        // point-lit bounces.
+        //
+        // The per-sample estimate is Mesh/IndirectBounce.glslh, which shades the bouncing neighbour through the
+        // SAME Mesh/DirectLighting.glslh the sun below is shaded with. It used to shade it here, inline, as
+        // `nAlb * max(0.0, dot(nN, sunL)) * sunRadiance` — the un-normalized Lambert this engine deleted from
+        // its forward mesh shaders — which made every emitter PI times brighter than the same surface is when
+        // the main pass shades it. The G-buffer already carries the neighbour's metallic (GBufferA.a) and
+        // roughness (GBufferB.a), so nothing extra is sampled to shade it properly.
+        //
+        // WHAT THE ESTIMATE DELIBERATELY DOES NOT MODEL, stated so the omission is a property and not an
+        // oversight: the neighbour's own occlusion. The sun below is attenuated by ShadowFactor *
+        // CloudShadowFactor; re-deriving that per gather sample means a cascade choice plus nine PCF taps
+        // TWELVE more times per pixel, and there is no lit-colour buffer to read it back from because this
+        // gather runs inside the very pass that produces the lit colour. A neighbour standing in shadow
+        // therefore bounces as though it stood in sun.
         vec3 GatherIndirectGI(vec2 uv, vec3 worldPos, vec3 N, vec3 sunL, vec3 sunRadiance)
         {
         	const int   SAMPLES = 12;     // GI sample count (perf/quality knob)
@@ -107,21 +125,15 @@ Shader "DeferredLighting"
         		vec2  suv = uv + vec2(cos(a), sin(a)) * r;
         		if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) continue;
 
-        		vec3 nN = texture(u_GBufferB, suv).rgb;
-        		if (dot(nN, nN) <= 0.001) continue; // sky texel -> no bounce
-        		nN = normalize(nN);
+        		vec4 nb = texture(u_GBufferB, suv);
+        		if (dot(nb.rgb, nb.rgb) <= 0.001) continue; // sky texel -> no bounce
 
+        		vec4  na   = texture(u_GBufferA, suv);
         		vec3  nPos = texture(u_GBufferC, suv).rgb;
-        		vec3  nAlb = texture(u_GBufferA, suv).rgb;
-        		// Neighbour's directly-lit outgoing radiance (its sun bounce).
-        		vec3  nLit = nAlb * max(0.0, dot(nN, sunL)) * sunRadiance;
+        		vec3  nF0  = mix(Fdielectric, na.rgb, na.a);
 
-        		vec3  dir = nPos - worldPos;
-        		float d2  = dot(dir, dir);
-        		vec3  dn  = normalize(dir);
-        		float recv = max(0.0, dot(N, dn));    // this surface faces the neighbour
-        		float emit = max(0.0, dot(nN, -dn));  // neighbour faces this surface
-        		indirect += nLit * recv * emit / (1.0 + d2);
+        		indirect += EvaluateBounceSample(worldPos, N, nPos, normalize(nb.rgb), na.rgb, nF0, na.a,
+        		                                 max(nb.a, 0.04), sunL, sunRadiance);
         	}
         	return indirect / float(SAMPLES);
         }

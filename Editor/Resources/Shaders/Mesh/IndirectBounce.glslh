@@ -1,0 +1,79 @@
+#ifndef INDIRECT_BOUNCE_GLSLH
+#define INDIRECT_BOUNCE_GLSLH
+
+// THE one-bounce estimate: what ONE already-shaded surface sends to another. The algebra half of the
+// screen-space GI gather in Programs/Deferred/DeferredLighting.shader, split out of it for exactly the
+// reason Mesh/AmbientIBL.glslh is split — it declares no sampler and no uniform block, so it compiles
+// as C++ and Desert/Tests/Engine/IndirectBounce asserts its energy bound on the SHIPPED TEXT instead of
+// on a paraphrase of it.
+//
+// The defect that made it a file. The gather shaded the bouncing neighbour with
+// `albedo * max(0.0, dot(N, sunL)) * radiance` — the un-normalized Lambert form the forward mesh
+// shaders shipped until Mesh/DirectLighting.glslh replaced it — so the emitter of every bounce was PI
+// times brighter than the same surface is when the main pass shades it, and a white one radiated 3.14
+// times the light that reached it. It survived the sweep that removed that form everywhere else
+// because the census asked whether each shader FILE names the shared BRDF: DeferredLighting.shader
+// does, for its sun, one function below this one. The middle link kept its own copy and no assertion
+// was about the middle link.
+//
+// A bounce is direct light seen a second time. It takes the same BRDF, and now it takes the same text.
+//
+// Requires Mesh/DirectLighting.glslh (and through it Mesh/PBRFunctions.glslh) to have been included
+// first.
+
+// The light the surface at `receiverPos` receives from the surface at `emitterPos`, both already shaded
+// by the sun. Returned as INCIDENT light, which is what Mesh/AmbientIBL.glslh's ComposeAmbient expects
+// for its `indirect` argument — the receiver's own albedo is applied there, not here.
+//
+//   receiverPos / receiverN — the surface being shaded; N unit, world space.
+//   emitterPos / emitterN   — the neighbouring surface doing the bouncing; N unit, world space.
+//   emitterAlbedo / emitterF0 / emitterMetalness / emitterRoughness
+//                           — its material, read from the same G-buffer the main pass shades it from.
+//                             F0 is mix(Fdielectric, albedo, metalness), as at every other call site;
+//                             roughness must already be clamped away from 0 by the caller.
+//   sunL                    — UNIT vector toward the sun, the same one the main pass shades with.
+//   sunRadiance             — the sun's incident radiance at the emitter.
+vec3 EvaluateBounceSample(vec3 receiverPos, vec3 receiverN, vec3 emitterPos, vec3 emitterN,
+                          vec3 emitterAlbedo, vec3 emitterF0, float emitterMetalness,
+                          float emitterRoughness, vec3 sunL, vec3 sunRadiance)
+{
+	vec3  toEmitter = emitterPos - receiverPos;
+	float d2        = dot(toEmitter, toEmitter);
+	if (d2 <= 0.0)
+		return vec3(0.0);
+
+	vec3 dn = normalize(toEmitter);
+
+	// The two halves of the form factor: neither surface can send or receive through its own back.
+	float recv = max(dot(receiverN, dn), 0.0);
+	float emit = max(dot(emitterN, -dn), 0.0);
+	if (recv <= 0.0 || emit <= 0.0)
+		return vec3(0.0);
+
+	// -dn is the emitter's VIEW vector — the direction from it toward the surface being shaded. The
+	// estimate is therefore NOT viewless, and the whole shared BRDF applies rather than a diffuse half
+	// of it prised out by hand: a polished floor throwing the sun onto a wall is part of the bounce, and
+	// a metal one correctly contributes no diffuse at all instead of bouncing its own reflectance as
+	// paint.
+	vec3 outgoing = EvaluateDirectLight(sunL, sunRadiance, -dn, emitterN, emitterF0, emitterMetalness,
+	                                    emitterRoughness, emitterAlbedo);
+
+	// Geometric coupling: the two cosines above, and a softened inverse square.
+	//
+	// THE `1.0` IS IN SQUARE WORLD UNITS AND THE WORLD IS MEASURED IN CENTIMETRES, so the bounce is
+	// half-strength one centimetre away and is down by 1e-4 at a metre. That is why nothing in the
+	// repository has ever seen this term: measured on CornellDemo (the scene that exists for colour
+	// bleed) at the shipped GIIntensity of 2.0, the whole screen-space GI moves the final frame by at
+	// most 1/255 on 0.21% of pixels, and the isolated indirect buffer at a hundred times the intensity
+	// still peaks at 26/255. Rescaling this softening to metres (`1.0 + d2 * 1e-4`) moves 23.7% of the
+	// frame by up to 48/255 and the green wall's bleed appears on the floor for the first time.
+	//
+	// It is left alone here deliberately. Changing it re-authors every scene in the repository — 49 of
+	// 51 run this gather at the C++ default and not one has ever set the knob — so it is the owner's
+	// call and not a correction to smuggle in beside a BRDF fix. See the Д17 report.
+	float falloff = 1.0 + d2;
+
+	return outgoing * recv * emit / falloff;
+}
+
+#endif // INDIRECT_BOUNCE_GLSLH
