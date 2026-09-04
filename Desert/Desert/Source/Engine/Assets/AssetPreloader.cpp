@@ -148,7 +148,18 @@ namespace Desert::Assets
 
             for ( const auto& [handle, meshAsset] : manager->FindAllByType<Assets::MeshAsset>() )
             {
-                Runtime::ResourceRegistry::GetMeshService()->RegisterAsset( meshAsset ); // unparsed shell
+                // The manager travels WITH the shell. A .skmesh names its skeleton by a signature stored
+                // inside the file, so the resolve CreateAsset already ran above saw a signature of 0 and
+                // bound nothing; the deferred load is the first moment the answer exists, and this is what
+                // lets it ask again. Without it a skinned mesh loaded from a scene is invisible and says
+                // "MeshFactory: Skeleton dependency invalid" once per frame forever.
+                if ( const auto registered = Runtime::ResourceRegistry::GetMeshService()->RegisterAsset(
+                          meshAsset, m_AssetManager ); // unparsed shell
+                     !registered )
+                {
+                    LOG_ERROR( "Mesh shell '{}' could not be registered: {}",
+                               meshAsset->GetMetadata().Filepath.string(), registered.GetError() );
+                }
             }
 
             for ( const auto& [handle, materialAsset] : manager->FindAllByType<Assets::MaterialAsset>() )

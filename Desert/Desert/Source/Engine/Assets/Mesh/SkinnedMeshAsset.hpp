@@ -68,24 +68,44 @@ namespace Desert::Assets
 
         virtual void ResolveDependencies( AssetManager& manager ) override
         {
-            const auto& allSKeletons = manager.FindAllByType<Assets::SkeletonAsset>();
-            for ( const auto& skeleton : allSKeletons )
+            // Re-runnable by construction: the previous answer is dropped first, so a second call after the
+            // file is parsed cannot leave a stale binding behind and cannot be mistaken for the first.
+            m_SkeletonDependency.Handle = Common::AssetHandle::Null();
+            m_SkeletonDependency.Cached.reset();
+
+            // A SIGNATURE OF ZERO MEANS "NOT KNOWN YET", NEVER "MATCHES ANYTHING". The signature is a field
+            // inside the .skmesh, so an unparsed shell carries 0 — and SkeletonAsset::GetSignature() also
+            // returns 0 for a skeleton whose own file has not been read. Comparing the two would bind this
+            // mesh to the first unloaded skeleton in the project and report the dependency as resolved,
+            // which is a worse failure than the unresolved one because nothing downstream can detect it.
+            // AssetBase::EnsureLoaded runs this again the moment the parse fills the signature in.
+            if ( m_SkeletonSignature == 0 )
             {
-                if ( skeleton.second->GetSignature() == m_SkeletonSignature )
+                return;
+            }
+
+            const auto& allSkeletons = manager.FindAllByType<Assets::SkeletonAsset>();
+            for ( const auto& [handle, skeleton] : allSkeletons )
+            {
+                if ( skeleton->GetSignature() == m_SkeletonSignature )
                 {
-                    m_SkeletonDependency.Cached = skeleton.second;
+                    m_SkeletonDependency.Handle = handle;
+                    m_SkeletonDependency.Cached = skeleton;
+                    break;
                 }
             }
 
             if ( !m_SkeletonDependency.IsValid() )
             {
-                // Common + harmless during preload: a lazy mesh shell hasn't loaded its signature yet (it's 0)
-                // — it gets re-resolved when finalized (drop/first use). Only a non-zero, still-unresolved
-                // signature is a real mismatch.
-                if ( m_SkeletonSignature != 0 )
-                    LOG_WARN( "SkinnedMeshAsset '{}': skeleton sig {} not found among {} skeletons.",
-                              m_Metadata.Filepath.string(), m_SkeletonSignature, allSKeletons.size() );
+                LOG_WARN( "SkinnedMeshAsset '{}': skeleton sig {} not found among {} skeletons.",
+                          m_Metadata.Filepath.string(), m_SkeletonSignature, allSkeletons.size() );
             }
+        }
+
+        // The rig this mesh was cooked against, as stored in the .skmesh. Zero until the file is parsed.
+        uint64_t GetSkeletonSignature() const
+        {
+            return m_SkeletonSignature;
         }
 
         bool IsReadyForUse() const override

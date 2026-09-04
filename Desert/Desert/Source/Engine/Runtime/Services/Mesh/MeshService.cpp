@@ -18,14 +18,41 @@ namespace Desert::Runtime
         return BOOLSUCCESS;
     }
 
-    Common::BoolResultStr MeshService::RegisterAsset( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
+    Common::BoolResultStr MeshService::RegisterAsset( const std::shared_ptr<Assets::MeshAsset>&  meshAsset,
+                                                      const std::weak_ptr<Assets::AssetManager>& resolveAgainst )
     {
         if ( !meshAsset )
             return Common::MakeError( "Mesh asset is null" );
+        if ( resolveAgainst.expired() )
+            return Common::MakeError( "Mesh asset '" + meshAsset->GetMetadata().Filepath.string() +
+                                      "' was registered as a lazy shell against an AssetManager that is "
+                                      "already gone; its deferred load could never resolve dependencies." );
+
         // Handle is path-derived in the ctor, so a not-yet-loaded shell is keyed correctly. The .stmesh parse
         // + GPU build are deferred to the first Get/GetAsset.
         m_MeshAssets[meshAsset->GetMetadata().Handle] = meshAsset;
+        m_AssetManager                                = resolveAgainst;
         return BOOLSUCCESS;
+    }
+
+    Common::BoolResultStr MeshService::EnsureLoaded( const std::shared_ptr<Assets::MeshAsset>& meshAsset ) const
+    {
+        if ( meshAsset->IsReadyForUse() )
+            return BOOLSUCCESS;
+
+        const auto manager = m_AssetManager.lock();
+        if ( !manager )
+        {
+            // Loudly, and then not at all: a skinned mesh parsed without a manager reports a skeleton
+            // signature it cannot look up, MeshFactory refuses to build it, and the frame contains nothing
+            // with no other trace anywhere. Naming the file and the reason is the whole difference between
+            // this and the defect it replaces.
+            return Common::MakeError( "MeshService: '" + meshAsset->GetMetadata().Filepath.string() +
+                                      "' needs a deferred load but no AssetManager is bound — the shell was "
+                                      "never registered through RegisterAsset, or its project has closed." );
+        }
+
+        return meshAsset->EnsureLoaded( *manager );
     }
 
     Assets::AssetHandle MeshService::RegisterProcedural( const std::shared_ptr<Mesh>& mesh )
@@ -49,8 +76,11 @@ namespace Desert::Runtime
         // Lazy build: a shell was registered — parse the .stmesh (if needed) + build the GPU mesh now.
         if ( auto ait = m_MeshAssets.find( handle ); ait != m_MeshAssets.end() )
         {
-            if ( !ait->second->IsReadyForUse() )
-                ait->second->Load();
+            if ( const auto loaded = EnsureLoaded( ait->second ); !loaded )
+            {
+                LOG_ERROR( "MeshService::Get: {}", loaded.GetError() );
+                return nullptr;
+            }
             auto  mesh = Graphic::MeshFactory::Create( ait->second );
             auto* raw  = mesh.get();
             // Don't cache a FAILED build (e.g. a skinned mesh whose skeleton dependency wasn't resolved yet) —
@@ -68,8 +98,11 @@ namespace Desert::Runtime
         if ( it == m_MeshAssets.end() )
             return nullptr;
         // Ensure the payload is parsed before callers read submeshes / material handles (lazy shells).
-        if ( !it->second->IsReadyForUse() )
-            it->second->Load();
+        if ( const auto loaded = EnsureLoaded( it->second ); !loaded )
+        {
+            LOG_ERROR( "MeshService::GetAsset: {}", loaded.GetError() );
+            return nullptr;
+        }
         return it->second.get();
     }
 
@@ -77,6 +110,7 @@ namespace Desert::Runtime
     {
         m_Meshes.clear();
         m_MeshAssets.clear();
+        m_AssetManager.reset();
     }
 
     std::optional<bool> MeshService::IsSkinned( const Assets::AssetHandle& handle ) const

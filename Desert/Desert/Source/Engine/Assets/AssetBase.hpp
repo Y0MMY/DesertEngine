@@ -31,6 +31,34 @@ namespace Desert::Assets
 
         virtual bool IsReadyForUse() const = 0;
 
+        // LOADING AND RESOLVING ARE ONE STEP, and this is the only entry point that says so.
+        //
+        // A dependency named by a field INSIDE the file cannot be resolved before the file is parsed.
+        // AssetManager::CreateAsset resolves at construction, which is correct for an eagerly-loaded asset
+        // and MEANINGLESS for a lazy shell: the field the lookup keys on is still zero, so the resolve runs,
+        // finds nothing, and is never repeated. That is exactly how every skinned mesh in a scene became
+        // invisible — SkinnedMeshAsset's skeleton is matched by a signature stored in the .skmesh, the shell
+        // carried 0, and the only code that ever asked a second time was the editor's drag-and-drop.
+        //
+        // Callers therefore never write `Load()` and `ResolveDependencies()` as two statements: the second
+        // one is what gets forgotten, and nothing fails loudly when it is. `Load()` stays public for the
+        // reload paths, which re-resolve deliberately because the EDIT may have been the dependency.
+        NO_DISCARD Common::BoolResultStr EnsureLoaded( AssetManager& manager )
+        {
+            if ( IsReadyForUse() )
+            {
+                return BOOLSUCCESS;
+            }
+
+            if ( const auto loaded = Load(); !loaded )
+            {
+                return loaded;
+            }
+
+            ResolveDependencies( manager );
+            return BOOLSUCCESS;
+        }
+
         // EVERY asset's identity is derived from its path, here, once.
         //
         // This used to be `Common::UUID()`, which minted a fresh random id per construction, so an asset's

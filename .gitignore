@@ -59,7 +59,10 @@ Desert/Common/Source/Common/Core/Version.gen.hpp
 # Cooked artifacts (mesh/texture cooks, SPIR-V shader cache) — machine-local, content-addressed
 Cooked/
 
-# ...with one deliberate exception. A texture only becomes referenceable by a .demat once a .tex exists
+# ...with two deliberate exceptions, both of which are SOURCE that merely lives under a cooked path
+# because that is the only directory the preloader scans for its kind.
+#
+# THE FIRST. A texture only becomes referenceable by a .demat once a .tex exists
 # under Cooked/Textures/ carrying its handle, and the drag-drop importer mints that handle from the
 # texture's ABSOLUTE path — so a texture the repo itself ships would get a different handle on every
 # machine and every material pointing at it would resolve to nothing. This one .tex is therefore SOURCE,
@@ -75,6 +78,20 @@ Editor/Cooked/*
 !Editor/Cooked/Textures/
 Editor/Cooked/Textures/*
 !Editor/Cooked/Textures/T_Checker.tex
+
+# THE SECOND: the skinned probe. Until 2026-09-04 this repository contained NOT ONE skinned mesh in any
+# scene, which is why the skinned rendering path accumulated three independent defects that nothing could
+# see — no cloud shadow, no cascade shadows and no ambient, and finally a mesh that could not be loaded
+# from a scene at all. Each was found only when somebody hand-baked a rig, verified against it, and threw
+# it away again. This pair is that rig, kept: 5 KB total, a one-bone rest pose and a 100 cm box weighted
+# entirely to it, hand-authored rather than produced by any importer — re-running the cook would not
+# recreate it, because no source .fbx exists for it. Editor/Resources/Assets/Scenes/MESH_SkinnedProbe.desce
+# places it beside a static box of the same material, and Desert/Tests/Engine/SkinnedMeshDependency pins
+# both derived numbers (the rig signature and the mesh's path-derived handle) so a rename fails loudly.
+!Editor/Cooked/Meshes/
+Editor/Cooked/Meshes/*
+!Editor/Cooked/Meshes/SkinProbe.skeleton
+!Editor/Cooked/Meshes/SkinProbe.skmesh
 
 # Fetched by scripts/MacOS/Setup.sh (not a submodule)
 ThirdParty/meshoptimizer/
