@@ -106,15 +106,19 @@ namespace Desert::Graphic
         }
 
         // A custom DSL surface shader exists only on the static path — it has no skinning stage and no
-        // instanced variant. Say which material and which path, ONCE per material rather than once per
-        // frame: the caller (a mesh renderer queue) will then skip the mesh, and a silent skip with no
-        // name in the log is what made "my character is invisible" take an afternoon to diagnose.
+        // instanced variant. Name the material, the shader AND the path, because the consequence is
+        // visible and misleading: the caller (MeshECSSystem) substitutes its default PBR material, so the
+        // mesh draws in plain grey rather than vanishing, and "my character is the wrong colour" is a
+        // different search from "my character is missing". The message was checked against a frame —
+        // it said "will not draw" and the mesh drew.
         if ( path != MeshVertexPath::Static )
         {
             LOG_WARN( "[MaterialFactory] Material '{}' uses the custom shader '{}', which has no {} vertex "
                       "variant (DSL surface shaders carry no skinning or instancing stage). The mesh asking "
-                      "for it will not draw; assign a PBR material to it instead.",
-                      asset->GetMetadata().Filepath.generic_string(), shaderName, MeshVertexPathName( path ) );
+                      "for it will fall back to the default PBR material and render in the wrong colour; "
+                      "assign a PBR material to it, or author a {} variant of '{}'.",
+                      asset->GetMetadata().Filepath.generic_string(), shaderName, MeshVertexPathName( path ),
+                      MeshVertexPathName( path ), shaderName );
             return nullptr;
         }
 

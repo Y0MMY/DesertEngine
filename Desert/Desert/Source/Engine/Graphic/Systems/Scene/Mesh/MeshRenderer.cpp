@@ -1933,16 +1933,20 @@ namespace Desert::Graphic::System
                     }
                     else
                     {
-                        // Reached only by a slot whose material has no skinned variant at all — a custom
-                        // DSL surface shader, which carries no skinning stage. MaterialFactory has
-                        // already named the material and the path in the log; this says what the renderer
-                        // then did about it.
-                        static bool s_WarnedCustomSkinned = false;
-                        if ( !s_WarnedCustomSkinned )
+                        // A consistency guard, not the custom-shader case: MeshECSSystem substitutes its
+                        // default skinned PBR material for any slot that fails to resolve, so every slot
+                        // reaching here should already carry a skinned-path parent. If one does not, the
+                        // producer and this queue disagree about what a skinned slot IS, and drawing it
+                        // through the skinned pipeline with a static material's descriptor sets is a
+                        // layout mismatch — so the mesh is dropped and the disagreement is named.
+                        static bool s_WarnedNoSkinnedSlot = false;
+                        if ( !s_WarnedNoSkinnedSlot )
                         {
-                            LOG_WARN( "[MeshRenderer] A skinned mesh's material slots hold no PBR material "
-                                      "on the skinned vertex path — mesh skipped. Assign a PBR material." );
-                            s_WarnedCustomSkinned = true;
+                            LOG_WARN( "[MeshRenderer] A skinned mesh arrived with slots but none whose parent "
+                                      "is a PBR material on the SKINNED vertex path; the mesh is dropped. "
+                                      "MeshECSSystem is expected to have substituted its default skinned "
+                                      "material, so this means the two disagree." );
+                            s_WarnedNoSkinnedSlot = true;
                         }
                     }
                 }
