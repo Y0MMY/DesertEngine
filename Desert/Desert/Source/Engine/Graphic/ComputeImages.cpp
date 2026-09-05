@@ -156,8 +156,7 @@ namespace Desert::Graphic
         pipeline->SetPushConstants( &cloudPush, static_cast<uint32_t>( sizeof( cloudPush ) ) );
 
         pipeline->Dispatch( std::max( 1u, width / kComputeImagesWorkGroupSize ),
-                            std::max( 1u, height / kComputeImagesWorkGroupSize ),
-                            1u );
+                            std::max( 1u, height / kComputeImagesWorkGroupSize ), 1u );
 
         return output;
     }

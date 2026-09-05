@@ -21,6 +21,7 @@
 #include <array>
 #include <cmath>
 
+using Desert::Core::Formats::MipChainLength;
 using Desert::ECS::SkyAtmosphereData;
 using Desert::ECS::SkyEnvironmentResolution;
 using Desert::Graphic::AdvanceTimeOfDay;
@@ -29,8 +30,8 @@ using Desert::Graphic::CloudEnvironmentFingerprint;
 using Desert::Graphic::CloudGpuPayload;
 using Desert::Graphic::CloudRegionBinding;
 using Desert::Graphic::CloudTypeShape;
-using Desert::Graphic::EnvironmentPanoramaSize;
 using Desert::Graphic::DispatchGroupCount;
+using Desert::Graphic::EnvironmentPanoramaSize;
 using Desert::Graphic::EvaluateAtmosphere;
 using Desert::Graphic::kComputeImagesWorkGroupSize;
 using Desert::Graphic::kSkyEnvCubeFaceSize;
@@ -39,7 +40,6 @@ using Desert::Graphic::kSkyEnvPrefilterFaceSize;
 using Desert::Graphic::kSkyEnvPrefilterMips;
 using Desert::Graphic::kSkyEnvRadianceMips;
 using Desert::Graphic::kSkyPackedVec4Count;
-using Desert::Core::Formats::MipChainLength;
 using Desert::Graphic::kSkyPayloadBytes;
 using Desert::Graphic::kSkyRebakeMaxDeferSeconds;
 using Desert::Graphic::kSkyRebakeSettleSeconds;
@@ -356,7 +356,8 @@ TEST( SkyEnvironmentCubes, CostReportChargesForExactlyWhatTheBakeBuilds )
     // An independent mip walk over the SAME (face, mips) pairs SceneEnvironment passes to the compute
     // chain. The report once charged 1024/11 (128 MiB) for a prefiltered cube the bake built at 256/9
     // (8 MiB) — under a comment saying the two cannot disagree.
-    const auto cubeBytes = []( uint32_t face, uint32_t mips ) {
+    const auto cubeBytes = []( uint32_t face, uint32_t mips )
+    {
         uint64_t bytes = 0;
         for ( uint32_t mip = 0; mip < mips; ++mip )
         {

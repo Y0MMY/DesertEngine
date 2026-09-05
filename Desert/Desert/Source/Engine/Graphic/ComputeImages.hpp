@@ -34,7 +34,7 @@ namespace Desert::Graphic
         // The FACE edge of the output cube, in texels — the same quantity ImageCubeSpecification::FaceSize
         // names. Callers state the face they want; nothing downstream multiplies or divides by the 4x3
         // cross unwrap any more (that arithmetic produced three defects — see ImageCubeSpecification).
-        uint32_t             FaceSize;
+        uint32_t FaceSize;
     };
 
     class ComputeImages final

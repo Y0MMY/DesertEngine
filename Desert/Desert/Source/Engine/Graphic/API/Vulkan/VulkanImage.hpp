@@ -187,8 +187,14 @@ namespace Desert::Graphic::API::Vulkan
         // --- ImageCube Interface ---
         // A cube's faces are square: both extents ARE the face. The spec names the face directly
         // (no 4x3-cross arithmetic — see ImageCubeSpecification::FaceSize for the defects that bought).
-        [[nodiscard]] uint32_t GetWidth() const override { return m_Specification.FaceSize; }
-        [[nodiscard]] uint32_t GetHeight() const override { return m_Specification.FaceSize; }
+        [[nodiscard]] uint32_t GetWidth() const override
+        {
+            return m_Specification.FaceSize;
+        }
+        [[nodiscard]] uint32_t GetHeight() const override
+        {
+            return m_Specification.FaceSize;
+        }
         [[nodiscard]] Core::Formats::ImageFormat GetImageFormat() const override { return m_Specification.Format; }
         [[nodiscard]] uint32_t GetMipmapLevels() const override { return m_Resource.MipLevels; }
         [[nodiscard]] bool IsLoaded() const override { return m_IsLoaded; }
