@@ -46,8 +46,23 @@ Shader "SkyTransmittanceLut"
                                                 UnpackMediumMieAbsorption(s), UnpackMediumOzone(s),
                                                 UnpackMediumGround(s), UnpackMediumTentPlanet(s));
 
-            // Bruneton's mapping wants the RAW uv (no texel-centre remap): its own distance
-            // parameterisation already puts the domain ends on the edge texels.
+            // TWO DIFFERENT THINGS GET CALLED "the texel-centre remap", and this line does one and not
+            // the other. It does NOT apply SkyUnitToTexelUv (0.5/n + x*(n-1)/n), the UNIT-RANGE remap
+            // that the multi-scatter and sky-view LUTs need, because Bruneton's distance
+            // parameterisation already places the domain ends on the edge texels — applying it here
+            // would compress the domain a second time.
+            //
+            // It DOES address the centre of its own texel, which is not optional: a compute shader
+            // writing texel `coord` is read back by `texture()`, and hardware bilinear maps a uv to
+            // texel space as uv*size - 0.5. So the value stored at `coord` is returned exactly when the
+            // reader's uv is (coord + 0.5)/size, and this line is what makes the reader's
+            // SkyTransmittanceLutUvFromParams the exact inverse of this write.
+            //
+            // The comment that stood here said "the RAW uv (no texel-centre remap)" one line above the
+            // + 0.5f that is a texel-centre address, and the two readers (SkyViewLut,
+            // SkyAerialPerspectiveLut) repeated the claim about this file. The CODE was right in all
+            // three places; only the sentence was wrong. Nothing was ever mis-sampled — but the next
+            // person to trust that sentence would have "fixed" this line and broken the pair.
             vec2 uv = (vec2(coord) + 0.5f) / vec2(size);
 
             SkyTransmittanceLutCoord c =
