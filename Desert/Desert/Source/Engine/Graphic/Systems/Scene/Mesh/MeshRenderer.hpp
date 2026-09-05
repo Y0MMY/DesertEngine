@@ -413,8 +413,15 @@ namespace Desert::Graphic::System
         std::vector<StaticMeshRenderData>  m_StaticQueue;
         std::vector<SkinnedMeshRenderData> m_SkinnedQueue;
 
-        // Generic (data-driven) static meshes + a per-shader DataDrivenMaterial cache (one material reused
-        // across all meshes of that shader; per-object data is the transform push-constant + overrides).
+        // Generic (data-driven) static meshes + a cache of the materials that record them. Per-object data
+        // is the transform push constant plus a ROW of the material's `Materials[]` buffer, named by a
+        // second push constant — so any number of objects share one material and still carry their own
+        // parameter values.
+        //
+        // KEYED BY SHADER **AND TEXTURE SET** (see GenericTextureKey). It was keyed by shader alone, which
+        // was the whole defect while parameters lived in the material too; textures still live there, and a
+        // key that ignored them would batch two entities into one descriptor set and give both the last
+        // one's textures.
         std::vector<GenericMeshRenderData>                              m_GenericQueue;
         std::unordered_map<std::string, std::unique_ptr<DataDrivenMaterial>> m_GenericMaterials;
 
@@ -447,6 +454,24 @@ namespace Desert::Graphic::System
             uint32_t            FirstInstance = 0;
             uint32_t            MaterialIndex = 0;
         };
+
+        // One recorded generic draw, resolved in DrawGenericMeshes' first pass and executed in its third.
+        // The passes are separate because every row has to be uploaded at FINAL size before the first draw
+        // is recorded — growing a storage buffer reallocates the VkBuffer under a draw already recorded
+        // against the old one — and only the first pass knows how many rows there will be.
+        struct GenericDraw
+        {
+            const GenericMeshRenderData*      Data     = nullptr;
+            DataDrivenMaterial*               Material = nullptr;
+            std::shared_ptr<GraphicsPipeline> Pipeline;
+            uint32_t                          Row = 0;
+        };
+        // One material's rows, end to end: Count rows of (parameter slots per row) vec4s.
+        struct MaterialRows
+        {
+            std::vector<glm::vec4> Bytes;
+            uint32_t               Count = 0;
+        };
         struct ShadowBatch
         {
             Desert::StaticMesh* Mesh  = nullptr;
@@ -465,5 +490,7 @@ namespace Desert::Graphic::System
         std::vector<ObjDraw>        m_ScratchSingles;
         std::vector<ShadowBatch>    m_ScratchShadowBatches;
         std::vector<const StaticMeshRenderData*> m_ScratchShadowSingles;
+        std::vector<GenericDraw>                 m_ScratchGenericDraws;
+        std::vector<std::pair<DataDrivenMaterial*, MaterialRows>> m_ScratchGenericRows;
     };
 } // namespace Desert::Graphic::System

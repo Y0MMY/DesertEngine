@@ -30,11 +30,10 @@ Shader "TextSDF"
 
         #include <Common/CameraUB.glslh>
 
-        PushConstant PushConstants
-        {
-            mat4 Transform;
-        }
-        m_PushConstants;
+        // Transform + the material row index, in the one block both stages declare (see the header).
+        // Text is the producer that needed the row most: every 3D label in a scene draws through ONE
+        // shared TextSDF material, so a per-material colour block gave them all the first label's colour.
+        #include <Common/MaterialTransport.glslh>
 
         Out(0) vec2 v_UV;
 

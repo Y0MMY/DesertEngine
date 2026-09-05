@@ -53,15 +53,16 @@ namespace Desert::Graphic
         if ( !m_MaterialExecutor )
             return;
 
-        // Transform sub-block at offset 0 (RenderMesh overwrites it per submesh), then the per-object
-        // index into Materials[], then — on the skinned path only — where this draw's bones start in the
-        // packed Bones buffer. All three are PUSH constants and not material state on purpose: Vulkan
-        // snapshots a push at record time, so a value written here cannot be clobbered by the next
-        // object's Bind before the GPU runs the draw. That is the property the bone matrices did not
-        // have when they lived on the material.
+        // Transform sub-block at offset 0 (RenderMesh overwrites it per submesh), and — on the skinned
+        // path only — where this draw's bones start in the packed Bones buffer. Both are PUSH constants
+        // and not material state on purpose: Vulkan snapshots a push at record time, so a value written
+        // here cannot be clobbered by the next object's Bind before the GPU runs the draw. That is the
+        // property the bone matrices did not have when they lived on the material.
+        //
+        // The row index is the third such value and is written by Material::SetMaterialIndex, straight
+        // into this same buffer, because generic draws need it without ever calling Bind.
         glm::mat4 transform = instance->GetMat4( "Transform" );
         m_MaterialExecutor->PushConstant( &transform, sizeof( glm::mat4 ), kPushTransformOffset );
-        m_MaterialExecutor->PushConstant( &m_MaterialIndex, sizeof( uint32_t ), kPushMaterialIndexOffset );
         if ( m_Path == MeshVertexPath::Skinned )
             m_MaterialExecutor->PushConstant( &m_BoneOffset, sizeof( uint32_t ), kPushBoneOffsetOffset );
 

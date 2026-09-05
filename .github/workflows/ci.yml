@@ -162,7 +162,18 @@ jobs:
     name: Windows ${{ matrix.config }}
     needs: [ format ]
     runs-on: windows-latest
-    timeout-minutes: 90
+    # 150, not 90, and the margin is the point. Measured 2026-09-05 over the last four green runs,
+    # Windows Debug takes 73, 73, 76 and 84 minutes — 81 % to 93 % of a 90-minute budget. Twice it went
+    # over and GitHub cancelled it, at ~90 minutes each time (runs 33915939489 and 33940280564).
+    #
+    # A cancelled job is the worst of the three outcomes, worse than a red one: it reports as
+    # "cancelled", not "failure", so nothing looks broken while the platform that diverges MOST from
+    # macOS — windows.h macros eating method names, wide-string path::native(), Release-only float
+    # cancellation — quietly produces no evidence at all. Raising the ceiling stops losing evidence
+    # today; it does not make the build faster, and the growth is real (the vertex-path split added
+    # shaders and is the likeliest cause of the first cancellation). Cutting the build time is its own
+    # task; until it lands, this number must stay well clear of the measured duration.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:

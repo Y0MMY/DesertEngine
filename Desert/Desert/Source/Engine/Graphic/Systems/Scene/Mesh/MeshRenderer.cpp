@@ -4,6 +4,7 @@
 #include <Engine/Graphic/ShadowCascades.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRPush.hpp>
+#include <Engine/Core/Formats/MaterialParamRow.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Geometry/LODSelection.hpp>
 #include <Common/Core/Profiler.hpp>
@@ -110,6 +111,35 @@ namespace Desert::Graphic::System
         // second, hand-written loop inside SubmitMesh looking for a different CLASS, and the two answered
         // differently about the same `.demat`: the static loop found a material, the skinned one found
         // nothing, and a character with authored materials was silently dropped.
+        // The texture half of a shared generic material's identity.
+        //
+        // Parameters became per-draw rows; SAMPLERS did not and cannot, because a sampler is a descriptor
+        // and a descriptor set belongs to the material every draw of the group binds. So two draws may
+        // share a material only if they want the same textures, and this spells "the same textures" as a
+        // key: the sorted asset handles of the overrides plus the address of any runtime-owned texture
+        // (the text system's font atlas, which has no handle). Sorted, because two entities that named
+        // the same textures in a different order are the same texture set and must batch as one.
+        std::string GenericTextureKey( const MeshRenderer::GenericMeshRenderData& g )
+        {
+            if ( g.SlotMaterial )
+                return {}; // the material IS the asset; it is already its own key
+
+            std::vector<std::string> parts;
+            parts.reserve( g.Overrides.Textures.size() + 1 );
+            for ( const auto& [name, handle] : g.Overrides.Textures )
+                if ( handle != 0 )
+                    parts.push_back( name + "=" + std::to_string( handle ) );
+            if ( g.DirectTexture && !g.DirectTextureSampler.empty() )
+                parts.push_back( g.DirectTextureSampler + "=@" +
+                                 std::to_string( reinterpret_cast<uintptr_t>( g.DirectTexture ) ) );
+            std::sort( parts.begin(), parts.end() );
+
+            std::string key;
+            for ( const auto& part : parts )
+                key += "|" + part;
+            return key;
+        }
+
         MaterialInstance* FirstPBRSlot( const std::vector<MaterialInstance*>& slots, MeshVertexPath path )
         {
             for ( auto* inst : slots )
@@ -257,6 +287,23 @@ namespace Desert::Graphic::System
                                                 { Graphic::ShaderDataType::Float3, "a_Bitangent" },
                                                 { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
 
+        // Reused across frames like every other accumulator in this file — this runs once per frame per
+        // submesh group, and two fresh vectors a frame is the allocation churn the optimization workflow
+        // says not to write.
+        auto& draws          = m_ScratchGenericDraws;
+        auto& rowsByMaterial = m_ScratchGenericRows;
+        draws.clear();
+        rowsByMaterial.clear();
+
+        const auto rowsFor = [&rowsByMaterial]( DataDrivenMaterial* mat ) -> MaterialRows&
+        {
+            for ( auto& [m, r] : rowsByMaterial )
+                if ( m == mat )
+                    return r;
+            rowsByMaterial.emplace_back( mat, MaterialRows{} );
+            return rowsByMaterial.back().second;
+        };
+
         for ( const auto& g : m_GenericQueue )
         {
             // Per-slot draws carry their own material (asset params already applied at build);
@@ -339,7 +386,13 @@ namespace Desert::Graphic::System
 
             if ( !material )
             {
-                auto& shared = m_GenericMaterials[shaderName];
+                // ONE MATERIAL PER (SHADER x TEXTURE SET), not per shader. The parameters of the draws
+                // that share it are separate rows now, so they no longer collide — but a SAMPLER is a
+                // descriptor and a descriptor set belongs to the material, so two entities wanting
+                // different textures still cannot share one. Keying them apart is what stops the row fix
+                // from leaving half the defect standing: two labels in one font share a material and
+                // batch; two labels in different fonts get one material each and both are right.
+                auto& shared = m_GenericMaterials[shaderName + GenericTextureKey( g )];
                 if ( !shared )
                     shared = std::make_unique<DataDrivenMaterial>( shaderName );
                 material = shared.get();
@@ -356,16 +409,17 @@ namespace Desert::Graphic::System
             if ( !pipeline )
                 continue;
 
-            // The scene's whole contribution, by name and guarded — one call, the same one the PBR
-            // materials get. A shader that declares only CameraUB receives only CameraUB.
-            frameState.ApplyTo( material );
-
-            // A shader-override draw does not own its material: m_GenericMaterials keys one material
-            // per SHADER, so several entities share it within a frame and each draw has to restate its
-            // own values before recording. A per-slot draw is the opposite — the material IS the asset,
-            // its values were applied when the asset loaded, and restating them here would overwrite
-            // them with schema defaults. So only this step is conditional; getting those values onto
-            // the GPU is not, and is done below for both.
+            // ── This draw's ROW ─────────────────────────────────────────────────────────────────────
+            //
+            // A shader-override draw does not own its material: several entities share one within a
+            // frame, so each restates its own values. A per-slot draw is the opposite — the material IS
+            // the asset, its values were applied when the asset loaded, and restating them here would
+            // overwrite them with schema defaults.
+            //
+            // Either way the values end up as a row rather than in the material's own block, which is
+            // the whole change: the block WAS the parameters, so the last draw to write it decided the
+            // colours of every draw recorded before it, and three spheres differing only in a graph
+            // parameter rendered as one (MAT_ProbeSharedBlock.desce).
             if ( !g.SlotMaterial )
             {
                 material->ApplyDefaults();
@@ -373,7 +427,9 @@ namespace Desert::Graphic::System
                     material->SetParamRaw( name, value );
 
                 // Texture overrides: resolve asset handle -> runtime Image2D and bind by sampler name.
-                // Unset samplers keep the backend fallback texture, so this is purely additive.
+                // Unset samplers keep the backend fallback texture, so this is purely additive. Bound on
+                // the material and not per draw, because the key above guarantees every draw sharing
+                // this material asked for the same set.
                 for ( const auto& [name, handle] : g.Overrides.Textures )
                 {
                     if ( handle == 0 )
@@ -393,17 +449,75 @@ namespace Desert::Graphic::System
                     material->SetTexture( g.DirectTextureSampler, g.DirectTexture );
             }
 
-            // THE single route the parameters take to the GPU, for both producers. Generic draws submit
-            // an executor rather than binding through a MaterialInstance, so Material::Bind — where every
-            // other material in the engine gets this — never runs for them. The override branch above
-            // used to supply it by accident, because SetParamRaw calls UpdateFields as a side effect;
-            // per-slot draws call neither, and their parameters reached exactly one of the three
-            // frame-in-flight copies. Unconditional and self-limiting: once every copy has been served
-            // the fields go clean and this does nothing.
-            material->FlushParameterBuffers();
+            auto&       rows = rowsFor( material );
+            GenericDraw draw;
+            draw.Data     = &g;
+            draw.Material = material;
+            draw.Pipeline = pipeline;
+            draw.Row      = rows.Count;
+            ++rows.Count;
+            rows.Bytes.insert( rows.Bytes.end(), material->GetParamRow().begin(), material->GetParamRow().end() );
+            draws.push_back( draw );
+        }
 
-            Renderer::GetInstance().RenderMesh( pipeline.get(), g.Mesh, g.Transform,
-                                                material->GetMaterialExecutor(), 1, 0, ~g.VisibleSubmeshMask,
+        if ( draws.empty() )
+            return;
+
+        // ── Upload every row BEFORE recording any draw ──────────────────────────────────────────────
+        //
+        // At final size, and once, for the same reason DrawStaticMeshes does it: growing a storage
+        // buffer reallocates the VkBuffer, and a draw recorded against the old one would read freed
+        // memory. The scene snapshot goes on per MATERIAL rather than per draw — it depends only on
+        // scene-global state, and a shader that declares only CameraUB still receives only CameraUB.
+        for ( auto& [material, rows] : rowsByMaterial )
+        {
+            frameState.ApplyTo( material );
+            if ( rows.Bytes.empty() )
+                continue; // a shader with no parameters declares no Materials block to fill
+            if ( auto* sb = material->Get<StorageBufferProperty>( Core::Formats::kMaterialRowBlockName ) )
+                sb->SetRawData( rows.Bytes.data(),
+                                static_cast<uint32_t>( rows.Bytes.size() * sizeof( glm::vec4 ) ) );
+        }
+
+        // ── Record, IN QUEUE ORDER ──────────────────────────────────────────────────────────────────
+        //
+        // Order is preserved deliberately rather than incidentally: TextSDF blends with ZWrite off, so
+        // grouping the draws by material — the obvious way to write this loop — would reorder overlapping
+        // labels and change the composite. Nothing above needs the draws grouped; the rows are already
+        // uploaded, and what a draw carries is one push constant.
+        //
+        // ONE DRAW PER OBJECT, AND THE ROW TRANSPORT IS NOT WHAT STOPS THAT. Measured 2026-09-05 in Debug
+        // on Resources/Assets/Scenes/MAT_ProbeGraphBatchStress.desce — 1025 cubes on one graph material,
+        // the exact scene MAT_ProbeBatchStress is except that its material is a `MatProbe` graph rather
+        // than a `.demat` PBR surface. Minimum of six interleaved runs across two builds, reading the
+        // pass's own profiler line; the machine was shared with another agent, and the two builds' minima
+        // agreed to 0.001 ms:
+        //
+        //   scene (1025 cubes)     RenderMesh calls   MeshGeometryPass CPU   frame (wall)
+        //   PBR material           6                  0.742 ms               11.254 ms  (89 FPS)
+        //   graph material         5125               12.417 ms              56.178 ms  (18 FPS)
+        //
+        // Moving the parameters onto rows halved this pass (26.647 -> 12.417 ms, and 71.029 -> 56.178 ms
+        // of frame) by deleting the per-draw uniform-field writes and flushes. It did NOT change the draw
+        // count, and it could not have: what collapses 1025 objects into 6 draws is INSTANCING, and
+        // instancing needs a vertex stage that reads its transform from `InstanceTransforms[]` instead of
+        // the push constant. `MeshShaderFor(Instanced, Forward)` names a whole second .shader for the PBR
+        // surface; a data-driven shader has no such variant and the DSL has no way to express one, so the
+        // vertex-path axis of Materials/Mesh/MeshVertexPath.hpp has exactly one cell filled for every
+        // material that is not MaterialPBR.
+        //
+        // That is the next piece of work and it is a shader-permutation feature, not a renderer change:
+        // the DSL (or the graph generator) has to emit an instanced variant, ShaderService has to register
+        // it, the pipeline cache has to hold both, and this loop then groups by (material x mesh) exactly
+        // as DrawStaticMeshes does — including its rule that an object with per-instance overrides leaves
+        // the batch, which here means "a row that differs from the batch's". The row transport is what
+        // makes that rule expressible at all; before it, two objects sharing a material could not differ.
+        for ( const auto& d : draws )
+        {
+            const auto& g = *d.Data;
+            d.Material->SetMaterialIndex( d.Row );
+            Renderer::GetInstance().RenderMesh( d.Pipeline.get(), g.Mesh, g.Transform,
+                                                d.Material->GetMaterialExecutor(), 1, 0, ~g.VisibleSubmeshMask,
                                                 ComputeLOD( g.Transform, g.Mesh, /*forced*/ -1 ) );
         }
     }

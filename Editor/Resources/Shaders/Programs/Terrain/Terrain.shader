@@ -5,7 +5,11 @@ Shader "Terrain"
 
     Domain Terrain
 
-    Properties
+    // Binding(1) is what makes these parameters a ROW of the shared `Materials[]` storage buffer, read
+    // through `u_Material` in the fragment stage. The block used to be written out by hand below and was
+    // a uniform block per material — one set of values for every terrain in the scene, which is the same
+    // defect the graph materials had (Engine/Core/Formats/MaterialParamRow.hpp).
+    Properties Binding(1)
     {
         Color       Tint ("Tint") = (1, 1, 1, 1)
         Float       DetailTiling ("Texture Tiling (m)", Range(0.25,64)) = 4
@@ -277,13 +281,8 @@ Shader "Terrain"
         }
         u;
 
-        // Data-driven material params (binding 1). Driven by MaterialComponent overrides.
-        Uniform(1) MaterialUB
-        {
-            vec4  Tint;
-            float DetailTiling; // world-space size (meters) of one texture tile
-        }
-        u_Mat;
+        // Data-driven material params (binding 1) are generated from the Properties block above and read
+        // through `u_Material`; nothing is declared here.
 
         // Splat layers (texture2D #pragma params; unassigned => white fallback). Bindings follow MaterialUB.
         Uniform(2) sampler2D u_GrassTex;
@@ -356,7 +355,7 @@ Shader "Terrain"
             vec3  rockCol   = vec3( 0.40, 0.37, 0.33 ); // bare rock (default base)
             vec3  snowCol   = vec3( 0.86, 0.88, 0.92 );
 
-            float scale  = 1.0 / max( u_Mat.DetailTiling, 0.001 );
+            float scale  = 1.0 / max( u_Material.DetailTiling, 0.001 );
             vec3  grassT = Triplanar( u_GrassTex, v_WorldPos, N, scale ) * grassCol;
             vec3  rockT  = Triplanar( u_RockTex, v_WorldPos, N, scale ) * rockCol;
             vec3  snowT  = Triplanar( u_SnowTex, v_WorldPos, N, scale ) * snowCol;
@@ -405,7 +404,7 @@ Shader "Terrain"
 
             vec3 lit = albedo * ( ambient + sun * ndl * cloudShadow ) + sun * spec * ndl * cloudShadow;
 
-            o_Color = vec4( lit * u_Mat.Tint.rgb, 1.0 );
+            o_Color = vec4( lit * u_Material.Tint.rgb, 1.0 );
         }
     }
 }

@@ -1,21 +1,34 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Core/Formats/MaterialParamRow.hpp>
 #include <Engine/Core/Formats/ShaderProgramMeta.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Shader.hpp>
 
 #include <glm/glm.hpp>
-#include <unordered_set>
 
 namespace Desert::Graphic
 {
     class Image2D;
 
     // Generic, data-driven material built from ANY shader by name — no per-shader C++ class. Parameters
-    // come from the shader's reflected uniform-buffer fields (offsets/types) plus the `#pragma param`
-    // schema (UI metadata + defaults). Setting a param by name routes to the matching UB field via the
-    // base Material's reflection. This is what makes arbitrary shaders assignable with dynamic params.
+    // come from the shader's `Properties` schema (UI metadata + defaults + declaration ORDER), and the
+    // order is the whole mapping: parameter i is slot i of the row the shader reads. This is what makes
+    // arbitrary shaders assignable with dynamic params.
+    //
+    // WHAT THIS CLASS NO LONGER IS. It used to write its parameters into a per-material `uniform
+    // MaterialUB` block by reflected field name. A block IS the parameters, so the material held exactly
+    // one set of values — and the renderer keys ONE material per shader, so several objects drawn with
+    // one graph shader all rendered the values of whichever draw wrote last. It now holds a ROW instead,
+    // and the renderer packs every draw's row into one `Materials[]` storage buffer and names each draw's
+    // row with a push constant, exactly as MaterialPBR has always done. See
+    // Engine/Core/Formats/MaterialParamRow.hpp for the measurement, the probe scene and the layout rule.
+    //
+    // A CONSEQUENCE WORTH STATING: the row is plain CPU memory, so none of the frame-in-flight machinery
+    // that guarded the old block applies to it. The renderer uploads every row of a draw group before
+    // recording the group's first draw, every frame — there is no value that was written once and owes
+    // itself to a copy nobody served, which is what `FlushParameterBuffers` existed to pay for.
     class DataDrivenMaterial : public Material
     {
     public:
@@ -25,6 +38,7 @@ namespace Desert::Graphic
             if ( auto shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( shaderName ) )
                 m_Schema = shader->GetProgramMeta();
 
+            m_Row.resize( Core::Formats::MaterialParamSlotCount( m_Schema ) );
             ApplyDefaults();
         }
 
@@ -37,41 +51,40 @@ namespace Desert::Graphic
             return m_ShaderName;
         }
 
-        // Number of schema params that mapped to an actual UB field (vs declared-but-absent). Useful to
-        // verify the reflection<->annotation wiring.
-        uint32_t GetMappedParamCount() const
+        // The bytes one draw reads, in schema order. The renderer copies this into the shared
+        // `Materials[]` buffer at the row it then names on the push constant.
+        const Core::Formats::MaterialParamRow& GetParamRow() const
         {
-            return m_MappedParamCount;
+            return m_Row;
         }
 
-        // Write a scalar/vector param by name into whatever UB field it maps to. numComponents = 1..4.
-        bool SetParam( const std::string& name, const glm::vec4& value, uint32_t numComponents )
+        // Write a scalar/vector param by name. The whole slot is written whatever the parameter's
+        // declared width: the components past it are the generated struct's own padding, so there is
+        // nothing there to damage, and the alternative — a per-type byte count — is a second statement of
+        // a layout that MaterialParamRow.hpp deliberately has only one of.
+        bool SetParam( const std::string& name, const glm::vec4& value )
         {
-            auto [ub, field] = FindFieldInAnyUB( name );
-            if ( !ub || !field )
+            const auto slot = Core::Formats::MaterialParamSlot( m_Schema, name );
+            if ( !slot )
                 return false;
-            return ub->WriteField( field, &value, numComponents * sizeof( float ) );
-        }
-
-        // Write a param by name using the UB field's own size (no component count needed). Used to apply
-        // MaterialComponent overrides generically. UpdateFields() pushes the field into the UB buffer AND
-        // marks it dirty so the executor's Apply() actually uploads it (a bare SetRawBytes does not).
-        bool SetParamRaw( const std::string& name, const glm::vec4& value )
-        {
-            auto [ub, field] = FindFieldInAnyUB( name );
-            if ( !ub || !field )
-                return false;
-            size_t sz = field->GetFieldInfo().Size;
-            if ( sz > sizeof( glm::vec4 ) )
-                sz = sizeof( glm::vec4 );
-            if ( !ub->WriteField( field, &value, sz ) )
-                return false;
-            ub->UpdateFields();
+            m_Row[*slot] = value;
             return true;
         }
 
-        // Bind a texture by its sampler name (the #pragma param texture2D name). Unset samplers keep the
+        // The name the override producers use. Identical to SetParam now — it was a separate entry point
+        // only because the old transport needed a different byte count and a different flush for it.
+        bool SetParamRaw( const std::string& name, const glm::vec4& value )
+        {
+            return SetParam( name, value );
+        }
+
+        // Bind a texture by its sampler name (the Properties texture2D name). Unset samplers keep the
         // backend's fallback texture, so a shader with an unassigned texture still renders.
+        //
+        // TEXTURES ARE NOT ROW BYTES and cannot be: a sampler is a descriptor, and a descriptor set is
+        // shared by every draw the material records. Two objects that want different textures therefore
+        // need two materials, and it is the RENDERER that keys them apart (MeshRenderer::DrawGenericMeshes
+        // keys its shared override materials by shader AND texture set for exactly this reason).
         bool SetTexture( const std::string& name, const Image2D* image )
         {
             if ( !image )
@@ -84,60 +97,21 @@ namespace Desert::Graphic
             return false;
         }
 
-        // Seed every numeric param with its `#pragma param ... default(...)` value, then flush so the
-        // defaults reach the GPU (see SetParamRaw note on UpdateFields()).
+        // Seed every numeric param with its `Properties ... = default` value.
         void ApplyDefaults()
         {
-            m_MappedParamCount = 0;
+            uint32_t slot = 0;
             for ( const auto& p : m_Schema.Params )
             {
                 if ( p.IsTexture )
                     continue;
-                auto [ub, field] = FindFieldInAnyUB( p.Name );
-                if ( !ub || !field )
-                    continue;
-
-                ++m_MappedParamCount;
-                size_t sz = field->GetFieldInfo().Size;
-                if ( sz > sizeof( glm::vec4 ) )
-                    sz = sizeof( glm::vec4 ); // params are scalars/vectors (<= 16 bytes)
-                ub->WriteField( field, &p.Default, sz );
+                m_Row[slot++] = p.Default;
             }
-            FlushFieldFilledUniformBuffers();
-        }
-
-        // Re-push the parameter values this material already holds into the uniform-buffer copy the
-        // CURRENT (frame x renderer slot) will read. Every generic draw calls this.
-        //
-        // UpdateFields() writes exactly ONE copy — whichever pair is recording (see
-        // ShaderResources::BufferCopyIndex). The per-slot dirty counter is standing permission to keep
-        // writing until every copy has been served, but permission is not the write: somebody has to come
-        // back on the following frames and perform it. Materials bound through a MaterialInstance get that
-        // from Material::Bind. Generic draws submit an executor and never Bind, so a per-slot material —
-        // whose parameters are applied once, when its asset loads — reached a single frame-in-flight copy
-        // and the mesh rendered BLACK on the other two, the unwritten copies being zero-filled.
-        //
-        // ONLY the buffers that carry schema parameters, and that restriction is load-bearing. The
-        // engine-filled blocks (CameraUB, TimeUB, DirectionLightsUB) are written whole by
-        // UniformBufferProperty::SetRawData, which does not go through FieldProperty at all — their field
-        // local data is never initialised. Flushing those would memcpy uninitialised bytes over the camera
-        // matrices the renderer had just written, which empties the frame. Measured, not imagined: the
-        // first version of this fix flushed every buffer and the probe scene rendered as bare sky.
-        //
-        // The restriction used to live in a member set rebuilt by ApplyDefaults, which meant this class
-        // had to keep remembering a fact about buffers it does not own. It is now the buffer's own
-        // answer: a whole-filled UB reports no dirty fields and refuses UpdateFields by name. That is
-        // why this method is a plain call to the base — and why it stays a method rather than becoming
-        // one at the call site: MeshRenderer's generic draws ask for exactly this, and the name is what
-        // says the parameters, not the engine blocks, are what they are asking for.
-        void FlushParameterBuffers()
-        {
-            FlushFieldFilledUniformBuffers();
         }
 
     private:
         std::string                      m_ShaderName;
         Core::Formats::ShaderProgramMeta m_Schema;
-        uint32_t                         m_MappedParamCount = 0;
+        Core::Formats::MaterialParamRow  m_Row;
     };
 } // namespace Desert::Graphic

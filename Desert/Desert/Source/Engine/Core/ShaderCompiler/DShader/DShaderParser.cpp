@@ -256,7 +256,7 @@ namespace Desert::Core::Preprocess
             return true;
         }
 
-        // GLSL declaration type for an auto-generated MaterialUB field.
+        // GLSL declaration type for an auto-generated material-parameter field.
         const char* GlslTypeOf( const ShaderParam& p )
         {
             switch ( p.Type )
@@ -275,6 +275,25 @@ namespace Desert::Core::Preprocess
                     return "int";
                 default:
                     return "vec4";
+            }
+        }
+
+        // How many floats of tail padding a parameter needs to fill its whole 16-byte slot. See
+        // Core/Formats/MaterialParamRow.hpp for why every parameter owns a slot instead of being packed:
+        // it makes "parameter i is at 16*i" true by construction, so the C++ packer implements no layout
+        // rules and cannot disagree with the GLSL about one.
+        uint32_t GlslSlotPaddingFloats( const ShaderParam& p )
+        {
+            switch ( p.Type )
+            {
+                case ShaderValueType::Float4:
+                    return 0;
+                case ShaderValueType::Float3:
+                    return 1;
+                case ShaderValueType::Float2:
+                    return 2;
+                default: // float, int, bool — 4 bytes of value, 12 of slot
+                    return 3;
             }
         }
 
@@ -724,6 +743,18 @@ namespace Desert::Core::Preprocess
         // TextureBinding). Injected into the fragment stage (and compute, for kernel shaders) —
         // material parameters belong to shading, and a single-stage declaration keeps the
         // reflection unambiguous.
+        //
+        // WHAT `Binding(n)` MEANS, AND WHAT IT USED TO MEAN. It now declares a ROW of the shared
+        // `Materials[]` storage buffer plus the `#define` that names this draw's row. It used to declare
+        // `uniform MaterialUB` — a block per material, which IS the parameters, so a material could hold
+        // exactly one set of values and several objects sharing a shader all rendered the first one's
+        // (Core/Formats/MaterialParamRow.hpp names the probe scene and the measurement). Nothing about a
+        // shader's source had to change for the swap: both spellings answer to `u_Material.<Name>`, and
+        // the difference is only whether that name resolves to a block or to a row.
+        //
+        // The push constant carrying the row index is an INCLUDE and not text emitted here, because it is
+        // identical in every shader in the engine and the offsets have to stay identical too — the same
+        // reason the generator emits structure and lets `.glslh` files carry boilerplate.
         std::string BuildAutoDeclarations( const ShaderProgramMeta& meta, const PropertiesInfo& info )
         {
             std::ostringstream out;
@@ -737,14 +768,24 @@ namespace Desert::Core::Preprocess
 
                 if ( any )
                 {
-                    out << "layout( binding = " << *info.UBBinding << " ) uniform MaterialUB\n{\n";
+                    out << "#include <Common/MaterialTransport.glslh>\n";
+                    out << "struct MaterialParams\n{\n";
+                    uint32_t slot = 0;
                     for ( const auto& p : meta.Params )
                     {
                         if ( p.IsTexture )
                             continue;
                         out << "    " << GlslTypeOf( p ) << " " << p.Name << ";\n";
+                        // The pad is a float ARRAY (std430 stride 4), so the value plus its pad is
+                        // exactly one 16-byte slot whatever the value's own type is.
+                        if ( const uint32_t pad = GlslSlotPaddingFloats( p ); pad > 0 )
+                            out << "    float _slotPad" << slot << "[" << pad << "];\n";
+                        ++slot;
                     }
-                    out << "}\nu_Material;\n";
+                    out << "};\n";
+                    out << "layout( std430, binding = " << *info.UBBinding << " ) readonly buffer Materials\n"
+                        << "{\n    MaterialParams u_Materials[];\n};\n";
+                    out << "#define u_Material u_Materials[m_PushConstants.MaterialIndex]\n";
                 }
             }
 

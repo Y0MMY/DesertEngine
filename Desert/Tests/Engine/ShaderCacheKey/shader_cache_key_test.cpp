@@ -22,6 +22,7 @@
 
 #include <gtest/gtest.h>
 
+#include <Engine/Core/Formats/MaterialParamRow.hpp>
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
@@ -35,8 +36,10 @@
 
 #include <shaderc/shaderc.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -913,6 +916,209 @@ TEST_F( ShaderRootFixture, TheLitGraphSurfaceIsHANDEDTheSceneITSHADESWITH )
     // above can be taken by a Properties block however many textures an artist adds. Distinctness is the
     // property that says so, and it is the one a per-slot check cannot state.
     EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), bindings.size() );
+}
+
+// ---- The material row: the C++ packer against the GLSL the compiler actually produced -------------------
+//
+// Every material in the engine delivers its parameters as a row of a shared `Materials[]` storage buffer,
+// and Graphic::DataDrivenMaterial writes that row as a plain `std::vector<glm::vec4>` — parameter i at
+// 16*i, no std430 arithmetic anywhere in the C++. That is only true because DShaderParser pads every
+// parameter out to a whole 16-byte slot, and "because the generator pads it" is a claim about GLSL layout
+// rules made by someone who is not the GLSL compiler.
+//
+// So it is asked of the compiler. This walks every shipped shader that carries a generated block, compiles
+// its fragment stage for real and reads the member offsets out of the SPIR-V. A packer and a shader that
+// disagree about one offset is the exact defect shape this repository keeps paying for — each side
+// individually correct, nothing checking they agree — and it would surface as a material whose third
+// parameter is somebody else's second.
+namespace
+{
+    // Shipped shaders whose fragment stage declares the DSL-generated material row, found by parsing
+    // rather than by a list: a list is a second census, and the point of the transport being one is that
+    // no census has to be maintained.
+    std::vector<std::filesystem::path> ShadersWithAGeneratedMaterialRow()
+    {
+        std::vector<std::filesystem::path> out;
+        const auto                         root = std::filesystem::path( "Resources/Shaders/Programs" );
+        if ( !std::filesystem::exists( root ) )
+            return out;
+
+        for ( const auto& entry : std::filesystem::recursive_directory_iterator( root ) )
+        {
+            if ( !entry.is_regular_file() || entry.path().extension() != ".shader" )
+                continue;
+            auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( ReadFile( entry.path() ) );
+            if ( !parsed.IsSuccess() )
+                continue;
+            const auto it = parsed.GetValue().Stages.find( ShaderStage::Fragment );
+            if ( it == parsed.GetValue().Stages.end() )
+                continue;
+            if ( it->second.find( "#define u_Material u_Materials[" ) != std::string::npos )
+                out.push_back( entry.path() );
+        }
+        std::sort( out.begin(), out.end() );
+        return out;
+    }
+} // namespace
+
+TEST_F( ShaderRootFixture, AMaterialParameterSitsAtSixteenTimesItsIndexInTheCompiledSpirv )
+{
+    const auto shaders = ShadersWithAGeneratedMaterialRow();
+    ASSERT_FALSE( shaders.empty() ) << "no shipped shader carries a generated material row — either the "
+                                       "shader root was not found or the transport changed spelling";
+
+    for ( const auto& shaderFile : shaders )
+    {
+        const auto spirv =
+             CompileStage( StageSource( shaderFile, ShaderStage::Fragment ), shaderFile, shaderc_fragment_shader );
+        ASSERT_FALSE( spirv.empty() ) << shaderFile.string();
+
+        spirv_cross::CompilerGLSL          compiler( spirv );
+        const spirv_cross::ShaderResources resources = compiler.get_shader_resources();
+
+        const spirv_cross::Resource* block = nullptr;
+        for ( const auto& buffer : resources.storage_buffers )
+        {
+            if ( compiler.get_name( buffer.base_type_id ) == Desert::Core::Formats::kMaterialRowBlockName )
+                block = &buffer;
+        }
+        ASSERT_NE( block, nullptr ) << shaderFile.string() << ": no storage block named "
+                                    << Desert::Core::Formats::kMaterialRowBlockName;
+
+        // The block holds one member — the runtime array of rows — and the row struct is its element type.
+        const spirv_cross::SPIRType& blockType = compiler.get_type( block->base_type_id );
+        ASSERT_EQ( blockType.member_types.size(), 1u ) << shaderFile.string();
+        const spirv_cross::SPIRType& rowType = compiler.get_type( blockType.member_types[0] );
+
+        const uint32_t stride = compiler.type_struct_member_array_stride( blockType, 0 );
+        EXPECT_EQ( stride % Desert::Core::Formats::kMaterialParamSlotSize, 0u )
+             << shaderFile.string() << ": a row is " << stride
+             << " bytes, which is not a whole number of parameter slots";
+
+        // The DECLARED members alternate value, padding, value, padding... so the value of parameter i is
+        // whichever member sits at 16*i. Checking that each 16-byte boundary is the START of a member is
+        // the property the packer needs; checking member k's own index is not, because the padding
+        // members shift it.
+        std::set<uint32_t> memberOffsets;
+        for ( uint32_t m = 0; m < rowType.member_types.size(); ++m )
+            memberOffsets.insert( compiler.type_struct_member_offset( rowType, m ) );
+
+        const uint32_t slots = stride / Desert::Core::Formats::kMaterialParamSlotSize;
+        for ( uint32_t slot = 0; slot < slots; ++slot )
+        {
+            const uint32_t offset = slot * Desert::Core::Formats::kMaterialParamSlotSize;
+            EXPECT_TRUE( memberOffsets.count( offset ) != 0 )
+                 << shaderFile.string() << ": nothing starts at byte " << offset << ", so parameter " << slot
+                 << " is not where DataDrivenMaterial writes it";
+        }
+
+        // And the reverse, which is the half that catches a MISSING pad rather than a wrong one: no member
+        // may start anywhere except on a slot boundary or inside its own parameter's padding. Expressed as
+        // a count, because a row of N slots has exactly N parameter members and N boundaries.
+        EXPECT_EQ( memberOffsets.count( 0u ), 1u ) << shaderFile.string();
+        EXPECT_GE( memberOffsets.size(), slots ) << shaderFile.string();
+    }
+}
+
+// The test above cannot fail for a row that SHRANK, and the shipped set cannot show you why.
+//
+// It derives `slots` from the compiled stride, so a packer that emits no padding at all produces a
+// shorter row, fewer slots, and a loop that checks fewer boundaries — both sides of the comparison
+// move together and the assertion passes. Measured, not supposed: with the padding helper forced to
+// zero, every shipped shader still reported the same stride it reports now (MatProbe 48, Terrain and
+// TextSDF 32, Unlit 16) and only lost a member, because each of them declares at most ONE
+// Float/int/bool parameter and GLSL's own alignment re-establishes the boundaries by itself. The
+// padding is what separates two SMALL parameters, and no shipped shader has two in a row — so the
+// case the padding exists for was the one case nothing compiled.
+//
+// This test supplies it. The source is authored here rather than added to Resources/ because a
+// shader asset nothing renders is a fixture pretending to be content, and because the expected slot
+// count then comes from the DECLARATION (three parameters were written, so three slots) instead of
+// from the SPIR-V being examined. That is the whole point: with the count fixed by construction, a
+// row that shrinks fails on the count before it ever reaches the boundary loop.
+TEST_F( ShaderRootFixture, TwoSmallParametersInARowStillLandOnTheirOwnSlots )
+{
+    // Three parameters, and the first two are the adjacent small pair the shipped set never forms.
+    const std::string source = R"(Shader "RowPackingProbe"
+{
+    Domain Surface
+
+    Properties Binding(1)
+    {
+        Float  First  ("First")  = 1.0
+        Float  Second ("Second") = 2.0
+        Color  Third  ("Third")  = (0.1, 0.2, 0.3, 1.0)
+    }
+
+    State { Cull Back ZTest LEqual ZWrite On }
+
+    Vertex
+    {
+        In(0) vec3 a_Position;
+        #include <Common/CameraUB.glslh>
+        #include <Common/MaterialTransport.glslh>
+        void main()
+        {
+            gl_Position = cameraUB.Projection * cameraUB.View * m_PushConstants.Transform
+                        * vec4( a_Position, 1.0 );
+        }
+    }
+
+    Fragment
+    {
+        Out(0) vec4 o_Color;
+        void main()
+        {
+            o_Color = u_Material.Third * ( u_Material.First + u_Material.Second );
+        }
+    }
+})";
+
+    constexpr uint32_t kDeclaredParameters = 3; // written above, not read back from the shader
+
+    auto parsed = Desert::Core::Preprocess::DShaderParser::Parse( source );
+    ASSERT_TRUE( parsed.IsSuccess() ) << "the probe shader no longer parses: " << parsed.GetError();
+    const auto stageIt = parsed.GetValue().Stages.find( ShaderStage::Fragment );
+    ASSERT_NE( stageIt, parsed.GetValue().Stages.end() );
+
+    // Any real path works — it only resolves `#include <...>` and names the source in diagnostics.
+    const auto spirv =
+         CompileStage( stageIt->second, ShaderPath( "Unlit/Unlit.shader" ), shaderc_fragment_shader );
+    ASSERT_FALSE( spirv.empty() );
+
+    spirv_cross::CompilerGLSL          compiler( spirv );
+    const spirv_cross::ShaderResources resources = compiler.get_shader_resources();
+
+    const spirv_cross::Resource* block = nullptr;
+    for ( const auto& buffer : resources.storage_buffers )
+    {
+        if ( compiler.get_name( buffer.base_type_id ) == Desert::Core::Formats::kMaterialRowBlockName )
+            block = &buffer;
+    }
+    ASSERT_NE( block, nullptr ) << "the probe declares parameters but got no material row";
+
+    const spirv_cross::SPIRType& blockType = compiler.get_type( block->base_type_id );
+    ASSERT_EQ( blockType.member_types.size(), 1u );
+    const spirv_cross::SPIRType& rowType = compiler.get_type( blockType.member_types[0] );
+    const uint32_t               stride  = compiler.type_struct_member_array_stride( blockType, 0 );
+
+    // The count is the assertion the shipped-set test is missing: three declared parameters occupy
+    // three whole slots, whatever the compiler would have done with them unpadded.
+    EXPECT_EQ( stride, kDeclaredParameters * Desert::Core::Formats::kMaterialParamSlotSize )
+         << "a row of " << kDeclaredParameters << " parameters is " << stride
+         << " bytes; two adjacent small parameters have been packed into one slot";
+
+    std::set<uint32_t> memberOffsets;
+    for ( uint32_t m = 0; m < rowType.member_types.size(); ++m )
+        memberOffsets.insert( compiler.type_struct_member_offset( rowType, m ) );
+
+    for ( uint32_t slot = 0; slot < kDeclaredParameters; ++slot )
+    {
+        const uint32_t offset = slot * Desert::Core::Formats::kMaterialParamSlotSize;
+        EXPECT_TRUE( memberOffsets.count( offset ) != 0 )
+             << "nothing starts at byte " << offset << ", so parameter " << slot
+             << " is not where DataDrivenMaterial writes it";
+    }
 }
 
 TEST_F( ShaderRootFixture, AnUnlitGraphSurfaceReceivesNoneOfIt )
