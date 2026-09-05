@@ -117,8 +117,28 @@ Editor/Resources/Assets/Scenes/Autosave/
 # macOS Finder junk
 .DS_Store
 
+# --- Docs/ is NOT version-controlled, by the owner's decision ----------------------------------------
+# "Docs вообще убрать из git! то есть и снапшоты уйдут!" — the point being the frames: 546 PNGs and
+# 638 MB of blobs, against a repository whose packed history had already blown a CI checkout timeout
+# once (task D4).
+#
+# `d703b56a` removed them from the index and did NOT add this line, which left the directory in the one
+# state that cannot hold: untracked but not ignored. That is not stable — it survives only as long as
+# nobody types `git add -A`. On 2026-09-05 I typed it, and all 593 files came straight back in one
+# commit (f0175c34). No new bytes entered the pack, because the blobs were still reachable from before
+# the removal, but the decision was silently undone and the next agent's four new screenshots (2.1 MB
+# that had never been in this repository) were committed the same way.
+#
+# So the rule lives here now, where `git add` consults it, instead of depending on nobody making an
+# ordinary mistake. Everything under Docs/ stays on disk and is read normally; it is simply not ours to
+# carry in history. If a document genuinely needs to travel with the code, promote it into a skill
+# under .claude/skills/ (as Docs/Clouds/DEV_CONTRACT.md already was) rather than re-tracking the tree.
+Docs/
+
 # --- Cloud programme reference material -------------------------------------------------------------
-# The two SIGGRAPH PDFs (63 MB) are third-party conference material. Our analysis of them is committed
+# Kept for the record even though Docs/ above already covers them: these say WHY particular files were
+# excluded when the directory was tracked, and that reasoning outlives the blanket rule. The two
+# SIGGRAPH PDFs (63 MB) are third-party conference material — our analysis of them was committed
 # (Docs/Clouds/*.md); the papers themselves are not ours to redistribute.
 Docs/Clouds/*.pdf
 
