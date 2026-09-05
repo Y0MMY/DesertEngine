@@ -64,7 +64,7 @@ namespace Desert::Editor
         // Unity/UE-style anchor presets. Each axis is Min/Center/Max (a fixed-size box pinned to that edge,
         // keeping the element's current size) or Stretch (anchors 0..1, zero offsets -> fills the parent on
         // that axis). Stretch+Stretch = "fill parent" (the full-quad the UI needs). Offsets are in the same
-        // screen-px space UICanvasRenderer resolves layout in.
+        // screen-px space UICanvasLayout/RenderCanvas2D resolve layout in.
         enum class AnchorAxis
         {
             Min,
