@@ -1138,6 +1138,96 @@ TEST_F( ShaderRootFixture, AnUnlitGraphSurfaceReceivesNoneOfIt )
     EXPECT_FALSE( HasBinding( bindings, 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) );
 }
 
+// ---- The terrain's per-draw data rides beside the draw, not in the shared block --------------------
+
+TEST_F( ShaderRootFixture, TheTerrainKeepsPerDrawDataOutOfItsSharedUniformBlock )
+{
+    // The terrain pass records EVERY draw of a frame before the GPU executes any of them, and a
+    // material's descriptors are written at most once per frame — so anything per-terrain that lives
+    // in the shared TerrainUB is read by the GPU as the LAST terrain's values, for every terrain. That
+    // was live: on a two-terrain scene both drew with one Model/size/seed. The fix is the same
+    // transport the parameters already use (MaterialParamRow.hpp): per-draw data is a row of
+    // `TerrainInstances[]`, named by the push-constant index. This test pins the SPLIT — the relation
+    // between what stays shared and what rides per draw — in the compiled SPIR-V of all four stages,
+    // exactly as VulkanShader merges them into one descriptor set layout.
+    const auto path = ShaderPath( "Terrain/Terrain.shader" );
+
+    struct StageToCompile
+    {
+        ShaderStage         Stage;
+        shaderc_shader_kind Kind;
+    };
+    const StageToCompile stages[] = {
+        { ShaderStage::Vertex, shaderc_vertex_shader },
+        { ShaderStage::TessControl, shaderc_tess_control_shader },
+        { ShaderStage::TessEvaluation, shaderc_tess_evaluation_shader },
+        { ShaderStage::Fragment, shaderc_fragment_shader },
+    };
+
+    ShaderResource::ReflectionData data;
+    std::vector<uint32_t>          tessEvalSpirv; // kept for the stride check below
+    for ( const auto& [stage, kind] : stages )
+    {
+        const auto spirv = CompileStage( StageSource( path, stage ), path, kind );
+        ASSERT_FALSE( spirv.empty() ) << "stage " << static_cast<int>( stage ) << " did not compile";
+        if ( stage == ShaderStage::TessEvaluation )
+            tessEvalSpirv = spirv;
+        const auto diagnostics = ShaderReflection::ReflectStage( spirv, stage, data );
+        EXPECT_TRUE( diagnostics.empty() ) << ( diagnostics.empty() ? "" : diagnostics.front() );
+    }
+
+    const auto setIt = data.ShaderDescriptorSets.find( 0 );
+    ASSERT_NE( setIt, data.ShaderDescriptorSets.end() );
+    const auto& set = setIt->second;
+
+    // The shared half: TerrainUB holds ONLY what every terrain of a frame agrees on — View +
+    // Projection + SunDir + SunColor, 2*64 + 2*16 = 160 bytes. This is a size relation, not a spot
+    // value: putting any per-terrain field back (Model was the first to be forgotten here) grows the
+    // block past 160 and fails this line before it fails on screen.
+    const auto ub = set.UniformBuffers.find( 0 );
+    ASSERT_NE( ub, set.UniformBuffers.end() ) << "TerrainUB left binding 0";
+    EXPECT_EQ( ub->second.Size, 160u )
+         << "TerrainUB is no longer just the shared frame data - a per-draw field moved back in";
+
+    // The per-draw half: TerrainInstances[] at binding 8, one struct per recorded draw.
+    const auto instances = set.StorageBuffers.find( 8 );
+    ASSERT_NE( instances, set.StorageBuffers.end() ) << "the TerrainInstances row buffer is gone";
+    EXPECT_EQ( instances->second.Name, "TerrainInstances" );
+
+    // ...and its stride is the C++ writer's stride. The reflected block Size of a runtime array is 0
+    // by definition, so the stride is read straight from the SPIR-V type — the same number
+    // TerrainBatch.hpp static_asserts as sizeof(TerrainInstance).
+    {
+        spirv_cross::Compiler compiler( tessEvalSpirv );
+        const auto            resources = compiler.get_shader_resources();
+        bool                  found     = false;
+        for ( const auto& resource : resources.storage_buffers )
+        {
+            if ( compiler.get_decoration( resource.id, spv::DecorationBinding ) != 8 )
+                continue;
+            const auto& block = compiler.get_type( resource.base_type_id );
+            ASSERT_FALSE( block.member_types.empty() );
+            const uint32_t stride = compiler.type_struct_member_array_stride( block, 0 );
+            EXPECT_EQ( stride, 112u ) << "the GLSL TerrainInstance and the C++ TerrainInstance disagree";
+            found = true;
+        }
+        EXPECT_TRUE( found ) << "the tess-eval stage no longer reads TerrainInstances";
+    }
+
+    // The census, so a binding added or lost anywhere in the four stages is named here first.
+    const auto bindings = ShaderReflection::BuildLayoutBindings( set );
+    EXPECT_EQ( bindings.size(), 9u ) << DescribeBindings( bindings );
+    EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );  // TerrainUB (shared)
+    EXPECT_TRUE( HasBinding( bindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );  // Materials[] rows
+    EXPECT_TRUE( HasBinding( bindings, 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_GrassTex
+    EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_RockTex
+    EXPECT_TRUE( HasBinding( bindings, 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_SnowTex
+    EXPECT_TRUE( HasBinding( bindings, 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_SplatMap
+    EXPECT_TRUE( HasBinding( bindings, 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_CloudShadowMap
+    EXPECT_TRUE( HasBinding( bindings, 7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );         // CloudShadowUB
+    EXPECT_TRUE( HasBinding( bindings, 8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) ); // TerrainInstances[]
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
