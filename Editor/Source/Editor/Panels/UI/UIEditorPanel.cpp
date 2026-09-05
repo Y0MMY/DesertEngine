@@ -172,7 +172,7 @@ namespace Desert::Editor
         // worldViewProj = nullptr on purpose too: a WorldSpace canvas is billboarded by the camera in the
         // viewport, but there is no camera here — the authoring view shows it flat, at its design size.
         ::Desert::UI::RenderCanvas2D( reg, m_Render2D.GetDrawList(), viewport, /*worldViewProj=*/nullptr,
-                            /*input=*/nullptr );
+                                      /*input=*/nullptr );
         m_Render2D.Flush();
         renderer.EndRenderPass();
 
@@ -206,8 +206,8 @@ namespace Desert::Editor
         // Toolbar, generated from the one element catalog the viewport's "UI" menu also reads. Buttons wrap
         // to the next line instead of running off the edge — eleven of them do not fit a docked panel.
         {
-            const ImGuiStyle& style      = ImGui::GetStyle();
-            const float       rightEdge  = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+            const ImGuiStyle& style     = ImGui::GetStyle();
+            const float       rightEdge = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
             for ( std::size_t i = 0; i < kUIElementCount; ++i )
             {
                 const UIElementEntry& entry = kUIElements[i];
@@ -218,7 +218,7 @@ namespace Desert::Editor
                 if ( i + 1 >= kUIElementCount )
                     break;
                 const std::string next = std::string( kUIElements[i + 1].Icon ) + " + " + kUIElements[i + 1].Label;
-                const float nextWidth = ImGui::CalcTextSize( next.c_str() ).x + style.FramePadding.x * 2.0f;
+                const float       nextWidth = ImGui::CalcTextSize( next.c_str() ).x + style.FramePadding.x * 2.0f;
                 if ( ImGui::GetItemRectMax().x + style.ItemSpacing.x + nextWidth < rightEdge )
                     ImGui::SameLine();
             }
@@ -244,8 +244,8 @@ namespace Desert::Editor
         if ( avail.x < 1.0f || avail.y < 1.0f )
             return;
 
-        const ::Desert::UI::Rect fit = ::Desert::UI::CanvasRect( static_cast<float>( m_TargetWidth ),
-                                             static_cast<float>( m_TargetHeight ), avail.x, avail.y );
+        const ::Desert::UI::Rect fit = ::Desert::UI::CanvasRect(
+             static_cast<float>( m_TargetWidth ), static_cast<float>( m_TargetHeight ), avail.x, avail.y );
         const ImVec2 imageMin( origin.x + fit.X, origin.y + fit.Y );
         const ImVec2 imageMax( imageMin.x + fit.W, imageMin.y + fit.H );
 

@@ -131,8 +131,8 @@ TEST( UIElementCensus, EveryCreatableElementIsDrawnByTheRenderer )
     {
         const std::string type = kUIElements[i].ComponentType;
         EXPECT_TRUE( dispatch.count( type ) == 1 )
-             << "the editor's create menus offer '" << kUIElements[i].Label << "' (ECS::" << type
-             << ") but " << kRenderer << " never asks the registry for it — the element would be created "
+             << "the editor's create menus offer '" << kUIElements[i].Label << "' (ECS::" << type << ") but "
+             << kRenderer << " never asks the registry for it — the element would be created "
              << "and never drawn. Add a case to the renderer, or drop the catalog entry.";
     }
 }

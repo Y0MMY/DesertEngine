@@ -269,7 +269,7 @@ namespace Desert::UI
         const auto& cd        = reg.get<ECS::UICanvasComponent>( canvas ).Data;
         const Rect  childRoot = InsetRect( canvasRect, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
                                            cd.SafeArea.z * scale, cd.SafeArea.w * scale );
-        bool found = false;
+        bool        found     = false;
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) && !found )

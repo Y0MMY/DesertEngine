@@ -76,12 +76,12 @@ namespace Desert::Editor
 
         std::shared_ptr<::Desert::Core::Scene> m_Scene;
 
-        std::unique_ptr<Editor::UI::UIHelper>       m_UIHelper;
-        std::shared_ptr<Graphic::Framebuffer>       m_Target;
-        std::shared_ptr<Graphic::RenderPass>        m_RenderPass;
-        Graphic::Render2D::Render2D                 m_Render2D;
-        uint32_t                                    m_TargetWidth  = 0;
-        uint32_t                                    m_TargetHeight = 0;
+        std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
+        std::shared_ptr<Graphic::Framebuffer> m_Target;
+        std::shared_ptr<Graphic::RenderPass>  m_RenderPass;
+        Graphic::Render2D::Render2D           m_Render2D;
+        uint32_t                              m_TargetWidth  = 0;
+        uint32_t                              m_TargetHeight = 0;
 
         // True once OnPreUpdate has recorded a canvas into m_Target this frame — OnUIRender only shows the
         // image when it has one, so a panel opened mid-frame draws its chrome and the picture one frame on.

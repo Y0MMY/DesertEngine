@@ -35,17 +35,17 @@
 //   EntityName    - the scene-graph name the new entity gets.
 //   Icon          - the toolbar/menu glyph.
 //   MenuLabel     - the human label. The panel's toolbar prefixes it with "+ ".
-#define DESERT_UI_ELEMENT_LIST( X )                                                                          \
-    X( UIPanelComponent, "UI Panel", ICON_MDI_CARD_OUTLINE, "Panel" )                                        \
-    X( UITextComponent2D, "UI Text", ICON_MDI_FORMAT_TEXT, "Text" )                                          \
-    X( UIButtonComponent, "UI Button", ICON_MDI_BUTTON_POINTER, "Button" )                                   \
-    X( UIImageComponent, "UI Image", ICON_MDI_IMAGE, "Image" )                                               \
-    X( UILayoutGroupComponent, "UI Layout Group", ICON_MDI_VIEW_GRID, "Layout Group" )                        \
-    X( UIProgressBarComponent, "UI Progress Bar", ICON_MDI_PROGRESS_HELPER, "Progress Bar" )                  \
-    X( UIToggleComponent, "UI Toggle", ICON_MDI_CHECKBOX_MARKED_OUTLINE, "Toggle" )                           \
-    X( UISliderComponent, "UI Slider", ICON_MDI_TUNE_VARIANT, "Slider" )                                     \
-    X( UIScrollViewComponent, "UI Scroll View", ICON_MDI_VIEW_LIST, "Scroll View" )                           \
-    X( UIInputFieldComponent, "UI Input Field", ICON_MDI_FORM_TEXTBOX, "Input Field" )                        \
+#define DESERT_UI_ELEMENT_LIST( X )                                                                               \
+    X( UIPanelComponent, "UI Panel", ICON_MDI_CARD_OUTLINE, "Panel" )                                             \
+    X( UITextComponent2D, "UI Text", ICON_MDI_FORMAT_TEXT, "Text" )                                               \
+    X( UIButtonComponent, "UI Button", ICON_MDI_BUTTON_POINTER, "Button" )                                        \
+    X( UIImageComponent, "UI Image", ICON_MDI_IMAGE, "Image" )                                                    \
+    X( UILayoutGroupComponent, "UI Layout Group", ICON_MDI_VIEW_GRID, "Layout Group" )                            \
+    X( UIProgressBarComponent, "UI Progress Bar", ICON_MDI_PROGRESS_HELPER, "Progress Bar" )                      \
+    X( UIToggleComponent, "UI Toggle", ICON_MDI_CHECKBOX_MARKED_OUTLINE, "Toggle" )                               \
+    X( UISliderComponent, "UI Slider", ICON_MDI_TUNE_VARIANT, "Slider" )                                          \
+    X( UIScrollViewComponent, "UI Scroll View", ICON_MDI_VIEW_LIST, "Scroll View" )                               \
+    X( UIInputFieldComponent, "UI Input Field", ICON_MDI_FORM_TEXTBOX, "Input Field" )                            \
     X( UIDropdownComponent, "UI Dropdown", ICON_MDI_MENU_DOWN, "Dropdown" )
 
 namespace Desert::Editor

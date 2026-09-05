@@ -49,11 +49,11 @@ namespace Desert::Editor
     // kUIElements, so an entry can never be listed in a menu without a creator behind it.
     inline entt::entity CreateUIElement( ::Desert::Core::Scene& scene, entt::entity parent, std::size_t index )
     {
-        std::size_t   i      = 0;
-        entt::entity  result = entt::null;
+        std::size_t  i      = 0;
+        entt::entity result = entt::null;
 
-#define DESERT_UI_ELEMENT_CREATE( Type, EntityName, Icon, Label )                                            \
-    if ( index == i++ )                                                                                      \
+#define DESERT_UI_ELEMENT_CREATE( Type, EntityName, Icon, Label )                                                 \
+    if ( index == i++ )                                                                                           \
         return AddUIChild<ECS::Type>( scene, parent, EntityName );
 
         DESERT_UI_ELEMENT_LIST( DESERT_UI_ELEMENT_CREATE )
