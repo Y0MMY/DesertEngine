@@ -52,10 +52,13 @@ Shader "SkyAerialPerspectiveLut"
             vec4 u_VolumeParams;   // x = volume depth (km), y = aerial perspective start depth (km)
         };
 
-        // The transmittance LUT is addressed through Bruneton's raw-uv mapping (its write side uses no
-        // texel-centre remap); the multi-scatter LUT was written through the texel-centre remap, so its
-        // read applies SkyUnitToTexelUv — each read is the exact inverse of its write. Identical to the
-        // Sky-View fill's pair, deliberately: the AP volume and the sky must sample the same texels.
+        // The transmittance LUT is addressed straight from its distance parameterisation: no
+        // SkyUnitToTexelUv here, because Bruneton's mapping already puts the domain ends on the edge
+        // texels. (Its write side DOES address texel centres — see SkyTransmittanceLut.shader — which
+        // is what makes this read the exact inverse of that write; the two are different remaps and the
+        // comment that used to stand here conflated them.) The multi-scatter LUT is parameterised in
+        // unit range instead, so its read applies SkyUnitToTexelUv. Identical to the Sky-View fill's
+        // pair, deliberately: the AP volume and the sky must sample the same texels.
         vec3 SkySampleSunTransmittanceLut(SkyAtmParams atm, float radiusKm, float sunZenithCos)
         {
             vec2 uv = SkyTransmittanceLutUvFromParams(atm.BottomRadiusKm, atm.TopRadiusKm, radiusKm,
