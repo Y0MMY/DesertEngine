@@ -21,6 +21,19 @@ workspace "Desert"
     externalwarnings "Off"
     warnings "Off"
 
+    -- MSVC compiles the files of ONE project serially unless told otherwise, and `msbuild -m` — which CI
+    -- already passes — parallelises PROJECTS, not the files inside them. So the two projects that hold
+    -- almost all of the code, Desert and Editor, were each built on a single core while the rest of the
+    -- runner idled.
+    --
+    -- Measured on run 33958917578, the step breakdown of Windows Debug: Build 57.9 min, Run tests
+    -- 32.9 min, everything else 2.7 min combined. The build is the larger half and it is the half that
+    -- was single-threaded. That job also runs at 93 minutes against a ceiling that had already cancelled
+    -- it twice (see the note beside `timeout-minutes` in .github/workflows/ci.yml).
+    --
+    -- No effect on the makefile generators, which already get their parallelism from `make -j`.
+    flags { "MultiProcessorCompile" }
+
     -- EnTT hands each component type a sequential index from ONE global counter, and without this the
     -- counter is a plain `id_type` incremented with `value++` (ENTT_MAYBE_ATOMIC, entt.hpp). Two threads
     -- first-touching two different component types can then be handed the SAME index and read each
