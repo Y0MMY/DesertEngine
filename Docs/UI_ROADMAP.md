@@ -22,6 +22,35 @@ approved per the engine's "no magic dependencies" rule).
 
 ---
 
+## 0. Two structural questions this list does not otherwise ask (added 2026-09-05)
+
+Everything below section 0 is a feature list, and a feature list cannot ask a structural question.
+These two came out of reading UE's Slate/UMG from source (`Docs/UI/UE_RESEARCH/`, five reports) and
+diffing it against ours (`Docs/UI/GAP_ANALYSIS.md`). Both are cheap to decide now and expensive to
+decide later.
+
+**0.1 Invalidation — and the answer is probably "no", on evidence.** We rebuild the whole draw list
+every frame by walking the ECS. That reads like a gap against Slate's `FSlateInvalidationRoot` /
+`EInvalidateWidgetReason` machinery, and it is not: with both invalidation CVars at their defaults
+and no `SInvalidationPanel` — the shipping engine configuration — Slate also does a full prepass, a
+full paint and a full re-batch every frame, and `SWidget::Invalidate()` is a no-op. We are not behind
+UE's behaviour; we lack UE's *option*, which costs per-widget memory, a documented one-frame hitch,
+two live `ensureMsgf` failure modes, and a slow-path cliff that is worse than no invalidation at all
+for that frame. **Owed: measure the full-walk cost against canvas size and record the answer,
+including the legitimate answer "immediate mode carries the sizes we target".**
+
+**0.2 Render transform — undecided, and four subsystems are quietly relying on the answer.**
+`UILayout.hpp` resolves everything to `Rect{X,Y,W,H}`: no rotation, no scale, no pivot, no render
+transform. That is *why* scissor clipping is sufficient (Slate carries stencil clipping precisely
+because it has transforms), why hit testing can be `rect contains point`, and why `DrawList2D` quads
+are corner pairs rather than four points. Adding rotation later is a change to the layout model, the
+draw list, the batcher and hit testing at once. Nothing here asks for it — `UITween` animates
+Offset / Size / Opacity / Color — but every toolkit ships a spinner, and the cheap answer for a
+spinner is a special case, which is how a system ends up with a transform anyway, spelled five
+different ways. **Owed: decide explicitly, either way, in writing.**
+
+---
+
 ## A. Content types (what can live in a UI element)
 - [x] Text (custom font asset, word-wrap, rich text — see E)
 - [~] Image / Sprite (PNG/JPG/TGA), **9-slice**, tint — done on Panel/Button/Canvas via `AssetHandle`; empty Image draws nothing; atlas/tiling/flip todo
@@ -64,6 +93,19 @@ approved per the engine's "no magic dependencies" rule).
 ## D. Interaction & input
 - [x] Mouse click-select (editor), button hover/press (runtime)
 - [x] State set: normal / hover / pressed / focused / **disabled / selected** (per-state button sprites + tints)
+- [ ] **Visibility as a state per element — the largest single capability gap (measured 2026-09-05).**
+      There is exactly ONE authored `Visible` flag in the whole UI component set and it is on the
+      **canvas** (`Components.hpp:962`); `UILayoutData` has no visibility field, so hiding one element
+      needs a `UIBinding` to a data key or a `UIScreen`. And `Interactable` / `RaycastTarget` are read
+      from the element only (`UICanvasRenderer2D.cpp:1112-1113`) while the walk descends into children
+      regardless — so `RaycastTarget = false` is exactly UE's `SelfHitTestInvisible`, and
+      `HitTestInvisible` (element *and* subtree) plus "disable this whole panel" are inexpressible.
+      Missing entirely: the layout axis — UE's `Collapsed` drops the element from its parent's layout
+      while `Hidden` keeps its space, which inside a VBox/HBox *is* the feature.
+      **Do not copy `ESlateVisibility`**: it welds two axes into one five-valued word. Decomposed it is
+      `Visibility {Visible, Hidden, Collapsed}` × `HitTest {All, ChildrenOnly, None}` — two orthogonal
+      fields, nine combinations, of which UE exposes five. Simpler to author and serialize, strictly
+      more expressive, and it matches what our walk already does per element. (Task У4.)
 - [~] **Focus + navigation** — keyboard Tab-order + Enter-activate done; gamepad D-pad, back button todo
 - [ ] **Touch + gestures** (tap/long-press/swipe/drag/pinch), multi-touch
 - [x] **Drag & drop** between UI elements — `UIDraggable` (payload + ghost) / `UIDropTarget` (prefix filter,
@@ -106,6 +148,18 @@ approved per the engine's "no magic dependencies" rule).
 - [ ] Custom UI shaders/materials; post-processing scoped to UI
 - [x] Batching to a real UI mesh — `Render2D` merges same-state quads into batched draw calls
 - [ ] Offscreen culling, element pooling for lists
+- [ ] **Introspection — we have none, and this list had no line for it until 2026-09-05.** UE ships a
+      Widget Reflector (pick an element on screen, see its tree, geometry and paint counts), a
+      `SlateDebugger.*` console family, `stat Slate`, and Slate Insights traces
+      (`Docs/UI/UE_RESEARCH/02_debugging_and_introspection.md`). This matters more than its position in
+      a feature list suggests: the four most expensive defects in this engine shipped built, tested and
+      unseen, and a UI toolkit that cannot answer "why is this element here, this size, in this batch"
+      reproduces that failure mode in a new subsystem. Cheap to start — the batcher already knows batch
+      counts and clip rects, and the walk already elects a picked element.
+- [ ] **MSDF text.** Ours is single-channel SDF. UE moved to multi-channel in 5.5 with a four-value
+      `EFontRasterizationMode` (Bitmap / Msdf / Sdf / SdfApproximation), per-font-face ppem tiers and a
+      dedicated atlas content type, selected per device profile. MSDF is what keeps corners sharp —
+      exactly the artefact single-channel SDF produces.
 
 ## H. Data & scripting
 - [x] Data binding (MVVM-lite) — `UIBinding` ties an element to a key in a global data store
@@ -185,9 +239,21 @@ behind it (Color/Opacity become the tint over that blur; Opacity 1 is an ordinar
   because it already contains what is behind it.
 * Missing shader or a not-yet-built pyramid degrades to a flat tinted panel rather than failing.
 
-**Next up (dependency-free):** gamepad/D-pad navigation + event bubbling to finish D; A render-texture
-element (reuse per-instance SceneRenderer → offscreen target); then C's virtualized ListView, which
-unlocks data-driven lists in H.
+**Next up (dependency-free), reordered 2026-09-05 after the UE gap analysis:**
+
+1. **Visibility as a state per element** (D) — the largest capability gap, and small: a two-axis field
+   on `UILayoutData` plus propagating the hit-test flags down the walk. Task У4.
+2. **Gamepad/D-pad navigation + event bubbling**, to finish D.
+3. **Render-texture element** — worth more than its one line, because UE's `RetainerBox`,
+   world-space UI and "3D model in a widget" are all the *same* mechanism, so this buys three
+   entries here at once (A, G, and the flatten that `RenderOpacity` cannot do).
+4. **Virtualized ListView**, which unlocks data-driven lists in H.
+5. **Introspection** (G) — cheap, and it is how every later item gets debugged.
+
+Two pieces of housekeeping landed on the way: the UI Editor panel used to draw through a second,
+obsolete ImGui renderer that handled 6 of the 22 component types (task У2 — deleted, with a
+compile-time census so it cannot happen again), and the canvas walk's runtime state is moving out of
+file-scope globals into a per-view context (task У3).
 
 Dependencies to approve when reached: pl_mpeg/libvpx or ffmpeg (video), rlottie (Lottie),
 HarfBuzz (complex text). Each: justify size/license/compile-time first. (nanosvg was considered for

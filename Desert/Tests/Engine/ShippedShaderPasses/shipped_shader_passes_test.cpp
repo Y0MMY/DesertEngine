@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -249,6 +250,8 @@ TEST( ShippedShaderPasses, AGeneratedMaterialRowAlwaysArrivesWithThePushConstant
 {
     const std::string rowBuffer = std::string( "buffer " ) + Desert::Core::Formats::kMaterialRowBlockName;
 
+    std::set<std::string> withAGeneratedBlock;
+
     for ( const auto& shader : ShippedShaders() )
     {
         ASSERT_TRUE( shader.Parsed.IsSuccess() ) << shader.File.string() << ": " << shader.Parsed.GetError();
@@ -258,6 +261,8 @@ TEST( ShippedShaderPasses, AGeneratedMaterialRowAlwaysArrivesWithThePushConstant
             if ( source.find( "#define u_Material u_Materials[" ) == std::string::npos )
                 continue; // not a GENERATED block; a hand-written one indexes itself
 
+            withAGeneratedBlock.insert( shader.File.filename().string() );
+
             EXPECT_NE( source.find( rowBuffer ), std::string::npos )
                  << shader.File.string() << ": defines u_Material without the buffer behind it";
             EXPECT_NE( source.find( "#include <Common/MaterialTransport.glslh>" ), std::string::npos )
@@ -266,6 +271,18 @@ TEST( ShippedShaderPasses, AGeneratedMaterialRowAlwaysArrivesWithThePushConstant
                     "block that carries it";
         }
     }
+
+    // Everything above is inside `if (marker found) ... else continue`, so it asserts nothing at all when
+    // the marker stops matching — and the marker is a literal spelling of generated text. Change how the
+    // emitter writes that #define and this test goes green by having no work to do, which is the one
+    // failure mode a census must not have. The sibling test (…ReadsThemFromTheSharedRowBuffer) does not
+    // cover it: that one keys on "buffer Materials", a different string, so a #define respelling leaves it
+    // green too.
+    EXPECT_EQ( withAGeneratedBlock.size(), 6u )
+         << "expected six shipped shaders to carry a generated material row; found " << withAGeneratedBlock.size()
+         << ". If a shader was legitimately added or removed, change this number. If it is zero or"
+            " unexpectedly small, the marker string above has stopped matching the emitter and this test"
+            " was passing without examining anything.";
 }
 
 int main( int argc, char** argv )
