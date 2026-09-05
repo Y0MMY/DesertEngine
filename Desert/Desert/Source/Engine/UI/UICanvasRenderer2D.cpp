@@ -9,6 +9,8 @@
 #include <Engine/Text/Utf8.hpp>
 #include <Engine/UI/UIDataStore.hpp>
 
+#include <Common/Core/Logger.hpp>
+
 #include <algorithm>
 #include <optional>
 #include <chrono>
@@ -35,47 +37,26 @@ namespace Desert::UI
         }
 
         // Per-button hover interpolation (0=rest, 1=hovered), eased each frame toward the target so hover
-        // colours cross-fade instead of snapping. Keyed by entity (transient, non-serialized). s_FrameDt is
-        // the wall-clock delta of the current frame, refreshed once at the top of RenderCanvas2D.
-        std::unordered_map<entt::entity, float> s_HoverT;
-        float                                   s_FrameDt = 0.0f;
-
-        float HoverEase( entt::entity e, bool hovered )
+        // colours cross-fade instead of snapping. The clock is keyed by entity INSIDE the view's context —
+        // entt::entity is unique only within a registry, so a map shared between views answered to entity 7
+        // of every scene at once.
+        float HoverEase( UICanvasContext& ctx, entt::entity e, bool hovered )
         {
-            float&      t = s_HoverT[e];
-            const float k = std::clamp( s_FrameDt * 12.0f, 0.0f, 1.0f ); // exponential approach
+            float&      t = ctx.HoverT[e];
+            const float k = std::clamp( ctx.FrameDt * 12.0f, 0.0f, 1.0f ); // exponential approach
             t += ( ( hovered ? 1.0f : 0.0f ) - t ) * k;
             return t;
         }
 
         // --- Screens ----------------------------------------------------------------------------------
         // A canvas can hold several UIScreen sub-trees; exactly one is current, and a ShowScreen button
-        // moves between them (BackScreen returns). Like the tweens, the live state is kept HERE and not in
-        // the component: navigating in the editor must not rewrite the authored scene.
-        std::string              s_Screen;                // current screen name
-        std::string              s_ScreenFrom;            // the one handing over, while a transition runs
-        std::vector<std::string> s_ScreenStack;           // history for BackScreen
-        float                    s_ScreenT       = 1.0f;  // 0..1 progress of the current transition (1 = idle)
-        float                    s_ScreenSlidePx = 60.0f; // mirrored from the canvas's UIScreenStack
-        float                    s_ScreenTime    = 0.25f;
-        ECS::UIEasing            s_ScreenEasing  = ECS::UIEasing::CubicOut;
-        bool                     s_ScreenBack = false; // true when the transition is a Back (slides the other way)
-        std::string              s_ScreenReq; // requested by a button this frame, applied at the walk's end
-        bool                     s_ScreenReqBack = false;
-
-        void RequestScreen( const std::string& name, bool back )
+        // moves between them (BackScreen returns). Like the tweens, the live state is kept in the view's
+        // context and not in the component: navigating in the editor must not rewrite the authored scene.
+        void RequestScreen( UICanvasContext& ctx, const std::string& name, bool back )
         {
-            s_ScreenReq     = name;
-            s_ScreenReqBack = back;
+            ctx.ScreenReq     = name;
+            ctx.ScreenReqBack = back;
         }
-
-        // --- Tweens -----------------------------------------------------------------------------------
-        // A generic from->to animation, evaluated here on the way to the screen and NEVER written back
-        // into the authored component — so a tween is safe to run in the editor, previews live in Design
-        // mode, and stopping it simply restores the authored look.
-        std::unordered_map<entt::entity, float>    s_TweenT;    // per-entity clock (transient, like s_HoverT)
-        std::unordered_map<entt::entity, uint64_t> s_TweenSeen; // frame the tween was last evaluated on
-        uint64_t                                   s_FrameIndex = 0;
 
         float Ease( ECS::UIEasing e, float t )
         {
@@ -138,23 +119,27 @@ namespace Desert::UI
             glm::vec4 Tint{ 1.0f };   // multiplies colour + alpha
         };
 
-        TweenSample SampleTween( entt::registry& reg, entt::entity e )
+        // A generic from->to animation, evaluated here on the way to the screen and NEVER written back
+        // into the authored component — so a tween is safe to run in the editor, previews live in Design
+        // mode, and stopping it simply restores the authored look. Its playhead therefore lives in the
+        // view's context, which is what lets two views animate the same element independently.
+        TweenSample SampleTween( UICanvasContext& ctx, entt::registry& reg, entt::entity e )
         {
             TweenSample out;
             if ( !reg.has<ECS::UITweenComponent>( e ) )
                 return out;
             const auto& tw = reg.get<ECS::UITweenComponent>( e ).Data;
 
-            float&    clock    = s_TweenT[e];
-            uint64_t& lastSeen = s_TweenSeen[e];
+            float&    clock    = ctx.TweenT[e];
+            uint64_t& lastSeen = ctx.TweenSeen[e];
             // Not evaluated last frame => this element was hidden (or the canvas was). Replaying from the
             // top is what an intro tween should do when its screen comes back.
-            if ( tw.RewindOnHide && lastSeen + 1 != s_FrameIndex )
+            if ( tw.RewindOnHide && lastSeen + 1 != ctx.FrameIndex )
                 clock = 0.0f;
-            lastSeen = s_FrameIndex;
+            lastSeen = ctx.FrameIndex;
 
             if ( tw.Playing )
-                clock += s_FrameDt;
+                clock += ctx.FrameDt;
 
             const float dur = std::max( 0.001f, tw.Duration );
             float       t   = ( clock - tw.Delay ) / dur; // <0 while delayed
@@ -201,7 +186,7 @@ namespace Desert::UI
 
         // A keyed CLIP (UIAnim) on top of the one-shot tween: several property lanes, many keys, one
         // playhead. Segments ease with the key they arrive at, so an author shapes each leg separately.
-        void ApplyAnimClip( entt::registry& reg, entt::entity e, TweenSample& out )
+        void ApplyAnimClip( UICanvasContext& ctx, entt::registry& reg, entt::entity e, TweenSample& out )
         {
             if ( !reg.has<ECS::UIAnimComponent>( e ) )
                 return;
@@ -209,9 +194,14 @@ namespace Desert::UI
 
             // The playhead is a runtime field (never serialized): the canvas drives it while Playing, and
             // the Sequencer pauses playback and writes it directly to scrub.
-            if ( clip.Playing )
+            //
+            // It is the one clock in this walk that lives in the SCENE rather than in the view, so only the
+            // view that owns the scene's time advances it. Let both an editor viewport and the UI Editor
+            // preview advance it and every clip runs at twice its authored speed — the mirror image of the
+            // bug the context fixes, and the reason DrivesSceneAnimation is a field and not an assumption.
+            if ( clip.Playing && ctx.DrivesSceneAnimation )
             {
-                clip.Time += s_FrameDt;
+                clip.Time += ctx.FrameDt;
                 if ( clip.Duration > 0.0f )
                     clip.Time =
                          clip.Loop ? std::fmod( clip.Time, clip.Duration ) : std::min( clip.Time, clip.Duration );
@@ -321,13 +311,13 @@ namespace Desert::UI
             return out;
         }
 
-        // The tint of the element being drawn — multiplied into its colours so Opacity/Color tweens reach
-        // every control without threading a parameter through each one.
-        glm::vec4 s_Tint{ 1.0f };
-
-        glm::vec4 Tinted( const glm::vec4& c )
+        // The tint of the element being drawn lives in the context (UICanvasContext::Tint) — multiplied into
+        // its colours so Opacity/Color tweens reach every control. The two draw helpers outside the walk
+        // (DrawText2D, DrawIcon) take the already-tinted colour as an argument rather than reading it, so
+        // they need no context at all.
+        glm::vec4 Tinted( const UICanvasContext& ctx, const glm::vec4& c )
         {
-            return c * s_Tint;
+            return c * ctx.Tint;
         }
 
         // --- Hit testing ------------------------------------------------------------------------------
@@ -335,24 +325,8 @@ namespace Desert::UI
         // up. Instead the walk elects a single HOT element: every raycast-target whose rect (and clip)
         // contains the pointer overwrites the candidate, and since children draw after parents the last
         // writer is the topmost. Controls compare against the PREVIOUS frame's winner — the same one-frame
-        // deferral ImGui uses, which avoids a second layout pass and is invisible in practice.
-        entt::entity s_Hot     = entt::null; // resolved last frame: what the controls react to now
-        entt::entity s_HotNext = entt::null; // being elected during this frame's walk
-        Rect         s_HotNextRect{};
-        bool         s_PrevDown = false; // for the press edge (UIInput only carries held + release)
-
-        // An in-flight drag. Lives here with the other cross-frame UI state; a drag survives until release.
-        struct DragState
-        {
-            bool         Active  = false; // past the threshold: the ghost is up and a drop can land
-            bool         Pending = false; // pressed on a draggable, still deciding drag vs click
-            entt::entity Source  = entt::null;
-            std::string  Payload;
-            glm::vec2    Size{ 0.0f };
-            glm::vec2    PressPos{ 0.0f };
-            float        Ghost = 0.55f;
-        };
-        DragState s_Drag;
+        // deferral ImGui uses, which avoids a second layout pass and is invisible in practice. The election
+        // and the drag both live in UICanvasContext (Hot / HotNext / Drag).
 
         Rect IntersectRect( const Rect& a, const Rect& b )
         {
@@ -427,6 +401,14 @@ namespace Desert::UI
             return static_cast<Graphic::Image2D*>( imgService->Resolve( tex->GetImageHandle() ) );
         }
 
+        // An animated (GIF) sprite's current frame — a pure function of wall-clock time. Non-GIF handles
+        // resolve to nullptr here, so ordinary textures fall through to ResolveSpriteImage.
+        Graphic::Image2D* ResolveAnimatedFrame( const Assets::AssetHandle& handle )
+        {
+            auto* animService = Runtime::ResourceRegistry::GetAnimatedImageService();
+            return animService ? animService->Resolve( handle ) : nullptr;
+        }
+
         // Draw a filled UI box: a sprite (tinted by `color`) when one is bound + resolvable, else a flat
         // colour. `srcBorder` (L,T,R,B in SOURCE pixels) enables 9-slice — corners stay unstretched (x
         // scale), edges/centre stretch — so image panels/buttons resize without distorting their borders.
@@ -435,15 +417,12 @@ namespace Desert::UI
                       const glm::vec4& color, const Assets::AssetHandle& sprite, const glm::vec4& srcBorder,
                       float scale, float rounding )
         {
-            // An animated (GIF) sprite plays its current frame (a pure function of wall-clock time), drawn
-            // stretched to the box; static sprites / 9-slice keep the path below. Non-GIF handles resolve to
-            // nullptr here, so ordinary textures are unaffected.
-            if ( auto* animService = Runtime::ResourceRegistry::GetAnimatedImageService() )
-                if ( Graphic::Image2D* frame = animService->Resolve( sprite ) )
-                {
-                    dl.AddImage( frame, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f }, color );
-                    return;
-                }
+            // An animated sprite plays stretched to the box; static sprites / 9-slice keep the path below.
+            if ( Graphic::Image2D* frame = ResolveAnimatedFrame( sprite ) )
+            {
+                dl.AddImage( frame, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f }, color );
+                return;
+            }
 
             Graphic::Image2D* img = ResolveSpriteImage( sprite );
             if ( !img )
@@ -653,8 +632,10 @@ namespace Desert::UI
             return lines;
         }
 
+        // @p tint is the caller's accumulated element tint (UICanvasContext::Tint), passed in rather than
+        // read from a global so this helper stays a pure function of its arguments.
         void DrawText2D( Graphic::Render2D::DrawList2D& dl, const ECS::UITextData& t, const Rect& rect,
-                         float scale )
+                         float scale, const glm::vec4& tint )
         {
             if ( t.Text.empty() )
                 return;
@@ -689,7 +670,7 @@ namespace Desert::UI
             };
 
             const std::vector<StyledChar> chars =
-                 BuildStyledChars( t.Text, Tinted( glm::vec4( t.Color, 1.0f ) ), t.RichText );
+                 BuildStyledChars( t.Text, glm::vec4( t.Color, 1.0f ) * tint, t.RichText );
 
             // Marquee: a single clipped line scrolling leftward, repeated seamlessly across the width. A news
             // ticker / running banner. Pure function of the shared clock, so it needs no per-frame state.
@@ -953,7 +934,9 @@ namespace Desert::UI
         // Draw an icon ASSET centred in `rect`, sized to `sizeFrac` of the shorter side. The .svg was
         // imported into an SDF once (Runtime::IconService), so this is a single quad through the very same
         // shader as text — crisp at any size, and outline/glow/shadow come along for free.
-        void DrawIcon( Graphic::Render2D::DrawList2D& dl, const ECS::UIIconData& ic, const Rect& rect )
+        // @p tint as in DrawText2D: the caller's accumulated element tint, an argument rather than a global.
+        void DrawIcon( Graphic::Render2D::DrawList2D& dl, const ECS::UIIconData& ic, const Rect& rect,
+                       const glm::vec4& tint )
         {
             auto* icons = Runtime::ResourceRegistry::GetIconService();
             if ( !icons )
@@ -982,7 +965,7 @@ namespace Desert::UI
                                       static_cast<float>( layer.RGBA & 0xFF ) / 255.0f );
                 dl.AddText( atlas, { c.x - w * 0.5f, c.y - h * 0.5f }, { c.x + w * 0.5f, c.y + h * 0.5f },
                             { layer.U0, layer.V0 }, { layer.U1, layer.V1 },
-                            Tinted( glm::vec4( glm::vec3( fill ) * ic.Color, fill.a ) ) );
+                            glm::vec4( glm::vec3( fill ) * ic.Color, fill.a ) * tint );
             }
         }
 
@@ -1021,9 +1004,9 @@ namespace Desert::UI
 
         // Recursively draw one element. `forcedRect` (non-null) is the rect assigned by a parent auto-layout
         // group — it overrides the element's own anchors for position + size.
-        void DrawElement( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
-                          Graphic::Render2D::DrawList2D& dl, const UIInput* input, std::string* outClicked,
-                          entt::entity* focused, std::vector<PopupInfo>* popups,
+        void DrawElement( UICanvasContext& ctx, entt::registry& reg, entt::entity e, const Rect& parent,
+                          float scale, Graphic::Render2D::DrawList2D& dl, const UIInput* input,
+                          std::string* outClicked, entt::entity* focused, std::vector<PopupInfo>* popups,
                           std::vector<entt::entity>* focusables, const Rect& clipRect,
                           const Rect* forcedRect = nullptr )
         {
@@ -1059,32 +1042,32 @@ namespace Desert::UI
             if ( reg.has<ECS::UIScreenComponent>( e ) )
             {
                 const std::string& name      = reg.get<ECS::UIScreenComponent>( e ).Data.Name;
-                const bool         isCurrent = ( name == s_Screen );
-                const bool         isLeaving = ( name == s_ScreenFrom && s_ScreenT < 1.0f );
+                const bool         isCurrent = ( name == ctx.Screen );
+                const bool         isLeaving = ( name == ctx.ScreenFrom && ctx.ScreenT < 1.0f );
                 if ( !isCurrent && !isLeaving )
                     return; // not on screen: skip the whole sub-tree, input included
 
-                if ( s_ScreenT < 1.0f )
+                if ( ctx.ScreenT < 1.0f )
                 {
-                    const float k   = Ease( s_ScreenEasing, s_ScreenT );
-                    const float dir = s_ScreenBack ? -1.0f : 1.0f;
+                    const float k   = Ease( ctx.ScreenEasing, ctx.ScreenT );
+                    const float dir = ctx.ScreenBack ? -1.0f : 1.0f;
                     if ( isCurrent )
                     {
                         screenFade    = k;
-                        screenSlide.x = ( 1.0f - k ) * s_ScreenSlidePx * dir;
+                        screenSlide.x = ( 1.0f - k ) * ctx.ScreenSlidePx * dir;
                     }
                     else // leaving: pushed out the opposite way
                     {
                         screenFade    = 1.0f - k;
-                        screenSlide.x = -k * s_ScreenSlidePx * dir;
+                        screenSlide.x = -k * ctx.ScreenSlidePx * dir;
                     }
                 }
             }
 
             // Tween: shift/resize the resolved rect and stage the colour multiplier its draws will use.
             // Applied on the way out, never written back — see SampleTween.
-            TweenSample tween = SampleTween( reg, e );
-            ApplyAnimClip( reg, e, tween ); // a clip layers on top of the one-shot tween
+            TweenSample tween = SampleTween( ctx, reg, e );
+            ApplyAnimClip( ctx, reg, e, tween ); // a clip layers on top of the one-shot tween
 
             // A binding can hide the element outright — skip the sub-tree, input included.
             const BindingSample binding = SampleBinding( reg, e, tween );
@@ -1096,16 +1079,17 @@ namespace Desert::UI
             rect.H += tween.Size.y * scale;
 
             // Tints nest: a faded panel fades its children with it.
-            const glm::vec4 parentTint = s_Tint;
-            s_Tint                     = parentTint * tween.Tint * glm::vec4( 1.0f, 1.0f, 1.0f, screenFade );
+            const glm::vec4 parentTint = ctx.Tint;
+            ctx.Tint                   = parentTint * tween.Tint * glm::vec4( 1.0f, 1.0f, 1.0f, screenFade );
             struct TintRestore
             {
-                glm::vec4 Prev;
+                UICanvasContext& Ctx;
+                glm::vec4        Prev;
                 ~TintRestore()
                 {
-                    s_Tint = Prev;
+                    Ctx.Tint = Prev;
                 }
-            } tintRestore{ parentTint };
+            } tintRestore{ ctx, parentTint };
 
             // Interaction flags live on the layout (every UI element has one); a rect handed down by a
             // layout group inherits the same defaults.
@@ -1122,17 +1106,17 @@ namespace Desert::UI
                 if ( input && raycastTarget && PointIn( rect, input->MousePx ) &&
                      PointIn( clipRect, input->MousePx ) )
                 {
-                    s_HotNext     = e;
-                    s_HotNextRect = rect;
+                    ctx.HotNext     = e;
+                    ctx.HotNextRect = rect;
                 }
                 // This element is what the pointer is over (resolved last frame) AND it responds.
-                const bool hot = interactable && e == s_Hot;
+                const bool hot = interactable && e == ctx.Hot;
 
                 // A drop target outlines itself while a drag it would accept is in flight.
-                if ( s_Drag.Active && reg.has<ECS::UIDropTargetComponent>( e ) )
+                if ( ctx.Drag.Active && reg.has<ECS::UIDropTargetComponent>( e ) )
                 {
                     const auto& dt = reg.get<ECS::UIDropTargetComponent>( e ).Data;
-                    if ( Accepts( dt, s_Drag.Payload ) )
+                    if ( Accepts( dt, ctx.Drag.Payload ) )
                         dl.AddRect( mn, mx, glm::vec4( dt.HighlightColor, hot ? 1.0f : 0.6f ), hot ? 3.0f : 2.0f );
                 }
 
@@ -1148,7 +1132,7 @@ namespace Desert::UI
                     // Resting colour is Selected (persistent highlight) or Normal; hover cross-fades toward
                     // HoverColor (eased), press snaps to PressedColor, Disabled overrides everything.
                     const glm::vec3 rest = b.Selected ? b.SelectedColor : b.NormalColor;
-                    const float     ht   = HoverEase( e, hover && !down );
+                    const float     ht   = HoverEase( ctx, e, hover && !down );
                     const glm::vec3 c    = b.Disabled ? b.DisabledColor
                                            : down     ? b.PressedColor
                                                       : glm::mix( rest, b.HoverColor, ht );
@@ -1159,8 +1143,8 @@ namespace Desert::UI
                         spr = b.PressedSprite;
                     else if ( hover && HandleSet( b.HoverSprite ) )
                         spr = b.HoverSprite;
-                    DrawBox( dl, mn, mx, Tinted( glm::vec4( c, b.Disabled ? 0.6f : 1.0f ) ), spr, b.SpriteBorder,
-                             scale, 6.0f * scale );
+                    DrawBox( dl, mn, mx, Tinted( ctx, glm::vec4( c, b.Disabled ? 0.6f : 1.0f ) ), spr,
+                             b.SpriteBorder, scale, 6.0f * scale );
 
                     // Selected accent: a rounded bar hugging the left edge (the "you are here" marker).
                     if ( b.Selected && !b.Disabled )
@@ -1173,7 +1157,7 @@ namespace Desert::UI
 
                     const bool isFocused = focused && *focused == e;
                     if ( outClicked && input && !b.Disabled &&
-                         ( ( hover && input->MouseReleased && !s_Drag.Active ) ||
+                         ( ( hover && input->MouseReleased && !ctx.Drag.Active ) ||
                            ( isFocused && input->Submit ) ) )
                     {
                         // Encode the structured action into the click message the runtime dispatches (same
@@ -1191,11 +1175,11 @@ namespace Desert::UI
                                 break;
                             case ECS::UIButtonAction::ShowScreen:
                                 // Handled inside the canvas — the host never sees a screen switch.
-                                RequestScreen( b.OnClickMessage, false );
+                                RequestScreen( ctx, b.OnClickMessage, false );
                                 *outClicked = "screen:" + b.OnClickMessage;
                                 break;
                             case ECS::UIButtonAction::BackScreen:
-                                RequestScreen( "", true );
+                                RequestScreen( ctx, "", true );
                                 *outClicked = "screen:back";
                                 break;
                             case ECS::UIButtonAction::SendMessage:
@@ -1248,16 +1232,17 @@ namespace Desert::UI
                     // Checked before the sprite/video fills — a glass panel is defined by what is behind it,
                     // so an image on top of it would be a different element (draw one as a child).
                     if ( p.BackdropBlur > 0.0f && !video && !HandleSet( p.Sprite ) )
-                        dl.AddGlassRect( mn, mx, Tinted( glm::vec4( p.Color, op ) ), rounding, p.BackdropBlur );
+                        dl.AddGlassRect( mn, mx, Tinted( ctx, glm::vec4( p.Color, op ) ), rounding,
+                                         p.BackdropBlur );
                     else if ( video )
                         dl.AddImage( video, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f },
-                                     Tinted( glm::vec4( p.Color, op ) ) );
+                                     Tinted( ctx, glm::vec4( p.Color, op ) ) );
                     else if ( p.UseGradient && !HandleSet( p.Sprite ) )
-                        dl.AddRectFilledMultiColor( mn, mx, Tinted( glm::vec4( p.Color, op ) ),
+                        dl.AddRectFilledMultiColor( mn, mx, Tinted( ctx, glm::vec4( p.Color, op ) ),
                                                     glm::vec4( p.GradientColor, op ) );
                     else
-                        DrawBox( dl, mn, mx, Tinted( glm::vec4( p.Color, op ) ), p.Sprite, p.SpriteBorder, scale,
-                                 rounding );
+                        DrawBox( dl, mn, mx, Tinted( ctx, glm::vec4( p.Color, op ) ), p.Sprite, p.SpriteBorder,
+                                 scale, rounding );
 
                     // Gradient ring hugging the edge (avatar / status / progress ring).
                     if ( p.RingWidth > 0.0f )
@@ -1278,7 +1263,7 @@ namespace Desert::UI
                     if ( binding.Value )
                         pb.Value = *binding.Value; // bound: the store drives the fill
                     const float r = pb.CornerRadius * scale;
-                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( pb.Background, 1.0f ) ), r );
+                    dl.AddRectFilled( mn, mx, Tinted( ctx, glm::vec4( pb.Background, 1.0f ) ), r );
                     const float t = std::clamp( pb.Value, 0.0f, 1.0f );
                     if ( t > 0.0f )
                         dl.AddRectFilled( mn, { mn.x + rect.W * t, mx.y }, glm::vec4( pb.Fill, 1.0f ), r );
@@ -1288,7 +1273,7 @@ namespace Desert::UI
                     auto&      tg    = reg.get<ECS::UIToggleComponent>( e ).Data;
                     const bool  hover = input && hot;
                     const float r = tg.CornerRadius * scale;
-                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( tg.BoxColor, 1.0f ) ), r );
+                    dl.AddRectFilled( mn, mx, Tinted( ctx, glm::vec4( tg.BoxColor, 1.0f ) ), r );
                     if ( tg.Value )
                     {
                         const float pad = std::min( rect.W, rect.H ) * 0.22f; // inset "check" fill
@@ -1308,7 +1293,7 @@ namespace Desert::UI
                     const float fillX = mn.x + rect.W * t;
                     const float cy    = ( mn.y + mx.y ) * 0.5f;
                     const float hs    = rect.H * 0.6f; // handle half-size (circle via rounding)
-                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( sl.TrackColor, 1.0f ) ), pill );
+                    dl.AddRectFilled( mn, mx, Tinted( ctx, glm::vec4( sl.TrackColor, 1.0f ) ), pill );
                     if ( t > 0.0f )
                         dl.AddRectFilled( mn, { fillX, mx.y }, glm::vec4( sl.FillColor, 1.0f ), pill );
                     dl.AddRectFilled( { fillX - hs, cy - hs }, { fillX + hs, cy + hs },
@@ -1328,7 +1313,8 @@ namespace Desert::UI
                     const bool isFocused = focused && *focused == e;
                     const bool hover     = input && hot;
 
-                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( f.Background, 1.0f ) ), f.CornerRadius * scale );
+                    dl.AddRectFilled( mn, mx, Tinted( ctx, glm::vec4( f.Background, 1.0f ) ),
+                                      f.CornerRadius * scale );
                     if ( isFocused )
                         dl.AddRect( mn, mx, glm::vec4( f.FocusColor, 1.0f ), std::max( 1.0f, 2.0f * scale ) );
 
@@ -1340,7 +1326,7 @@ namespace Desert::UI
                     td.Color    = showPlaceholder ? f.PlaceholderColor : f.TextColor;
                     td.Align    = ECS::UITextAlign::Left;
                     dl.PushClipRect( mn, mx );
-                    DrawText2D( dl, td, rect, scale );
+                    DrawText2D( dl, td, rect, scale, ctx.Tint );
                     if ( isFocused )
                     {
                         const float caretX = rect.X + 6.0f + MeasureTextPx( f.Text, f.FontSize * scale );
@@ -1365,7 +1351,8 @@ namespace Desert::UI
                     auto&      d       = reg.get<ECS::UIDropdownComponent>( e ).Data;
                     const auto options = SplitOptions( d.Options );
 
-                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( d.Background, 1.0f ) ), d.CornerRadius * scale );
+                    dl.AddRectFilled( mn, mx, Tinted( ctx, glm::vec4( d.Background, 1.0f ) ),
+                                      d.CornerRadius * scale );
 
                     ECS::UITextData td;
                     td.Text     = ( d.SelectedIndex >= 0 && d.SelectedIndex < (int)options.size() )
@@ -1374,7 +1361,7 @@ namespace Desert::UI
                     td.FontSize = d.FontSize;
                     td.Color    = d.TextColor;
                     td.Align    = ECS::UITextAlign::Left;
-                    DrawText2D( dl, td, rect, scale );
+                    DrawText2D( dl, td, rect, scale, ctx.Tint );
 
                     // Down-arrow on the right edge.
                     const float ax = mx.x - rect.H * 0.5f, ay = ( mn.y + mx.y ) * 0.5f, aw = rect.H * 0.16f;
@@ -1396,17 +1383,17 @@ namespace Desert::UI
                     {
                         ECS::UITextData bound = reg.get<ECS::UITextComponent2D>( e ).Data;
                         bound.Text            = *binding.Text;
-                        DrawText2D( dl, bound, rect, scale );
+                        DrawText2D( dl, bound, rect, scale, ctx.Tint );
                     }
                     else
                     {
-                        DrawText2D( dl, reg.get<ECS::UITextComponent2D>( e ).Data, rect, scale );
+                        DrawText2D( dl, reg.get<ECS::UITextComponent2D>( e ).Data, rect, scale, ctx.Tint );
                     }
                 }
 
                 if ( reg.has<ECS::UIIconComponent>( e ) )
                 {
-                    DrawIcon( dl, reg.get<ECS::UIIconComponent>( e ).Data, rect );
+                    DrawIcon( dl, reg.get<ECS::UIIconComponent>( e ).Data, rect, ctx.Tint );
                 }
 
                 if ( reg.has<ECS::UIImageComponent>( e ) )
@@ -1415,7 +1402,7 @@ namespace Desert::UI
                     // With no sprite bound it draws nothing (an empty Image is invisible, not a solid box).
                     const auto& im = reg.get<ECS::UIImageComponent>( e ).Data;
                     if ( HandleSet( im.Sprite ) )
-                        DrawBox( dl, mn, mx, Tinted( glm::vec4( im.Tint, im.Opacity ) ), im.Sprite,
+                        DrawBox( dl, mn, mx, Tinted( ctx, glm::vec4( im.Tint, im.Opacity ) ), im.Sprite,
                                  im.SpriteBorder, scale, 0.0f );
                 }
 
@@ -1447,7 +1434,7 @@ namespace Desert::UI
 
                     const float contentPx = sv.ContentHeight * scale;
                     scrollMaxPx           = std::max( 0.0f, contentPx - rect.H );
-                    const bool hover      = input && interactable && e == s_Hot;
+                    const bool hover      = input && interactable && e == ctx.Hot;
                     if ( hover && input->ScrollDelta != 0.0f )
                         sv.ScrollY -= input->ScrollDelta * 30.0f; // 30 design px per wheel notch
                     const float maxScrollDesign = scale > 0.0f ? scrollMaxPx / scale : 0.0f;
@@ -1505,14 +1492,14 @@ namespace Desert::UI
 
                     const auto rects = SolveLayoutGroup( childParent, params, sizes, flex );
                     for ( std::size_t i = 0; i < kids.size(); ++i )
-                        DrawElement( reg, kids[i], childParent, scale, dl, input, outClicked, focused, popups,
+                        DrawElement( ctx, reg, kids[i], childParent, scale, dl, input, outClicked, focused, popups,
                                      focusables, childClip, &rects[i] );
                 }
                 else
                 {
                     for ( auto c : children )
                         if ( reg.valid( c ) )
-                            DrawElement( reg, c, childParent, scale, dl, input, outClicked, focused, popups,
+                            DrawElement( ctx, reg, c, childParent, scale, dl, input, outClicked, focused, popups,
                                          focusables, childClip );
                 }
                 if ( clip )
@@ -1538,23 +1525,30 @@ namespace Desert::UI
         }
     } // namespace
 
-    bool RenderCanvas2D( entt::registry& reg, Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
-                         const glm::mat4* worldViewProj, const UIInput* input, std::string* outClicked,
-                         entt::entity* focused, std::vector<std::string>* outMessages )
+    bool RenderCanvas2D( UICanvasContext& ctx, entt::registry& reg, Graphic::Render2D::DrawList2D& dl,
+                         const Rect& viewportPx, const glm::mat4* worldViewProj, const UIInput* input,
+                         std::string* outClicked, entt::entity* focused, std::vector<std::string>* outMessages )
     {
-        // Refresh the shared frame delta once per canvas draw (drives hover eases). Clamped so a long stall /
-        // first frame doesn't snap animations.
+        // This view is now looking at another scene. Entity ids are unique only inside a registry, so every
+        // per-entity clock the context holds would answer to ids that mean something else here — drop them.
+        if ( ctx.Registry != &reg )
         {
-            static float lastT = NowSeconds();
-            const float  now   = NowSeconds();
-            s_FrameDt          = std::clamp( now - lastT, 0.0f, 0.1f );
-            lastT              = now;
-            ++s_FrameIndex; // drives the tween rewind-on-hide check
+            ctx.Reset();
+            ctx.Registry = &reg;
+        }
+
+        // Refresh THIS VIEW's frame delta once per canvas draw (drives hover eases). Clamped so a long stall
+        // doesn't snap animations; the first frame of a view gets 0 rather than the age of the process.
+        {
+            const float now = NowSeconds();
+            ctx.FrameDt     = ctx.LastFrameTime < 0.0f ? 0.0f : std::clamp( now - ctx.LastFrameTime, 0.0f, 0.1f );
+            ctx.LastFrameTime = now;
+            ++ctx.FrameIndex; // drives the tween rewind-on-hide check
         }
 
         // A scene swap leaves the elected entity dangling — drop it rather than matching a recycled id.
-        if ( s_Hot != entt::null && !reg.valid( s_Hot ) )
-            s_Hot = entt::null;
+        if ( ctx.Hot != entt::null && !reg.valid( ctx.Hot ) )
+            ctx.Hot = entt::null;
 
         auto canvasView = reg.view<ECS::UICanvasComponent>();
         if ( canvasView.begin() == canvasView.end() )
@@ -1591,6 +1585,37 @@ namespace Desert::UI
             scale               = fit.Scale;
         }
 
+        // The canvas's own Background Sprite: the full-canvas backdrop, drawn under everything and OUTSIDE
+        // the safe area (a notch inset is where content must not go, not where the wallpaper stops). It goes
+        // in before the children so anything they draw lands on top of it.
+        //
+        // This field was reflected, serialized and shown in Details for its whole life and NOTHING read it —
+        // section 1.3, a dead setting. It has no colour of its own, so unlike a panel it cannot fall back to
+        // a flat fill when the handle does not resolve: that would paint an opaque white sheet over the
+        // scene. It draws only what it can resolve, and says so once when it cannot.
+        if ( HandleSet( canvasData.Sprite ) )
+        {
+            Graphic::Image2D* bg = ResolveAnimatedFrame( canvasData.Sprite );
+            if ( !bg )
+                bg = ResolveSpriteImage( canvasData.Sprite );
+            if ( bg )
+            {
+                dl.AddImage( bg, { canvasRect.X, canvasRect.Y },
+                             { canvasRect.X + canvasRect.W, canvasRect.Y + canvasRect.H }, { 0.0f, 0.0f },
+                             { 1.0f, 1.0f }, glm::vec4( 1.0f ) );
+                ctx.WarnedBackground = Assets::AssetHandle{};
+            }
+            else if ( ctx.WarnedBackground != canvasData.Sprite )
+            {
+                // Once per handle, not once per frame — a background that never resolves would otherwise
+                // write a log line at frame rate.
+                ctx.WarnedBackground = canvasData.Sprite;
+                LOG_ERROR( "[UI] canvas Background Sprite {} did not resolve to an image; the canvas draws "
+                           "no backdrop this frame",
+                           static_cast<uint64_t>( canvasData.Sprite ) );
+            }
+        }
+
         // Top-level content lays out inside the safe area (mobile notches); 0 insets = full canvas.
         const Rect childRoot = InsetRect( canvasRect, canvasData.SafeArea.x * scale, canvasData.SafeArea.y * scale,
                                           canvasData.SafeArea.z * scale, canvasData.SafeArea.w * scale );
@@ -1600,11 +1625,11 @@ namespace Desert::UI
             if ( reg.has<ECS::UIScreenStackComponent>( canvasEntity ) )
             {
                 const auto& st  = reg.get<ECS::UIScreenStackComponent>( canvasEntity ).Data;
-                s_ScreenTime    = st.TransitionTime;
-                s_ScreenSlidePx = st.SlidePx;
-                s_ScreenEasing  = st.Easing;
-                if ( s_Screen.empty() )
-                    s_Screen = st.InitialScreen;
+                ctx.ScreenTime    = st.TransitionTime;
+                ctx.ScreenSlidePx = st.SlidePx;
+                ctx.ScreenEasing  = st.Easing;
+                if ( ctx.Screen.empty() )
+                    ctx.Screen = st.InitialScreen;
             }
             // Seed, or re-seed when the current name doesn't exist here — otherwise a name left over from
             // another scene would hide every screen in this one.
@@ -1617,21 +1642,22 @@ namespace Desert::UI
                     continue;
                 if ( firstScreen.empty() )
                     firstScreen = n;
-                if ( n == s_Screen )
+                if ( n == ctx.Screen )
                     currentExists = true;
             }
             if ( !firstScreen.empty() && !currentExists )
             {
-                s_Screen = firstScreen;
-                s_ScreenFrom.clear();
-                s_ScreenStack.clear();
-                s_ScreenT = 1.0f;
+                ctx.Screen = firstScreen;
+                ctx.ScreenFrom.clear();
+                ctx.ScreenStack.clear();
+                ctx.ScreenT = 1.0f;
             }
-            if ( s_ScreenT < 1.0f )
+            if ( ctx.ScreenT < 1.0f )
             {
-                s_ScreenT = s_ScreenTime > 0.0f ? std::min( 1.0f, s_ScreenT + s_FrameDt / s_ScreenTime ) : 1.0f;
-                if ( s_ScreenT >= 1.0f )
-                    s_ScreenFrom.clear(); // hand-over finished; the outgoing screen stops drawing
+                ctx.ScreenT =
+                     ctx.ScreenTime > 0.0f ? std::min( 1.0f, ctx.ScreenT + ctx.FrameDt / ctx.ScreenTime ) : 1.0f;
+                if ( ctx.ScreenT >= 1.0f )
+                    ctx.ScreenFrom.clear(); // hand-over finished; the outgoing screen stops drawing
             }
         }
 
@@ -1640,8 +1666,8 @@ namespace Desert::UI
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
-                    DrawElement( reg, c, childRoot, scale, dl, input, outClicked, focused, &popups, &focusables,
-                                 viewportPx );
+                    DrawElement( ctx, reg, c, childRoot, scale, dl, input, outClicked, focused, &popups,
+                                 &focusables, viewportPx );
 
         // --- Pointer events, drag & drop -------------------------------------------------------------
         // Everything here runs on the freshly elected hot element, AFTER the tree is laid out: enter/exit
@@ -1665,61 +1691,61 @@ namespace Desert::UI
                             : nullptr;
             };
 
-            if ( s_HotNext != s_Hot ) // the pointer crossed a boundary this frame
+            if ( ctx.HotNext != ctx.Hot ) // the pointer crossed a boundary this frame
             {
-                if ( const auto* ev = events( s_Hot ) )
+                if ( const auto* ev = events( ctx.Hot ) )
                     emit( ev->OnExitMessage );
-                if ( const auto* ev = events( s_HotNext ) )
+                if ( const auto* ev = events( ctx.HotNext ) )
                     emit( ev->OnEnterMessage );
             }
 
-            const bool pressed = input->MouseDown && !s_PrevDown; // UIInput carries held + release only
+            const bool pressed = input->MouseDown && !ctx.PrevDown; // UIInput carries held + release only
             if ( pressed )
             {
-                if ( const auto* ev = events( s_HotNext ) )
+                if ( const auto* ev = events( ctx.HotNext ) )
                     emit( ev->OnDownMessage );
 
                 // Start a drag from a draggable element. The ghost is the source's own footprint, so the
                 // cursor carries something the size of what it picked up.
-                if ( s_HotNext != entt::null && reg.valid( s_HotNext ) &&
-                     reg.has<ECS::UIDraggableComponent>( s_HotNext ) )
+                if ( ctx.HotNext != entt::null && reg.valid( ctx.HotNext ) &&
+                     reg.has<ECS::UIDraggableComponent>( ctx.HotNext ) )
                 {
                     // Only PENDING for now — a press that never moves is a click, not a drag.
-                    const auto& d   = reg.get<ECS::UIDraggableComponent>( s_HotNext ).Data;
-                    s_Drag.Pending  = true;
-                    s_Drag.Source   = s_HotNext;
-                    s_Drag.Payload  = d.Payload;
-                    s_Drag.Ghost    = d.GhostOpacity;
-                    s_Drag.Size     = { s_HotNextRect.W, s_HotNextRect.H };
-                    s_Drag.PressPos = input->MousePx;
+                    const auto& d     = reg.get<ECS::UIDraggableComponent>( ctx.HotNext ).Data;
+                    ctx.Drag.Pending  = true;
+                    ctx.Drag.Source   = ctx.HotNext;
+                    ctx.Drag.Payload  = d.Payload;
+                    ctx.Drag.Ghost    = d.GhostOpacity;
+                    ctx.Drag.Size     = { ctx.HotNextRect.W, ctx.HotNextRect.H };
+                    ctx.Drag.PressPos = input->MousePx;
                 }
             }
             // Promote the pending press to a real drag once the pointer travels far enough.
-            if ( s_Drag.Pending && !s_Drag.Active && input->MouseDown )
+            if ( ctx.Drag.Pending && !ctx.Drag.Active && input->MouseDown )
             {
                 constexpr float kDragStartPx = 4.0f;
-                if ( glm::length( input->MousePx - s_Drag.PressPos ) > kDragStartPx )
-                    s_Drag.Active = true;
+                if ( glm::length( input->MousePx - ctx.Drag.PressPos ) > kDragStartPx )
+                    ctx.Drag.Active = true;
             }
 
             if ( input->MouseReleased )
             {
-                if ( const auto* ev = events( s_HotNext ) )
+                if ( const auto* ev = events( ctx.HotNext ) )
                     emit( ev->OnUpMessage );
 
-                if ( s_Drag.Active )
+                if ( ctx.Drag.Active )
                 {
                     // Drop on the element under the cursor, or on the nearest ancestor that accepts — a
                     // target is usually a panel whose children are what you actually point at.
-                    for ( entt::entity t = s_HotNext; t != entt::null && reg.valid( t ); )
+                    for ( entt::entity t = ctx.HotNext; t != entt::null && reg.valid( t ); )
                     {
                         if ( reg.has<ECS::UIDropTargetComponent>( t ) )
                         {
                             const auto& dt = reg.get<ECS::UIDropTargetComponent>( t ).Data;
-                            if ( Accepts( dt, s_Drag.Payload ) && t != s_Drag.Source )
+                            if ( Accepts( dt, ctx.Drag.Payload ) && t != ctx.Drag.Source )
                             {
-                                emit( dt.OnDropMessage.empty() ? s_Drag.Payload
-                                                               : dt.OnDropMessage + "|" + s_Drag.Payload );
+                                emit( dt.OnDropMessage.empty() ? ctx.Drag.Payload
+                                                               : dt.OnDropMessage + "|" + ctx.Drag.Payload );
                                 break;
                             }
                         }
@@ -1728,49 +1754,49 @@ namespace Desert::UI
                                  : entt::null;
                     }
                 }
-                s_Drag = DragState{}; // a plain click on a draggable ends here too
+                ctx.Drag = UIDragState{}; // a plain click on a draggable ends here too
             }
-            s_PrevDown = input->MouseDown;
+            ctx.PrevDown = input->MouseDown;
 
             // The ghost rides on top of everything, drawn after the tree so nothing overlaps it.
-            if ( s_Drag.Active )
+            if ( ctx.Drag.Active )
             {
-                const glm::vec2 half = s_Drag.Size * 0.5f;
+                const glm::vec2 half = ctx.Drag.Size * 0.5f;
                 const glm::vec2 mn   = input->MousePx - half;
                 const glm::vec2 mx   = input->MousePx + half;
-                dl.AddRectFilled( mn, mx, glm::vec4( 0.35f, 0.55f, 0.85f, s_Drag.Ghost * 0.6f ), 6.0f );
-                dl.AddRect( mn, mx, glm::vec4( 0.75f, 0.87f, 1.0f, s_Drag.Ghost ), 2.0f );
+                dl.AddRectFilled( mn, mx, glm::vec4( 0.35f, 0.55f, 0.85f, ctx.Drag.Ghost * 0.6f ), 6.0f );
+                dl.AddRect( mn, mx, glm::vec4( 0.75f, 0.87f, 1.0f, ctx.Drag.Ghost ), 2.0f );
             }
         }
         // A ShowScreen / BackScreen button fired during the walk: start the hand-over now, so the very
         // next frame already draws both screens mid-transition.
-        if ( !s_ScreenReq.empty() || s_ScreenReqBack )
+        if ( !ctx.ScreenReq.empty() || ctx.ScreenReqBack )
         {
-            if ( s_ScreenReqBack )
+            if ( ctx.ScreenReqBack )
             {
-                if ( !s_ScreenStack.empty() ) // at the bottom of the stack Back is simply ignored
+                if ( !ctx.ScreenStack.empty() ) // at the bottom of the stack Back is simply ignored
                 {
-                    s_ScreenFrom = s_Screen;
-                    s_Screen     = s_ScreenStack.back();
-                    s_ScreenStack.pop_back();
-                    s_ScreenT    = 0.0f;
-                    s_ScreenBack = true;
+                    ctx.ScreenFrom = ctx.Screen;
+                    ctx.Screen     = ctx.ScreenStack.back();
+                    ctx.ScreenStack.pop_back();
+                    ctx.ScreenT    = 0.0f;
+                    ctx.ScreenBack = true;
                 }
             }
-            else if ( s_ScreenReq != s_Screen )
+            else if ( ctx.ScreenReq != ctx.Screen )
             {
-                s_ScreenStack.push_back( s_Screen );
-                s_ScreenFrom = s_Screen;
-                s_Screen     = s_ScreenReq;
-                s_ScreenT    = 0.0f;
-                s_ScreenBack = false;
+                ctx.ScreenStack.push_back( ctx.Screen );
+                ctx.ScreenFrom = ctx.Screen;
+                ctx.Screen     = ctx.ScreenReq;
+                ctx.ScreenT    = 0.0f;
+                ctx.ScreenBack = false;
             }
-            s_ScreenReq.clear();
-            s_ScreenReqBack = false;
+            ctx.ScreenReq.clear();
+            ctx.ScreenReqBack = false;
         }
 
-        s_Hot     = s_HotNext; // hand this frame's election to the next one
-        s_HotNext = entt::null;
+        ctx.Hot     = ctx.HotNext; // hand this frame's election to the next one
+        ctx.HotNext = entt::null;
 
         // Tab advances keyboard focus to the next focusable control (wraps; effective next frame).
         if ( focused && input && input->Tab && !focusables.empty() )
@@ -1812,7 +1838,7 @@ namespace Desert::UI
                 td.FontSize = d.FontSize;
                 td.Color    = d.TextColor;
                 td.Align    = ECS::UITextAlign::Left;
-                DrawText2D( dl, td, row, pi.Scale );
+                DrawText2D( dl, td, row, pi.Scale, ctx.Tint );
                 if ( hover && input->MouseReleased )
                 {
                     d.SelectedIndex = static_cast<int>( i );

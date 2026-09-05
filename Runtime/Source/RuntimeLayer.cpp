@@ -350,8 +350,10 @@ namespace Desert::Player
                 // Pointer events / drops can fire several times in one frame, so they come back in their
                 // own list; a button action still arrives through `clicked`.
                 std::vector<std::string> uiMessages;
-                UI::RenderCanvas2D( m_Scene->GetRegistry(), dl, UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input,
-                                    &clicked, &m_FocusedUI, &uiMessages );
+                // The player has exactly one view, but its canvas state still belongs to that view rather
+                // than to the process — a scene change rebinds it, and nothing else can reach it.
+                UI::RenderCanvas2D( m_UICanvas, m_Scene->GetRegistry(), dl, UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr,
+                                    &input, &clicked, &m_FocusedUI, &uiMessages );
                 // Queue them for gameplay: ScriptSystem drains this and calls OnUIMessage on every script.
                 for ( const std::string& msg : uiMessages )
                     UI::UIMessageQueue::Get().Push( msg );

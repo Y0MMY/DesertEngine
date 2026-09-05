@@ -5,6 +5,7 @@
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 
 #include <Engine/Graphic/Render2D/Render2D.hpp>
+#include <Engine/UI/UICanvasContext.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -64,6 +65,11 @@ namespace Desert::Editor
         void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
         {
             m_Scene = scene;
+            // The preview's canvas state describes entities of the scene it was drawing, and entity ids
+            // repeat across registries. RenderCanvas2D also notices the swap on its own, but it compares
+            // registry ADDRESSES and a freed scene's registry can land where the next one is allocated —
+            // so the host that knows a swap happened says so.
+            m_UICanvas.Reset();
         }
 
     private:
@@ -80,6 +86,13 @@ namespace Desert::Editor
         std::shared_ptr<Graphic::Framebuffer> m_Target;
         std::shared_ptr<Graphic::RenderPass>  m_RenderPass;
         Graphic::Render2D::Render2D           m_Render2D;
+
+        // This preview's own canvas state, so its walk cannot touch the viewport's. DrivesSceneAnimation is
+        // false because a UIAnim clip's playhead lives in the component (the Sequencer scrubs it) and is
+        // therefore SCENE state: the viewport pass advances it, and a second view advancing it too would run
+        // every clip at twice its authored speed.
+        ::Desert::UI::UICanvasContext m_UICanvas;
+
         uint32_t                              m_TargetWidth  = 0;
         uint32_t                              m_TargetHeight = 0;
 

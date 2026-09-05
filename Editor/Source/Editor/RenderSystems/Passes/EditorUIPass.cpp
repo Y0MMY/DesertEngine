@@ -75,9 +75,13 @@ namespace Desert::Editor::Render
             }
 
             std::vector<std::string> uiMessages;
-            UI::RenderCanvas2D( scene->GetRegistry(), m_Render2D.GetDrawList(), UI::Rect{ 0.0f, 0.0f, w, h },
-                                vpPtr, feed ? &input : nullptr, feed ? &clicked : nullptr,
-                                feed ? &pv.Focused : nullptr, feed ? &uiMessages : nullptr );
+            // m_UICanvas is this VIEW's canvas state — one per EditorUIPass, and the editor builds one pass
+            // per open scene document, so two viewports no longer walk into each other's hover clocks, hot
+            // element or screen stack.
+            UI::RenderCanvas2D( m_UICanvas, scene->GetRegistry(), m_Render2D.GetDrawList(),
+                                UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, feed ? &input : nullptr,
+                                feed ? &clicked : nullptr, feed ? &pv.Focused : nullptr,
+                                feed ? &uiMessages : nullptr );
             m_Render2D.Flush();
 
             if ( auto* renderer = scene->GetSceneRenderer() )

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Engine/UI/UICanvasContext.hpp>
 #include <Engine/UI/UILayout.hpp>
 #include <Engine/Graphic/Render2D/DrawList2D.hpp>
 
@@ -39,8 +40,14 @@ namespace Desert::UI
     // @p outMessages (optional) collects EVERY message the canvas fired this frame — pointer enter/exit,
     // press/release and drops — since more than one can happen in a single frame, unlike @p outClicked.
     // Without it those messages fall back to @p outClicked when it is still empty.
-    bool RenderCanvas2D( entt::registry& reg, Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
-                         const glm::mat4* worldViewProj = nullptr, const UIInput* input = nullptr,
-                         std::string* outClicked = nullptr, entt::entity* focused = nullptr,
-                         std::vector<std::string>* outMessages = nullptr );
+    //
+    // @p ctx carries EVERYTHING this walk remembers between frames — hover and tween clocks, the elected hot
+    // element, the drag, the screen stack. It belongs to the calling VIEW and must be the same object frame
+    // after frame; see UICanvasContext.hpp for why one process-wide set of that state was a defect rather
+    // than a simplification. Two views (two scene documents, or a viewport and the UI Editor preview) each
+    // pass their own, and cannot then disturb each other.
+    bool RenderCanvas2D( UICanvasContext& ctx, entt::registry& reg, Graphic::Render2D::DrawList2D& dl,
+                         const Rect& viewportPx, const glm::mat4* worldViewProj = nullptr,
+                         const UIInput* input = nullptr, std::string* outClicked = nullptr,
+                         entt::entity* focused = nullptr, std::vector<std::string>* outMessages = nullptr );
 } // namespace Desert::UI
