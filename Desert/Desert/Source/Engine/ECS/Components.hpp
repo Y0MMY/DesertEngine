@@ -956,8 +956,14 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Match Width/Height" ), Category( "UI Canvas" ), Range( 0.0f, 1.0f ) )
         float MatchWidthHeight = 0.5f; // ScaleWithScreen only: 0 = match width, 1 = match height
 
-        PROPERTY( DisplayName( "Background Sprite" ), Category( "UI Canvas" ) )
-        Assets::AssetHandle Sprite; // optional full-canvas background image (unset = transparent)
+        // Asset<TextureAsset> is what makes this a HANDLE and not a number. Without it the reflected
+        // serializer writes the raw 64-bit id and reads it back as one — and the id is minted at load time
+        // from the file's path, so it names nothing after a restart (ComponentRegistry::MakeReflected says
+        // this in full). It is also what the Details panel dispatches on to offer a texture picker, so the
+        // field could not be authored either. This setting was dead in three places at once: nothing drew
+        // it, nothing could set it, and nothing it was set to survived a reload.
+        PROPERTY( DisplayName( "Background Sprite" ), Category( "UI Canvas" ), Asset<TextureAsset> )
+        Assets::AssetHandle Sprite; // drag a texture from the Content Browser; unset = transparent
 
         PROPERTY( DisplayName( "Visible" ), Category( "UI Canvas" ) )
         bool Visible = true;

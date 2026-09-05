@@ -29,6 +29,24 @@
 
 #include <cmath>
 
+// One handle the animated-image stub below answers for, and the fake image it hands back. The draw list
+// treats a texture as an OPAQUE id — it stores the pointer and never dereferences it — so a fixed address
+// is a complete stand-in for a GPU image here, and it is what lets the canvas-background draw be asserted
+// without a device. Only this handle resolves; everything else still gets nothing, so a button with no
+// sprite of its own is unaffected.
+namespace
+{
+    constexpr uint64_t kBackgroundHandle = 0xB00B5;
+
+    // Never dereferenced. Taken as an address so it is a real, unique object rather than a made-up number.
+    int                       g_FakeImageStorage       = 0;
+    bool                      g_BackgroundServiceArmed = false;
+    Desert::Graphic::Image2D* FakeImage()
+    {
+        return reinterpret_cast<Desert::Graphic::Image2D*>( &g_FakeImageStorage );
+    }
+} // namespace
+
 // The renderer resolves sprites, fonts, icons and video through these. Every one of them owns GPU objects,
 // and every draw helper already copes with the service being absent — a sprite that will not resolve falls
 // back to its flat colour, text and icons draw nothing. That is exactly the path a headless walk wants, so
@@ -51,9 +69,12 @@ namespace Desert::Runtime
     {
         return nullptr;
     }
+    // The one service the suite can stand up, because the only thing the renderer does with what it
+    // returns is put the pointer in a draw command. It is armed by a single test and otherwise absent.
     AnimatedImageService* ResourceRegistry::GetAnimatedImageService()
     {
-        return nullptr;
+        static AnimatedImageService stub;
+        return g_BackgroundServiceArmed ? &stub : nullptr;
     }
     VideoService* ResourceRegistry::GetVideoService()
     {
@@ -74,10 +95,11 @@ namespace Desert::Runtime
         ADD_FAILURE() << "ImageService::Resolve reached with no image service";
         return nullptr;
     }
-    Graphic::Image2D* AnimatedImageService::Resolve( const Assets::AssetHandle& )
+    // Answers for exactly one handle. Every other sprite in the walk keeps resolving to nothing, so a
+    // button or panel with no image of its own draws its flat colour as it does everywhere else.
+    Graphic::Image2D* AnimatedImageService::Resolve( const Assets::AssetHandle& handle )
     {
-        ADD_FAILURE() << "AnimatedImageService::Resolve reached with no animated-image service";
-        return nullptr;
+        return static_cast<uint64_t>( handle ) == kBackgroundHandle ? FakeImage() : nullptr;
     }
     Graphic::Image2D* VideoService::Resolve( uint64_t )
     {
@@ -432,6 +454,55 @@ TEST( UICanvasContext, AnUnresolvableCanvasBackgroundDrawsNothingRatherThanAWhit
          << "a background sprite that did not resolve still put geometry on screen";
     EXPECT_TRUE( SameColor( DrawnColor( dlSprite ), glm::vec3( 0.1f ) ) )
          << "the first thing drawn is no longer the button — a backdrop was painted under it from nothing";
+}
+
+// --- (9) And when it DOES resolve, it is drawn: full canvas, under everything ----------------------------
+//
+// The other half of the dead setting. Test (8) says a background that cannot resolve invents nothing; this
+// one says a background that can resolve reaches the draw list, covers the whole canvas rect, and is the
+// FIRST thing emitted so every child lands on top of it.
+//
+// It is asserted here rather than in a frame because a canvas background cannot currently be authored in a
+// .desce at all — see the report: TextureAsset handles serialize as an absolute machine-local path, the
+// read side does not create-on-miss and returns 0 without a log, and a numeric handle above 2^53 is mangled
+// by the JSON double round-trip (measured: 5355760296319878840 came back as 5355760296319879168). All three
+// live in the scene serializer, none of them in this task's files.
+TEST( UICanvasContext, AResolvableCanvasBackgroundCoversTheCanvasAndIsDrawnFirst )
+{
+    Fixture f;
+    f.Registry.get<ECS::UICanvasComponent>( f.Canvas ).Data.Sprite =
+         Desert::Assets::AssetHandle( kBackgroundHandle );
+
+    g_BackgroundServiceArmed = true;
+    UICanvasContext ctx;
+    R2D::DrawList2D dl;
+    Desert::UI::RenderCanvas2D( ctx, f.Registry, dl, kViewport );
+    g_BackgroundServiceArmed = false;
+
+    ASSERT_FALSE( dl.GetCommands().empty() );
+    EXPECT_EQ( dl.GetCommands().front().Texture, FakeImage() )
+         << "the first draw command is not the canvas backdrop, so a child would be painted over by it";
+
+    // The first quad is the backdrop: four vertices spanning the whole canvas, which at Stretch is the
+    // whole viewport. The safe area does not cut it -- a notch inset says where CONTENT may not go, not
+    // where the wallpaper stops.
+    ASSERT_GE( dl.GetVertices().size(), 4u );
+    float minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
+    for ( std::size_t i = 0; i < 4; ++i )
+    {
+        const glm::vec2 p = dl.GetVertices()[i].Position;
+        minX              = std::min( minX, p.x );
+        minY              = std::min( minY, p.y );
+        maxX              = std::max( maxX, p.x );
+        maxY              = std::max( maxY, p.y );
+    }
+    EXPECT_FLOAT_EQ( minX, 0.0f );
+    EXPECT_FLOAT_EQ( minY, 0.0f );
+    EXPECT_FLOAT_EQ( maxX, kSide );
+    EXPECT_FLOAT_EQ( maxY, kSide );
+
+    // And the button is still drawn, on top: the backdrop did not replace the tree.
+    EXPECT_GT( dl.GetVertices().size(), 4u ) << "the canvas drew its backdrop and nothing else";
 }
 
 int main( int argc, char** argv )
