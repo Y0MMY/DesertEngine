@@ -42,7 +42,7 @@ TEST( AssetMissingFile, SurfaceMaterialLoadsCanonicalDefaults )
     ASSERT_FALSE( fs::exists( path ) );
 
     Desert::Assets::SurfaceMaterialAsset material( Desert::Assets::AssetPriority::Medium, path );
-    const auto result = material.Load();
+    const auto                           result = material.Load();
 
     // The branch's own comment: a missing .demat is a NEW material — usable, editable, re-savable.
     EXPECT_TRUE( result.IsSuccess() );
@@ -58,12 +58,11 @@ TEST( AssetMissingFile, CloudTypeLoadRefusesWithTheReason )
     ASSERT_FALSE( fs::exists( path ) );
 
     Desert::Assets::CloudTypeAsset type( Desert::Assets::AssetPriority::Medium, path );
-    const auto result = type.Load();
+    const auto                     result = type.Load();
 
     // The header's contract: missing is an ERROR carrying the reason — never a quiet default type.
     ASSERT_FALSE( result.IsSuccess() );
-    EXPECT_NE( result.GetError().find( "empty or could not be opened" ), std::string::npos )
-         << result.GetError();
+    EXPECT_NE( result.GetError().find( "empty or could not be opened" ), std::string::npos ) << result.GetError();
     EXPECT_FALSE( type.IsReadyForUse() );
 }
 
