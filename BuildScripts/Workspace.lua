@@ -21,18 +21,29 @@ workspace "Desert"
     externalwarnings "Off"
     warnings "Off"
 
-    -- MSVC compiles the files of ONE project serially unless told otherwise, and `msbuild -m` — which CI
-    -- already passes — parallelises PROJECTS, not the files inside them. So the two projects that hold
-    -- almost all of the code, Desert and Editor, were each built on a single core while the rest of the
-    -- runner idled.
+    -- NO `MultiProcessorCompile` HERE, AND THE ABSENCE IS THE MEASUREMENT.
     --
-    -- Measured on run 33958917578, the step breakdown of Windows Debug: Build 57.9 min, Run tests
-    -- 32.9 min, everything else 2.7 min combined. The build is the larger half and it is the half that
-    -- was single-threaded. That job also runs at 93 minutes against a ceiling that had already cancelled
-    -- it twice (see the note beside `timeout-minutes` in .github/workflows/ci.yml).
+    -- It was added on 2026-09-05 on a reading that looked airtight: `msbuild -m`, which CI passes,
+    -- parallelises PROJECTS and not the files inside them, so Desert and Editor — which hold almost all
+    -- of the code — were each compiled on one core. The step breakdown of Windows Debug backed it up
+    -- (run 33958917578: Build 57.9 min, Run tests 32.9 min, everything else 2.7 min).
     --
-    -- No effect on the makefile generators, which already get their parallelism from `make -j`.
-    flags { "MultiProcessorCompile" }
+    -- Then the runs came back and said the opposite. Windows Debug BEFORE the flag: 73, 73, 76, 84 min.
+    -- AFTER it: 93.6, 94.4, 92.3. Roughly twenty minutes SLOWER.
+    --
+    -- The likely mechanism is the one this project spent the same day learning on its own hardware:
+    -- `-m` and `/MP` MULTIPLY. Up to four project builds, each spawning up to four compilers, on a
+    -- four-core hosted runner — sixteen processes for four cores, which is oversubscription, not
+    -- parallelism.
+    --
+    -- The honest caveat: seven merges landed the same day and the suite count went 95 -> 99, so part of
+    -- that twenty minutes is the tree growing. Two variables moved at once, which is exactly what this
+    -- project's own rule forbids. So the flag is reverted to restore the known-good baseline, and the
+    -- next Windows run answers the question with ONE variable changed: back near 73-84 means the flag
+    -- was the cost; still near 93 means the tree grew and the flag was innocent.
+    --
+    -- Do not re-add it without that number. If it turns out to be wanted, drop `-m` from the msbuild
+    -- invocation in the same change — the two together are the thing that oversubscribes.
 
     -- EnTT hands each component type a sequential index from ONE global counter, and without this the
     -- counter is a plain `id_type` incremented with `value++` (ENTT_MAYBE_ATOMIC, entt.hpp). Two threads
