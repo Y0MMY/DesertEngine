@@ -8,9 +8,26 @@ on:
   pull_request:
   workflow_dispatch:
 
-# One run per branch: a new push cancels the previous in-flight run.
+# A PUSH gets its own run and keeps it. A PULL REQUEST keeps only its latest.
+#
+# This used to be one group per branch, so any push to `dev` cancelled whatever was still running —
+# and the cost was not runner time, it was evidence. Integrating several merges in a session meant
+# each push killed the verification of the one before it, and a cancelled job reports as `cancelled`
+# rather than `failure`, so nothing looks wrong. On 2026-09-05 that pattern cost a full merge's worth
+# of Windows coverage before anyone noticed.
+#
+# `cancel-in-progress: false` alone would NOT have fixed it: with the same group, runs queue instead
+# of cancelling, so the second push simply waits out the first — the same hour, spent differently.
+# The fix is the group key. On `push` it is the commit, so every pushed commit is verified
+# independently and in parallel; on `pull_request` it stays the ref, so pushing a fixup to a PR still
+# cancels the previous attempt, which is what you want while iterating.
+#
+# Affordable because this repository is PUBLIC: GitHub Actions minutes on standard runners are free
+# and unmetered for public repos, so the only thing extra runs cost is concurrency, and this branch
+# sees single-digit runs a day. If the repository ever goes private, Windows bills at 2x and macOS at
+# 10x, and this decision has to be taken again with a bill attached.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 env:
