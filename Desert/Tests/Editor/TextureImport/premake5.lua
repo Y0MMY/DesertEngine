@@ -12,9 +12,13 @@ project(test_name)
     -- stb_image and the cooked-path formula, so the file every texture in the project is cooked by can be
     -- compiled into a test binary as-is - which is the only way a defect planted in it comes out red.
     -- stb_image.cpp is the implementation TU for the header the importer includes.
+    -- TextureAsset.cpp is the READ side of the .tex the importer writes: the cross-checkout round trip
+    -- ("a .tex cooked here loads its pixels in a differently-rooted checkout") is a relation between the
+    -- two, so both have to be the real code, in one binary.
     files {
         test_files,
         "%{wks.location}/Editor/Source/Editor/Import/TextureImporter.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Assets/TextureAsset.cpp",
         "%{wks.location}/ThirdParty/stb/stb_image.cpp",
     }
 
@@ -23,6 +27,7 @@ project(test_name)
         "%{wks.location}/Desert/Desert/Source", -- <Engine/Assets/Serialization/Texture.hpp>
         "%{wks.location}/Editor/Source",        -- the importer's own "TextureImporter.hpp" / "CookPaths.hpp"
         "%{wks.location}/Editor/Source/Editor/Import",
+        "%{wks.location}/ThirdParty/entt/include/", -- AssetManager.hpp, included by TextureAsset.hpp
         "%{wks.location}/ThirdParty/stb/include",
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the .tex payload is written with rfl::json
     }
@@ -50,6 +55,12 @@ project(test_name)
     -- Common: UUID/AssetHandle and the FileSystem helpers. Optick: Common's JobSystem registers its
     -- worker threads with the profiler.
     links { "Common", "Optick" }
+
+    -- Common contains Objective-C (MacOSFileSystem's file dialog) and TextureAsset::Load reaches
+    -- Common::Utils::FileSystem, so the ObjC runtime + AppKit have to link as well.
+    filter "system:macosx"
+        links { "Cocoa.framework", "Foundation.framework" }
+    filter {}
 
     filter "system:not windows"
         links { "ReflectCpp" }

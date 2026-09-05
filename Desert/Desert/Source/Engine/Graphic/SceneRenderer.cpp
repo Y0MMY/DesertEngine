@@ -590,11 +590,24 @@ namespace Desert::Graphic
 
             // SSAO first (reads the G-buffer world pos + normal into the AO buffer); the lighting pass below
             // multiplies its ambient term by this. Skipped when disabled (the shader uses AO=1 then).
+            //
+            // The hemisphere radius and depth bias are WORLD distances (SSAO.shader offsets samples by
+            // TBN*dir*radius in world space), and a world unit is a centimetre. The classic recipe these
+            // numbers come from (John Chapman-style hemisphere SSAO, radius 0.5, bias 0.025) states them
+            // in METRES; they were passed bare, so the occlusion hemisphere was five MILLIMETRES wide and
+            // the pass returned ~1.0 for every pixel of every scene while costing a full-screen 16-tap
+            // pass per frame. The radius keeps the literature's 0.5 m after an A/B against 0.25 m and
+            // 1 m on CornellDemo's AO channel (corner-band p05 occlusion vs a flat wall's 0%): 0.25 m
+            // darkens only a narrow seam (8%), 1 m reaches 16% but smears a grainy gradient a third of
+            // the way up the wall — 16 samples spread over a metre read as dirt, not contact — and 0.5 m
+            // (12%) keeps the darkening at the corner with the sample noise still unobtrusive.
+            constexpr float          kSSAORadius = Common::Units::Metres( 0.5f );   // literature: 0.5 m
+            constexpr float          kSSAOBias   = Common::Units::Metres( 0.025f ); // literature: 0.025 m
             std::shared_ptr<Image2D> aoImage;
             if ( m_EnableSSAO )
                 if ( auto* ssao = UNIQUE_GET_AS( System::SSAORenderer, m_RenderSystems["SSAOSystem"] ) )
                 {
-                    ssao->Execute( m_GBuffer, viewProj, cameraPos, /*radius*/ 0.5f, /*bias*/ 0.025f,
+                    ssao->Execute( m_GBuffer, viewProj, cameraPos, kSSAORadius, kSSAOBias,
                                    /*power*/ 1.5f, /*samples*/ 16 );
                     aoImage = ssao->GetAOImage();
                 }
@@ -713,8 +726,13 @@ namespace Desert::Graphic
                 if ( auto* ssr = UNIQUE_GET_AS( System::SSRRenderer, m_RenderSystems["SSRSystem"] ) )
                 {
                     DESERT_PROFILE_PASS( "Deferred: SSR" );
-                    ssr->Execute( m_GBuffer, sceneCopy, viewProj, cameraPos, /*maxSteps*/ 32,
-                                  m_SSRMaxDistance, m_SSRIntensity, /*thickness*/ 0.5f );
+                    // Hit-acceptance band in WORLD units (SSR.shader compares the refined camera-radial
+                    // delta against it), and a world unit is a centimetre. The usual SSR thickness of
+                    // 0.5 m was passed bare — a 5 mm band — so rays that genuinely crossed geometry
+                    // refined to a delta wider than the band and were discarded as silhouette gaps.
+                    constexpr float kSSRThickness = Common::Units::Metres( 0.5f ); // literature: 0.5 m
+                    ssr->Execute( m_GBuffer, sceneCopy, viewProj, cameraPos, /*maxSteps*/ 32, m_SSRMaxDistance,
+                                  m_SSRIntensity, kSSRThickness );
                 }
 
             meshRenderer->RenderGlassManual( sceneCopy );

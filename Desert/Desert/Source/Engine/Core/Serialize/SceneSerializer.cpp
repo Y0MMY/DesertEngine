@@ -186,8 +186,20 @@ namespace Desert::Core
                 continue;
             }
 
+            // A prefab whose FILE is gone (deleted, renamed, not packaged) must not take the rest of
+            // the scene down with it: name the failure and skip THIS record only. The result used to
+            // be discarded here, so the log never said which prefab was missing — and before the read
+            // primitives went soft the question never even came back, because a missing file aborted
+            // the process inside ReadFileContent.
             if ( !prefabAsset->IsReadyForUse() )
-                prefabAsset->Load();
+            {
+                if ( const auto loaded = prefabAsset->Load(); !loaded )
+                {
+                    LOG_ERROR( "SceneSerializer: prefab '{0}' named by the scene did not load: {1}",
+                               *entityData->PrefabPath, loaded.GetError() );
+                    continue;
+                }
+            }
 
             std::unordered_set<Common::UUID> stack;
             ECS::Entity prefabRoot = Runtime::Factory::PrefabFactory::Instantiate(

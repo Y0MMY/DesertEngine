@@ -12,7 +12,10 @@ namespace Desert::Assets
     class TextureAsset : public AssetBase
     {
     public:
-        // TODO: Move TextureAsset::Type to models
+        // A CLASSIFICATION of material texture slots, not a property of this asset: SurfaceMaterialAsset
+        // and Mapper key sampler names and slot maps on it. No TextureAsset instance stores one — the
+        // `m_Type` member GetType() used to return was never assigned by anything and read back
+        // uninitialized memory, so both were deleted rather than kept looking wired.
         enum class Type
         {
             Albedo,
@@ -25,7 +28,7 @@ namespace Desert::Assets
             Skybox
         };
 
-        explicit TextureAsset( AssetPriority priority, const Common::Filepath& filepath /*, Type type*/ );
+        explicit TextureAsset( AssetPriority priority, const Common::Filepath& filepath );
 
         virtual Common::BoolResultStr Load() override;
 
@@ -36,11 +39,7 @@ namespace Desert::Assets
             return m_IsReadyForUse;
         }
 
-        Type GetType() const
-        {
-            return m_Type;
-        }
-
+        // The source image path THIS machine can open — the stored root-tagged key, expanded by Load().
         const auto& GetSourcePath() const
         {
             return m_SourcePath;
@@ -61,16 +60,11 @@ namespace Desert::Assets
         }
 
     private:
-        Type         m_Type;
-        bool         m_IsReadyForUse = false;
-        std::string  m_SourcePath;
-        std::string  m_CookedPath;
-
-        uint32_t m_Width;
-        uint32_t m_Height;
-        uint32_t m_Channels;
-
-        Desert::Core::Formats::ImageFormat m_Format;
+        // Load() fills exactly what consumers read. This used to also declare m_Type, m_CookedPath,
+        // m_Width/m_Height/m_Channels and m_Format — none of which Load() (or anything else) ever
+        // assigned, so every one of them was uninitialized memory wearing a member's name.
+        bool        m_IsReadyForUse = false;
+        std::string m_SourcePath;
     };
 
 } // namespace Desert::Assets

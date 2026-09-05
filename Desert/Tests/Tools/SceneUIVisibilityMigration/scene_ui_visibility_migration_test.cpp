@@ -357,11 +357,13 @@ TEST( SceneUIVisibilityMigration, AFileAtTheHeadDoesNotRunTheStep )
     EXPECT_FALSE( Migration::MigrateScene( scene, "Resources/Assets" ).UIVisibilityRaised );
 }
 
-TEST( SceneUIVisibilityMigration, TheStepHasItsOwnVersionAndItIsTheHead )
+TEST( SceneUIVisibilityMigration, TheStepHasItsOwnVersionAndItIsBelowTheHead )
 {
     EXPECT_EQ( 10, Migration::kSceneVersionUIVisibility );
-    EXPECT_EQ( Core::kSceneVersion, Migration::kSceneVersionUIVisibility )
-         << "this is the newest step, so it must be the generation the loader requires";
+    // It was the newest step when it was written and is not any more (v11 restates SSRMaxDistance in
+    // centimetres). What has to stay true is that it is BELOW the head — a step at or above the
+    // generation the loader requires would stamp files the loader refuses.
+    EXPECT_LT( Migration::kSceneVersionUIVisibility, Core::kSceneVersion );
     EXPECT_GT( Migration::kSceneVersionUIVisibility, Migration::kSceneVersionGravityUnits );
 }
 

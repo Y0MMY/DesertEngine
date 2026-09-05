@@ -1,5 +1,7 @@
 #include "FontService.hpp"
 
+#include <Engine/Runtime/Services/ServiceScanRoots.hpp>
+
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -255,17 +257,14 @@ namespace Desert::Runtime
 
         DefaultFontHandle(); // guarantee the built-in font is always offered, even if a root is missing
 
-        // Fonts come from THIS project's Assets tree (drop a .ttf into the project) plus the shared engine
-        // Resources/Fonts built-ins (Roboto, Noto, ...). Mirrors the editor's old font-combo scan.
-        const std::filesystem::path roots[] = { Common::Constants::Path::ASSETS_PATH,
-                                                Common::Constants::Path::FONTS_PATH };
-        for ( const auto& root : roots )
-        {
-            std::error_code ec;
-            for ( const auto& de : std::filesystem::recursive_directory_iterator( root, ec ) )
-                if ( !ec && de.is_regular_file( ec ) && de.path().extension() == ".ttf" )
-                    RegisterFont( de.path().generic_string() );
-        }
+        // BOTH halves of the content world (loose files + the mounted .dpak), through the one shared
+        // enumeration. This scan used to walk only the disk half, so in a packaged game — where the
+        // loose directories do not exist — no .ttf was ever registered and a saved font handle could
+        // not resolve to a path.
+        for ( const auto* root : FontScanRoots() )
+            for ( const auto& p : Common::Utils::FileSystem::ListFilesRecursive( *root ) )
+                if ( p.extension() == ".ttf" )
+                    RegisterFont( p.generic_string() );
         std::sort( m_Available.begin(), m_Available.end() );
         m_Available.erase( std::unique( m_Available.begin(), m_Available.end() ), m_Available.end() );
     }

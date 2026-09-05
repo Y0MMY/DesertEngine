@@ -113,7 +113,11 @@ Shader "SSR"
         	float hit      = 0.0;
         	float stepLen  = step0;
         	float t        = 0.0;
-        	vec3  pPrev    = worldPos + N * 0.02; // start slightly off the surface to avoid self-hit
+        	// Start slightly off the surface to avoid self-hit. 2.0 is WORLD units, i.e. two CENTIMETRES:
+        	// the metre-era 0.02 (= 2 cm then) survived the unit switch as 0.2 mm, far below the depth
+        	// deltas a G-buffer texel carries at centimetre scale, so grazing rays began "inside" their own
+        	// surface and were rejected by the very first sign-change test.
+        	vec3  pPrev    = worldPos + N * 2.0;
         	// Jitter the start by a random fraction of the first step — DIFFERENT each frame (the seed in
         	// CameraPos.w) so the temporal accumulation averages a fresh estimate every frame and converges.
         	pPrev += R * ( step0 * hash12(v_TexCoord * 4096.0 + vec2(u_CameraPos.w)) );

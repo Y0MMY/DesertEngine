@@ -23,15 +23,28 @@ namespace Common::Utils
         // per-type chunks, then patch paks — the patch wins). Lookups walk it newest-first.
         std::vector<Mount> s_Mounts;
 
-        // Archive key for an incoming path within ONE mount: absolute-normalized, then relative to
-        // that mount's root. nullopt when the path points outside the mounted tree.
-        std::optional<std::string> KeyFor( const Mount& mount, const std::filesystem::path& path )
+        // One absolute, symlink-resolved spelling for an incoming path. weakly_canonical, not
+        // lexically_normal alone, because two spellings of ONE directory must compare equal: on macOS
+        // the temp tree is reached both as /var/... (a symlink) and /private/var/... (what getcwd
+        // returns), and comparing an as-spelled mount root against a resolved current_path made every
+        // relative lookup under a symlinked prefix miss the pak. The tail may not exist anywhere but
+        // the archive — weakly_canonical resolves the existing prefix and keeps the rest lexical.
+        std::filesystem::path CanonicalAbs( const std::filesystem::path& path )
         {
-            std::error_code ec;
-            std::filesystem::path abs =
+            std::error_code             ec;
+            const std::filesystem::path raw =
                  path.is_absolute() ? path.lexically_normal()
                                     : ( std::filesystem::current_path( ec ) / path ).lexically_normal();
 
+            std::error_code             canonEc;
+            const std::filesystem::path canon = std::filesystem::weakly_canonical( raw, canonEc );
+            return ( canonEc || canon.empty() ) ? raw : canon;
+        }
+
+        // Archive key for an incoming (pre-canonicalized) path within ONE mount: relative to that
+        // mount's root. nullopt when the path points outside the mounted tree.
+        std::optional<std::string> KeyFor( const Mount& mount, const std::filesystem::path& abs )
+        {
             const std::filesystem::path rel = abs.lexically_relative( mount.Root );
             if ( rel.empty() || rel.begin()->string() == ".." )
                 return std::nullopt;
@@ -43,9 +56,12 @@ namespace Common::Utils
         auto Resolve( const std::filesystem::path& path, Fn&& fn )
              -> decltype( fn( *s_Mounts.front().Pak, std::string{} ) )
         {
+            if ( s_Mounts.empty() ) // dev: nothing mounted, skip the canonicalization syscalls
+                return {};
+            const std::filesystem::path abs = CanonicalAbs( path ); // once, not per mount
             for ( auto it = s_Mounts.rbegin(); it != s_Mounts.rend(); ++it )
             {
-                const auto key = KeyFor( *it, path );
+                const auto key = KeyFor( *it, abs );
                 if ( !key || !it->Pak->Contains( *key ) )
                     continue;
                 return fn( *it->Pak, *key );
@@ -63,9 +79,10 @@ namespace Common::Utils
             return false;
         }
 
-        std::error_code ec;
-        Mount           mount;
-        mount.Root = std::filesystem::absolute( pakFile, ec ).parent_path().lexically_normal();
+        Mount mount;
+        // The root must live in the same canonical spelling KeyFor produces for lookups, or a pak
+        // mounted through a symlink (macOS /var -> /private/var) can never resolve anything.
+        mount.Root = CanonicalAbs( pakFile ).parent_path();
         mount.Pak  = std::move( reader );
         LOG_INFO( "[VFS] Mounted {} ({} entries, root {}, priority {})", pakFile.string(),
                   mount.Pak->EntryCount(), mount.Root.string(), s_Mounts.size() );
@@ -85,8 +102,11 @@ namespace Common::Utils
 
     bool VFS::Exists( const std::filesystem::path& path )
     {
+        if ( s_Mounts.empty() ) // dev: nothing mounted, skip the canonicalization syscalls entirely
+            return false;
+        const std::filesystem::path abs = CanonicalAbs( path );
         for ( auto it = s_Mounts.rbegin(); it != s_Mounts.rend(); ++it )
-            if ( const auto key = KeyFor( *it, path ); key && it->Pak->Contains( *key ) )
+            if ( const auto key = KeyFor( *it, abs ); key && it->Pak->Contains( *key ) )
                 return true;
         return false;
     }
@@ -108,9 +128,12 @@ namespace Common::Utils
         std::vector<std::filesystem::path>  result;
         std::unordered_set<std::string>     seen;
 
+        if ( s_Mounts.empty() )
+            return result;
+        const std::filesystem::path abs = CanonicalAbs( directory );
         for ( auto it = s_Mounts.rbegin(); it != s_Mounts.rend(); ++it )
         {
-            auto prefix = KeyFor( *it, directory );
+            auto prefix = KeyFor( *it, abs );
             if ( !prefix )
                 continue;
             std::string p = *prefix;

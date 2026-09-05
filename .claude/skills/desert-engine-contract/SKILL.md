@@ -71,6 +71,31 @@ saves weeks, because nobody builds on sand.
 
 ## 2. Required
 
+### Read the file, not the line
+
+**Standing rule, added 2026-09-05 at the owner's insistence and after I earned it.** When you open a
+file for any reason — one constant, one call site, one grep hit — spend the extra minute on the
+question the visit did not ask: *what is this file's design, and is it right?* Then **say what you
+found**, even when it is outside your task. You are not required to fix it; you are required to name
+it.
+
+Why this is a rule and not a nicety: this project runs a defect-driven loop, where each task is born
+from what the last one found. That finds a great deal, and it is structurally blind to anything
+nobody has stumbled over yet. Architectural problems do not announce themselves — they sit in files
+that work.
+
+The failure this rule exists to stop, in the exact form it happened: I opened `AssetPreloader.cpp` to
+check one extension constant, looked at that one line, and reported the file fine. It walks the whole
+asset tree once *per asset type* (six passes over the mesh directory alone), `PreloadMeshes()` also
+loads textures, animations, skeletons and materials, `ReloadCooked()` calls `PreloadMeshes()` meaning
+"reload everything", a load-bearing ordering dependency is expressed only as statement order, and the
+extension→type mapping is twelve hand-written pairs with nothing asserting they agree. None of that
+was hidden. I read with a query instead of with judgement — the same "tool answering a different
+question" this document warns about elsewhere, applied to reading. The owner had to ask why they were
+finding these instead of me.
+
+A finding costs one paragraph in the report. Not finding it costs whatever it costs later.
+
 ### Architecture
 
 - **Interface before implementation.** The header first: types, signatures, resource ownership,

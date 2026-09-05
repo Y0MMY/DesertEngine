@@ -217,6 +217,17 @@ int main( int argc, char** argv )
                 std::cout << "; NOT a boolean, left at the default Hit Test: " << name;
             std::cout << ")";
         }
+        if ( report.SSRUnitsRaised )
+        {
+            std::cout << " scene v" << Desert::Migration::kSceneVersionUIVisibility << "->v"
+                      << Desert::Migration::kSceneVersionSSRUnits << " (";
+            if ( report.SSRUnits.Scaled )
+                std::cout << "SSR max distance " << report.SSRUnits.Before << " -> " << report.SSRUnits.After
+                          << " cm (metre-era slider value, x100)";
+            else
+                std::cout << "stamp only - the scene states no SSR max distance";
+            std::cout << ")";
+        }
         if ( report.UnitsRaised )
             std::cout << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
                       << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected

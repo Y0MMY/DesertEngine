@@ -98,7 +98,8 @@ namespace Desert::Graphic::System
         }
 
         // gbuffer = the camera G-buffer (albedo/normal/worldpos at 0/1/2); sceneColor = snapshot of the lit
-        // opaque scene; viewProj/cameraPos = the camera; maxDistance = max reflected-ray travel (world units).
+        // opaque scene; viewProj/cameraPos = the camera; maxDistance and thickness are WORLD distances,
+        // and a world unit is a centimetre - callers passing literature values convert through Common::Units.
         void Execute( const std::shared_ptr<Framebuffer>& gbuffer, const std::shared_ptr<Image2D>& sceneColor,
                       const glm::mat4& viewProj, const glm::vec4& cameraPos, int maxSteps, float maxDistance,
                       float intensity, float thickness )

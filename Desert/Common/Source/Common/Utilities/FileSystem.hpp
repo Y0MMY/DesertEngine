@@ -34,10 +34,29 @@ namespace Common::Utils
         GetFileNameWithoutExtension_PATH( const std::filesystem::path& filepath );
 
     public:
+        // THE READ PRIMITIVES ARE SOFT ON PURPOSE. A path that resolves neither on disk nor in a
+        // mounted .dpak logs the path (LOG_ERROR) and returns EMPTY — it never terminates the
+        // process. A primitive cannot know whether the missing file is fatal to its caller, so the
+        // policy lives at the call site: every loader in this engine answers an empty read through
+        // its own error channel (Common::MakeError / LOG_ERROR / a defaults branch), and in a
+        // packaged game an abort down here is a guaranteed crash on the player's machine over a
+        // single missing asset. A caller for which the file IS load-bearing must check the result
+        // (or Exists()) and refuse through its own channel — see RuntimeLayer's boot-scene load.
+        // NOTE an empty return is also what a genuinely zero-byte file produces; callers that must
+        // tell the two apart ask Exists() first.
         [[nodiscard]] static const std::string ReadFileContent( const std::filesystem::path& filepath );
         static const void WriteContentToFile( const std::filesystem::path& filepath, const std::string& content );
 
         [[nodiscard]] static std::vector<uint8_t> ReadByteFileContent( const std::filesystem::path& filepath );
+
+        // Every regular file under `root`, from BOTH halves of the content world: the loose files on
+        // disk and everything a mounted .dpak holds under that root, deduplicated by absolute
+        // normalized path (a loose file overrides its pak twin). A missing root contributes nothing.
+        // Every scanner that enumerates content must go through this: the font and icon services each
+        // used to walk only the disk half, so a packaged game — where the loose directories do not
+        // exist at all — scanned nothing and no text could resolve its font.
+        [[nodiscard]] static std::vector<std::filesystem::path>
+        ListFilesRecursive( const std::filesystem::path& root );
 
     public:
         [[nodiscard]] static const std::filesystem::path GetParentPath( const std::filesystem::path& filepath );
@@ -64,8 +83,5 @@ namespace Common::Utils
         static bool        HasEnvironmentVariable( const std::string& key );
         static bool        SetEnvironmentVariable( const std::string& key, const std::string& value );
         static std::string GetEnvironmentVariable( const std::string& key );
-
-    public:
-        std::string ReadFileAndSkipBOM( const std::filesystem::path& filepath );
     };
 } // namespace Common::Utils

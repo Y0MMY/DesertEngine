@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace Common::Constants
 {
@@ -98,7 +99,25 @@ namespace Common::Constants
         const std::string MESH_SERIALIZBLE_EXTENSION  = ".demesh";
         const std::string MATERIAL_EXTENSION          = ".demat";
         const std::string PREFAB_EXTENSION            = ".deprefab";
-        const std::string STATIC_MESH                 = ".skmesh";
-        const std::string SKINNED_MESH                = ".stmesh";
+        // st = STatic, sk = SKinned. These two were SWAPPED from the day they were written, and nothing
+        // caught it because nothing read them: AssetPreloader carried its own literal arrays and was
+        // right, so the cooker, the loaders and the tests all agreed with each other and disagreed with
+        // this file in silence. The bug could only surface the moment someone trusted these names — i.e.
+        // it was a trap armed for a future reader, not a defect anyone could observe.
+        // AssetPreloader now consumes these, so the two spellings are one value again.
+        //
+        // They are `constexpr string_view` and not `const std::string` so the agreement between the NAME
+        // and the LETTERS can be asserted by the compiler below. A runtime test would only fail once
+        // someone ran it; this cannot be compiled wrong, which is the right strength for a value whose
+        // only failure mode is a human reading two similar spellings too quickly.
+        constexpr std::string_view STATIC_MESH  = ".stmesh";
+        constexpr std::string_view SKINNED_MESH = ".skmesh";
+
+        // The relation, not the values: whatever these become, `st` must mean STatic and `sk` SKinned.
+        // Swapping the two right-hand sides above keeps every individual line looking correct — that is
+        // exactly how they were wrong in the first place — and stops compiling here.
+        static_assert( STATIC_MESH.starts_with( ".st" ), "STATIC_MESH must be the .st* spelling" );
+        static_assert( SKINNED_MESH.starts_with( ".sk" ), "SKINNED_MESH must be the .sk* spelling" );
+        static_assert( STATIC_MESH != SKINNED_MESH, "the two mesh extensions must stay distinct" );
     } // namespace Extensions
 } // namespace Common::Constants

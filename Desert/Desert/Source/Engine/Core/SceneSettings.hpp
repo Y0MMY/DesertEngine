@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 
+#include <Common/Core/Units.hpp>
 #include <Engine/Assets/Common.hpp>
 #include <Engine/Reflection/ReflectionMacros.hpp>
 
@@ -203,8 +204,13 @@ namespace Desert::Core
         bool EnableSSR = false;
         PROPERTY( DisplayName( "SSR Intensity" ), Category( "Rendering" ), Range( 0.0f, 1.0f ) )
         float SSRIntensity = 1.0f;
-        PROPERTY( DisplayName( "SSR Max Distance" ), Category( "Rendering" ), Range( 1.0f, 200.0f ) )
-        float SSRMaxDistance = 40.0f;
+        // How far the reflection ray may travel, in WORLD UNITS — and a world unit is a centimetre. The
+        // shader consumes this as a world distance (SSR.shader, u_SSRParams.y), so the metre-era
+        // Range(1, 200) / default 40 that used to sit here killed every reflection ray 40 CENTIMETRES out
+        // and capped the slider at two metres. 40 m is the metre-era default carried over at its intended
+        // magnitude; scene files were raised by SceneMigrator (scene v10 -> v11).
+        PROPERTY( DisplayName( "SSR Max Distance" ), Category( "Rendering" ), Length, Range( 100.0f, 20000.0f ) )
+        float SSRMaxDistance = Common::Units::Metres( 40.0f );
 
         // Environment: skybox brightness now lives on the SkyboxComponent (entity) as
         // SkyboxComponent::Intensity — applied in the Skybox pass. Procedural sky lives there too. The old
