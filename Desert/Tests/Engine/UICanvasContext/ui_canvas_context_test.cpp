@@ -35,12 +35,30 @@
 // the suite supplies the accessors itself and returns nothing.
 namespace Desert::Runtime
 {
-    TextureService*       ResourceRegistry::GetTextureService()       { return nullptr; }
-    ImageService*         ResourceRegistry::GetImageService()         { return nullptr; }
-    FontService*          ResourceRegistry::GetFontService()          { return nullptr; }
-    IconService*          ResourceRegistry::GetIconService()          { return nullptr; }
-    AnimatedImageService* ResourceRegistry::GetAnimatedImageService() { return nullptr; }
-    VideoService*         ResourceRegistry::GetVideoService()         { return nullptr; }
+    TextureService* ResourceRegistry::GetTextureService()
+    {
+        return nullptr;
+    }
+    ImageService* ResourceRegistry::GetImageService()
+    {
+        return nullptr;
+    }
+    FontService* ResourceRegistry::GetFontService()
+    {
+        return nullptr;
+    }
+    IconService* ResourceRegistry::GetIconService()
+    {
+        return nullptr;
+    }
+    AnimatedImageService* ResourceRegistry::GetAnimatedImageService()
+    {
+        return nullptr;
+    }
+    VideoService* ResourceRegistry::GetVideoService()
+    {
+        return nullptr;
+    }
 
     // The service METHODS the walk calls on whatever those accessors hand back. Every accessor above
     // returns nullptr, so none of these can run — they exist because the linker still wants the symbols,
@@ -88,9 +106,9 @@ namespace Desert::Runtime
     }
 } // namespace Desert::Runtime
 
+using Desert::UI::Rect;
 using Desert::UI::UICanvasContext;
 using Desert::UI::UIInput;
-using Desert::UI::Rect;
 namespace ECS = Desert::ECS;
 namespace R2D = Desert::Graphic::Render2D;
 
@@ -110,14 +128,14 @@ namespace
 
         Fixture()
         {
-            Canvas = Registry.create();
-            auto& canvas = Registry.emplace<ECS::UICanvasComponent>( Canvas ).Data;
+            Canvas                 = Registry.create();
+            auto& canvas           = Registry.emplace<ECS::UICanvasComponent>( Canvas ).Data;
             canvas.ScaleMode       = ECS::UICanvasScaleMode::Stretch;
             canvas.ReferenceWidth  = kSide;
             canvas.ReferenceHeight = kSide;
 
-            Button       = Registry.create();
-            auto& layout = Registry.emplace<ECS::UILayoutComponent>( Button ).Data;
+            Button           = Registry.create();
+            auto& layout     = Registry.emplace<ECS::UILayoutComponent>( Button ).Data;
             layout.AnchorMin = { 0.0f, 0.0f };
             layout.AnchorMax = { 0.0f, 0.0f };
             layout.OffsetMin = { 0.0f, 0.0f };
@@ -214,7 +232,7 @@ TEST( UICanvasContext, TheHotElectionOfOneViewDoesNotReachAnother )
 // elected element every frame. Observable with one document open, which is what made it the third argument.
 TEST( UICanvasContext, AnInertPreviewDoesNotClearTheInteractiveViewsElection )
 {
-    Fixture f;
+    Fixture         f;
     UICanvasContext viewport;
     UICanvasContext preview;
     preview.DrivesSceneAnimation = false; // as UIEditorPanel configures it
@@ -233,7 +251,7 @@ TEST( UICanvasContext, AnInertPreviewDoesNotClearTheInteractiveViewsElection )
 // hovered ITS entity 1; view B's entity 1 is a different button in a different registry and must be at rest.
 TEST( UICanvasContext, APerEntityClockIsKeyedInsideItsOwnView )
 {
-    Fixture a, b;
+    Fixture         a, b;
     UICanvasContext ctxA, ctxB;
 
     Frame( ctxA, a, At( 10.0f, 10.0f, /*down=*/false ) );
@@ -258,7 +276,7 @@ TEST( UICanvasContext, APerEntityClockIsKeyedInsideItsOwnView )
 // are handed the same 50 ms and must both spend it.
 TEST( UICanvasContext, EveryViewMeasuresItsOwnFrameDelta )
 {
-    Fixture a, b;
+    Fixture         a, b;
     UICanvasContext ctxA, ctxB;
 
     Frame( ctxA, a, At( 10.0f, 10.0f, /*down=*/false ) ); // seed both clocks
@@ -273,9 +291,14 @@ TEST( UICanvasContext, EveryViewMeasuresItsOwnFrameDelta )
     EXPECT_NEAR( ctxB.FrameDt, 0.05f, 5e-3f )
          << "the second view of the frame measured no time — the two walks are sharing one clock";
 
-    // And the hover ease that delta drives moved by the same amount in both.
-    EXPECT_NEAR( ctxA.HoverT[a.Button], ctxB.HoverT[b.Button], 1e-4f );
-    EXPECT_GT( ctxA.HoverT[a.Button], 0.0f ) << "50 ms of hover moved the ease by nothing";
+    // And the hover ease that delta drives moved by the same amount in both. The tolerances here are wide
+    // on purpose: the clock is a real one, the two walks are microseconds apart, and the defect this
+    // catches is one view easing to 0.6 while the other sits at exactly 0 — not a difference in the fourth
+    // decimal. A tighter bound made this test fail on the spread between two consecutive steady_clock
+    // reads, which is a flake and worse than no test at all.
+    EXPECT_GT( ctxA.HoverT[a.Button], 0.5f ) << "50 ms of hover moved view A's ease by nothing";
+    EXPECT_GT( ctxB.HoverT[b.Button], 0.5f ) << "50 ms of hover moved view B's ease by nothing";
+    EXPECT_NEAR( ctxA.HoverT[a.Button], ctxB.HoverT[b.Button], 0.01f );
 }
 
 // --- (5) Screen navigation is view state, the anim playhead is scene state -------------------------------
@@ -290,16 +313,16 @@ TEST( UICanvasContext, ScreenNavigationBelongsToTheViewThatDidIt )
     // Rehome the button under a "Home" screen and add an empty "Settings" beside it, which is how a real
     // canvas with pages is built. InitialScreen is named rather than left to the seeding loop's first hit:
     // that loop walks an entt view, whose order is the component pool's, not the creation order.
-    auto& stack       = f.Registry.emplace<ECS::UIScreenStackComponent>( f.Canvas ).Data;
+    auto& stack         = f.Registry.emplace<ECS::UIScreenStackComponent>( f.Canvas ).Data;
     stack.InitialScreen = "Home";
 
-    const entt::entity home = f.Registry.create();
+    const entt::entity home                                      = f.Registry.create();
     f.Registry.emplace<ECS::UIScreenComponent>( home ).Data.Name = "Home";
     auto& homeLayout     = f.Registry.emplace<ECS::UILayoutComponent>( home ).Data;
     homeLayout.AnchorMax = { 1.0f, 1.0f }; // a screen spreads over the whole canvas
     homeLayout.OffsetMax = { 0.0f, 0.0f };
 
-    const entt::entity settings = f.Registry.create();
+    const entt::entity settings                                      = f.Registry.create();
     f.Registry.emplace<ECS::UIScreenComponent>( settings ).Data.Name = "Settings";
     auto& settingsLayout     = f.Registry.emplace<ECS::UILayoutComponent>( settings ).Data;
     settingsLayout.AnchorMax = { 1.0f, 1.0f };
@@ -324,7 +347,7 @@ TEST( UICanvasContext, ScreenNavigationBelongsToTheViewThatDidIt )
     Frame( second, f, At( 900.0f, 900.0f ) );
     ASSERT_TRUE( viewport.Hot == f.Button ) << "the pointer sat on the button and something else was elected";
 
-    UIInput click = At( 10.0f, 10.0f, /*down=*/false );
+    UIInput click       = At( 10.0f, 10.0f, /*down=*/false );
     click.MouseReleased = true;
     {
         R2D::DrawList2D dl;
@@ -346,7 +369,7 @@ TEST( UICanvasContext, ScreenNavigationBelongsToTheViewThatDidIt )
 TEST( UICanvasContext, OnlyTheDrivingViewAdvancesTheScenesAnimationPlayhead )
 {
     Fixture f;
-    auto& clip   = f.Registry.emplace<ECS::UIAnimComponent>( f.Button ).Data;
+    auto&   clip  = f.Registry.emplace<ECS::UIAnimComponent>( f.Button ).Data;
     clip.Playing  = true;
     clip.Duration = 100.0f; // long enough that nothing wraps
     clip.Loop     = false;
@@ -374,7 +397,7 @@ TEST( UICanvasContext, OnlyTheDrivingViewAdvancesTheScenesAnimationPlayhead )
 // it remembers mean something else in the new registry, so the context drops them.
 TEST( UICanvasContext, RebindingAViewToAnotherRegistryDropsItsPerEntityState )
 {
-    Fixture a, b;
+    Fixture         a, b;
     UICanvasContext ctx;
 
     Frame( ctx, a, At( 10.0f, 10.0f ) );
@@ -401,7 +424,7 @@ TEST( UICanvasContext, AnUnresolvableCanvasBackgroundDrawsNothingRatherThanAWhit
          Desert::Assets::AssetHandle( 0x1234u );
 
     UICanvasContext c1, c2;
-    R2D::DrawList2D  dlBare, dlSprite;
+    R2D::DrawList2D dlBare, dlSprite;
     Desert::UI::RenderCanvas2D( c1, bare.Registry, dlBare, kViewport );
     Desert::UI::RenderCanvas2D( c2, withSprite.Registry, dlSprite, kViewport );
 
