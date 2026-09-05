@@ -39,6 +39,7 @@ Shader "CloudRaymarch"
         #include <Common/CloudNoise.glslh>
         #include <Common/CloudGeometry.glslh>
         #include <Common/CloudLighting.glslh>
+        #include <Common/CloudAerial.glslh>
 
         // For SKY_DISTANT_LIGHT_SPHERE_TEXEL only — the index of the full-sphere texel in the distant
         // sky light image. Taken from the sky's own header rather than written as a literal here, so the
@@ -628,20 +629,21 @@ Shader "CloudRaymarch"
                 t += stepKm;
             }
 
-            // AERIAL PERSPECTIVE. Ninety kilometres of air between the camera and a distant cloud is not
+            // AERIAL PERSPECTIVE. Sixty kilometres of air between the camera and a distant cloud is not
             // nothing: it scatters its own light in and attenuates what comes back, which is why a real
-            // cloud on the horizon is the colour of the sky and not the colour of a cloud. Without this
-            // term the layer ends at the horizon as an opaque white wall, and no amount of coverage,
-            // density or fade fixes it — the wall is the absence of the atmosphere, not the presence of
-            // too much cloud.
+            // cloud on the horizon is closer to the colour of the sky than to the colour of a cloud.
+            // Without this term the layer ends at the horizon as an opaque white wall, and no amount of
+            // coverage, density or fade fixes it — the wall is the absence of the atmosphere, not the
+            // presence of too much cloud.
             //
-            // One fetch per pixel at the weighted distance above, composed exactly as Unreal does:
-            // the volume's in-scattering scaled by how much cloud this pixel actually has, plus the
-            // cloud's own radiance behind the volume's transmittance.
+            // One fetch per pixel at the weighted distance above; the composition and the art-direction
+            // ramp are Common/CloudAerial.glslh, shared with the panorama bake so the screen and the IBL
+            // cannot drift.
             if (u_CloudAerial.z > 0.5f && aerialWeightSum > 0.0f)
             {
-                float meanDistanceKm = (aerialWeightedT / aerialWeightSum) * max(u_CloudAerial.y, 0.0f);
-                float sliceUnit      = SkyApSliceUnitFromDistance(meanDistanceKm, u_CloudAerial.x);
+                float meanDistanceKm =
+                     CloudAerialMeanDistanceKm(aerialWeightedT, aerialWeightSum, u_CloudAerial.y);
+                float sliceUnit = SkyApSliceUnitFromDistance(meanDistanceKm, u_CloudAerial.x);
 
                 // Read through the exact inverse of the fill's texel-centre remap on all three axes, so
                 // the frame's edges and the volume's near plane land on written texels rather than
@@ -650,19 +652,11 @@ Shader "CloudRaymarch"
                                 SkyUnitToTexelUv(uv.y, SKY_AP_VOLUME_HEIGHT),
                                 SkyUnitToTexelUv(sliceUnit, SKY_AP_VOLUME_DEPTH));
 
-                vec4  aerial        = texture(u_CloudAerialPerspective, uvw);
-                float cloudCoverage = 1.0f - clamp(transmittance, 0.0f, 1.0f);
+                vec4 aerial = texture(u_CloudAerialPerspective, uvw);
 
-                // HOW MUCH of the atmosphere to apply. Full is the physical answer and UE's default, and
-                // it erases a cloud on the horizon because ninety kilometres of air genuinely does. A sky
-                // that wants its distant band back ramps the haze in from a distance instead; the dial
-                // exists in UE for the same reason and is off by default here for the same reason.
-                float aerialAmount = 1.0f;
-                if (u_CloudFade.y > 0.0f)
-                    aerialAmount = clamp((meanDistanceKm - u_CloudFade.x) / u_CloudFade.y, 0.0f, 1.0f);
-
-                vec3 hazed = aerial.rgb * cloudCoverage + aerial.a * luminance;
-                luminance  = mix(luminance, hazed, aerialAmount);
+                luminance = CloudApplyAerialPerspective(
+                     luminance, transmittance, aerial.rgb, aerial.a,
+                     CloudAerialAmount(meanDistanceKm, u_CloudFade.x, u_CloudFade.y));
             }
 
             imageStore(u_CloudScatter, coord, vec4(luminance, clamp(transmittance, 0.0f, 1.0f)));

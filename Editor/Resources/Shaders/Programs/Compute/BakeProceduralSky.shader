@@ -96,6 +96,7 @@ Shader "BakeProceduralSky"
         #include <Common/CloudNoise.glslh>
         #include <Common/CloudGeometry.glslh>
         #include <Common/CloudLighting.glslh>
+        #include <Common/CloudAerial.glslh>
 
         // The four noise volumes a layer's species can name, deduplicated by
         // Graphic::ResolveCloudNoiseVolumes exactly as they are for the screen march. Separate bindings
@@ -450,9 +451,10 @@ Shader "BakeProceduralSky"
             {
                 // Clamped to the volume's far extent so a cloud past it gets what the screen's last froxel
                 // slice would have given it, rather than an integral the screen never performs.
-                float meanDistanceKm = min((aerialWeightedT / aerialWeightSum) * max(u_CloudAerial.y, 0.0f),
-                                           max(u_CloudAerial.x, 0.0f));
-                float startDepthKm   = max(u_BakeClouds.z, 0.0f);
+                float meanDistanceKm =
+                     min(CloudAerialMeanDistanceKm(aerialWeightedT, aerialWeightSum, u_CloudAerial.y),
+                         max(u_CloudAerial.x, 0.0f));
+                float startDepthKm = max(u_BakeClouds.z, 0.0f);
 
                 SkyScatterResult air =
                      SkyApIntegrateSegment(atm, originKm, dir, UnpackSunDirection(s),
@@ -466,14 +468,11 @@ Shader "BakeProceduralSky"
                 vec3  inScatter = air.Luminance * UnpackSkyAndAerialPerspectiveLuminanceFactor(s);
                 float airT      = (air.Transmittance.r + air.Transmittance.g + air.Transmittance.b) / 3.0f;
 
-                float cloudCoverage = 1.0f - clamp(transmittance, 0.0f, 1.0f);
-
-                float aerialAmount = 1.0f;
-                if (u_CloudFade.y > 0.0f)
-                    aerialAmount = clamp((meanDistanceKm - u_CloudFade.x) / u_CloudFade.y, 0.0f, 1.0f);
-
-                vec3 hazed = inScatter * cloudCoverage + airT * luminance;
-                luminance  = mix(luminance, hazed, aerialAmount);
+                // The composition and the ramp are the screen march's, from the header both include —
+                // only WHERE the air came from differs between the two passes.
+                luminance = CloudApplyAerialPerspective(
+                     luminance, transmittance, inScatter, airT,
+                     CloudAerialAmount(meanDistanceKm, u_CloudFade.x, u_CloudFade.y));
             }
 
             result.Luminance     = luminance;

@@ -1034,16 +1034,47 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Aerial Perspective Start Distance" ), Category( "Lighting" ), Length,
                   Range( 0.0f, 20000000.0f ), Advanced,
-                  Tooltip( "Distance before the atmosphere begins to haze the clouds. At 0 — the physical "
-                           "answer, and UE's default — ninety kilometres of air erases a cloud on the "
-                           "horizon completely, which is correct and is not always what a sky is wanted to "
-                           "look like. Pushing it out keeps the distant band visible." ) )
+                  Tooltip( "Distance inside which the clouds are shown through NO atmosphere at all. Zero "
+                           "— the default here and in UE — is the honest answer: the cloud is seen through "
+                           "the same air as the sky beside it. Raise it only to keep a distant band louder "
+                           "than the air allows, and know that it removes the haze from everything nearer "
+                           "as well." ) )
+        // ZERO, AND THE JUSTIFICATION FOR THE OLD DEFAULT WAS MEASURED AND FOUND FALSE (D21). What stood
+        // here claimed that at 0 "ninety kilometres of air erases a cloud on the horizon completely". Our
+        // own medium says otherwise: walking the aerial-perspective volume with the shipped Earth
+        // parameters, the mean transmittance along a horizon ray is 0.81 at 10 km, 0.56 at 30 km, 0.36 at
+        // 60 km and 0.24 at 90 km — and 60 km is where the clouds STOP, because that is what
+        // MaxViewDistance holds in every scene in the repository. A third of the contrast surviving is a
+        // hazed band, not an erased one, and no cloud in this engine is ever at 90 km to begin with.
+        //
+        // The knob is real and stays: it is UE's (AerialPespectiveRayleighScatteringStartDistance, also 0
+        // by default), and a sky that wants its far band louder than the air allows is a legitimate
+        // request. What it is NOT is a fix for the atmosphere being too strong — the term is exactly the
+        // sky's own (Common/CloudAerial.glslh, and the relations pinned in Tests/Engine/SkyScattering),
+        // so a cloud it has taken away has become the sky rather than gone dark.
+        //
+        // The shape of the dial is worth reading before reaching for it: BELOW the start distance the
+        // atmosphere is not attenuated, it is absent. 43 scenes here carried 30 km / 90 km, which deleted
+        // the aerial perspective outright inside 30 km — where most of a layer lives — and admitted a
+        // third of it at the farthest cloud the layer can hold. It was in three scenes whose cloud layer
+        // is switched OFF, which is what settled that it was a copy and not a decision.
+        //
+        // WHAT REMOVING IT COST AND BOUGHT, on Clouds_Protocol at the six dome points (noise floor 0
+        // bytes, measured by repeat): the frame's own contrast did not move at all — 0.545 -> 0.541 at the
+        // horizon, 0.399 -> 0.395 at 45 degrees, 0.456 -> 0.455 at the zenith — so the atmosphere is not
+        // flattening anything. What moved is COLOUR: mean saturation 0.137 -> 0.207 at the horizon,
+        // 0.132 -> 0.180 at mid, 0.227 -> 0.248 at the zenith, the gain scaling with how much air is in
+        // front, which is the signature it should have. Over the far band alone (30-60 km) the internal
+        // contrast falls to 0.49 of what it was and the saturation rises by half — and 0.49 is the air's
+        // own transmittance over that band, which is the whole argument: the term is exactly as strong as
+        // the medium says and not a step stronger.
         float AerialPerspectiveStartDistance = 0.0f;
 
         PROPERTY( DisplayName( "Aerial Perspective Fade Distance" ), Category( "Lighting" ), Length,
                   Range( 0.0f, 20000000.0f ), Advanced,
-                  Tooltip( "Distance over which the haze reaches full strength once it has started. Zero "
-                           "applies it in full immediately." ) )
+                  Tooltip( "Distance over which the haze ramps from nothing to full once it has started. "
+                           "Zero applies it in full immediately, which is what makes the start distance "
+                           "above inert on its own." ) )
         float AerialPerspectiveFadeDistance = 0.0f;
 
         PROPERTY( DisplayName( "Ambient Scale" ), Category( "Lighting" ), Color,

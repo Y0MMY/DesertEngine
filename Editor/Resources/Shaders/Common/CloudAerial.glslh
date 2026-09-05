@@ -1,0 +1,93 @@
+// The aerial perspective ON CLOUDS: how the air between the camera and a cloud is composed with the
+// cloud's own radiance. Dual-compile dialect (Common/CloudNoise.glslh states the rules); driven as C++
+// by Desert/Tests/Engine/SkyScattering.
+//
+// TWO PASSES STATE THIS, and before this header they stated it twice in their own words:
+// Programs/Clouds/CloudRaymarch.shader FETCHES the atmosphere from the froxel volume the sky filled,
+// Programs/Compute/BakeProceduralSky.shader INTEGRATES the same air itself because the panorama bake has
+// no camera frustum to fetch from. Where the air comes from is genuinely different; what is done with it
+// once it arrives is not, and that half is here so the two cannot drift. (The screen pass and the bake
+// disagreeing about a cloud term is not hypothetical in this engine — it is why the bake owed a sun
+// multiply for a whole programme.)
+//
+// THE COMPOSITION, and why it is the shape it is. The march hands back a premultiplied pair: `luminance`
+// is the light the cloud scattered toward the eye and `cloudTransmittance` is what survives THROUGH it,
+// so the frame composites the cloud as `scene = luminance + scene * cloudTransmittance`
+// (Programs/Clouds/CloudComposite.shader). The sky pixel that `scene` holds is the FULL integral of the
+// same medium along the same ray, and the aerial-perspective pair (`apInScatter`, `apTransmittance`) is
+// that same integral truncated at the cloud. Those two facts fix the composition completely:
+//
+//     sky            = apInScatter + apTransmittance * skyBeyondTheCloud
+//     the true pixel = apInScatter + apTransmittance * ( luminance + cloudTransmittance * skyBeyond )
+//
+// and eliminating skyBeyond between them leaves exactly
+//
+//     luminance' = apInScatter * ( 1 - cloudTransmittance ) + apTransmittance * luminance
+//
+// which is what CloudApplyAerialPerspective computes, and is Unreal's line verbatim
+// (VolumetricCloud.usf: `Luminance = AerialPerspective.rgb * CloudMeanCoverage + AerialPerspective.a *
+// Luminance`). The consequence worth stating, because it is the relation the tests assert: after this the
+// cloud's contrast against the sky beside it is multiplied by `apTransmittance` and by NOTHING else, so a
+// cloud the atmosphere has erased is the sky, rather than being dark, bright or the wrong hue.
+//
+// `apTransmittance` is a SCALAR — the mean of the three channels — and that is deliberate on both sides:
+// the froxel volume has one lane left after the in-scatter, and Unreal collapses it the same way for the
+// same reason ("We use gray scale transmittance to match the rendering when applying the AerialPerspective
+// texture", SkyAtmosphere.usf). What it costs is the reddening of the cloud's OWN light at long range; the
+// light the air ADDS keeps its full spectrum, and that is the term that dominates.
+
+#ifndef CLOUD_AERIAL_GLSLH
+#define CLOUD_AERIAL_GLSLH
+
+// The one distance the whole term is evaluated at: the transmittance-weighted mean of the marched
+// samples, i.e. where the cloud the eye can actually see is, not where the ray entered the shell. The
+// weights are recorded BEFORE each sample attenuates the ray, so they measure what a sample was able to
+// contribute. @p viewDistanceScale is the atmosphere's own art-direction dial
+// (SkyAtmosphereComponent::AerialPerspectiveViewDistanceScale), applied on the read side by every
+// consumer of the volume because the volume itself is filled without it.
+//
+// Callers must have found at least one sample; with no weight there is no cloud to haze and the term is
+// skipped entirely rather than evaluated at a fabricated distance.
+float CloudAerialMeanDistanceKm( float weightedDistanceKm, float weightSum, float viewDistanceScale )
+{
+    return ( weightedDistanceKm / max( weightSum, 1e-8f ) ) * max( viewDistanceScale, 0.0f );
+}
+
+// How much of the atmosphere to apply, in [0,1]. Full is the physical answer and both engines' default;
+// a fade distance of zero means "in full, immediately", which is the ramp degenerating rather than a
+// special case. Unreal computes the same ramp as `saturate( ( distance - start ) * fadeInverse )`.
+//
+// This is an ART-DIRECTION dial and it can only ever REMOVE atmosphere, never add it: at less than 1 the
+// cloud is being shown through less air than the sky beside it is, which is a deliberate lie and looks
+// like one when it is pushed far. BELOW the start distance the atmosphere is not weakened, it is absent —
+// which is the part that surprises, because the name says "start" and reads as "the haze begins here".
+//
+// ONE DELIBERATE DIVERGENCE FROM UNREAL, stated because a setting ported between the two will not mean
+// the same thing. Unreal's start distance ALSO shifts the volume lookup (SkyAtmosphereCommon.ush:
+// `tDepth = max( 0, length - StartDepth )`), so its cloud reads the froxel at a shorter distance than it
+// actually is, and it therefore samples air the sky beside it is not looking through. We read the volume
+// at the cloud's true distance and ramp only the amount, which is what keeps the relation the whole term
+// is for: cloud and sky at one distance see one atmosphere. At the default of 0 the two engines are
+// identical; above it ours applies more haze at the same setting, and ours is the one that stays honest.
+float CloudAerialAmount( float meanDistanceKm, float startDistanceKm, float fadeDistanceKm )
+{
+    if ( fadeDistanceKm <= 0.0f )
+        return 1.0f;
+    return clamp( ( meanDistanceKm - startDistanceKm ) / fadeDistanceKm, 0.0f, 1.0f );
+}
+
+// The composition itself. @p luminance and @p cloudTransmittance are the march's premultiplied pair;
+// @p apInScatter and @p apTransmittance are the atmosphere between the camera and the cloud.
+//
+// The @p amount lerp is applied to the RESULT rather than to the atmosphere sample, and the two are the
+// same thing: fading the sample toward "no atmosphere" — Unreal's `AP.rgb *= w; AP.a = 1 - w * (1 - AP.a)`
+// — expands to exactly this mix, which the tests pin so the cheaper form here stays honest.
+vec3 CloudApplyAerialPerspective( vec3 luminance, float cloudTransmittance, vec3 apInScatter,
+                                  float apTransmittance, float amount )
+{
+    float cloudCoverage = 1.0f - clamp( cloudTransmittance, 0.0f, 1.0f );
+    vec3  hazed         = apInScatter * cloudCoverage + apTransmittance * luminance;
+    return mix( luminance, hazed, clamp( amount, 0.0f, 1.0f ) );
+}
+
+#endif // CLOUD_AERIAL_GLSLH

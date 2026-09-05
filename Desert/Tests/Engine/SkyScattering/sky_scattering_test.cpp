@@ -19,14 +19,22 @@
 //   * energy sanity — non-negative everywhere, transmittance a survival probability, the Mie forward
 //     lobe brighter toward the sun than away from it, the multi-scattering term linear in Psi;
 //   * the sun disc's limb darkening is 1 at the centre, falls to the rim, and reddens there.
+//
+// The last section adds a second unit and a RELATION between them: Common/CloudAerial.glslh (the cloud
+// march's aerial-perspective composition, through CloudAerialReference.hpp) against this file's own sky.
+// A cloud the air has taken away must BE the sky beside it, and that is a statement neither pass can
+// make about itself.
 
+#include "CloudAerialReference.hpp"
 #include "SkyScatteringReference.hpp"
 
 #include <Engine/Graphic/SkyPayload.hpp>
 
+#include <glm/gtx/component_wise.hpp>
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 
 namespace Ref = Desert::Tests::SkyScatteringRef;
 
@@ -1047,6 +1055,281 @@ TEST( SkySunAtPointReader, TheShadowAndTheFetchSwitchOffTogetherAtTheSamplesOwnH
                     "distinguishing a high deck from the ground";
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The cloud's aerial perspective — a RELATION between two passes, not a value in one of them
+//
+// A cloud and the sky beside it are seen through the same air. The sky pixel is the full integral of
+// the medium along the ray; the cloud pixel is that integral truncated at the cloud, composed with what
+// the cloud itself scattered. What must be true is that the two agree — a cloud the atmosphere has taken
+// away has to BECOME the sky, not merely fade toward something. A composition that is off by a factor,
+// or that hazes toward a colour the sky does not have, passes every test of either pass alone and is
+// visible in a frame as a distant band that is too dark, too pale or the wrong hue.
+//
+// Both sides come from the shaders' own text: Common/CloudAerial.glslh through CloudAerialReference.hpp
+// (the composition and the ramp, shared by the screen march and the panorama bake) and
+// Common/SkyScattering.glslh through SkyScatteringReference.hpp (the froxel walk and the distant sky).
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // The froxel column's walk, exactly as SkyAerialPerspectiveLut.shader performs it, stopped at
+    // @p distanceKm. That is the quantity the volume holds and the cloud march fetches, so it is the
+    // right stand-in for the texture read — the interpolation between slices is the only thing left out.
+    Ref::SkyScatterResult ApTo( const Ref::SkyAtmParams& p, const glm::vec3& originKm, const glm::vec3& rayDir,
+                                const glm::vec3& sunDir, const glm::vec3& sun, float distanceKm,
+                                float startDepthKm )
+    {
+        glm::vec3 luminance( 0.0f );
+        glm::vec3 transmittance( 1.0f );
+        float     tPrev = 0.0f;
+
+        for ( int slice = 0; slice < 16; ++slice )
+        {
+            const float unit  = static_cast<float>( slice ) / 15.0f;
+            const float tNext = glm::min( Ref::SkyApDistanceFromSliceUnit( unit, 96.0f ), distanceKm );
+
+            const Ref::SkyScatterResult step =
+                 Ref::SkyApIntegrateSegment( p, originKm, rayDir, sunDir, sun, glm::max( tPrev, startDepthKm ),
+                                             glm::max( tNext, startDepthKm ), luminance, transmittance );
+            luminance     = step.Luminance;
+            transmittance = step.Transmittance;
+            tPrev         = tNext;
+
+            if ( tPrev >= distanceKm )
+                break;
+        }
+
+        Ref::SkyScatterResult r;
+        r.Luminance     = luminance;
+        r.Transmittance = transmittance;
+        return r;
+    }
+
+    float MeanChannel( const glm::vec3& v )
+    {
+        return ( v.r + v.g + v.b ) / 3.0f;
+    }
+} // namespace
+
+TEST( CloudAerialPerspective, AmountIsUnrealsRampAndFullByDefault )
+{
+    namespace Cloud = Desert::Tests::CloudAerialRef;
+
+    // A fade distance of zero is "apply it in full, immediately" — the ramp degenerating, not a branch
+    // that skips the term. Both engines default to this, and it is what the component's defaults give.
+    for ( const float d : { 0.0f, 1.0f, 30.0f, 500.0f } )
+    {
+        EXPECT_FLOAT_EQ( Cloud::CloudAerialAmount( d, 0.0f, 0.0f ), 1.0f ) << "distance " << d;
+        EXPECT_FLOAT_EQ( Cloud::CloudAerialAmount( d, 30.0f, 0.0f ), 1.0f ) << "distance " << d;
+    }
+
+    // With a ramp it is saturate( ( distance - start ) / fade ), the same expression Unreal evaluates as
+    // saturate( tDepth * FadeDistanceKmInv ).
+    EXPECT_FLOAT_EQ( Cloud::CloudAerialAmount( 10.0f, 30.0f, 90.0f ), 0.0f );
+    EXPECT_FLOAT_EQ( Cloud::CloudAerialAmount( 30.0f, 30.0f, 90.0f ), 0.0f );
+    EXPECT_FLOAT_EQ( Cloud::CloudAerialAmount( 60.0f, 30.0f, 90.0f ), 1.0f / 3.0f );
+    EXPECT_FLOAT_EQ( Cloud::CloudAerialAmount( 120.0f, 30.0f, 90.0f ), 1.0f );
+    EXPECT_FLOAT_EQ( Cloud::CloudAerialAmount( 500.0f, 30.0f, 90.0f ), 1.0f );
+
+    // Monotone and bounded, so the dial can only ever remove atmosphere and never add it.
+    float previous = -1.0f;
+    for ( int i = 0; i <= 40; ++i )
+    {
+        const float a = Cloud::CloudAerialAmount( static_cast<float>( i ) * 5.0f, 30.0f, 90.0f );
+        EXPECT_GE( a, previous );
+        EXPECT_GE( a, 0.0f );
+        EXPECT_LE( a, 1.0f );
+        previous = a;
+    }
+}
+
+TEST( CloudAerialPerspective, MeanDistanceIsTheTransmittanceWeightedOne )
+{
+    namespace Cloud = Desert::Tests::CloudAerialRef;
+
+    // Two samples, the near one twice as visible as the far one: the term is evaluated where the cloud
+    // the eye can SEE is, not at the middle of the marched span.
+    const float weighted = 4.0f * 0.8f + 20.0f * 0.4f;
+    const float sum      = 0.8f + 0.4f;
+    EXPECT_FLOAT_EQ( Cloud::CloudAerialMeanDistanceKm( weighted, sum, 1.0f ), weighted / sum );
+
+    // The atmosphere's view-distance scale is a multiplier on the read side, and a negative one is
+    // clamped away rather than folding the cloud to the camera.
+    EXPECT_FLOAT_EQ( Cloud::CloudAerialMeanDistanceKm( weighted, sum, 2.0f ), 2.0f * weighted / sum );
+    EXPECT_FLOAT_EQ( Cloud::CloudAerialMeanDistanceKm( weighted, sum, -1.0f ), 0.0f );
+}
+
+TEST( CloudAerialPerspective, ACloudThatIsTheSkyBehindItCompositesToTheSky )
+{
+    namespace Cloud = Desert::Tests::CloudAerialRef;
+
+    ResetLutCallbacks();
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec3 origin( 0.0f, p.BottomRadiusKm + 0.002f, 0.0f );
+    const glm::vec3 sunDir = glm::normalize( glm::vec3( 0.0f, 0.35f, -0.94f ) );
+    const glm::vec3 sun( 22.0f );
+
+    for ( const glm::vec3 rayDir :
+          { glm::normalize( glm::vec3( 0.0f, 0.0349f, -1.0f ) ), glm::normalize( glm::vec3( 0.4f, 0.20f, -0.9f ) ),
+            glm::normalize( glm::vec3( -0.3f, 0.70f, 0.6f ) ) } )
+    {
+        // The pixel the frame already holds where there is no cloud: the whole medium, to the shell.
+        const Ref::SkyScatterResult sky =
+             Ref::SkyIntegrateScatteredLuminance( p, origin, rayDir, sunDir, sun, 64 );
+
+        for ( const float distanceKm : { 5.0f, 20.0f, 60.0f, 96.0f } )
+        {
+            const Ref::SkyScatterResult ap = ApTo( p, origin, rayDir, sunDir, sun, distanceKm, 0.1f );
+
+            // The sky the cloud stands in front of, marched from the cloud's own position. The medium is
+            // additive along the ray, so this and the volume must reconstruct the sky pixel exactly —
+            // the premise everything below rests on, asserted rather than assumed.
+            const glm::vec3             beyondOrigin = origin + rayDir * distanceKm;
+            const Ref::SkyScatterResult beyond =
+                 Ref::SkyIntegrateScatteredLuminance( p, beyondOrigin, rayDir, sunDir, sun, 64 );
+
+            // The only slack anywhere below: two quadratures of one integral (16 froxel segments against
+            // a 64-sample march) never agree to the last bit. Everything else is asserted exactly.
+            const float quadrature = 0.02f;
+
+            const glm::vec3 reconstructed = ap.Luminance + ap.Transmittance * beyond.Luminance;
+            EXPECT_NEAR( reconstructed.r, sky.Luminance.r, quadrature ) << "d=" << distanceKm;
+            EXPECT_NEAR( reconstructed.g, sky.Luminance.g, quadrature ) << "d=" << distanceKm;
+            EXPECT_NEAR( reconstructed.b, sky.Luminance.b, quadrature ) << "d=" << distanceKm;
+
+            // THE TEST. A "cloud" that emits exactly the sky behind it, over any coverage, is not a
+            // cloud at all — the composite has to give the sky pixel back untouched. It is the strongest
+            // available statement that the cloud is hazed toward the SKY and not toward some other
+            // colour: a wrong factor on either term, or an in-scatter added twice, leaves a residue here
+            // that no picture of a real cloud would separate from "the distant band looks a bit off".
+            for ( const float cloudTransmittance : { 0.0f, 0.25f, 0.6f, 0.95f } )
+            {
+                const glm::vec3 asIfAir = ( 1.0f - cloudTransmittance ) * beyond.Luminance;
+
+                const glm::vec3 hazed = Cloud::CloudApplyAerialPerspective(
+                     asIfAir, cloudTransmittance, ap.Luminance, MeanChannel( ap.Transmittance ), 1.0f );
+                const glm::vec3 pixel = hazed + cloudTransmittance * sky.Luminance;
+
+                // EXACTLY the sky, up to ONE named term: the volume's scalar alpha standing in for a
+                // spectral transmittance, which Unreal collapses the same way and for the same reason.
+                // Written out rather than absorbed into a tolerance — the residue is
+                // ( meanT - transmittance ) times the cloud's own light, and stating it that way means
+                // the test measures the approximation instead of hiding a wrong factor behind it.
+                const glm::vec3 collapse = ( MeanChannel( ap.Transmittance ) - ap.Transmittance ) * asIfAir;
+
+                EXPECT_NEAR( pixel.r, sky.Luminance.r + collapse.r, quadrature )
+                     << "d=" << distanceKm << " Tc=" << cloudTransmittance;
+                EXPECT_NEAR( pixel.g, sky.Luminance.g + collapse.g, quadrature )
+                     << "d=" << distanceKm << " Tc=" << cloudTransmittance;
+                EXPECT_NEAR( pixel.b, sky.Luminance.b + collapse.b, quadrature )
+                     << "d=" << distanceKm << " Tc=" << cloudTransmittance;
+            }
+        }
+    }
+}
+
+TEST( CloudAerialPerspective, ContrastAgainstTheSkyIsAttenuatedByTheAirAndNothingElse )
+{
+    namespace Cloud = Desert::Tests::CloudAerialRef;
+
+    ResetLutCallbacks();
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec3 origin( 0.0f, p.BottomRadiusKm + 0.002f, 0.0f );
+    const glm::vec3 rayDir = glm::normalize( glm::vec3( 0.0f, 0.0349f, -1.0f ) );
+    const glm::vec3 sunDir = glm::normalize( glm::vec3( 0.0f, 1.0f, 0.0f ) );
+    const glm::vec3 sun( 22.0f );
+
+    const Ref::SkyScatterResult sky = Ref::SkyIntegrateScatteredLuminance( p, origin, rayDir, sunDir, sun, 64 );
+
+    const float cloudTransmittance = 0.15f;
+    // A bright cumulus face: several times the horizon sky, which is what makes the band read as cloud.
+    const glm::vec3 cloudLuminance = ( 1.0f - cloudTransmittance ) * glm::vec3( 3.0f, 3.0f, 3.0f );
+
+    float previousResidual = std::numeric_limits<float>::max();
+
+    for ( const float distanceKm : { 5.0f, 10.0f, 20.0f, 40.0f, 60.0f, 96.0f } )
+    {
+        const Ref::SkyScatterResult ap    = ApTo( p, origin, rayDir, sunDir, sun, distanceKm, 0.1f );
+        const float                 meanT = MeanChannel( ap.Transmittance );
+
+        const glm::vec3             beyondOrigin = origin + rayDir * distanceKm;
+        const Ref::SkyScatterResult beyond =
+             Ref::SkyIntegrateScatteredLuminance( p, beyondOrigin, rayDir, sunDir, sun, 64 );
+
+        const glm::vec3 hazed =
+             Cloud::CloudApplyAerialPerspective( cloudLuminance, cloudTransmittance, ap.Luminance, meanT, 1.0f );
+        const glm::vec3 pixel = hazed + cloudTransmittance * sky.Luminance;
+
+        // The whole point, in one line: what separates the cloud from the sky beside it is the cloud's
+        // own light times the air's transmittance, LESS the sky it displaced times the same air — and
+        // nothing else. No extra fade, no second attenuation, no term that depends on how bright the
+        // cloud happens to be. The cloud's side takes the scalar alpha and the sky's side the spectral
+        // one, which is the collapse named in the test above and is written into the prediction rather
+        // than tolerated.
+        const glm::vec3 predicted =
+             meanT * cloudLuminance - ( 1.0f - cloudTransmittance ) * ap.Transmittance * beyond.Luminance;
+        const glm::vec3 measured = pixel - sky.Luminance;
+
+        EXPECT_NEAR( measured.r, predicted.r, 0.02f ) << "d=" << distanceKm;
+        EXPECT_NEAR( measured.g, predicted.g, 0.02f ) << "d=" << distanceKm;
+        EXPECT_NEAR( measured.b, predicted.b, 0.02f ) << "d=" << distanceKm;
+
+        // And it only ever shrinks with distance: more air can only take the cloud further toward the
+        // sky, never bring it back out of it.
+        const float residual = glm::length( measured );
+        EXPECT_LT( residual, previousResidual ) << "d=" << distanceKm;
+        previousResidual = residual;
+    }
+}
+
+TEST( CloudAerialPerspective, TheRampFadesTheATMOSPHERE_NotTheResultTowardNothing )
+{
+    namespace Cloud = Desert::Tests::CloudAerialRef;
+
+    ResetLutCallbacks();
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec3 origin( 0.0f, p.BottomRadiusKm + 0.002f, 0.0f );
+    const glm::vec3 rayDir = glm::normalize( glm::vec3( 0.0f, 0.0349f, -1.0f ) );
+    const glm::vec3 sunDir = glm::normalize( glm::vec3( 0.0f, 0.5f, -0.87f ) );
+    const glm::vec3 sun( 22.0f );
+
+    const Ref::SkyScatterResult ap    = ApTo( p, origin, rayDir, sunDir, sun, 60.0f, 0.1f );
+    const float                 meanT = MeanChannel( ap.Transmittance );
+
+    const float     cloudTransmittance = 0.3f;
+    const glm::vec3 cloudLuminance( 2.2f, 2.1f, 1.9f );
+
+    for ( const float amount : { 0.0f, 0.25f, 0.5f, 1.0f } )
+    {
+        const glm::vec3 ours =
+             Cloud::CloudApplyAerialPerspective( cloudLuminance, cloudTransmittance, ap.Luminance, meanT, amount );
+
+        // Unreal ramps the SAMPLE toward "no atmosphere" before composing with it
+        // (SkyAtmosphereCommon.ush: `AP.rgb *= Weight; AP.a = 1 - Weight * ( 1 - AP.a )`) and then runs
+        // the composition at full strength. Our cheaper mix of the RESULT has to be the same value, or
+        // the dial means something different here than it does there for anyone porting a setting.
+        const glm::vec3 fadedInScatter = ap.Luminance * amount;
+        const float     fadedT         = 1.0f - amount * ( 1.0f - meanT );
+        const glm::vec3 unreal         = Cloud::CloudApplyAerialPerspective( cloudLuminance, cloudTransmittance,
+                                                                             fadedInScatter, fadedT, 1.0f );
+
+        EXPECT_NEAR( ours.r, unreal.r, 1e-5f ) << "amount " << amount;
+        EXPECT_NEAR( ours.g, unreal.g, 1e-5f ) << "amount " << amount;
+        EXPECT_NEAR( ours.b, unreal.b, 1e-5f ) << "amount " << amount;
+    }
+
+    // Amount 0 is the cloud untouched — the setting the scenes shipped, stated so its meaning is not in
+    // doubt: below the start distance the atmosphere is not attenuated, it is ABSENT.
+    const glm::vec3 none =
+         Cloud::CloudApplyAerialPerspective( cloudLuminance, cloudTransmittance, ap.Luminance, meanT, 0.0f );
+    EXPECT_FLOAT_EQ( none.r, cloudLuminance.r );
+    EXPECT_FLOAT_EQ( none.g, cloudLuminance.g );
+    EXPECT_FLOAT_EQ( none.b, cloudLuminance.b );
 }
 
 int main( int argc, char** argv )
