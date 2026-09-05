@@ -986,6 +986,65 @@ namespace Desert::ECS
         WidthControlsHeight  // height = width / ratio
     };
 
+    // ------------------------------------------------------------------------------------------------
+    // ELEMENT VISIBILITY — TWO AXES, NOT ONE FIVE-VALUED WORD
+    //
+    // UE spells this as ESlateVisibility, one enum with five values. Decomposed, those five answer two
+    // independent questions that were glued together, which is where the awkward names come from:
+    //
+    //   ESlateVisibility       drawn  keeps layout space  self hit-tests  children hit-test
+    //   Visible                 yes         yes                yes              yes
+    //   Hidden                  no          yes                no               no
+    //   Collapsed               no          no                 no               no
+    //   HitTestInvisible        yes         yes                no               no
+    //   SelfHitTestInvisible    yes         yes                no               yes
+    //
+    // The first two columns are one question and the last two are another, so the two enums below are
+    // that decomposition. Two fields are simpler to author and to serialize, they are strictly more
+    // expressive than the five words (UE exposes five of the products; every product here is reachable),
+    // and the second one is exactly the shape the walk already had — per-element flags.
+    // ------------------------------------------------------------------------------------------------
+
+    // Is the element on screen, and does it still hold its place in the parent's layout?
+    //
+    // Collapsed vs Hidden is the whole reason this axis exists and is only observable inside a
+    // UILayoutGroup (VBox / HBox / Grid): a Collapsed child gets no slot and its siblings close the gap,
+    // a Hidden one keeps its slot and leaves a hole. Under plain anchor layout the two look identical,
+    // because siblings there are positioned against the parent and have nothing to close up.
+    //
+    // Neither is hit-testable: an element nobody can see must not eat clicks, which is also UE's rule.
+    // Both take their whole sub-tree with them.
+    enum class UIVisibility
+    {
+        Visible,  // drawn, holds its slot, hit-tested per UIHitTest below
+        Hidden,   // not drawn, KEEPS its slot in the parent's layout group, hit-tests nothing
+        Collapsed // not drawn, DROPS OUT of the parent's layout group, hit-tests nothing
+    };
+
+    // What the pointer sees of this element AND of everything under it.
+    //
+    // THIS AXIS ABSORBED THE TWO BOOLEANS THAT USED TO SIT HERE, and the mapping is:
+    //   RaycastTarget = false  ->  ChildrenOnly   (identical behaviour: the element is transparent to the
+    //                                              pointer, its children are not — UE SelfHitTestInvisible)
+    //   Interactable  = false  ->  Blocking       (the element stops the pointer and responds to nothing;
+    //                                              what is NEW is that its sub-tree is inert too, so
+    //                                              greying out a form or a modal dialog is one field
+    //                                              instead of one field per descendant)
+    // `None` is the value neither boolean could express — UE's HitTestInvisible, where the element and its
+    // whole sub-tree are transparent, so a decorative overlay lets every click through to what is behind.
+    //
+    // WHY FOUR VALUES AND NOT THREE. UE needs a second, separate concept (IsEnabled) for "visible, blocks
+    // the pointer, responds to nothing", which is precisely what our Interactable was. Folding it in here
+    // rather than leaving it beside this field keeps one source of truth for "what does the pointer do
+    // with this element", at the price of one extra enumerator.
+    enum class UIHitTest
+    {
+        All,          // the element and its children take the pointer and respond (the default)
+        ChildrenOnly, // the element is transparent to the pointer; its children still take it
+        Blocking,     // the element stops the pointer; neither it nor its sub-tree responds to anything
+        None          // the element and its whole sub-tree are transparent to the pointer
+    };
+
     // Godot Control-like rect: anchors (fraction of the parent rect, 0..1), offsets (pixels from the anchored
     // edges), a custom minimum size, a pivot and content clipping. The layout solver turns these into a screen
     // rect each frame. AnchorMin==AnchorMax => fixed-size element positioned by offsets; spread anchors =>
@@ -1015,14 +1074,17 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Clip Contents" ), Category( "UI Layout" ) )
         bool ClipContents = false;
 
-        // Hit testing. RaycastTarget = does the pointer see this element at all (off = clicks fall through
-        // to whatever is behind, for decorative overlays); Interactable = does it RESPOND (off = it still
-        // blocks what is under it, but hover/press/drag do nothing). Unity draws the same distinction.
-        PROPERTY( DisplayName( "Interactable" ), Category( "UI Interaction" ) )
-        bool Interactable = true;
+        // Is this element on screen, and does it keep its place when it is not? Collapsed is the one that
+        // changes the LAYOUT: inside a VBox/HBox/Grid it drops the element's slot and the siblings close
+        // up, where Hidden leaves the hole. See UIVisibility.
+        PROPERTY( DisplayName( "Visibility" ), Category( "UI Layout" ) )
+        UIVisibility Visibility = UIVisibility::Visible;
 
-        PROPERTY( DisplayName( "Raycast Target" ), Category( "UI Interaction" ) )
-        bool RaycastTarget = true;
+        // What the pointer sees of this element and of its whole sub-tree. Replaces the Interactable /
+        // Raycast Target pair, which said the same things per element and could not say them about a
+        // sub-tree at all — see UIHitTest for which old flag became which value.
+        PROPERTY( DisplayName( "Hit Test" ), Category( "UI Interaction" ) )
+        UIHitTest HitTest = UIHitTest::All;
 
         // Aspect Ratio Fitter (Phase B): keep this width/height ratio, deriving the free axis about the centre.
         PROPERTY( DisplayName( "Aspect Ratio (W/H)" ), Category( "Fitter" ), Range( 0.0f, 8.0f ) )

@@ -71,6 +71,10 @@ namespace Desert::Migration
     //                   a hundred times too weak, and were only harmless because nothing read the field:
     //                   the physics world set its gravity from a literal instead. That literal is gone in
     //                   the same change, so the value now has to be right
+    //  10             - a UI element states its visibility and its hit testing as two enums. The
+    //                   `Interactable` / `RaycastTarget` booleans on `UILayout` are gone: they said the
+    //                   same two things about the element alone, and could say nothing at all about its
+    //                   sub-tree
     inline constexpr int kSceneVersionSky             = 1;
     inline constexpr int kSceneVersionTonemap         = 2;
     inline constexpr int kSceneVersionCloudNoise      = 3;
@@ -80,12 +84,13 @@ namespace Desert::Migration
     inline constexpr int kSceneVersionTerrainMaterial = 7;
     inline constexpr int kSceneVersionMaterialPath    = 8;
     inline constexpr int kSceneVersionGravityUnits    = 9;
+    inline constexpr int kSceneVersionUIVisibility    = 10;
 
     // The last step this tool knows and the generation the engine requires are ONE number, and this is
     // where that is checked. If a schema step is ever added here without raising Core::kSceneVersion, the
     // tool would stamp files at a version the loader refuses - every scene in the repository would stop
     // opening at once, and the file that caused it would look correct in isolation.
-    static_assert( kSceneVersionGravityUnits == kSceneVersion,
+    static_assert( kSceneVersionUIVisibility == kSceneVersion,
                    "the last migration step and the engine's required scene version must be the same "
                    "generation - raise Core::kSceneVersion in Engine/Core/Serialize/SceneFormat.hpp" );
 
@@ -474,6 +479,51 @@ namespace Desert::Migration
     // SHELF LIFE: this raises v8 to v9 and nothing else. It is deleted once no v8 file remains.
     GravityUnitsMigrationReport MigrateGravityUnitsV8ToV9( std::optional<rfl::Generic>& settings );
 
+    // What MigrateUIVisibilityV9ToV10 did to one file.
+    struct UIVisibilityMigrationReport
+    {
+        int Entities     = 0; // entities carrying a "UILayout" payload that was touched
+        int FlagsDropped = 0; // "Interactable" / "RaycastTarget" keys removed (0..2 per entity)
+        int HitTestSet   = 0; // entities that gained an explicit "HitTest" because a flag was off
+
+        // Keys that were present but were not a boolean at all. Removed like the rest - the field they
+        // named no longer exists - and NAMED rather than counted, because "1 value dropped" does not tell
+        // anyone which element stopped blocking clicks (DC 1.4). The element keeps UIHitTest::All.
+        std::vector<std::string> BrokenNames;
+    };
+
+    // Raises a scene from schema v9 to v10: an element's hit testing stops being two booleans on
+    // `UILayout` and becomes one enum, beside a second enum for its visibility.
+    //
+    // WHICH OLD FLAG BECAME WHICH VALUE, and this is the whole of the conversion:
+    //
+    //   * `RaycastTarget = false` -> `HitTest = 1` (ChildrenOnly). Identical behaviour: the element is
+    //     transparent to the pointer while its children are not. It is what UE calls
+    //     SelfHitTestInvisible, and it is the only one of the two that had a UE name at all.
+    //   * `Interactable = false`  -> `HitTest = 2` (Blocking). The element stops the pointer and reacts to
+    //     nothing. Behaviour CHANGES in one direction, deliberately: it now applies to the sub-tree too,
+    //     which is what makes a greyed-out form or a modal dialog one field instead of one field per
+    //     descendant. Nothing in this repository sets the flag, so no shipped scene moves.
+    //   * Both false -> ChildrenOnly. A transparent element cannot be pressed anyway, so the raycast
+    //     answer subsumes the other; picking Blocking there would ADD blocking the file never asked for.
+    //   * `true` (either flag) is the default and writes nothing: an absent key is how the reflection
+    //     serializer spells "leave it at the C++ default", and both defaults are UIHitTest::All.
+    //
+    // `Visibility` is never written. The old format had no way to say anything but "visible" - the single
+    // `Visible` bool lived on the CANVAS and is untouched by this step - so every value it could take
+    // would be invented.
+    //
+    // A key that is present but is not a boolean is dropped and reported by name; the element keeps the
+    // default rather than being guessed at, which is the same refusal the gravity step makes.
+    //
+    // PURE - no GPU, no filesystem, no global state. The counters go back to the caller, which is the one
+    // that knows which file this was.
+    //
+    // Idempotent: a payload with neither key is left byte-identical and reports zero.
+    //
+    // SHELF LIFE: this raises v9 to v10 and nothing else. It is deleted once no v9 file remains.
+    UIVisibilityMigrationReport MigrateUIVisibilityV9ToV10( std::vector<Assets::EntityData>& entities );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -499,12 +549,15 @@ namespace Desert::Migration
         // the schema was below kSceneVersionGravityUnits
         bool                        GravityUnitsRaised = false;
         GravityUnitsMigrationReport GravityUnits;
+        // the schema was below kSceneVersionUIVisibility
+        bool                        UIVisibilityRaised = false;
+        UIVisibilityMigrationReport UIVisibility;
 
         bool Changed() const
         {
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
                    CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised ||
-                   GravityUnitsRaised;
+                   GravityUnitsRaised || UIVisibilityRaised;
         }
     };
 

@@ -18,6 +18,22 @@
 // to the renderer's rect resolution belongs here too.
 namespace Desert::UI
 {
+    // --- The visibility axis, asked once ------------------------------------------------------------
+    // Three places resolve an element's rect — the renderer's walk, the editor's pick, the editor's
+    // marquee — and a fourth measures a container's content for the size fitter. All four have to agree
+    // on WHICH CHILDREN EXIST, because a child counted by the layout and not by the pick is an element
+    // drawn where nothing can click it, which is this project's recurring defect shape. So the two
+    // questions are asked through these two functions and nowhere else.
+
+    // Does @p e occupy a slot in its parent's auto-layout group? Only ECS::UIVisibility::Collapsed drops
+    // out; Hidden keeps its slot, and that difference IS the layout axis. An element with no UILayout has
+    // nothing to say and takes its slot.
+    [[nodiscard]] bool TakesLayoutSpace( entt::registry& reg, entt::entity e );
+
+    // Is @p e drawn at all — and therefore hit-testable at all? False for Hidden and Collapsed, both of
+    // which take their whole sub-tree with them.
+    [[nodiscard]] bool IsElementVisible( entt::registry& reg, entt::entity e );
+
     // In-scene UI editing (viewport WYSIWYG). Returns the topmost UI element whose resolved rect contains
     // `pointPx`, or entt::null. `viewportPx` must be the SAME rect the canvas was drawn into so hit-testing
     // matches what is on screen.

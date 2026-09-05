@@ -1206,6 +1206,95 @@ namespace Desert::Migration
         return report;
     }
 
+    UIVisibilityMigrationReport MigrateUIVisibilityV9ToV10( std::vector<Assets::EntityData>& entities )
+    {
+        static constexpr const char* kInteractableKey  = "Interactable";
+        static constexpr const char* kRaycastTargetKey = "RaycastTarget";
+        static constexpr const char* kHitTestKey       = "HitTest";
+
+        // The enumerators of ECS::UIHitTest, which is what the reflected serializer reads this key back
+        // as. Stated as named constants rather than as bare 1 and 2 at the assignment, because an integer
+        // in a migration is exactly the thing nobody can check against the enum six months later.
+        constexpr int kHitTestChildrenOnly = 1; // the old RaycastTarget = false
+        constexpr int kHitTestBlocking     = 2; // the old Interactable  = false
+
+        UIVisibilityMigrationReport report;
+
+        for ( auto& entity : entities )
+        {
+            const auto layout = entity.Components.get( "UILayout" );
+            if ( !layout.has_value() )
+                continue;
+
+            const auto fields = layout.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': the UILayout payload is {1}, not an object - its "
+                          "interaction flags could not be folded into Hit Test",
+                          entity.Tag.value_or( "Entity" ), Describe( layout.value() ) );
+                continue;
+            }
+
+            // Rebuilt rather than edited in place, like every step above it: rfl::Object is an ordered
+            // vector of pairs with no erase and no rename, and copying every key except the two states the
+            // intent more plainly than an index dance. The new key is appended once, after the loop, so
+            // that two old keys can never produce two of it.
+            rfl::Generic::Object kept;
+            int                  dropped = 0;
+            std::optional<int>   hitTest;
+
+            for ( const auto& [key, value] : fields.value() )
+            {
+                const bool isRaycast = ( key == kRaycastTargetKey );
+                if ( key != kInteractableKey && !isRaycast )
+                {
+                    kept[key] = value;
+                    continue;
+                }
+
+                ++dropped;
+
+                const auto flag = value.to_bool();
+                if ( !flag.has_value() )
+                {
+                    // Neither true nor false: there is no behaviour to carry, and inventing one would be
+                    // the silent substitution DC 1.4 forbids. The key goes (the field it named is gone
+                    // either way) and the element keeps UIHitTest::All.
+                    report.BrokenNames.push_back( entity.Tag.value_or( "Entity" ) + "." + key );
+                    LOG_WARN( "[SceneMigration] entity '{0}': UILayout.{1} is {2}, not a boolean - the "
+                              "element keeps the default Hit Test (All)",
+                              entity.Tag.value_or( "Entity" ), key, Describe( value ) );
+                    continue;
+                }
+                if ( flag.value() )
+                    continue; // the default on both flags; an absent key IS UIHitTest::All
+
+                // A transparent element cannot be pressed anyway, so RaycastTarget's answer subsumes
+                // Interactable's whenever both are off. Writing Blocking there would ADD blocking that the
+                // file never asked for.
+                if ( isRaycast )
+                    hitTest = kHitTestChildrenOnly;
+                else if ( !hitTest.has_value() )
+                    hitTest = kHitTestBlocking;
+            }
+
+            if ( dropped == 0 )
+                continue; // already raised, or authored after the move - leave the tree byte-identical
+
+            if ( hitTest.has_value() )
+            {
+                kept[kHitTestKey] = rfl::Generic( hitTest.value() );
+                report.HitTestSet += 1;
+            }
+
+            entity.Components["UILayout"] = rfl::Generic( std::move( kept ) );
+            report.Entities += 1;
+            report.FlagsDropped += dropped;
+        }
+
+        return report;
+    }
+
     SceneMigrationReport MigrateScene( SceneSerialized& scene, const std::filesystem::path& assetsRoot )
     {
         SceneMigrationReport report;
@@ -1285,6 +1374,15 @@ namespace Desert::Migration
         {
             report.GravityUnitsRaised = true;
             report.GravityUnits       = MigrateGravityUnitsV8ToV9( scene.Settings );
+        }
+
+        // Independent of every step above: no earlier step reads or writes a "UILayout" payload, and none
+        // of the three keys this one touches is a length the unit migration scales. It sits last because
+        // it is newest.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionUIVisibility )
+        {
+            report.UIVisibilityRaised = true;
+            report.UIVisibility       = MigrateUIVisibilityV9ToV10( scene.Entities );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

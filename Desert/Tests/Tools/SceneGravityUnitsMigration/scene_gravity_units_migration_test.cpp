@@ -320,8 +320,10 @@ TEST( SceneGravityUnitsMigration, NoShippedSceneCarriesAMetreEraGravity )
 TEST( SceneGravityUnitsMigration, TheStepHasItsOwnVersionAndItIsTheHead )
 {
     EXPECT_EQ( 9, Migration::kSceneVersionGravityUnits );
-    EXPECT_EQ( Core::kSceneVersion, Migration::kSceneVersionGravityUnits )
-         << "this is the newest step, so it must be the generation the loader requires";
+    // It was the newest step when it was written and is not any more (v10 folds the UI interaction flags
+    // into two enums). What has to stay true is that it is BELOW the head — a step at or above the
+    // generation the loader requires would stamp files the loader refuses.
+    EXPECT_LT( Migration::kSceneVersionGravityUnits, Core::kSceneVersion );
     EXPECT_GT( Migration::kSceneVersionGravityUnits, Migration::kSceneVersionMaterialPath );
 }
 
