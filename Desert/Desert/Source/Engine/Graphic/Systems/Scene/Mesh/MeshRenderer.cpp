@@ -485,6 +485,33 @@ namespace Desert::Graphic::System
         // grouping the draws by material — the obvious way to write this loop — would reorder overlapping
         // labels and change the composite. Nothing above needs the draws grouped; the rows are already
         // uploaded, and what a draw carries is one push constant.
+        //
+        // ONE DRAW PER OBJECT, AND THE ROW TRANSPORT IS NOT WHAT STOPS THAT. Measured 2026-09-05 in Debug
+        // on Resources/Assets/Scenes/MAT_ProbeGraphBatchStress.desce — 1025 cubes on one graph material,
+        // the exact scene MAT_ProbeBatchStress is except that its material is a `MatProbe` graph rather
+        // than a `.demat` PBR surface. Minimum of six interleaved runs across two builds, reading the
+        // pass's own profiler line; the machine was shared with another agent, and the two builds' minima
+        // agreed to 0.001 ms:
+        //
+        //   scene (1025 cubes)     RenderMesh calls   MeshGeometryPass CPU   frame (wall)
+        //   PBR material           6                  0.742 ms               11.254 ms  (89 FPS)
+        //   graph material         5125               12.417 ms              56.178 ms  (18 FPS)
+        //
+        // Moving the parameters onto rows halved this pass (26.647 -> 12.417 ms, and 71.029 -> 56.178 ms
+        // of frame) by deleting the per-draw uniform-field writes and flushes. It did NOT change the draw
+        // count, and it could not have: what collapses 1025 objects into 6 draws is INSTANCING, and
+        // instancing needs a vertex stage that reads its transform from `InstanceTransforms[]` instead of
+        // the push constant. `MeshShaderFor(Instanced, Forward)` names a whole second .shader for the PBR
+        // surface; a data-driven shader has no such variant and the DSL has no way to express one, so the
+        // vertex-path axis of Materials/Mesh/MeshVertexPath.hpp has exactly one cell filled for every
+        // material that is not MaterialPBR.
+        //
+        // That is the next piece of work and it is a shader-permutation feature, not a renderer change:
+        // the DSL (or the graph generator) has to emit an instanced variant, ShaderService has to register
+        // it, the pipeline cache has to hold both, and this loop then groups by (material x mesh) exactly
+        // as DrawStaticMeshes does — including its rule that an object with per-instance overrides leaves
+        // the batch, which here means "a row that differs from the batch's". The row transport is what
+        // makes that rule expressible at all; before it, two objects sharing a material could not differ.
         for ( const auto& d : draws )
         {
             const auto& g = *d.Data;
