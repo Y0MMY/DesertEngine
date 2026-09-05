@@ -29,8 +29,10 @@
 #include <Engine/Runtime/SelectionContext.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
-#include <Engine/UI/UICanvasRenderer.hpp>
+#include <Engine/UI/UICanvasLayout.hpp>
 #include <Engine/UI/UILayout.hpp>
+#include <Editor/Panels/UI/UIElementCatalog.hpp>
+#include <Editor/Panels/UI/UIElementFactory.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Formats/ImageFormat.hpp>
@@ -54,31 +56,10 @@ namespace Desert::Editor
 
     namespace
     {
-        // In-scene UI authoring — same structure the UI Editor panel builds (a UILayout + the element,
-        // parented under the canvas) so a canvas authored in the viewport is identical to one from the panel.
-        entt::entity FindCanvas( entt::registry& reg )
-        {
-            auto view = reg.view<ECS::UICanvasComponent>();
-            return view.begin() == view.end() ? entt::null : *view.begin();
-        }
-
-        template <typename ElementComponent>
-        entt::entity AddUIChild( ::Desert::Core::Scene& scene, entt::entity parent, const char* name )
-        {
-            auto& e      = scene.CreateNewEntity( std::string( name ) );
-            auto  handle = e.GetHandle();
-            e.AddComponent<ECS::UILayoutComponent>();
-            e.AddComponent<ElementComponent>();
-
-            auto& reg = scene.GetRegistry();
-            if ( !reg.has<ECS::RelationshipComponent>( handle ) )
-                reg.emplace<ECS::RelationshipComponent>( handle );
-            reg.get<ECS::RelationshipComponent>( handle ).Parent = parent;
-            if ( !reg.has<ECS::RelationshipComponent>( parent ) )
-                reg.emplace<ECS::RelationshipComponent>( parent );
-            reg.get<ECS::RelationshipComponent>( parent ).Children.push_back( handle );
-            return handle;
-        }
+        // In-scene UI authoring uses the SAME catalog and the SAME factory as the UI Editor panel's toolbar
+        // (Editor/Panels/UI/UIElementCatalog.hpp) — this file used to carry its own copy of AddUIChild and its
+        // own hand-written menu, and the two lists had already drifted: the viewport offered UI Image and the
+        // panel did not.
 
         // Unity/UE-style anchor presets. Each axis is Min/Center/Max (a fixed-size box pinned to that edge,
         // keeping the element's current size) or Stretch (anchors 0..1, zero offsets -> fills the parent on
@@ -394,7 +375,7 @@ namespace Desert::Editor
             if ( ImGui::BeginPopup( "ui_create" ) )
             {
                 auto&              reg    = m_Scene->GetRegistry();
-                const entt::entity canvas = FindCanvas( reg );
+                const entt::entity canvas = FindUICanvas( reg );
                 if ( canvas == entt::null )
                 {
                     if ( ImGui::MenuItem( ICON_MDI_PLUS "  UI Canvas" ) )
@@ -414,30 +395,16 @@ namespace Desert::Editor
                             if ( h == canvas || reg.has<ECS::UILayoutComponent>( h ) )
                                 parent = h; // nest under the selected element
                         }
-                    const auto select = [&]( entt::entity h )
-                    { Core::SelectionManager::SetSelected( reg.get<ECS::UUIDComponent>( h ).UUID ); };
-                    if ( ImGui::MenuItem( ICON_MDI_CARD_OUTLINE "  Panel" ) )
-                        select( AddUIChild<ECS::UIPanelComponent>( *m_Scene, parent, "UI Panel" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_FORMAT_TEXT "  Text" ) )
-                        select( AddUIChild<ECS::UITextComponent2D>( *m_Scene, parent, "UI Text" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_BUTTON_POINTER "  Button" ) )
-                        select( AddUIChild<ECS::UIButtonComponent>( *m_Scene, parent, "UI Button" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_IMAGE "  Image" ) )
-                        select( AddUIChild<ECS::UIImageComponent>( *m_Scene, parent, "UI Image" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_VIEW_GRID "  Layout Group" ) )
-                        select( AddUIChild<ECS::UILayoutGroupComponent>( *m_Scene, parent, "UI Layout Group" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_PROGRESS_HELPER "  Progress Bar" ) )
-                        select( AddUIChild<ECS::UIProgressBarComponent>( *m_Scene, parent, "UI Progress Bar" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_CHECKBOX_MARKED_OUTLINE "  Toggle" ) )
-                        select( AddUIChild<ECS::UIToggleComponent>( *m_Scene, parent, "UI Toggle" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_TUNE_VARIANT "  Slider" ) )
-                        select( AddUIChild<ECS::UISliderComponent>( *m_Scene, parent, "UI Slider" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_VIEW_LIST "  Scroll View" ) )
-                        select( AddUIChild<ECS::UIScrollViewComponent>( *m_Scene, parent, "UI Scroll View" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_FORM_TEXTBOX "  Input Field" ) )
-                        select( AddUIChild<ECS::UIInputFieldComponent>( *m_Scene, parent, "UI Input Field" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_MENU_DOWN "  Dropdown" ) )
-                        select( AddUIChild<ECS::UIDropdownComponent>( *m_Scene, parent, "UI Dropdown" ) );
+                    for ( std::size_t i = 0; i < kUIElementCount; ++i )
+                    {
+                        const UIElementEntry& entry = kUIElements[i];
+                        const std::string     label = std::string( entry.Icon ) + "  " + entry.Label;
+                        if ( ImGui::MenuItem( label.c_str() ) )
+                        {
+                            const entt::entity h = CreateUIElement( *m_Scene, parent, i );
+                            Core::SelectionManager::SetSelected( reg.get<ECS::UUIDComponent>( h ).UUID );
+                        }
+                    }
                 }
                 ImGui::EndPopup();
             }
@@ -447,7 +414,7 @@ namespace Desert::Editor
         // the toolbar stays clean for pure-3D scenes. ---
         {
             auto&              reg    = m_Scene->GetRegistry();
-            const entt::entity canvas = FindCanvas( reg );
+            const entt::entity canvas = FindUICanvas( reg );
             entt::entity       selUI  = entt::null;
             if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
                 if ( auto ref = m_Scene->FindEntityByID( *sel ) )
@@ -1050,7 +1017,7 @@ namespace Desert::Editor
 
         // Canvas bounds outline so an EMPTY canvas (no Panel yet) is still visible + selectable — you can
         // see where it maps on screen. Dashed-ish subtle frame, drawn under the element handles.
-        if ( const entt::entity canvas = FindCanvas( reg ); canvas != entt::null )
+        if ( const entt::entity canvas = FindUICanvas( reg ); canvas != entt::null )
         {
             ::Desert::UI::Rect cr;
             if ( ::Desert::UI::GetElementRect( reg, canvas, viewRect, cr ) )
