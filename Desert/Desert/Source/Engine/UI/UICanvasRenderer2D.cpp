@@ -1141,11 +1141,11 @@ namespace Desert::UI
 
             // Blocking elects itself precisely so the pointer STOPS here: it is the greyed-out form and the
             // modal dialog, which must swallow the click rather than let it reach what is behind them.
-            const bool raycastTarget =
+            const bool electsSelf =
                  scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::Blocking );
             // Only this element's own value: an inherited term would be unreachable, because responding
             // needs `e == ctx.Hot` and the line above is already what decides whether it can be Hot.
-            const bool interactable = hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly;
+            const bool responds = hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly;
 
             // Blocking and None both close the sub-tree to the pointer; they differ only in whether the
             // element itself stops it, which is the line above.
@@ -1159,14 +1159,14 @@ namespace Desert::UI
 
                 // Elect the hot element: last writer in draw order = topmost. Clipped-away pixels don't
                 // count, so a scrolled-out row can't be clicked through its viewport.
-                if ( input && raycastTarget && PointIn( rect, input->MousePx ) &&
+                if ( input && electsSelf && PointIn( rect, input->MousePx ) &&
                      PointIn( clipRect, input->MousePx ) )
                 {
                     ctx.HotNext     = e;
                     ctx.HotNextRect = rect;
                 }
                 // This element is what the pointer is over (resolved last frame) AND it responds.
-                const bool hot = interactable && e == ctx.Hot;
+                const bool hot = responds && e == ctx.Hot;
 
                 // A drop target outlines itself while a drag it would accept is in flight.
                 if ( ctx.Drag.Active && reg.has<ECS::UIDropTargetComponent>( e ) )
@@ -1490,7 +1490,7 @@ namespace Desert::UI
 
                     const float contentPx = sv.ContentHeight * scale;
                     scrollMaxPx           = std::max( 0.0f, contentPx - rect.H );
-                    const bool hover      = input && interactable && e == ctx.Hot;
+                    const bool hover      = input && responds && e == ctx.Hot;
                     if ( hover && input->ScrollDelta != 0.0f )
                         sv.ScrollY -= input->ScrollDelta * 30.0f; // 30 design px per wheel notch
                     const float maxScrollDesign = scale > 0.0f ? scrollMaxPx / scale : 0.0f;
