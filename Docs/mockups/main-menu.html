@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DesertRP — Main Menu Mockup</title>
+<style>
+  /* ---------------------------------------------------------------------------
+     In-game main menu mockup for a GTA/SA-MP-style roleplay game.
+     Pure HTML/CSS. The 16:9 .stage is a container-query context, so everything
+     is sized in cqw/cqh units and scales as one locked composition.
+     Palette: golden-hour sunset + neon, dark glassmorphism panels,
+              orange (#ff7a33) x cyan (#2fe3ff) accents.
+  --------------------------------------------------------------------------- */
+  :root{
+    --orange:#ff7a33; --orange-deep:#e8531a;
+    --cyan:#2fe3ff; --cyan-deep:#12b6d6;
+    --ink:#eef3fb; --muted:#9db0c6; --muted-dim:#6b7c93;
+    --glass:rgba(14,19,29,.55); --glass-2:rgba(18,24,36,.62);
+    --stroke:rgba(255,255,255,.09); --stroke-hot:rgba(255,138,60,.55);
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; background:#05070c; overflow:hidden;
+    font-family:"Inter","Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif}
+  body{display:grid; place-items:center}
+
+  /* 16:9 stage, letterboxed to the window */
+  .stage{
+    position:relative; overflow:hidden;
+    width:min(100vw, 177.78vh); height:min(56.25vw, 100vh);
+    container-type:size;
+    color:var(--ink);
+    box-shadow:0 0 120px rgba(0,0,0,.8);
+    --u:1cqw; /* base unit */
+  }
+  .stage>*{position:absolute}
+
+  /* ---------------- Cinematic background ---------------- */
+  .bg{inset:0; z-index:0}
+  .sky{position:absolute; inset:0;
+    background:
+      radial-gradient(120cqw 70cqh at 66% 82%, rgba(255,150,70,.55), transparent 55%),
+      linear-gradient(180deg,#0e1526 0%,#241b39 34%,#5b2f43 58%,#a34a37 78%,#e08040 100%)}
+  /* sun glow behind the character */
+  .sun{position:absolute; left:60%; top:40%; width:44cqw; height:44cqw; transform:translate(-50%,-50%);
+    background:radial-gradient(circle, rgba(255,196,120,.85), rgba(255,150,70,.25) 40%, transparent 66%);
+    filter:blur(2px)}
+  /* city skyline silhouette */
+  .skyline{position:absolute; left:0; right:0; bottom:26cqh; height:26cqh;
+    background:linear-gradient(180deg, transparent, rgba(6,8,14,.15));
+    -webkit-mask:var(--sky-mask); mask:var(--sky-mask);
+    --sky-mask:repeating-linear-gradient(90deg,#000 0 3cqw, transparent 3cqw 3.5cqw);
+    display:flex; align-items:flex-end; gap:.7cqw; padding:0 2cqw; opacity:.9}
+  .skyline i{flex:1; background:linear-gradient(180deg,#161a2b,#0b0d17); border-radius:.3cqw .3cqw 0 0;
+    box-shadow:inset 0 0 1cqw rgba(0,0,0,.6)}
+  .skyline i::before{content:""; display:block} /* keep box */
+  /* neon signs */
+  .neon{position:absolute; border-radius:.5cqw; font-size:1.15cqw; font-weight:800; letter-spacing:.08em;
+    padding:.5cqw .8cqw; color:#fff; text-shadow:0 0 1cqw currentColor; opacity:.92}
+  .neon.n1{left:8cqw; top:34cqh; color:var(--cyan); box-shadow:0 0 2cqw var(--cyan); border:1px solid var(--cyan)}
+  .neon.n2{left:82cqw; top:30cqh; color:#ff4db8; box-shadow:0 0 2cqw #ff4db8; border:1px solid #ff4db8}
+  .neon.n3{left:74cqw; top:46cqh; color:var(--orange); box-shadow:0 0 1.6cqw var(--orange); border:1px solid var(--orange); font-size:.95cqw}
+  /* hero character silhouette */
+  .hero{position:absolute; left:58%; bottom:8cqh; transform:translateX(-50%);
+    height:64cqh; width:auto; filter:drop-shadow(0 0 2cqw rgba(255,150,70,.5)) drop-shadow(-1cqw 0 2cqw rgba(47,227,255,.35))}
+  .hero svg{height:100%; width:auto; display:block}
+  /* parked car silhouette (bottom-left, well clear of the hero) */
+  .car{position:absolute; left:6cqw; bottom:9cqh; width:19cqw; height:5cqh; opacity:.9;
+    filter:drop-shadow(0 1cqh 2cqw rgba(0,0,0,.55))}
+  .car svg{width:100%; height:100%; display:block}
+  /* wet asphalt + reflections */
+  .asphalt{position:absolute; left:0; right:0; bottom:0; height:20cqh;
+    background:linear-gradient(180deg, transparent, #05060a 62%);
+    box-shadow:inset 0 6cqh 6cqw rgba(255,120,60,.08)}
+  .asphalt::before{content:""; position:absolute; left:52%; bottom:0; width:26cqw; height:16cqh; transform:translateX(-50%) scaleY(-1);
+    background:radial-gradient(60% 80% at 50% 0, rgba(255,160,90,.22), transparent 70%); filter:blur(2px)}
+  .vignette{position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 42%, transparent 55%, rgba(0,0,0,.6) 100%)}
+  .grain{position:absolute; inset:0; pointer-events:none; opacity:.05; mix-blend-mode:overlay;
+    background-image:radial-gradient(#fff 1px, transparent 1px); background-size:3px 3px}
+
+  /* ---------------- Top bar ---------------- */
+  .topbar{left:0; right:0; top:0; height:9cqh; z-index:5;
+    display:flex; align-items:center; justify-content:space-between; padding:0 3cqw;
+    background:linear-gradient(180deg, rgba(5,7,12,.75), transparent)}
+  .logo{display:flex; align-items:baseline; gap:.5cqw; font-weight:900; letter-spacing:.02em}
+  .logo .d{font-size:3cqw; color:var(--ink); text-shadow:0 0 2cqw rgba(47,227,255,.4)}
+  .logo .d span{color:var(--orange)}
+  .logo .tag{font-size:1.0cqw; font-weight:700; letter-spacing:.42em; color:var(--muted); text-transform:uppercase; margin-left:.4cqw}
+  .top-right{display:flex; align-items:center; gap:1.6cqw; font-size:1.15cqw; color:var(--muted)}
+  .top-right .item{display:flex; align-items:center; gap:.5cqw}
+  .dot{width:.8cqw; height:.8cqw; border-radius:50%; background:#3ee07f; box-shadow:0 0 1.2cqw #3ee07f; animation:pulse 2s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .top-right b{color:var(--ink); font-weight:800}
+
+  /* ---------------- Left navigation ---------------- */
+  .nav{left:3cqw; top:20cqh; width:24cqw; z-index:5; display:flex; flex-direction:column; gap:.7cqh}
+  .nav .cap{font-size:.95cqw; letter-spacing:.4em; color:var(--muted-dim); text-transform:uppercase; margin-bottom:.6cqh; padding-left:.4cqw}
+  .navbtn{display:flex; align-items:center; gap:1.2cqw; height:6.4cqh; padding:0 1.4cqw; cursor:pointer;
+    border-radius:1cqw; color:var(--muted); font-size:1.7cqw; font-weight:700; letter-spacing:.03em;
+    background:linear-gradient(90deg, rgba(255,255,255,.02), transparent);
+    border:1px solid transparent; transition:.18s ease}
+  .navbtn svg{width:2.2cqw; height:2.2cqw; flex:none; opacity:.8}
+  .navbtn .lbl{flex:1}
+  .navbtn .hint{font-size:.9cqw; color:var(--muted-dim); font-weight:600}
+  .navbtn:hover{color:var(--ink); background:linear-gradient(90deg, rgba(47,227,255,.10), transparent);
+    border-color:var(--stroke); transform:translateX(.5cqw)}
+  .navbtn.active{color:#fff;
+    background:linear-gradient(90deg, rgba(255,122,51,.22), rgba(255,122,51,.02));
+    border-color:var(--stroke-hot); box-shadow:0 0 2.5cqw rgba(255,122,51,.18)}
+  .navbtn.active::before{content:""; position:absolute; left:3cqw; width:.4cqw; height:4cqh;
+    background:var(--orange); border-radius:1cqw; box-shadow:0 0 1.4cqw var(--orange)}
+  .navbtn.active svg{opacity:1; color:var(--orange)}
+
+  /* ---------------- Right column (glass cards) ---------------- */
+  .side{right:3cqw; top:12cqh; width:26cqw; z-index:5; display:flex; flex-direction:column; gap:1.6cqh}
+  .card{background:var(--glass); border:1px solid var(--stroke); border-radius:1.4cqw;
+    backdrop-filter:blur(18px) saturate(120%); -webkit-backdrop-filter:blur(18px) saturate(120%);
+    box-shadow:0 1.5cqh 5cqw rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05); padding:1.6cqw}
+  .card .ttl{font-size:.9cqw; letter-spacing:.34em; color:var(--muted-dim); text-transform:uppercase; margin-bottom:1cqh}
+
+  /* profile */
+  .profile{display:flex; align-items:center; gap:1.3cqw}
+  .avatar{width:6.2cqw; height:6.2cqw; border-radius:1.1cqw; flex:none;
+    background:conic-gradient(from 210deg, var(--orange), #ff4db8, var(--cyan), var(--orange));
+    padding:.28cqw}
+  .avatar i{display:block; width:100%; height:100%; border-radius:.85cqw;
+    background:linear-gradient(160deg,#2a3242,#12161f); display:grid; place-items:center; font-size:2.6cqw}
+  .pmeta{flex:1; min-width:0}
+  .pname{font-size:1.9cqw; font-weight:800; line-height:1.1}
+  .pname .verified{color:var(--cyan); font-size:1.3cqw}
+  .prow{display:flex; gap:1.4cqw; margin-top:.7cqh; font-size:1.05cqw; color:var(--muted)}
+  .prow b{color:var(--ink)}
+  .prow .cash{color:#7ee08a}
+  .xp{height:.7cqh; border-radius:1cqw; margin-top:1cqh; background:rgba(255,255,255,.08); overflow:hidden}
+  .xp i{display:block; height:100%; width:68%; border-radius:1cqw;
+    background:linear-gradient(90deg,var(--orange),var(--cyan)); box-shadow:0 0 1.4cqw rgba(47,227,255,.4)}
+
+  /* server quick connect */
+  .srv-top{display:flex; align-items:center; justify-content:space-between}
+  .srv-name{font-size:1.7cqw; font-weight:800}
+  .srv-flag{font-size:1.4cqw}
+  .srv-stats{display:flex; gap:1.6cqw; margin:1cqh 0 1.4cqh; font-size:1.1cqw; color:var(--muted)}
+  .srv-stats b{color:var(--ink)}
+  .srv-stats .ping{color:#7ee08a}
+  .bar{height:.6cqh; border-radius:1cqw; background:rgba(255,255,255,.08); overflow:hidden; margin-bottom:1.4cqh}
+  .bar i{display:block; height:100%; width:85%; background:linear-gradient(90deg,#3ee07f,#f2c14e)}
+  .connect{display:flex; align-items:center; justify-content:center; gap:.9cqw; height:6.4cqh; cursor:pointer;
+    border-radius:1cqw; font-size:1.7cqw; font-weight:900; letter-spacing:.08em; color:#1a0f06;
+    background:linear-gradient(180deg,#ffb066,var(--orange)); border:1px solid rgba(255,190,140,.7);
+    box-shadow:0 1cqh 3cqw rgba(255,122,51,.4), inset 0 1px 0 rgba(255,255,255,.5); transition:.16s ease}
+  .connect:hover{transform:translateY(-.4cqh); box-shadow:0 1.6cqh 4cqw rgba(255,122,51,.55)}
+  .connect svg{width:2cqw; height:2cqw}
+
+  /* news */
+  .news .row{display:flex; gap:.9cqw; font-size:1.08cqw; color:var(--muted); padding:.7cqh 0; border-bottom:1px solid rgba(255,255,255,.05)}
+  .news .row:last-child{border-bottom:0}
+  .news .row .tag{color:var(--cyan); font-weight:800; flex:none}
+  .news .row.hot .tag{color:var(--orange)}
+
+  /* ---------------- Bottom bar ---------------- */
+  .bottombar{left:0; right:0; bottom:0; height:6cqh; z-index:5; display:flex; align-items:center;
+    justify-content:space-between; padding:0 3cqw; font-size:1.05cqw; color:var(--muted);
+    background:linear-gradient(0deg, rgba(5,7,12,.8), transparent)}
+  .ver{font-weight:700; letter-spacing:.06em}
+  .ticker{flex:1; margin:0 3cqw; overflow:hidden; white-space:nowrap; -webkit-mask:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+  .ticker span{display:inline-block; padding-left:100%; animation:scroll 26s linear infinite}
+  @keyframes scroll{to{transform:translateX(-100%)}}
+  .keys{display:flex; gap:1.4cqw}
+  .keys .k{display:flex; align-items:center; gap:.5cqw}
+  .kbd{display:inline-grid; place-items:center; min-width:2cqw; height:2cqw; padding:0 .5cqw; font-size:.95cqw; font-weight:800;
+    color:var(--ink); background:rgba(255,255,255,.08); border:1px solid var(--stroke); border-radius:.5cqw}
+</style>
+</head>
+<body>
+  <div class="stage">
+    <!-- ================= BACKGROUND ================= -->
+    <div class="bg">
+      <div class="sky"></div>
+      <div class="sun"></div>
+      <div class="skyline">
+        <i style="height:60%"></i><i style="height:85%"></i><i style="height:45%"></i>
+        <i style="height:95%"></i><i style="height:70%"></i><i style="height:52%"></i>
+        <i style="height:80%"></i><i style="height:100%"></i><i style="height:66%"></i>
+        <i style="height:88%"></i><i style="height:48%"></i><i style="height:74%"></i>
+        <i style="height:92%"></i><i style="height:58%"></i><i style="height:82%"></i>
+        <i style="height:64%"></i><i style="height:96%"></i><i style="height:50%"></i>
+      </div>
+      <div class="neon n1">24/7</div>
+      <div class="neon n2">MOTEL</div>
+      <div class="neon n3">◈ BAR</div>
+      <div class="car">
+        <svg viewBox="0 0 300 90" xmlns="http://www.w3.org/2000/svg" aria-label="car">
+          <path d="M8 66 q4 -20 22 -24 l40 -6 q18 -18 44 -20 l58 0 q30 2 46 24 l40 8 q22 4 26 24 l0 8 -276 0 z"
+                fill="#171b28"/>
+          <path d="M92 20 q22 -14 42 -14 l40 0 q24 2 38 18 l-120 2 z" fill="#2a3040" opacity=".7"/>
+          <path d="M8 66 q4 -20 22 -24" fill="none" stroke="#ff9a55" stroke-width="2.5" opacity=".6"/>
+          <path d="M236 22 q30 2 46 24" fill="none" stroke="#2fe3ff" stroke-width="2.5" opacity=".5"/>
+          <circle cx="74" cy="74" r="15" fill="#0a0c14" stroke="#3a4152" stroke-width="4"/>
+          <circle cx="220" cy="74" r="15" fill="#0a0c14" stroke="#3a4152" stroke-width="4"/>
+          <rect x="252" y="52" width="16" height="7" rx="3" fill="#ff7a33" opacity=".85"/>
+        </svg>
+      </div>
+      <!-- hero character silhouette (placeholder for the real 3D render / video) -->
+      <div class="hero">
+        <svg viewBox="0 0 200 460" xmlns="http://www.w3.org/2000/svg" aria-label="character">
+          <g fill="#0c0f18">
+            <circle cx="100" cy="46" r="30"/>                                  <!-- head -->
+            <path d="M70 74 q30 22 60 0 l16 12 q22 14 20 60 l-8 96 q-4 20 -18 18 l-4 -70 -6 120 q-2 18 -16 18 -12 0 -14 -18 l-6 -110 -6 110 q-2 18 -14 18 -14 0 -16 -18 l-6 -120 -4 70 q-14 2 -18 -18 l-8 -96 q-2 -46 20 -60 z"/>
+          </g>
+          <!-- rim light edges -->
+          <path d="M70 74 q30 22 60 0" fill="none" stroke="#ff9a55" stroke-width="3" opacity=".8"/>
+          <path d="M56 150 l-6 96" fill="none" stroke="#2fe3ff" stroke-width="3" opacity=".55"/>
+          <path d="M148 150 l4 96" fill="none" stroke="#ff9a55" stroke-width="3" opacity=".55"/>
+        </svg>
+      </div>
+      <div class="asphalt"></div>
+      <div class="vignette"></div>
+      <div class="grain"></div>
+    </div>
+
+    <!-- ================= TOP BAR ================= -->
+    <div class="topbar">
+      <div class="logo">
+        <div class="d">DESERT<span>RP</span></div>
+        <div class="tag">multiplayer</div>
+      </div>
+      <div class="top-right">
+        <div class="item"><span class="dot"></span> СЕТЬ&nbsp;<b>ONLINE</b></div>
+        <div class="item">👥 Друзья&nbsp;<b>12</b>/38</div>
+        <div class="item">✉️ <b>3</b></div>
+      </div>
+    </div>
+
+    <!-- ================= LEFT NAV ================= -->
+    <nav class="nav">
+      <div class="cap">Главное меню</div>
+
+      <div class="navbtn active">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <span class="lbl">ИГРАТЬ</span><span class="hint">Enter</span>
+      </div>
+      <div class="navbtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+        <span class="lbl">ПЕРСОНАЖИ</span><span class="hint">4</span>
+      </div>
+      <div class="navbtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><circle cx="7" cy="7" r="1" fill="currentColor"/><circle cx="7" cy="17" r="1" fill="currentColor"/></svg>
+        <span class="lbl">СЕРВЕРЫ</span><span class="hint">128</span>
+      </div>
+      <div class="navbtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h2l2 12h11l2-8H7"/><circle cx="9" cy="20" r="1.4"/><circle cx="17" cy="20" r="1.4"/></svg>
+        <span class="lbl">МАГАЗИН</span>
+      </div>
+      <div class="navbtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+        <span class="lbl">НАСТРОЙКИ</span>
+      </div>
+      <div class="navbtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v8"/><path d="M6.5 7a8 8 0 1 0 11 0"/></svg>
+        <span class="lbl">ВЫХОД</span><span class="hint">Esc</span>
+      </div>
+    </nav>
+
+    <!-- ================= RIGHT COLUMN ================= -->
+    <aside class="side">
+      <!-- profile -->
+      <div class="card">
+        <div class="ttl">Профиль</div>
+        <div class="profile">
+          <div class="avatar"><i>🕶️</i></div>
+          <div class="pmeta">
+            <div class="pname">Nico_Bellic <span class="verified">✔</span></div>
+            <div class="prow"><span>Ур. <b>34</b></span><span class="cash">$&nbsp;1 248 500</span><span>⏱ <b>412ч</b></span></div>
+            <div class="xp"><i></i></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- server quick connect -->
+      <div class="card">
+        <div class="ttl">Последний сервер</div>
+        <div class="srv-top"><div class="srv-name">Los Santos RP</div><div class="srv-flag">🇷🇺</div></div>
+        <div class="srv-stats"><span>👤 <b>847</b>/1000</span><span class="ping">📶 <b>32</b> ms</span><span>🗺 v2.4</span></div>
+        <div class="bar"><i></i></div>
+        <div class="connect">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> ПОДКЛЮЧИТЬСЯ
+        </div>
+      </div>
+
+      <!-- news -->
+      <div class="card news">
+        <div class="ttl">Новости</div>
+        <div class="row hot"><span class="tag">ПАТЧ</span><span>0.9.1 — новая система жилья и аукцион авто</span></div>
+        <div class="row"><span class="tag">ИВЕНТ</span><span>Гонки в эти выходные — приз 5 000 000$</span></div>
+        <div class="row"><span class="tag">КЛАН</span><span>«Vinewood Family» приглашает новичков</span></div>
+      </div>
+    </aside>
+
+    <!-- ================= BOTTOM BAR ================= -->
+    <div class="bottombar">
+      <div class="ver">DesertRP • build v0.9.1</div>
+      <div class="ticker"><span>🔥 Двойной опыт до понедельника&nbsp;&nbsp;•&nbsp;&nbsp;🚗 В магазин добавлены 12 новых авто&nbsp;&nbsp;•&nbsp;&nbsp;🏆 Сезон 4 стартует 15 августа&nbsp;&nbsp;•&nbsp;&nbsp;💬 Присоединяйся к Discord сообществу</span></div>
+      <div class="keys">
+        <div class="k"><span class="kbd">↑↓</span> Навигация</div>
+        <div class="k"><span class="kbd">↵</span> Выбор</div>
+        <div class="k"><span class="kbd">Esc</span> Назад</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
