@@ -162,8 +162,37 @@ namespace Desert::Editor
         std::unique_ptr<PreviewViewport> m_Preview;
         std::unique_ptr<UI::UIHelper>    m_UIHelper;
 
-        PreviewViewport::Shape m_Shape   = PreviewViewport::Shape::Sphere;
-        bool                   m_Applied = false; // the subject has been pushed into the viewport
+        PreviewViewport::Shape m_Shape = PreviewViewport::Shape::Sphere;
+
+        // WHAT WAS PUSHED, not whether something was. This used to be `bool m_Applied`, reset by hand at
+        // every site that invalidates the push, and the site that changes the material's SHADER carries no
+        // such reset.
+        //
+        // THIS IS HARDENING, NOT A BUG FIX, AND THE DISTINCTION IS THE POINT. The missing reset looks like
+        // a live defect and is not one: DrawShaderPicker's call site calls MaterialService::Invalidate,
+        // which bumps m_InvalidationVersion, and MeshECSSystem rebuilds the runtime instance from the new
+        // shader on its next tick (Components.hpp SeenMaterialsVersion, MeshECSSystem.hpp:129). The preview
+        // updates through that path, never through SetMaterial. Verified by rendering the shader switch,
+        // not by reading — the reading said otherwise and the reading was wrong.
+        //
+        // What is real is the coupling: preview correctness depends on EVERY shader-change path calling
+        // Invalidate, and nothing enforces that. Recording the identity that WAS pushed makes the re-push
+        // condition DERIVED, so a future path that changes subject, shape or shader announces itself by
+        // differing rather than by being remembered. Empty shader name means "nothing pushed yet".
+        // Costs nothing per frame: EffectiveShaderName() is already resolved in the same function for the
+        // rebuild counter below.
+        struct PushedIdentity
+        {
+            Common::AssetHandle    Subject;
+            PreviewViewport::Shape Shape = PreviewViewport::Shape::Sphere;
+            std::string            ShaderName;
+
+            bool operator==( const PushedIdentity& other ) const
+            {
+                return Subject == other.Subject && Shape == other.Shape && ShaderName == other.ShaderName;
+            }
+        };
+        PushedIdentity m_Pushed;
 
         // The rebuild count this window has already acted on; see MaterialShaderRebuild for why it is a
         // count each window compares against rather than a pending value one of them consumes.

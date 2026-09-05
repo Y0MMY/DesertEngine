@@ -221,7 +221,10 @@ namespace Desert::Editor
         m_Preview  = std::make_unique<PreviewViewport>();
         m_UIHelper = std::make_unique<UI::UIHelper>();
         m_UIHelper->Init();
-        m_Applied = false; // the new viewport knows nothing about the current material
+        // A FRESH VIEWPORT HOLDS NOTHING, even when the identity is unchanged — so this clear is still
+        // required and is not made redundant by the derived condition. Forgetting it would leave the new
+        // viewport empty while m_Pushed claimed the material was already in it.
+        m_Pushed = {};
     }
 
     void MaterialEditorPanel::ReleasePreview()
@@ -234,7 +237,7 @@ namespace Desert::Editor
         // belonged to the framebuffers just destroyed.
         m_Preview.reset();
         m_UIHelper.reset();
-        m_Applied = false;
+        m_Pushed = {};
     }
 
     void MaterialEditorPanel::OnPreUpdate()
@@ -265,10 +268,16 @@ namespace Desert::Editor
 
         EnsurePreview();
 
-        if ( !m_Applied )
+        // Re-push when WHAT WOULD BE PUSHED differs from what was — subject, shape, or the shader the
+        // material resolves to. Deriving the condition is the point: any future field added to
+        // PushedIdentity is covered the moment it is added, with no new reset site to remember. See the
+        // header for why the shader term is hardening rather than a fix — the live path that keeps the
+        // preview correct on a shader switch is MaterialService::Invalidate bumping the version that
+        // MeshECSSystem rebuilds from, and that was established by rendering the switch, not by reading.
+        if ( const PushedIdentity wanted{ Subject(), m_Shape, EffectiveShaderName() }; !( wanted == m_Pushed ) )
         {
             m_Preview->SetMaterial( Subject(), m_Shape );
-            m_Applied = true;
+            m_Pushed = wanted;
         }
 
         // The shader behind this material was rebuilt: drop the pipelines THIS renderer cached from the old
@@ -302,8 +311,10 @@ namespace Desert::Editor
                 const bool selected = ( s == m_Shape );
                 if ( ImGui::Selectable( ShapeName( s ), selected ) && !selected )
                 {
-                    m_Shape   = s;
-                    m_Applied = false; // re-push so the primitive actually changes
+                    // No re-push flag here on purpose: the shape is PART of the pushed identity, so
+                    // changing it announces itself. This site used to carry the only reset that was
+                    // remembered; the shader site next door was the one that was not.
+                    m_Shape = s;
                 }
             }
             ImGui::EndCombo();
