@@ -81,10 +81,15 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
     // Paths outside the mount root stay unresolved.
     EXPECT_FALSE( Common::Utils::VFS::Exists( "/definitely/not/mounted.txt" ) );
 
-    // Listing reconstructs FULL paths under the mount root.
+    // Listing reconstructs FULL paths under the mount root — in the VFS's ONE canonical spelling
+    // (symlinked prefixes resolved: on macOS this temp dir is /var/... as spelled and /private/var/...
+    // resolved). The contract is not a spelling but the round trip: a listed path must name the same
+    // file as the spelling the caller asked with, and must READ back through the VFS.
     const auto listed = Common::Utils::VFS::ListFiles( dir / "Assets" );
     ASSERT_EQ( listed.size(), 1u );
-    EXPECT_EQ( listed[0], virtualPath );
+    std::error_code cec;
+    EXPECT_EQ( fs::weakly_canonical( listed[0], cec ), fs::weakly_canonical( virtualPath, cec ) );
+    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( listed[0] ), "{\"scene\":true}" );
 
     // LOOSE FILE OVERRIDE: a real file with the same path wins over the pak entry.
     fs::create_directories( virtualPath.parent_path() );
