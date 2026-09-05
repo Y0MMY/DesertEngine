@@ -12,19 +12,22 @@
 // generated from this macro now, so the two menus cannot disagree again — adding an element is one line
 // here and it appears in both.
 //
-// WHAT BELONGS IN THE LIST. An entry is an ELEMENT: something that exists as a child entity of the canvas
-// and means something on its own — a visual (Panel, Text, Button, Image, and the controls) or a container
-// that positions its children (Layout Group, Scroll View). Deliberately NOT entries:
+// WHAT BELONGS IN THE LIST. An entry is an ELEMENT: a type the renderer draws as a child entity of the
+// canvas in its own right — a visual (Panel, Text, Button, Image, Icon and the controls) or a container that
+// positions its children (Layout Group, Scroll View). Image and Icon show nothing until an asset is bound to
+// them, and that is authoring, not a defect: the entity exists, is selectable, and Details has the slot.
+// Deliberately NOT entries:
 //
-//   * UICanvasComponent      - the root itself, created by its own "Create UI Canvas" action.
+//   * UICanvasComponent      - the root itself, created by its own "Create UI Canvas" action, and a second
+//                              canvas would not be drawn at all (the renderer takes the first one).
 //   * UILayoutComponent      - the rect; every element gets one automatically (see UIElementFactory).
-//   * UIIconComponent        - draws NOTHING until an .svg asset is bound to it, so a menu that offered it
-//                              would hand the author an invisible entity. Add it in Details, with the asset.
-//   * UIScreen/UIScreenStack - the screen machine. A screen with no name is skipped by the renderer and a
-//                              stack belongs on the canvas, not on a child; both are Details-side work.
+//   * UIScreen/UIScreenStack - the screen machine. A screen with no NAME is skipped by the renderer's own
+//                              seeding loop, and a stack belongs on the canvas rather than on a child, so a
+//                              menu entry for either would produce something that cannot be drawn at all —
+//                              which is a different thing from an element still waiting for its asset.
 //   * UIAnim, UIBinding, UITween, UIDraggable, UIDropTarget, UIPointerEvents
 //                            - MODIFIERS. They are added in Details to an element that already exists and
-//                              draw nothing by themselves.
+//                              draw nothing by themselves, ever.
 //
 // That partition is not a comment that can rot: the `UIElementCensus` suite enumerates the renderer's own
 // dispatch and requires every UI component it handles to be either an entry below or one of the exclusions
@@ -40,6 +43,7 @@
     X( UITextComponent2D, "UI Text", ICON_MDI_FORMAT_TEXT, "Text" )                                               \
     X( UIButtonComponent, "UI Button", ICON_MDI_BUTTON_POINTER, "Button" )                                        \
     X( UIImageComponent, "UI Image", ICON_MDI_IMAGE, "Image" )                                                    \
+    X( UIIconComponent, "UI Icon", ICON_MDI_STAR_OUTLINE, "Icon" )                                                \
     X( UILayoutGroupComponent, "UI Layout Group", ICON_MDI_VIEW_GRID, "Layout Group" )                            \
     X( UIProgressBarComponent, "UI Progress Bar", ICON_MDI_PROGRESS_HELPER, "Progress Bar" )                      \
     X( UIToggleComponent, "UI Toggle", ICON_MDI_CHECKBOX_MARKED_OUTLINE, "Toggle" )                               \

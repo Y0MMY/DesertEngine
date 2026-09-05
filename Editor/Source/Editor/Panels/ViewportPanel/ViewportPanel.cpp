@@ -402,7 +402,8 @@ namespace Desert::Editor
                         if ( ImGui::MenuItem( label.c_str() ) )
                         {
                             const entt::entity h = CreateUIElement( *m_Scene, parent, i );
-                            Core::SelectionManager::SetSelected( reg.get<ECS::UUIDComponent>( h ).UUID );
+                            if ( h != entt::null )
+                                Core::SelectionManager::SetSelected( reg.get<ECS::UUIDComponent>( h ).UUID );
                         }
                     }
                 }

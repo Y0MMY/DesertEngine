@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -51,8 +52,6 @@ namespace
                                 "and a second canvas would not be drawn (the renderer takes the first)" },
          { "UILayoutComponent", "the rect. Every element gets one automatically in AddUIChild; on its own "
                                 "it is an invisible box" },
-         { "UIIconComponent", "draws NOTHING until an .svg asset is bound (DrawIcon returns early on an "
-                              "unset icon), so a menu entry would hand the author an invisible entity" },
          { "UIScreenComponent", "the screen machine: a screen with no name is skipped by the renderer's "
                                 "seeding loop, so a menu-created one would be invisible" },
          { "UIScreenStackComponent", "belongs on the canvas entity, not on a child element" },
@@ -176,9 +175,57 @@ TEST( UIElementCensus, NoCatalogEntryOrExclusionIsAGhost )
              << "ECS::" << x.Type << " is excluded from the create menus here, but the renderer does not "
              << "handle it either — the row is stale and should go.";
 
-    // Every UI component the ENGINE has is one the renderer handles, so the census is complete: 11 creatable
-    // + 11 excluded. The number is pinned so that growing either side is a deliberate edit of this file.
+    // Every UI component the ENGINE has is one the renderer handles, so the census is complete: 12 creatable
+    // + 10 excluded. The number is pinned so that growing either side is a deliberate edit of this file.
     EXPECT_EQ( dispatch.size(), kUIElementCount + sizeof( kExclusions ) / sizeof( kExclusions[0] ) );
+}
+
+// The loop closes at the ENGINE: a UI component that exists at all must be one the renderer draws and one
+// this file has placed. Without this the two tests above would happily agree about a set that had quietly
+// stopped being all of them — a twenty-third component could be declared, serialized, given a Details
+// section and never drawn by anything, which is the very shape the panel's dead preview had.
+TEST( UIElementCensus, EveryUIComponentTheEngineDeclaresIsHandledAndPlaced )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    const std::string components = ReadFile( root + "Desert/Desert/Source/Engine/ECS/Components.hpp" );
+    ASSERT_FALSE( components.empty() ) << "Engine/ECS/Components.hpp could not be read";
+
+    // Declared UI component structs. `*Data` payloads and the UI enums are not components and do not match.
+    std::set<std::string> declared;
+    const std::string     decl( "struct UI" );
+    for ( std::size_t at = components.find( decl ); at != std::string::npos; at = components.find( decl, at + 1 ) )
+    {
+        const std::size_t nameStart = at + decl.size() - 2; // keep "UI"
+        std::size_t       end       = nameStart;
+        while ( end < components.size() &&
+                ( std::isalnum( static_cast<unsigned char>( components[end] ) ) || components[end] == '_' ) )
+            ++end;
+        const std::string name = components.substr( nameStart, end - nameStart );
+        if ( name.find( "Component" ) != std::string::npos )
+            declared.insert( name );
+    }
+    ASSERT_GE( declared.size(), 20u ) << "found only " << declared.size()
+                                      << " UI component declarations — the scan no longer measures anything";
+
+    const std::set<std::string> dispatch = RendererDispatch( ReadFile( root + kRenderer ) );
+
+    std::set<std::string> accounted;
+    for ( std::size_t i = 0; i < kUIElementCount; ++i )
+        accounted.insert( kUIElements[i].ComponentType );
+    for ( const Exclusion& x : kExclusions )
+        accounted.insert( x.Type );
+
+    for ( const std::string& name : declared )
+    {
+        EXPECT_TRUE( dispatch.count( name ) == 1 )
+             << "ECS::" << name << " is declared in Components.hpp but " << kRenderer
+             << " never asks the registry for it: nothing in the engine draws it.";
+        EXPECT_TRUE( accounted.count( name ) == 1 )
+             << "ECS::" << name << " is declared in Components.hpp but is neither an entry in "
+             << "UIElementCatalog.hpp nor an exclusion in this test.";
+    }
 }
 
 int main( int argc, char** argv )

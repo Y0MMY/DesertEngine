@@ -34,6 +34,11 @@ namespace Desert::Editor
         // 1:1, ScaleWithScreen scales by 1, Letterbox fits exactly), so the picture is the canvas as authored
         // rather than the canvas squeezed into whatever the user dragged the window to. The panel then just
         // fits that image into its content region.
+        //
+        // The cap is memory, not policy: Reference Width/Height go up to 7680x4320 in Details, and an RGBA32F
+        // attachment that size is half a gigabyte for a preview window. A canvas past the cap is previewed at
+        // the cap and SAYS SO in the log with both numbers — under Stretch its element offsets are in design
+        // px and would not be scaled down with it, so that preview is the one case that is not to scale.
         constexpr uint32_t kMinDesignPx = 16;
         constexpr uint32_t kMaxDesignPx = 4096;
 
@@ -154,8 +159,17 @@ namespace Desert::Editor
         if ( !canvasData.Visible )
             return;
 
-        const uint32_t w = ClampDesignPx( canvasData.ReferenceWidth );
-        const uint32_t h = ClampDesignPx( canvasData.ReferenceHeight );
+        const uint32_t w      = ClampDesignPx( canvasData.ReferenceWidth );
+        const uint32_t h      = ClampDesignPx( canvasData.ReferenceHeight );
+        const bool     capped = canvasData.ReferenceWidth > static_cast<float>( kMaxDesignPx ) ||
+                            canvasData.ReferenceHeight > static_cast<float>( kMaxDesignPx ) ||
+                            canvasData.ReferenceWidth < static_cast<float>( kMinDesignPx ) ||
+                            canvasData.ReferenceHeight < static_cast<float>( kMinDesignPx );
+        // Only when the size actually changes, so a capped canvas does not log once per frame.
+        if ( capped && ( w != m_TargetWidth || h != m_TargetHeight ) )
+            LOG_WARN( "[UI Editor] canvas design resolution {}x{} previewed at {}x{} (preview cap); a Stretch "
+                      "canvas this large is NOT shown to scale",
+                      canvasData.ReferenceWidth, canvasData.ReferenceHeight, w, h );
         if ( !EnsureTarget( w, h ) )
             return;
 
@@ -204,7 +218,7 @@ namespace Desert::Editor
         const auto& canvasData = reg.get<ECS::UICanvasComponent>( canvas ).Data;
 
         // Toolbar, generated from the one element catalog the viewport's "UI" menu also reads. Buttons wrap
-        // to the next line instead of running off the edge — eleven of them do not fit a docked panel.
+        // to the next line instead of running off the edge — a dozen of them do not fit a docked panel.
         {
             const ImGuiStyle& style     = ImGui::GetStyle();
             const float       rightEdge = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
