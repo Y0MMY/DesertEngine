@@ -1,4 +1,5 @@
 #include "AssetPreloader.hpp"
+#include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
 #include "Shader/ShaderAsset.hpp"
@@ -13,8 +14,13 @@
 
 namespace Desert::Assets
 {
-    constexpr std::array<std::string_view, 1> SUPPORTED_SKINNED_MESH_EXTENSIONS = { ".skmesh" };
-    constexpr std::array<std::string_view, 1> SUPPORTED_STATIC_MESH_EXTENSIONS  = { ".stmesh" };
+    // The two mesh extensions come from Common::Constants::Extensions rather than being spelled again
+    // here. They used to be literals in this file AND named constants in Constants.hpp, and the two
+    // disagreed — the named ones were swapped — for as long as nobody read them. One value, one home.
+    const std::array<std::string_view, 1> SUPPORTED_SKINNED_MESH_EXTENSIONS = {
+         Common::Constants::Extensions::SKINNED_MESH };
+    const std::array<std::string_view, 1> SUPPORTED_STATIC_MESH_EXTENSIONS = {
+         Common::Constants::Extensions::STATIC_MESH };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKELETON_EXTENSIONS     = { ".skeleton" };
     // (now written by import too). Both register as SurfaceMaterialAsset.
     constexpr std::array<std::string_view, 1> SUPPORTED_MATERIAL_EXTENSIONS     = { ".demat" };
