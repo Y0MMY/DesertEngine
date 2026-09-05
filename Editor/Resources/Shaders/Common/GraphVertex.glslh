@@ -23,11 +23,11 @@ In(4) vec2 a_TextureCoord;
 
 #include <Common/CameraUB.glslh>
 
-PushConstant PushConstants
-{
-    mat4 Transform;
-}
-m_PushConstants;
+// The per-draw block — model matrix here, material row index in the fragment stage. Shared rather than
+// declared locally: Vulkan takes ONE push range per pipeline, so the two stages have to agree on its
+// length byte for byte, and this vertex stage used to declare a 64-byte block while the fragment stage
+// generated for `Properties Binding(n)` needs 68.
+#include <Common/MaterialTransport.glslh>
 
 Out(0) vec2 v_UV;
 #ifdef GRAPH_LIT

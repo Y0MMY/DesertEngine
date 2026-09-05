@@ -473,10 +473,17 @@ namespace Desert::Graphic::API::Vulkan
             VulkanShader* vulkanShader = (VulkanShader*)pipeline->GetSpecification().Shader.get();
             if ( pcBuffer.Size && vulkanShader->GetShaderPushConstant().has_value() )
             {
+                // The REFLECTED size, not the buffer's. The push buffer is a fixed 128-byte scratch
+                // (MaterialExecutor), so pushing pcBuffer.Size wrote past the range the pipeline layout
+                // declares — a validation error the moment any vertexless draw gained a push constant,
+                // which the terrain's material row index is the first to do. RenderMesh three hundred
+                // lines up already used pcInfo.Size; this is the same line, and it was the odd one out.
                 auto pcInfo = vulkanShader->GetShaderPushConstant().value();
-                vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
-                                    (VkShaderStageFlags)pcInfo.ShaderStage, 0, (uint32_t)pcBuffer.Size,
-                                    pcBuffer.Data );
+                if ( pcInfo.Size > 0 )
+                {
+                    vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                        (VkShaderStageFlags)pcInfo.ShaderStage, 0, pcInfo.Size, pcBuffer.Data );
+                }
             }
         }
 
@@ -515,10 +522,13 @@ namespace Desert::Graphic::API::Vulkan
             VulkanShader* vulkanShader = (VulkanShader*)pipeline->GetSpecification().Shader.get();
             if ( pcBuffer.Size && vulkanShader->GetShaderPushConstant().has_value() )
             {
+                // The reflected size, for the reason spelled out in SubmitVertices above.
                 auto pcInfo = vulkanShader->GetShaderPushConstant().value();
-                vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
-                                    (VkShaderStageFlags)pcInfo.ShaderStage, 0, (uint32_t)pcBuffer.Size,
-                                    pcBuffer.Data );
+                if ( pcInfo.Size > 0 )
+                {
+                    vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                        (VkShaderStageFlags)pcInfo.ShaderStage, 0, pcInfo.Size, pcBuffer.Data );
+                }
             }
         }
 

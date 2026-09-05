@@ -6,6 +6,7 @@
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Core/Formats/ImageFormat.hpp>
 #include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
+#include <Engine/Core/Formats/MaterialParamRow.hpp>
 #include <Common/Core/Units.hpp>
 
 #include <algorithm>
@@ -318,6 +319,32 @@ namespace Desert::Graphic::System
                  constexpr float    kTessLevel  = 16.0f;
                  constexpr uint32_t kMaxGridDim = 64u;
 
+                 // ── Every terrain's parameters, packed into the shared row buffer BEFORE any draw ───
+                 //
+                 // The material is one object shared by the whole queue, so the values used to be
+                 // written into it and drawn immediately, once per terrain — and a per-material uniform
+                 // block IS the parameters, so the last terrain recorded decided the Tint and tiling of
+                 // every terrain recorded before it. They are rows now, named per draw by a push
+                 // constant, exactly as the mesh path does it
+                 // (Engine/Core/Formats/MaterialParamRow.hpp). The upload happens up front and at final
+                 // size for the same reason it does there: growing a storage buffer reallocates the
+                 // VkBuffer under a draw already recorded against the old one.
+                 std::vector<glm::vec4> rows;
+                 for ( const auto& t : m_Queue )
+                 {
+                     m_Material->ApplyDefaults();
+                     for ( const auto& [name, value] : t.Overrides.Params )
+                         m_Material->SetParamRaw( name, value );
+                     rows.insert( rows.end(), m_Material->GetParamRow().begin(), m_Material->GetParamRow().end() );
+                 }
+                 if ( !rows.empty() )
+                 {
+                     if ( auto* sb =
+                               m_Material->Get<StorageBufferProperty>( Core::Formats::kMaterialRowBlockName ) )
+                         sb->SetRawData( rows.data(), static_cast<uint32_t>( rows.size() * sizeof( glm::vec4 ) ) );
+                 }
+
+                 uint32_t terrainIndex = 0;
                  for ( const auto& t : m_Queue )
                  {
                      const uint32_t gridDim =
@@ -344,11 +371,13 @@ namespace Desert::Graphic::System
                      // cloud at all: the ground beside it did and it did not.
                      CloudShadowBind( m_Material.get(), m_SceneRenderer->GetCloudShadowInput() );
 
-                     // Material params: reset to #pragma defaults, then apply this entity's overrides by name.
-                     m_Material->ApplyDefaults();
-                     for ( const auto& [name, value] : t.Overrides.Params )
-                         m_Material->SetParamRaw( name, value );
-
+                     // Material params were packed into the row buffer above; this draw only names its
+                     // row. TEXTURES cannot travel that way — a sampler is a descriptor and the
+                     // descriptor set belongs to the shared material — so a second terrain with
+                     // different splat textures still takes the last writer's. Stated rather than
+                     // hidden: it is the same limit MeshRenderer keys its generic materials apart to
+                     // avoid, and the terrain queue has no such key because a terrain material is not
+                     // addressable by asset here.
                      // Texture overrides: resolve asset handle -> runtime Image2D and bind by sampler name.
                      // Unset samplers keep the backend white fallback, so this is purely additive.
                      for ( const auto& [name, handle] : t.Overrides.Textures )
@@ -367,6 +396,8 @@ namespace Desert::Graphic::System
                      // Per-terrain painted splat map (Manual layers). Null -> white fallback stays bound.
                      if ( t.SplatMap )
                          m_Material->SetTexture( "u_SplatMap", t.SplatMap );
+
+                     m_Material->SetMaterialIndex( terrainIndex++ );
 
                      const uint32_t vertexCount = gridDim * gridDim * 4u; // patches * control points
                      Renderer::GetInstance().SubmitVertices( m_Pipeline.get(), vertexCount,

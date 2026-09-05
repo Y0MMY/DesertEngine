@@ -28,6 +28,21 @@ namespace Desert::Graphic
 
         virtual void Bind( const MaterialInstance* instance );
 
+        // Name the row of the shared `Materials[]` storage buffer that the NEXT recorded draw reads.
+        //
+        // ON `Material` AND NOT ON ITS SUBCLASSES BECAUSE THERE IS ONE TRANSPORT. A PBR surface, a shader
+        // graph, the terrain and the SDF text all deliver their parameters as a row indexed by a push
+        // constant at Core::Formats::kMaterialIndexPushOffset — so this writes that one offset for all of
+        // them, and there is no second place a second offset could be written. (There used to be a second
+        // transport, a uniform block per material, and it could not give two objects different values at
+        // all; MaterialParamRow.hpp records what that cost and how it was measured.)
+        //
+        // Written STRAIGHT INTO THE PUSH BUFFER rather than stored for a later Bind: a push constant is
+        // snapshotted by Vulkan when the draw is recorded, so this is already per-draw state and holding
+        // it on the material would be one more thing the next object could clobber. Generic draws never
+        // call Bind at all — they submit an executor — so a stored value would never be pushed for them.
+        void SetMaterialIndex( uint32_t index );
+
         // Public for editor introspection (PropertyEditorBuilder reads reflected properties to build UI).
         const std::vector<IProperty*>& GetRegisteredProperties() const
         {

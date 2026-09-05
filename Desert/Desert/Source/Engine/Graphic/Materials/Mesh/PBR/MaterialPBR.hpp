@@ -4,6 +4,7 @@
 #include "PBRPush.hpp"
 
 #include <Engine/Assets/Mesh/PBRSurfaceParams.hpp>
+#include <Engine/Core/Formats/MaterialParamRow.hpp>
 #include <Engine/Graphic/Materials/Mesh/MeshVertexPath.hpp>
 
 #include <glm/glm.hpp>
@@ -49,9 +50,13 @@ namespace Desert::Graphic
         // so the check a test can make is that the block is exactly as long as the last field this code
         // writes — which is what fires if a field is inserted before BoneOffset and this code starts
         // writing the bone offset into MaterialIndex. Desert/Tests/Engine/MeshVertexPath makes it.
-        static constexpr uint32_t kPushTransformOffset     = 0;
-        static constexpr uint32_t kPushMaterialIndexOffset = sizeof( glm::mat4 );     // 64
-        static constexpr uint32_t kPushBoneOffsetOffset    = sizeof( glm::mat4 ) + 4; // 68, skinned only
+        //
+        // DEFINED FROM Core::Formats, not beside it. Those two constants are the same numbers the DSL
+        // emits into every generated material block, and a second spelling of them here is exactly how
+        // the two transports would drift apart after being collapsed into one.
+        static constexpr uint32_t kPushTransformOffset     = Core::Formats::kMaterialTransformPushOffset;
+        static constexpr uint32_t kPushMaterialIndexOffset = Core::Formats::kMaterialIndexPushOffset; // 64
+        static constexpr uint32_t kPushBoneOffsetOffset    = kPushMaterialIndexOffset + 4; // 68, skinned only
         static constexpr uint32_t kPushSizeWithoutBones    = kPushMaterialIndexOffset + 4;
         static constexpr uint32_t kPushSizeWithBones       = kPushBoneOffsetOffset + 4;
 
@@ -73,11 +78,9 @@ namespace Desert::Graphic
             return m_Data;
         }
 
-        // Index into this material's per-draw `Materials[]` storage buffer for the next Bind/draw.
-        void SetMaterialIndex( uint32_t index )
-        {
-            m_MaterialIndex = index;
-        }
+        // Which row of `Materials[]` the next draw reads is Material::SetMaterialIndex — the one entry
+        // point every transport in the engine now shares. It used to be a member here plus a push in
+        // Bind, and the push had to be repeated by anything that drew without an instance.
 
         // Where this draw's bones start in the packed `Bones` buffer below. Skinned path only.
         void SetBoneOffset( uint32_t firstBone )
@@ -102,8 +105,7 @@ namespace Desert::Graphic
         MaterialPBR( MeshVertexPath path, MeshPass pass, const char* shaderName );
 
         Assets::PBRSurfaceParams m_Data;
-        uint32_t                 m_MaterialIndex = 0;
-        uint32_t                 m_BoneOffset    = 0;
+        uint32_t                 m_BoneOffset = 0;
         MeshVertexPath           m_Path;
         MeshPass                 m_Pass;
     };

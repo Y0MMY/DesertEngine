@@ -1,7 +1,7 @@
 // Fully data-driven surface shader in the Desert Shader Language (single file: properties,
 // render state and all stages together). The Properties block both drives the Details UI and
-// (via Binding/TextureBinding) auto-generates the MaterialUB uniform block + samplers in the
-// fragment stage — the parameter is declared exactly once.
+// (via Binding/TextureBinding) auto-generates this material's row of the shared `Materials[]`
+// storage buffer + its samplers in the fragment stage — the parameter is declared exactly once.
 Shader "Unlit"
 {
     Domain Surface
@@ -29,11 +29,8 @@ Shader "Unlit"
 
         #include <Common/CameraUB.glslh>
 
-        PushConstant PushConstants
-        {
-            mat4 Transform;
-        }
-        m_PushConstants;
+        // Transform + the material row index, in the one block both stages declare (see the header).
+        #include <Common/MaterialTransport.glslh>
 
         Out(0) vec2 v_UV;
 
