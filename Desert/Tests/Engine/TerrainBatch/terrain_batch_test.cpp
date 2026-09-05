@@ -87,3 +87,9 @@ TEST( TerrainInstanceRow, TheRowIsSevenSixteenByteSlots )
     // The SPIR-V side of the same relation is asserted in the ShaderCacheKey suite.
     EXPECT_EQ( sizeof( TerrainInstance ), 112u );
 }
+
+int main( int argc, char** argv )
+{
+    ::testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
+}
