@@ -1540,9 +1540,10 @@ namespace Desert::UI
         // Refresh THIS VIEW's frame delta once per canvas draw (drives hover eases). Clamped so a long stall
         // doesn't snap animations; the first frame of a view gets 0 rather than the age of the process.
         {
-            const float now = NowSeconds();
-            ctx.FrameDt     = ctx.LastFrameTime < 0.0f ? 0.0f : std::clamp( now - ctx.LastFrameTime, 0.0f, 0.1f );
+            const float now   = NowSeconds();
+            ctx.FrameDt       = ctx.HasDrawn ? std::clamp( now - ctx.LastFrameTime, 0.0f, 0.1f ) : 0.0f;
             ctx.LastFrameTime = now;
+            ctx.HasDrawn      = true;
             ++ctx.FrameIndex; // drives the tween rewind-on-hide check
         }
 

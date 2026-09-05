@@ -64,7 +64,11 @@ namespace Desert::UI
         // Wall-clock seconds at this view's previous frame, and the delta from it. Per view because two
         // views draw in the same frame: with one shared clock the second walk of every frame measured a
         // delta of ~0 and its hover eases, tweens and screen transitions stood still.
-        float    LastFrameTime = -1.0f; // < 0 = this view has not drawn yet
+        // HasDrawn is a flag rather than a sentinel value in LastFrameTime, because the clock's epoch is the
+        // first UI frame of the process: a "not yet" spelled as a negative time is indistinguishable from a
+        // real reading taken in the first fraction of a second.
+        bool     HasDrawn      = false;
+        float    LastFrameTime = 0.0f;
         float    FrameDt       = 0.0f;
         uint64_t FrameIndex    = 0; // drives the tween's rewind-on-hide check
 
