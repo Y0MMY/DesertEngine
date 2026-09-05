@@ -24,7 +24,7 @@ namespace Desert::Graphic
             auto* imageService = Runtime::ResourceRegistry::GetImageService();
 
             // 1) Radiance cube (sharp environment) — also the source the prefilter convolves.
-            auto        radianceCube   = ConvertPanoramaToCubemapCross( imagePanorama->GetImageHandle() );
+            auto        radianceCube   = ConvertPanoramaToRadianceCube( imagePanorama->GetImageHandle() );
             const auto  radianceHandle = imageService->Register( std::move( radianceCube ),
                                                                  Runtime::ImageHandle::Type::ImageCube );
 
@@ -45,16 +45,8 @@ namespace Desert::Graphic
         return {};
     }
 
-    // The cube chain's sizes live in SkyRules.hpp, because the environment-cost report has to compute the
-    // same numbers and a second copy of them is how a report starts lying.
-    static constexpr uint32_t kEnvFaceMapSize    = kSkyEnvCubeFaceSize;
-    static constexpr uint32_t kIrradianceMapSize = kSkyEnvIrradianceFaceSize;
-    static constexpr uint32_t kBRDF_LUT_Size     = 256;
-    static constexpr uint32_t kMipsCount         = kSkyEnvPrefilterMips;
-    static constexpr uint32_t kWorkGroups        = 32;
-
     std::shared_ptr<Desert::Graphic::ImageCube>
-    EnvironmentManager::ConvertPanoramaToCubemapCross( const Runtime::ImageHandle& panorama )
+    EnvironmentManager::ConvertPanoramaToRadianceCube( const Runtime::ImageHandle& panorama )
     {
         ComputeImagesSpecification processingInfo;
         processingInfo.InputHandle = panorama;
@@ -65,10 +57,12 @@ namespace Desert::Graphic
         // "TODO" that used to sit here survived: it broke only the GPU capture, and only at the moment
         // someone was reading one. Two different compute dispatches both labelled "TODO" is the least
         // useful thing a capture of this 727 ms bake chain can say.
-        processingInfo.Tag       = "EnvRadianceCross";
-        processingInfo.Width = kEnvFaceMapSize * 4;
-        processingInfo.Height    = kEnvFaceMapSize * 3;
-        processingInfo.MipLevels = 1u;
+        processingInfo.Tag = "EnvRadiance";
+        // The face sizes and mip counts live in SkyRules.hpp beside the cost report, because the report
+        // has to compute the same numbers and a second copy of them is how a report starts lying — the
+        // prefiltered cube below shipped at a QUARTER of its reported face exactly that way.
+        processingInfo.FaceSize  = kSkyEnvCubeFaceSize;
+        processingInfo.MipLevels = kSkyEnvRadianceMips;
 
         return ComputeImages::ProccessForImageCube( processingInfo );
     }
@@ -79,10 +73,9 @@ namespace Desert::Graphic
         ComputeImagesSpecification processingInfo;
         processingInfo.InputHandle = panorama;
         processingInfo.ShaderName  = "DiffuseIrradiance";
-        // Names the 301.8 ms stage of the bake — see the note in ConvertPanoramaToCubemapCross.
+        // Names the 301.8 ms stage of the bake — see the note in ConvertPanoramaToRadianceCube.
         processingInfo.Tag       = "EnvDiffuseIrradiance";
-        processingInfo.Width     = kIrradianceMapSize * 4;
-        processingInfo.Height    = kIrradianceMapSize * 3;
+        processingInfo.FaceSize  = kSkyEnvIrradianceFaceSize;
         processingInfo.MipLevels = 1u;
 
         return ComputeImages::ProccessForImageCube( processingInfo );
@@ -107,7 +100,7 @@ namespace Desert::Graphic
              imageService->Register( std::move( panorama ), Runtime::ImageHandle::Type::Image2D );
 
         // 1) Radiance cube (sharp environment) — also the source the prefilter convolves.
-        auto       radianceCube   = ConvertPanoramaToCubemapCross( panoramaHandle );
+        auto       radianceCube   = ConvertPanoramaToRadianceCube( panoramaHandle );
         const auto radianceHandle = imageService->Register( std::move( radianceCube ),
                                                             Runtime::ImageHandle::Type::ImageCube );
 
@@ -136,9 +129,8 @@ namespace Desert::Graphic
         processingInfo.InputHandle = radianceCube;
         processingInfo.ShaderName  = "PrefilterEnvMap";
         processingInfo.Tag         = "EnvPrefiltered";
-        processingInfo.Width       = kEnvFaceMapSize;
-        processingInfo.Height      = kEnvFaceMapSize;
-        processingInfo.MipLevels   = kMipsCount;
+        processingInfo.FaceSize    = kSkyEnvPrefilterFaceSize;
+        processingInfo.MipLevels   = kSkyEnvPrefilterMips;
 
         return ComputeImages::ProccessForImageCubeMips( processingInfo );
     }

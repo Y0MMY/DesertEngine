@@ -31,6 +31,16 @@ project(test_name)
     -- Optick: Common's JobSystem registers its worker threads with the profiler.
     links { "Common", "Optick" }
 
+    -- SkyRules.hpp reaches Engine/Core/Formats/ImageFormat.hpp (the cube-chain constants derive their
+    -- mip counts from its MipChainLength), and Core.hpp's DESERT_DEBUG_BREAK needs the platform.
+    filter "system:windows"
+        defines { "DESERT_PLATFORM_WINDOWS" }
+    filter "system:macosx"
+        defines { "DESERT_PLATFORM_MACOS" }
+    filter "system:linux"
+        defines { "DESERT_PLATFORM_LINUX" }
+    filter {}
+
     filter "system:not windows"
         links { "ReflectCpp" }
     filter {}

@@ -235,11 +235,30 @@ namespace Desert::Core::Formats
         bool                  GenerateMips = false;
     };
 
+    // Length of the full mip chain for a texture whose largest dimension is @p dim
+    // (floor(log2(dim)) + 1, and 1 for a zero/one-texel extent). This is THE definition — the mip count a
+    // Vulkan image legally accepts, the count the cost report charges for, and the count a dispatch loop
+    // walks all derive from it, so they cannot disagree by each rounding log2 their own way.
+    constexpr uint32_t MipChainLength( uint32_t dim )
+    {
+        uint32_t levels = 1u;
+        for ( ; dim > 1u; dim >>= 1u )
+            ++levels;
+        return levels;
+    }
+
     struct ImageCubeSpecification
     {
-        const std::string     Tag;
-        const uint32_t        Width;
-        const uint32_t        Height;
+        const std::string Tag;
+        // The edge of one FACE, in texels. A cube image is six square layers of exactly this size, and
+        // every derived quantity — the legal mip chain, a compute dispatch's extent, the byte cost —
+        // follows from the face. This field used to be a Width/Height pair carrying the 4x3 "cross"
+        // unwrap of the source image, with every consumer dividing back to the face; three separate
+        // defects were one side of that division going missing (a mip count computed from the cross ->
+        // invalid vkCreateImage and VK_ERROR_DEVICE_LOST; dispatches over the cross -> 12x-16x surplus
+        // threads; a prefiltered cube created at a QUARTER of the face its caller asked for). The cross
+        // is a layout of source pixels, not a property of the cube.
+        const uint32_t        FaceSize;
         const ImageFormat     Format;
         const uint32_t        Mips = 1;
         ImagePixelData        Data;

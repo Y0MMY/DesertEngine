@@ -87,24 +87,27 @@ namespace Desert::Graphic::API::Vulkan
     {
         Core::Formats::ImageCubeSpecification spec = {
              .Tag        = "VulkanFallbackTextures-Cube",
-             .Width      = 4 * 4,
-             .Height     = 4 * 3,
+             .FaceSize   = 4,
              .Format     = format,
              .Mips       = 1,
              .Properties = Core::Formats::ImageProperties::Sample,
         };
 
+        // Sized for the cube's actual texels: six square faces. (VulkanImageCube::UploadData is
+        // currently a no-op, so these pixels never reach the GPU — the fallback works because nothing
+        // that binds it is ever allowed to be read. Kept honest for the day the upload exists.)
+        const size_t cubeTexels = 6ull * spec.FaceSize * spec.FaceSize;
         switch ( format )
         {
             case Core::Formats::ImageFormat::RGBA8F:
             case Core::Formats::ImageFormat::BGRA8F:
             {
-                spec.Data = std::vector<unsigned char>( spec.Width * spec.Height * 4, 0xFF);
+                spec.Data = std::vector<unsigned char>( cubeTexels * 4, 0xFF );
                 break;
             }
             case Core::Formats::ImageFormat::RGBA32F:
             {
-                std::vector<float> data( spec.Width * spec.Height * 4, 1.0f);
+                std::vector<float> data( cubeTexels * 4, 1.0f );
                 spec.Data = data;
                 break;
             }

@@ -538,14 +538,19 @@ namespace Desert::Graphic::API::Vulkan
         m_Resource.LayerCount = 6;
         m_Resource.Layout     = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        uint32_t faceSize = m_Specification.Width / 4;
+        const uint32_t faceSize = m_Specification.FaceSize;
 
-        // NOTE: the cubemap's mipLevels can exceed the face's chain length (Mips is often derived from the
-        // full cross width, not the Width/4 face) -> a VUID-VkImageCreateInfo-mipLevels-00958 validation
-        // warning. NOT clamped here on purpose: the IBL prefilter writes a fixed number of roughness mips,
-        // and silently reducing the image's mip count would desync it (out-of-range mip access -> crash).
-        // Fixing this properly means deriving Mips from the FACE size at the IBL call sites — a separate,
-        // careful change in the IBL pipeline.
+        // The specification names the FACE, so there is no division here for a caller to forget — but a
+        // mip count past the face's chain is still an invalid vkCreateImage (VUID-...-00958) that surfaces
+        // as a GPU fault / VK_ERROR_DEVICE_LOST far from the call site. Refuse it loudly with the numbers
+        // instead: silently clamping would desync a caller that then walks mip views it asked for.
+        const uint32_t maxMips = Core::Formats::MipChainLength( faceSize );
+        if ( m_Specification.Mips > maxMips )
+            return Common::MakeFormattedError<bool>(
+                 "ImageCube '{}': {} mips requested but a {}-texel face supports at most {} "
+                 "(VUID-VkImageCreateInfo-mipLevels-00958)",
+                 m_Specification.Tag, m_Specification.Mips, faceSize, maxMips );
+
         VkImageLayout finalDefaultLayout = Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
 
         VkImageCreateInfo info = {

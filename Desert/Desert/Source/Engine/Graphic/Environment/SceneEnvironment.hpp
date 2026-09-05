@@ -54,8 +54,12 @@ namespace Desert::Graphic
                                              Image2D* multiScatterLut, const CloudBakeBinding& clouds );
 
     private:
+        // Samples an equirect panorama into the radiance cube (the sharp environment the skybox draws and
+        // the prefilter convolves). Named for the RESULT: the 4x3 "cross" this used to be named after was
+        // an internal unwrap of the source pixels, and carrying it in the name is how call sites came to
+        // reason in cross widths instead of faces.
         static std::shared_ptr<ImageCube>
-        ConvertPanoramaToCubemapCross( const Runtime::ImageHandle& panorama );
+        ConvertPanoramaToRadianceCube( const Runtime::ImageHandle& panorama );
 
         static std::shared_ptr<ImageCube>
         CreateDiffuseIrradiance( const Runtime::ImageHandle& panorama );

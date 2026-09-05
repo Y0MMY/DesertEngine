@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Engine/Core/Formats/ImageFormat.hpp>
 #include <Engine/ECS/SkyAtmosphereComponent.hpp>
 
 #include <Common/Core/Units.hpp>
@@ -186,11 +187,27 @@ namespace Desert::Graphic
     // ---------------------------------------------------------------------------------------------------
 
     // The IBL cube chain that every baked environment produces. These are the sizes SceneEnvironment
-    // actually asks for; they live here so the cost report and the bake cannot disagree.
+    // actually asks for; they live here so the cost report and the bake cannot disagree. Every size names
+    // a FACE (ImageCubeSpecification::FaceSize) — no call site multiplies by the 4x3 cross unwrap.
     inline constexpr uint32_t kSkyEnvCubeFaceSize       = 1024;
     inline constexpr uint32_t kSkyEnvIrradianceFaceSize = 32;
-    inline constexpr uint32_t kSkyEnvPrefilterMips      = 11;
-    inline constexpr uint32_t kSkyEnvBytesPerPixel      = 16; // RGBA32F — Image::GetBytesPerPixel
+    // The radiance cube is the SHARP environment: the skybox pass draws its mip 0 and the prefilter
+    // convolves it. Its lower mips exist for the prefilter's mipmap-filtered importance sampling
+    // (PrefilterEnvMap computes `mipLevel = 0.5*log2(ws/wt)+1` per sample); with a single level those
+    // textureLod reads all clamp to mip 0 and the wide-roughness convolution integrates 1024 point
+    // samples of a sun-bright texel — fireflies the sample count cannot buy back.
+    inline constexpr uint32_t kSkyEnvRadianceMips = 1u;
+    // The prefiltered specular face. 256 is the MEASURED choice, not the historical 1024: the roughness
+    // ramp starts blurring from mip 1 anyway, mirror (mip 0) detail beyond 256 was not resolvable on the
+    // Starter metal ladder, and 1024 costs 16x the convolution work in the heaviest bake stage plus
+    // 128 MiB of RGBA32F per live SceneRenderer against 8 MiB.
+    inline constexpr uint32_t kSkyEnvPrefilterFaceSize = 256;
+    // Derived from the face, never authored: a hand-typed pair is how 11 mips got requested on a 256
+    // face — an invalid vkCreateImage (VUID-...-00958) away from VK_ERROR_DEVICE_LOST.
+    inline constexpr uint32_t kSkyEnvPrefilterMips = Core::Formats::MipChainLength( kSkyEnvPrefilterFaceSize );
+    static_assert( kSkyEnvRadianceMips <= Core::Formats::MipChainLength( kSkyEnvCubeFaceSize ),
+                   "radiance mip count exceeds what its own face supports" );
+    inline constexpr uint32_t kSkyEnvBytesPerPixel = 16; // RGBA32F — Image::GetBytesPerPixel
 
     struct SkyEnvironmentSize
     {
@@ -248,17 +265,22 @@ namespace Desert::Graphic
     };
 
     // What one baked environment costs on the GPU. Note that only the PANORAMA scales with the resolution
-    // ladder — the cube chain is a fixed 1024-texel face either way — which is exactly the kind of thing a
-    // number in the log tells you and a tooltip does not.
+    // ladder — the cube chain's faces are fixed constants either way — which is exactly the kind of thing
+    // a number in the log tells you and a tooltip does not.
+    //
+    // Each addend below is (face, mips) EXACTLY as SceneEnvironment requests it, from the same constants.
+    // This function once charged for a 1024-face 11-mip prefiltered cube (128 MiB) while the bake built a
+    // 256-face 9-mip one (8 MiB) — the two sides shared the face constant but one call site multiplied it
+    // by the cross layout and the other did not. Tests/Engine/SkyRules pins the agreement.
     inline SkyEnvironmentCost SkyEnvironmentBakeCost( ECS::SkyEnvironmentResolution resolution )
     {
         const SkyEnvironmentSize size = EnvironmentPanoramaSize( resolution );
 
         SkyEnvironmentCost cost;
         cost.PanoramaBytes = static_cast<uint64_t>( size.Width ) * size.Height * kSkyEnvBytesPerPixel;
-        cost.CubeBytes     = SkyEnvironmentCubeBytes( kSkyEnvCubeFaceSize, 1u ) +
+        cost.CubeBytes     = SkyEnvironmentCubeBytes( kSkyEnvCubeFaceSize, kSkyEnvRadianceMips ) +
                          SkyEnvironmentCubeBytes( kSkyEnvIrradianceFaceSize, 1u ) +
-                         SkyEnvironmentCubeBytes( kSkyEnvCubeFaceSize, kSkyEnvPrefilterMips );
+                         SkyEnvironmentCubeBytes( kSkyEnvPrefilterFaceSize, kSkyEnvPrefilterMips );
         cost.TotalBytes = cost.PanoramaBytes + cost.CubeBytes;
         return cost;
     }

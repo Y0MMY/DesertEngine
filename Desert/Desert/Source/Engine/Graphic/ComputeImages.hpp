@@ -13,14 +13,28 @@ namespace Desert::ShaderResources
 
 namespace Desert::Graphic
 {
+    // Must match the conversion shaders' LocalSize(32, 32, 1) — a dispatch derived with a different
+    // group size under-covers the output and the right/bottom edge is never written.
+    inline constexpr uint32_t kComputeImagesWorkGroupSize = 32u;
+
+    // Whole workgroups covering @p extentTexels threads: the pair (extent, groups) this returns is the
+    // relation Tests/Engine/SkyRules pins — every texel covered, no whole surplus group. Deriving the
+    // extent from anything but the output's own face is how one bake dispatched 12x its texel count.
+    constexpr uint32_t DispatchGroupCount( uint32_t extentTexels, uint32_t localSize )
+    {
+        return ( extentTexels + localSize - 1u ) / localSize;
+    }
+
     struct ComputeImagesSpecification
     {
         Runtime::ImageHandle InputHandle;
         std::string          Tag;
         std::string          ShaderName;
         uint32_t             MipLevels;
-        uint32_t             Width;
-        uint32_t             Height;
+        // The FACE edge of the output cube, in texels — the same quantity ImageCubeSpecification::FaceSize
+        // names. Callers state the face they want; nothing downstream multiplies or divides by the 4x3
+        // cross unwrap any more (that arithmetic produced three defects — see ImageCubeSpecification).
+        uint32_t             FaceSize;
     };
 
     class ComputeImages final
