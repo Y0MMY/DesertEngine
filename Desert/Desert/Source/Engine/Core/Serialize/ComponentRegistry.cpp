@@ -1,4 +1,6 @@
 #include "ComponentRegistry.hpp"
+#include <Engine/Core/Serialize/TextureSlot.hpp>
+
 #include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -242,35 +244,14 @@ namespace Desert::Core::Serialize
                     return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
                 return relStr;
             }
+            // Textures: in TextureSlot.cpp, which is the ONE branch of this table a suite can reach.
+            // It used to write `a->GetMetadata().Filepath.string()` right here — absolute, i.e. a
+            // developer's home directory in a committed file, the same defect the MaterialAsset branch
+            // above was fixed for. The material's fix could not be copied: a cooked texture lives under
+            // COOKED_PATH, a SIBLING of the assets root, where relative-to-ASSETS_PATH gives
+            // `../Cooked/...` and falls back to absolute anyway.
             if ( type == "TextureAsset" )
-            {
-                auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) );
-                if ( !a )
-                {
-                    // DC 1.4. A slot that IS set and names an asset this manager does not have is the
-                    // one case worth a line: the alternative is an empty string in the file, which is
-                    // indistinguishable from "the artist left it empty" and loses the reference for
-                    // good on the next save.
-                    LOG_ERROR( "[Textures] Entity references texture handle {} and no texture with that "
-                               "handle is registered; the slot is being saved as EMPTY and the reference "
-                               "is lost. Cooked textures are scanned from '{}'.",
-                               handle, Common::Constants::Path::TEXTURE_PATH_COOKED.string() );
-                    return "";
-                }
-
-                // PROJECT-RELATIVE AND ROOT-TAGGED, and the tag is the whole point. This branch used
-                // to write `a->GetMetadata().Filepath.string()`, which is ABSOLUTE — the same defect
-                // the MaterialAsset branch above was fixed for, in a file that gets committed. The
-                // material's fix cannot simply be copied here: a material lives under ASSETS_PATH,
-                // while a cooked texture lives under COOKED_PATH, which is a SIBLING of the assets
-                // root, so relative-to-ASSETS_PATH produces `../Cooked/Textures/T.tex` and falls
-                // straight back to the absolute spelling. Common::AssetHandle::StableKeyForPath is
-                // the engine's existing single answer to "where is this asset in the project" — it
-                // owns the root table and the tag — so this stores that answer rather than inventing
-                // a second root-selection rule. It is also stronger than a bare relative path: a
-                // project whose assets root is called `Content` still reads `assets:Textures/X.png`.
-                return Common::AssetHandle::StableKeyForPath( a->GetMetadata().Filepath );
-            }
+                return TextureSlotToPath( mgr, handle );
             // NO "CloudNoiseVolumeAsset" BRANCH ANY MORE. It served exactly one reflected field — the
             // cloud layer's own noise slot — and that field moved onto the cloud TYPE, which stores its
             // volume as a path of its own rather than through this resolver. A branch keyed on a
@@ -426,47 +407,24 @@ namespace Desert::Core::Serialize
             }
             if ( type == "TextureAsset" )
             {
-                // EVERY spelling is accepted, and the expansion happens exactly once. A file written
-                // by ToPath above carries the root-tagged key (`cooked:Textures/T.tex`); a file
-                // written before that carries a plain relative or absolute path, and
-                // PathForStableKey hands an untagged string straight back, so both arrive here as a
-                // path this machine can open.
-                const std::filesystem::path full = Common::AssetHandle::PathForStableKey( path );
-
-                auto a = mgr.FindByPath<Assets::TextureAsset>( full );
-                if ( !a )
-                {
-                    // WHY CREATE RATHER THAN RETURN 0. FindByPath compares filepaths VERBATIM, while
-                    // CreateAsset deduplicates on the spelling-independent StableKeyForPath — so this
-                    // call is BOTH the create-on-miss every other branch here already does AND the
-                    // spelling-independent lookup FindByPath is not. A texture the preloader
-                    // registered under a different spelling of the same file resolves here to the
-                    // record that already exists, instead of to zero.
-                    a = m.CreateAsset<Assets::TextureAsset>( Assets::AssetPriority::High, full );
-                }
-
-                if ( !a )
-                {
-                    // DC 1.4: this branch used to return 0 with nothing logged, so a texture that did
-                    // not resolve was indistinguishable from a slot the artist left empty — and the
-                    // next save wrote the emptiness back into the file. Say which name failed, what
-                    // it expanded to, and where textures are looked for.
-                    LOG_ERROR( "[Textures] Texture '{}' named by the scene did not resolve (expanded to "
-                               "'{}'; cooked textures live under '{}', content under '{}'). The slot "
-                               "stays unset.",
-                               path, full.string(),
-                               Common::Constants::Path::TEXTURE_PATH_COOKED.string(),
-                               Common::Constants::Path::TEXTUREDIR_PATH.string() );
+                // The reference itself is resolved in TextureSlot.cpp — every spelling accepted,
+                // create-on-miss (which is also the spelling-independent lookup FindByPath is not), and
+                // a logged reason instead of the silent 0 this branch used to return.
+                const uint64_t resolved = TextureSlotFromPath( m, path );
+                if ( resolved == 0 )
                     return 0;
-                }
 
                 // The SHELL only, and unconditionally: RegisterAsset is an idempotent map write, while
                 // the `Get`-first spelling used elsewhere in this file would BUILD the GPU texture
                 // here — during scene parsing, for every slot — which is exactly the upload
-                // AssetPreloader defers to the first draw.
+                // AssetPreloader defers to the first draw. This step stays at the call site because it
+                // is the one part of the round trip that needs the renderer.
                 if ( auto* svc = Runtime::ResourceRegistry::GetTextureService() )
-                    svc->RegisterAsset( a );
-                return static_cast<uint64_t>( a->GetMetadata().Handle );
+                {
+                    if ( auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( resolved ) ) )
+                        svc->RegisterAsset( a );
+                }
+                return resolved;
             }
             // The read side of the volume branch is gone with the write side above, and for the same
             // reason: no reflected field names that asset type any more. A cloud type's own volume is
