@@ -956,12 +956,17 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Match Width/Height" ), Category( "UI Canvas" ), Range( 0.0f, 1.0f ) )
         float MatchWidthHeight = 0.5f; // ScaleWithScreen only: 0 = match width, 1 = match height
 
-        // Asset<TextureAsset> is what makes this a HANDLE and not a number. Without it the reflected
-        // serializer writes the raw 64-bit id and reads it back as one — and the id is minted at load time
-        // from the file's path, so it names nothing after a restart (ComponentRegistry::MakeReflected says
-        // this in full). It is also what the Details panel dispatches on to offer a texture picker, so the
-        // field could not be authored either. This setting was dead in three places at once: nothing drew
-        // it, nothing could set it, and nothing it was set to survived a reload.
+        // Asset<TextureAsset> is what names the asset TYPE to the serializer's resolver. Without it the
+        // resolver gets an empty type string, falls through its table to the mesh lookup, and writes the
+        // slot out as an EMPTY STRING — so every save cleared it.
+        //
+        // CORRECTED 2026-09-05: this comment used to say the annotation "is what makes this a HANDLE and
+        // not a number", and that the field could not be authored without it. Neither is so.
+        // DesertHeaderTool maps `Assets::AssetHandle` onto FieldType::AssetHandle by the TYPE's spelling
+        // (main.cpp, MapFieldType), and the Details panel's texture picker is the default arm of that
+        // field type — so the slot was always editable in the editor and always discarded on save. The
+        // setting was dead in three places, but the third one is "nothing it was set to survived a save",
+        // and the cause is the empty asset type, not the field type.
         PROPERTY( DisplayName( "Background Sprite" ), Category( "UI Canvas" ), Asset<TextureAsset> )
         Assets::AssetHandle Sprite; // drag a texture from the Content Browser; unset = transparent
 
@@ -1130,7 +1135,13 @@ namespace Desert::ECS
                   Tooltip( "Fill with the blurred scene behind the panel (frosted glass). 0 = off." ) )
         float BackdropBlur = 0.0f;
 
-        PROPERTY( DisplayName( "Sprite" ), Category( "UI Panel" ), Preview )
+        // Asset<TextureAsset> is what tells the SERIALIZER which asset type this handle names. Without it
+        // the resolver is handed an empty type string, falls through its table to the mesh lookup, finds
+        // no mesh under a texture's handle and writes the field out as an EMPTY STRING — so the slot was
+        // silently cleared by every save. (It is not what makes the field a handle: DesertHeaderTool maps
+        // `Assets::AssetHandle` to FieldType::AssetHandle by its spelling, which is why the Details panel
+        // could always offer a picker for it. The setting could be authored and could not be kept.)
+        PROPERTY( DisplayName( "Sprite" ), Category( "UI Panel" ), Asset<TextureAsset>, Preview )
         Assets::AssetHandle Sprite; // optional background image, tinted by Color * Opacity. Unset = flat colour.
 
         PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Panel" ) )
@@ -1577,13 +1588,17 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Action Target" ), Category( "UI Button" ) )
         std::string OnClickMessage = ""; // scene path / message name / URL, depending on Action
 
-        PROPERTY( DisplayName( "Sprite" ), Category( "UI Button" ) )
+        // All three carry Asset<TextureAsset> for the reason UIPanelData::Sprite states in full: the
+        // annotation is what names the asset TYPE to the serializer, and without it the resolver wrote
+        // each of these out as an empty string. UICanvasRenderer2D reads all three (a button picks
+        // Pressed, then Hover, then Sprite), so they were live in the draw and dead in the file.
+        PROPERTY( DisplayName( "Sprite" ), Category( "UI Button" ), Asset<TextureAsset> )
         Assets::AssetHandle Sprite; // normal-state image, tinted by the state colour. Unset = flat colour.
 
-        PROPERTY( DisplayName( "Hover Sprite" ), Category( "UI Button" ) )
+        PROPERTY( DisplayName( "Hover Sprite" ), Category( "UI Button" ), Asset<TextureAsset> )
         Assets::AssetHandle HoverSprite; // shown on hover (falls back to Sprite if unset)
 
-        PROPERTY( DisplayName( "Pressed Sprite" ), Category( "UI Button" ) )
+        PROPERTY( DisplayName( "Pressed Sprite" ), Category( "UI Button" ), Asset<TextureAsset> )
         Assets::AssetHandle PressedSprite; // shown while pressed (falls back to Sprite if unset)
 
         PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Button" ) )

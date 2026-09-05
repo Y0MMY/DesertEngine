@@ -3,6 +3,7 @@
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/UUID.hpp>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -70,6 +71,20 @@ namespace Common
             std::string_view             Tag;
         };
 
+        // ONE table, read by both directions. It used to be a local array inside StableKeyForPath, and
+        // the moment the inverse below appeared that would have made two lists of roots that must agree
+        // with nothing checking that they do — the defect shape this file's own comments are about. A
+        // root added here reaches the writer and the reader in the same edit.
+        static const std::array<PathRoot, 3>& ContentRoots() noexcept
+        {
+            static const std::array<PathRoot, 3> roots = {
+                 PathRoot{ &Constants::Path::ASSETS_PATH, "assets" },
+                 PathRoot{ &Constants::Path::COOKED_PATH, "cooked" },
+                 PathRoot{ &Constants::Path::RESOURCE_PATH, "engine" },
+            };
+            return roots;
+        }
+
         // Builds the stable key a path-derived handle is hashed from: the path RELATIVE to whichever
         // root contains it, behind that root's tag.
         //
@@ -112,17 +127,11 @@ namespace Common
             if ( ec )
                 return normalized.generic_string();
 
-            const PathRoot roots[] = {
-                 { &Constants::Path::ASSETS_PATH, "assets" },
-                 { &Constants::Path::COOKED_PATH, "cooked" },
-                 { &Constants::Path::RESOURCE_PATH, "engine" },
-            };
-
             std::string_view bestTag;
             std::string      bestRelative;
             std::size_t      bestRootLength = 0;
 
-            for ( const PathRoot& candidate : roots )
+            for ( const PathRoot& candidate : ContentRoots() )
             {
                 std::error_code rootEc;
                 const fs::path  absoluteRoot = candidate.Root->is_absolute()
@@ -151,6 +160,43 @@ namespace Common
                 return normalized.generic_string();
 
             return std::string( bestTag ) + ':' + bestRelative;
+        }
+
+        // THE EXACT INVERSE of StableKeyForPath: turns `assets:Textures/T.png` back into the path that
+        // root spells today. Written here, beside the forward direction, because the two are the classic
+        // pair that must agree and the agreement is asserted (AssetHandleStability) rather than hoped for.
+        //
+        // WHY IT EXISTS. A reference stored in a scene has to name an asset in a form that survives being
+        // sent to another machine, and StableKeyForPath is already the engine's one answer to "where is
+        // this asset in the project". Storing that answer is only useful if it can be read back, and no
+        // plain relative path can do the job for every asset class: a material lives under ASSETS_PATH
+        // while a cooked texture lives under COOKED_PATH, which is a SIBLING of it, so a path made
+        // relative to the assets root comes out as `../Cooked/...` for a texture and falls back to the
+        // absolute spelling — i.e. to a developer's home directory in a committed file. The tag is what
+        // carries the missing bit, and it is a bit no path can carry.
+        //
+        // A string with no known tag is returned unchanged. That covers three real cases and is not a
+        // fallback: a plain relative path written before this form existed, an absolute path to a file
+        // genuinely outside the project (StableKeyForPath returns those verbatim too), and the synthetic
+        // `procedural://` / `memory://` keys that are identities rather than locations.
+        static std::filesystem::path PathForStableKey( std::string_view key ) noexcept
+        {
+            for ( const PathRoot& candidate : ContentRoots() )
+            {
+                const std::string prefix = std::string( candidate.Tag ) + ':';
+                if ( key.rfind( prefix, 0 ) != 0 )
+                    continue;
+
+                const std::string_view relative = key.substr( prefix.size() );
+                // A tag with nothing after it names the root itself, which is not an asset; returning the
+                // root would silently hand back a directory, so the key is treated as untagged text.
+                if ( relative.empty() )
+                    break;
+
+                return ( *candidate.Root / std::filesystem::path( relative ) ).lexically_normal();
+            }
+
+            return std::filesystem::path( key );
         }
 
         // Deterministic handle from an asset's path, keyed on its location RELATIVE to the project (see

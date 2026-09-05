@@ -505,6 +505,107 @@ TEST( AssetHandleStability, TheHashedKeyCarriesNoPartOfTheProjectRoot )
                "cooked:Textures/T.tex" );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// THE KEY IS ALSO A NAME AN ASSET CAN BE STORED UNDER, so it needs an exact inverse.
+//
+// StableKeyForPath answers "where is this asset in the project", and that is precisely what a scene has
+// to write down about a texture: a raw filepath is absolute with a project open and carries a
+// developer's home directory into a committed file, and the assets-root-relative form the material and
+// cloud branches use cannot spell a COOKED asset at all, because Cooked/ is a SIBLING of the assets root
+// and the reduction comes out as `../Cooked/...`. PathForStableKey is that answer read back.
+//
+// Forward and inverse are the classic pair that must agree, so the agreement is asserted rather than
+// hoped for — and asserted in BOTH directions, because either one alone is satisfiable by a function
+// that throws information away.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( AssetHandleStability, EveryRootsKeyExpandsBackToThePathItCameFrom )
+{
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+
+    const std::vector<std::filesystem::path> subjects = {
+         "/ann/work/Game/Content/Textures/T.png",
+         "/ann/work/Game/Content/Clouds/Types/Cumulus.decloudtype",
+         "/ann/work/Game/Cooked/Textures/T.tex",
+         "/ann/work/Game/Cooked/Meshes/Rock.stmesh",
+    };
+
+    for ( const auto& path : subjects )
+    {
+        const std::string key = Common::AssetHandle::StableKeyForPath( path );
+        EXPECT_EQ( Common::AssetHandle::PathForStableKey( key ).lexically_normal(), path.lexically_normal() )
+             << "the key '" << key << "' does not expand back to " << path.string();
+    }
+
+    // Engine resources come back too, and they must not follow the project: the same key under a
+    // different project has to expand to the same file.
+    const std::string shaderKey = Common::AssetHandle::StableKeyForPath( "Resources/Shaders/Programs/PBR.shader" );
+    EXPECT_EQ( shaderKey, "engine:Shaders/Programs/PBR.shader" );
+    const std::filesystem::path underOneProject = Common::AssetHandle::PathForStableKey( shaderKey );
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Other", "Assets" );
+    EXPECT_EQ( Common::AssetHandle::PathForStableKey( shaderKey ), underOneProject );
+}
+
+TEST( AssetHandleStability, AKeyExpandsAgainstTHISMachinesRootsAndNotTheOneThatWroteIt )
+{
+    // The property the whole stored form exists for. Ann writes the key; the build agent, whose checkout
+    // shares no directory with hers and whose assets folder is not even called the same thing, expands it
+    // to ITS copy of the file. A stored raw path cannot do this, and that is the defect.
+    ProjectRootGuard guard;
+
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+    const std::string written = Common::AssetHandle::StableKeyForPath( "/ann/work/Game/Cooked/Textures/T.tex" );
+    EXPECT_EQ( written, "cooked:Textures/T.tex" );
+
+    Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Game", "Assets" );
+    EXPECT_EQ( Common::AssetHandle::PathForStableKey( written ).lexically_normal(),
+               std::filesystem::path( "/opt/ci/checkout/Game/Cooked/Textures/T.tex" ) );
+
+    // And the path the expansion produced is the one THIS machine derives the shared handle from, which
+    // is what makes the reference actually resolve rather than merely look portable.
+    EXPECT_EQ( HandleValue( Common::AssetHandle::PathForStableKey( written ) ),
+               HandleValue( "/opt/ci/checkout/Game/Cooked/Textures/T.tex" ) );
+}
+
+TEST( AssetHandleStability, AStringWithNoRootTagIsHandedBackUnchanged )
+{
+    // Three real cases, none of them a fallback: a plain relative path written before the tagged form
+    // existed, an absolute path to a file genuinely outside the project (StableKeyForPath returns those
+    // verbatim too, so the inverse has to as well), and a synthetic key that is an identity rather than
+    // a location. Inventing a root for any of them would change which file the name means.
+    ProjectRootGuard guard;
+    Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
+
+    EXPECT_EQ( Common::AssetHandle::PathForStableKey( "Materials/M.demat" ),
+               std::filesystem::path( "Materials/M.demat" ) );
+    EXPECT_EQ( Common::AssetHandle::PathForStableKey( "/elsewhere/scratch/Hand.dcnv" ),
+               std::filesystem::path( "/elsewhere/scratch/Hand.dcnv" ) );
+    EXPECT_EQ( Common::AssetHandle::PathForStableKey( "procedural://humanoid/Walk" ),
+               std::filesystem::path( "procedural://humanoid/Walk" ) );
+
+    // A tag with nothing after it names the ROOT, which is a directory and not an asset. Expanding it
+    // would hand a caller a directory to load; it is treated as ordinary text instead.
+    EXPECT_EQ( Common::AssetHandle::PathForStableKey( "cooked:" ), std::filesystem::path( "cooked:" ) );
+}
+
+TEST( AssetHandleStability, TwoRootsThatShareAPrefixDoNotSwapKeysOnExpansion )
+{
+    // The companion: an inverse that ignored the tag and joined everything to one root would satisfy the
+    // round trip for whichever root it picked and quietly move every other asset. Under the DEFAULT
+    // sandbox this is not hypothetical — ASSETS_PATH (`Resources/Assets/`) is nested inside
+    // RESOURCE_PATH (`Resources/`), and the two tags must still land in different places.
+    ProjectRootGuard guard;
+    Common::Constants::Path::ASSETS_PATH = "Resources/Assets/";
+
+    EXPECT_NE( Common::AssetHandle::PathForStableKey( "assets:Textures/T.png" ),
+               Common::AssetHandle::PathForStableKey( "engine:Textures/T.png" ) );
+    EXPECT_EQ( Common::AssetHandle::PathForStableKey( "assets:Textures/T.png" ).generic_string(),
+               "Resources/Assets/Textures/T.png" );
+    EXPECT_EQ( Common::AssetHandle::PathForStableKey( "engine:Textures/T.png" ).generic_string(),
+               "Resources/Textures/T.png" );
+}
+
 TEST( AssetHandleStability, AnAbsoluteAndARelativeSpellingOfOneAssetAgree )
 {
     // The second required relation. It is not hypothetical: with a project open the roots are absolute

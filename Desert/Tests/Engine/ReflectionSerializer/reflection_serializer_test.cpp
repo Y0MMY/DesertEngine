@@ -5,6 +5,8 @@
 
 #include <glm/glm.hpp>
 
+#include <rflcpp/rfl/json.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -167,6 +169,110 @@ TEST( ReflectionSerializer, MissingKeysKeepDefaults )
     EXPECT_FLOAT_EQ( dst.Scale, 12.5f );
     EXPECT_EQ( dst.Name, "unchanged" );
     EXPECT_EQ( dst.Count, 777 );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// AN ASSET HANDLE IS 64 BITS AND A DOUBLE HOLDS 53 OF THEM.
+//
+// Every integral field used to be read back through `AsNumber`, which returns a `double`. For int32 and
+// uint32 that is exact and nobody noticed; for an AssetHandle it is not, and an AssetHandle is where the
+// engine keeps the identity of every texture, mesh, material and font. A handle is a 64-bit FNV-1a hash
+// or an id read out of a cooked file, so it is above 2^53 (9 007 199 254 740 992) essentially always.
+//
+// Measured on a live one before anything was changed: 5355760296319878840 came back as
+// 5355760296319879168 — 328 out, at a magnitude 594 times past the point where doubles stop counting
+// integers. The corruption was OURS. A probe over reflect-cpp showed rfl::json writing and reading that
+// same value exactly, and 16135626166276358966 (above 2^63, the id a shipped `.tex` actually carries)
+// exactly as well; rfl::Generic keeps integers in an int64_t alternative and never touches a double.
+//
+// The values below are chosen ON the boundary and on both sides of it, so the assertion fails for the
+// right reason rather than because one arbitrary number happened to round.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    struct Slot
+    {
+        uint64_t Handle = 0;
+    };
+
+    TypeInfo MakeSlotType()
+    {
+        TypeInfo t;
+        t.Name = "Slot";
+        t.Size = sizeof( Slot );
+        t.Fields.push_back(
+             Field( "Handle", FieldType::AssetHandle, offsetof( Slot, Handle ), sizeof( uint64_t ) ) );
+        return t;
+    }
+
+    // The trip a handle actually takes: object -> Generic tree -> JSON TEXT -> Generic tree -> object.
+    // Going through the text matters — the file on disk is the text, and a serializer that kept the value
+    // in memory and lost it on the way to JSON would pass an in-memory-only round trip.
+    uint64_t RoundTripThroughJson( uint64_t handle )
+    {
+        const TypeInfo type = MakeSlotType();
+        const Slot     src{ handle };
+
+        const std::string json = rfl::json::write( rfl::Generic( SerializeReflected( type, &src ) ) );
+
+        const auto reread = rfl::json::read<rfl::Generic>( json );
+        if ( !reread )
+            return 0;
+        const auto obj = reread.value().to_object();
+        if ( !obj )
+            return 0;
+
+        Slot dst;
+        DeserializeReflected( type, &dst, obj.value() );
+        return dst.Handle;
+    }
+} // namespace
+
+TEST( ReflectionSerializer, AnAssetHandleSurvivesTheJsonTripExactly )
+{
+    // THE measured value, first and on its own: this is the number a canvas background sprite was given
+    // and the number that came back.
+    EXPECT_EQ( RoundTripThroughJson( 5355760296319878840ull ), 5355760296319878840ull )
+         << "the handle a scene stores is not the handle it loads. Every reference in the file then names "
+            "an asset that does not exist, with nothing logged anywhere.";
+
+    // And the boundary itself, from below and above, so a failure says WHERE the loss starts.
+    constexpr uint64_t kExactLimit = 1ull << 53; // 9 007 199 254 740 992
+    for ( const uint64_t handle : { kExactLimit - 1, kExactLimit, kExactLimit + 1, kExactLimit + 2,
+                                    kExactLimit * 3 + 7, 16135626166276358966ull } )
+    {
+        EXPECT_EQ( RoundTripThroughJson( handle ), handle ) << "handle " << handle << " did not survive";
+    }
+
+    // 16135626166276358966 is above 2^63, which is the OTHER edge: rfl::Generic has only a signed 64-bit
+    // alternative, so the value is stored as a negative integer and has to be reinterpreted rather than
+    // converted on the way back. It is not a hypothetical — it is the id `T_Checker.tex` carries.
+}
+
+TEST( ReflectionSerializer, AnUnsetHandleIsStillZeroAfterTheTrip )
+{
+    // The companion the test above needs: 0 means "no asset" everywhere in the engine, so a serializer
+    // that turned every handle into a constant would satisfy nothing here, and one that turned 0 into
+    // something else would fill every empty slot in every scene.
+    EXPECT_EQ( RoundTripThroughJson( 0 ), 0u );
+}
+
+TEST( ReflectionSerializer, AnAssetHandleStoredAsAPathIsRefusedWithoutAResolverRatherThanZeroed )
+{
+    // DC §1.4 at the field level. A file written by the scene serializer stores a PATH, and reading it
+    // with no resolver cannot produce a handle — but it must not silently produce 0 either, because 0 is
+    // a legitimate value ("unset") and the caller cannot tell the two apart.
+    const TypeInfo type = MakeSlotType();
+
+    rfl::Generic::Object obj;
+    obj["Handle"] = std::string( "cooked:Textures/T_Checker.tex" );
+
+    Slot dst{ 12345ull };
+    DeserializeReflected( type, &dst, obj );
+
+    EXPECT_EQ( dst.Handle, 12345ull ) << "a named asset that could not be resolved overwrote the field "
+                                         "with 0, which reads as 'the artist left this empty'";
 }
 
 int main( int argc, char** argv )

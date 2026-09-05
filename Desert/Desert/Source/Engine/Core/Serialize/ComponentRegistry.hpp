@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/ECS/Entity.hpp>
+#include <Engine/Reflection/ReflectionSerializer.hpp>
 
 #include <rflcpp/rfl/Generic.hpp>
 
@@ -49,6 +50,12 @@ namespace Desert::Core::Serialize
 
         std::vector<ComponentSerializer> m_Serializers;
     };
+
+    // The one place an AssetResolver is built (the invariant is stated on AssetResolver itself). Exposed
+    // because SceneSettings is reflected like a component but is NOT one, so it is serialized straight
+    // from SceneSerializer — and until this was exposed that call had no resolver, which meant the
+    // scene's own `SplashSprite` was the last field in the engine still written as a raw 64-bit number.
+    Reflection::AssetResolver MakeAssetResolver( const Assets::AssetManager& mgr );
 
     // Standalone (de)serialization of a single MaterialComponent to/from a JSON string — the generic
     // ".demat" material file (reusable, data-driven). Reuses the same Ser mirror + asset resolver as the
