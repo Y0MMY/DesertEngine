@@ -1,7 +1,10 @@
 #include "ReflectionSerializer.hpp"
 
+#include <Common/Core/Logger.hpp>
+
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace Desert::Reflection
@@ -9,6 +12,15 @@ namespace Desert::Reflection
     namespace
     {
         // Accepts a JSON number stored either as integer or floating point.
+        //
+        // FOR FLOATING-POINT FIELDS ONLY. It used to serve the integral cases as well, and a 64-bit
+        // value does not survive that: `double` has 53 bits of mantissa, so every integer above 2^53
+        // (9 007 199 254 740 992) is rounded to the nearest representable neighbour. Measured on a real
+        // asset handle, which is a 64-bit FNV-1a hash and therefore lands in that range essentially
+        // always: 5355760296319878840 came back as 5355760296319879168, off by 328 — 594 times past the
+        // point where doubles stop counting. The corruption was OURS and not the JSON library's:
+        // rfl::json writes and reads that same value exactly, including values above 2^63, and
+        // rfl::Generic keeps integers in an int64_t alternative that never touches a double.
         double AsNumber( const rfl::Generic& g )
         {
             if ( auto d = g.to_double(); d.has_value() )
@@ -16,6 +28,29 @@ namespace Desert::Reflection
             if ( auto i = g.to_int64(); i.has_value() )
                 return static_cast<double>( i.value() );
             return 0.0;
+        }
+
+        // The integral counterpart: every bit of a stored integer, or nothing. Returning an optional
+        // rather than a 0 default is deliberate — 0 is a MEANINGFUL handle value ("unset"), so a
+        // silent 0 on a malformed field is DC §1.4's substitution, and the callers below log instead.
+        std::optional<int64_t> AsInteger( const rfl::Generic& g )
+        {
+            if ( auto i = g.to_int64(); i.has_value() )
+                return i.value();
+            // A whole number written with a decimal point (`5.0`) is a legitimate JSON spelling of an
+            // integer, and the code this replaces accepted it (it asked for a double FIRST), so a file
+            // carrying one must keep loading. It is accepted only when the value is integral AND inside
+            // int64's range — outside it the conversion is undefined behaviour, and a double that large
+            // has already lost the exact integer it claims to be, which is the whole subject here.
+            if ( auto d = g.to_double(); d.has_value() )
+            {
+                const double v = d.value();
+                constexpr double kUpperBound = 9223372036854775808.0; // 2^63, the first value int64 lacks
+                constexpr double kLowerBound = -9223372036854775808.0;
+                if ( v >= kLowerBound && v < kUpperBound && v == static_cast<double>( static_cast<int64_t>( v ) ) )
+                    return static_cast<int64_t>( v );
+            }
+            return std::nullopt;
         }
 
         void WriteVec( rfl::Generic::Object& out, const std::string& name, const float* v, int count )
@@ -155,10 +190,12 @@ namespace Desert::Reflection
                         *static_cast<bool*>( p ) = b.value();
                     break;
                 case FieldType::Int:
-                    *static_cast<int32_t*>( p ) = static_cast<int32_t>( AsNumber( g ) );
+                    if ( const auto v = AsInteger( g ) )
+                        *static_cast<int32_t*>( p ) = static_cast<int32_t>( *v );
                     break;
                 case FieldType::UInt:
-                    *static_cast<uint32_t*>( p ) = static_cast<uint32_t>( AsNumber( g ) );
+                    if ( const auto v = AsInteger( g ) )
+                        *static_cast<uint32_t*>( p ) = static_cast<uint32_t>( *v );
                     break;
                 case FieldType::Float:
                     *static_cast<float*>( p ) = static_cast<float>( AsNumber( g ) );
@@ -180,21 +217,39 @@ namespace Desert::Reflection
                     ReadVec( g, static_cast<float*>( p ), 4 );
                     break;
                 case FieldType::Enum:
-                    WriteIntBySize( p, field.Size, static_cast<int64_t>( AsNumber( g ) ) );
+                    if ( const auto v = AsInteger( g ) )
+                        WriteIntBySize( p, field.Size, *v );
                     break;
                 case FieldType::AssetHandle:
-                    if ( resolver && resolver->FromPath )
+                {
+                    if ( auto s = g.to_string(); s.has_value() )
                     {
-                        if ( auto s = g.to_string(); s.has_value() )
+                        // A path/key. Without a resolver there is nothing that can turn it into a handle,
+                        // and quietly leaving the field at zero is what made a texture slot look like an
+                        // empty slot (DC §1.4).
+                        if ( resolver && resolver->FromPath )
                             *static_cast<uint64_t*>( p ) = resolver->FromPath( s.value(), field.Meta.AssetType );
-                        else // raw-handle fallback (e.g. files saved without a resolver)
-                            *static_cast<uint64_t*>( p ) = static_cast<uint64_t>( AsNumber( g ) );
+                        else if ( !s.value().empty() )
+                            LOG_ERROR( "[Reflection] Field '{0}' names the asset '{1}' but was deserialized "
+                                       "with no asset resolver, so the reference cannot be turned into a "
+                                       "handle; the field keeps its default.",
+                                       field.Name, s.value() );
+                        break;
                     }
+
+                    // A RAW HANDLE, read as an exact 64-bit integer. It went through `double` until
+                    // 2026-09-05, which silently rounded every handle above 2^53 — measured on a live
+                    // one, 5355760296319878840 loaded back as 5355760296319879168. The int64 the file
+                    // carries is reinterpreted rather than converted, so handles above 2^63 (which the
+                    // path hash produces about half the time) survive as well.
+                    if ( const auto v = AsInteger( g ) )
+                        *static_cast<uint64_t*>( p ) = static_cast<uint64_t>( *v );
                     else
-                    {
-                        *static_cast<uint64_t*>( p ) = static_cast<uint64_t>( AsNumber( g ) );
-                    }
+                        LOG_ERROR( "[Reflection] Field '{0}' holds neither an asset path nor an integer "
+                                   "handle; the field keeps its default.",
+                                   field.Name );
                     break;
+                }
                 case FieldType::Struct:
                     if ( field.StructType )
                     {

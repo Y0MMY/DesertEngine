@@ -1,4 +1,6 @@
 #include "ComponentRegistry.hpp"
+#include <Common/Core/AssetHandle.hpp>
+#include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <cstring>
@@ -48,11 +50,6 @@ namespace Desert::Core::Serialize
                 return r.value();
             return std::nullopt;
         }
-
-        // Defined below, beside the table of asset types it dispatches on. Declared here because the two
-        // template helpers above it call it with a non-dependent argument, so the name has to be visible
-        // at their point of definition rather than at instantiation.
-        Reflection::AssetResolver MakeAssetResolver( const Assets::AssetManager& mgr );
 
         // Builds a handler for a component whose serializable payload is a reflected data block. Adding a
         // PROPERTY field to that block automatically extends serialization — no code change here.
@@ -198,369 +195,438 @@ namespace Desert::Core::Serialize
             };
             return s;
         }
+    } // namespace
 
-        // Resolves reflected AssetHandle fields to/from on-disk PATHS (backward-compatible with the old
-        // per-component serializers). Dispatches by the field's PROPERTY(Asset<...>) type name. Only a few
-        // asset types exist, so this is a small hand-written table (not codegen). Captures `mgr` by ref —
-        // only used within the (de)serialize call that builds it.
-        Reflection::AssetResolver MakeAssetResolver( const Assets::AssetManager& mgr )
+    // Resolves reflected AssetHandle fields to/from on-disk PATHS (backward-compatible with the old
+    // per-component serializers). Dispatches by the field's PROPERTY(Asset<...>) type name. Only a few
+    // asset types exist, so this is a small hand-written table (not codegen). Captures `mgr` by ref —
+    // only used within the (de)serialize call that builds it.
+    //
+    // AT NAMESPACE SCOPE rather than in the anonymous namespace above, because SceneSettings is reflected
+    // like a component and serialized like one, but is not one: SceneSerializer writes it directly, and
+    // could not reach a resolver that only existed inside this file.
+    Reflection::AssetResolver MakeAssetResolver( const Assets::AssetManager& mgr )
+    {
+        Reflection::AssetResolver r;
+
+        r.ToPath = [&mgr]( uint64_t handle, const std::string& type ) -> std::string
         {
-            Reflection::AssetResolver r;
-
-            r.ToPath = [&mgr]( uint64_t handle, const std::string& type ) -> std::string
+            if ( handle == 0 )
+                return "";
+            if ( type == "SkyboxAsset" )
             {
-                if ( handle == 0 )
-                    return "";
-                if ( type == "SkyboxAsset" )
-                {
-                    auto a = mgr.FindByHandle<Assets::SkyboxAsset>( Common::UUID( handle ) );
-                    return a ? a->GetMetadata().Filepath.string() : "";
-                }
-                if ( type == "MaterialAsset" )
-                {
-                    auto a = mgr.FindByHandle<Assets::MaterialAsset>( Common::UUID( handle ) );
-                    if ( !a )
-                        return "";
-
-                    // RELATIVE to the assets root, on exactly the terms the three cloud branches below are
-                    // relative — and this branch is the reason they had to say so. It wrote the asset's
-                    // filepath verbatim, which is ABSOLUTE, so every scene re-saved in the editor took
-                    // whoever saved it home directory into the repository: 22 distinct
-                    // `/Users/<somebody>/.../Materials/*.demat` across 42 of the 51 scenes here, none of
-                    // which resolves on any other machine. A material is content that ships WITH the
-                    // project, so the path that names it must be too. The v7 -> v8 migration produces this
-                    // same string, and FromPath below accepts either form.
-                    std::error_code ec;
-                    const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
-                                                                     Common::Constants::Path::ASSETS_PATH, ec );
-                    // generic_string() rather than native(): native() is a WIDE string on Windows and a
-                    // narrow one here, so a narrow ".." literal only compiles on this platform.
-                    const auto relStr = rel.generic_string();
-                    if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
-                        return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
-                    return relStr;
-                }
-                if ( type == "TextureAsset" )
-                {
-                    auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) );
-                    return a ? a->GetMetadata().Filepath.string() : "";
-                }
-                // NO "CloudNoiseVolumeAsset" BRANCH ANY MORE. It served exactly one reflected field — the
-                // cloud layer's own noise slot — and that field moved onto the cloud TYPE, which stores its
-                // volume as a path of its own rather than through this resolver. A branch keyed on a
-                // metadata string no reflected field produces is a path nothing can reach (§4.1).
-                if ( type == "CloudTypeAsset" )
-                {
-                    auto a = mgr.FindByHandle<Assets::CloudTypeAsset>( Common::UUID( handle ) );
-                    if ( !a )
-                        return "";
-
-                    // RELATIVE to the assets root, unlike every branch around it, and the difference is
-                    // deliberate rather than an oversight. Those branches write absolute paths, so every
-                    // scene in this repository carries one developer's home directory and a cloud type
-                    // shipped with the engine would be unresolvable on any other machine — while the
-                    // library it names is content that ships WITH the project. The v4 -> v5 migration has
-                    // to produce this string too, and it is a pure function that cannot read a path root,
-                    // so relative is also the only form it could write. FromPath below accepts either.
-                    std::error_code ec;
-                    const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
-                                                                     Common::Constants::Path::ASSETS_PATH, ec );
-                    // generic_string() rather than native(): native() is a WIDE string on Windows and a
-                    // narrow one here, so a narrow ".." literal only compiles on this platform.
-                    const auto relStr = rel.generic_string();
-                    if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
-                        return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
-                    return relStr;
-                }
-                if ( type == "CloudModellingVolumeAsset" )
-                {
-                    auto a = mgr.FindByHandle<Assets::CloudModellingVolumeAsset>( Common::UUID( handle ) );
-                    if ( !a )
-                        return "";
-
-                    // RELATIVE, on exactly the terms the cloud type above is relative: a sculpted body is
-                    // content that ships WITH the project, and an absolute path would carry one
-                    // developer's home directory into every scene that uses one.
-                    std::error_code ec;
-                    const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
-                                                                     Common::Constants::Path::ASSETS_PATH, ec );
-                    // generic_string() rather than native(): native() is a WIDE string on Windows and a
-                    // narrow one here, so a narrow ".." literal only compiles on this platform.
-                    const auto relStr = rel.generic_string();
-                    if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
-                        return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
-                    return relStr;
-                }
-                if ( type == "CloudLayoutAsset" )
-                {
-                    auto a = mgr.FindByHandle<Assets::CloudLayoutAsset>( Common::UUID( handle ) );
-                    if ( !a )
-                        return "";
-
-                    // RELATIVE, on exactly the terms the two cloud assets above are relative: a painting is
-                    // content that ships WITH the project, and an absolute path would carry one developer's
-                    // home directory into every scene that names one.
-                    std::error_code ec;
-                    const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
-                                                                     Common::Constants::Path::ASSETS_PATH, ec );
-                    // generic_string() rather than native(): native() is a WIDE string on Windows and a
-                    // narrow one here, so a narrow ".." literal only compiles on this platform.
-                    const auto relStr = rel.generic_string();
-                    if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
-                        return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
-                    return relStr;
-                }
-                if ( type == "FontAsset" )
-                {
-                    // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
-                    return Runtime::ResourceRegistry::GetFontService()->PathForHandle( handle );
-                }
-                if ( type == "VideoAsset" )
-                {
-                    // Videos aren't AssetManager assets — the VideoService owns the handle<->path registry.
-                    return Runtime::ResourceRegistry::GetVideoService()->PathForHandle( handle );
-                }
-                if ( type == "IconAsset" )
-                {
-                    // Vector icons aren't AssetManager assets — the IconService owns handle<->path.
-                    return Runtime::ResourceRegistry::GetIconService()->PathForHandle( handle );
-                }
-                // Meshes (static/skinned both resolve handle->path via the MeshAsset base).
-                auto a = mgr.FindByHandle<Assets::MeshAsset>( Common::UUID( handle ) );
+                auto a = mgr.FindByHandle<Assets::SkyboxAsset>( Common::UUID( handle ) );
                 return a ? a->GetMetadata().Filepath.string() : "";
-            };
-
-            r.FromPath = [&mgr]( const std::string& path, const std::string& type ) -> uint64_t
+            }
+            if ( type == "MaterialAsset" )
             {
-                if ( path.empty() )
-                    return 0;
-                auto& m = const_cast<Assets::AssetManager&>( mgr );
+                auto a = mgr.FindByHandle<Assets::MaterialAsset>( Common::UUID( handle ) );
+                if ( !a )
+                    return "";
 
-                if ( type == "SkyboxAsset" )
+                // RELATIVE to the assets root, on exactly the terms the three cloud branches below are
+                // relative — and this branch is the reason they had to say so. It wrote the asset's
+                // filepath verbatim, which is ABSOLUTE, so every scene re-saved in the editor took
+                // whoever saved it home directory into the repository: 22 distinct
+                // `/Users/<somebody>/.../Materials/*.demat` across 42 of the 51 scenes here, none of
+                // which resolves on any other machine. A material is content that ships WITH the
+                // project, so the path that names it must be too. The v7 -> v8 migration produces this
+                // same string, and FromPath below accepts either form.
+                std::error_code ec;
+                const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
+                                                                 Common::Constants::Path::ASSETS_PATH, ec );
+                // generic_string() rather than native(): native() is a WIDE string on Windows and a
+                // narrow one here, so a narrow ".." literal only compiles on this platform.
+                const auto relStr = rel.generic_string();
+                if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
+                    return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
+                return relStr;
+            }
+            if ( type == "TextureAsset" )
+            {
+                auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) );
+                if ( !a )
                 {
-                    auto a = mgr.FindByPath<Assets::SkyboxAsset>( path );
-                    if ( !a )
-                        a = m.CreateAsset<Assets::SkyboxAsset>( Assets::AssetPriority::Medium, path );
-                    if ( a )
-                    {
-                        if ( !a->IsReadyForUse() )
-                            a->Load();
-                        if ( !Runtime::ResourceRegistry::GetSkyboxService()->Get( a->GetMetadata().Handle ) )
-                            Runtime::ResourceRegistry::GetSkyboxService()->Register( a );
-                        return static_cast<uint64_t>( a->GetMetadata().Handle );
-                    }
-                    return 0;
+                    // DC 1.4. A slot that IS set and names an asset this manager does not have is the
+                    // one case worth a line: the alternative is an empty string in the file, which is
+                    // indistinguishable from "the artist left it empty" and loses the reference for
+                    // good on the next save.
+                    LOG_ERROR( "[Textures] Entity references texture handle {} and no texture with that "
+                               "handle is registered; the slot is being saved as EMPTY and the reference "
+                               "is lost. Cooked textures are scanned from '{}'.",
+                               handle, Common::Constants::Path::TEXTURE_PATH_COOKED.string() );
+                    return "";
                 }
-                if ( type == "MaterialAsset" )
-                {
-                    // BOTH FORMS ARE ACCEPTED, on the terms the cloud branches below state: a file written
-                    // by ToPath above (or by the v7 -> v8 migration) carries a path relative to the assets
-                    // root, because a material ships with the project; a material an artist points at
-                    // outside the project carries an absolute one. Joining the relative form to the root
-                    // HERE means it happens exactly once, and it is also what makes the FindByPath below
-                    // hit: that lookup compares filepaths VERBATIM (unlike CreateAsset, which dedups on
-                    // the spelling-independent StableKeyForPath), so a scene naming a preloaded material
-                    // by any other spelling missed it and went the create-and-register way round.
-                    const std::filesystem::path named( path );
-                    const std::filesystem::path full =
-                         named.is_absolute() ? named
-                                             : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
 
-                    auto a = mgr.FindByPath<Assets::MaterialAsset>( full );
-                    if ( !a )
-                    {
-                        // Not preloaded (e.g. an editor .demat the preloader's .mat scan missed). Create +
-                        // load + register from the path so materials survive a cold restart, not just an
-                        // in-session reload.
-                        auto created =
-                             m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, full );
-                        if ( created )
-                        {
-                            if ( !created->IsReadyForUse() )
-                                created->Load();
-                            if ( !Runtime::ResourceRegistry::GetMaterialService()->Get(
-                                      created->GetMetadata().Handle ) )
-                            {
-                                if ( const auto registered =
-                                          Runtime::ResourceRegistry::GetMaterialService()->Register( created );
-                                     !registered )
-                                {
-                                    // DC 1.4: the slot is about to fall back to the default material, and
-                                    // the reason (another `.demat` already holds this MaterialId) is only
-                                    // knowable here.
-                                    LOG_ERROR( "[Materials] Material '{}' named by the scene could not be "
-                                               "registered: {}",
-                                               full.string(), registered.GetError() );
-                                }
-                            }
-                            a = created;
-                        }
-                    }
-                    return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
-                }
-                if ( type == "TextureAsset" )
-                {
-                    // Textures are registered from cooked paths by the preloader; just look up by path.
-                    auto a = mgr.FindByPath<Assets::TextureAsset>( path );
-                    return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
-                }
-                // The read side of the volume branch is gone with the write side above, and for the same
-                // reason: no reflected field names that asset type any more. A cloud type's own volume is
-                // bound in Assets::CloudTypeAsset::ResolveDependencies, from the path inside the type's
-                // file, which is where a reference to a `.dcnv` now lives.
-                if ( type == "CloudTypeAsset" )
-                {
-                    // BOTH FORMS ARE ACCEPTED, and neither is a legacy path. A file written by ToPath above
-                    // (or by the v4 -> v5 migration) carries a path relative to the assets root, because
-                    // the library ships with the project; a file an artist points at outside the project
-                    // carries an absolute one. Joining a relative path to the root is the whole difference,
-                    // and doing it here means it happens exactly once.
-                    const std::filesystem::path named( path );
-                    const std::filesystem::path full =
-                         named.is_absolute() ? named
-                                             : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+                // PROJECT-RELATIVE AND ROOT-TAGGED, and the tag is the whole point. This branch used
+                // to write `a->GetMetadata().Filepath.string()`, which is ABSOLUTE — the same defect
+                // the MaterialAsset branch above was fixed for, in a file that gets committed. The
+                // material's fix cannot simply be copied here: a material lives under ASSETS_PATH,
+                // while a cooked texture lives under COOKED_PATH, which is a SIBLING of the assets
+                // root, so relative-to-ASSETS_PATH produces `../Cooked/Textures/T.tex` and falls
+                // straight back to the absolute spelling. Common::AssetHandle::StableKeyForPath is
+                // the engine's existing single answer to "where is this asset in the project" — it
+                // owns the root table and the tag — so this stores that answer rather than inventing
+                // a second root-selection rule. It is also stronger than a bare relative path: a
+                // project whose assets root is called `Content` still reads `assets:Textures/X.png`.
+                return Common::AssetHandle::StableKeyForPath( a->GetMetadata().Filepath );
+            }
+            // NO "CloudNoiseVolumeAsset" BRANCH ANY MORE. It served exactly one reflected field — the
+            // cloud layer's own noise slot — and that field moved onto the cloud TYPE, which stores its
+            // volume as a path of its own rather than through this resolver. A branch keyed on a
+            // metadata string no reflected field produces is a path nothing can reach (§4.1).
+            if ( type == "CloudTypeAsset" )
+            {
+                auto a = mgr.FindByHandle<Assets::CloudTypeAsset>( Common::UUID( handle ) );
+                if ( !a )
+                    return "";
 
-                    auto a = mgr.FindByPath<Assets::CloudTypeAsset>( full );
-                    if ( !a )
-                        a = m.CreateAsset<Assets::CloudTypeAsset>( Assets::AssetPriority::Medium, full );
-                    if ( !a )
-                        return 0;
-                    if ( !a->IsReadyForUse() && !a->Load() )
-                        return 0;
-                    if ( const auto registered = Runtime::ResourceRegistry::GetCloudTypeService()->Register( a );
-                         !registered )
-                        LOG_ERROR( "[Clouds] Cloud type '{}' named by the scene could not be registered: {}",
-                                   full.string(), registered.GetError() );
-                    return static_cast<uint64_t>( a->GetMetadata().Handle );
-                }
-                if ( type == "CloudModellingVolumeAsset" )
-                {
-                    // Both forms accepted, for the reason the cloud type's branch gives above.
-                    const std::filesystem::path named( path );
-                    const std::filesystem::path full =
-                         named.is_absolute() ? named
-                                             : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+                // RELATIVE to the assets root, unlike every branch around it, and the difference is
+                // deliberate rather than an oversight. Those branches write absolute paths, so every
+                // scene in this repository carries one developer's home directory and a cloud type
+                // shipped with the engine would be unresolvable on any other machine — while the
+                // library it names is content that ships WITH the project. The v4 -> v5 migration has
+                // to produce this string too, and it is a pure function that cannot read a path root,
+                // so relative is also the only form it could write. FromPath below accepts either.
+                std::error_code ec;
+                const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
+                                                                 Common::Constants::Path::ASSETS_PATH, ec );
+                // generic_string() rather than native(): native() is a WIDE string on Windows and a
+                // narrow one here, so a narrow ".." literal only compiles on this platform.
+                const auto relStr = rel.generic_string();
+                if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
+                    return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
+                return relStr;
+            }
+            if ( type == "CloudModellingVolumeAsset" )
+            {
+                auto a = mgr.FindByHandle<Assets::CloudModellingVolumeAsset>( Common::UUID( handle ) );
+                if ( !a )
+                    return "";
 
-                    auto a = mgr.FindByPath<Assets::CloudModellingVolumeAsset>( full );
-                    if ( !a )
-                        a = m.CreateAsset<Assets::CloudModellingVolumeAsset>( Assets::AssetPriority::Medium,
-                                                                              full );
-                    if ( !a )
-                        return 0;
-                    if ( !a->IsReadyForUse() && !a->Load() )
-                        return 0;
-                    if ( const auto registered =
-                              Runtime::ResourceRegistry::GetCloudModellingService()->Register( a );
-                         !registered )
-                        LOG_ERROR( "[Clouds] Cloud modelling volume '{}' named by the scene could not be "
-                                   "uploaded: {}",
-                                   full.string(), registered.GetError() );
-                    return static_cast<uint64_t>( a->GetMetadata().Handle );
-                }
-                if ( type == "CloudLayoutAsset" )
-                {
-                    // Both forms accepted, for the reason the cloud type's branch gives above.
-                    const std::filesystem::path named( path );
-                    const std::filesystem::path full =
-                         named.is_absolute() ? named
-                                             : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+                // RELATIVE, on exactly the terms the cloud type above is relative: a sculpted body is
+                // content that ships WITH the project, and an absolute path would carry one
+                // developer's home directory into every scene that uses one.
+                std::error_code ec;
+                const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
+                                                                 Common::Constants::Path::ASSETS_PATH, ec );
+                // generic_string() rather than native(): native() is a WIDE string on Windows and a
+                // narrow one here, so a narrow ".." literal only compiles on this platform.
+                const auto relStr = rel.generic_string();
+                if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
+                    return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
+                return relStr;
+            }
+            if ( type == "CloudLayoutAsset" )
+            {
+                auto a = mgr.FindByHandle<Assets::CloudLayoutAsset>( Common::UUID( handle ) );
+                if ( !a )
+                    return "";
 
-                    auto a = mgr.FindByPath<Assets::CloudLayoutAsset>( full );
-                    if ( !a )
-                        a = m.CreateAsset<Assets::CloudLayoutAsset>( Assets::AssetPriority::Medium, full );
-                    if ( !a )
-                        return 0;
-                    if ( !a->IsReadyForUse() && !a->Load() )
-                        return 0;
-                    if ( const auto registered = Runtime::ResourceRegistry::GetCloudLayoutService()->Register( a );
-                         !registered )
-                        LOG_ERROR( "[Clouds] Cloud layout '{}' named by the scene could not be registered: {}",
-                                   full.string(), registered.GetError() );
-                    return static_cast<uint64_t>( a->GetMetadata().Handle );
-                }
-                if ( type == "FontAsset" )
-                {
-                    // Register the path with the FontService (idempotent) and return its deterministic handle.
-                    return Runtime::ResourceRegistry::GetFontService()->RegisterFont( path );
-                }
-                if ( type == "VideoAsset" )
-                {
-                    // Register the path with the VideoService (idempotent) and return its deterministic handle.
-                    return Runtime::ResourceRegistry::GetVideoService()->RegisterVideo( path );
-                }
-                if ( type == "IconAsset" )
-                {
-                    // Register the .svg with the IconService (idempotent); it bakes the SDF on first draw.
-                    return Runtime::ResourceRegistry::GetIconService()->RegisterIcon( path );
-                }
-                // Meshes: find, else cook-create as the concrete type + register + load.
-                if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
-                {
-                    auto a = mgr.FindByPath<Assets::MeshAsset>( path );
-                    if ( !a )
-                    {
-                        Assets::Asset<Assets::MeshAsset> created;
-                        if ( type == "SkinnedMeshAsset" )
-                            created = m.CreateAsset<Assets::SkinnedMeshAsset>( Assets::AssetPriority::High, path );
-                        else
-                            created = m.CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, path );
-                        if ( created )
-                        {
-                            Runtime::ResourceRegistry::GetMeshService()->Register( created );
-                            created->Load();
-                            a = created;
-                        }
-                    }
-                    return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
-                }
+                // RELATIVE, on exactly the terms the two cloud assets above are relative: a painting is
+                // content that ships WITH the project, and an absolute path would carry one developer's
+                // home directory into every scene that names one.
+                std::error_code ec;
+                const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
+                                                                 Common::Constants::Path::ASSETS_PATH, ec );
+                // generic_string() rather than native(): native() is a WIDE string on Windows and a
+                // narrow one here, so a narrow ".." literal only compiles on this platform.
+                const auto relStr = rel.generic_string();
+                if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
+                    return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
+                return relStr;
+            }
+            if ( type == "FontAsset" )
+            {
+                // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
+                return Runtime::ResourceRegistry::GetFontService()->PathForHandle( handle );
+            }
+            if ( type == "VideoAsset" )
+            {
+                // Videos aren't AssetManager assets — the VideoService owns the handle<->path registry.
+                return Runtime::ResourceRegistry::GetVideoService()->PathForHandle( handle );
+            }
+            if ( type == "IconAsset" )
+            {
+                // Vector icons aren't AssetManager assets — the IconService owns handle<->path.
+                return Runtime::ResourceRegistry::GetIconService()->PathForHandle( handle );
+            }
+            // Meshes (static/skinned both resolve handle->path via the MeshAsset base).
+            auto a = mgr.FindByHandle<Assets::MeshAsset>( Common::UUID( handle ) );
+            return a ? a->GetMetadata().Filepath.string() : "";
+        };
+
+        r.FromPath = [&mgr]( const std::string& path, const std::string& type ) -> uint64_t
+        {
+            if ( path.empty() )
                 return 0;
-            };
+            auto& m = const_cast<Assets::AssetManager&>( mgr );
 
-            // Asset-database path: a stable GUID stored in the scene resolves directly through the
-            // AssetManager (assets adopt their persisted/path-derived handles on load), surviving
-            // file renames that break path references. Returns 0 for unknown GUIDs so the caller
-            // falls back to FromPath.
-            r.FromGuid = [&mgr]( uint64_t guid, const std::string& type ) -> uint64_t
+            if ( type == "SkyboxAsset" )
             {
-                if ( guid == 0 )
-                    return 0;
-                const Common::UUID handle( guid );
-
-                if ( type == "MaterialAsset" )
+                auto a = mgr.FindByPath<Assets::SkyboxAsset>( path );
+                if ( !a )
+                    a = m.CreateAsset<Assets::SkyboxAsset>( Assets::AssetPriority::Medium, path );
+                if ( a )
                 {
-                    auto a = mgr.FindByHandle<Assets::MaterialAsset>( handle );
-                    if ( !a )
-                        return 0;
-                    if ( auto* svc = Runtime::ResourceRegistry::GetMaterialService(); svc && !svc->Get( handle ) )
-                        svc->Register( a );
-                    return guid;
-                }
-                if ( type == "TextureAsset" )
-                {
-                    return mgr.FindByHandle<Assets::TextureAsset>( handle ) ? guid : 0;
-                }
-                if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
-                {
-                    auto a = mgr.FindByHandle<Assets::MeshAsset>( handle );
-                    if ( !a )
-                        return 0;
-                    if ( auto* svc = Runtime::ResourceRegistry::GetMeshService(); svc && !svc->GetAsset( handle ) )
-                    {
-                        svc->Register( a );
+                    if ( !a->IsReadyForUse() )
                         a->Load();
-                    }
-                    return guid;
-                }
-                if ( type == "SkyboxAsset" )
-                {
-                    return mgr.FindByHandle<Assets::SkyboxAsset>( handle ) ? guid : 0;
+                    if ( !Runtime::ResourceRegistry::GetSkyboxService()->Get( a->GetMetadata().Handle ) )
+                        Runtime::ResourceRegistry::GetSkyboxService()->Register( a );
+                    return static_cast<uint64_t>( a->GetMetadata().Handle );
                 }
                 return 0;
-            };
+            }
+            if ( type == "MaterialAsset" )
+            {
+                // BOTH FORMS ARE ACCEPTED, on the terms the cloud branches below state: a file written
+                // by ToPath above (or by the v7 -> v8 migration) carries a path relative to the assets
+                // root, because a material ships with the project; a material an artist points at
+                // outside the project carries an absolute one. Joining the relative form to the root
+                // HERE means it happens exactly once, and it is also what makes the FindByPath below
+                // hit: that lookup compares filepaths VERBATIM (unlike CreateAsset, which dedups on
+                // the spelling-independent StableKeyForPath), so a scene naming a preloaded material
+                // by any other spelling missed it and went the create-and-register way round.
+                const std::filesystem::path named( path );
+                const std::filesystem::path full =
+                     named.is_absolute() ? named
+                                         : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
 
-            return r;
-        }
+                auto a = mgr.FindByPath<Assets::MaterialAsset>( full );
+                if ( !a )
+                {
+                    // Not preloaded (e.g. an editor .demat the preloader's .mat scan missed). Create +
+                    // load + register from the path so materials survive a cold restart, not just an
+                    // in-session reload.
+                    auto created =
+                         m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, full );
+                    if ( created )
+                    {
+                        if ( !created->IsReadyForUse() )
+                            created->Load();
+                        if ( !Runtime::ResourceRegistry::GetMaterialService()->Get(
+                                  created->GetMetadata().Handle ) )
+                        {
+                            if ( const auto registered =
+                                      Runtime::ResourceRegistry::GetMaterialService()->Register( created );
+                                 !registered )
+                            {
+                                // DC 1.4: the slot is about to fall back to the default material, and
+                                // the reason (another `.demat` already holds this MaterialId) is only
+                                // knowable here.
+                                LOG_ERROR( "[Materials] Material '{}' named by the scene could not be "
+                                           "registered: {}",
+                                           full.string(), registered.GetError() );
+                            }
+                        }
+                        a = created;
+                    }
+                }
+                return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
+            }
+            if ( type == "TextureAsset" )
+            {
+                // EVERY spelling is accepted, and the expansion happens exactly once. A file written
+                // by ToPath above carries the root-tagged key (`cooked:Textures/T.tex`); a file
+                // written before that carries a plain relative or absolute path, and
+                // PathForStableKey hands an untagged string straight back, so both arrive here as a
+                // path this machine can open.
+                const std::filesystem::path full = Common::AssetHandle::PathForStableKey( path );
 
+                auto a = mgr.FindByPath<Assets::TextureAsset>( full );
+                if ( !a )
+                {
+                    // WHY CREATE RATHER THAN RETURN 0. FindByPath compares filepaths VERBATIM, while
+                    // CreateAsset deduplicates on the spelling-independent StableKeyForPath — so this
+                    // call is BOTH the create-on-miss every other branch here already does AND the
+                    // spelling-independent lookup FindByPath is not. A texture the preloader
+                    // registered under a different spelling of the same file resolves here to the
+                    // record that already exists, instead of to zero.
+                    a = m.CreateAsset<Assets::TextureAsset>( Assets::AssetPriority::High, full );
+                }
+
+                if ( !a )
+                {
+                    // DC 1.4: this branch used to return 0 with nothing logged, so a texture that did
+                    // not resolve was indistinguishable from a slot the artist left empty — and the
+                    // next save wrote the emptiness back into the file. Say which name failed, what
+                    // it expanded to, and where textures are looked for.
+                    LOG_ERROR( "[Textures] Texture '{}' named by the scene did not resolve (expanded to "
+                               "'{}'; cooked textures live under '{}', content under '{}'). The slot "
+                               "stays unset.",
+                               path, full.string(),
+                               Common::Constants::Path::TEXTURE_PATH_COOKED.string(),
+                               Common::Constants::Path::TEXTUREDIR_PATH.string() );
+                    return 0;
+                }
+
+                // The SHELL only, and unconditionally: RegisterAsset is an idempotent map write, while
+                // the `Get`-first spelling used elsewhere in this file would BUILD the GPU texture
+                // here — during scene parsing, for every slot — which is exactly the upload
+                // AssetPreloader defers to the first draw.
+                if ( auto* svc = Runtime::ResourceRegistry::GetTextureService() )
+                    svc->RegisterAsset( a );
+                return static_cast<uint64_t>( a->GetMetadata().Handle );
+            }
+            // The read side of the volume branch is gone with the write side above, and for the same
+            // reason: no reflected field names that asset type any more. A cloud type's own volume is
+            // bound in Assets::CloudTypeAsset::ResolveDependencies, from the path inside the type's
+            // file, which is where a reference to a `.dcnv` now lives.
+            if ( type == "CloudTypeAsset" )
+            {
+                // BOTH FORMS ARE ACCEPTED, and neither is a legacy path. A file written by ToPath above
+                // (or by the v4 -> v5 migration) carries a path relative to the assets root, because
+                // the library ships with the project; a file an artist points at outside the project
+                // carries an absolute one. Joining a relative path to the root is the whole difference,
+                // and doing it here means it happens exactly once.
+                const std::filesystem::path named( path );
+                const std::filesystem::path full =
+                     named.is_absolute() ? named
+                                         : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+
+                auto a = mgr.FindByPath<Assets::CloudTypeAsset>( full );
+                if ( !a )
+                    a = m.CreateAsset<Assets::CloudTypeAsset>( Assets::AssetPriority::Medium, full );
+                if ( !a )
+                    return 0;
+                if ( !a->IsReadyForUse() && !a->Load() )
+                    return 0;
+                if ( const auto registered = Runtime::ResourceRegistry::GetCloudTypeService()->Register( a );
+                     !registered )
+                    LOG_ERROR( "[Clouds] Cloud type '{}' named by the scene could not be registered: {}",
+                               full.string(), registered.GetError() );
+                return static_cast<uint64_t>( a->GetMetadata().Handle );
+            }
+            if ( type == "CloudModellingVolumeAsset" )
+            {
+                // Both forms accepted, for the reason the cloud type's branch gives above.
+                const std::filesystem::path named( path );
+                const std::filesystem::path full =
+                     named.is_absolute() ? named
+                                         : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+
+                auto a = mgr.FindByPath<Assets::CloudModellingVolumeAsset>( full );
+                if ( !a )
+                    a = m.CreateAsset<Assets::CloudModellingVolumeAsset>( Assets::AssetPriority::Medium,
+                                                                          full );
+                if ( !a )
+                    return 0;
+                if ( !a->IsReadyForUse() && !a->Load() )
+                    return 0;
+                if ( const auto registered =
+                          Runtime::ResourceRegistry::GetCloudModellingService()->Register( a );
+                     !registered )
+                    LOG_ERROR( "[Clouds] Cloud modelling volume '{}' named by the scene could not be "
+                               "uploaded: {}",
+                               full.string(), registered.GetError() );
+                return static_cast<uint64_t>( a->GetMetadata().Handle );
+            }
+            if ( type == "CloudLayoutAsset" )
+            {
+                // Both forms accepted, for the reason the cloud type's branch gives above.
+                const std::filesystem::path named( path );
+                const std::filesystem::path full =
+                     named.is_absolute() ? named
+                                         : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
+
+                auto a = mgr.FindByPath<Assets::CloudLayoutAsset>( full );
+                if ( !a )
+                    a = m.CreateAsset<Assets::CloudLayoutAsset>( Assets::AssetPriority::Medium, full );
+                if ( !a )
+                    return 0;
+                if ( !a->IsReadyForUse() && !a->Load() )
+                    return 0;
+                if ( const auto registered = Runtime::ResourceRegistry::GetCloudLayoutService()->Register( a );
+                     !registered )
+                    LOG_ERROR( "[Clouds] Cloud layout '{}' named by the scene could not be registered: {}",
+                               full.string(), registered.GetError() );
+                return static_cast<uint64_t>( a->GetMetadata().Handle );
+            }
+            if ( type == "FontAsset" )
+            {
+                // Register the path with the FontService (idempotent) and return its deterministic handle.
+                return Runtime::ResourceRegistry::GetFontService()->RegisterFont( path );
+            }
+            if ( type == "VideoAsset" )
+            {
+                // Register the path with the VideoService (idempotent) and return its deterministic handle.
+                return Runtime::ResourceRegistry::GetVideoService()->RegisterVideo( path );
+            }
+            if ( type == "IconAsset" )
+            {
+                // Register the .svg with the IconService (idempotent); it bakes the SDF on first draw.
+                return Runtime::ResourceRegistry::GetIconService()->RegisterIcon( path );
+            }
+            // Meshes: find, else cook-create as the concrete type + register + load.
+            if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
+            {
+                auto a = mgr.FindByPath<Assets::MeshAsset>( path );
+                if ( !a )
+                {
+                    Assets::Asset<Assets::MeshAsset> created;
+                    if ( type == "SkinnedMeshAsset" )
+                        created = m.CreateAsset<Assets::SkinnedMeshAsset>( Assets::AssetPriority::High, path );
+                    else
+                        created = m.CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, path );
+                    if ( created )
+                    {
+                        Runtime::ResourceRegistry::GetMeshService()->Register( created );
+                        created->Load();
+                        a = created;
+                    }
+                }
+                return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
+            }
+            return 0;
+        };
+
+        // Asset-database path: a stable GUID stored in the scene resolves directly through the
+        // AssetManager (assets adopt their persisted/path-derived handles on load), surviving
+        // file renames that break path references. Returns 0 for unknown GUIDs so the caller
+        // falls back to FromPath.
+        r.FromGuid = [&mgr]( uint64_t guid, const std::string& type ) -> uint64_t
+        {
+            if ( guid == 0 )
+                return 0;
+            const Common::UUID handle( guid );
+
+            if ( type == "MaterialAsset" )
+            {
+                auto a = mgr.FindByHandle<Assets::MaterialAsset>( handle );
+                if ( !a )
+                    return 0;
+                if ( auto* svc = Runtime::ResourceRegistry::GetMaterialService(); svc && !svc->Get( handle ) )
+                    svc->Register( a );
+                return guid;
+            }
+            if ( type == "TextureAsset" )
+            {
+                return mgr.FindByHandle<Assets::TextureAsset>( handle ) ? guid : 0;
+            }
+            if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
+            {
+                auto a = mgr.FindByHandle<Assets::MeshAsset>( handle );
+                if ( !a )
+                    return 0;
+                if ( auto* svc = Runtime::ResourceRegistry::GetMeshService(); svc && !svc->GetAsset( handle ) )
+                {
+                    svc->Register( a );
+                    a->Load();
+                }
+                return guid;
+            }
+            if ( type == "SkyboxAsset" )
+            {
+                return mgr.FindByHandle<Assets::SkyboxAsset>( handle ) ? guid : 0;
+            }
+            return 0;
+        };
+
+        return r;
+    }
+
+    namespace
+    {
         // Like MakeReflected, but reflects the WHOLE component (no Data sub-member) and threads an
         // AssetResolver so AssetHandle fields round-trip as paths. Used for asset-bearing components that
         // are now fully reflected (Skybox) instead of hand-mapped.

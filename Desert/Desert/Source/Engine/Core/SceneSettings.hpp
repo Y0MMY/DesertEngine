@@ -384,7 +384,11 @@ namespace Desert::Core
 
         // Splash screen: an image the standalone Runtime shows full-screen when THIS scene loads (the boot
         // scene's splash is the game's startup splash). Duration 0 = no splash; Fade = in/out seconds.
-        PROPERTY( DisplayName( "Splash Sprite" ), Category( "Splash" ) )
+        // Asset<TextureAsset> for the reason UIPanelData::Sprite gives: it names the asset type to the
+        // resolver, without which the slot serializes as an empty string. SceneSerializer had to gain a
+        // resolver for this one field — the settings block was written without one, which is what put a
+        // raw 64-bit handle through the JSON double round trip.
+        PROPERTY( DisplayName( "Splash Sprite" ), Category( "Splash" ), Asset<TextureAsset> )
         Assets::AssetHandle SplashSprite;
         PROPERTY( DisplayName( "Splash Duration" ), Category( "Splash" ), Range( 0.0f, 10.0f ) )
         float SplashDuration = 0.0f;

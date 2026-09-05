@@ -2,6 +2,7 @@
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Core/Serialize/ComponentRegistry.hpp>
 #include <Engine/Core/Serialize/EntitySerializer.hpp>
 #include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/Core/Serialize/SceneStitchRules.hpp>
@@ -60,8 +61,18 @@ namespace Desert::Core
         }
 
         // Scene-wide settings via the generic reflection serializer (no hand-written mirror struct).
+        //
+        // WITH THE ASSET RESOLVER, on the same terms every component gets one. SceneSettings owns one
+        // AssetHandle — SplashSprite, the image the standalone Runtime shows while this scene loads — and
+        // without a resolver here it was written as a raw 64-bit number and read back through a double,
+        // which rounds every handle above 2^53. It was the last field in the engine still taking that
+        // path.
         if ( const auto* st = Reflection::ReflectionRegistry::Get().Find( "SceneSettings" ) )
-            scene.Settings = rfl::Generic( Reflection::SerializeReflected( *st, &m_Scene->GetSettings() ) );
+        {
+            auto resolver  = Serialize::MakeAssetResolver( *m_AssetManager );
+            scene.Settings = rfl::Generic(
+                 Reflection::SerializeReflected( *st, &m_Scene->GetSettings(), &resolver ) );
+        }
 
         return rfl::json::write( scene );
     }
@@ -106,7 +117,10 @@ namespace Desert::Core
         {
             if ( const auto* st = Reflection::ReflectionRegistry::Get().Find( "SceneSettings" ) )
                 if ( auto obj = scene.Settings->to_object(); obj.has_value() )
-                    Reflection::DeserializeReflected( *st, &m_Scene->GetSettings(), obj.value() );
+                {
+                    auto resolver = Serialize::MakeAssetResolver( *m_AssetManager );
+                    Reflection::DeserializeReflected( *st, &m_Scene->GetSettings(), obj.value(), &resolver );
+                }
         }
 
         // WHICH entity each record becomes, which one its payload lands on and what it hangs off is a pure
