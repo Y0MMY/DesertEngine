@@ -30,6 +30,17 @@ namespace Desert::UI
 
         // Seconds since the first UI frame — a shared wall clock so every time-driven effect (pulse, marquee,
         // hover eases) animates without any per-frame dt being plumbed through the stateless walk.
+        //
+        // THE ONE STATIC LEFT IN THIS FILE, and deliberately: it is a CLOCK, not state. Every view reads it
+        // and keeps its own last reading in its context, which is what a shared clock has to look like once
+        // two views draw in one frame — the previous arrangement kept the last reading here too, so of two
+        // walks in a frame the second measured no time at all. Nothing here is written after the first call.
+        //
+        // Its consequence is worth knowing before comparing frames: a canvas with a marquee or a running
+        // tween is NOT byte-reproducible run to run, because its phase comes from this clock rather than
+        // from the frame counter. Measured on MainMenu (one marquee): 0.63-0.85% of pixels differ between
+        // two runs of the same binary, and 0.405% even at 400 frames when the intro tween has settled.
+        // UI_ElementProbe has no marquee and no tween, and its floor is exactly 0.
         float NowSeconds()
         {
             static const auto epoch = std::chrono::steady_clock::now();
