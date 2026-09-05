@@ -204,15 +204,22 @@ namespace Common::Utils
     {
         std::vector<fs::path> result;
 
-        // Dedup key = absolute normalized path, matching how the VFS resolves an incoming path — so a
-        // relative disk spelling and the pak's absolute one collapse into ONE candidate, and the loose
-        // file (pushed first) is the spelling that survives.
+        // Dedup key = absolute, symlink-resolved path — the same canonical spelling the VFS resolves
+        // against — so a relative disk spelling and the pak's absolute one collapse into ONE
+        // candidate, and the loose file (pushed first) is the spelling that survives. weakly_canonical
+        // and not lexically_normal alone, because the disk walk yields the root as SPELLED while
+        // VFS::ListFiles yields the mount root as RESOLVED, and under a symlinked prefix (macOS
+        // /var -> /private/var) those are two spellings of one file.
         std::unordered_set<std::string> seen;
         std::error_code                 ec;
         const fs::path                  cwd  = fs::current_path( ec );
         auto                            push = [&]( const fs::path& p )
         {
-            const fs::path abs = ( p.is_absolute() ? p : cwd / p ).lexically_normal();
+            const fs::path  raw = ( p.is_absolute() ? p : cwd / p ).lexically_normal();
+            std::error_code canonEc;
+            fs::path        abs = fs::weakly_canonical( raw, canonEc );
+            if ( canonEc || abs.empty() )
+                abs = raw;
             if ( seen.insert( abs.generic_string() ).second )
                 result.push_back( p );
         };
