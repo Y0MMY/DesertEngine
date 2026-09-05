@@ -280,13 +280,12 @@ TEST( TextureSlotRoundTrip, AContentTextureAndACookedOneTakeDifferentRootsAndBot
 
     AssetManager manager;
     ASSERT_NE( manager.CreateAsset<TextureAsset>(
-                    AssetPriority::Medium,
-                    Common::Filepath( ann.Dir / "Cooked" / "Textures" / "T_Cooked.tex" ) ),
+                    AssetPriority::Medium, Common::Filepath( ann.Dir / "Cooked" / "Textures" / "T_Cooked.tex" ) ),
                nullptr );
-    ASSERT_NE( manager.CreateAsset<TextureAsset>(
-                    AssetPriority::Medium,
-                    Common::Filepath( ann.Dir / "Content" / "Textures" / "T_Content.tex" ) ),
-               nullptr );
+    ASSERT_NE(
+         manager.CreateAsset<TextureAsset>(
+              AssetPriority::Medium, Common::Filepath( ann.Dir / "Content" / "Textures" / "T_Content.tex" ) ),
+         nullptr );
 
     EXPECT_EQ( TextureSlotToPath( manager, kProbeHandle ), "cooked:Textures/T_Cooked.tex" );
     EXPECT_EQ( TextureSlotToPath( manager, kOtherHandle ), "assets:Textures/T_Content.tex" );
@@ -312,11 +311,11 @@ TEST( TextureSlotRoundTrip, TwoTexturesDoNotCollapseOntoOneReference )
     Open( ann );
 
     AssetManager manager;
-    ASSERT_NE( manager.CreateAsset<TextureAsset>(
-                    AssetPriority::Medium, Common::Filepath( ann.Dir / "Cooked" / "Textures" / "A.tex" ) ),
+    ASSERT_NE( manager.CreateAsset<TextureAsset>( AssetPriority::Medium,
+                                                  Common::Filepath( ann.Dir / "Cooked" / "Textures" / "A.tex" ) ),
                nullptr );
-    ASSERT_NE( manager.CreateAsset<TextureAsset>(
-                    AssetPriority::Medium, Common::Filepath( ann.Dir / "Cooked" / "Textures" / "B.tex" ) ),
+    ASSERT_NE( manager.CreateAsset<TextureAsset>( AssetPriority::Medium,
+                                                  Common::Filepath( ann.Dir / "Cooked" / "Textures" / "B.tex" ) ),
                nullptr );
 
     const std::string a = TextureSlotToPath( manager, kProbeHandle );
@@ -343,8 +342,7 @@ TEST( TextureSlotRoundTrip, EverySpellingOfOneFileResolvesToOneTexture )
 
     AssetManager manager;
     ASSERT_NE( manager.CreateAsset<TextureAsset>(
-                    AssetPriority::Medium,
-                    Common::Filepath( ann.Dir / "Cooked" / "Textures" / "T_Probe.tex" ) ),
+                    AssetPriority::Medium, Common::Filepath( ann.Dir / "Cooked" / "Textures" / "T_Probe.tex" ) ),
                nullptr );
 
     EXPECT_EQ( TextureSlotFromPath( manager, "cooked:Textures/T_Probe.tex" ), kProbeHandle );

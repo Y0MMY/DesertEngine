@@ -540,8 +540,7 @@ TEST( AssetHandleStability, EveryRootsKeyExpandsBackToThePathItCameFrom )
 
     // Engine resources come back too, and they must not follow the project: the same key under a
     // different project has to expand to the same file.
-    const std::string shaderKey =
-         Common::AssetHandle::StableKeyForPath( "Resources/Shaders/Programs/PBR.shader" );
+    const std::string shaderKey = Common::AssetHandle::StableKeyForPath( "Resources/Shaders/Programs/PBR.shader" );
     EXPECT_EQ( shaderKey, "engine:Shaders/Programs/PBR.shader" );
     const std::filesystem::path underOneProject = Common::AssetHandle::PathForStableKey( shaderKey );
     Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Other", "Assets" );
@@ -556,8 +555,7 @@ TEST( AssetHandleStability, AKeyExpandsAgainstTHISMachinesRootsAndNotTheOneThatW
     ProjectRootGuard guard;
 
     Common::Constants::Path::SetProjectRoot( "/ann/work/Game", "Content" );
-    const std::string written =
-         Common::AssetHandle::StableKeyForPath( "/ann/work/Game/Cooked/Textures/T.tex" );
+    const std::string written = Common::AssetHandle::StableKeyForPath( "/ann/work/Game/Cooked/Textures/T.tex" );
     EXPECT_EQ( written, "cooked:Textures/T.tex" );
 
     Common::Constants::Path::SetProjectRoot( "/opt/ci/checkout/Game", "Assets" );

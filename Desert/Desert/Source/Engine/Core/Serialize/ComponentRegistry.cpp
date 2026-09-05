@@ -465,14 +465,12 @@ namespace Desert::Core::Serialize
 
                 auto a = mgr.FindByPath<Assets::CloudModellingVolumeAsset>( full );
                 if ( !a )
-                    a = m.CreateAsset<Assets::CloudModellingVolumeAsset>( Assets::AssetPriority::Medium,
-                                                                          full );
+                    a = m.CreateAsset<Assets::CloudModellingVolumeAsset>( Assets::AssetPriority::Medium, full );
                 if ( !a )
                     return 0;
                 if ( !a->IsReadyForUse() && !a->Load() )
                     return 0;
-                if ( const auto registered =
-                          Runtime::ResourceRegistry::GetCloudModellingService()->Register( a );
+                if ( const auto registered = Runtime::ResourceRegistry::GetCloudModellingService()->Register( a );
                      !registered )
                     LOG_ERROR( "[Clouds] Cloud modelling volume '{}' named by the scene could not be "
                                "uploaded: {}",

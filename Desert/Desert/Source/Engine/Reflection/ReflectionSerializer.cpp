@@ -44,7 +44,7 @@ namespace Desert::Reflection
             // has already lost the exact integer it claims to be, which is the whole subject here.
             if ( auto d = g.to_double(); d.has_value() )
             {
-                const double v = d.value();
+                const double     v           = d.value();
                 constexpr double kUpperBound = 9223372036854775808.0; // 2^63, the first value int64 lacks
                 constexpr double kLowerBound = -9223372036854775808.0;
                 if ( v >= kLowerBound && v < kUpperBound && v == static_cast<double>( static_cast<int64_t>( v ) ) )

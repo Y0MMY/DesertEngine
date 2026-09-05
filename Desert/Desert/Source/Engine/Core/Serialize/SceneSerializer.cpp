@@ -69,9 +69,9 @@ namespace Desert::Core
         // path.
         if ( const auto* st = Reflection::ReflectionRegistry::Get().Find( "SceneSettings" ) )
         {
-            auto resolver  = Serialize::MakeAssetResolver( *m_AssetManager );
-            scene.Settings = rfl::Generic(
-                 Reflection::SerializeReflected( *st, &m_Scene->GetSettings(), &resolver ) );
+            auto resolver = Serialize::MakeAssetResolver( *m_AssetManager );
+            scene.Settings =
+                 rfl::Generic( Reflection::SerializeReflected( *st, &m_Scene->GetSettings(), &resolver ) );
         }
 
         return rfl::json::write( scene );
