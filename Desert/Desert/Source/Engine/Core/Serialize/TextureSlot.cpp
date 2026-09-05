@@ -39,11 +39,10 @@ namespace Desert::Core::Serialize
 
         auto asset = manager.FindByPath<Assets::TextureAsset>( full );
 
-        // THE EXISTENCE CHECK IS NOT DEFENSIVE, IT IS LOAD-BEARING. CreateAsset loads the asset, and
-        // TextureAsset::Load reads through Common::Utils::FileSystem::ReadFileContent, whose miss path is
-        // a DESERT_VERIFY — i.e. in Debug a scene naming a texture that is not on disk would abort the
-        // editor instead of reporting a missing texture. Asked first, the same case becomes the log line
-        // below.
+        // Asked BEFORE CreateAsset on purpose: a missing texture then produces the log line below —
+        // which names the search roots a texture is expected under — instead of registering an asset
+        // shell whose load failed with only the raw path in the log. (Historically this check was
+        // load-bearing in a harder way: ReadFileContent used to abort the process on a missing file.)
         if ( !asset && Common::Utils::FileSystem::Exists( full ) )
             asset = manager.CreateAsset<Assets::TextureAsset>( Assets::AssetPriority::High, full );
 

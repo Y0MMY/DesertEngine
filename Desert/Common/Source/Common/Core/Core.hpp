@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <utility>
 #include "Logger.hpp"
 #include "Constants.hpp"
 #include <Common/Core/UUID.hpp>
@@ -51,12 +52,44 @@ decltype( auto ) initializeDefaultValue()
 #define DESERT_DEBUG_BREAK __debugbreak()
 #endif
 
+namespace Common::Detail
+{
+    // Forwarders for DESERT_VERIFY's optional message. An overload pair rather than __VA_OPT__
+    // because the Windows build uses MSVC's TRADITIONAL preprocessor (no /Zc:preprocessor — see the
+    // RE_EXPAND_VARGS workaround above), which does not implement __VA_OPT__; a plain __VA_ARGS__
+    // forwarded into a call works on every compiler this project builds with.
+    inline void LogVerifyMessage()
+    {
+    }
+    template <typename... Args>
+    void LogVerifyMessage( fmt::format_string<Args...> message, Args&&... args )
+    {
+        Common::Logger::LogError( message, std::forward<Args>( args )... );
+    }
+    inline void WarnVerifyMessage()
+    {
+    }
+    template <typename... Args>
+    void WarnVerifyMessage( fmt::format_string<Args...> message, Args&&... args )
+    {
+        Common::Logger::LogWarn( message, std::forward<Args>( args )... );
+    }
+} // namespace Common::Detail
+
+// DESERT_VERIFY is for INVARIANTS — states the program cannot continue from — and it aborts in EVERY
+// configuration, Release included. It is not an error channel: a missing file, a failed parse, a
+// resource that did not load all go through Common::BoolResultStr / LOG_ERROR so the caller can
+// refuse with a name instead of dying (the read primitives in FileSystem used to VERIFY on a missing
+// file, which crashed a packaged game over one absent asset).
+// The optional message args used to be silently DISCARDED — "Could not read file! {}" never once
+// reached a log — so they are forwarded to the logger now.
 #define DESERT_VERIFY( cond, ... )                                                                                \
     do                                                                                                            \
     {                                                                                                             \
         if ( !( cond ) )                                                                                          \
         {                                                                                                         \
             Common::Logger::LogError( "Verify failed: {} at {}:{}", #cond, __FILE__, __LINE__ );                  \
+            Common::Detail::LogVerifyMessage( __VA_ARGS__ );                                                      \
             DESERT_DEBUG_BREAK;                                                                                   \
             std::abort();                                                                                         \
         }                                                                                                         \
@@ -66,6 +99,7 @@ decltype( auto ) initializeDefaultValue()
     if ( !( cond ) )                                                                                              \
     {                                                                                                             \
         Common::Logger::LogWarn( "Verify failed: {} at {}:{}", #cond, __FILE__, __LINE__ );                       \
+        Common::Detail::WarnVerifyMessage( __VA_ARGS__ );                                                         \
     }
 
 // #define MAKE_SHARED_OBJECT( type, value ) Memory::Shared<type>::Create( value );

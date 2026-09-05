@@ -1,6 +1,5 @@
 #include "AssetPreloader.hpp"
-#include <Common/Utilities/VFS.hpp>
-#include <unordered_set>
+#include <Common/Utilities/FileSystem.hpp>
 
 #include "Shader/ShaderAsset.hpp"
 #include "Mesh/StaticMeshAsset.hpp"
@@ -52,30 +51,12 @@ namespace Desert::Assets
                                 const std::weak_ptr<AssetManager>& assetManager, AssetPriority priority,
                                 Args&&... args )
         {
-            namespace fs = std::filesystem;
-
             // Candidates = the loose files on disk PLUS everything a mounted .dpak holds under this
-            // root (packaged game: the disk dirs typically do not exist at all). Deduplicated by
-            // normalized path — a loose file overrides its pak twin.
-            std::vector<fs::path>           candidates;
-            std::unordered_set<std::string> seen;
-            auto push = [&]( const fs::path& p )
-            {
-                if ( seen.insert( p.lexically_normal().generic_string() ).second )
-                    candidates.push_back( p );
-            };
-
-            std::error_code ec;
-            if ( fs::exists( rootPath, ec ) ) // tolerate missing cooked dirs (clean/from-scratch project)
-            {
-                for ( const auto& entry : fs::recursive_directory_iterator( rootPath, ec ) )
-                    if ( entry.is_regular_file() )
-                        push( entry.path() );
-            }
-            for ( const auto& packed : Common::Utils::VFS::ListFiles( rootPath ) )
-                push( packed );
-
-            for ( const auto& candidate : candidates )
+            // root (packaged game: the disk dirs typically do not exist at all), deduplicated with a
+            // loose file overriding its pak twin. The enumeration itself is the ONE shared
+            // implementation every content scanner uses — the font/icon services once hand-rolled the
+            // disk half only, and a packaged game scanned nothing.
+            for ( const auto& candidate : Common::Utils::FileSystem::ListFilesRecursive( rootPath ) )
             {
                 std::string ext = candidate.extension().string();
                 std::transform( ext.begin(), ext.end(), ext.begin(), ::tolower );

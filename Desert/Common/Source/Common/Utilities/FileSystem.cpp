@@ -12,6 +12,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
 
 #ifdef _MSC_VER
 #pragma warning( error : 4834 )
@@ -46,10 +47,10 @@ namespace Common::Utils
             LOG_INFO( "Created File {}", path.string() );
             file.close();
         }
-
         else
         {
-            DESERT_VERIFY( false );
+            // Same soft contract as the read primitives: name the failure, let the caller decide.
+            LOG_ERROR( "[FileSystem] Could not create file: {}", path.string() );
         }
     }
 
@@ -152,7 +153,12 @@ namespace Common::Utils
             if ( auto packed = VFS::ReadFile( filepath ) )
                 return std::move( *packed );
 
-            DESERT_VERIFY( in, "Could not read file! {}", filepath.string().c_str() );
+            // Soft by contract (see the header): the caller owns the policy for a missing file. This
+            // used to DESERT_VERIFY, i.e. abort in every configuration — which made every "file is
+            // empty or missing" branch in the loaders dead code and turned one missing asset into a
+            // crash of a packaged game.
+            LOG_ERROR( "[FileSystem] Could not read file (not on disk, not in a mounted pak): {}",
+                       filepath.string() );
             return {};
         }
 
@@ -167,41 +173,6 @@ namespace Common::Utils
         return fileContent;
     }
 
-    int SkipBOM( std::istream& in )
-    {
-        char test[4] = { 0 };
-        in.seekg( 0, std::ios::beg );
-        in.read( test, 3 );
-        if ( strcmp( test, "\xEF\xBB\xBF" ) == 0 )
-        {
-            in.seekg( 3, std::ios::beg );
-            return 3;
-        }
-        in.seekg( 0, std::ios::beg );
-        return 0;
-    }
-
-    // Returns an empty string when failing.
-    std::string FileSystem::ReadFileAndSkipBOM( const std::filesystem::path& filepath )
-    {
-        std::string   result;
-        std::ifstream in( filepath, std::ios::in | std::ios::binary );
-        if ( in )
-        {
-            in.seekg( 0, std::ios::end );
-            auto      fileSize     = in.tellg();
-            const int skippedChars = SkipBOM( in );
-
-            fileSize -= skippedChars - 1;
-            result.resize( fileSize );
-            in.read( result.data() + 1, fileSize );
-            // Add a dummy tab to beginning of file.
-            result[0] = '\t';
-        }
-        in.close();
-        return result;
-    }
-
     std::vector<uint8_t> FileSystem::ReadByteFileContent( const std::filesystem::path& filepath )
     {
         std::ifstream file( filepath, std::ios::in | std::ios::binary );
@@ -210,7 +181,9 @@ namespace Common::Utils
             if ( auto packed = VFS::ReadFile( filepath ) )
                 return std::vector<uint8_t>( packed->begin(), packed->end() );
 
-            DESERT_VERIFY( file, "Could not open file! {}", filepath.string().c_str() );
+            // Soft by contract (see the header) — same reasoning as ReadFileContent above.
+            LOG_ERROR( "[FileSystem] Could not open file (not on disk, not in a mounted pak): {}",
+                       filepath.string() );
             return {};
         }
 
@@ -221,10 +194,50 @@ namespace Common::Utils
         std::vector<uint8_t> binaryData( fileSize / sizeof( uint8_t ) );
         if ( !file.read( reinterpret_cast<char*>( binaryData.data() ), fileSize ) )
         {
-            DESERT_VERIFY( file, "Could not read file! {}", filepath.string().c_str() );
+            LOG_ERROR( "[FileSystem] Could not read {} bytes of file: {}", fileSize, filepath.string() );
             return {};
         }
         return std::move( binaryData );
+    }
+
+    std::vector<std::filesystem::path> FileSystem::ListFilesRecursive( const std::filesystem::path& root )
+    {
+        std::vector<fs::path> result;
+
+        // Dedup key = absolute, symlink-resolved path — the same canonical spelling the VFS resolves
+        // against — so a relative disk spelling and the pak's absolute one collapse into ONE
+        // candidate, and the loose file (pushed first) is the spelling that survives. weakly_canonical
+        // and not lexically_normal alone, because the disk walk yields the root as SPELLED while
+        // VFS::ListFiles yields the mount root as RESOLVED, and under a symlinked prefix (macOS
+        // /var -> /private/var) those are two spellings of one file.
+        std::unordered_set<std::string> seen;
+        std::error_code                 ec;
+        const fs::path                  cwd  = fs::current_path( ec );
+        auto                            push = [&]( const fs::path& p )
+        {
+            const fs::path  raw = ( p.is_absolute() ? p : cwd / p ).lexically_normal();
+            std::error_code canonEc;
+            fs::path        abs = fs::weakly_canonical( raw, canonEc );
+            if ( canonEc || abs.empty() )
+                abs = raw;
+            if ( seen.insert( abs.generic_string() ).second )
+                result.push_back( p );
+        };
+
+        if ( fs::exists( root, ec ) ) // a missing root is a valid state (clean project, packaged game)
+        {
+            for ( auto it = fs::recursive_directory_iterator( root, ec ); it != fs::recursive_directory_iterator();
+                  it.increment( ec ) )
+            {
+                if ( ec )
+                    break;
+                if ( it->is_regular_file( ec ) )
+                    push( it->path() );
+            }
+        }
+        for ( const auto& packed : VFS::ListFiles( root ) )
+            push( packed );
+        return result;
     }
 
     const std::filesystem::path FileSystem::GetParentPath( const std::filesystem::path& filepath )
@@ -261,6 +274,12 @@ namespace Common::Utils
     const void FileSystem::WriteContentToFile( const std::filesystem::path& filepath, const std::string& content )
     {
         std::ofstream fout( filepath );
+        if ( !fout )
+        {
+            // Was a silent no-op: a prefs/layout/deproj write to an unwritable location just vanished.
+            LOG_ERROR( "[FileSystem] Could not write file: {}", filepath.string() );
+            return;
+        }
         fout << content;
         fout.close();
     }
