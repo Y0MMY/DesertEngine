@@ -531,7 +531,7 @@ namespace
 
         static glm::vec3 ColorOf( int i )
         {
-            return i == 0 ? glm::vec3( 1.0f, 0.0f, 0.0f )
+            return i == 0   ? glm::vec3( 1.0f, 0.0f, 0.0f )
                    : i == 1 ? glm::vec3( 0.0f, 1.0f, 0.0f )
                             : glm::vec3( 0.0f, 0.0f, 1.0f );
         }
@@ -544,8 +544,8 @@ namespace
             canvas.ReferenceWidth  = kSide;
             canvas.ReferenceHeight = kSide;
 
-            Box                = Registry.create();
-            auto& boxLayout    = Registry.emplace<ECS::UILayoutComponent>( Box ).Data;
+            Box                 = Registry.create();
+            auto& boxLayout     = Registry.emplace<ECS::UILayoutComponent>( Box ).Data;
             boxLayout.AnchorMin = { 0.0f, 0.0f };
             boxLayout.AnchorMax = { 1.0f, 1.0f };
             boxLayout.OffsetMin = { 0.0f, 0.0f };
@@ -710,8 +710,8 @@ namespace
             canvas.ReferenceWidth  = kSide;
             canvas.ReferenceHeight = kSide;
 
-            Panel                = Registry.create();
-            auto& panelLayout    = Registry.emplace<ECS::UILayoutComponent>( Panel ).Data;
+            Panel                 = Registry.create();
+            auto& panelLayout     = Registry.emplace<ECS::UILayoutComponent>( Panel ).Data;
             panelLayout.AnchorMin = { 0.0f, 0.0f };
             panelLayout.AnchorMax = { 1.0f, 1.0f };
             panelLayout.OffsetMin = { 0.0f, 0.0f };

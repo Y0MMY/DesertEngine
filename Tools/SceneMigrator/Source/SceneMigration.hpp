@@ -482,7 +482,7 @@ namespace Desert::Migration
     // What MigrateUIVisibilityV9ToV10 did to one file.
     struct UIVisibilityMigrationReport
     {
-        int Entities = 0; // entities carrying a "UILayout" payload that was touched
+        int Entities     = 0; // entities carrying a "UILayout" payload that was touched
         int FlagsDropped = 0; // "Interactable" / "RaycastTarget" keys removed (0..2 per entity)
         int HitTestSet   = 0; // entities that gained an explicit "HitTest" because a flag was off
 
@@ -550,7 +550,7 @@ namespace Desert::Migration
         bool                        GravityUnitsRaised = false;
         GravityUnitsMigrationReport GravityUnits;
         // the schema was below kSceneVersionUIVisibility
-        bool                       UIVisibilityRaised = false;
+        bool                        UIVisibilityRaised = false;
         UIVisibilityMigrationReport UIVisibility;
 
         bool Changed() const

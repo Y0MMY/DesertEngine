@@ -56,11 +56,10 @@ namespace
     // prove the rest of the payload survives untouched and in order.
     Assets::EntityData ElementWith( const Keys& layout, const char* tag = "Element" )
     {
-        Assets::EntityData   entity;
+        Assets::EntityData entity;
         entity.Tag                  = tag;
         rfl::Generic::Object padded = {};
-        padded["AnchorMin"]         = rfl::Generic( rfl::Generic::Array{ rfl::Generic( 0.0 ),
-                                                                         rfl::Generic( 0.0 ) } );
+        padded["AnchorMin"] = rfl::Generic( rfl::Generic::Array{ rfl::Generic( 0.0 ), rfl::Generic( 0.0 ) } );
         for ( const auto& [key, value] : layout )
             padded[key] = value;
         padded["ClipContents"]        = rfl::Generic( false );
@@ -168,19 +167,18 @@ TEST( SceneUIVisibilityMigration, BothOffIsChildrenOnlyWhicheverOrderTheFileStat
 {
     for ( const bool raycastFirst : { true, false } )
     {
-        const Keys layout = raycastFirst ? Keys{ { "RaycastTarget", rfl::Generic( false ) },
-                                                 { "Interactable", rfl::Generic( false ) } }
-                                         : Keys{ { "Interactable", rfl::Generic( false ) },
-                                                 { "RaycastTarget", rfl::Generic( false ) } };
+        const Keys layout =
+             raycastFirst
+                  ? Keys{ { "RaycastTarget", rfl::Generic( false ) }, { "Interactable", rfl::Generic( false ) } }
+                  : Keys{ { "Interactable", rfl::Generic( false ) }, { "RaycastTarget", rfl::Generic( false ) } };
 
         std::vector<Assets::EntityData> entities{ ElementWith( layout ) };
-        const auto report = Migration::MigrateUIVisibilityV9ToV10( entities );
+        const auto                      report = Migration::MigrateUIVisibilityV9ToV10( entities );
 
         EXPECT_EQ( report.FlagsDropped, 2 );
         EXPECT_EQ( report.HitTestSet, 1 ) << "two flags produced two Hit Test keys";
         ASSERT_TRUE( IntAt( LayoutOf( entities[0] ), "HitTest" ).has_value() );
-        EXPECT_EQ( *IntAt( LayoutOf( entities[0] ), "HitTest" ),
-                   static_cast<int>( ECS::UIHitTest::ChildrenOnly ) )
+        EXPECT_EQ( *IntAt( LayoutOf( entities[0] ), "HitTest" ), static_cast<int>( ECS::UIHitTest::ChildrenOnly ) )
              << "raycast-first was " << raycastFirst;
     }
 }
@@ -190,9 +188,8 @@ TEST( SceneUIVisibilityMigration, BothOffIsChildrenOnlyWhicheverOrderTheFileStat
 // those scenes would be pinned to the old one for a reason nobody could find.
 TEST( SceneUIVisibilityMigration, FlagsThatWereOnLeaveNoKeyBehind )
 {
-    std::vector<Assets::EntityData> entities{
-         ElementWith( Keys{ { "Interactable", rfl::Generic( true ) },
-                      { "RaycastTarget", rfl::Generic( true ) } } ) };
+    std::vector<Assets::EntityData> entities{ ElementWith(
+         Keys{ { "Interactable", rfl::Generic( true ) }, { "RaycastTarget", rfl::Generic( true ) } } ) };
 
     const auto report = Migration::MigrateUIVisibilityV9ToV10( entities );
 
@@ -226,8 +223,9 @@ TEST( SceneUIVisibilityMigration, APayloadWithNeitherKeyIsLeftByteIdentical )
 TEST( SceneUIVisibilityMigration, AnEntityWithNoUILayoutIsNotTouched )
 {
     Assets::EntityData mesh;
-    mesh.Tag                      = "Ground";
-    mesh.Components["StaticMesh"] = rfl::Generic( ObjectOf( Keys{ { "Primitive", rfl::Generic( std::string( "Cube" ) ) } } ) );
+    mesh.Tag = "Ground";
+    mesh.Components["StaticMesh"] =
+         rfl::Generic( ObjectOf( Keys{ { "Primitive", rfl::Generic( std::string( "Cube" ) ) } } ) );
     std::vector<Assets::EntityData> entities{ mesh };
     const std::string               before = rfl::json::write( entities[0] );
 
@@ -320,8 +318,8 @@ TEST( SceneUIVisibilityMigration, RunningItTwiceChangesNothingTheSecondTime )
     std::vector<Assets::EntityData> entities{ ElementWith( Keys{ { "Interactable", rfl::Generic( false ) } } ) };
 
     Migration::MigrateUIVisibilityV9ToV10( entities );
-    const std::string   afterFirst = rfl::json::write( entities[0] );
-    const auto          second     = Migration::MigrateUIVisibilityV9ToV10( entities );
+    const std::string afterFirst = rfl::json::write( entities[0] );
+    const auto        second     = Migration::MigrateUIVisibilityV9ToV10( entities );
 
     EXPECT_EQ( second.Entities, 0 );
     EXPECT_EQ( second.FlagsDropped, 0 );

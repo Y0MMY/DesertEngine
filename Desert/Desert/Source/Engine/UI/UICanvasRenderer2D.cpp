@@ -1145,13 +1145,12 @@ namespace Desert::UI
                  scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::Blocking );
             // Only this element's own value: an inherited term would be unreachable, because responding
             // needs `e == ctx.Hot` and the line above is already what decides whether it can be Hot.
-            const bool interactable =
-                 hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly;
+            const bool interactable = hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly;
 
             // Blocking and None both close the sub-tree to the pointer; they differ only in whether the
             // element itself stops it, which is the line above.
-            const HitScope childScope{ scope.Elect && ( hitTest == ECS::UIHitTest::All ||
-                                                        hitTest == ECS::UIHitTest::ChildrenOnly ) };
+            const HitScope childScope{
+                 scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly ) };
 
             if ( forcedRect || hasLayout )
             {
