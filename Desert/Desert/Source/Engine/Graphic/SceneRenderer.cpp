@@ -597,8 +597,10 @@ namespace Desert::Graphic
             // in METRES; they were passed bare, so the occlusion hemisphere was five MILLIMETRES wide and
             // the pass returned ~1.0 for every pixel of every scene while costing a full-screen 16-tap
             // pass per frame. The radius keeps the literature's 0.5 m after an A/B against 0.25 m and
-            // 1 m on CornellDemo: 0.25 m loses the wall-to-wall corner gradient, 1 m spreads the corner
-            // darkening into a soft global dim that reads as dirt, 0.5 m keeps contact shadows tight.
+            // 1 m on CornellDemo's AO channel (corner-band p05 occlusion vs a flat wall's 0%): 0.25 m
+            // darkens only a narrow seam (8%), 1 m reaches 16% but smears a grainy gradient a third of
+            // the way up the wall — 16 samples spread over a metre read as dirt, not contact — and 0.5 m
+            // (12%) keeps the darkening at the corner with the sample noise still unobtrusive.
             constexpr float          kSSAORadius = Common::Units::Metres( 0.5f );   // literature: 0.5 m
             constexpr float          kSSAOBias   = Common::Units::Metres( 0.025f ); // literature: 0.025 m
             std::shared_ptr<Image2D> aoImage;
