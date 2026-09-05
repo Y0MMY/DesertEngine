@@ -7,6 +7,20 @@
 
 namespace Desert::UI
 {
+    bool TakesLayoutSpace( entt::registry& reg, entt::entity e )
+    {
+        if ( !reg.valid( e ) || !reg.has<ECS::UILayoutComponent>( e ) )
+            return true;
+        return reg.get<ECS::UILayoutComponent>( e ).Data.Visibility != ECS::UIVisibility::Collapsed;
+    }
+
+    bool IsElementVisible( entt::registry& reg, entt::entity e )
+    {
+        if ( !reg.valid( e ) || !reg.has<ECS::UILayoutComponent>( e ) )
+            return true;
+        return reg.get<ECS::UILayoutComponent>( e ).Data.Visibility == ECS::UIVisibility::Visible;
+    }
+
     namespace
     {
         // Maps the canvas to the viewport per its scale mode (see UICanvasScaleMode). Returns the canvas root
@@ -73,8 +87,8 @@ namespace Desert::UI
             std::vector<glm::vec2> sizes;
             for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
             {
-                if ( !reg.valid( c ) )
-                    continue;
+                if ( !reg.valid( c ) || !TakesLayoutSpace( reg, c ) )
+                    continue; // a Collapsed child is not in the group, so it is not in its content size
                 glm::vec2 pref( 0.0f );
                 if ( reg.has<ECS::UILayoutComponent>( c ) )
                 {
@@ -110,8 +124,8 @@ namespace Desert::UI
             std::vector<float>     flex;
             for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
             {
-                if ( !reg.valid( c ) )
-                    continue;
+                if ( !reg.valid( c ) || !TakesLayoutSpace( reg, c ) )
+                    continue; // Collapsed: no slot here, exactly as in the renderer's own group solve
                 glm::vec2 pref( 0.0f );
                 float     fg = 0.0f;
                 if ( reg.has<ECS::UILayoutComponent>( c ) )
@@ -142,6 +156,13 @@ namespace Desert::UI
         void PickRecurse( entt::registry& reg, entt::entity e, const Rect& parent, float scale, const glm::vec2& p,
                           entt::entity& hit, const Rect* forcedRect = nullptr )
         {
+            // An element that is not drawn cannot be clicked in the viewport either — the same rule the
+            // renderer applies to the pointer, applied to the editor's WYSIWYG pick, because a marquee
+            // appearing around something invisible is a selection the author cannot explain. A hidden
+            // element is still selectable from the Scene Hierarchy, which is where it is visible.
+            if ( !IsElementVisible( reg, e ) )
+                return;
+
             Rect       rect      = parent;
             const bool hasLayout = reg.has<ECS::UILayoutComponent>( e );
             if ( forcedRect )

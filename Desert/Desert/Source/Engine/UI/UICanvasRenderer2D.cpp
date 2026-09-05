@@ -7,6 +7,7 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Text/FontBaker.hpp>
 #include <Engine/Text/Utf8.hpp>
+#include <Engine/UI/UICanvasLayout.hpp>
 #include <Engine/UI/UIDataStore.hpp>
 
 #include <Common/Core/Logger.hpp>
@@ -377,6 +378,19 @@ namespace Desert::UI
                 out.push_back( cur );
             return out;
         }
+
+        // What an ancestor's UIHitTest allows this sub-tree to do — the half of the hit-test axis that is
+        // INHERITED. Both booleans used to be read off the element alone and the walk descended regardless,
+        // which is why "this element and everything under it is invisible to the pointer" and "grey out
+        // this whole panel" could not be said at all: the flag had to be cleared by hand on every
+        // descendant. Passed down the recursion, never up, and narrowed at each level — a sub-tree can
+        // only lose permissions, never regain them, so no child can re-enable itself inside a disabled
+        // dialog.
+        struct HitScope
+        {
+            bool Elect   = true; // may anything in here become the hot element (i.e. stop the pointer)?
+            bool Respond = true; // may anything in here react to being hot (hover, press, drag, scroll)?
+        };
 
         // An open dropdown whose option list is drawn AFTER the whole tree, so it overlays everything.
         struct PopupInfo
@@ -989,8 +1003,8 @@ namespace Desert::UI
             std::vector<glm::vec2> sizes;
             for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
             {
-                if ( !reg.valid( c ) )
-                    continue;
+                if ( !reg.valid( c ) || !TakesLayoutSpace( reg, c ) )
+                    continue; // a Collapsed child has no slot, so it is not part of the content either
                 glm::vec2 pref( 0.0f );
                 if ( reg.has<ECS::UILayoutComponent>( c ) )
                 {
@@ -1018,9 +1032,21 @@ namespace Desert::UI
         void DrawElement( UICanvasContext& ctx, entt::registry& reg, entt::entity e, const Rect& parent,
                           float scale, Graphic::Render2D::DrawList2D& dl, const UIInput* input,
                           std::string* outClicked, entt::entity* focused, std::vector<PopupInfo>* popups,
-                          std::vector<entt::entity>* focusables, const Rect& clipRect,
+                          std::vector<entt::entity>* focusables, const Rect& clipRect, HitScope scope,
                           const Rect* forcedRect = nullptr )
         {
+            // The visibility axis, before anything else is computed. Hidden and Collapsed both stop here
+            // and take the whole sub-tree with them — nothing drawn, nothing hit-tested, no tween clock
+            // advanced (so an intro tween with Rewind On Hide replays when the element comes back, exactly
+            // as it does for a screen that is not current).
+            //
+            // The two differ only in the parent's layout, which was decided one level UP: a Collapsed child
+            // of a layout group never reaches this function at all, because the group left no slot for it
+            // and its siblings closed the gap. A Hidden one reaches it with a slot and leaves a hole. Under
+            // plain anchor layout the two are the same picture, because there is no packing to close.
+            if ( !IsElementVisible( reg, e ) )
+                return;
+
             Rect       rect      = parent;
             const bool hasLayout = reg.has<ECS::UILayoutComponent>( e );
             if ( forcedRect )
@@ -1102,10 +1128,25 @@ namespace Desert::UI
                 }
             } tintRestore{ ctx, parentTint };
 
-            // Interaction flags live on the layout (every UI element has one); a rect handed down by a
-            // layout group inherits the same defaults.
-            const bool interactable  = !hasLayout || reg.get<ECS::UILayoutComponent>( e ).Data.Interactable;
-            const bool raycastTarget = !hasLayout || reg.get<ECS::UILayoutComponent>( e ).Data.RaycastTarget;
+            // The hit-test axis lives on the layout (every UI element has one); an element without one
+            // takes the default. Four values, resolved into the three questions the walk actually asks —
+            // may I be elected, may I react, and what may my children do — and each is narrowed by what
+            // an ancestor already allowed, so permissions only ever shrink going down.
+            const ECS::UIHitTest hitTest =
+                 hasLayout ? reg.get<ECS::UILayoutComponent>( e ).Data.HitTest : ECS::UIHitTest::All;
+
+            // Blocking elects itself precisely so the pointer STOPS here: it is the greyed-out form and the
+            // modal dialog, which must swallow the click rather than let it reach what is behind them.
+            const bool raycastTarget = scope.Elect && ( hitTest == ECS::UIHitTest::All ||
+                                                        hitTest == ECS::UIHitTest::Blocking );
+            // ChildrenOnly can never be hot (it does not elect itself), so its own "responds" is moot; it
+            // is written out in full rather than folded away because the table then matches UIHitTest.
+            const bool interactable = scope.Respond && ( hitTest == ECS::UIHitTest::All ||
+                                                         hitTest == ECS::UIHitTest::ChildrenOnly );
+
+            const HitScope childScope{
+                 scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly ),
+                 scope.Respond && hitTest != ECS::UIHitTest::Blocking };
 
             if ( forcedRect || hasLayout )
             {
@@ -1473,7 +1514,11 @@ namespace Desert::UI
                     std::vector<float>        flex;
                     for ( auto c : children )
                     {
-                        if ( !reg.valid( c ) )
+                        // THE LAYOUT AXIS, and the only place it does anything: a Collapsed child is not
+                        // given a slot, so every sibling after it moves up by that slot's size plus the
+                        // spacing. A Hidden one is kept here and stopped at the top of DrawElement, which
+                        // is what leaves its hole open.
+                        if ( !reg.valid( c ) || !TakesLayoutSpace( reg, c ) )
                             continue;
                         glm::vec2 pref( 0.0f );
                         float     fg = 0.0f;
@@ -1504,14 +1549,14 @@ namespace Desert::UI
                     const auto rects = SolveLayoutGroup( childParent, params, sizes, flex );
                     for ( std::size_t i = 0; i < kids.size(); ++i )
                         DrawElement( ctx, reg, kids[i], childParent, scale, dl, input, outClicked, focused, popups,
-                                     focusables, childClip, &rects[i] );
+                                     focusables, childClip, childScope, &rects[i] );
                 }
                 else
                 {
                     for ( auto c : children )
                         if ( reg.valid( c ) )
                             DrawElement( ctx, reg, c, childParent, scale, dl, input, outClicked, focused, popups,
-                                         focusables, childClip );
+                                         focusables, childClip, childScope );
                 }
                 if ( clip )
                     dl.PopClipRect();
@@ -1679,7 +1724,7 @@ namespace Desert::UI
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
                     DrawElement( ctx, reg, c, childRoot, scale, dl, input, outClicked, focused, &popups,
-                                 &focusables, viewportPx );
+                                 &focusables, viewportPx, HitScope{} );
 
         // --- Pointer events, drag & drop -------------------------------------------------------------
         // Everything here runs on the freshly elected hot element, AFTER the tree is laid out: enter/exit

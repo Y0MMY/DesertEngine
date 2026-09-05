@@ -201,6 +201,22 @@ int main( int argc, char** argv )
                 std::cout << "gravity already " << report.GravityUnits.After << " cm/s2, unchanged";
             std::cout << ")";
         }
+        if ( report.UIVisibilityRaised )
+        {
+            std::cout << " scene v" << Desert::Migration::kSceneVersionGravityUnits << "->v"
+                      << Desert::Migration::kSceneVersionUIVisibility << " (";
+            if ( report.UIVisibility.Entities > 0 )
+                std::cout << report.UIVisibility.FlagsDropped << " interaction flag(s) folded into Hit Test on "
+                          << report.UIVisibility.Entities << " element(s), " << report.UIVisibility.HitTestSet
+                          << " of which stopped being the default";
+            else
+                std::cout << "stamp only - no UI element stated an interaction flag";
+            // Named, not counted, for the reason the two steps above name what they could not carry: an
+            // element whose flag was unreadable keeps the default, and the operator has to see which one.
+            for ( const auto& name : report.UIVisibility.BrokenNames )
+                std::cout << "; NOT a boolean, left at the default Hit Test: " << name;
+            std::cout << ")";
+        }
         if ( report.UnitsRaised )
             std::cout << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
                       << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected
