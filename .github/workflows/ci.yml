@@ -52,6 +52,12 @@ jobs:
   sanitizers:
     name: ASan+UBSan tests
     runs-on: macos-14
+    # Measured 2026-09-05 over the last five green runs: 55, 59, 60, 60 and 66 minutes — 61 % to 73 % of
+    # this budget. NOT raised, deliberately: Windows was raised because it had already been cancelled
+    # twice, and raising a ceiling nobody has hit is how you stop noticing that a job is growing. This
+    # one IS growing (every new suite lands here first, and the suite count went 95 -> 97 today), and it
+    # gates `macos` below, so a timeout here does not fail macOS Release — it SKIPS it, which reports as
+    # nothing being wrong. Watch the margin; when it reaches Windows's 80 %+, raise it or split the job.
     timeout-minutes: 90
     steps:
       - name: Checkout (with submodules)
@@ -157,7 +163,9 @@ jobs:
   # compiled it, so MSVC-only breakage (object-file section limits, the <windows.h> min/max macros, CRT
   # mismatches between static libs, wide-string filesystem paths) reached the branch unnoticed. Depends
   # only on `format`, not on the macOS-specific `sanitizers` job, so Windows feedback is not gated behind
-  # a 15-minute macOS run.
+  # it — which matters more than it did when this was written: that job said "a 15-minute macOS run" and
+  # `sanitizers` now takes 55 to 66 minutes (measured 2026-09-05 over the last five green runs). The
+  # decision was right; only its stated price was a year out of date.
   windows:
     name: Windows ${{ matrix.config }}
     needs: [ format ]
