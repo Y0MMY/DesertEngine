@@ -492,8 +492,9 @@ namespace
 
          { "Gravity", kPhysicsSystem },
          // DEAD. Nothing anywhere reads it - see kKnownDeadSettings.
-         { "PauseSimulation", nullptr, nullptr, "no reader anywhere; the editor's own pause is a separate "
-                                                "editor-side state and never consults this field" },
+         { "PauseSimulation", nullptr, nullptr,
+           "no reader anywhere; the editor's own pause is a separate "
+           "editor-side state and never consults this field" },
 
          { "WindDirection", kSceneRenderer },
          { "WindStrength", kSceneRenderer },
@@ -515,12 +516,13 @@ namespace
     // would let an unmarked light in a corner of the scene tint the sky.
     // ------------------------------------------------------------------------------------------------
 
-    constexpr const char* kScene       = "Desert/Desert/Source/Engine/Core/Scene.cpp";
-    constexpr const char* kTerrain     = "Desert/Desert/Source/Engine/ECS/System/TerrainECSSystem.hpp";
-    constexpr const char* kPointLight  = "Desert/Desert/Source/Engine/ECS/System/PointLightSystem.hpp";
-    constexpr const char* kSpotLight   = "Desert/Desert/Source/Engine/ECS/System/SpotLightSystem.hpp";
-    constexpr const char* kLightGizmo  = "Editor/Source/Editor/Panels/ViewportPanel/LightGizmoRenderer.cpp";
-    constexpr const char* kParticles   = "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Particles/ParticleRenderer.cpp";
+    constexpr const char* kScene      = "Desert/Desert/Source/Engine/Core/Scene.cpp";
+    constexpr const char* kTerrain    = "Desert/Desert/Source/Engine/ECS/System/TerrainECSSystem.hpp";
+    constexpr const char* kPointLight = "Desert/Desert/Source/Engine/ECS/System/PointLightSystem.hpp";
+    constexpr const char* kSpotLight  = "Desert/Desert/Source/Engine/ECS/System/SpotLightSystem.hpp";
+    constexpr const char* kLightGizmo = "Editor/Source/Editor/Panels/ViewportPanel/LightGizmoRenderer.cpp";
+    constexpr const char* kParticles =
+         "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Particles/ParticleRenderer.cpp";
     constexpr const char* kAudioSystem = "Desert/Desert/Source/Engine/ECS/System/AudioECSSystem.hpp";
 
     constexpr Row kCameraRows[] = {
@@ -531,13 +533,20 @@ namespace
     };
 
     constexpr Row kTerrainRows[] = {
-         { "Material", kTerrain },   { "Size", kTerrain },
-         { "Resolution", kTerrain },  { "HeightScale", kTerrain },
-         { "NoiseFrequency", kTerrain }, { "Seed", kTerrain },
-         { "GrassMode", kTerrain },  { "RockMode", kTerrain },
-         { "SnowMode", kTerrain },   { "EnableGrass", kTerrain },
-         { "GrassDensity", kTerrain }, { "GrassHeight", kTerrain },
-         { "GrassBladesPerClump", kTerrain }, { "GrassWidth", kTerrain },
+         { "Material", kTerrain },
+         { "Size", kTerrain },
+         { "Resolution", kTerrain },
+         { "HeightScale", kTerrain },
+         { "NoiseFrequency", kTerrain },
+         { "Seed", kTerrain },
+         { "GrassMode", kTerrain },
+         { "RockMode", kTerrain },
+         { "SnowMode", kTerrain },
+         { "EnableGrass", kTerrain },
+         { "GrassDensity", kTerrain },
+         { "GrassHeight", kTerrain },
+         { "GrassBladesPerClump", kTerrain },
+         { "GrassWidth", kTerrain },
          { "GrassBrightness", kTerrain },
     };
 
@@ -555,8 +564,10 @@ namespace
     };
 
     constexpr Row kPointLightRows[] = {
-         { "Color", kPointLight },     { "Intensity", kPointLight },
-         { "Radius", kPointLight },    { "MinRadius", kPointLight },
+         { "Color", kPointLight },
+         { "Intensity", kPointLight },
+         { "Radius", kPointLight },
+         { "MinRadius", kPointLight },
          { "Falloff", kPointLight },
          // An EDITOR-ONLY visualisation flag, deliberately: it draws the radius gizmo and reaches no
          // shader at all, so the gizmo renderer is the honest consumer to name.
@@ -564,9 +575,8 @@ namespace
     };
 
     constexpr Row kSpotLightRows[] = {
-         { "Color", kSpotLight },          { "Intensity", kSpotLight },
-         { "Range", kSpotLight },          { "InnerConeAngle", kSpotLight },
-         { "OuterConeAngle", kSpotLight }, { "Falloff", kSpotLight },
+         { "Color", kSpotLight },          { "Intensity", kSpotLight },      { "Range", kSpotLight },
+         { "InnerConeAngle", kSpotLight }, { "OuterConeAngle", kSpotLight }, { "Falloff", kSpotLight },
          { "ShowCone", kLightGizmo }, // editor-only, same as ShowRadius above
     };
 
@@ -601,22 +611,28 @@ namespace
     };
 
     constexpr Row kColliderRows[] = {
-         { "Shape", kPhysicsSystem },  { "HalfExtents", kPhysicsSystem },
-         { "Radius", kPhysicsSystem }, { "HalfHeight", kPhysicsSystem },
+         { "Shape", kPhysicsSystem },
+         { "HalfExtents", kPhysicsSystem },
+         { "Radius", kPhysicsSystem },
+         { "HalfHeight", kPhysicsSystem },
     };
 
     constexpr Row kRigidBodyRows[] = {
-         { "Type", kPhysicsSystem },     { "Mass", kPhysicsSystem },
-         { "Friction", kPhysicsSystem }, { "Restitution", kPhysicsSystem },
+         { "Type", kPhysicsSystem },
+         { "Mass", kPhysicsSystem },
+         { "Friction", kPhysicsSystem },
+         { "Restitution", kPhysicsSystem },
     };
 
     constexpr Row kCharacterControllerRows[] = {
-         { "Radius", kPhysicsSystem },      { "Height", kPhysicsSystem },
-         { "MaxSlopeDeg", kPhysicsSystem }, { "Gravity", kPhysicsSystem },
+         { "Radius", kPhysicsSystem },
+         { "Height", kPhysicsSystem },
+         { "MaxSlopeDeg", kPhysicsSystem },
+         { "Gravity", kPhysicsSystem },
     };
 
     constexpr Row kAudioRows[] = {
-         { "Clip", kAudioSystem },     { "Volume", kAudioSystem }, { "Loop", kAudioSystem },
+         { "Clip", kAudioSystem },     { "Volume", kAudioSystem },  { "Loop", kAudioSystem },
          { "AutoPlay", kAudioSystem }, { "Spatial", kAudioSystem },
     };
 
@@ -654,7 +670,7 @@ namespace
     };
 
     constexpr Row kLayoutGroupRows[] = {
-         { "Type", kCanvasLayout },     { "Padding", kCanvasLayout }, { "Spacing", kCanvasLayout },
+         { "Type", kCanvasLayout },         { "Padding", kCanvasLayout },  { "Spacing", kCanvasLayout },
          { "StretchCross", kCanvasLayout }, { "CellSize", kCanvasLayout }, { "Columns", kCanvasLayout },
     };
 
@@ -674,13 +690,13 @@ namespace
     };
 
     constexpr Row kButtonRows[] = {
-         { "NormalColor", kCanvasRenderer },   { "HoverColor", kCanvasRenderer },
-         { "PressedColor", kCanvasRenderer },  { "Action", kCanvasRenderer },
+         { "NormalColor", kCanvasRenderer },    { "HoverColor", kCanvasRenderer },
+         { "PressedColor", kCanvasRenderer },   { "Action", kCanvasRenderer },
          { "OnClickMessage", kCanvasRenderer }, { "Sprite", kCanvasRenderer },
-         { "HoverSprite", kCanvasRenderer },   { "PressedSprite", kCanvasRenderer },
-         { "SpriteBorder", kCanvasRenderer },  { "Selected", kCanvasRenderer },
-         { "SelectedColor", kCanvasRenderer }, { "SelectedAccent", kCanvasRenderer },
-         { "Disabled", kCanvasRenderer },      { "DisabledColor", kCanvasRenderer },
+         { "HoverSprite", kCanvasRenderer },    { "PressedSprite", kCanvasRenderer },
+         { "SpriteBorder", kCanvasRenderer },   { "Selected", kCanvasRenderer },
+         { "SelectedColor", kCanvasRenderer },  { "SelectedAccent", kCanvasRenderer },
+         { "Disabled", kCanvasRenderer },       { "DisabledColor", kCanvasRenderer },
     };
 
     constexpr Row kTextRows[] = {
@@ -697,47 +713,57 @@ namespace
     };
 
     constexpr Row kImageRows[] = {
-         { "Sprite", kCanvasRenderer }, { "Tint", kCanvasRenderer },
-         { "Opacity", kCanvasRenderer }, { "SpriteBorder", kCanvasRenderer },
+         { "Sprite", kCanvasRenderer },
+         { "Tint", kCanvasRenderer },
+         { "Opacity", kCanvasRenderer },
+         { "SpriteBorder", kCanvasRenderer },
     };
 
     constexpr Row kIconRows[] = {
-         { "Icon", kCanvasRenderer }, { "Color", kCanvasRenderer }, { "Scale", kCanvasRenderer },
+         { "Icon", kCanvasRenderer },
+         { "Color", kCanvasRenderer },
+         { "Scale", kCanvasRenderer },
     };
 
     constexpr Row kProgressBarRows[] = {
-         { "Value", kCanvasRenderer }, { "Background", kCanvasRenderer },
-         { "Fill", kCanvasRenderer },  { "CornerRadius", kCanvasRenderer },
+         { "Value", kCanvasRenderer },
+         { "Background", kCanvasRenderer },
+         { "Fill", kCanvasRenderer },
+         { "CornerRadius", kCanvasRenderer },
     };
 
     constexpr Row kToggleRows[] = {
-         { "Value", kCanvasRenderer },      { "BoxColor", kCanvasRenderer },
-         { "CheckColor", kCanvasRenderer }, { "CornerRadius", kCanvasRenderer },
+         { "Value", kCanvasRenderer },
+         { "BoxColor", kCanvasRenderer },
+         { "CheckColor", kCanvasRenderer },
+         { "CornerRadius", kCanvasRenderer },
     };
 
     constexpr Row kSliderRows[] = {
-         { "Value", kCanvasRenderer },      { "MinValue", kCanvasRenderer },
-         { "MaxValue", kCanvasRenderer },   { "TrackColor", kCanvasRenderer },
-         { "FillColor", kCanvasRenderer },  { "HandleColor", kCanvasRenderer },
+         { "Value", kCanvasRenderer },      { "MinValue", kCanvasRenderer },  { "MaxValue", kCanvasRenderer },
+         { "TrackColor", kCanvasRenderer }, { "FillColor", kCanvasRenderer }, { "HandleColor", kCanvasRenderer },
     };
 
     constexpr Row kScrollViewRows[] = {
-         { "ScrollY", kCanvasRenderer },       { "ContentHeight", kCanvasRenderer },
-         { "Background", kCanvasRenderer },    { "ShowScrollbar", kCanvasRenderer },
+         { "ScrollY", kCanvasRenderer },        { "ContentHeight", kCanvasRenderer },
+         { "Background", kCanvasRenderer },     { "ShowScrollbar", kCanvasRenderer },
          { "ScrollbarColor", kCanvasRenderer },
     };
 
     constexpr Row kInputFieldRows[] = {
-         { "Text", kCanvasRenderer },             { "Placeholder", kCanvasRenderer },
-         { "FontSize", kCanvasRenderer },         { "TextColor", kCanvasRenderer },
-         { "PlaceholderColor", kCanvasRenderer }, { "Background", kCanvasRenderer },
-         { "FocusColor", kCanvasRenderer },       { "CornerRadius", kCanvasRenderer },
+         { "Text", kCanvasRenderer },
+         { "Placeholder", kCanvasRenderer },
+         { "FontSize", kCanvasRenderer },
+         { "TextColor", kCanvasRenderer },
+         { "PlaceholderColor", kCanvasRenderer },
+         { "Background", kCanvasRenderer },
+         { "FocusColor", kCanvasRenderer },
+         { "CornerRadius", kCanvasRenderer },
     };
 
     constexpr Row kDropdownRows[] = {
-         { "Options", kCanvasRenderer },   { "SelectedIndex", kCanvasRenderer },
-         { "Open", kCanvasRenderer },      { "FontSize", kCanvasRenderer },
-         { "Background", kCanvasRenderer }, { "TextColor", kCanvasRenderer },
+         { "Options", kCanvasRenderer },   { "SelectedIndex", kCanvasRenderer }, { "Open", kCanvasRenderer },
+         { "FontSize", kCanvasRenderer },  { "Background", kCanvasRenderer },    { "TextColor", kCanvasRenderer },
          { "Highlight", kCanvasRenderer }, { "CornerRadius", kCanvasRenderer },
     };
 
@@ -748,7 +774,9 @@ namespace
     };
 
     constexpr Row kBindingRows[] = {
-         { "Key", kCanvasRenderer }, { "Target", kCanvasRenderer }, { "Format", kCanvasRenderer },
+         { "Key", kCanvasRenderer },
+         { "Target", kCanvasRenderer },
+         { "Format", kCanvasRenderer },
     };
 
     constexpr Row kScreenRows[] = {
@@ -756,21 +784,27 @@ namespace
     };
 
     constexpr Row kScreenStackRows[] = {
-         { "InitialScreen", kCanvasRenderer }, { "TransitionTime", kCanvasRenderer },
-         { "SlidePx", kCanvasRenderer },       { "Easing", kCanvasRenderer },
+         { "InitialScreen", kCanvasRenderer },
+         { "TransitionTime", kCanvasRenderer },
+         { "SlidePx", kCanvasRenderer },
+         { "Easing", kCanvasRenderer },
     };
 
     constexpr Row kPointerEventsRows[] = {
-         { "OnEnterMessage", kCanvasRenderer }, { "OnExitMessage", kCanvasRenderer },
-         { "OnDownMessage", kCanvasRenderer },  { "OnUpMessage", kCanvasRenderer },
+         { "OnEnterMessage", kCanvasRenderer },
+         { "OnExitMessage", kCanvasRenderer },
+         { "OnDownMessage", kCanvasRenderer },
+         { "OnUpMessage", kCanvasRenderer },
     };
 
     constexpr Row kDraggableRows[] = {
-         { "Payload", kCanvasRenderer }, { "GhostOpacity", kCanvasRenderer },
+         { "Payload", kCanvasRenderer },
+         { "GhostOpacity", kCanvasRenderer },
     };
 
     constexpr Row kDropTargetRows[] = {
-         { "Accepts", kCanvasRenderer }, { "OnDropMessage", kCanvasRenderer },
+         { "Accepts", kCanvasRenderer },
+         { "OnDropMessage", kCanvasRenderer },
          { "HighlightColor", kCanvasRenderer },
     };
 
@@ -1007,9 +1041,8 @@ TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
             // source, so the two files are one scope for the purpose of finding receivers. Without this
             // every `m_Data.X` in VolumetricCloudRenderer.cpp reads as unanchored, and twenty-two live
             // cloud settings look dead.
-            const std::vector<std::string> receivers =
-                 DeriveReceivers( text + "\n" + StripCommentsAndLiterals( ReadFile( root + SiblingOf( r->Where ) ) ),
-                                  anchors );
+            const std::vector<std::string> receivers = DeriveReceivers(
+                 text + "\n" + StripCommentsAndLiterals( ReadFile( root + SiblingOf( r->Where ) ) ), anchors );
 
             bool read = false;
             for ( const std::string& recv : receivers )

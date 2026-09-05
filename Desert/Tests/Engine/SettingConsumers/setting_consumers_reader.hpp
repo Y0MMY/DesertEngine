@@ -217,7 +217,7 @@ namespace Desert::Tests::ConsumerText
     // `call( receiver.field )` for one of `receivers` - the shape of an assertion that a particular
     // EXPRESSION is present, without pinning the local variable's spelling.
     inline bool CallOnFieldRead( const std::string& s, const std::string& call,
-                                const std::vector<std::string>& receivers, const std::string& field )
+                                 const std::vector<std::string>& receivers, const std::string& field )
     {
         for ( std::size_t at : WordPositions( s, call ) )
         {
@@ -280,10 +280,11 @@ namespace Desert::Tests::ConsumerText
     // (any identifier assigned from any expression mentioning a receiver) was measured to credit 150
     // names in UICanvasRenderer2D.cpp - including the button's `b` - which would have re-opened exactly
     // the hole this file exists to close.
-    inline std::vector<std::string> DeriveReceivers( const std::string& s, const std::vector<std::string>& anchors )
+    inline std::vector<std::string> DeriveReceivers( const std::string&              s,
+                                                     const std::vector<std::string>& anchors )
     {
         std::vector<std::string> out;
-        const auto              add = [&out]( const std::string& name )
+        const auto               add = [&out]( const std::string& name )
         {
             if ( name.empty() )
                 return;
