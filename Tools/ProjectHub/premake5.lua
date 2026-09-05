@@ -1,6 +1,9 @@
 -- ProjectHub — standalone project launcher (Unity Hub-style), fully SEPARATE from the Editor.
 -- A small GLFW + ImGui (OpenGL2 backend) window: lists recent projects, creates new ones, and
--- launches the Editor with `--project <path>`. Links no engine code — only GLFW + ImGui + the OS GL.
+-- launches the Editor with `--project <path>`. Links no engine/renderer code — only GLFW + ImGui +
+-- the OS GL, plus Common (+ ReflectCpp) for the shared project-format serializer
+-- (Common/Project/ProjectFormat.hpp): the .deproj and projects.json the hub writes must be the
+-- bytes the Editor parses, so the two go through one implementation.
 project "ProjectHub"
     kind "ConsoleApp"
     language "C++"
@@ -17,7 +20,9 @@ project "ProjectHub"
     includedirs {
         "%{wks.location}/ThirdParty/ImGui/",
         "%{wks.location}/ThirdParty/GLFW/include/",
-        -- Common: only for the shared build-version identity (Common::Version).
+        -- Common: the shared build-version identity (Common::Version) and the shared project-format
+        -- header (Common/Project/ProjectFormat.hpp). The rfl headers stay OUT of the hub's sources —
+        -- serialization is compiled once, inside Common.
         "%{wks.location}/Desert/Common/Source/",
         "%{wks.location}/ThirdParty/spdlog/include/",
     }
@@ -26,6 +31,7 @@ project "ProjectHub"
         "ImGui",
         "GLFW",
         "Common",
+        "ReflectCpp", -- Common/Project/ProjectFormat.cpp serializes via rfl::json
     }
 
     filter "configurations:Debug"

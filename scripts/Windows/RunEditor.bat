@@ -23,9 +23,20 @@ cd Editor
 
 REM The editor REQUIRES a project (--project <.deproj>); picking projects is the Project Hub's job.
 REM With no extra args, fall back to the built-in sandbox project.
-if "%~1"=="" (
+REM
+REM %* is NOT affected by `shift` in cmd — it always expands to the ORIGINAL argument list, so
+REM forwarding with %* handed the Editor the configuration name ("Debug --project X") as a stray
+REM positional argument. Rebuild the forwarded tail by hand instead.
+set "ARGS="
+:collect
+if "%~1"=="" goto run
+set ARGS=%ARGS% %1
+shift
+goto collect
+:run
+if not defined ARGS (
     "%EDITOR%" --project Desert.deproj
 ) else (
-    "%EDITOR%" %*
+    "%EDITOR%"%ARGS%
 )
 exit /b %ERRORLEVEL%

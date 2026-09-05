@@ -1,6 +1,7 @@
 #pragma once
 
-#include <optional>
+#include <Common/Project/ProjectFormat.hpp>
+
 #include <string>
 #include <vector>
 
@@ -9,13 +10,9 @@ namespace Desert::Project
     // A Desert project = a folder with a .deproj JSON file describing it. ENGINE-level concept: both the
     // Editor and the Runtime player open one (`--project <path>`), which REMAPS every content path
     // (Common::Constants::Path) into the project folder. The Project Hub (Tools/ProjectHub) creates
-    // projects and launches the apps.
-    struct ProjectFile
-    {
-        std::string Name;
-        std::string AssetsRoot   = "Assets";
-        std::string DefaultScene = ""; // relative to the project directory
-    };
+    // projects and launches the apps — which is why the STRUCT lives in Common/Project/ProjectFormat.hpp:
+    // the hub links Common and no engine code, and both sides must share one definition of the format.
+    using ProjectFile = Common::Project::ProjectFile;
 
     class ProjectContext final
     {
