@@ -352,6 +352,44 @@ namespace
          { "ExtinctionFactor", kHeroPayload },
     };
 
+    // ------------------------------------------------------------------------------------------------
+    // The UI canvas. This table is here because of what it caught by NOT being here.
+    //
+    // UICanvasData::Sprite - "Background Sprite" - was reflected, serialized, shown in Details and read by
+    // NOTHING for its whole life. The old ImGui canvas renderer drew it only when handed a SpriteResolver,
+    // and the panel that owned it never passed one; then that renderer was deleted and the field had no
+    // reader at all. It is fixed (UICanvasRenderer2D draws the full-canvas backdrop before the children),
+    // and this table is what keeps a tenth field from joining the component the same way.
+    //
+    // MEASURED WHILE FIXING IT, because it is a bigger finding than the field: this suite covered FOUR of
+    // the engine's THIRTY-SEVEN reflected types, all of them sky, fog or cloud. Twenty-one of the
+    // remaining thirty-three are the UI components. The census could not have caught this setting, and
+    // still cannot catch one in the other twenty UI types - each needs a table of its own, and that is
+    // named as owed work rather than pretended away.
+    //
+    // AND THE ROW SHAPE ALONE WOULD NOT HAVE CAUGHT IT EITHER. A WIRED row asserts the named file mentions
+    // the field's NAME; "Sprite" is also a field of the button, the panel and the image, so
+    // UICanvasRenderer2D.cpp mentioned it on the day the canvas's copy was dead. That is why the canvas's
+    // background gets an assertion of its own below, on the exact expression that reads it.
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr const char* kCanvasRenderer = "Desert/Desert/Source/Engine/UI/UICanvasRenderer2D.cpp";
+
+    constexpr Row kCanvasRows[] = {
+         // The canvas rect and its scale: ResolveCanvas, at the top of the walk.
+         { "ScaleMode", kCanvasRenderer },
+         { "ReferenceWidth", kCanvasRenderer },
+         { "ReferenceHeight", kCanvasRenderer },
+         { "MatchWidthHeight", kCanvasRenderer },
+         // Screen-space vs billboarded, and the distance scale the billboard uses.
+         { "RenderMode", kCanvasRenderer },
+         { "WorldScale", kCanvasRenderer },
+         // The gate, the backdrop and the notch inset.
+         { "Visible", kCanvasRenderer },
+         { "Sprite", kCanvasRenderer },
+         { "SafeArea", kCanvasRenderer },
+    };
+
     // The repository root, found by walking up from wherever the test binary was started - the same
     // approach the font-baker test uses, so neither has to be run from one exact directory.
     std::string RepoRoot()
@@ -465,6 +503,11 @@ TEST( SettingConsumers, EveryHeroCloudFieldNamesItsConsumer )
     CheckTableCoversTypeExactly( Type( "HeroCloudData" ), kHeroCloudRows, std::size( kHeroCloudRows ) );
 }
 
+TEST( SettingConsumers, EveryCanvasFieldNamesItsConsumer )
+{
+    CheckTableCoversTypeExactly( Type( "UICanvasData" ), kCanvasRows, std::size( kCanvasRows ) );
+}
+
 TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
 {
     const std::string root = RepoRoot();
@@ -474,6 +517,34 @@ TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
     CheckWiredRowsReadTheirField( root, kFogRows, std::size( kFogRows ) );
     CheckWiredRowsReadTheirField( root, kCloudRows, std::size( kCloudRows ) );
     CheckWiredRowsReadTheirField( root, kHeroCloudRows, std::size( kHeroCloudRows ) );
+    CheckWiredRowsReadTheirField( root, kCanvasRows, std::size( kCanvasRows ) );
+}
+
+// A field name shared by four components makes a WIRED row vacuous, and this is the case that proves it.
+//
+// "Sprite" belongs to the button, the panel, the image AND the canvas. UICanvasRenderer2D.cpp mentioned the
+// word on every day the canvas's own copy was dead, so the row above would have passed while the setting
+// did nothing - the exact failure this whole suite exists to prevent, one level up.
+//
+// So the canvas background is asserted on the expression that reads it, spelled out in full rather than
+// matched loosely: a regex that still matched after somebody rewrote the read would pass while testing
+// nothing. The three neighbours of this test do the same for the cloud march's ceilings.
+TEST( SettingConsumers, TheCanvasBackgroundIsReadAtTheCanvasAndNotJustNamedSomewhereInTheFile )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() ) << "repository root not found from the test's working directory";
+
+    const std::string source = ReadFile( root + kCanvasRenderer );
+    ASSERT_FALSE( source.empty() ) << kCanvasRenderer << " is missing or empty";
+
+    EXPECT_NE( source.find( "HandleSet( canvasData.Sprite )" ), std::string::npos )
+         << "UICanvasRenderer2D does not test the CANVAS's own background handle. The three other Sprite "
+            "fields in this file (button, panel, image) keep the name alive whether or not the canvas's is "
+            "read, which is how this setting stayed dead through a census that lists it as wired.";
+
+    // And it is drawn, not merely inspected: the resolved image reaches the draw list.
+    EXPECT_NE( source.find( "ResolveSpriteImage( canvasData.Sprite )" ), std::string::npos )
+         << "the canvas background handle is tested but never resolved to an image";
 }
 
 // Slot A shipped WHOLE - format, loader, service, component, collector, packer, seam and cutout in one

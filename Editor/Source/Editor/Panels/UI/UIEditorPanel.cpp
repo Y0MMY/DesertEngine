@@ -53,6 +53,11 @@ namespace Desert::Editor
     UIEditorPanel::UIEditorPanel( const std::shared_ptr<::Desert::Core::Scene>& scene )
          : IPanel( "UI Editor", /*showPanel=*/false ), m_Scene( scene )
     {
+        // An authoring preview is a SECOND view of a scene the viewport is already drawing. The one clock
+        // this walk does not own is the UIAnim playhead, which lives in the component; the viewport's pass
+        // advances it, and this view must not, or every clip runs at twice its authored speed whenever the
+        // panel is open.
+        m_UICanvas.DrivesSceneAnimation = false;
     }
 
     UIEditorPanel::~UIEditorPanel()
@@ -185,7 +190,13 @@ namespace Desert::Editor
         //
         // worldViewProj = nullptr on purpose too: a WorldSpace canvas is billboarded by the camera in the
         // viewport, but there is no camera here — the authoring view shows it flat, at its design size.
-        ::Desert::UI::RenderCanvas2D( reg, m_Render2D.GetDrawList(), viewport, /*worldViewProj=*/nullptr,
+        //
+        // m_UICanvas is THIS panel's own canvas state, and inertness is not enough without it: the walk
+        // hands its hot election over at the end whether or not it had input, so this preview used to clear
+        // the viewport's elected element every single frame it was open — one scene, no second document
+        // needed. See UICanvasContext.hpp.
+        ::Desert::UI::RenderCanvas2D( m_UICanvas, reg, m_Render2D.GetDrawList(), viewport,
+                                      /*worldViewProj=*/nullptr,
                                       /*input=*/nullptr );
         m_Render2D.Flush();
         renderer.EndRenderPass();
