@@ -26,7 +26,7 @@ namespace Desert::Core
     // BUMPING THIS. Raising the number is one edit here plus one migration step in Tools/SceneMigrator, and
     // then a run of the tool over the repository - the run is not optional, because this loader will refuse
     // every scene that has not had it.
-    inline constexpr int kSceneVersion = 10;
+    inline constexpr int kSceneVersion = 11;
 
     // World-unit generation of a .desce file. One world unit is a CENTIMETRE (Common/Core/Units.hpp).
     // Bump this only if the world unit changes again - and then, as above, add the step to SceneMigrator

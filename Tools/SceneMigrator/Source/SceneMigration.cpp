@@ -1295,6 +1295,58 @@ namespace Desert::Migration
         return report;
     }
 
+    SSRUnitsMigrationReport MigrateSSRUnitsV10ToV11( std::optional<rfl::Generic>& settings )
+    {
+        SSRUnitsMigrationReport report;
+
+        if ( !settings.has_value() )
+            return report; // a scene with no Settings block states no SSR distance; nothing to restate
+
+        const auto fields = settings.value().to_object();
+        if ( !fields.has_value() )
+        {
+            LOG_WARN( "[SceneMigration] the Settings block is {0}, not an object - the scene's SSR max "
+                      "distance could not be restated in centimetres and stays as it is",
+                      Describe( settings.value() ) );
+            return report;
+        }
+
+        rfl::Generic::Object kept;
+        for ( const auto& [key, value] : fields.value() )
+        {
+            if ( key != "SSRMaxDistance" )
+            {
+                kept[key] = value;
+                continue;
+            }
+
+            // AsFiniteNumber, not to_double: a hand-edited scene writes "SSRMaxDistance":40, which
+            // reflect-cpp parses as int64 and to_double() then refuses - the same trap the sky and
+            // gravity migrations document.
+            const auto number = AsFiniteNumber( value );
+            if ( !number.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] Settings.SSRMaxDistance is {0}, not a finite number - it is "
+                          "left exactly as it is and the scene still states no usable SSR distance",
+                          Describe( value ) );
+                kept[key] = value;
+                continue;
+            }
+
+            // Every value a v10 file can carry was authored under the metre-scale slider, so inside the
+            // version gate x100 is a restatement of the author's magnitude, not a guess (see the header
+            // on why this step scales where the gravity step recognises).
+            report.Found  = true;
+            report.Scaled = true;
+            report.Before = static_cast<float>( number.value() );
+            report.After  = static_cast<float>( number.value() * 100.0 );
+            kept[key]     = number.value() * 100.0;
+        }
+
+        settings = rfl::Generic( kept );
+        return report;
+    }
+
     SceneMigrationReport MigrateScene( SceneSerialized& scene, const std::filesystem::path& assetsRoot )
     {
         SceneMigrationReport report;
@@ -1383,6 +1435,16 @@ namespace Desert::Migration
         {
             report.UIVisibilityRaised = true;
             report.UIVisibility       = MigrateUIVisibilityV9ToV10( scene.Entities );
+        }
+
+        // Independent of every step above: it touches one key of the scene-wide Settings block and no
+        // entity payload, and no earlier step reads or writes SSRMaxDistance. The gravity step scales the
+        // same block but a different key, so their order is irrelevant; this sits last because it is
+        // newest.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionSSRUnits )
+        {
+            report.SSRUnitsRaised = true;
+            report.SSRUnits       = MigrateSSRUnitsV10ToV11( scene.Settings );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

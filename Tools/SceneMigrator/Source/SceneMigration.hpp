@@ -75,6 +75,10 @@ namespace Desert::Migration
     //                   `Interactable` / `RaycastTarget` booleans on `UILayout` are gone: they said the
     //                   same two things about the element alone, and could say nothing at all about its
     //                   sub-tree
+    //  11             - `SSRMaxDistance` is stated in CENTIMETRES, like every other length in the file.
+    //                   The field was authored under a metre-scale slider (Range 1..200, default 40) but
+    //                   consumed by the shader as world units, so every saved value was a hundred times
+    //                   shorter than its author meant
     inline constexpr int kSceneVersionSky             = 1;
     inline constexpr int kSceneVersionTonemap         = 2;
     inline constexpr int kSceneVersionCloudNoise      = 3;
@@ -85,12 +89,13 @@ namespace Desert::Migration
     inline constexpr int kSceneVersionMaterialPath    = 8;
     inline constexpr int kSceneVersionGravityUnits    = 9;
     inline constexpr int kSceneVersionUIVisibility    = 10;
+    inline constexpr int kSceneVersionSSRUnits        = 11;
 
     // The last step this tool knows and the generation the engine requires are ONE number, and this is
     // where that is checked. If a schema step is ever added here without raising Core::kSceneVersion, the
     // tool would stamp files at a version the loader refuses - every scene in the repository would stop
     // opening at once, and the file that caused it would look correct in isolation.
-    static_assert( kSceneVersionUIVisibility == kSceneVersion,
+    static_assert( kSceneVersionSSRUnits == kSceneVersion,
                    "the last migration step and the engine's required scene version must be the same "
                    "generation - raise Core::kSceneVersion in Engine/Core/Serialize/SceneFormat.hpp" );
 
@@ -524,6 +529,34 @@ namespace Desert::Migration
     // SHELF LIFE: this raises v9 to v10 and nothing else. It is deleted once no v9 file remains.
     UIVisibilityMigrationReport MigrateUIVisibilityV9ToV10( std::vector<Assets::EntityData>& entities );
 
+    // What MigrateSSRUnitsV10ToV11 did to one file.
+    struct SSRUnitsMigrationReport
+    {
+        bool  Found  = false; // the Settings block named an SSRMaxDistance at all
+        bool  Scaled = false; // it was a finite number and was multiplied by 100
+        float Before = 0.0F;
+        float After  = 0.0F;
+    };
+
+    // Restates the scene's SSR ray length in centimetres.
+    //
+    // WHY EVERY VALUE IS SCALED AND NONE IS RECOGNISED. The gravity step above matches Earth's two
+    // spellings exactly because both populations - metre-era and centimetre-era - were in the tree at
+    // once under the SAME version stamp. This field has no second population: a v10 file could only have
+    // been authored under the metre-scale slider (Range 1..200), so inside the version gate the value's
+    // magnitude carries no information and a x100 is a restatement, not a guess. That also means this
+    // function is NOT idempotent on its own - like MigrateMetresToUnits, it relies on the caller gating
+    // it on the scene version, and MigrateScene() below is the only supported way to call it.
+    //
+    // A value that is not a finite number is left exactly as it is and warned about, like every step
+    // above: the field it names is still a length the renderer reads, and guessing at it would be the
+    // silent substitution §1.4 forbids.
+    //
+    // PURE - no GPU, no filesystem, no global state.
+    //
+    // SHELF LIFE: this raises v10 to v11 and nothing else. It is deleted once no v10 file remains.
+    SSRUnitsMigrationReport MigrateSSRUnitsV10ToV11( std::optional<rfl::Generic>& settings );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -552,12 +585,15 @@ namespace Desert::Migration
         // the schema was below kSceneVersionUIVisibility
         bool                        UIVisibilityRaised = false;
         UIVisibilityMigrationReport UIVisibility;
+        // the schema was below kSceneVersionSSRUnits
+        bool                    SSRUnitsRaised = false;
+        SSRUnitsMigrationReport SSRUnits;
 
         bool Changed() const
         {
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
                    CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised ||
-                   GravityUnitsRaised || UIVisibilityRaised;
+                   GravityUnitsRaised || UIVisibilityRaised || SSRUnitsRaised;
         }
     };
 

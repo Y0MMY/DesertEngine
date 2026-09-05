@@ -301,7 +301,10 @@ namespace Desert::Editor
             ImGui::Checkbox( "Enable SSR", &s.EnableSSR );
             ImGui::BeginDisabled( !s.EnableSSR );
             ImGui::SliderFloat( "SSR Intensity", &s.SSRIntensity, 0.0f, 1.0f );
-            ImGui::SliderFloat( "SSR Max Distance", &s.SSRMaxDistance, 1.0f, 200.0f );
+            // World units are centimetres; the bounds mirror the PROPERTY Range on SSRMaxDistance
+            // (1 m .. 200 m). The old 1..200 pair was the metre-era slider consumed as centimetres, which
+            // capped the reflection ray at two metres.
+            ImGui::SliderFloat( "SSR Max Distance", &s.SSRMaxDistance, 100.0f, 20000.0f, "%.0f cm" );
             ImGui::EndDisabled();
             ImGui::EndDisabled();
             ImGui::TextDisabled( "Deferred: static meshes only, directional light (WIP)." );
