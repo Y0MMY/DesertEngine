@@ -1,4 +1,5 @@
 #include "PropertyEditorBuilder.hpp"
+#include "PropertyReset.hpp"
 #include <Editor/Core/DragPayloads.hpp>
 #include <Editor/Core/MultiEdit.hpp>
 
@@ -489,7 +490,11 @@ namespace Desert::Editor
         const bool resettable = defFieldPtr && !field.Meta.ReadOnly && !field.IsContainer &&
                                 field.Type != FieldType::String && field.Type != FieldType::Struct &&
                                 field.Size > 0;
-        if ( resettable && std::memcmp( p, defFieldPtr, field.Size ) != 0 )
+        // Offered when THIS object differs from the default — or when the selection is mixed: with
+        // several objects selected the primary may already sit at the default while the others do not,
+        // and hiding the button there would make the default unreachable for exactly the objects that
+        // need it (the broadcast below only runs off this row's report).
+        if ( resettable && ( mixed || std::memcmp( p, defFieldPtr, field.Size ) != 0 ) )
         {
             const float bw = ImGui::GetFrameHeight();
             // Sits left of the pin when one is showing (rightEdge already stepped past it).
@@ -498,17 +503,21 @@ namespace Desert::Editor
             ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetSelectedColor() );
             if ( ImGui::SmallButton( ICON_MDI_BACKUP_RESTORE ) )
             {
-                std::memcpy( p, defFieldPtr, field.Size );
-                // NOT `changed = true`, and this is the whole defect this variable used to carry: the
-                // widget switch below runs on the SAME frame and every scalar case ASSIGNS
+                // NOT `changed = true`, and this is the defect this flag used to carry: the widget switch
+                // below runs on the SAME frame and every scalar case ASSIGNS
                 // (`changed = ImGui::SliderFloat(...)`), which returns false because the click landed on
-                // this button and not on the widget. The reset's flag was overwritten before the function
-                // could return it — for Bool, Int, UInt, Float, Double, Vec3 and Vec4, i.e. for every type
-                // this button is allowed to appear on. The memcpy still ran, so the number snapped back on
-                // screen and the button LOOKED alive, while the caller was told nothing changed: no undo
-                // entry, no multi-select broadcast, no apply. Reported by the owner as "нажимаю вернуть к
-                // исходному — ничего не происходит", which is exactly right.
-                resetToDefault = true;
+                // this button — so anything set before the switch cannot survive in `changed`. The flag is
+                // OR-ed back in at the single return instead.
+                //
+                // The reset itself is an EDIT and records itself (undo entry + revision bump) — the
+                // widget-commit path below cannot do it, because no widget activates on this click. Before
+                // Д29 the memcpy ran silently: the value snapped back on screen while Ctrl+Z, the unsaved-
+                // changes star, autosave and the save prompt all learned nothing, so the reset evaporated
+                // with the session. `|| mixed`: on a mixed selection the primary may already hold the
+                // default (nothing to record here), but the OTHER objects still need the broadcast, and
+                // the broadcast only runs when this row reports.
+                resetToDefault =
+                     ResetFieldToDefault( object, field, defaultObject, CommandHistory::Get() ) || mixed;
             }
             ImGui::PopStyleColor( 2 );
             if ( ImGui::IsItemHovered() )
@@ -1371,6 +1380,11 @@ namespace Desert::Editor
 
         Utils::ImGuiUtilities::ResetPropertyRows();
 
+        // The default instance travels into the rows here exactly as in Draw(): the reset button is
+        // gated on it, and handing nullptr made the button silently vanish the moment a SECOND object
+        // was selected — same panel, same field, different behaviour by selection count (Д29).
+        const void* defaultObject = type.GetDefaultInstance ? type.GetDefaultInstance() : nullptr;
+
         // Same grouping as Draw(), but each field is marked "(mixed)" when it differs across the
         // selection, and a POD edit on the primary is broadcast to every other object.
         return DrawCategories(
@@ -1380,7 +1394,7 @@ namespace Desert::Editor
                  const bool broadcastable = IsBroadcastable( field );
                  const bool mixed = broadcastable && AnyFieldDiffers( primary, others, field.Offset, field.Size );
 
-                 const bool changed = DrawField( primary, field, assetMgr, uiHelper, nullptr, mixed, &type );
+                 const bool changed = DrawField( primary, field, assetMgr, uiHelper, defaultObject, mixed, &type );
                  if ( changed && broadcastable )
                      BroadcastField( primary, others, field.Offset, field.Size );
                  return changed;
