@@ -21,6 +21,7 @@
 
 #include <Common/Core/Events/WindowEvents.hpp>
 #include <Common/Core/EventRegistry.hpp>
+#include <Common/Core/Units.hpp>
 
 #include "Systems/Scene/Mesh/MeshRenderer.hpp"
 #include "Systems/Scene/Skybox/SkyboxRenderer.hpp"
@@ -394,7 +395,9 @@ namespace Desert::Graphic
         float                   m_GIIntensity   = 2.0f;
         bool                    m_EnableSSR     = false;
         float                   m_SSRIntensity  = 1.0f;
-        float                   m_SSRMaxDistance = 40.0f;
+        // World units (= centimetres). Mirrors SceneSettings::SSRMaxDistance's default; refreshed from
+        // SceneSettings every frame, so this value only matters before the first Update.
+        float m_SSRMaxDistance = Common::Units::Metres( 40.0f );
 
         // The RSM is a LOW-FREQUENCY input to a temporally-accumulated resolve, so it does not need to be
         // re-rendered every frame — refreshing it every 4th frame (and immediately when the sun moves) keeps

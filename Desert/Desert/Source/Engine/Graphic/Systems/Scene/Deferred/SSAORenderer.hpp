@@ -50,6 +50,8 @@ namespace Desert::Graphic::System
         }
 
         // Renders AO from the G-buffer into the SSAO target. viewProj = world->clip; cameraPos.xyz = camera.
+        // radius and bias are WORLD distances (the shader offsets samples in world space), and a world
+        // unit is a centimetre - callers passing literature values must convert through Common::Units.
         void Execute( const std::shared_ptr<Framebuffer>& gbuffer, const glm::mat4& viewProj,
                       const glm::vec4& cameraPos, float radius, float bias, float power, int sampleCount )
         {
