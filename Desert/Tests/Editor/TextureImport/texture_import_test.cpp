@@ -28,15 +28,22 @@
 #include <Editor/Import/TextureImporter.hpp>
 #include <Editor/Import/CookPaths.hpp>
 
+#include <Engine/Assets/TextureAsset.hpp>
+
 #include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/Constants.hpp>
 
 #include <gtest/gtest.h>
 
+#include <spdlog/sinks/ostream_sink.h>
+
+#include <stb_image/stb_image.h>
+
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -145,6 +152,37 @@ namespace
     };
 
     unsigned TextureImport::s_Counter = 0;
+
+    // Captures everything the logger emits for the duration of one call. The default logger is restored
+    // afterwards, because a test that leaves a sink behind silences every test after it. (Same helper as
+    // in TextureSlotRoundTrip, for the same DC §1.4 assertions.)
+    class LogCapture
+    {
+    public:
+        LogCapture() : m_Previous( spdlog::default_logger() )
+        {
+            auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>( m_Stream );
+            spdlog::set_default_logger( std::make_shared<spdlog::logger>( "capture", std::move( sink ) ) );
+            spdlog::set_level( spdlog::level::trace );
+        }
+
+        ~LogCapture()
+        {
+            spdlog::set_default_logger( m_Previous );
+        }
+
+        LogCapture( const LogCapture& )            = delete;
+        LogCapture& operator=( const LogCapture& ) = delete;
+
+        std::string Text() const
+        {
+            return m_Stream.str();
+        }
+
+    private:
+        std::ostringstream              m_Stream;
+        std::shared_ptr<spdlog::logger> m_Previous;
+    };
 } // namespace
 
 // 1 + 3. The handle is the FNV-1a derivation over the canonical source path, and the .tex written for it
@@ -177,7 +215,17 @@ TEST_F( TextureImport, HandleIsDerivedFromTheSourcePathAndIsWrittenIntoTheCooked
     EXPECT_NE( text.find( "\"Width\":4" ), std::string::npos ) << text;
     EXPECT_NE( text.find( "\"Height\":3" ), std::string::npos ) << text;
     EXPECT_NE( text.find( "\"Channels\":4" ), std::string::npos ) << text;
-    EXPECT_NE( text.find( ".dds" ), std::string::npos ) << text;
+
+    // SourcePath is the same root-tagged key the handle is hashed from, with no part of this checkout in
+    // it. The absolute form is the defect that reached the repository: T_Checker.tex shipped carrying a
+    // developer's home directory, and the runtime loads pixels from exactly this string.
+    EXPECT_NE( text.find( "\"SourcePath\":\"assets:Textures/T_Test.bmp\"" ), std::string::npos ) << text;
+    EXPECT_EQ( text.find( m_Root.generic_string() ), std::string::npos )
+         << "the cooked file contains the checkout directory: " << text;
+
+    // The `.dds` CookedPath field is gone: it named a file nothing ever wrote or read.
+    EXPECT_EQ( text.find( ".dds" ), std::string::npos ) << text;
+    EXPECT_EQ( text.find( "CookedPath" ), std::string::npos ) << text;
 }
 
 // 2. Wipe Cooked/ and cook again: the same handle comes back. This is the property that keeps every
@@ -309,6 +357,128 @@ TEST_F( TextureImport, SecondImportOfTheSamePathReturnsTheSameHandle )
     const Common::UUID second = importer.Import( source );
 
     EXPECT_EQ( (uint64_t)first, (uint64_t)second );
+}
+
+// THE ROUND TRIP THE .tex IN THE REPOSITORY HAS TO SURVIVE: cooked in one checkout, committed, and the
+// PIXELS load in another checkout that shares no directory with the first and does not even call its
+// assets folder the same thing. Modelled on TextureSlotRoundTrip, which proved the same relation for the
+// scene's reference TO the .tex; this is the .tex's own reference to its source image.
+TEST_F( TextureImport, ATexCookedInOneCheckoutLoadsItsPixelsInAnother )
+{
+    // --- the machine that cooks and commits -------------------------------------------------------
+    const fs::path source = TexturesDir() / "T_Test.bmp";
+    WriteBmp( source, 4, 3, 0xF0 );
+
+    TextureImporter    importer;
+    const Common::UUID cookedAs = importer.Import( source );
+
+    const std::string texBytes = ReadAll( TextureImporter::CookedMetaPath( source ) );
+
+    // --- the machine that checks it out -----------------------------------------------------------
+    // Only the COMMITTED bytes travel: the .tex verbatim, and the source image at its place in the
+    // project. The assets root is named differently on purpose.
+    const fs::path other = fs::temp_directory_path() / "desert_texture_import_checkout_b";
+    fs::remove_all( other );
+    WriteBmp( other / "Content" / "Textures" / "T_Test.bmp", 4, 3, 0xF0 );
+    const fs::path otherTex = other / "Cooked" / "Textures" / "T_Test.tex";
+    fs::create_directories( otherTex.parent_path() );
+    {
+        std::ofstream out( otherTex, std::ios::binary );
+        out << texBytes;
+    }
+
+    Common::Constants::Path::SetProjectRoot( other, "Content" );
+
+    Desert::Assets::TextureAsset asset( Desert::Assets::AssetPriority::Medium, Common::Filepath( otherTex ) );
+    ASSERT_TRUE( asset.Load().IsSuccess() );
+
+    // The resolved path is THIS checkout's copy of the image — asserted as a value, because in this test
+    // the writing checkout still exists on the same disk, so "some file opened" would also be true of the
+    // old absolute-path behaviour reading the OTHER machine's file.
+    const fs::path resolved = fs::path( asset.GetSourcePath() ).lexically_normal();
+    EXPECT_EQ( resolved, ( other / "Content" / "Textures" / "T_Test.bmp" ).lexically_normal() );
+
+    // And pixels actually come out of it, through the same decoder the engine uses.
+    int      w = 0, h = 0, ch = 0;
+    stbi_uc* pixels = stbi_load( asset.GetSourcePath().c_str(), &w, &h, &ch, 4 );
+    ASSERT_NE( pixels, nullptr ) << "the source path the .tex resolved to does not decode: "
+                                 << asset.GetSourcePath();
+    EXPECT_EQ( w, 4 );
+    EXPECT_EQ( h, 3 );
+    stbi_image_free( pixels );
+
+    // One identity across the trip: the handle the loader reads out of the file is the handle the cook
+    // returned, because both derive from the same project-relative key.
+    EXPECT_EQ( (uint64_t)asset.GetHandle(), (uint64_t)cookedAs );
+
+    fs::remove_all( other );
+    Common::Constants::Path::SetProjectRoot( m_Root, "Resources/Assets" ); // TearDown removes m_Root
+}
+
+// DC §1.4: a source that does not decode produces NO cooked file, a null handle, and a log line with the
+// path and stb's reason. It used to fall through and freeze the uninitialized width/height into a .tex
+// that mtime then declared up to date for ever, in silence.
+TEST_F( TextureImport, AFileThatDoesNotDecodeCooksNothingAndSaysWhy )
+{
+    const fs::path source = TexturesDir() / "T_Bad.bmp";
+    fs::create_directories( source.parent_path() );
+    {
+        std::ofstream out( source, std::ios::binary );
+        out << "this is not an image";
+    }
+
+    TextureImporter importer;
+    std::string     text;
+    Common::UUID    handle = Common::UUID( 1ull );
+    {
+        LogCapture log;
+        handle = importer.Import( source );
+        text   = log.Text();
+    }
+
+    EXPECT_EQ( (uint64_t)handle, 0u );
+    EXPECT_FALSE( fs::exists( TextureImporter::CookedMetaPath( source ) ) )
+         << "a cooked file was written for an image that never decoded";
+    EXPECT_NE( text.find( "T_Bad.bmp" ), std::string::npos )
+         << "the failure did not name the file that failed.\nlogged: " << text;
+
+    // The failure is not cached: fix the image, import again in the same session, and it cooks.
+    WriteBmp( source, 2, 2, 0x77 );
+    const Common::UUID fixed = importer.Import( source );
+    EXPECT_EQ( (uint64_t)fixed, (uint64_t)Common::AssetHandle::FromCookedPath( source ) );
+    EXPECT_TRUE( fs::exists( TextureImporter::CookedMetaPath( source ) ) );
+}
+
+// THE RELATION THE mtime BRANCH USED TO SKIP: the handle Import returns must be the handle the cooked
+// file STORES, because the runtime takes its identity from the file (TextureAsset::Load), not from this
+// return value. A stale .tex newer than its source is exactly what git manufactures — checkout stamps
+// both files with "now" — so under the old branch a wrong stored handle was up to date for ever.
+TEST_F( TextureImport, AStaleCookedFileNewerThanItsSourceIsRestampedToAgreeWithTheReturnedHandle )
+{
+    const fs::path source = TexturesDir() / "T_Test.bmp";
+    WriteBmp( source, 4, 3, 0xF0 );
+
+    const fs::path meta = Desert::Editor::CookPaths::CookedTexture( source, ".tex" );
+    fs::create_directories( meta.parent_path() );
+    {
+        std::ofstream out( meta, std::ios::binary );
+        out << R"({"Handle":12345,"SourcePath":")" << source.generic_string()
+            << R"(","Width":4,"Height":3,"Channels":4,"Format":"RGBA8F"})";
+    }
+    fs::last_write_time( meta, fs::last_write_time( source ) + std::chrono::seconds( 10 ) );
+
+    TextureImporter    importer;
+    const Common::UUID returned = importer.Import( source );
+
+    const std::string text = ReadAll( meta );
+    EXPECT_NE( text.find( "\"Handle\":" + std::to_string( (uint64_t)returned ) ), std::string::npos )
+         << "Import returned one handle and left another one in the file; every reference minted from the "
+            "return value now misses.\nstored: "
+         << text;
+    EXPECT_EQ( text.find( "\"Handle\":12345," ), std::string::npos ) << text;
+
+    // The machine-bound SourcePath went with it: one re-cook migrates a pre-portability .tex in place.
+    EXPECT_NE( text.find( "\"SourcePath\":\"assets:Textures/T_Test.bmp\"" ), std::string::npos ) << text;
 }
 
 int main( int argc, char** argv )

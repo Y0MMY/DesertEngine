@@ -9,7 +9,15 @@
 
 #include <Engine/Assets/Serialization/Texture.hpp>
 
+#include <Common/Core/AssetHandle.hpp>
+#include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
+
+#include <rflcpp/rfl.hpp>
+#include <rflcpp/rfl/json.hpp>
+
+#include <fstream>
+#include <sstream>
 
 #include <stb_image/stb_image.h>
 
@@ -90,6 +98,16 @@ namespace Desert::Editor
         // paragraph above records being done last time.
         const Common::UUID handle = Common::AssetHandle::FromCookedPath( path );
 
+        // The SAME key the handle is hashed from is what SourcePath stores: the source's place inside the
+        // project behind its root's tag (`assets:Textures/T.png`), never the spelling of this machine's
+        // checkout. The paragraph above celebrates curing the HANDLE of machine-dependence; SourcePath used
+        // to be written one line below it as the weakly-canonical ABSOLUTE path — the identical defect, and
+        // the one the runtime actually loads pixels through (TextureFactory reads it back verbatim). A
+        // naive relative(source, ASSETS_PATH) is not an option for the same reason TextureSlot.cpp records:
+        // COOKED_PATH is a SIBLING of the assets root, so some legitimate sources relativize to `../` and
+        // fall back to the absolute spelling anyway. StableKeyForPath owns the root table and the fallback.
+        const std::string sourceKey = Common::AssetHandle::StableKeyForPath( path );
+
         std::error_code ec;
         if ( std::filesystem::exists( meta, ec ) )
         {
@@ -98,27 +116,85 @@ namespace Desert::Editor
             const auto      srcT  = std::filesystem::last_write_time( path, ec2 );
             if ( !ec2 && metaT >= srcT )
             {
-                m_Cache[abs] = handle; // up-to-date — keep the existing cooked metadata as-is
-                return handle;
+                // mtime alone used to decide, and the derived handle was returned without anything checking
+                // that the FILE stores the same one — while the runtime takes its handle from the file
+                // (TextureAsset::Load), not from this return value. Nobody owned the relation
+                // "returned == stored", and git sets mtimes to checkout time, so a committed stale .tex was
+                // "up to date" for ever by construction. The file is now read back and kept only if it
+                // agrees with the derivation on BOTH identity fields; anything else is re-cooked, loudly.
+                std::ifstream     in( meta, std::ios::binary );
+                std::stringstream buffer;
+                buffer << in.rdbuf();
+                const auto stored = rfl::json::read<Assets::Serialization::TextureAssetData>( buffer.str() );
+                if ( stored.has_value() &&
+                     static_cast<uint64_t>( stored->Handle ) == static_cast<uint64_t>( handle ) &&
+                     stored->SourcePath == sourceKey )
+                {
+                    m_Cache[abs] = handle; // up-to-date AND consistent — keep the cooked metadata as-is
+                    return handle;
+                }
+
+                if ( !stored.has_value() )
+                {
+                    LOG_WARN( "[TextureImporter] '{0}' is up to date by mtime but does not parse ({1}); "
+                              "re-cooking it.",
+                              meta.string(), stored.error().what() );
+                }
+                else
+                {
+                    LOG_INFO( "[TextureImporter] Re-stamping '{0}': it stores Handle={1} SourcePath='{2}', "
+                              "the derivation says Handle={3} SourcePath='{4}'.",
+                              meta.string(), static_cast<uint64_t>( stored->Handle ), stored->SourcePath,
+                              static_cast<uint64_t>( handle ), sourceKey );
+                }
             }
+        }
+
+        int      w = 0, h = 0, ch = 0;
+        stbi_uc* pixels = stbi_load( abs.c_str(), &w, &h, &ch, 4 );
+        if ( !pixels )
+        {
+            // No .tex is written and the null handle is returned: a failed decode used to fall through and
+            // freeze the UNINITIALIZED w/h into the cooked file, silently — garbage dimensions in a file
+            // that mtime then declares up to date for ever. The failure is not cached either, so fixing the
+            // image and importing again works without restarting the editor.
+            const char* reason = stbi_failure_reason();
+            LOG_ERROR( "[TextureImporter] stbi_load failed for '{0}' ({1}); no cooked metadata was written "
+                       "and the null handle is returned.",
+                       abs, reason ? reason : "no reason reported" );
+            return Common::AssetHandle::Null();
+        }
+
+        // Only the dimensions are needed here; the pixels are loaded again at draw time from SourcePath.
+        stbi_image_free( pixels );
+
+        // A source outside every content root has no project-relative name to store, so the key IS the
+        // absolute spelling (StableKeyForPath's documented behaviour) and the cooked file is bound to this
+        // machine. Say so once, at cook time, instead of letting the artist discover it on a colleague's
+        // machine as an empty material slot.
+        bool projectRelative = false;
+        for ( const auto& root : Common::AssetHandle::ContentRoots() )
+        {
+            if ( sourceKey.rfind( std::string( root.Tag ) + ':', 0 ) == 0 )
+            {
+                projectRelative = true;
+                break;
+            }
+        }
+        if ( !projectRelative )
+        {
+            LOG_WARN( "[TextureImporter] '{0}' lies outside every content root, so its cooked metadata "
+                      "stores the absolute path and will not resolve on another machine.",
+                      abs );
         }
 
         Assets::Serialization::TextureAssetData data;
         data.Handle     = handle;
-        data.SourcePath = abs;
-
-        int      w, h, ch;
-        stbi_uc* pixels = stbi_load( abs.c_str(), &w, &h, &ch, 4 );
-
-        data.Width    = w;
-        data.Height   = h;
-        data.Channels = 4;
-        data.Format   = Desert::Core::Formats::ImageFormat::RGBA8F;
-
-        auto cooked     = BuildCookedPath( path, ".dds" );
-        data.CookedPath = cooked.string();
-
-        stbi_image_free( pixels );
+        data.SourcePath = sourceKey;
+        data.Width      = static_cast<uint32_t>( w );
+        data.Height     = static_cast<uint32_t>( h );
+        data.Channels   = 4;
+        data.Format     = Desert::Core::Formats::ImageFormat::RGBA8F;
 
         WriteJsonToFile( data, meta );
 
