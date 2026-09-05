@@ -42,8 +42,18 @@ workspace "Desert"
     -- next Windows run answers the question with ONE variable changed: back near 73-84 means the flag
     -- was the cost; still near 93 means the tree grew and the flag was innocent.
     --
-    -- Do not re-add it without that number. If it turns out to be wanted, drop `-m` from the msbuild
-    -- invocation in the same change — the two together are the thing that oversubscribes.
+    -- THE ANSWER CAME BACK, AND IT ACQUITS THE FLAG. Run 33976407162, the revert, one variable moved:
+    -- Windows Debug **93 min WITHOUT it** — indistinguishable from the 92-94 measured WITH it, and
+    -- twenty minutes above the 73-84 baseline that predates both. So the twenty minutes is the TREE
+    -- GROWING, not `/MP`, and the `-m` x `/MP` oversubscription story above is a plausible mechanism
+    -- that this project never actually observed. It is written down because it was the reasoning at the
+    -- time, not because it was confirmed.
+    --
+    -- What that leaves: the flag was never fairly measured in either direction. Re-adding it is now a
+    -- legitimate experiment for task И1 rather than a mistake to avoid — one variable, one run, and if
+    -- it is kept, drop `-m` from the msbuild invocation in the SAME change so the two cannot multiply.
+    -- The ceiling is not the pressure it was: 93 min against `timeout-minutes: 150` is 62%, where the
+    -- job had previously been cancelled twice at 90. The pressure is that the tree keeps growing.
 
     -- EnTT hands each component type a sequential index from ONE global counter, and without this the
     -- counter is a plain `id_type` incremented with `value++` (ENTT_MAYBE_ATOMIC, entt.hpp). Two threads
