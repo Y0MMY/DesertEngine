@@ -1,0 +1,24 @@
+// The per-draw half of THE parameter transport: the model matrix and the row this draw reads out of the
+// shared `Materials[]` storage buffer. Both are push constants because Vulkan snapshots a push at record
+// time — a value written here cannot be clobbered by the next object's setup before the GPU runs the
+// draw, which is the property a per-material uniform block does not have and the reason it was deleted
+// (Engine/Core/Formats/MaterialParamRow.hpp has the measurement and the probe scene).
+//
+// SHARED, not repeated per shader, so the offsets cannot drift: the CPU writes MaterialIndex at 64
+// (Core::Formats::kMaterialIndexPushOffset) for the hand-written mesh PBR shaders and for every shader
+// the DSL generates alike. A stage that only needs Transform still declares the whole block — Vulkan
+// takes ONE push range per pipeline, and two stages disagreeing about its length is a layout mismatch.
+//
+// The guard is real work, not ceremony: DShaderParser injects this include into the fragment stage of any
+// shader with a `Properties Binding(n)` block, and that shader's own vertex stage includes it too.
+#ifndef DESERT_MATERIAL_TRANSPORT_GLSLH
+#define DESERT_MATERIAL_TRANSPORT_GLSLH
+
+PushConstant PushConstants
+{
+    mat4 Transform;     // offset 0
+    uint MaterialIndex; // offset 64 — the row in Materials[]
+}
+m_PushConstants;
+
+#endif

@@ -413,8 +413,15 @@ namespace Desert::Graphic::System
         std::vector<StaticMeshRenderData>  m_StaticQueue;
         std::vector<SkinnedMeshRenderData> m_SkinnedQueue;
 
-        // Generic (data-driven) static meshes + a per-shader DataDrivenMaterial cache (one material reused
-        // across all meshes of that shader; per-object data is the transform push-constant + overrides).
+        // Generic (data-driven) static meshes + a cache of the materials that record them. Per-object data
+        // is the transform push constant plus a ROW of the material's `Materials[]` buffer, named by a
+        // second push constant — so any number of objects share one material and still carry their own
+        // parameter values.
+        //
+        // KEYED BY SHADER **AND TEXTURE SET** (see GenericTextureKey). It was keyed by shader alone, which
+        // was the whole defect while parameters lived in the material too; textures still live there, and a
+        // key that ignored them would batch two entities into one descriptor set and give both the last
+        // one's textures.
         std::vector<GenericMeshRenderData>                              m_GenericQueue;
         std::unordered_map<std::string, std::unique_ptr<DataDrivenMaterial>> m_GenericMaterials;
 

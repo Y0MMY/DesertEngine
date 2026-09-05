@@ -103,26 +103,73 @@ TEST( DShaderParser, ParsesRenderState )
     EXPECT_EQ( s.Blend, true );
 }
 
-TEST( DShaderParser, GeneratesMaterialUBAndSamplersInFragmentOnly )
+// `Properties Binding(n)` generates a ROW of the shared `Materials[]` storage buffer plus the `#define`
+// that names this draw's row — the one parameter transport in the engine. It used to generate a `uniform
+// MaterialUB` block instead, which IS the parameters and therefore held exactly one set of values for
+// every object drawn with the shader; Engine/Core/Formats/MaterialParamRow.hpp records the probe scene
+// where three spheres differing only in a parameter all rendered the first one's colour.
+TEST( DShaderParser, GeneratesAMaterialRowAndSamplersInFragmentOnly )
 {
     auto res = DShaderParser::Parse( kUnlit );
     ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
     const auto& stages = res.GetValue().Stages;
 
     const auto& frag = stages.at( ShaderStage::Fragment );
-    EXPECT_NE( frag.find( "layout( binding = 1 ) uniform MaterialUB" ), std::string::npos );
+    EXPECT_NE( frag.find( "layout( std430, binding = 1 ) readonly buffer Materials" ), std::string::npos );
+    EXPECT_NE( frag.find( "MaterialParams u_Materials[];" ), std::string::npos );
+    EXPECT_NE( frag.find( "#define u_Material u_Materials[m_PushConstants.MaterialIndex]" ), std::string::npos );
+    EXPECT_NE( frag.find( "#include <Common/MaterialTransport.glslh>" ), std::string::npos );
     EXPECT_NE( frag.find( "vec4 Color;" ), std::string::npos );
     EXPECT_NE( frag.find( "float Tiling;" ), std::string::npos );
     EXPECT_NE( frag.find( "layout( binding = 2 ) uniform sampler2D u_AlbedoTex;" ), std::string::npos );
-    EXPECT_NE( frag.find( "u_Material;" ), std::string::npos );
+
+    // THE TRANSPORT THAT LOST. Nothing may generate it again: a shader that has one cannot give two
+    // objects different values, and the census in Tests/Engine/ShippedShaderPasses is the count of
+    // shipped shaders that do.
+    EXPECT_EQ( frag.find( "uniform MaterialUB" ), std::string::npos );
 
     const auto& vert = stages.at( ShaderStage::Vertex );
-    EXPECT_EQ( vert.find( "MaterialUB" ), std::string::npos );
+    EXPECT_EQ( vert.find( "buffer Materials" ), std::string::npos );
     EXPECT_EQ( vert.find( "sampler2D" ), std::string::npos );
 
     // Every stage gets the version header exactly once, as the first line.
     EXPECT_EQ( frag.rfind( "#version 450", 0 ), 0u );
     EXPECT_EQ( vert.rfind( "#version 450", 0 ), 0u );
+}
+
+// THE RELATION the C++ packer stands on: a parameter of any type occupies a whole 16-byte slot, so
+// parameter i is at 16*i and DataDrivenMaterial's row is a plain vec4 array with no layout rules in it.
+// Asserted on the emitted TEXT here (the layout is a property of what is generated); asserted again on
+// the reflected SPIR-V of the shipped shaders in Tests/Engine/ShaderCacheKey, which is the half that
+// would catch a GLSL rule this reasoning got wrong.
+//
+// The padding is what makes it true, so the padding is what is checked: `float` is 4 bytes of a 16-byte
+// slot and needs 3 floats behind it, `vec2` 2, `vec3` 1, `vec4` none. Drop any of them and the next
+// parameter slides, silently, to an offset the CPU is not writing.
+TEST( DShaderParser, EveryMaterialParameterOccupiesAWholeSixteenByteSlot )
+{
+    const char* src = R"(
+Shader "Slots"
+{
+    Properties Binding(3)
+    {
+        Float Scalar ("Scalar") = 1
+        Vec2  Pair   ("Pair")   = (1, 2)
+        Vec3  Triple ("Triple") = (1, 2, 3)
+        Color Quad   ("Quad")   = (1, 2, 3, 4)
+    }
+    Fragment { layout( location = 0 ) out vec4 c; void main() { c = u_Material.Quad; } }
+}
+)";
+    auto        res = DShaderParser::Parse( src );
+    ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
+    const auto& frag = res.GetValue().Stages.at( ShaderStage::Fragment );
+
+    EXPECT_NE( frag.find( "float Scalar;\n    float _slotPad0[3];" ), std::string::npos ) << frag;
+    EXPECT_NE( frag.find( "vec2 Pair;\n    float _slotPad1[2];" ), std::string::npos ) << frag;
+    EXPECT_NE( frag.find( "vec3 Triple;\n    float _slotPad2[1];" ), std::string::npos ) << frag;
+    // A vec4 already fills its slot, so it must be followed by NO padding at all — the struct closes.
+    EXPECT_NE( frag.find( "vec4 Quad;\n};" ), std::string::npos ) << frag;
 }
 
 TEST( DShaderParser, EmitsLineDirectivesForErrorMapping )
@@ -149,7 +196,7 @@ Shader "Manual"
 )";
     auto        res = DShaderParser::Parse( src );
     ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
-    EXPECT_EQ( res.GetValue().Stages.at( ShaderStage::Fragment ).find( "MaterialUB" ), std::string::npos );
+    EXPECT_EQ( res.GetValue().Stages.at( ShaderStage::Fragment ).find( "buffer Materials" ), std::string::npos );
     ASSERT_EQ( res.GetValue().Meta.Params.size(), 1u );
 }
 
@@ -333,7 +380,7 @@ TEST( DShaderParserPasses, PassStagesAreIndependent )
     // Auto-generated resources reach pass fragments too.
     const auto* outline = p.FindPass( "Outline" );
     ASSERT_NE( outline, nullptr );
-    EXPECT_NE( outline->Stages.at( ShaderStage::Fragment ).find( "MaterialUB" ), std::string::npos );
+    EXPECT_NE( outline->Stages.at( ShaderStage::Fragment ).find( "buffer Materials" ), std::string::npos );
 }
 
 TEST( DShaderParserPasses, PassOnlyShaderUsesFirstPassAsDefault )

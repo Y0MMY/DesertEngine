@@ -1,8 +1,15 @@
 #include "Material.hpp"
 #include <Engine/Graphic/Image.hpp>
+#include <Engine/Core/Formats/MaterialParamRow.hpp>
 
 namespace Desert::Graphic
 {
+    void Material::SetMaterialIndex( uint32_t index )
+    {
+        if ( !m_MaterialExecutor )
+            return;
+        m_MaterialExecutor->PushConstant( &index, sizeof( uint32_t ), Core::Formats::kMaterialIndexPushOffset );
+    }
 
     Material::Material( std::string&& debugName, std::string&& shaderName )
          : m_MaterialExecutor(
