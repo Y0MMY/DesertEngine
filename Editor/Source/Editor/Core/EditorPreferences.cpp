@@ -50,7 +50,8 @@ namespace Desert::Editor
 
     void EditorPreferences::Load()
     {
-        // First run: no prefs file yet — keep defaults (ReadFileContent ASSERTS on missing files).
+        // First run: no prefs file yet — keep defaults, and skip the read's "could not read file"
+        // error line, which would be noise for a state that is expected.
         if ( !std::filesystem::exists( PrefsFile() ) )
         {
             ApplyToGizmoState( Get() );
