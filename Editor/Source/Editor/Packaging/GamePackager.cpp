@@ -1,4 +1,5 @@
 #include "GamePackager.hpp"
+#include "PackagedContentTrees.hpp"
 
 #include <Engine/Project/ProjectContext.hpp>
 
@@ -170,21 +171,17 @@ namespace Desert::Editor
         makeExecutable( binDir / binName );
         ++stats.Files;
 
-        // 3) ALL content goes into ONE Content.dpak (UE .pak model): project assets (raw mesh sources
-        // stripped — the runtime reads cooked meshes only), the cooked cache and the engine shaders.
-        // The Runtime mounts the archive at startup; every content read resolves through the VFS.
-        namespace P = Common::Constants::Path;
+        // 3) ALL content goes into ONE Content.dpak (UE .pak model), tree by tree out of the shared
+        // census (PackagedContentTrees.hpp) — assets, cooked cache, shaders, fonts, icons. The Runtime
+        // mounts the archive at startup; every content read resolves through the VFS.
         {
             Common::Utils::PakWriter pak( resDir / "Content.dpak" );
             if ( !pak.IsOpen() )
                 return { false, "Cannot create Content.dpak in " + resDir.string(), "" };
 
-            if ( !AddTreeToPak( pak, P::ASSETS_PATH, "Assets", /*skipRawMeshSources=*/true, stats, error ) )
-                return { false, error, "" };
-            if ( !AddTreeToPak( pak, P::COOKED_PATH, "Cooked", false, stats, error ) )
-                return { false, error, "" };
-            if ( !AddTreeToPak( pak, P::SHADERDIR_PATH, "Resources/Shaders", false, stats, error ) )
-                return { false, error, "" };
+            for ( const PackagedTree& tree : PackagedContentTrees() )
+                if ( !AddTreeToPak( pak, *tree.Tree, tree.PakKey, tree.StripRawMeshSources, stats, error ) )
+                    return { false, error, "" };
 
             if ( pak.Finalize() == 0 )
                 return { false, "Failed to finalize Content.dpak (no entries?)", "" };
@@ -196,11 +193,11 @@ namespace Desert::Editor
             std::string defaultScene = ProjectContext::Current().DefaultScene;
             const std::string oldRoot = ProjectContext::Current().AssetsRoot;
             if ( !defaultScene.empty() && !oldRoot.empty() && defaultScene.rfind( oldRoot, 0 ) == 0 )
-                defaultScene = "Assets" + defaultScene.substr( oldRoot.size() );
+                defaultScene = kPackagedAssetsRoot + defaultScene.substr( oldRoot.size() );
 
             std::ostringstream deproj;
-            deproj << "{\"Name\":\"" << projectName << "\",\"AssetsRoot\":\"Assets\",\"DefaultScene\":\""
-                   << defaultScene << "\"}";
+            deproj << "{\"Name\":\"" << projectName << "\",\"AssetsRoot\":\"" << kPackagedAssetsRoot
+                   << "\",\"DefaultScene\":\"" << defaultScene << "\"}";
             Common::Utils::FileSystem::WriteContentToFile( resDir / ( safeName + ".deproj" ),
                                                            deproj.str() );
         }
@@ -316,7 +313,6 @@ namespace Desert::Editor
         if ( !ProjectContext::HasProject() )
             return { false, "No project is open.", "" };
 
-        namespace P = Common::Constants::Path;
         std::error_code ec;
         const fs::path pakPath = fs::path( ProjectContext::Directory() ) / "Content.dpak";
 
@@ -327,12 +323,10 @@ namespace Desert::Editor
         if ( !pak.IsOpen() )
             return { false, "Cannot create " + pakPath.string(), "" };
 
-        if ( !AddTreeToPak( pak, P::ASSETS_PATH, "Assets", /*skipRawMeshSources=*/true, stats, error ) )
-            return { false, error, "" };
-        if ( !AddTreeToPak( pak, P::COOKED_PATH, "Cooked", false, stats, error ) )
-            return { false, error, "" };
-        if ( !AddTreeToPak( pak, P::SHADERDIR_PATH, "Resources/Shaders", false, stats, error ) )
-            return { false, error, "" };
+        // The same census PackageGame packs — one list, two entry points (see PackagedContentTrees.hpp).
+        for ( const PackagedTree& tree : PackagedContentTrees() )
+            if ( !AddTreeToPak( pak, *tree.Tree, tree.PakKey, tree.StripRawMeshSources, stats, error ) )
+                return { false, error, "" };
 
         if ( pak.Finalize() == 0 )
             return { false, "Failed to finalize " + pakPath.string() + " (no entries?)", "" };

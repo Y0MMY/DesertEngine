@@ -1,5 +1,6 @@
 #include "IconService.hpp"
 
+#include <Engine/Runtime/Services/ServiceScanRoots.hpp>
 #include <Engine/Vector/VectorImage.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
@@ -244,16 +245,13 @@ namespace Desert::Runtime
             return;
         m_Scanned = true;
 
-        // This project's Assets tree (drop an .svg in) plus the shared engine icon set.
-        const std::filesystem::path roots[] = { Common::Constants::Path::ASSETS_PATH,
-                                                Common::Constants::Path::ICONS_PATH };
-        for ( const auto& root : roots )
-        {
-            std::error_code ec;
-            for ( const auto& de : std::filesystem::recursive_directory_iterator( root, ec ) )
-                if ( !ec && de.is_regular_file( ec ) && de.path().extension() == ".svg" )
-                    RegisterIcon( de.path().generic_string() );
-        }
+        // BOTH halves of the content world (loose files + the mounted .dpak), through the one shared
+        // enumeration — same defect and same fix as FontService::EnsurePreloaded: the disk-only scan
+        // registered nothing in a packaged game.
+        for ( const auto* root : IconScanRoots() )
+            for ( const auto& p : Common::Utils::FileSystem::ListFilesRecursive( *root ) )
+                if ( p.extension() == ".svg" )
+                    RegisterIcon( p.generic_string() );
         std::sort( m_Available.begin(), m_Available.end() );
         m_Available.erase( std::unique( m_Available.begin(), m_Available.end() ), m_Available.end() );
     }
