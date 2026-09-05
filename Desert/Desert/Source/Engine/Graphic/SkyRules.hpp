@@ -192,15 +192,22 @@ namespace Desert::Graphic
     inline constexpr uint32_t kSkyEnvCubeFaceSize       = 1024;
     inline constexpr uint32_t kSkyEnvIrradianceFaceSize = 32;
     // The radiance cube is the SHARP environment: the skybox pass draws its mip 0 and the prefilter
-    // convolves it. Its lower mips exist for the prefilter's mipmap-filtered importance sampling
-    // (PrefilterEnvMap computes `mipLevel = 0.5*log2(ws/wt)+1` per sample); with a single level those
-    // textureLod reads all clamp to mip 0 and the wide-roughness convolution integrates 1024 point
-    // samples of a sun-bright texel — fireflies the sample count cannot buy back.
+    // convolves it. A single level is a MEASURED refusal of the full chain (2026-09-06, Starter +
+    // MAT_ProbeClouds, 90-frame shots, zero-byte repeat floor): the prefilter's mipmap-filtered
+    // importance sampling wants lower mips, but with the ONLY live producer being the procedural bake —
+    // which deliberately writes NO sun disc (BakeProceduralSky.shader) and whose panorama tops out at
+    // 2048x1024 — enabling them moved the cloud-probe scene by at most 1/255 while costing 96 -> 128 MiB
+    // of RGBA32F per live SceneRenderer (x6 slots). Revisit if a high-frequency environment producer
+    // appears: an .hdr asset path with real content (the repository currently ships none) or a sun disc
+    // baked into the panorama. (The chain also bakes ~15% faster with mips — cache locality — so speed
+    // is an argument FOR them the day the memory is earned.)
     inline constexpr uint32_t kSkyEnvRadianceMips = 1u;
-    // The prefiltered specular face. 256 is the MEASURED choice, not the historical 1024: the roughness
-    // ramp starts blurring from mip 1 anyway, mirror (mip 0) detail beyond 256 was not resolvable on the
-    // Starter metal ladder, and 1024 costs 16x the convolution work in the heaviest bake stage plus
-    // 128 MiB of RGBA32F per live SceneRenderer against 8 MiB.
+    // The prefiltered specular face. 256 is the MEASURED choice, not the historical 1024 the cost report
+    // used to charge for (same protocol as above): 1024 changed the Starter metal ladder by at most
+    // 13/255 and the cloudy probe scene by at most 3/255 — no resolvable structure, because the
+    // environment producer is low-frequency by design — while costing 128 MiB against 8 MiB per live
+    // SceneRenderer and 1.7x the whole bake chain (~670 ms -> ~1130 ms sky-only, ~725 -> ~1265 ms with
+    // clouds marched in).
     inline constexpr uint32_t kSkyEnvPrefilterFaceSize = 256;
     // Derived from the face, never authored: a hand-typed pair is how 11 mips got requested on a 256
     // face — an invalid vkCreateImage (VUID-...-00958) away from VK_ERROR_DEVICE_LOST.
