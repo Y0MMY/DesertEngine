@@ -5,7 +5,6 @@
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 #include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/Project/ProjectContext.hpp>
-#include <Engine/UI/UICanvasRenderer.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/UICacheTexture.hpp>
 #include <Engine/Graphic/Image.hpp>
