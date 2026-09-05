@@ -30,8 +30,8 @@ namespace Desert::Graphic::System
     {
     public:
         using RenderSystem::RenderSystem;
-        ~ParticleRenderer() override; // defined in the .cpp so the unique_ptr<MaterialParticleBillboard> sees
-                                      // the complete type
+        ~ParticleRenderer() override; // defined in the .cpp so the per-emitter
+                                      // unique_ptr<MaterialParticleBillboard> sees the complete type
 
         Common::BoolResultStr Initialize() override;
         void                  Shutdown() override;
@@ -64,8 +64,16 @@ namespace Desert::Graphic::System
         {
             std::shared_ptr<ShaderResources::StorageBuffer> Particles; // persistent particle state
             std::shared_ptr<ShaderResources::StorageBuffer> Counter;   // per-frame spawn counter
-            int                                             MaxParticles = 0;
-            float                                           SpawnAccum   = 0.0f; // fractional spawn carry
+
+            // The billboard material is PER EMITTER, never shared across them: the particle SSBO is a
+            // descriptor, a descriptor set belongs to the material, and the set is written at most once
+            // per frame before its first bind — with one shared material every emitter after the first
+            // drew the FIRST one's buffer, silently (the rebind was swallowed by the per-frame stamp).
+            // Same arrangement as JumpFloodOutlineRenderer's per-step materials.
+            std::unique_ptr<MaterialParticleBillboard> Material;
+
+            int   MaxParticles = 0;
+            float SpawnAccum   = 0.0f; // fractional spawn carry
         };
 
         // This frame's active emitters (built by PrepareFrame, consumed by SimulateInFrame + the draw pass).
@@ -79,10 +87,9 @@ namespace Desert::Graphic::System
         bool        CreatePipelines();
         EmitterGpu& GetOrCreate( uint32_t entityId, int maxParticles );
 
-        std::shared_ptr<ComputePipeline>           m_SimPipeline;
-        std::shared_ptr<GraphicsPipeline>          m_AddPipeline;   // additive blend
-        std::shared_ptr<GraphicsPipeline>          m_AlphaPipeline; // alpha blend
-        std::unique_ptr<MaterialParticleBillboard> m_Material;
+        std::shared_ptr<ComputePipeline>  m_SimPipeline;
+        std::shared_ptr<GraphicsPipeline> m_AddPipeline;   // additive blend
+        std::shared_ptr<GraphicsPipeline> m_AlphaPipeline; // alpha blend
 
         std::unordered_map<uint32_t, EmitterGpu> m_Emitters;
         std::vector<FrameEmitter>                m_FrameEmitters;

@@ -14,7 +14,14 @@ namespace Desert::Graphic
     // Billboard material for the GPU particle system. Feeds only the shared CameraUB + the particle storage
     // buffer (the "ParticleBillboard" shader reads size/colour that the compute pass baked into each particle,
     // so there are no per-emitter uniforms). The particle buffer is EXTERNALLY owned (compute-written,
-    // persistent) and rebound each draw via StorageBufferProperty::SetBuffer.
+    // persistent) and bound via StorageBufferProperty::SetBuffer.
+    //
+    // ONE INSTANCE PER EMITTER (ParticleRenderer::EmitterGpu), never one shared across emitters. The
+    // buffer is a descriptor, a descriptor set belongs to the material, and the set is written at most
+    // once per frame BEFORE its first bind (VulkanMaterialBackend's per-frame stamp; rewriting a set
+    // bound in a recording command buffer is illegal without update-after-bind). The previous contract
+    // here — "rebound each draw" on a shared material — was unimplementable: the second and later
+    // emitters' rebinds were silently swallowed and every emitter drew the first one's buffer.
     class MaterialParticleBillboard final : public Material
     {
     public:

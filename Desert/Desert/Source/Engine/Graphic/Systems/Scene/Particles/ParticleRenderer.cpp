@@ -42,12 +42,11 @@ namespace Desert::Graphic::System
 
     void ParticleRenderer::Shutdown()
     {
-        m_Emitters.clear();
+        m_Emitters.clear(); // owns the per-emitter materials
         m_FrameEmitters.clear();
         m_SimPipeline.reset();
         m_AddPipeline.reset();
         m_AlphaPipeline.reset();
-        m_Material.reset();
     }
 
     bool ParticleRenderer::CreatePipelines()
@@ -99,7 +98,8 @@ namespace Desert::Graphic::System
         m_AlphaPipeline                         = GraphicsPipeline::Create( alphaSpec );
         m_AlphaPipeline->Invalidate();
 
-        m_Material = std::make_unique<MaterialParticleBillboard>();
+        // No shared billboard material here — each emitter owns one (created in GetOrCreate). The
+        // particle SSBO is a descriptor, and one material can hold exactly one per frame.
 
         return m_SimPipeline && m_AddPipeline && m_AlphaPipeline;
     }
@@ -120,6 +120,12 @@ namespace Desert::Graphic::System
                  "ParticleState", static_cast<uint32_t>( cap ) * kParticleStride, 1, /*persistent=*/true );
             e.Counter    = ShaderResources::StorageBuffer::Create( "ParticleSpawn", sizeof( uint32_t ), 1 );
             e.SpawnAccum = 0.0f;
+
+            // THIS emitter's material, holding THIS emitter's buffer in its descriptors. Created with
+            // the buffer (and kept across a capacity change — Update rebinds the new buffer) so the
+            // draw pass never routes two emitters through one descriptor set; see EmitterGpu::Material.
+            if ( !e.Material )
+                e.Material = std::make_unique<MaterialParticleBillboard>();
 
             // All particles start dead (VelLife.w = 0, Color.a = 0): a zeroed buffer, so compute respawns them.
             std::vector<uint8_t> zeros( static_cast<size_t>( cap ) * kParticleStride, 0 );
@@ -239,12 +245,15 @@ namespace Desert::Graphic::System
                  auto& renderer = Renderer::GetInstance();
                  for ( auto& fe : m_FrameEmitters )
                  {
-                     if ( !fe.Gpu || !fe.Gpu->Particles )
+                     if ( !fe.Gpu || !fe.Gpu->Particles || !fe.Gpu->Material )
                          continue;
-                     m_Material->Update( camera, fe.Gpu->Particles );
+                     // Each emitter updates and draws ITS OWN material: a shared one here routed every
+                     // emitter through one descriptor set, which is written at most once per frame — so
+                     // every emitter after the first drew the first one's buffer.
+                     fe.Gpu->Material->Update( camera, fe.Gpu->Particles );
                      auto* pipeline = fe.Additive ? m_AddPipeline.get() : m_AlphaPipeline.get();
                      renderer.SubmitVertices( pipeline, static_cast<uint32_t>( fe.Gpu->MaxParticles ) * 6u,
-                                              m_Material->GetMaterialExecutor() );
+                                              fe.Gpu->Material->GetMaterialExecutor() );
                  }
              },
              m_AddPipeline->GetSpecification(), targetFb, { RenderPassDependency( RenderPhase::Geometry ) } );
