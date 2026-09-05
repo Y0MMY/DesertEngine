@@ -113,8 +113,9 @@ namespace Desert::Graphic
         inline uint32_t        CalculateMipCount( uint32_t width, uint32_t height, uint32_t depth = 1 )
         {
             // Parenthesize to defeat any windows.h max() macro that may be active in the including TU.
-            uint32_t max_dim = ( std::max )( { width, height, depth } );
-            return max_dim > 0 ? (uint32_t)std::log2( max_dim ) + 1 : 1;
+            // Delegates to the ONE chain-length definition rather than rounding log2 its own way — a
+            // second implementation here is exactly the "two implementations of one quantity" defect.
+            return Core::Formats::MipChainLength( ( std::max )( { width, height, depth } ) );
         }
     } // namespace Utils
 

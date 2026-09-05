@@ -130,9 +130,11 @@ namespace Desert::Graphic
     {
         const ImageBaseSpec imageBaseSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
 
+        // The loaded file is a 4x3 cross unwrap, so the face is a quarter of the image's width. This is
+        // the ONE place that arithmetic belongs — at the boundary where source-pixel layout meets the
+        // cube — not inside every consumer of the spec.
         const Core::Formats::ImageCubeSpecification imageSpec = { .Tag        = imageBaseSpec.Tag,
-                                                                  .Width      = imageBaseSpec.Width,
-                                                                  .Height     = imageBaseSpec.Height,
+                                                                  .FaceSize   = imageBaseSpec.Width / 4u,
                                                                   .Format     = imageBaseSpec.Format,
                                                                   .Mips       = 1u,
                                                                   .Data       = imageBaseSpec.Data,

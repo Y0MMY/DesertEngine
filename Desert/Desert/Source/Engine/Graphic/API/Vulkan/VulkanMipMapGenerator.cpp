@@ -8,9 +8,15 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
+    // Blits each mip from the one above it, leaving every level in TRANSFER_SRC_OPTIMAL. When
+    // @p transitionToShaderRead is true the whole image is then moved to SHADER_READ_ONLY_OPTIMAL with a
+    // RAW barrier the wrapper's layout tracking does not see — callers whose tracked layout would go
+    // stale (the cube path, whose images the compute dispatcher later re-transitions from the TRACKED
+    // layout) pass false and do both boundary transitions through the image's own TransitionLayout.
     static void GenerateMipmapsTO( VkCommandBuffer commandBuffer, VkImage image, VkFormat imageFormat,
                                    uint32_t width, uint32_t height, uint32_t mipLevels,
-                                   uint32_t baseArrayLayer = 0, uint32_t layerCount = 1 )
+                                   uint32_t baseArrayLayer = 0, uint32_t layerCount = 1,
+                                   bool transitionToShaderRead = true )
     {
         for ( uint32_t layer = baseArrayLayer; layer < baseArrayLayer + layerCount; layer++ )
         {
@@ -57,6 +63,9 @@ namespace Desert::Graphic::API::Vulkan
                      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, mipSubRange );
             }
         }
+
+        if ( !transitionToShaderRead )
+            return;
 
         VkImageSubresourceRange finalRange = {};
         finalRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -117,14 +126,19 @@ namespace Desert::Graphic::API::Vulkan
 
         VkCommandBuffer commandBuffer = cmdAlloc.GetValue();
 
-        VkImageSubresourceRange baseMipRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 6 }; 
-
-        Utils::InsertImageMemoryBarrier( commandBuffer, res.Image, 0, VK_ACCESS_TRANSFER_READ_BIT, res.Layout,
-                                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                         VK_PIPELINE_STAGE_TRANSFER_BIT, baseMipRange );
+        // Both boundary transitions go through the image's OWN TransitionLayout so its tracked layout
+        // stays true. The raw-barrier version left the wrapper believing the pre-blit layout while the
+        // image actually sat in SHADER_READ_ONLY — and the compute dispatcher builds its next barrier
+        // and its descriptors from the TRACKED layout, so the lie would surface as a validation error
+        // (or silently wrong barrier) the first time the mipped cube is bound again.
+        vulkanImage->TransitionLayout( commandBuffer, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
 
         GenerateMipmapsTO( commandBuffer, res.Image, res.Format, imageCube->GetWidth(), imageCube->GetHeight(),
-                           imageCube->GetMipmapLevels(), 0, 6 );
+                           imageCube->GetMipmapLevels(), 0, 6, /*transitionToShaderRead=*/false );
+
+        // Every level is TRANSFER_SRC after the blit chain; move the whole image to the sampled layout
+        // the IBL chain reads it in, tracked.
+        vulkanImage->TransitionLayout( commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
 

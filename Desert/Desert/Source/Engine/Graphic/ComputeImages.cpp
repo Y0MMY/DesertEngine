@@ -13,8 +13,6 @@
 
 namespace Desert::Graphic
 {
-    static constexpr uint32_t kWorkGroupSize = 32;
-
     namespace
     {
         std::shared_ptr<Shader> GetComputeShader( const std::string& name )
@@ -157,8 +155,8 @@ namespace Desert::Graphic
                                    std::max( clouds.AerialStartDepthKm, 0.0f ), perSampleSun ? 1.0f : 0.0f };
         pipeline->SetPushConstants( &cloudPush, static_cast<uint32_t>( sizeof( cloudPush ) ) );
 
-        pipeline->Dispatch( std::max( 1u, width / kWorkGroupSize ), std::max( 1u, height / kWorkGroupSize ),
-                            1u );
+        pipeline->Dispatch( std::max( 1u, width / kComputeImagesWorkGroupSize ),
+                            std::max( 1u, height / kComputeImagesWorkGroupSize ), 1u );
 
         return output;
     }
@@ -171,8 +169,7 @@ namespace Desert::Graphic
 
         Core::Formats::ImageCubeSpecification outputInfo = {
              .Tag        = spec.Tag,
-             .Width      = spec.Width,
-             .Height     = spec.Height,
+             .FaceSize   = spec.FaceSize,
              .Format     = Core::Formats::ImageFormat::RGBA32F,
              .Mips       = spec.MipLevels,
              .Properties = Core::Formats::Storage | Core::Formats::Sample,
@@ -189,17 +186,27 @@ namespace Desert::Graphic
         pipeline->SetInput( 0, input );
         pipeline->SetOutput( 1, output.get(), 0 );
 
-        // Dispatched over the FACE, not over the cross. ImageCubeSpecification::Width is the width of the
-        // CROSS — VulkanImageCube derives `faceSize = Width / 4` and creates the image at that extent —
-        // while the shaders normalize by `imageSize(outputTexture)`, which is the face. Dispatching the
-        // cross dimensions therefore launched 4x3 = TWELVE times the invocations the image has texels,
-        // and the surplus ones computed a direction outside the face and threw the result away on an
-        // out-of-range imageStore. For DiffuseIrradiance, where every invocation integrates 65536
-        // samples, that was 4.8 billion samples per bake instead of 400 million — and the bake runs
-        // every time the sun rotates 5 degrees. ProccessForImageCubeMips below already had this right.
-        const uint32_t faceSize = std::max( 1u, spec.Width / 4u );
-        const uint32_t groups   = ( faceSize + kWorkGroupSize - 1u ) / kWorkGroupSize;
+        // One thread per face texel (the shaders normalize by `imageSize(outputTexture)`, which is the
+        // face). When this dispatch was derived from the old cross-layout Width it launched 4x3 = TWELVE
+        // times the invocations the image has texels — for DiffuseIrradiance, where every invocation
+        // integrates 65536 samples, 4.8 billion samples per bake instead of 400 million, paid on every
+        // 5-degree sun rotation. The spec naming the face is what makes that arithmetic impossible now.
+        const uint32_t groups = DispatchGroupCount( spec.FaceSize, kComputeImagesWorkGroupSize );
         pipeline->Dispatch( groups, groups, 6u );
+
+        // The compute writes only mip 0; a caller asking for a chain wants the lower levels FILLED, and a
+        // requested-but-empty mip is undefined memory behind a valid view (Dispatch above is the immediate
+        // fenced path, so the blits ordering after it is safe). Per-face 2D blit mips with clamp
+        // addressing are exactly what UE builds for its cubes; seam correctness across faces is the
+        // hardware's seamless-cubemap filtering, not ours.
+        if ( spec.MipLevels > 1u )
+        {
+            const auto mipResult =
+                 MipMapCubeGenerator::Create( MipGenStrategy::TransferOps )->GenerateMips( output );
+            if ( !mipResult.IsSuccess() )
+                LOG_ERROR( "[ComputeImages] '{}': mip generation failed ({}) — levels 1..{} are undefined.",
+                           spec.Tag, mipResult.GetError(), spec.MipLevels - 1u );
+        }
 
         return output;
     }
@@ -210,21 +217,22 @@ namespace Desert::Graphic
         if ( !shader )
             return nullptr;
 
-        // The cube image's actual FACE size is Width/4 (VulkanImageCube stores a 4x3 cross as 6 faces of
-        // Width/4). The mip chain length is bounded by the FACE, not the cross width — requesting more
-        // (kMipsCount=11 on a 256 face) is an invalid vkCreateImage (VUID-...-00958) and asks the loop
-        // below for mip views that don't exist -> GPU fault / VK_ERROR_DEVICE_LOST. Clamp to the face chain.
-        // (PBR reads the count via textureQueryLevels, so fewer mips is safe — the roughness ramp adapts.)
-        const uint32_t faceSize = std::max( 1u, spec.Width / 4u );
-        uint32_t       maxMips  = 1u;
-        for ( uint32_t d = faceSize; d > 1u; d >>= 1 )
-            ++maxMips;
+        // The mip chain is bounded by the face (more is an invalid vkCreateImage, VUID-...-00958, which
+        // VulkanImageCube now refuses with the numbers). A caller asking for a longer chain than its own
+        // face supports is a size/mips disagreement — say so and proceed with the legal chain rather than
+        // hand the refusal to every scene as a black environment. (PBR reads the count via
+        // textureQueryLevels, so fewer mips is safe — the roughness ramp adapts.)
+        const uint32_t faceSize = spec.FaceSize;
+        const uint32_t maxMips  = Core::Formats::MipChainLength( faceSize );
+        if ( spec.MipLevels > maxMips )
+            LOG_ERROR( "[ComputeImages] '{}': {} mips requested for a {}-texel face which supports at most "
+                       "{} — building the legal chain. The caller's face/mips pair disagrees.",
+                       spec.Tag, spec.MipLevels, faceSize, maxMips );
         const uint32_t mips = std::clamp( spec.MipLevels, 1u, maxMips );
 
         Core::Formats::ImageCubeSpecification outputInfo = {
              .Tag        = spec.Tag,
-             .Width      = spec.Width,
-             .Height     = spec.Height,
+             .FaceSize   = spec.FaceSize,
              .Format     = Core::Formats::ImageFormat::RGBA32F,
              .Mips       = mips,
              .Properties = Core::Formats::Storage | Core::Formats::Sample,
@@ -244,9 +252,8 @@ namespace Desert::Graphic
             const float    roughness = ( mips > 1 ) ? static_cast<float>( mip ) / static_cast<float>( mips - 1 )
                                                      : 0.0f;
             // Dispatch over the FACE size at this mip (the shader writes per-face and clamps to imageSize).
-            // Previously used the cross width (4x the face) -> 16x wasted threads per dispatch.
             const uint32_t mipSize   = std::max( 1u, faceSize >> mip );
-            const uint32_t groups    = ( mipSize + kWorkGroupSize - 1 ) / kWorkGroupSize;
+            const uint32_t groups    = DispatchGroupCount( mipSize, kComputeImagesWorkGroupSize );
 
             pipeline->SetInput( 0, radiance );
             pipeline->SetOutput( 1, output.get(), mip );

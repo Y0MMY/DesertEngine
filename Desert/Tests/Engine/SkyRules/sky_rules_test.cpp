@@ -8,6 +8,8 @@
 #include <Engine/Graphic/AtmosphereEnv.hpp>
 #include <Engine/Graphic/Clouds/CloudEnvironmentBake.hpp>
 #include <Engine/Graphic/ColorTemperature.hpp>
+#include <Engine/Graphic/ComputeImages.hpp>
+#include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
 #include <Engine/Graphic/SkyRules.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
@@ -19,6 +21,7 @@
 #include <array>
 #include <cmath>
 
+using Desert::Core::Formats::MipChainLength;
 using Desert::ECS::SkyAtmosphereData;
 using Desert::ECS::SkyEnvironmentResolution;
 using Desert::Graphic::AdvanceTimeOfDay;
@@ -27,8 +30,15 @@ using Desert::Graphic::CloudEnvironmentFingerprint;
 using Desert::Graphic::CloudGpuPayload;
 using Desert::Graphic::CloudRegionBinding;
 using Desert::Graphic::CloudTypeShape;
+using Desert::Graphic::DispatchGroupCount;
 using Desert::Graphic::EnvironmentPanoramaSize;
 using Desert::Graphic::EvaluateAtmosphere;
+using Desert::Graphic::kComputeImagesWorkGroupSize;
+using Desert::Graphic::kSkyEnvCubeFaceSize;
+using Desert::Graphic::kSkyEnvIrradianceFaceSize;
+using Desert::Graphic::kSkyEnvPrefilterFaceSize;
+using Desert::Graphic::kSkyEnvPrefilterMips;
+using Desert::Graphic::kSkyEnvRadianceMips;
 using Desert::Graphic::kSkyPackedVec4Count;
 using Desert::Graphic::kSkyPayloadBytes;
 using Desert::Graphic::kSkyRebakeMaxDeferSeconds;
@@ -279,12 +289,88 @@ TEST( EnvironmentResolution, PanoramaCostIsTheAdvertisedNumber )
                  1e-6 );
     EXPECT_NEAR( BytesToMiB( SkyEnvironmentBakeCost( SkyEnvironmentResolution::Low ).PanoramaBytes ), 2.0, 1e-6 );
 
-    // The cube chain does NOT scale with the ladder — it is a fixed 1024-texel face either way. That is
+    // The cube chain does NOT scale with the ladder — its faces are fixed constants either way. That is
     // the fact the log line exists to tell you, so it had better be true.
     const auto high = SkyEnvironmentBakeCost( SkyEnvironmentResolution::High );
     const auto low  = SkyEnvironmentBakeCost( SkyEnvironmentResolution::Low );
     EXPECT_EQ( high.CubeBytes, low.CubeBytes );
     EXPECT_EQ( high.TotalBytes, high.PanoramaBytes + high.CubeBytes );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The IBL cube chain: the size that was asked for and the size the face gets are ONE quantity
+// ---------------------------------------------------------------------------------------------------
+//
+// Three shipped defects were the same disagreement: a spec that carried the 4x3-cross extent while the
+// image, the mip chain and the dispatch needed the FACE. A mip count derived from the cross was an
+// invalid vkCreateImage (VUID-VkImageCreateInfo-mipLevels-00958 -> VK_ERROR_DEVICE_LOST); a dispatch
+// derived from the cross launched 12x-16x the texel count; the prefiltered specular was created at a
+// QUARTER of the face the cost report charged for. The spec now names the face, and these tests pin the
+// relations each defect broke.
+
+TEST( SkyEnvironmentCubes, MipChainLengthIsTheVulkanRule )
+{
+    // floor(log2(dim)) + 1, including non-powers-of-two and degenerate extents.
+    EXPECT_EQ( MipChainLength( 1024u ), 11u );
+    EXPECT_EQ( MipChainLength( 256u ), 9u );
+    EXPECT_EQ( MipChainLength( 32u ), 6u );
+    EXPECT_EQ( MipChainLength( 5u ), 3u );
+    EXPECT_EQ( MipChainLength( 1u ), 1u );
+    EXPECT_EQ( MipChainLength( 0u ), 1u );
+
+    // The 2D helper is the same rule through the same function — a parallel log2 rounding its own way
+    // is the "two implementations of one quantity" defect shape.
+    EXPECT_EQ( Desert::Graphic::Utils::CalculateMipCount( 1024u, 512u ), MipChainLength( 1024u ) );
+    EXPECT_EQ( Desert::Graphic::Utils::CalculateMipCount( 96u, 640u ), MipChainLength( 640u ) );
+}
+
+TEST( SkyEnvironmentCubes, EveryRequestedChainFitsItsOwnFace )
+{
+    // The (face, mips) pairs SceneEnvironment actually requests. A pair where mips exceeds the face's
+    // chain is the VUID-00958 defect: VulkanImageCube now refuses it, so a violation here is a bake
+    // that comes back with no environment at all.
+    EXPECT_EQ( kSkyEnvPrefilterMips, MipChainLength( kSkyEnvPrefilterFaceSize ) )
+         << "the prefilter walks the FULL chain of its face; a hand-typed count was how 11 mips got "
+            "requested on a 256 face";
+    EXPECT_LE( kSkyEnvRadianceMips, MipChainLength( kSkyEnvCubeFaceSize ) );
+    EXPECT_GE( kSkyEnvRadianceMips, 1u );
+}
+
+TEST( SkyEnvironmentCubes, DispatchCoversEachFaceInWholeGroupsWithNoSurplusGroup )
+{
+    // The relation the 12x/16x dispatches broke: enough groups to cover every texel of the face, and
+    // not one whole group more. (A cross-derived extent fails the second bound immediately.)
+    const std::array<uint32_t, 5> faces = { kSkyEnvCubeFaceSize, kSkyEnvIrradianceFaceSize,
+                                            kSkyEnvPrefilterFaceSize, 48u, 1u };
+    for ( const uint32_t face : faces )
+    {
+        const uint32_t groups = DispatchGroupCount( face, kComputeImagesWorkGroupSize );
+        EXPECT_GE( groups * kComputeImagesWorkGroupSize, face ) << "face " << face << " not covered";
+        EXPECT_LT( ( groups - 1u ) * kComputeImagesWorkGroupSize, face )
+             << "face " << face << " dispatches a surplus group row";
+    }
+}
+
+TEST( SkyEnvironmentCubes, CostReportChargesForExactlyWhatTheBakeBuilds )
+{
+    // An independent mip walk over the SAME (face, mips) pairs SceneEnvironment passes to the compute
+    // chain. The report once charged 1024/11 (128 MiB) for a prefiltered cube the bake built at 256/9
+    // (8 MiB) — under a comment saying the two cannot disagree.
+    const auto cubeBytes = []( uint32_t face, uint32_t mips )
+    {
+        uint64_t bytes = 0;
+        for ( uint32_t mip = 0; mip < mips; ++mip )
+        {
+            const uint64_t side = std::max( 1u, face >> mip );
+            bytes += 6ull * side * side * 16ull; // six faces, RGBA32F
+        }
+        return bytes;
+    };
+
+    const uint64_t expected = cubeBytes( kSkyEnvCubeFaceSize, kSkyEnvRadianceMips ) +
+                              cubeBytes( kSkyEnvIrradianceFaceSize, 1u ) +
+                              cubeBytes( kSkyEnvPrefilterFaceSize, kSkyEnvPrefilterMips );
+    EXPECT_EQ( SkyEnvironmentBakeCost( SkyEnvironmentResolution::Medium ).CubeBytes, expected );
 }
 
 TEST( PlanetRadius, KilometresBecomeCentimetres )

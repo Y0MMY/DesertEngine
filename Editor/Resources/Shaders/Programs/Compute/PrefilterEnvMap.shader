@@ -120,6 +120,19 @@ Shader "PrefilterEnvMap"
         	vec3 N = getSamplingVector();
         	vec3 Lo = N;
 
+        	// Mip 0 is roughness 0: a perfect mirror is the radiance itself, not a convolution of it.
+        	// The GGX path below cannot express this — at alpha = 0 every sample collapses onto N and
+        	// ndfGGX divides zero by zero, so pdf, ws and mipLevel are all NaN. A single-mip source hid
+        	// that (any LOD clamps to 0); the moment the radiance cube carries a real chain, the NaN LOD
+        	// bakes per-texel speckle into the mirror mip (measured: max 39/255 across the whole probe
+        	// sphere, Starter, 2026-09-06). Copy the radiance instead of integrating it.
+        	if (PARAM_ROUGHNESS <= Epsilon)
+        	{
+        		imageStore(outputTexture, ivec3(gl_GlobalInvocationID),
+        		           vec4(textureLod(inputTexture, N, 0.0).rgb, 1.0));
+        		return;
+        	}
+
         	vec3 S, T;
         	computeBasisVectors(N, S, T);
 
