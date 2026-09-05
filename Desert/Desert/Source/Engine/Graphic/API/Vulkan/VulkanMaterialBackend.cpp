@@ -137,6 +137,7 @@ namespace Desert::Graphic::API::Vulkan
              framesInFlight,
              std::vector<std::vector<uint64_t>>(
                   slots, std::vector<uint64_t>( setCount, std::numeric_limits<uint64_t>::max() ) ) );
+        m_FrameWrites.assign( framesInFlight, std::vector<FrameWriteRecord>( slots ) );
 
         const std::vector<VkDescriptorSetLayout> layouts = RawHandles( m_Layouts );
 
@@ -177,6 +178,48 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
+    void VulkanMaterialBackend::NoteDescriptorWrite( uint32_t frameIndex, uint32_t binding, uint64_t handle )
+    {
+        const uint32_t slot = EngineContext::GetInstance().GetActiveRendererSlot();
+        if ( frameIndex >= m_FrameWrites.size() || slot >= m_FrameWrites[frameIndex].size() )
+            return;
+
+        auto&          record        = m_FrameWrites[frameIndex][slot];
+        const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
+        if ( record.Frame != absoluteFrame )
+        {
+            record.Frame = absoluteFrame;
+            record.Handles.clear();
+        }
+        record.Handles[binding] = handle;
+    }
+
+    void VulkanMaterialBackend::ReportSwallowedRebind( uint32_t frameIndex, uint32_t binding, uint64_t handle,
+                                                       const char* what )
+    {
+        const uint32_t slot = EngineContext::GetInstance().GetActiveRendererSlot();
+        if ( frameIndex >= m_FrameWrites.size() || slot >= m_FrameWrites[frameIndex].size() )
+            return;
+
+        const auto& record = m_FrameWrites[frameIndex][slot];
+        if ( record.Frame != Engine::FrameManager::GetInstance().GetAbsoluteFrameCount() )
+            return; // nothing was written this frame; the stamp came from another mechanism
+        const auto written = record.Handles.find( binding );
+        if ( written == record.Handles.end() || written->second == handle )
+            return; // same resource re-applied inside its dirty window — the guard doing its job
+
+        if ( !m_SwallowReported.insert( binding ).second )
+            return; // already named once for this material; a per-draw defect fires every draw
+
+        LOG_ERROR( "Material on shader '{}': {} at binding {} was rebound to a different resource "
+                   "({:#x} -> {:#x}) after this frame's descriptor flush. The write is SWALLOWED — the "
+                   "set was already bound in the recording command buffer, so every draw of this "
+                   "material keeps the first resource. A resource that varies per draw needs its own "
+                   "material (one per emitter / per texture set, as ParticleRenderer and "
+                   "TerrainRenderer do) or a buffer row named by push constant.",
+                   m_VulkanShader->GetName(), what, binding, written->second, handle );
+    }
+
     void VulkanMaterialBackend::UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes, bool force )
     {
         if ( writes.empty() ) return;
@@ -197,20 +240,29 @@ namespace Desert::Graphic::API::Vulkan
         const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
         const uint32_t setIndex = 0; // Simplified
 
-        // Only update if not already updated this absolute frame
-        if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
-                                        [setIndex] == absoluteFrame )
-            return;
-
         if ( auto bufferInfo = uniformProp->GetUniform() )
         {
             if ( auto vulkanBuffer = sp_cast<ShaderResources::API::Vulkan::VulkanUniformBuffer>( bufferInfo ) )
             {
                 auto& descriptorBufferInfo = vulkanBuffer->GetDescriptorBufferInfo( frameIndex );
-                auto  wds = DescriptorSetBuilder::GetUniformWDS( this, frameIndex, 0,
-                                                                 vulkanBuffer->GetBinding(), 1U, &descriptorBufferInfo );
+                const uint64_t handle               = reinterpret_cast<uint64_t>( descriptorBufferInfo.buffer );
+
+                // At most one descriptor flush per (frame, slot) per frame — the set is bound into the
+                // recording command buffer right after the first draw's Apply, and rewriting it then is
+                // illegal. A LATER Apply carrying a DIFFERENT resource is therefore a swallowed rebind:
+                // kept swallowed, but never silent.
+                if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
+                                                [setIndex] == absoluteFrame )
+                {
+                    ReportSwallowedRebind( frameIndex, vulkanBuffer->GetBinding(), handle, "uniform buffer" );
+                    return;
+                }
+
+                auto wds = DescriptorSetBuilder::GetUniformWDS( this, frameIndex, 0, vulkanBuffer->GetBinding(),
+                                                                1U, &descriptorBufferInfo );
 
                 UpdateDescriptorSets( { wds } );
+                NoteDescriptorWrite( frameIndex, vulkanBuffer->GetBinding(), handle );
                 uniformProp->MarkClean();
             }
         }
@@ -226,19 +278,28 @@ namespace Desert::Graphic::API::Vulkan
         const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
         const uint32_t setIndex = 0; // Simplified
 
-        if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
-                                        [setIndex] == absoluteFrame )
-            return;
-
         if ( auto bufferInfo = storageProp->GetStorageBuffer() )
         {
             if ( auto vulkanBuffer = sp_cast<ShaderResources::API::Vulkan::VulkanStorageBuffer>( bufferInfo ) )
             {
                 auto& descriptorBufferInfo = vulkanBuffer->GetDescriptorBufferInfo( frameIndex );
-                auto  wds = DescriptorSetBuilder::GetStorageWDS( this, frameIndex, 0,
-                                                                 vulkanBuffer->GetBinding(), 1U, &descriptorBufferInfo );
+                const uint64_t handle               = reinterpret_cast<uint64_t>( descriptorBufferInfo.buffer );
+
+                // See ApplyUniformBuffer. This is the exact path that swallowed the particle system:
+                // one shared billboard material, N emitters, and every SetBuffer after the first draw
+                // of the frame landed here and vanished.
+                if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
+                                                [setIndex] == absoluteFrame )
+                {
+                    ReportSwallowedRebind( frameIndex, vulkanBuffer->GetBinding(), handle, "storage buffer" );
+                    return;
+                }
+
+                auto wds = DescriptorSetBuilder::GetStorageWDS( this, frameIndex, 0, vulkanBuffer->GetBinding(),
+                                                                1U, &descriptorBufferInfo );
 
                 UpdateDescriptorSets( { wds } );
+                NoteDescriptorWrite( frameIndex, vulkanBuffer->GetBinding(), handle );
                 storageProp->MarkClean();
             }
         }
@@ -254,19 +315,27 @@ namespace Desert::Graphic::API::Vulkan
         const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
         const uint32_t setIndex = 0; // Simplified
 
-        if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
-                                        [setIndex] == absoluteFrame )
-            return;
-
         if ( auto imageUniform = textureProp->GetUniform() )
         {
             if ( auto vulkanImage = sp_cast<ShaderResources::API::Vulkan::VulkanUniformImage2D>( imageUniform ) )
             {
                 auto descriptorImageInfo = vulkanImage->GetDescriptorImageInfo();
+                const uint64_t handle              = reinterpret_cast<uint64_t>( descriptorImageInfo.imageView );
+
+                // See ApplyUniformBuffer. For textures this is the "second terrain keeps the first
+                // one's splat" path — the reason TerrainRenderer keys one material per texture set.
+                if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
+                                                [setIndex] == absoluteFrame )
+                {
+                    ReportSwallowedRebind( frameIndex, vulkanImage->GetBinding(), handle, "2D texture" );
+                    return;
+                }
+
                 auto wds = DescriptorSetBuilder::GetSampler2DWDS( this, frameIndex, 0,
                                                                   vulkanImage->GetBinding(), 1U, &descriptorImageInfo );
 
                 UpdateDescriptorSets( { wds } );
+                NoteDescriptorWrite( frameIndex, vulkanImage->GetBinding(), handle );
                 textureProp->MarkClean();
             }
         }
@@ -282,19 +351,26 @@ namespace Desert::Graphic::API::Vulkan
         const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
         const uint32_t setIndex = 0; // Simplified
 
-        if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
-                                        [setIndex] == absoluteFrame )
-            return;
-
         if ( auto imageUniform = textureProp->GetUniform() )
         {
             if ( auto vulkanImage = sp_cast<ShaderResources::API::Vulkan::VulkanUniformImageCube>( imageUniform ) )
             {
                 auto descriptorImageInfo = vulkanImage->GetDescriptorImageInfo();
+                const uint64_t handle              = reinterpret_cast<uint64_t>( descriptorImageInfo.imageView );
+
+                // See ApplyUniformBuffer.
+                if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
+                                                [setIndex] == absoluteFrame )
+                {
+                    ReportSwallowedRebind( frameIndex, vulkanImage->GetBinding(), handle, "cube texture" );
+                    return;
+                }
+
                 auto wds = DescriptorSetBuilder::GetSamplerCubeWDS( this, frameIndex, 0,
                                                                     vulkanImage->GetBinding(), 1U, &descriptorImageInfo );
 
                 UpdateDescriptorSets( { wds } );
+                NoteDescriptorWrite( frameIndex, vulkanImage->GetBinding(), handle );
                 textureProp->MarkClean();
             }
         }

@@ -6,6 +6,11 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <cstdint>
+#include <limits>
+#include <unordered_map>
+#include <unordered_set>
+
 namespace Desert::Graphic::API::Vulkan
 {
     class VulkanMaterialBackend final : public MaterialBackend
@@ -80,6 +85,31 @@ namespace Desert::Graphic::API::Vulkan
         // was not active when the frame's updates ran would keep whatever its set held last — the guard
         // would report the work as already done for a set nobody wrote.
         std::vector<std::vector<std::vector<uint64_t>>> m_DescriptorSetsUpdateFrame;
+
+        // What this frame's descriptor writes actually bound, per [frame][slot] and binding — enough to
+        // tell a harmless re-apply of the SAME resource (a property inside its dirty window, applied
+        // again by a second draw) from a REBIND to a different resource that the stamp above is about
+        // to swallow. The swallow is the correct behaviour — rewriting a set bound in a recording
+        // command buffer is illegal without update-after-bind — but it must never be SILENT: it means a
+        // renderer is trying to vary a per-draw resource through a shared material, which reads as
+        // "every object drew with the first one's texture/buffer" and cost this project a defect in
+        // exactly that shape (particles, then terrain). Detected and named in ReportSwallowedRebind.
+        struct FrameWriteRecord
+        {
+            uint64_t                               Frame = std::numeric_limits<uint64_t>::max();
+            std::unordered_map<uint32_t, uint64_t> Handles; // binding -> VkBuffer / VkImageView bits
+        };
+        std::vector<std::vector<FrameWriteRecord>> m_FrameWrites;
+
+        // Bindings whose swallowed rebind was already reported, so a per-draw defect logs once per
+        // material lifetime instead of once per draw per frame.
+        std::unordered_set<uint32_t> m_SwallowReported;
+
+        // Success path: remember what @p binding was just given for the CURRENT (frame, slot).
+        void NoteDescriptorWrite( uint32_t frameIndex, uint32_t binding, uint64_t handle );
+        // Early-return path: if @p binding was written this frame with a DIFFERENT resource, say so
+        // (once), naming the shader and both handles. @p what names the descriptor kind for the log.
+        void ReportSwallowedRebind( uint32_t frameIndex, uint32_t binding, uint64_t handle, const char* what );
 
         VkBuffer      m_DummyBuffer = VK_NULL_HANDLE;
         VmaAllocation m_DummyAllocation = nullptr;

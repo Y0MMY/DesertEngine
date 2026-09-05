@@ -49,9 +49,9 @@ TEST( TerrainTextureKey, TheSplatMapIsPartOfTheIdentity )
 {
     // The splat map is runtime-owned (painted, no asset handle), so it enters by address — two terrains
     // painted separately must not share the descriptors that hold the paint.
-    int a = 0, b = 0;
-    const auto withA    = TerrainTextureKey( WithTextures( {} ), &a );
-    const auto withB    = TerrainTextureKey( WithTextures( {} ), &b );
+    int        a = 0, b = 0;
+    const auto withA     = TerrainTextureKey( WithTextures( {} ), &a );
+    const auto withB     = TerrainTextureKey( WithTextures( {} ), &b );
     const auto unpainted = TerrainTextureKey( WithTextures( {} ), nullptr );
 
     EXPECT_NE( withA, withB );

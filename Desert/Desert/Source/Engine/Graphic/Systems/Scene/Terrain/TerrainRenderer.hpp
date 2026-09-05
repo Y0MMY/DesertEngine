@@ -4,11 +4,13 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Materials/MaterialOverrides.hpp>
+#include <Engine/Graphic/Systems/Scene/Terrain/TerrainBatch.hpp>
 #include <Engine/ShaderResources/StorageBuffer.hpp>
 
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -77,9 +79,18 @@ namespace Desert::Graphic::System
         void EnsureGrassCullBuffers( uint32_t maxInstances );
 
     private:
-        std::shared_ptr<GraphicsPipeline>  m_Pipeline;
-        std::unique_ptr<DataDrivenMaterial> m_Material;
-        std::vector<TerrainDrawData>        m_Queue;
+        std::shared_ptr<GraphicsPipeline> m_Pipeline;
+
+        // ONE MATERIAL PER TEXTURE SET, keyed by TerrainTextureKey (TerrainBatch.hpp), never one for the
+        // whole queue: a sampler is a descriptor, a descriptor set belongs to the material, and the
+        // set is written at most once per frame BEFORE its first bind — so with one shared material the
+        // first terrain's textures were the frame's textures and every later SetTexture was silently
+        // swallowed. Same rule and key shape as MeshRenderer::m_GenericMaterials. Keys persist across
+        // frames (a material owns per-frame GPU state and must outlive the frames in flight); a scene's
+        // terrain texture sets are few and stable, so the map does not grow in practice.
+        std::unordered_map<std::string, std::unique_ptr<DataDrivenMaterial>> m_Materials;
+
+        std::vector<TerrainDrawData> m_Queue;
 
         // GPU-instanced grass (Stage 7): a second pipeline/material drawn in the same Geometry phase.
         std::shared_ptr<GraphicsPipeline>   m_GrassPipeline;

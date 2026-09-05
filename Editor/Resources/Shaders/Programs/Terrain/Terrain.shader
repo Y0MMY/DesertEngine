@@ -26,30 +26,46 @@ Shader "Terrain"
         ZWrite On
     }
 
+    // ── The split every stage below repeats ─────────────────────────────────────────────────────────
+    //
+    // TerrainUB (binding 0) holds ONLY what every terrain of a frame shares: View, Projection and the
+    // sun. Everything per-terrain — Model, sizes, seed, layer modes — is a row of TerrainInstances[]
+    // (binding 8), named per draw by the SAME push-constant index that names the material param row.
+    //
+    // WHY: the terrain pass records every draw of a frame before the GPU executes any of them, and a
+    // material's uniform buffer has one copy per frame — so per-terrain fields kept in TerrainUB were
+    // read as the LAST terrain's values by every terrain (two terrains drew as one). A push constant is
+    // snapshotted at record time, so a row named by it cannot be clobbered by the next draw's setup —
+    // the exact argument that already moved the material params to Materials[] (MaterialParamRow.hpp).
+    // The C++ mirror of TerrainInstance lives in Engine/Graphic/Systems/Scene/Terrain/TerrainBatch.hpp,
+    // and the ShaderCacheKey suite asserts both statements of the layout against the compiled SPIR-V.
+
     Vertex
     {
         // GPU terrain — vertexless patch grid. A draw of (gridDim*gridDim*4) vertices synthesizes a grid of
         // quad patches purely from gl_VertexIndex (no vertex buffer). This stage emits each patch corner as a
         // world-space control point on the y=0 plane; the TES projects + (later) displaces it.
 
-        Uniform(0) TerrainUB
+        #include <Common/MaterialTransport.glslh>
+
+        struct TerrainInstance
         {
-            mat4 View;
-            mat4 Projection;
             mat4 Model;
-            vec4 Params;     // x = world size (m), y = gridDim (patches/side), z = heightScale, w = tessLevel
-            vec4 Params2;    // x = noiseFrequency, y = seed, z/w = spare
+            vec4 Params;     // x = world size, y = gridDim (patches/side), z = heightScale, w = tessLevel
+            vec4 Params2;    // x = noiseFrequency, y = seed, z = grass brightness, w = spare
             vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
-            vec4 SunDir;     // xyz = normalized light direction (scene directional light)
-            vec4 SunColor;   // rgb = color, a = intensity
-        }
-        u;
+        };
+        ReadBuffer(8) TerrainInstances
+        {
+            TerrainInstance u_Terrains[];
+        };
+        #define u_T u_Terrains[m_PushConstants.MaterialIndex]
 
         Out(0) vec2 v_WorldXZ;
 
         void main()
         {
-            int gridDim = int( u.Params.y );
+            int gridDim = int( u_T.Params.y );
             int patchId = gl_VertexIndex / 4;
             int corner  = gl_VertexIndex % 4;
 
@@ -59,7 +75,7 @@ Shader "Terrain"
             // Unit-quad corner offsets in CCW order: (0,0) (1,0) (1,1) (0,1).
             vec2 off = vec2( ( corner == 1 || corner == 2 ) ? 1.0 : 0.0, ( corner == 2 || corner == 3 ) ? 1.0 : 0.0 );
 
-            float size = u.Params.x;
+            float size = u_T.Params.x;
             float cell = size / float( gridDim );
             float x    = ( float( gx ) + off.x ) * cell - size * 0.5;
             float z    = ( float( gz ) + off.y ) * cell - size * 0.5;
@@ -79,29 +95,41 @@ Shader "Terrain"
 
         layout( vertices = 4 ) out;
 
+        // Shared frame data only — the per-terrain half arrives per draw, see the note above Vertex.
         Uniform(0) TerrainUB
         {
             mat4 View;
             mat4 Projection;
-            mat4 Model;
-            vec4 Params;     // x = size, y = gridDim, z = heightScale, w = tessLevel (used here as MAX/near tess)
-            vec4 Params2;    // x = noiseFrequency, y = seed, z/w = spare
-            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
             vec4 SunDir;
             vec4 SunColor;
         }
         u;
+
+        #include <Common/MaterialTransport.glslh>
+
+        struct TerrainInstance
+        {
+            mat4 Model;
+            vec4 Params;     // x = size, y = gridDim, z = heightScale, w = tessLevel (used here as MAX/near tess)
+            vec4 Params2;    // x = noiseFrequency, y = seed, z = grass brightness, w = spare
+            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
+        };
+        ReadBuffer(8) TerrainInstances
+        {
+            TerrainInstance u_Terrains[];
+        };
+        #define u_T u_Terrains[m_PushConstants.MaterialIndex]
 
         In(0) vec2 v_WorldXZ[];
         Out(0) vec2 tc_WorldXZ[];
 
         float TessForDistance( float d )
         {
-            float maxTess = max( u.Params.w, 1.0 );
+            float maxTess = max( u_T.Params.w, 1.0 );
             float minTess = 2.0;
             // Distance band scales with terrain size so LOD adapts to small and large terrains alike.
-            float nearD = max( u.Params.x * 0.05, 2.0 );
-            float farD  = max( u.Params.x * 1.5, nearD + 1.0 );
+            float nearD = max( u_T.Params.x * 0.05, 2.0 );
+            float farD  = max( u_T.Params.x * 1.5, nearD + 1.0 );
             float t     = clamp( ( farD - d ) / ( farD - nearD ), 0.0, 1.0 );
             return mix( minTess, maxTess, t );
         }
@@ -118,7 +146,7 @@ Shader "Terrain"
             {
                 // Control-point corners in view space (camera at origin). gl_in are the flat y=0 control points;
                 // displacement is small vs. the LOD distances, so using the flat positions is fine and stable.
-                mat4 mv = u.View * u.Model;
+                mat4 mv = u.View * u_T.Model;
                 vec3 c0 = ( mv * gl_in[0].gl_Position ).xyz; // (u,v)=(0,0)
                 vec3 c1 = ( mv * gl_in[1].gl_Position ).xyz; // (1,0)
                 vec3 c2 = ( mv * gl_in[2].gl_Position ).xyz; // (1,1)
@@ -156,18 +184,30 @@ Shader "Terrain"
 
         layout( quads, equal_spacing, cw ) in;
 
+        // Shared frame data only — the per-terrain half arrives per draw, see the note above Vertex.
         Uniform(0) TerrainUB
         {
             mat4 View;
             mat4 Projection;
-            mat4 Model;
-            vec4 Params;     // x = size, y = gridDim, z = heightScale, w = tessLevel
-            vec4 Params2;    // x = noiseFrequency, y = seed, z/w = spare
-            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
             vec4 SunDir;
             vec4 SunColor;
         }
         u;
+
+        #include <Common/MaterialTransport.glslh>
+
+        struct TerrainInstance
+        {
+            mat4 Model;
+            vec4 Params;     // x = size, y = gridDim, z = heightScale, w = tessLevel
+            vec4 Params2;    // x = noiseFrequency, y = seed, z = grass brightness, w = spare
+            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
+        };
+        ReadBuffer(8) TerrainInstances
+        {
+            TerrainInstance u_Terrains[];
+        };
+        #define u_T u_Terrains[m_PushConstants.MaterialIndex]
 
         In(0) vec2 tc_WorldXZ[];
 
@@ -215,10 +255,10 @@ Shader "Terrain"
         // Returns terrain height (world units) at a world-space XZ position.
         float TerrainHeight( vec2 worldXZ )
         {
-            float freq = max( u.Params2.x, 0.0001 );
-            vec2  seed = vec2( u.Params2.y * 0.137, u.Params2.y * 0.911 );
+            float freq = max( u_T.Params2.x, 0.0001 );
+            vec2  seed = vec2( u_T.Params2.y * 0.137, u_T.Params2.y * 0.911 );
             float h    = FBm( worldXZ * freq + seed );
-            return ( h - 0.5 ) * 2.0 * u.Params.z; // center around 0, scale by heightScale
+            return ( h - 0.5 ) * 2.0 * u_T.Params.z; // center around 0, scale by heightScale
         }
 
         void main()
@@ -237,17 +277,17 @@ Shader "Terrain"
             pos.y = TerrainHeight( pos.xz );
 
             // Analytic normal via central differences on the height field. Epsilon scales with the grid cell.
-            float eps = max( u.Params.x / max( u.Params.y, 1.0 ), 0.01 ) * 0.5;
+            float eps = max( u_T.Params.x / max( u_T.Params.y, 1.0 ), 0.01 ) * 0.5;
             float hL  = TerrainHeight( pos.xz - vec2( eps, 0.0 ) );
             float hR  = TerrainHeight( pos.xz + vec2( eps, 0.0 ) );
             float hD  = TerrainHeight( pos.xz - vec2( 0.0, eps ) );
             float hU  = TerrainHeight( pos.xz + vec2( 0.0, eps ) );
             vec3  n   = normalize( vec3( hL - hR, 2.0 * eps, hD - hU ) );
 
-            vec4 worldPos = u.Model * vec4( pos.xyz, 1.0 ); // apply the terrain entity's transform
+            vec4 worldPos = u_T.Model * vec4( pos.xyz, 1.0 ); // apply the terrain entity's transform
             v_WorldPos    = worldPos.xyz;
-            v_Normal      = normalize( mat3( u.Model ) * n );
-            v_Height01    = clamp( pos.y / max( u.Params.z, 0.0001 ) * 0.5 + 0.5, 0.0, 1.0 );
+            v_Normal      = normalize( mat3( u_T.Model ) * n );
+            v_Height01    = clamp( pos.y / max( u_T.Params.z, 0.0001 ) * 0.5 + 0.5, 0.0, 1.0 );
 
             gl_Position = u.Projection * u.View * worldPos;
         }
@@ -267,19 +307,32 @@ Shader "Terrain"
 
         Out(0) vec4 o_Color;
 
-        // Engine-filled terrain UB (binding 0) — used here for the per-layer modes.
+        // Engine-filled terrain UB (binding 0) — shared frame data only; the per-terrain half (Model,
+        // Params, layer modes) is this draw's TerrainInstances row, see the note above Vertex.
         Uniform(0) TerrainUB
         {
             mat4 View;
             mat4 Projection;
-            mat4 Model;
-            vec4 Params;
-            vec4 Params2;
-            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
             vec4 SunDir;     // xyz = normalized light direction (scene directional light)
             vec4 SunColor;   // rgb = color, a = intensity
         }
         u;
+
+        struct TerrainInstance
+        {
+            mat4 Model;
+            vec4 Params;     // x = size, y = gridDim, z = heightScale, w = tessLevel
+            vec4 Params2;    // x = noiseFrequency, y = seed, z = grass brightness, w = spare
+            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
+        };
+        ReadBuffer(8) TerrainInstances
+        {
+            TerrainInstance u_Terrains[];
+        };
+        // m_PushConstants is already declared here: the generated Materials[] transport injects
+        // MaterialTransport.glslh at the top of the fragment stage, and its include guard makes this
+        // stage's declaration one with the other stages' explicit includes.
+        #define u_T u_Terrains[m_PushConstants.MaterialIndex]
 
         // Data-driven material params (binding 1) are generated from the Properties block above and read
         // through `u_Material`; nothing is declared here.
@@ -350,7 +403,7 @@ Shader "Terrain"
             // 0.031/0.027 are frequencies per world unit — a ~2 m patch, which is what the metre era's
             // 3.1/2.7 meant. Left alone they were a 2 cm chequer under the blades: shimmer, not variation.
             float groundVar  = sin( v_WorldPos.x * 0.031 ) * sin( v_WorldPos.z * 0.027 ) * 0.5 + 0.5;
-            float grassBright = max( u.Params2.z, 0.05 );
+            float grassBright = max( u_T.Params2.z, 0.05 );
             vec3  grassCol   = vec3( 0.052, 0.10, 0.034 ) * ( 0.75 + 0.5 * groundVar ) * grassBright;
             vec3  rockCol   = vec3( 0.40, 0.37, 0.33 ); // bare rock (default base)
             vec3  snowCol   = vec3( 0.86, 0.88, 0.92 );
@@ -362,7 +415,7 @@ Shader "Terrain"
 
             // Splat-map weights. UV is terrain-local (subtract the Model translation) so painting matches
             // regardless of where the terrain entity sits in the world.
-            vec2  splatUV  = ( v_WorldPos.xz - u.Model[3].xz ) / max( u.Params.x, 0.001 ) + 0.5;
+            vec2  splatUV  = ( v_WorldPos.xz - u_T.Model[3].xz ) / max( u_T.Params.x, 0.001 ) + 0.5;
             vec4  splat    = texture( u_SplatMap, splatUV );
             float rockAuto  = smoothstep( 0.25, 0.55, slope );
             float grassAuto = 1.0 - rockAuto; // grass only on flat-ish ground
@@ -371,8 +424,8 @@ Shader "Terrain"
             // ROCK is the default ground. Where grass is enabled (LayerModes.w) on flat ground, the ground turns
             // GREEN — a continuous lawn base that fills the gaps between the instanced blades. Full field (not
             // splat-gated) so the user gets a lawn without painting; the splat only trims it (floor 0.4).
-            float wGrass = u.LayerModes.w * grassAuto * max( splat.r, 0.4 );
-            float wSnow  = LayerWeight( u.LayerModes.z, snowAuto, splat.b );
+            float wGrass = u_T.LayerModes.w * grassAuto * max( splat.r, 0.4 );
+            float wSnow  = LayerWeight( u_T.LayerModes.z, snowAuto, splat.b );
 
             vec3 albedo = rockT;
             albedo      = mix( albedo, grassT, clamp( wGrass, 0.0, 1.0 ) );
