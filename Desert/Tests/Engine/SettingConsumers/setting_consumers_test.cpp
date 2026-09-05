@@ -1055,27 +1055,34 @@ TEST( SettingConsumers, TheKnownDeadSettingsAreExactlyThese )
 }
 
 // A field name shared by four components makes a name-only row vacuous, and this is the case that proved
-// it. The row shape above is the general fix; this stays as the specific one, because the canvas's
-// backdrop is the exact setting that was dead, and an assertion on the expression that revives it is the
-// cheapest possible regression test for that particular history.
+// it. The row shape above is the general fix; this stays as the specific one, because it asserts
+// something the general shape deliberately does not: that the handle is not merely READ but RESOLVED TO
+// AN IMAGE. A canvas that tests its background handle and never draws it renders exactly like a canvas
+// with no background, which is the state this setting was actually in.
 //
-// Spelled out in full rather than matched loosely: a regex that still matched after somebody rewrote the
-// read would pass while testing nothing.
-TEST( SettingConsumers, TheCanvasBackgroundIsReadAtTheCanvasAndNotJustNamedSomewhereInTheFile )
+// IT DOES NOT PIN THE LOCAL'S NAME. It used to spell `HandleSet( canvasData.Sprite )` verbatim, which
+// made an honest rename of a local variable red - a failure that says nothing about whether the setting
+// is alive. The receiver is now derived from the file exactly as the census's rows are.
+TEST( SettingConsumers, TheCanvasBackgroundIsResolvedToAnImageAndNotJustNamedSomewhereInTheFile )
 {
+    using namespace Desert::Tests::ConsumerText;
+
     const std::string root = RepoRoot();
     ASSERT_FALSE( root.empty() ) << "repository root not found from the test's working directory";
 
-    const std::string source = ReadFile( root + kCanvasRenderer );
+    const std::string source = StripCommentsAndLiterals( ReadFile( root + kCanvasRenderer ) );
     ASSERT_FALSE( source.empty() ) << kCanvasRenderer << " is missing or empty";
 
-    EXPECT_NE( source.find( "HandleSet( canvasData.Sprite )" ), std::string::npos )
+    const std::vector<std::string> canvas = DeriveReceivers( source, { "UICanvasData", "UICanvasComponent" } );
+    ASSERT_FALSE( canvas.empty() ) << kCanvasRenderer << " no longer binds a UICanvasData at all";
+
+    EXPECT_TRUE( CallOnFieldRead( source, "HandleSet", canvas, "Sprite" ) )
          << "UICanvasRenderer2D does not test the CANVAS's own background handle. The three other Sprite "
             "fields in this file (button, panel, image) keep the name alive whether or not the canvas's is "
-            "read, which is how this setting stayed dead through a census that lists it as wired.";
+            "read, which is how this setting stayed dead through a census that listed it as wired.";
 
     // And it is drawn, not merely inspected: the resolved image reaches the draw list.
-    EXPECT_NE( source.find( "ResolveSpriteImage( canvasData.Sprite )" ), std::string::npos )
+    EXPECT_TRUE( CallOnFieldRead( source, "ResolveSpriteImage", canvas, "Sprite" ) )
          << "the canvas background handle is tested but never resolved to an image";
 }
 

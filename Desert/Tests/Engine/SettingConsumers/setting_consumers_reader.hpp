@@ -214,6 +214,37 @@ namespace Desert::Tests::ConsumerText
         return false;
     }
 
+    // `call( receiver.field )` for one of `receivers` - the shape of an assertion that a particular
+    // EXPRESSION is present, without pinning the local variable's spelling.
+    inline bool CallOnFieldRead( const std::string& s, const std::string& call,
+                                const std::vector<std::string>& receivers, const std::string& field )
+    {
+        for ( std::size_t at : WordPositions( s, call ) )
+        {
+            std::size_t i = SkipSpace( s, at + call.size() );
+            if ( i >= s.size() || s[i] != '(' )
+                continue;
+            i = SkipSpace( s, i + 1 );
+
+            const std::string recv = IdentAt( s, i );
+            if ( recv.empty() )
+                continue;
+            bool known = false;
+            for ( const std::string& r : receivers )
+                known = known || r == recv;
+            if ( !known )
+                continue;
+
+            if ( !MemberReadAt( s, i + recv.size(), field ) )
+                continue;
+
+            const std::size_t after = SkipSpace( s, s.find( field, i ) + field.size() );
+            if ( after < s.size() && s[after] == ')' )
+                return true;
+        }
+        return false;
+    }
+
     // An anchor may be followed by a template close and a call before the member access, which is how
     // `reg.get<ECS::UILayoutComponent>( e ).Data.HitTest` and `scene->GetSettings().ShowGrid` read.
     inline bool AnchorReadsField( const std::string& s, const std::string& anchor, const std::string& field )
