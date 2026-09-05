@@ -380,16 +380,20 @@ namespace Desert::UI
         }
 
         // What an ancestor's UIHitTest allows this sub-tree to do — the half of the hit-test axis that is
-        // INHERITED. Both booleans used to be read off the element alone and the walk descended regardless,
+        // INHERITED. Both old booleans were read off the element alone and the walk descended regardless,
         // which is why "this element and everything under it is invisible to the pointer" and "grey out
         // this whole panel" could not be said at all: the flag had to be cleared by hand on every
-        // descendant. Passed down the recursion, never up, and narrowed at each level — a sub-tree can
-        // only lose permissions, never regain them, so no child can re-enable itself inside a disabled
-        // dialog.
+        // descendant. Passed down the recursion, never up, and only ever narrowed — a sub-tree can lose
+        // permission and never regain it, so no child can re-enable itself inside a disabled dialog.
+        //
+        // IT IS ONE BOOLEAN AND NOT TWO, and that was measured rather than assumed. The obvious shape is a
+        // pair — may this sub-tree be ELECTED, may it RESPOND — but the second is unreachable: responding
+        // is gated on `e == ctx.Hot`, and an element that may not be elected can never be the hot one. A
+        // mutation that removed the inherited "respond" entirely left every test green, which is what a
+        // field with no observable effect looks like (DC 1.3), so it is not here.
         struct HitScope
         {
-            bool Elect   = true; // may anything in here become the hot element (i.e. stop the pointer)?
-            bool Respond = true; // may anything in here react to being hot (hover, press, drag, scroll)?
+            bool Elect = true; // may anything in here become the hot element (i.e. stop the pointer)?
         };
 
         // An open dropdown whose option list is drawn AFTER the whole tree, so it overlays everything.
@@ -1137,16 +1141,17 @@ namespace Desert::UI
 
             // Blocking elects itself precisely so the pointer STOPS here: it is the greyed-out form and the
             // modal dialog, which must swallow the click rather than let it reach what is behind them.
-            const bool raycastTarget = scope.Elect && ( hitTest == ECS::UIHitTest::All ||
-                                                        hitTest == ECS::UIHitTest::Blocking );
-            // ChildrenOnly can never be hot (it does not elect itself), so its own "responds" is moot; it
-            // is written out in full rather than folded away because the table then matches UIHitTest.
-            const bool interactable = scope.Respond && ( hitTest == ECS::UIHitTest::All ||
-                                                         hitTest == ECS::UIHitTest::ChildrenOnly );
+            const bool raycastTarget =
+                 scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::Blocking );
+            // Only this element's own value: an inherited term would be unreachable, because responding
+            // needs `e == ctx.Hot` and the line above is already what decides whether it can be Hot.
+            const bool interactable =
+                 hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly;
 
-            const HitScope childScope{
-                 scope.Elect && ( hitTest == ECS::UIHitTest::All || hitTest == ECS::UIHitTest::ChildrenOnly ),
-                 scope.Respond && hitTest != ECS::UIHitTest::Blocking };
+            // Blocking and None both close the sub-tree to the pointer; they differ only in whether the
+            // element itself stops it, which is the line above.
+            const HitScope childScope{ scope.Elect && ( hitTest == ECS::UIHitTest::All ||
+                                                        hitTest == ECS::UIHitTest::ChildrenOnly ) };
 
             if ( forcedRect || hasLayout )
             {
