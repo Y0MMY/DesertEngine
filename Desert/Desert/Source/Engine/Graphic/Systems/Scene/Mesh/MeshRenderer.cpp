@@ -287,24 +287,14 @@ namespace Desert::Graphic::System
                                                 { Graphic::ShaderDataType::Float3, "a_Bitangent" },
                                                 { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
 
-        // What one recorded draw needs, resolved in the first pass and executed in the third. The two
-        // passes exist because the rows have to be uploaded at final size before the first draw is
-        // recorded, and only the first pass knows how many there will be.
-        struct GenericDraw
-        {
-            const GenericMeshRenderData*      Data     = nullptr;
-            DataDrivenMaterial*               Material = nullptr;
-            std::shared_ptr<GraphicsPipeline> Pipeline;
-            uint32_t                          Row = 0;
-        };
-        struct MaterialRows
-        {
-            std::vector<glm::vec4> Bytes; // rows end to end, Count * (slots per row)
-            uint32_t               Count = 0;
-        };
+        // Reused across frames like every other accumulator in this file — this runs once per frame per
+        // submesh group, and two fresh vectors a frame is the allocation churn the optimization workflow
+        // says not to write.
+        auto& draws          = m_ScratchGenericDraws;
+        auto& rowsByMaterial = m_ScratchGenericRows;
+        draws.clear();
+        rowsByMaterial.clear();
 
-        std::vector<GenericDraw>                                  draws;
-        std::vector<std::pair<DataDrivenMaterial*, MaterialRows>> rowsByMaterial;
         const auto rowsFor = [&rowsByMaterial]( DataDrivenMaterial* mat ) -> MaterialRows&
         {
             for ( auto& [m, r] : rowsByMaterial )
