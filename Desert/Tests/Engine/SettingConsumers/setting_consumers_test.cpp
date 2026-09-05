@@ -376,9 +376,20 @@ namespace
 
     constexpr Row kHeroCloudRows[] = {
          { "Enabled", kCloudSystem }, // the zero-cost gate: not collected, so the march's loop is empty
-         { "Volume", kCloudSystem },  // resolved through the modelling service, never packed as a number
-         { "Strength", kHeroPayload },         { "SuppressProceduralField", kHeroPayload },
-         { "DetailFactor", kHeroPayload },     { "DensityFactor", kHeroPayload },
+         // THE COLLECTOR AND NOT THE RENDERER, and the row MOVED here in Д23. The handle is resolved
+         // through Runtime::CloudModellingService inside VolumetricCloudRenderer.cpp, which is the fuller
+         // consumption — but there it is read off a `Graphic::HeroCloudInstance`, one struct removed from
+         // the component, and this audit deliberately does not follow a type through a wrapper it cannot
+         // see. The collector's own read (`hero.Data.Volume == AssetHandle::Null()` decides whether the
+         // body is collected at all) is a real consumption and is written plainly, so that is what the row
+         // names. The old row pointed at the renderer and passed for a bad reason: the word "Volume"
+         // appears eight times in that file — the noise volume, the atlas volume, the sky-occlusion
+         // volume — and none of those is this field.
+         { "Volume", kCloudSystem },
+         { "Strength", kHeroPayload },
+         { "SuppressProceduralField", kHeroPayload },
+         { "DetailFactor", kHeroPayload },
+         { "DensityFactor", kHeroPayload },
          { "ExtinctionFactor", kHeroPayload },
     };
 
