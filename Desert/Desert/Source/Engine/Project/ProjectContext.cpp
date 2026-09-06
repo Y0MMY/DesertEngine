@@ -98,8 +98,15 @@ namespace Desert::Project
     {
         if ( !s_Current || s_FilePath.empty() )
             return false;
-        Common::Utils::FileSystem::WriteContentToFile( std::filesystem::path( s_FilePath ),
-                                                       rfl::json::write( *s_Current ) );
+        // Atomic (write-then-rename), because the .deproj is the one file without which the project
+        // does not open at all: the plain primitive truncates in place, so a write interrupted half
+        // way used to leave zero bytes where the descriptor was.
+        if ( !Common::Utils::FileSystem::WriteContentToFileAtomic( std::filesystem::path( s_FilePath ),
+                                                                   rfl::json::write( *s_Current ) ) )
+        {
+            LOG_ERROR( "[Project] Could not save {} — the file on disk is unchanged", s_FilePath );
+            return false;
+        }
         LOG_INFO( "[Project] Saved {}", s_FilePath );
         return true;
     }
@@ -160,8 +167,15 @@ namespace Desert::Project
         if ( projects.size() > 10 )
             projects.resize( 10 );
 
-        Common::Utils::FileSystem::WriteContentToFile(
-             std::filesystem::path( RegistryFile() ),
-             rfl::json::write( ProjectsRegistry{ std::move( projects ) } ) );
+        // Atomic (write-then-rename): this file is shared with the Project Hub, and an interrupted
+        // in-place write left a torn projects.json that neither side could parse — every recent
+        // project gone over one crash at the wrong moment. On failure the registry simply keeps its
+        // previous list, which is the right outcome for a convenience file: name it and move on.
+        if ( !Common::Utils::FileSystem::WriteContentToFileAtomic(
+                  std::filesystem::path( RegistryFile() ),
+                  rfl::json::write( ProjectsRegistry{ std::move( projects ) } ) ) )
+            LOG_ERROR( "[Project] Could not update the recent-projects registry {} — it keeps its "
+                       "previous contents",
+                       RegistryFile() );
     }
 } // namespace Desert::Project

@@ -47,6 +47,23 @@ namespace Common::Utils
         [[nodiscard]] static const std::string ReadFileContent( const std::filesystem::path& filepath );
         static const void WriteContentToFile( const std::filesystem::path& filepath, const std::string& content );
 
+        // WRITE-THEN-RENAME, for files whose PREVIOUS contents must survive a failed write. The plain
+        // primitive above opens the destination with trunc, so the old file is already gone before the
+        // first byte lands — a full disk, dropped permissions or a killed process mid-write leaves
+        // zero bytes where data used to be (Tools/SceneMigrator destroyed scenes exactly this way).
+        // This one writes `<filepath>.tmp` BESIDE the destination (same directory — rename is only
+        // atomic within one filesystem, and the system temp dir can be another volume), verifies the
+        // stream after the write AND after close (close() is where a buffered failure finally
+        // surfaces), and only then renames over the original. Interruption at any step leaves the
+        // original untouched; the worst a failure costs is a stray .tmp, which is removed on the way
+        // out. The temp name is deliberately FIXED rather than unique-per-process: two concurrent
+        // writers then race to a whole file from one of them instead of interleaving into a torn one,
+        // and a test can block the temp path to drive the failure branch.
+        // Returns false on any failure, after logging which step failed and where — the caller owns
+        // the policy (a tool counts it as a failed file, the editor keeps running).
+        [[nodiscard]] static bool WriteContentToFileAtomic( const std::filesystem::path& filepath,
+                                                            const std::string&           content );
+
         [[nodiscard]] static std::vector<uint8_t> ReadByteFileContent( const std::filesystem::path& filepath );
 
         // Every regular file under `root`, from BOTH halves of the content world: the loose files on

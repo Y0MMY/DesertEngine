@@ -377,3 +377,60 @@ one run immediately after editing a compute shader differed from its baseline on
 never reproduced — five later runs of the same shader were byte-identical to the baseline. Discard the
 first run after any shader edit, exactly as for a fresh worktree, and take the second. A knockout that
 rests on one post-edit frame is not a knockout.
+
+### Regenerate the makefiles after ANY merge that added a file
+
+The generated `*.make` files list sources EXPLICITLY, so a merge that brings in a new `.cpp` produces
+a tree where that file is simply not compiled. It does not fail at compile time — it fails at LINK
+time, in another target, with an undefined symbol that names a function you can see in the source
+right in front of you.
+
+Caught 2026-09-06 on the lead, integrating И2: `MigratorMain.cpp` arrived with the merge, the
+makefiles were not regenerated, and `SceneMigrator` failed to link on `RunSceneMigrator` — a symbol
+whose definition was sitting in the working tree. Ninety seconds of confusion for a one-line fix.
+
+```bash
+CI=true premake5 gmake     # after every merge; free when nothing changed
+```
+
+The `CI=true` matters: without it the test projects are not generated at all, and the sweep silently
+covers less than it claims to (§3).
+
+And distinguish the two failures before diagnosing either. `Terminated: 15` is SIGTERM — something
+killed the build, usually a harness timeout under load — and says NOTHING about the code. An
+`Undefined symbols` link error after a merge is almost always this missing regeneration, not a defect
+in what was merged.
+
+## 8. Who runs what, when several agents share one machine
+
+**Added 2026-09-06, from a measured jam.** Eight agents each running the full sweep in their own
+worktree is nine runs of the same 105 suites — theirs plus the lead's after the merge. Measured cost:
+72–80 clang processes on 8 performance cores, load 135, and **nothing finishing** for the better part
+of an hour. The suites were not the problem; running them nine times was.
+
+**The developer proves their own change. The lead proves the integration.**
+
+A developer runs, in their worktree:
+
+1. the three targets by exit code — `Desert`, `Editor`, `Runtime` (compilation is not delegable);
+2. **their own new suites**, and any suite whose subject they touched;
+3. the three that fire from changes nowhere near their name — `ComponentReflection`,
+   `SettingConsumers`, `ShaderCacheKey` (see §3);
+4. frames, if the change can alter what appears on screen. Never delegable, never skippable.
+
+The **full sweep runs once, by the lead, in the main tree after the merge** — where it is also the
+only place it can catch what the merge itself created. A distant suite broken by a developer's change
+is found there, one merge later, and merges are serialised anyway.
+
+**Wrap every build in the queue**, or the machine goes back to starving itself:
+
+```bash
+scripts/MacOS/BuildSlot.sh make Editor config=debug -j4 CC="ccache clang" CXX="ccache clang++"
+```
+
+It passes the exit code through unchanged, so the `echo $? > my_rc.txt` discipline still holds.
+
+**What this does NOT relax.** A developer who skips their own new suite, or ships a render change
+without a frame, has not done the work — the lead's sweep is a net for integration, not a substitute
+for proving your own change. And a developer whose change plausibly reaches far (a shared header, a
+format, a build file) still runs the full sweep and says so.
