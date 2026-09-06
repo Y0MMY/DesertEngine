@@ -292,8 +292,9 @@ namespace Desert::Editor
         // own DefaultScene generates next.
         if ( ProjectContext::HasProject() && ProjectContext::Current().Name == "Desert Sandbox" )
         {
-            const auto demoPath = Common::Constants::Path::SCENE_PATH /
-                                  ( "CornellDemo" + Common::Constants::Extensions::SCENE_EXTENSION );
+            const auto demoPath =
+                 Common::Constants::Path::SCENE_PATH /
+                 ( "CornellDemo" + std::string( Common::Constants::Extensions::SCENE_EXTENSION ) );
             std::error_code ec;
             if ( !std::filesystem::exists( demoPath, ec ) )
             {
@@ -728,8 +729,8 @@ namespace Desert::Editor
                         const auto      dir = Common::Constants::Path::SCENE_PATH / "Autosave";
                         std::error_code ec;
                         std::filesystem::create_directories( dir, ec );
-                        const auto path =
-                             dir / ( name + "_autosave" + Common::Constants::Extensions::SCENE_EXTENSION );
+                        const auto path = dir / ( name + "_autosave" +
+                                                  std::string( Common::Constants::Extensions::SCENE_EXTENSION ) );
                         Common::Utils::FileSystem::WriteContentToFile( path, serializer.SerializeToJson() );
                         LOG_INFO( "[Autosave] {}", path.string() );
                     }

@@ -140,7 +140,7 @@ namespace Desert::Editor
             base += ( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == '-' ) ? c : '_';
         base = "M_" + ( base.empty() ? std::string( "Terrain" ) : base ) + "_Terrain";
 
-        const std::string           ext = ::Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::string           ext( ::Common::Constants::Extensions::MATERIAL_EXTENSION );
         const std::filesystem::path dir = ::Common::Constants::Path::MATERIAL_PATH;
         std::error_code             ec;
         std::filesystem::create_directories( dir, ec );
