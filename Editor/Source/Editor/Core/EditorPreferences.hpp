@@ -12,8 +12,13 @@ namespace Desert::Editor
     // Preferences window (Edit -> Preferences...) edits + saves them.
     struct EditorPreferences
     {
-        float CameraSpeed     = 1.0f;
-        float TranslateSnap   = 0.5f;  // world units
+        float CameraSpeed = 1.0f;
+        // World units, and 1 world unit is 1 CENTIMETRE project-wide. This was 0.5f with the comment
+        // "world units" from the metre era, and Load() pushes it straight into GizmoState — so the
+        // preferences file has been overwriting GizmoState's own (correct) 50 cm default with half a
+        // centimetre ever since the units migration, i.e. grid snap has effectively been off. Matches
+        // GizmoState::s_TranslateSnap deliberately: two defaults for one value is what caused this.
+        float TranslateSnap   = 50.0f; // cm — half a metre
         float RotateSnapDeg   = 15.0f; // degrees
         float ScaleSnap       = 0.1f;
         bool  PersistentSnap  = false;

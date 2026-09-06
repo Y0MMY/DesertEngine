@@ -34,6 +34,7 @@
 #include "Editor/Core/EditorResources.hpp"
 #include "Editor/Core/ThemeManager.hpp"
 #include "Editor/Core/GizmoState.hpp"
+#include "Editor/Core/NumberFormat.hpp"
 #include "Editor/Core/MeshResolve.hpp"            // the toolbar/status triangle census
 #include "Editor/Core/Selection/ViewportMode.hpp" // the editor-mode rail
 #include <Engine/Geometry/MeshStats.hpp>
@@ -2186,8 +2187,7 @@ namespace Desert::Editor
         ImGui::SameLine( 0.0f, 16.0f );
         {
             const uint64_t tris = SceneTriangleCount();
-            ImGui::TextDisabled( ICON_MDI_TRIANGLE_OUTLINE " %s tris",
-                                 Utils::ImGuiUtilities::FormatThousands( tris ).c_str() );
+            ImGui::TextDisabled( ICON_MDI_TRIANGLE_OUTLINE " %s tris", FormatThousands( tris ).c_str() );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Triangles in the VISIBLE meshes of this scene (LOD 0)." );
         }
@@ -2444,7 +2444,20 @@ namespace Desert::Editor
 
             ImGui::SameLine();
             ImGui::SetCursorScreenPos( ImVec2( startX, ImGui::GetCursorScreenPos().y ) );
+
+            // Play is the bar's PRIMARY action and gets the accent; Pause is a modifier of a state that
+            // is already running and stays neutral. Undifferentiated, the pair reads as two equal
+            // buttons and the eye has to read the glyphs to find the one it wants.
+            const ImVec4 accent = ThemeManager::GetSelectedColor();
+            ImGui::PushStyleColor( ImGuiCol_Button, accent );
+            ImGui::PushStyleColor( ImGuiCol_ButtonHovered,
+                                   ImVec4( accent.x + 0.10f, accent.y + 0.08f, accent.z + 0.06f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonActive,
+                                   ImVec4( accent.x * 0.8f, accent.y * 0.8f, accent.z * 0.8f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 1.0f ) );
             DrawPlayButton( ImVec2( playW, btnH ) );
+            ImGui::PopStyleColor( 4 );
+
             ImGui::SameLine();
             DrawPauseButton( btnSize );
         }
@@ -2789,7 +2802,11 @@ namespace Desert::Editor
             ImGui::Separator();
             bool snapChanged = false;
             snapChanged |= ImGui::Checkbox( "Snap always on (Ctrl inverts)", &prefs.PersistentSnap );
-            snapChanged |= ImGui::DragFloat( "Move (m)", &prefs.TranslateSnap, 0.05f, 0.01f, 100.0f, "%.2f" );
+            // CENTIMETRES, which is what the value has always been fed into: this control said "(m)" and
+            // clamped to 0.01..100 while writing a field GizmoState reads as world units, and a world
+            // unit is 1 cm. A slider whose unit disagrees with its consumer is how the shipped grid snap
+            // ended up at half a centimetre (see EditorPreferences::TranslateSnap).
+            snapChanged |= ImGui::DragFloat( "Move (cm)", &prefs.TranslateSnap, 1.0f, 1.0f, 10000.0f, "%.0f" );
             snapChanged |= ImGui::DragFloat( "Rotate (deg)", &prefs.RotateSnapDeg, 0.5f, 0.1f, 180.0f, "%.1f" );
             snapChanged |= ImGui::DragFloat( "Scale", &prefs.ScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f" );
             if ( snapChanged )

@@ -225,7 +225,7 @@ namespace Desert::Editor
             const ImVec2 textSz =
                  ImGui::CalcTextSize( parts.Category.data(), parts.Category.data() + parts.Category.size() );
             ImVec4 chipBg = ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled );
-            chipBg.w      = 0.14f;
+            chipBg.w      = 0.22f;
             dl->AddRectFilled( ImVec2( chipPos.x, chipPos.y + 1.0f ),
                                ImVec2( chipPos.x + textSz.x + 10.0f, chipPos.y + rowH - 3.0f ),
                                ImGui::GetColorU32( chipBg ), 3.0f );
