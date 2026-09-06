@@ -44,12 +44,24 @@ namespace Common::Utils
         // / LOG_ERROR / a defaults branch), and in a packaged game an abort down here is a
         // guaranteed crash on the player's machine over a single missing asset.
         //
-        // The Result return is what enforces that contract: a caller cannot use the content without
-        // unwrapping it, so "forgot to decide about the miss" is a compile error, not the silent
-        // substitution §1.4 forbids. It also ends the old ambiguity that this comment used to have
-        // to explain away — a genuinely zero-byte file is a SUCCESS holding an empty value, a
-        // missing file is an error, and the two are different values instead of one emptiness that
-        // only an up-front Exists() could tell apart.
+        // WHAT THE RESULT RETURN ACTUALLY BUYS, stated exactly, because an earlier version of this
+        // comment promised more than the type delivers. What it buys is that the OLD shape does not
+        // compile: `std::string s = ReadFileContent(p)` is rejected outright, so every one of the
+        // ~30 call sites in the engine was rewritten by the COMPILER rather than by eye, and a clean
+        // full build is the proof that the migration is complete.
+        //
+        // What it does NOT buy is a guarantee that the caller decided anything. `GetValue()` and
+        // `ExtractValue()` hand back a default-constructed T when the result is an error, so an
+        // unchecked unwrap still compiles and still yields the silent emptiness §1.4 forbids — one
+        // method call away, with no diagnostic. Do not read "returns a Result" as "the compiler has
+        // checked this for you"; the check is still yours to write. (`[[nodiscard]]` below catches
+        // only a wholly discarded call, and even that is silent in this workspace, which builds
+        // every target with -w — see BuildScripts/Workspace.lua.)
+        //
+        // It does end the old ambiguity this comment used to have to explain away — a genuinely
+        // zero-byte file is a SUCCESS holding an empty value, a missing file is an error, and the
+        // two are different values instead of one emptiness that only an up-front Exists() could
+        // tell apart.
         [[nodiscard]] static Common::ResultStr<std::string>
                           ReadFileContent( const std::filesystem::path& filepath );
         static const void WriteContentToFile( const std::filesystem::path& filepath, const std::string& content );

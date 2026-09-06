@@ -168,10 +168,25 @@ namespace Common::Utils
         in.seekg( 0, std::ios::end );
         fileContent.resize( in.tellg() );
         in.seekg( 0, std::ios::beg );
-        in.read( &fileContent[0], fileContent.size() );
+
+        // THE READ IS CHECKED, exactly as the byte primitive below checks its own. Opening a path is
+        // not the same as being able to read it: a directory opens and then fails on the first read,
+        // and so do a racing delete, a truncated pak and an I/O error on a network volume. This
+        // result used to be DISCARDED, which handed the caller a SUCCESS holding resize()'s zero
+        // fill — 64 NUL bytes presented as the file's contents, with no error and no log. That is
+        // the silent substitution §1.4 forbids, sitting in the primitive whose whole job is to make
+        // a failed read impossible to ignore.
+        if ( !fileContent.empty() && !in.read( &fileContent[0], fileContent.size() ) )
+        {
+            LOG_ERROR( "[FileSystem] Could not read {} bytes of file: {}", fileContent.size(), filepath.string() );
+            return Common::MakeFormattedError<std::string>( "Could not read {} bytes of file: {}",
+                                                            fileContent.size(), filepath.string() );
+        }
         in.close();
 
-        // A zero-byte file lands here as a SUCCESS holding "" — distinct from the miss above.
+        // A zero-byte file lands here as a SUCCESS holding "" — distinct from the miss above. It
+        // skips the read entirely: there is nothing to extract, and asking for zero characters is a
+        // question whose answer would only be noise.
         return Common::MakeSuccess( std::move( fileContent ) );
     }
 

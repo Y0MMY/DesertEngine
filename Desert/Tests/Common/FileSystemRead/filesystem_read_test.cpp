@@ -120,6 +120,28 @@ TEST( FileSystemRead, MissingAndEmptyAreDistinguishableForBytes )
     EXPECT_FALSE( missingRead.IsSuccess() );
 }
 
+// A READ THAT FAILS AFTER THE OPEN SUCCEEDED IS AN ERROR TOO — the third outcome, and the one that
+// had no test. A directory is the portable way to reach it: ifstream opens it and the first read
+// fails, which is the same shape as a racing delete, a truncated pak or an I/O error on a network
+// volume. ReadFileContent used to DISCARD its read result and hand back a SUCCESS holding
+// resize()'s zero fill (measured: 64 NUL bytes on macOS, no error, no log) while
+// ReadByteFileContent got it right — so the two primitives disagreed about their own contract, and
+// the string half was the silent substitution the typed return exists to remove.
+TEST( FileSystemRead, AReadThatFailsAfterOpeningIsANamedErrorNotZeroedContent )
+{
+    const fs::path dir = MakeTempDir( "desert_fsread_unreadable" );
+    ASSERT_TRUE( fs::is_directory( dir ) );
+
+    const auto text = Common::Utils::FileSystem::ReadFileContent( dir );
+    EXPECT_FALSE( text.IsSuccess() ) << "got a success holding " << text.GetValue().size() << " byte(s)";
+    EXPECT_NE( text.GetError().find( "desert_fsread_unreadable" ), std::string::npos ) << text.GetError();
+
+    // The byte primitive answers the same question the same way — the two halves agree.
+    const auto bytes = Common::Utils::FileSystem::ReadByteFileContent( dir );
+    EXPECT_FALSE( bytes.IsSuccess() );
+    EXPECT_EQ( text.IsSuccess(), bytes.IsSuccess() );
+}
+
 TEST( FileSystemRead, MissingFileUnderAMountedPakIsStillSoft )
 {
     // A pak IS mounted and owns the path's directory — the file just is not in it. Both halves of
