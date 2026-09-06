@@ -108,11 +108,20 @@ namespace Desert::Editor
         Save();
     }
 
-    void EditorPreferences::Save()
+    bool EditorPreferences::Save()
     {
         ApplyToGizmoState( Get() );
-        Common::Utils::FileSystem::WriteContentToFile( std::filesystem::path( PrefsFile() ),
-                                                       rfl::json::write( Get() ) );
+        // Load() checks its read and handles a corrupt file; Save() logged success unconditionally, so
+        // preferences silently stopped persisting the moment the config directory became unwritable.
+        if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
+                  std::filesystem::path( PrefsFile() ), rfl::json::write( Get() ) );
+             !written )
+        {
+            LOG_ERROR( "[Prefs] {} was NOT saved: {} — these settings apply to this session only.", PrefsFile(),
+                       written.GetError() );
+            return false;
+        }
         LOG_INFO( "[Prefs] Saved {}", PrefsFile() );
+        return true;
     }
 } // namespace Desert::Editor

@@ -76,6 +76,8 @@ namespace Desert::Editor
         static void Load();
 
         // Writes Get() to editor.json and pushes the snap values into GizmoState.
-        static void Save();
+        // False when the preferences file could not be written (reason logged): the values are live in
+        // this session but will not come back in the next one.
+        static bool Save();
     };
 } // namespace Desert::Editor

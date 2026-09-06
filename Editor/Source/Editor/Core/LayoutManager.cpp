@@ -2,6 +2,7 @@
 
 #include "EditorPreferences.hpp"
 
+#include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <ImGui/imgui.h>
@@ -57,7 +58,14 @@ namespace Desert::Editor
 
         std::error_code ec;
         std::filesystem::create_directories( LayoutsDir(), ec );
-        Common::Utils::FileSystem::WriteContentToFile( LayoutsDir() / ( clean + ".ini" ), ini );
+        const auto path = LayoutsDir() / ( clean + ".ini" );
+        if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( path, ini ); !written )
+        {
+            // The `bool` used to answer only "was the name usable?", so a layout that never reached
+            // the disk was reported saved and then simply was not in the list next time.
+            LOG_ERROR( "[Layout] '{}' was not saved: {}", path.string(), written.GetError() );
+            return false;
+        }
         return true;
     }
 

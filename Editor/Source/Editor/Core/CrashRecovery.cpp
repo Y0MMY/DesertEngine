@@ -1,6 +1,7 @@
 #include "CrashRecovery.hpp"
 
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
 namespace Desert::Editor
@@ -21,11 +22,31 @@ namespace Desert::Editor
         return std::filesystem::exists( LockPath(), ec );
     }
 
-    void CrashRecovery::ArmSession()
+    bool CrashRecovery::ArmSession()
     {
         std::error_code ec;
         std::filesystem::create_directories( AutosaveDir(), ec );
-        Common::Utils::FileSystem::WriteContentToFile( LockPath(), "editor session in progress" );
+        if ( ec )
+        {
+            LOG_ERROR( "[Recovery] Could not create {}: {} — this session is UNPROTECTED: a crash will "
+                       "not be detected on the next start.",
+                       AutosaveDir().string(), ec.message() );
+            return false;
+        }
+
+        // WasUncleanExit() is literally exists( LockPath() ), so a lock that failed to appear is
+        // indistinguishable from a clean exit: the editor crashes, the next start sees no lock and
+        // never offers the recovery. Saying so at arm time is the only moment the difference exists.
+        if ( const auto written =
+                  Common::Utils::FileSystem::WriteContentToFileAtomic( LockPath(), "editor session in progress" );
+             !written )
+        {
+            LOG_ERROR( "[Recovery] Could not arm the session lock {}: {} — this session is UNPROTECTED: "
+                       "a crash will not be detected on the next start.",
+                       LockPath().string(), written.GetError() );
+            return false;
+        }
+        return true;
     }
 
     void CrashRecovery::DisarmSession()
