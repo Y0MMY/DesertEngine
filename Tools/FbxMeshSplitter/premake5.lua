@@ -1,5 +1,6 @@
 -- FbxMeshSplitter — standalone CLI: splits a multi-mesh FBX into individual .obj files + a collection
--- manifest. Depends only on Assimp (no engine code). The launcher will invoke it; runnable by hand too.
+-- manifest. Depends only on Assimp (no engine code is LINKED; the one editor include below is a
+-- header-only constant table). The launcher will invoke it; runnable by hand too.
 project "FbxMeshSplitter"
     kind "ConsoleApp"
     language "C++"
@@ -8,6 +9,12 @@ project "FbxMeshSplitter"
     files {
         "**.cpp",
         "**.hpp",
+    }
+
+    -- Header-only: Editor/Import/TextureSourceFormats.hpp, the single texture-source priority list this
+    -- tool shares with AssimpImporter. Nothing from Editor is compiled or linked here.
+    includedirs {
+        "%{wks.location}/Editor/Source",
     }
 
     filter "configurations:Debug"
