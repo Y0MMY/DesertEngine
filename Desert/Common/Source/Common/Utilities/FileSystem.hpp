@@ -63,25 +63,38 @@ namespace Common::Utils
         // two are different values instead of one emptiness that only an up-front Exists() could
         // tell apart.
         [[nodiscard]] static Common::ResultStr<std::string>
-                          ReadFileContent( const std::filesystem::path& filepath );
-        static const void WriteContentToFile( const std::filesystem::path& filepath, const std::string& content );
+        ReadFileContent( const std::filesystem::path& filepath );
 
-        // WRITE-THEN-RENAME, for files whose PREVIOUS contents must survive a failed write. The plain
-        // primitive above opens the destination with trunc, so the old file is already gone before the
-        // first byte lands — a full disk, dropped permissions or a killed process mid-write leaves
-        // zero bytes where data used to be (Tools/SceneMigrator destroyed scenes exactly this way).
-        // This one writes `<filepath>.tmp` BESIDE the destination (same directory — rename is only
-        // atomic within one filesystem, and the system temp dir can be another volume), verifies the
-        // stream after the write AND after close (close() is where a buffered failure finally
-        // surfaces), and only then renames over the original. Interruption at any step leaves the
-        // original untouched; the worst a failure costs is a stray .tmp, which is removed on the way
-        // out. The temp name is deliberately FIXED rather than unique-per-process: two concurrent
-        // writers then race to a whole file from one of them instead of interleaving into a torn one,
-        // and a test can block the temp path to drive the failure branch.
-        // Returns false on any failure, after logging which step failed and where — the caller owns
-        // the policy (a tool counts it as a failed file, the editor keeps running).
-        [[nodiscard]] static bool WriteContentToFileAtomic( const std::filesystem::path& filepath,
-                                                            const std::string&           content );
+        // THE WRITE PRIMITIVE. There is exactly one, and this is it.
+        //
+        // WRITE-THEN-RENAME, so a file's PREVIOUS contents survive a failed write. It writes
+        // `<filepath>.tmp` BESIDE the destination (same directory — rename is only atomic within one
+        // filesystem, and the system temp dir can be another volume), verifies the stream after the
+        // write AND after close (close() is where a buffered failure finally surfaces), and only then
+        // renames over the original. Interruption at any step leaves the original untouched; the worst
+        // a failure costs is a stray .tmp, which is removed on the way out. The temp name is
+        // deliberately FIXED rather than unique-per-process: two concurrent writers then race to a
+        // whole file from one of them instead of interleaving into a torn one, and a test can block
+        // the temp path to drive the failure branch.
+        //
+        // WHY THERE IS NO PLAIN `WriteContentToFile` ANY MORE. There used to be one three lines above
+        // this, returning `const void`. It detected a failed open, logged it and returned nothing, and
+        // it checked neither `<<` nor `close()` at all, so a full disk never reached even the log. It
+        // opened the destination with trunc, so the old file was already gone before the first byte
+        // landed — Tools/SceneMigrator destroyed scenes exactly that way. Twenty-eight call sites used
+        // it, among them the whole Ctrl+S chain, which then cleared the "unsaved changes" mark and
+        // showed a green "Saved 'X'" toast for a scene that had not been written. Two write primitives
+        // meant every new call site was a coin toss between the safe one and the silent one, so the
+        // silent one is gone rather than deprecated, and its NAME is gone with it: changing only the
+        // return type would have left every old call site compiling (a discarded return is legal, and
+        // this workspace builds with -w so even [[nodiscard]] is mute). Removing the name is what made
+        // the COMPILER, rather than the eye, find all twenty-eight.
+        //
+        // On failure the result names which step failed and where, and the file on disk is unchanged —
+        // the caller owns the policy (a tool counts the file as failed and exits non-zero; the editor
+        // leaves its unsaved-changes mark standing and says why).
+        [[nodiscard]] static Common::BoolResultStr WriteContentToFileAtomic( const std::filesystem::path& filepath,
+                                                                             const std::string& content );
 
         [[nodiscard]] static Common::ResultStr<std::vector<uint8_t>>
         ReadByteFileContent( const std::filesystem::path& filepath );

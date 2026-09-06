@@ -291,20 +291,8 @@ namespace Common::Utils
         return 0;
     }
 
-    const void FileSystem::WriteContentToFile( const std::filesystem::path& filepath, const std::string& content )
-    {
-        std::ofstream fout( filepath );
-        if ( !fout )
-        {
-            // Was a silent no-op: a prefs/layout/deproj write to an unwritable location just vanished.
-            LOG_ERROR( "[FileSystem] Could not write file: {}", filepath.string() );
-            return;
-        }
-        fout << content;
-        fout.close();
-    }
-
-    bool FileSystem::WriteContentToFileAtomic( const std::filesystem::path& filepath, const std::string& content )
+    Common::BoolResultStr FileSystem::WriteContentToFileAtomic( const std::filesystem::path& filepath,
+                                                                const std::string&           content )
     {
         // Contract and the reasoning behind every step are in the header. In one line: the original
         // file must survive a failure at ANY point, so nothing here ever opens the original for write.
@@ -316,7 +304,8 @@ namespace Common::Utils
         {
             LOG_ERROR( "[FileSystem] Atomic write failed: could not open temporary {} (original untouched)",
                        temp.string() );
-            return false;
+            return Common::MakeFormattedError( "could not open the temporary file {} (the original is unchanged)",
+                                               temp.string() );
         }
 
         out << content;
@@ -329,7 +318,8 @@ namespace Common::Utils
                        content.size(), temp.string() );
             std::error_code removeEc;
             fs::remove( temp, removeEc );
-            return false;
+            return Common::MakeFormattedError( "could not write {} bytes to {} (the original is unchanged)",
+                                               content.size(), temp.string() );
         }
 
         std::error_code renameEc;
@@ -340,9 +330,10 @@ namespace Common::Utils
                        temp.string(), filepath.string(), renameEc.message() );
             std::error_code removeEc;
             fs::remove( temp, removeEc );
-            return false;
+            return Common::MakeFormattedError( "could not rename {} over {}: {} (the original is unchanged)",
+                                               temp.string(), filepath.string(), renameEc.message() );
         }
-        return true;
+        return BOOLSUCCESS;
     }
 
 } // namespace Common::Utils

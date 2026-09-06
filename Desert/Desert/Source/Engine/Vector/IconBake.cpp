@@ -167,6 +167,7 @@ namespace Desert::Vector
         // Write-then-rename (И2) — see ShaderSpirvCache::StoreCachedSpirv.
         const std::vector<uint8_t> bytes = SerializeBakedIcon( icon );
         return Common::Utils::FileSystem::WriteContentToFileAtomic(
-             path, std::string( reinterpret_cast<const char*>( bytes.data() ), bytes.size() ) );
+                    path, std::string( reinterpret_cast<const char*>( bytes.data() ), bytes.size() ) )
+             .IsSuccess();
     }
 } // namespace Desert::Vector

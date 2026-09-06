@@ -1,10 +1,10 @@
-// The atomic write primitive's contract: WriteContentToFileAtomic either lands the WHOLE content or
-// leaves the destination BYTE-IDENTICAL, and says which happened in its return value. The plain
-// WriteContentToFile cannot promise this — it opens the destination with trunc, so the old contents
-// are gone before the first new byte lands, and an interruption (full disk, dropped permissions, a
-// killed process) leaves zero bytes where data used to be. Tools/SceneMigrator destroyed scenes
-// exactly that way, and the shared recent-projects registry could be torn by either of its two
-// writers; both go through this primitive now.
+// The write primitive's contract: WriteContentToFileAtomic either lands the WHOLE content or leaves
+// the destination BYTE-IDENTICAL, and says which happened — and, since Д31-A, WHY — in its return
+// value. It is now the ONLY write primitive in the tree: the plain WriteContentToFile that used to sit
+// beside it returned `const void`, opened the destination with trunc so the old contents were gone
+// before the first new byte landed, and checked neither the insertion nor the close. Tools/SceneMigrator
+// destroyed scenes exactly that way, and the editor's whole Ctrl+S chain ran through it, clearing the
+// "unsaved changes" mark for writes that had not happened.
 //
 // The discriminating tests below are the ones that FAIL against an in-place implementation: they
 // build situations where writing the destination directly would succeed (and destroy it) while the
@@ -57,7 +57,7 @@ TEST( FileSystemWrite, ASuccessfulWriteLandsWholeAndLeavesNoTemporaryBehind )
     const fs::path dir  = MakeTempDir( "desert_fs_write_success" );
     const fs::path file = dir / "out.json";
 
-    EXPECT_TRUE( FileSystem::WriteContentToFileAtomic( file, "{\"a\":1}" ) );
+    EXPECT_TRUE( FileSystem::WriteContentToFileAtomic( file, "{\"a\":1}" ).IsSuccess() );
 
     EXPECT_EQ( ReadRaw( file ), "{\"a\":1}" );
     fs::path temp = file;
@@ -76,7 +76,7 @@ TEST( FileSystemWrite, AnExistingFileIsReplacedWithTheNewContentExactly )
     const fs::path file = dir / "out.json";
     WriteRaw( file, "the old contents, deliberately longer than the new ones" );
 
-    EXPECT_TRUE( FileSystem::WriteContentToFileAtomic( file, "short" ) );
+    EXPECT_TRUE( FileSystem::WriteContentToFileAtomic( file, "short" ).IsSuccess() );
     EXPECT_EQ( ReadRaw( file ), "short" );
 
     fs::remove_all( dir );
@@ -96,7 +96,11 @@ TEST( FileSystemWrite, ABlockedTemporaryCostsTheWriteAndNotTheOriginal )
     temp += ".tmp";
     fs::create_directories( temp ); // a directory where the primitive needs its working file
 
-    EXPECT_FALSE( FileSystem::WriteContentToFileAtomic( file, "{\"replacement\":true}" ) );
+    const auto written = FileSystem::WriteContentToFileAtomic( file, "{\"replacement\":true}" );
+    EXPECT_FALSE( written.IsSuccess() );
+    // The reason travels with the refusal, not only into the log: the editor puts it in front of the
+    // user, who does not have a log open.
+    EXPECT_NE( written.GetError().find( temp.string() ), std::string::npos ) << written.GetError();
     EXPECT_EQ( ReadRaw( file ), "{\"precious\":true}" ) << "a failed write cost the original its contents";
 
     fs::remove_all( dir );
@@ -116,7 +120,7 @@ TEST( FileSystemWrite, AReadOnlyDirectoryCostsTheWriteAndNotTheOriginal )
 
     fs::permissions( dir, fs::perms::owner_read | fs::perms::owner_exec );
 
-    EXPECT_FALSE( FileSystem::WriteContentToFileAtomic( file, "{\"replacement\":true}" ) );
+    EXPECT_FALSE( FileSystem::WriteContentToFileAtomic( file, "{\"replacement\":true}" ).IsSuccess() );
     EXPECT_EQ( ReadRaw( file ), "{\"precious\":true}" ) << "a failed write cost the original its contents";
 
     // Restore before cleanup, or remove_all leaves the read-only directory behind for the next run.
