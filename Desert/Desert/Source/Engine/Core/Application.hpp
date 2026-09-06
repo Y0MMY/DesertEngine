@@ -3,6 +3,7 @@
 #include <string>
 #include <optional>
 #include <cstdint>
+#include <unordered_set>
 
 #include <Common/Core/Singleton.hpp>
 #include <Common/Core/LayerStack.hpp>
@@ -83,6 +84,10 @@ namespace Desert::Engine
         void Init();
         void Destroy();
 
+        // Reports a layer's failed result once per distinct (stage, layer, message). See the definition
+        // for why the deduplication is not an optimisation.
+        void ReportLayerFailure( const char* stage, Common::Layer* layer, const std::string& error );
+
     private:
         NO_DISCARD bool OnClose( Common::EventWindowClose& e )
         {
@@ -107,8 +112,11 @@ namespace Desert::Engine
         ApplicationInfo m_ApplicationInfo;
 
         bool m_IsRunningApplication = true;
-        bool m_Minimized            = false;
         int  m_ExitCode             = 0;
+
+        // Failures already reported by ReportLayerFailure, keyed on stage + layer + message. Not a
+        // counter: a counter cannot tell a message that is still recurring from a new one.
+        std::unordered_set<std::string> m_ReportedLayerFailures;
 
         std::shared_ptr<Graphic::RendererContext> m_RendererContext;
         std::shared_ptr<Device>                   m_Device;
