@@ -38,22 +38,47 @@ workspace "Desert"
 
     -- `warnings "Off"` stood here until 2026-09-06, and it was not a neutral default: premake expands
     -- it to `-w`, which reached **142 of the 144** generated makefiles in BOTH configurations. So every
-    -- `[[nodiscard]]` in this repository — 315 of them across 86 files at the time — was decoration.
+    -- `[[nodiscard]]`/`NO_DISCARD` in this repository — 382 of them across 99 files, counted the day this
+    -- was written; the Д31 census said 315 in 86 a week earlier — was decoration.
     -- Task И3 had already found that the guard itself was MISSPELLED in four places and nothing said so,
     -- which is the shape of the problem: with `-w` the compiler cannot even report that you asked it the
     -- wrong question.
     --
-    -- "Extra" and not "High"/"Everything", deliberately, and it is the same word on both toolchains:
-    -- premake maps it to `-Wall -Wextra` for clang/gcc and to `/W4` for MSVC. Windows is half of CI and
-    -- `-Wall -Wextra` does not exist there, so leaving that branch on `-w` would have left half the
-    -- matrix blind; `/W4` is the MSVC level that carries the same class of diagnostics (unused
-    -- parameters, signed/unsigned mismatch, missing returns) plus C4834, its spelling of a discarded
-    -- `[[nodiscard]]`.
+    -- "Extra" and not "High"/"Everything": premake maps it to `-Wall -Wextra` for clang and gcc, which is
+    -- the level this commit brought to zero — 355 sites, measured in both configurations.
     --
     -- `-Werror` is NOT set, on purpose. The tree is silent under this flag as of this commit, and it has
     -- to STAY silent for a while under both compilers before a hard failure is a service rather than a
     -- hazard; the honest next step is `-Werror` on new files, not on all of them at once.
     warnings "Extra"
+
+    -- WINDOWS GETS /W3 AND NOT /W4, AND THAT IS A MEASURED CHOICE RATHER THAN A SHRUG. `warnings "Extra"`
+    -- means `/W4` on MSVC, and shipping it here would put this commit in exactly the state it exists to
+    -- end: a flag switched on over a tree that is not quiet, on the half of CI nobody can see from a Mac.
+    --
+    -- The cost was estimated with the closest proxy available on this machine — the clang flags whose
+    -- diagnostics ARE the /W4-only MSVC ones: `-Wconversion` and `-Wshorten-64-to-32` for C4244/C4267,
+    -- `-Wsign-conversion` for C4245/C4389, `-Wshadow` for C4456-C4459. Over the same 672 translation
+    -- units: **459 further sites**, 419 of them sign conversions. That is not a tail to clean up in the
+    -- same change, and it is not something to leave screaming in a log.
+    --
+    -- /W3 is not a token level. Every diagnostic this task was actually about is at MSVC level 1 or 3:
+    -- **C4834** (discarding a `[[nodiscard]]` value) is LEVEL 1, as are C4715 (not all control paths
+    -- return a value) and C4700 (uninitialised local used); C4018 (signed/unsigned mismatch) and C4101
+    -- (unreferenced local variable) are level 3. Each has a clang counterpart inside `-Wall -Wextra`
+    -- — `-Wunused-result`, `-Wreturn-type`, `-Wsign-compare`, `-Wunused-variable` — and every one of
+    -- those is at zero here, which is the evidence that /W3 should arrive quiet on Windows too. It is
+    -- evidence and not proof: no Windows machine was available, so the first CI run is the measurement.
+    --
+    -- What /W4 would add on top is C4100 (unreferenced formal parameter) and C4189, both of which this
+    -- commit has already cleared on the clang side, plus the 459 conversions. Raising it is a task with
+    -- a number attached, not an oversight.
+    --
+    -- `warnings "Default"` is premake's spelling of `<WarningLevel>Level3</WarningLevel>` — verified by
+    -- generating a vs2022 project, not assumed from the name.
+    filter "system:windows"
+        warnings "Default"
+    filter {}
 
     -- Vendored code is not ours to fix, and its warnings would drown ours the moment they appeared.
     -- A path rule rather than `warnings "Off"` in each of the eleven ThirdParty project scripts,
