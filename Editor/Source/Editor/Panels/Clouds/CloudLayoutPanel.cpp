@@ -113,11 +113,27 @@ namespace Desert::Editor
         m_HasLayout  = true;
         m_SourceName = m_SubjectPath.filename().string();
 
-        // FROM A FILE, so the channel-mapping controls are disabled and say why: the mapping an image was
-        // baked WITH is already in these pixels and there is no picture here to re-map. "Edit this painting"
-        // is what puts it back on the canvas.
-        m_LayoutFromFile = true;
-        m_PreviewDirty   = true;
+        // STRAIGHT ONTO THE CANVAS, and there is no button between the two any more. There used to be
+        // "Edit this painting", and it existed for one reason: the recovery could FAIL — a layout whose
+        // mask differed from its fourth pattern channel needed five planes and a canvas had four, so
+        // opening it was a thing that had to be asked for and could be refused. O-4 gave the mask its own
+        // plane and there is nothing left to refuse, so a document opened on a `.dclayout` is simply a
+        // document you can paint on and export from.
+        //
+        // A recovery that fails here is a layout that was never valid, and it is reported rather than
+        // leaving an empty canvas behind a panel that looks ready.
+        auto canvas = Assets::MakeCloudLayoutCanvasFromLayout( m_Layout );
+        if ( !canvas )
+        {
+            m_Status        = "This painting could not be opened: " + canvas.GetError();
+            m_StatusIsError = true;
+            LOG_ERROR( "[CloudLayout] {}", m_Status );
+            return;
+        }
+
+        m_Canvas           = canvas.ExtractValue();
+        m_CanvasImageDirty = true;
+        m_PreviewDirty     = true;
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -371,8 +387,7 @@ namespace Desert::Editor
             return;
         }
 
-        m_SourceName     = path.filename().string();
-        m_LayoutFromFile = false;
+        m_SourceName = path.filename().string();
 
         // A NEW SURFACE MEANS A NEW DEVICE IMAGE. Left alone, the canvas pane would go on showing the
         // previous picture's channel until something else happened to move, which reads as an import that
@@ -578,46 +593,6 @@ namespace Desert::Editor
                                    "around the sky rather than adding it and Coverage keeps meaning the "
                                    "fraction of sky it delivers. A mean near 0 or near 1 leaves very "
                                    "little room to redistribute anything." );
-
-            // A FINISHED PAINTING CAN BE PICKED BACK UP, which is what makes this a tool rather than a
-            // one-way bake. It reconstructs the canvas the file was painted on — both tables, since O-4
-            // gave the mask its own plane, so a layout that uses all four species slots AND adds and
-            // removes cloud now opens where it used to be refused for needing a fifth plane.
-            if ( m_LayoutFromFile )
-            {
-                if ( ImGui::Button( "Edit this painting", ImVec2( 180.0f, 0.0f ) ) )
-                {
-                    auto canvas = Assets::MakeCloudLayoutCanvasFromLayout( m_Layout );
-                    if ( !canvas )
-                    {
-                        m_Status        = canvas.GetError();
-                        m_StatusIsError = true;
-                    }
-                    else
-                    {
-                        m_Canvas = canvas.ExtractValue();
-
-                        // STRAIGHT RGBA AND NOTHING ELSE. The canvas was rebuilt FROM the pattern planes,
-                        // so channel k already holds slot k; any other mapping would rearrange the
-                        // painting on the way back in and the artist would watch their species swap.
-                        for ( uint32_t slot = 0; slot < Assets::kCloudLayoutChannels; ++slot )
-                            m_ChannelForSlot[slot] = slot;
-
-                        m_LayoutFromFile   = false;
-                        m_CanvasImageDirty = true;
-                        m_Status           = "'" + m_SourceName +
-                                   "' is on the canvas. Baking will write a new file "
-                                   "unless you pick the same name.";
-                        m_StatusIsError = false;
-
-                        RebuildLayout();
-                    }
-                }
-                if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "Puts this .dclayout back on the canvas so the brush can change it. "
-                                       "The channel mapping is reset to straight RGBA, because the canvas "
-                                       "is rebuilt from the pattern planes themselves." );
-            }
         }
         else
         {
@@ -671,7 +646,6 @@ namespace Desert::Editor
 
         m_Canvas           = made.ExtractValue();
         m_SourceName       = "a canvas " + std::to_string( m_Canvas.Side ) + " a side";
-        m_LayoutFromFile   = false;
         m_Painting         = false;
         m_Stroke           = Assets::CloudLayoutStroke{};
         m_CanvasImageDirty = true;
@@ -794,11 +768,7 @@ namespace Desert::Editor
             m_CanvasImageChannel = -1;
             m_Painting           = false;
 
-            if ( m_LayoutFromFile )
-                ImGui::TextDisabled( "This is a finished .dclayout. Press 'Edit this painting' above to put "
-                                     "it back on the canvas." );
-            else
-                ImGui::TextDisabled( "Start a canvas, or open a SQUARE picture, and the brush appears here." );
+            ImGui::TextDisabled( "Start a canvas, or open a SQUARE picture, and the brush appears here." );
             return;
         }
 
@@ -1074,7 +1044,7 @@ namespace Desert::Editor
         // hints at it — the symptom is a channel an artist swears they painted that does nothing.
         const LayerContext& layer = m_LastLayer;
 
-        ImGui::BeginDisabled( m_LayoutFromFile || m_Canvas.Pattern.empty() );
+        ImGui::BeginDisabled( m_Canvas.Pattern.empty() );
 
         bool remap = false;
         for ( uint32_t slot = 0; slot < Assets::kCloudLayoutChannels; ++slot )
@@ -1154,10 +1124,7 @@ namespace Desert::Editor
 
         ImGui::EndDisabled();
 
-        if ( m_LayoutFromFile )
-            ImGui::TextDisabled( "Opened from a .dclayout - the mapping is already baked into its pixels." );
-
-        if ( m_Canvas.HasMask() && !m_LayoutFromFile )
+        if ( m_Canvas.HasMask() )
         {
             if ( ImGui::Button( "Remove the add/remove mask" ) )
             {
@@ -1703,10 +1670,7 @@ namespace Desert::Editor
         }
 
         if ( !isCopy )
-        {
-            m_SourceName     = target.filename().string();
-            m_LayoutFromFile = true;
-        }
+            m_SourceName = target.filename().string();
         m_Status        = "Baked to " + target.string();
         m_StatusIsError = false;
 

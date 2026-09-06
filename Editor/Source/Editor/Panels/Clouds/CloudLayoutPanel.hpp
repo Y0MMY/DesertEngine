@@ -362,10 +362,14 @@ namespace Desert::Editor
         Assets::CloudLayoutData m_Layout;
         bool                    m_HasLayout = false;
 
-        /// True when m_Layout came from a `.dclayout` rather than from a picture. The channel controls
-        /// describe an image-to-slot mapping and there is no image, so they are disabled and say why —
-        /// rather than sitting there implying they would do something.
-        bool m_LayoutFromFile = false;
+        // AN `m_LayoutFromFile` FLAG USED TO SIT HERE, and it went with "Edit this painting". Both existed
+        // because recovering the canvas from a layout could FAIL — five planes did not fit in four — so a
+        // document opened on a `.dclayout` had to sit in a half-open state until somebody asked for the
+        // recovery and it either worked or was refused. O-4 gave the mask its own plane; the recovery
+        // cannot fail for that reason any more, so the subject is on the canvas the moment the window
+        // opens and there is no second state to record. It also fixed a real regression on the way: with
+        // the canvas empty until the button was pressed, "Export pattern" on a freshly opened document
+        // would have had nothing to write.
 
         // ---- preview ----------------------------------------------------------------------------------
 
