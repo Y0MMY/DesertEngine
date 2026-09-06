@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Desert.hpp>
-#include <imgui/imgui.h>
+#include <ImGui/imgui.h>
 
 #include <optional>
 #include <string>
