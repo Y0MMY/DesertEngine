@@ -67,7 +67,7 @@ namespace Desert::Graphic::System
         }
 
         auto& renderer = Renderer::GetInstance();
-        m_MaterialFXAA->Bind( inputFramebuffer->GetColorAttachmentImage() );
+        m_MaterialFXAA->BindInputs( inputFramebuffer->GetColorAttachmentImage() );
         renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_MaterialFXAA->GetMaterialExecutor() );
     }
 } // namespace Desert::Graphic::System

@@ -11,7 +11,7 @@ namespace Desert::Graphic
         m_LensFlareTexture  = m_MaterialExecutor->GetTexture2DProperty( "u_LensFlareTexture" ).get();
     }
 
-    void MaterialTonemap::Bind( const std::shared_ptr<Image2D>& targetImage,
+    void MaterialTonemap::BindInputs( const std::shared_ptr<Image2D>& targetImage,
                                 const std::shared_ptr<Image2D>& bloomImage,
                                 const std::shared_ptr<Image2D>& avgLuminance,
                                 const std::shared_ptr<Image2D>& lightShaftImage,

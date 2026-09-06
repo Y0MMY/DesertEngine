@@ -8,7 +8,7 @@ namespace Desert::Graphic
         m_SceneTexture = m_MaterialExecutor->GetTexture2DProperty( "u_SceneTexture" ).get();
     }
 
-    void MaterialJFAComposite::Bind( const Image2D* jfaSeed, const Image2D* sceneColor,
+    void MaterialJFAComposite::BindInputs( const Image2D* jfaSeed, const Image2D* sceneColor,
                                      const glm::vec4& outlineColor, float outlineWidth, float smoothness )
     {
         if ( m_JFATexture && jfaSeed )

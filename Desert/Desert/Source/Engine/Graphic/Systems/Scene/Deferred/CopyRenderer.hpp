@@ -60,7 +60,7 @@ namespace Desert::Graphic::System
 
             auto& renderer = Renderer::GetInstance();
             renderer.BeginRenderPass( renderPass.get() ); // clear + write the snapshot
-            m_Material->Bind( src );
+            m_Material->BindInputs( src );
             renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_Material->GetMaterialExecutor() );
             renderer.EndRenderPass();
         }

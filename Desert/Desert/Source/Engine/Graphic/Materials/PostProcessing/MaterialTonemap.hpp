@@ -29,7 +29,7 @@ namespace Desert::Graphic
             glm::vec3 LensFlareTint;       // the lens's Tint
         };
 
-        void Bind( const std::shared_ptr<Image2D>& targetImage, const std::shared_ptr<Image2D>& bloomImage,
+        void BindInputs( const std::shared_ptr<Image2D>& targetImage, const std::shared_ptr<Image2D>& bloomImage,
                    const std::shared_ptr<Image2D>& avgLuminance, const std::shared_ptr<Image2D>& lightShaftImage,
                    const std::shared_ptr<Image2D>& lensFlareImage, const Params& params );
 

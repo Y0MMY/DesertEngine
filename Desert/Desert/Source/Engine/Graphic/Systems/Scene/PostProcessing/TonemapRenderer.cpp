@@ -90,7 +90,7 @@ namespace Desert::Graphic::System
                                         m_LightShaftTint,  m_LensFlareIntensity, m_LensFlareTint };
 
         auto& renderer = Renderer::GetInstance();
-        m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage(), bloomImage, avgLuminance, lightShafts,
+        m_MaterialTonemap->BindInputs( framebuffer->GetColorAttachmentImage(), bloomImage, avgLuminance, lightShafts,
                                  lensFlare, params );
         renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_MaterialTonemap->GetMaterialExecutor() );
     }

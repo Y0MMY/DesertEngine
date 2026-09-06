@@ -81,7 +81,7 @@ namespace Desert::Graphic::System
             // shader writes lit meshes where the G-buffer has geometry and discards elsewhere, compositing
             // the deferred meshes over the real forward scene (so the skybox toggle + camera motion still work).
             renderer.BeginRenderPass( renderPass.get(), false );
-            m_Material->Bind( gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
+            m_Material->BindInputs( gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
                               gbuffer->GetColorAttachmentImage( 2 ), gbuffer->GetColorAttachmentImage( 3 ),
                               lightDir, lightColor, cameraPos, debugMode, pointLights, spotLights, shadow, aoImage,
                               giIntensity, ssaoEnabled, giMode, giImage, cloudShadow, environment );

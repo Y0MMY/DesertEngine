@@ -80,7 +80,7 @@ namespace Desert::Graphic
         // gA = Albedo+Metallic, gB = Normal+Roughness, gC = WorldPosition; lightDir.xyz = direction the sun
         // travels; lightColor.rgb/.a = colour/intensity; cameraPos.xyz = camera world pos (view vector);
         // debugMode 0=Lit,1=Albedo,2=Normal,3=Metallic,4=Roughness; point/spot = the scene's dynamic lights.
-        void Bind( const std::shared_ptr<Image2D>& gA, const std::shared_ptr<Image2D>& gB,
+        void BindInputs( const std::shared_ptr<Image2D>& gA, const std::shared_ptr<Image2D>& gB,
                    const std::shared_ptr<Image2D>& gC, const std::shared_ptr<Image2D>& gE,
                    const glm::vec4& lightDir, const glm::vec4& lightColor, const glm::vec4& cameraPos,
                    int debugMode, const ShaderProtocols::PointLight& pointLights,

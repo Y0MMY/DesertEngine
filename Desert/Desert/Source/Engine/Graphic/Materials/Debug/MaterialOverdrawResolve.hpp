@@ -14,7 +14,7 @@ namespace Desert::Graphic
             m_Overdraw = m_MaterialExecutor->GetTexture2DProperty( "u_Overdraw" ).get();
         }
 
-        void Bind( const std::shared_ptr<Image2D>& accum )
+        void BindInputs( const std::shared_ptr<Image2D>& accum )
         {
             if ( m_Overdraw && accum )
                 m_Overdraw->SetImage( accum.get() );

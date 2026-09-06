@@ -22,7 +22,7 @@ namespace Desert::Graphic
             m_RSMWorldPos = m_MaterialExecutor->GetTexture2DProperty( "u_RSMWorldPos" ).get();
         }
 
-        void Bind( const std::shared_ptr<Image2D>& normal, const std::shared_ptr<Image2D>& worldPos,
+        void BindInputs( const std::shared_ptr<Image2D>& normal, const std::shared_ptr<Image2D>& worldPos,
                    const std::shared_ptr<Image2D>& rsmAlbedo, const std::shared_ptr<Image2D>& rsmNormal,
                    const std::shared_ptr<Image2D>& rsmWorldPos, const glm::mat4& rsmViewProj,
                    const glm::vec4& sunColorIntensity, float giIntensity, float jitterSeed )

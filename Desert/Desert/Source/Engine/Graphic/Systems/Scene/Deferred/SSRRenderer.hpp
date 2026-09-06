@@ -131,7 +131,7 @@ namespace Desert::Graphic::System
                 auto pass            = RenderPass::Create( rp );
 
                 renderer.BeginRenderPass( pass.get() );
-                m_Material->Bind( gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
+                m_Material->BindInputs( gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
                                   gbuffer->GetColorAttachmentImage( 2 ), sceneColor, viewProj, cameraPos,
                                   maxSteps, maxDistance, intensity, thickness,
                                   static_cast<float>( m_FrameIndex % 1024u ) );
@@ -151,7 +151,7 @@ namespace Desert::Graphic::System
                 auto pass            = RenderPass::Create( rp );
 
                 renderer.BeginRenderPass( pass.get() );
-                m_ResolveMaterial->Bind( m_TraceBuffer->GetColorAttachmentImage( 0 ),
+                m_ResolveMaterial->BindInputs( m_TraceBuffer->GetColorAttachmentImage( 0 ),
                                          m_AccumFB[prv]->GetColorAttachmentImage( 0 ),
                                          gbuffer->GetColorAttachmentImage( 2 ), m_PrevViewProj, texel,
                                          m_HistoryValid ? 0.88f : 0.0f );
@@ -162,7 +162,7 @@ namespace Desert::Graphic::System
 
             // --- Pass 3: roughness-scaled blur of the RESOLVED buffer, blended over the scene. ---
             {
-                m_CompositeMaterial->Bind( m_AccumFB[cur]->GetColorAttachmentImage( 0 ),
+                m_CompositeMaterial->BindInputs( m_AccumFB[cur]->GetColorAttachmentImage( 0 ),
                                            gbuffer->GetColorAttachmentImage( 1 ), texel );
 
                 RenderPassSpecification rp;

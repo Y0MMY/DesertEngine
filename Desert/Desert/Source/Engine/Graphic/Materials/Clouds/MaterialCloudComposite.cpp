@@ -24,7 +24,7 @@ namespace Desert::Graphic
                        "upsample would fall back to bilinear over the whole screen." );
     }
 
-    void MaterialCloudComposite::Bind( const Image2D* scatterImage, const Image2D* guideImage )
+    void MaterialCloudComposite::BindInputs( const Image2D* scatterImage, const Image2D* guideImage )
     {
         if ( m_ScatterTexture && scatterImage )
             m_ScatterTexture->SetImage( scatterImage );

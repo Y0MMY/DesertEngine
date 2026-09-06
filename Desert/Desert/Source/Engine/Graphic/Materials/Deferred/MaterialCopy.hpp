@@ -13,7 +13,7 @@ namespace Desert::Graphic
             m_Input = m_MaterialExecutor->GetTexture2DProperty( "u_Input" ).get();
         }
 
-        void Bind( const std::shared_ptr<Image2D>& input )
+        void BindInputs( const std::shared_ptr<Image2D>& input )
         {
             if ( m_Input && input )
                 m_Input->SetImage( input.get() );

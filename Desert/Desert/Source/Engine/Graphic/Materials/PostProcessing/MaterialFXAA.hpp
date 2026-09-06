@@ -10,7 +10,7 @@ namespace Desert::Graphic
     public:
         MaterialFXAA();
 
-        void Bind( const std::shared_ptr<Image2D>& inputImage );
+        void BindInputs( const std::shared_ptr<Image2D>& inputImage );
 
     private:
         Texture2DProperty* m_InputTexture = nullptr;

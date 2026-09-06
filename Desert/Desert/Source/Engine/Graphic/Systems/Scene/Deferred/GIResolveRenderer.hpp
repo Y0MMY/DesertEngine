@@ -104,7 +104,7 @@ namespace Desert::Graphic::System
                 auto pass            = RenderPass::Create( rp );
 
                 renderer.BeginRenderPass( pass.get() );
-                m_Material->Bind( gbuffer->GetColorAttachmentImage( 1 ), gbuffer->GetColorAttachmentImage( 2 ),
+                m_Material->BindInputs( gbuffer->GetColorAttachmentImage( 1 ), gbuffer->GetColorAttachmentImage( 2 ),
                                   rsmAlbedo, rsmNormal, rsmWorldPos, rsmViewProj, sunColorIntensity,
                                   giIntensity, static_cast<float>( m_FrameIndex % 1024u ) );
                 renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_Material->GetMaterialExecutor() );
@@ -123,7 +123,7 @@ namespace Desert::Graphic::System
                 auto pass            = RenderPass::Create( rp );
 
                 renderer.BeginRenderPass( pass.get() );
-                m_ResolveMaterial->Bind( target->GetColorAttachmentImage( 0 ),
+                m_ResolveMaterial->BindInputs( target->GetColorAttachmentImage( 0 ),
                                          m_AccumFB[prv]->GetColorAttachmentImage( 0 ),
                                          gbuffer->GetColorAttachmentImage( 2 ), m_PrevViewProj, texel,
                                          m_HistoryValid ? 0.92f : 0.0f );

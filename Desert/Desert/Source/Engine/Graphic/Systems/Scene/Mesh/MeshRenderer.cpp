@@ -1950,7 +1950,7 @@ namespace Desert::Graphic::System
             auto rp                  = RenderPass::Create( rpSpec );
 
             renderer.BeginRenderPass( rp.get(), false );
-            m_OverdrawResolveMaterial->Bind( m_OverdrawFB->GetColorAttachmentImage( 0 ) );
+            m_OverdrawResolveMaterial->BindInputs( m_OverdrawFB->GetColorAttachmentImage( 0 ) );
             renderer.SubmitFullscreenQuad( m_OverdrawResolvePipeline.get(),
                                            m_OverdrawResolveMaterial->GetMaterialExecutor() );
             renderer.EndRenderPass();

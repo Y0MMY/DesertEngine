@@ -18,7 +18,7 @@ namespace Desert::Graphic
             m_Normal = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferNormal" ).get();
         }
 
-        void Bind( const std::shared_ptr<Image2D>& worldPos, const std::shared_ptr<Image2D>& normal,
+        void BindInputs( const std::shared_ptr<Image2D>& worldPos, const std::shared_ptr<Image2D>& normal,
                    const glm::mat4& viewProj, const glm::vec4& cameraPos, float radius, float bias, float power,
                    int sampleCount )
         {

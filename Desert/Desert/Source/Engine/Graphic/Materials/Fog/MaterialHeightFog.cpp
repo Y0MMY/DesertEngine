@@ -16,7 +16,7 @@ namespace Desert::Graphic
                        "fog apply would draw the fallback texture." );
     }
 
-    void MaterialHeightFog::Bind( const Image2D* fogImage )
+    void MaterialHeightFog::BindInputs( const Image2D* fogImage )
     {
         if ( m_FogTexture && fogImage )
             m_FogTexture->SetImage( fogImage );

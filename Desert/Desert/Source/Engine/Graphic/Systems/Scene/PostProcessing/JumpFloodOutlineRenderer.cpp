@@ -177,7 +177,7 @@ namespace Desert::Graphic::System
             // Init: silhouette mask -> seed[0]. ALWAYS run it (even with nothing selected) so seed[0] is
             // written + transitioned to SHADER_READ_ONLY this frame and the composite below can safely
             // sample it. (Skipping Init too leaves seed[0] in UNDEFINED layout on the first frame -> hazard.)
-            m_MaterialInit->Bind( maskFramebuffer->GetColorAttachmentImage().get() );
+            m_MaterialInit->BindInputs( maskFramebuffer->GetColorAttachmentImage().get() );
             RunQuad( m_SeedFramebuffers[0], "JFA_Init", m_InitPipeline.get(),
                      m_MaterialInit->GetMaterialExecutor() );
 
@@ -191,7 +191,7 @@ namespace Desert::Graphic::System
                 for ( uint32_t i = 0; i < m_StepCount; ++i )
                 {
                     const int writeIndex = 1 - readIndex;
-                    m_StepMaterials[i]->Bind( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
+                    m_StepMaterials[i]->BindInputs( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
                                               1 << ( m_StepCount - 1 - i ) );
                     RunQuad( m_SeedFramebuffers[writeIndex], "JFA_Step", m_StepPipeline.get(),
                              m_StepMaterials[i]->GetMaterialExecutor() );
@@ -204,7 +204,7 @@ namespace Desert::Graphic::System
         // scene through unchanged (JFA_Final early-out).
         // No steps ran (nothing selected) -> width 0 makes JFA_Final pass the scene through unchanged.
         const float effectiveWidth = ( m_Enabled && m_OutlineActive ) ? m_OutlineWidth : 0.0f;
-        m_MaterialComposite->Bind( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
+        m_MaterialComposite->BindInputs( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
                                    sceneColor.get(),
                                    glm::vec4( m_OutlineColor, 1.0f ),
                                    effectiveWidth,
