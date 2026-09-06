@@ -283,8 +283,15 @@ namespace Desert::Editor
         if ( !radiance.IsValid() || radiance.ImageType != Runtime::ImageHandle::Type::ImageCube )
             return nullptr;
 
-        return static_cast<const Graphic::ImageCube*>(
-             Runtime::ResourceRegistry::GetImageService()->Resolve( radiance ) );
+        // Checked like the two services above it. Not because this one is likelier to be absent — it is the
+        // same registry and the same lifetime — but because a third call spelled differently beside two
+        // guarded ones reads as a deliberate exception, and the next person has to work out which of the
+        // three is wrong.
+        auto* imageService = Runtime::ResourceRegistry::GetImageService();
+        if ( !imageService )
+            return nullptr;
+
+        return static_cast<const Graphic::ImageCube*>( imageService->Resolve( radiance ) );
     }
 
     void MaterialEditorPanel::DrawPreviewPlaceholder( float side, const std::string& reason ) const
