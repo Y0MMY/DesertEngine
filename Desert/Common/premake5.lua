@@ -1,9 +1,14 @@
 project "Common"
     kind "StaticLib"
 
-    files { 
-        "Source/Common/**.cpp", 
+    files {
+        "Source/Common/**.cpp",
         "Source/Common/**.hpp",
+        -- The shared project-format serializer lives in the desert-shared submodule (one definition
+        -- for the engine and the launcher); the ENGINE compiles it into Common, the launcher
+        -- compiles the same file itself. Missing file here means an uninitialized submodule:
+        -- `git submodule update --init ThirdParty/desert-shared`.
+        "%{wks.location}/ThirdParty/desert-shared/Source/ProjectFormat.cpp",
     }
 
     includedirs {

@@ -7,6 +7,7 @@
 
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Logger.hpp>
+#include <Common/Project/ProjectFormat.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Utilities/PakFile.hpp>
 
@@ -204,11 +205,15 @@ namespace Desert::Editor
             if ( !defaultScene.empty() && !oldRoot.empty() && defaultScene.rfind( oldRoot, 0 ) == 0 )
                 defaultScene = kPackagedAssetsRoot + defaultScene.substr( oldRoot.size() );
 
-            std::ostringstream deproj;
-            deproj << "{\"Name\":\"" << projectName << "\",\"AssetsRoot\":\"" << kPackagedAssetsRoot
-                   << "\",\"DefaultScene\":\"" << defaultScene << "\"}";
+            // Through the shared serializer (ProjectFormat.hpp) — this used to be the fourth
+            // hand-spliced copy of the .deproj format, and a project name with a quote in it
+            // shipped a package the Runtime could not open.
+            Common::Project::ProjectFile deproj;
+            deproj.Name         = projectName;
+            deproj.AssetsRoot   = kPackagedAssetsRoot;
+            deproj.DefaultScene = defaultScene;
             Common::Utils::FileSystem::WriteContentToFile( resDir / ( safeName + ".deproj" ),
-                                                           deproj.str() );
+                                                           Common::Project::WriteProjectFile( deproj ) );
         }
 
         // 5) Bundle only: MoltenVK + the Vulkan loader travel INSIDE Contents/Frameworks so the player

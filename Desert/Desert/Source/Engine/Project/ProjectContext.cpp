@@ -4,23 +4,15 @@
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Constants.hpp>
 
-#include <rflcpp/rfl/json.hpp>
-
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 
 namespace Desert::Project
 {
     namespace
     {
-        // Shape of <config>/projects.json — shared with the Project Hub, which reads/writes the same
-        // trivial structure without rfl. Keep the field name in sync with Tools/ProjectHub.
-        struct ProjectsRegistry
-        {
-            std::vector<std::string> Projects;
-        };
-
         std::optional<ProjectFile> s_Current;
         std::string                s_FilePath;
 
@@ -61,14 +53,14 @@ namespace Desert::Project
             return false;
         }
 
-        auto parsed = rfl::json::read<ProjectFile>( rawRead.GetValue() );
-        if ( !parsed.has_value() )
+        auto parsed = Common::Project::ReadProjectFile( rawRead.GetValue() );
+        if ( !parsed.IsSuccess() )
         {
-            LOG_ERROR( "[Project] Corrupt .deproj {}: {}", deprojPath, parsed.error().what() );
+            LOG_ERROR( "[Project] {}: {}", deprojPath, parsed.GetError() );
             return false;
         }
 
-        s_Current  = parsed.value();
+        s_Current  = parsed.ExtractValue();
         s_FilePath = std::filesystem::absolute( deprojPath ).string();
 
         // THE decoupling step: point every engine content path (and the Cooked/ cache) at this project.
@@ -81,11 +73,13 @@ namespace Desert::Project
         // a packaged game (opened from a read-only .dpak) — its content lives in the archive, not on disk.
         if ( onDisk )
         {
-            namespace P = Common::Constants::Path;
+            // The census lives beside the format (desert-shared ProjectFormat.hpp) — the same rows the
+            // launcher scaffolds a new project from, so "what a project has" cannot fork between creator
+            // and opener. ASSETS_PATH was just remapped above, so each row lands inside this project;
+            // Tests/Engine/ProjectFormat asserts every row equals the Constants::Path global it answers to.
             std::error_code ec;
-            for ( const auto& dir : { P::MESH_PATH, P::MATERIAL_PATH, P::TEXTUREDIR_PATH, P::SCENE_PATH,
-                                      P::PREFAB_PATH, P::SCRIPT_PATH, P::COLLECTIONS_PATH } )
-                std::filesystem::create_directories( dir, ec );
+            for ( const std::string_view folder : Common::Project::StandardContentFolders )
+                std::filesystem::create_directories( Common::Constants::Path::ASSETS_PATH / folder, ec );
         }
 
         if ( onDisk ) // don't pollute the dev hub's recent-projects list from a packaged game
@@ -102,8 +96,8 @@ namespace Desert::Project
         // Atomic (write-then-rename), because the .deproj is the one file without which the project
         // does not open at all: the plain primitive truncates in place, so a write interrupted half
         // way used to leave zero bytes where the descriptor was.
-        if ( !Common::Utils::FileSystem::WriteContentToFileAtomic( std::filesystem::path( s_FilePath ),
-                                                                   rfl::json::write( *s_Current ) ) )
+        if ( !Common::Utils::FileSystem::WriteContentToFileAtomic(
+                  std::filesystem::path( s_FilePath ), Common::Project::WriteProjectFile( *s_Current ) ) )
         {
             LOG_ERROR( "[Project] Could not save {} — the file on disk is unchanged", s_FilePath );
             return false;
@@ -156,8 +150,14 @@ namespace Desert::Project
         const auto raw = Common::Utils::FileSystem::ReadFileContent( RegistryFile() );
         if ( !raw || raw.GetValue().empty() )
             return {};
-        auto parsed = rfl::json::read<ProjectsRegistry>( raw.GetValue() );
-        return parsed.has_value() ? parsed.value().Projects : std::vector<std::string>{};
+        auto parsed = Common::Project::ReadProjectsRegistry( raw.GetValue() );
+        if ( !parsed.IsSuccess() )
+        {
+            // Refusing quietly here looked like "my projects vanished" — name the file and the reason.
+            LOG_ERROR( "[Project] {}: {}", RegistryFile(), parsed.GetError() );
+            return {};
+        }
+        return parsed.ExtractValue().Projects;
     }
 
     void ProjectContext::RegisterRecent( const std::string& deprojPath )
@@ -174,7 +174,8 @@ namespace Desert::Project
         // previous list, which is the right outcome for a convenience file: name it and move on.
         if ( !Common::Utils::FileSystem::WriteContentToFileAtomic(
                   std::filesystem::path( RegistryFile() ),
-                  rfl::json::write( ProjectsRegistry{ std::move( projects ) } ) ) )
+                  Common::Project::WriteProjectsRegistry(
+                       Common::Project::ProjectsRegistry{ std::move( projects ) } ) ) )
             LOG_ERROR( "[Project] Could not update the recent-projects registry {} — it keeps its "
                        "previous contents",
                        RegistryFile() );
