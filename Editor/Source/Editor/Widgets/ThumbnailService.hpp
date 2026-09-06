@@ -99,13 +99,14 @@ namespace Desert::Editor
             Kind                Type = Kind::Material;
             Assets::AssetHandle Handle{ static_cast<uint64_t>( 0 ) };
             Assets::AssetHandle Material{ static_cast<uint64_t>( 0 ) }; // meshes only
-            std::string         AssetPath;
+            std::string         Identity; // ThumbnailKey::Identity of the asset, NOT a path spelling
             std::string         Png;
             bool                Flat = false;
         };
 
-        // Shared by both Request* entry points: decides whether the work is needed at all.
-        bool ShouldQueue( const std::string& assetPath, const std::string& png );
+        // Shared by both Request* entry points: decides whether the work is needed at all. Takes the
+        // asset's IDENTITY (ThumbnailKey::Identity), never a raw path — the sets below are keyed on it.
+        bool ShouldQueue( const std::string& identity, const std::string& png );
 
         // Created lazily — a session may never preview — and RELEASED again once the queue has been idle
         // for a while, because it owns a full SceneRenderer and therefore one of the six renderer slots
@@ -115,9 +116,11 @@ namespace Desert::Editor
         // viewport's camera with no error message at all.
         std::unique_ptr<AssetThumbnailRenderer> m_Renderer;
         std::vector<Request>                    m_Queue;
-        std::unordered_set<std::string>         m_Queued;  // asset paths currently queued or in flight
+        // Keyed on ThumbnailKey::Identity, not on a path spelling, so two panels naming one asset
+        // differently cannot each hold their own entry (see Invalidate).
+        std::unordered_set<std::string>         m_Queued;  // asset identities currently queued or in flight
         std::unordered_set<std::string>         m_Failed;  // gave up: do not retry every frame
-        std::string                             m_InFlight;      // asset path being captured
+        std::string                             m_InFlight;      // identity of the asset being captured
         std::string                             m_InFlightPng;   // its target PNG, checked on completion
         int                                     m_InFlightTicks = 0;
         int                                     m_IdleTicks     = 0; // consecutive frames with no work at all

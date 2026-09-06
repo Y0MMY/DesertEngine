@@ -54,7 +54,9 @@ namespace Desert::Editor
         // Fully qualified: a Desert::Editor::Core namespace also exists (ViewportMode/FoliagePaint), so an
         // unqualified Core::Scene would wrongly resolve there in TUs that see it.
         std::shared_ptr<::Desert::Core::Scene>  m_Scene;
-        ECS::Entity                             m_Camera;
+        // No camera entity: the capture goes through the scene's own EditorCamera, which Scene::Init
+        // publishes as the main camera. See EnsureInit for why a CameraComponent here read as load-bearing
+        // and was not.
         ECS::Entity                             m_Target;
         bool                                    m_Inited = false;
 
