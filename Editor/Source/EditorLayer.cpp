@@ -21,6 +21,8 @@
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 #include <Engine/Core/Serialize/SceneFormat.hpp>
 #include "Editor/Core/CommandLine.hpp"
+#include "Editor/Core/Control/ControlChannelOptions.hpp"
+#include "Editor/Core/Control/ControlDispatch.hpp" // resolving a request to a palette entry
 #include "Editor/Core/CrashRecovery.hpp"
 #include "Editor/Core/LayoutManager.hpp"
 #include "Editor/Core/PanelRequests.hpp"
@@ -44,6 +46,7 @@
 #include "Editor/Core/EditorPreferences.hpp"
 #include "Editor/Core/ProjectContext.hpp"
 
+#include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp> // reading the PRESENTED frame back (shot.window)
 #include <Engine/Graphic/Image.hpp> // Image2D::ReadPixelsRGBA8 (debug frame dump)
 #include <Engine/Core/Input.hpp>
 #include <Common/Core/KeyCodes.hpp>
@@ -79,7 +82,6 @@
 #include "Editor/Panels/History/HistoryPanel.hpp"
 #include "Editor/Panels/Validation/SceneValidationPanel.hpp"
 #include "Editor/Panels/Clouds/CloudModellingVolumePanel.hpp"
-#include "Editor/Core/StartupOptions.hpp"
 #include "Editor/Panels/Clouds/CloudDocumentOpen.hpp"
 #include "Editor/Panels/Clouds/CloudLayoutPanel.hpp"
 #include "Editor/Panels/Clouds/CloudNoiseVolumePanel.hpp"
@@ -117,6 +119,13 @@
 
 namespace Desert::Editor
 {
+    // THE MENU BAR'S OWN MENUS, named once. Read by DrawMenuBar, which opens whichever one is held, and
+    // by BuildPaletteCommands, which offers exactly these as commands. Two readers of one list, so the
+    // palette cannot offer a menu the bar does not draw — the shape a hand-copied second list always ends
+    // up in.
+    static constexpr const char* kMenuBarMenus[] = { "File",   "Edit",     "View", "Window",
+                                                     "Scenes", "Graphics", "About" };
+
     // "Unsaved changes" marker: the CommandHistory revision at the last save/load. Compared against the
     // current revision for the status-bar dirty dot; reset wherever the scene is (re)loaded or saved.
     static uint64_t s_SavedRevision = 0;
@@ -445,6 +454,18 @@ namespace Desert::Editor
 
     [[nodiscard]] Common::BoolResultStr EditorLayer::OnAttach()
     {
+        // THE CONTROL CHANNEL, IF ONE WAS ASKED FOR. Before anything else, so a client that started this
+        // editor can connect and watch the boot rather than guessing how long to wait for the socket.
+        //
+        // A REFUSAL ENDS THE RUN. Carrying on unheard would be the worst of both: the client waits for a
+        // socket that will never appear, and the editor it was meant to drive sits there being driven by
+        // nobody. `--control-socket` is only ever passed by something that intends to connect.
+        if ( const auto& channel = Control::ControlChannelOptions::Get(); channel.Requested() )
+        {
+            if ( const auto listening = m_ControlSocket.Listen( channel.SocketPath ); !listening )
+                return Common::MakeFormattedError( "control channel: {}", listening.GetError() );
+        }
+
         // 1. Create ImGui Context first
         ::ImGui::CreateContext();
 
@@ -578,65 +599,16 @@ namespace Desert::Editor
                                                                                         m_AssetManager.get() );
                                  } );
 
-        // `--open-panel <name>`: put a tool on screen at boot, by the name the View menu shows. See
-        // Editor/Core/StartupOptions.hpp for why it is an argument rather than a click. A CONTEXTUAL
-        // panel is also PINNED, because opening one by hand is what pinning means and a name on the
-        // command line is as deliberate as a menu tick.
+        // NOTHING OPENS A PANEL AT BOOT ANY MORE, and the absence is the point.
         //
-        // The loop is over the TOOLS, and it can be nothing else: m_Panels is a PanelRegistry, so there is
-        // no document in it whose name could be matched here and whose "visibility" could then be set. The
-        // asset-path fallback below is how a document is put on screen, and it goes through the ordinary
-        // open request rather than through a flag on a panel.
-        for ( const std::string& wanted : Editor::StartupOptions::Get().PanelsToOpen )
-        {
-            bool found = false;
-            for ( auto& panel : m_Panels )
-            {
-                if ( panel->GetName() != wanted )
-                    continue;
-                panel->GetVisibility() = true;
-                if ( panel->IsContextual() )
-                    panel->Pinned() = true;
-                found = true;
-                break;
-            }
-
-            if ( found )
-                continue;
-
-            // Not a panel name — try it as an ASSET PATH, and open that asset's document.
-            //
-            // WHY THE SAME FLAG RATHER THAN A SECOND ONE. `--open-panel` exists because a tool window
-            // rightly defaults to hidden and there was no way to put one on screen unattended; the editor
-            // cannot be driven by synthetic input on macOS, so a capture of a tool needs a flag. An asset
-            // DOCUMENT has exactly that problem and one more: it does not exist until somebody opens an
-            // asset, so no name can name it at boot. What the flag means is "put this on screen", and a
-            // document is a thing on screen; a second flag would be the same request spelled twice.
-            //
-            // Only a value that was NEVER a material path falls through to the error below: a `.demat` that
-            // failed to resolve has already been reported here by name, and repeating it as "names no panel"
-            // would be a second message contradicting the first.
-            if ( RequestMaterialDocument( m_AssetManager.get(), wanted ) !=
-                 MaterialDocumentRequest::NotAMaterialPath )
-            {
-                continue;
-            }
-
-            // The same fall-through for the four cloud formats, and it is the ONLY way to put one of these
-            // documents on screen unattended: they no longer have panel names for the loop above to match,
-            // and macOS refuses synthetic input, so a capture of a cloud editor cannot come from a click.
-            if ( RequestCloudDocument( m_AssetManager.get(), wanted ) != CloudDocumentRequest::NotACloudPath )
-                continue;
-
-            // NAMED, WITH THE LIST. A flag that quietly did nothing is indistinguishable from a panel
-            // that failed to draw, and this argument exists precisely for runs nobody is watching.
-            std::string known;
-            for ( auto& panel : m_Panels )
-                known += ( known.empty() ? "" : ", " ) + panel->GetName();
-            LOG_ERROR( "[Editor] --open-panel '{}' names neither a panel nor an openable asset. Known "
-                       "panels: {}",
-                       wanted, known );
-        }
+        // `--open-panel <name>` stood here: a flag that put a tool on screen because macOS refuses this
+        // machine synthetic input, so there was no other way to photograph one. It could only ever act
+        // ONCE, at startup, which is all a flag can do — and every task that needed a different window
+        // added another flag beside it.
+        //
+        // The control channel replaces the whole family. "Panel" / "Open Details" is a command palette
+        // entry, so it is reachable by a person with Ctrl+P and by a client at any moment in the session,
+        // as many times as it likes. See BuildPaletteCommands and Editor/Core/Control.
 #endif // EBABLE_IMGUI
 
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
@@ -673,6 +645,15 @@ namespace Desert::Editor
     {
         DESERT_PROFILE_SCOPE( "Layer::OnUpdate" );
 
+        // THE CONTROL CHANNEL GOES FIRST, ahead of the startup-loading return below and not after it.
+        //
+        // A client connects while the editor is still cooking assets — that is the normal case, since it
+        // launched the process — and a channel that only started answering once loading finished would
+        // look, from the outside, exactly like an editor that had hung. It answers `state` throughout, so
+        // the client can watch the boot; anything that changes the picture is held by the quiescence gate
+        // until the staged load is done, which is what PendingWork::StartupLoading is for.
+        ServiceControlChannel();
+
         // Staged startup loading: run ONE heavy stage per frame — but only after at least one frame with
         // the loading overlay has been PRESENTED (else the first cook would freeze a blank window anyway).
         // While loading, the scene is NOT rendered at all (shaders/assets aren't there yet — rendering
@@ -685,6 +666,7 @@ namespace Desert::Editor
                 m_StartupStages[m_StartupNext].Run();
                 ++m_StartupNext;
             }
+            SampleFrameQuiescence();
             return BOOLSUCCESS;
         }
 
@@ -720,17 +702,6 @@ namespace Desert::Editor
             auto path = m_SceneLoadRequested.value();
             m_SceneLoadRequested.reset();
             LoadSceneInternal( path );
-        }
-
-        // `--select` lands HERE and not in OnAttach, because at OnAttach there is no scene to select in:
-        // the load is deferred to the first frame where the startup stages are done. This is the earliest
-        // point at which the entities exist, and it is before anything is drawn, so the very first frame
-        // already shows the Details panel filled — which is the whole reason a capture can prove anything
-        // about that panel.
-        if ( !m_StartupSelectionApplied && !m_SceneLoadRequested && !StartupLoading() )
-        {
-            m_StartupSelectionApplied = true;
-            ApplyStartupSelection();
         }
 
         // New (empty) scene — deferred like a load so it never tears down resources mid-frame.
@@ -934,6 +905,16 @@ namespace Desert::Editor
             m_ShotCameraPlaced = true;
         }
 
+        // WAS ANYTHING STILL OUTSTANDING WHEN THIS FRAME WAS MADE? Sampled HERE, and the position is the
+        // whole of its meaning: after every deferred queue above has drained — scene loads, document
+        // closes, asset opens, leaving Play — and before a single pixel of this frame is rendered.
+        //
+        // Sampled rather than asked for later, because by the time the frame has been presented the
+        // answer has moved on, and the question the control channel needs answered is about the picture:
+        // "did this frame have everything the command asked for in it, or was some of it still queued?"
+        // Editor/Core/Control/ControlPipeline.hpp is where that question is judged.
+        SampleFrameQuiescence();
+
         // Multi-scene editing: drive EVERY open document each frame so all viewports render live. The active
         // one is m_MainScene (rebound on viewport focus); RigBuilder / F9 below act on it only. The outline
         // aid + Begin/RegistryRender/OnUpdate/End are folded into UpdateSceneFrame (see below), applied per
@@ -1053,6 +1034,413 @@ namespace Desert::Editor
         const bool written = stbi_write_png( path.c_str(), w, h, 4, px.data(), w * 4 ) != 0;
         LOG_INFO( "[Shot] {} -> {} ({}x{})", written ? "wrote" : "FAILED to write", path, w, h );
         return written;
+    }
+
+    // =============================================================================================
+    // THE CONTROL CHANNEL
+    //
+    // Four functions and one promise. The promise is that a reply leaves only after a frame that already
+    // reflects the command it answers — see Editor/Core/Control/ControlPipeline.hpp for why that is not
+    // the same as "the next frame", and what it took to make it true rather than usually true.
+    //
+    // The order around one frame is:
+    //   OnUpdate      ServiceControlChannel()   read a request, run it, arm the gate
+    //   OnUpdate      ...deferred queues drain, the scene renders...
+    //   OnUpdate      SampleFrameQuiescence()   what was still outstanding while this frame was made
+    //   OnImGuiRender ...the interface is recorded into the swapchain...
+    //   present
+    //   OnFramePresented                        judge the frame; take the shot; release the reply
+    // =============================================================================================
+
+    void EditorLayer::ServiceControlChannel()
+    {
+        if ( !m_ControlSocket.IsListening() )
+            return;
+
+        // A request whose reply has not gone out yet holds the channel. Reading a second one here would
+        // hand the ordering guarantee to whoever wrote the client: two commands in flight cannot both be
+        // "the command the next settled frame proves".
+        if ( m_ControlInFlight )
+            return;
+
+        const std::optional<std::string> line = m_ControlSocket.PollRequestLine();
+        if ( !line )
+            return;
+
+        const auto parsed = Control::ParseRequest( *line );
+        if ( !parsed )
+        {
+            // Answered immediately: a request that did not parse has no id to echo and nothing to wait
+            // for. Silence here would be indistinguishable from an editor that had stopped reading.
+            m_ControlSocket.SendResponseLine(
+                 Control::FormatResponse( Control::Response::Failure( 0, parsed.GetError() ) ) );
+            return;
+        }
+
+        const Control::Request request  = parsed.GetValue();
+        Control::Response      response = ExecuteControlRequest( request );
+
+        // READS ANSWER NOW; ANYTHING THAT CAN CHANGE THE PICTURE WAITS FOR ONE.
+        //
+        // `commands` and `state` observe and change nothing, so making them wait would buy latency and no
+        // guarantee at all. `run` and the two shots are the ones the promise is about — and a shot does
+        // not merely wait for the settled frame, it IS taken on it, which is why its response is finished
+        // in OnFramePresented rather than here.
+        const bool waitsForAFrame =
+             response.Ok() && ( request.Operation == Control::Op::Run || Control::IsShot( request.Operation ) );
+
+        if ( !waitsForAFrame )
+        {
+            m_ControlSocket.SendResponseLine( Control::FormatResponse( response ) );
+            if ( request.Operation == Control::Op::Quit && response.Ok() )
+                m_ControlQuitCode = request.ExitCode;
+            return;
+        }
+
+        m_ControlInFlight     = request;
+        m_ControlPendingReply = std::move( response );
+        m_ControlGate.ArmAfterExecution( m_FrameIndex );
+    }
+
+    void EditorLayer::SampleFrameQuiescence()
+    {
+        Control::EditorQuiescence quiescence;
+        quiescence.Set( Control::PendingWork::StartupLoading, StartupLoading() );
+        quiescence.Set( Control::PendingWork::SceneLoad, m_SceneLoadRequested.has_value() );
+        quiescence.Set( Control::PendingWork::NewScene, m_NewSceneRequested );
+        quiescence.Set( Control::PendingWork::SceneView, m_AddSceneViewRequested );
+        quiescence.Set( Control::PendingWork::SceneStop, m_PendingSceneStop );
+        quiescence.Set( Control::PendingWork::DocumentCloses, !m_DocumentsToClose.empty() );
+        // The queue is a file-static inbox drained by ServiceAssetOpenRequests, so "is anything queued"
+        // is asked of the queue itself rather than of a copy this layer keeps — a copy would be a second
+        // answer, and the two would disagree on exactly the frame an open was handled halfway.
+        quiescence.Set( Control::PendingWork::AssetOpens, Core::AssetOpenRequests::HasPending() );
+        quiescence.Set( Control::PendingWork::OpenRefusal, m_OpenRefusalPending );
+        m_FrameQuiescence = quiescence;
+    }
+
+    void EditorLayer::OnFramePresented()
+    {
+        ++m_FrameIndex;
+
+        if ( !m_ControlSocket.IsListening() )
+            return;
+
+        // A quit waits for its own answer to leave the machine. A client that asked the editor to close
+        // and never heard back cannot tell a clean shutdown from a crash, and it is the last thing it
+        // will ever hear from this process.
+        if ( m_ControlQuitCode && !m_ControlSocket.HasUnsentOutput() )
+        {
+            const int32_t code = *m_ControlQuitCode;
+            m_ControlQuitCode.reset();
+            LOG_INFO( "[Control] quit requested; closing with status {}.", code );
+            const_cast<Engine::Application*>( m_Application )->Close( code );
+            return;
+        }
+
+        if ( !m_ControlInFlight || !m_ControlPendingReply )
+            return;
+
+        // The frame just presented is judged by the quiescence sampled while it was being BUILT. The gate
+        // uses m_FrameIndex - 1 because the counter was advanced above: the frame that has just gone out
+        // is the one that was being made when ServiceControlChannel armed the gate.
+        const Control::GateVerdict verdict =
+             m_ControlGate.ObserveFramePresented( m_FrameIndex - 1, m_FrameQuiescence );
+
+        if ( verdict == Control::GateVerdict::Waiting || verdict == Control::GateVerdict::Idle )
+            return;
+
+        Control::Response reply = *m_ControlPendingReply;
+
+        if ( verdict == Control::GateVerdict::TimedOut )
+        {
+            reply = Control::Response::Failure(
+                 m_ControlInFlight->Id,
+                 Control::DescribeSettleTimeout( m_FrameQuiescence, m_ControlGate.FramesWaited() ) );
+        }
+        else if ( Control::IsShot( m_ControlInFlight->Operation ) )
+        {
+            // THE SHOT IS TAKEN HERE AND NOWHERE ELSE, and that is the whole reason this hook exists.
+            // This instant — after present, before the next acquire — is the only one at which the frame
+            // a person would be looking at exists as bytes on the device, and it is a frame this gate has
+            // just certified as reflecting the command that came before it.
+            std::string error;
+            const bool  window  = ( m_ControlInFlight->Operation == Control::Op::ShotWindow );
+            const bool  written = window ? WriteWindowPng( m_ControlInFlight->Path, error )
+                                         : WriteViewportPng( m_ControlInFlight->Path );
+
+            if ( written )
+            {
+                rfl::Generic::Object payload;
+                payload["path"] = rfl::Generic( m_ControlInFlight->Path );
+                // Named on the wire so a report cannot quote a viewport capture as a picture of the
+                // editor. The two are different subjects and only one of them contains an interface.
+                payload["subject"] = rfl::Generic( std::string( window ? "window" : "viewport" ) );
+                reply              = Control::Response::Success( m_ControlInFlight->Id, std::move( payload ) );
+            }
+            else
+            {
+                reply = Control::Response::Failure(
+                     m_ControlInFlight->Id,
+                     error.empty() ? "the capture could not be written; the log has the reason." : error );
+            }
+        }
+
+        m_ControlSocket.SendResponseLine( Control::FormatResponse( reply ) );
+        m_ControlInFlight.reset();
+        m_ControlPendingReply.reset();
+    }
+
+    Control::Response EditorLayer::ExecuteControlRequest( const Control::Request& request )
+    {
+        switch ( request.Operation )
+        {
+            case Control::Op::Commands:
+            {
+                rfl::Generic::Array entries;
+                for ( const PaletteCommand& command : BuildPaletteCommands() )
+                {
+                    rfl::Generic::Object entry;
+                    entry["group"] = rfl::Generic( command.Group );
+                    entry["label"] = rfl::Generic( command.Label );
+                    entries.push_back( rfl::Generic( entry ) );
+                }
+
+                rfl::Generic::Object payload;
+                payload["commands"] = rfl::Generic( entries );
+                return Control::Response::Success( request.Id, std::move( payload ) );
+            }
+
+            case Control::Op::Run:
+            {
+                // ONE dictionary, built once, both resolved against and run out of. Building it twice —
+                // once to look the command up and once to run it — would let the two disagree on any
+                // frame where something opened or closed in between, and the command that ran would not
+                // be the command that was found.
+                const std::vector<PaletteCommand> dictionary = BuildPaletteCommands();
+                const Control::CommandAddress     wanted{ request.Group, request.Label };
+                const Control::Resolution         resolved = Control::ResolveCommand( dictionary, wanted );
+
+                if ( !resolved.Found )
+                {
+                    return Control::Response::Failure( request.Id,
+                                                       Control::DescribeUnknownCommand( wanted, resolved ) );
+                }
+
+                dictionary[resolved.Index].Run();
+                return Control::Response::Success( request.Id );
+            }
+
+            case Control::Op::State:
+            {
+                if ( const auto valid = Control::ValidateSections( request.Sections ); !valid )
+                    return Control::Response::Failure( request.Id, valid.GetError() );
+
+                return Control::Response::Success( request.Id,
+                                                   Control::ToJson( TakeEditorSnapshot(), request.Sections ) );
+            }
+
+            case Control::Op::ShotWindow:
+            case Control::Op::ShotViewport:
+                // Nothing happens now. The capture belongs to the settled frame this request is about to
+                // wait for, and is taken in OnFramePresented; answering here would be a picture of the
+                // frame BEFORE the commands that preceded it had been drawn.
+                return Control::Response::Success( request.Id );
+
+            case Control::Op::Quit:
+                return Control::Response::Success( request.Id );
+        }
+
+        // Unreachable while every Op is handled above, and stated rather than left to fall off the end:
+        // an Op added without a case here would otherwise return a default-constructed response, which is
+        // a failure with nothing said — the one thing Response is built to make impossible.
+        return Control::Response::Failure( request.Id,
+                                           "this operation parsed but has no implementation; that is a "
+                                           "defect in the control channel." );
+    }
+
+    Control::EditorSnapshot EditorLayer::TakeEditorSnapshot() const
+    {
+        Control::EditorSnapshot snapshot;
+
+        snapshot.SceneName              = m_MainScene ? m_MainScene->GetSceneName() : std::string();
+        snapshot.SceneHasUnsavedChanges = CommandHistory::Get().Revision() != s_SavedRevision;
+        snapshot.InPlayMode             = ( m_EditorState == EditorState::Play );
+
+        for ( const Common::UUID& uuid : Core::SelectionManager::GetSelection() )
+        {
+            Control::EntitySnapshot entity;
+            entity.Uuid = uuid.ToString();
+            if ( m_MainScene )
+            {
+                for ( const auto& candidate : m_MainScene->GetAllEntities() )
+                {
+                    if ( !candidate.HasComponent<ECS::UUIDComponent>() )
+                        continue;
+                    if ( candidate.GetComponent<ECS::UUIDComponent>().UUID != uuid )
+                        continue;
+                    if ( candidate.HasComponent<ECS::TagComponent>() )
+                        entity.Tag = candidate.GetComponent<ECS::TagComponent>().Tag;
+                    break;
+                }
+            }
+            snapshot.Selection.push_back( std::move( entity ) );
+        }
+
+        // MOST RECENTLY USED ORDER, which is the order the well lists and Ctrl+Tab walks. Reporting the
+        // storage order instead would be a second sequence for the same documents, and a client reading
+        // it would predict a different answer from Ctrl+Tab than the editor gives.
+        for ( const Assets::AssetHandle& subject : m_Documents.MostRecentOrder() )
+        {
+            const IAssetEditorPanel* document = m_Documents.Find( subject );
+            if ( !document )
+                continue;
+
+            Control::DocumentSnapshot entry;
+            entry.Name               = DocumentDisplayName( document->GetName() );
+            entry.Type               = Assets::AssetTypeName( document->SubjectType() );
+            entry.Subject            = std::to_string( static_cast<uint64_t>( subject ) );
+            entry.HoldsRendererSlot  = document->HoldsRendererSlot();
+            entry.ClaimsRendererSlot = document->ClaimsRendererSlot();
+            entry.Focused            = ( subject == m_FocusedDocument );
+            snapshot.Documents.push_back( std::move( entry ) );
+        }
+
+        for ( const ClosedDocument& closed : m_Documents.RecentlyClosed() )
+        {
+            Control::ClosedDocumentSnapshot entry;
+            entry.Name    = closed.DisplayName;
+            entry.Type    = Assets::AssetTypeName( closed.Type );
+            entry.Subject = std::to_string( static_cast<uint64_t>( closed.Subject ) );
+            snapshot.RecentlyClosed.push_back( std::move( entry ) );
+        }
+
+#ifdef EBABLE_IMGUI
+        // TOOLS ONLY, and by construction: m_Panels is a PanelRegistry, which cannot hold a document.
+        // A client reading this list is reading exactly what the View menu lists.
+        for ( const auto& panel : m_Panels )
+        {
+            Control::PanelSnapshot entry;
+            entry.Name = panel->GetName();
+            if ( const auto hash = entry.Name.find( "##" ); hash != std::string::npos )
+                entry.Name.erase( hash );
+            entry.Visible    = panel->GetVisibility();
+            entry.Pinned     = panel->Pinned();
+            entry.Contextual = panel->IsContextual();
+            entry.Relevant   = panel->IsRelevant();
+            snapshot.Panels.push_back( std::move( entry ) );
+        }
+#endif
+
+        snapshot.RendererSlotsLive    = Graphic::SceneRenderer::GetLiveRendererCount();
+        snapshot.RendererSlotsPending = PendingRendererSlotDemand( m_Documents.Documents() );
+        snapshot.RendererSlotsMax     = EngineContext::kMaxRendererSlots;
+
+        snapshot.LogInfoCount    = LogsPanel::InfoCount();
+        snapshot.LogWarningCount = LogsPanel::WarningCount();
+        snapshot.LogErrorCount   = LogsPanel::ErrorCount();
+        snapshot.LogTail         = LogsPanel::Tail( 40 );
+
+        snapshot.Quiescence = m_FrameQuiescence;
+        return snapshot;
+    }
+
+    void EditorLayer::RecordWindowCaptureIfDue()
+    {
+        // THE CAPTURE IS RECORDED WHILE THE FRAME IS STILL BEING BUILT, and that is not an optimisation.
+        //
+        // A swapchain image may only be touched between its acquire and its present. The first version of
+        // this read it back after the present, in OnFramePresented, and the picture was correct — which is
+        // exactly what made it dangerous. Only the validation layer objected: "vkQueueSubmit(): performs a
+        // layout transition on presentable VkImage, but the image has not been acquired from
+        // VkSwapchainKHR". A capture that quietly breaks the frame loop it was taken to document is worth
+        // less than no capture.
+        //
+        // So the editor asks the gate, before the submit, whether THIS frame is the one the reply waits
+        // for — the same question, on the same inputs, that OnFramePresented will answer afterwards.
+        if ( !m_ControlInFlight || m_ControlInFlight->Operation != Control::Op::ShotWindow )
+            return;
+        if ( !m_ControlGate.WouldDischarge( m_FrameIndex, m_FrameQuiescence ) )
+            return;
+
+        auto swapChain = std::dynamic_pointer_cast<Graphic::API::Vulkan::VulkanSwapChain>(
+             EngineContext::GetInstance().GetWindow()->GetWindowSwapChain() );
+        if ( !swapChain )
+        {
+            m_ControlCaptureError = "there is no Vulkan swapchain to capture the presented frame from.";
+            return;
+        }
+
+        if ( const auto recorded = swapChain->RecordFrameCapture(); !recorded )
+        {
+            m_ControlCaptureError = recorded.GetError();
+            return;
+        }
+        m_ControlCaptureError.clear();
+    }
+
+    bool EditorLayer::WriteWindowPng( const std::string& path, std::string& outError )
+    {
+        // THE WHOLE EDITOR, INTERFACE INCLUDED — which is what WriteViewportPng next door cannot do and
+        // never could. That one reads the scene's own final image; ImGui is recorded into the SWAPCHAIN
+        // render pass, so no capture this engine took before this existed held a single pixel of a panel,
+        // a menu or a dialog. It is why proving anything about the interface meant photographing the
+        // window from outside the process, by PID.
+        //
+        // This is the second half of the capture: the copy was recorded into this frame's command buffer
+        // by RecordWindowCaptureIfDue, and the bytes are collected here, once the present that carried it
+        // has gone out.
+        if ( !m_ControlCaptureError.empty() )
+        {
+            outError = m_ControlCaptureError;
+            m_ControlCaptureError.clear();
+            return false;
+        }
+
+        auto swapChain = std::dynamic_pointer_cast<Graphic::API::Vulkan::VulkanSwapChain>(
+             EngineContext::GetInstance().GetWindow()->GetWindowSwapChain() );
+        if ( !swapChain )
+        {
+            outError = "there is no Vulkan swapchain to collect the captured frame from.";
+            return false;
+        }
+
+        const std::filesystem::path file = std::filesystem::path( path );
+        if ( file.has_parent_path() && !file.parent_path().empty() )
+        {
+            std::error_code ec;
+            std::filesystem::create_directories( file.parent_path(), ec );
+            if ( ec && !std::filesystem::exists( file.parent_path() ) )
+            {
+                outError = "could not create '" + file.parent_path().string() + "': " + ec.message();
+                return false;
+            }
+        }
+
+        // The copy was submitted with this frame; waiting is what makes the staging buffer readable.
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+
+        uint32_t   width  = 0;
+        uint32_t   height = 0;
+        const auto pixels = swapChain->TakeCapturedFrameRGBA8( width, height );
+        if ( !pixels )
+        {
+            outError = pixels.GetError();
+            return false;
+        }
+
+        stbi_flip_vertically_on_write( 0 );
+        const bool written = stbi_write_png( path.c_str(), static_cast<int>( width ), static_cast<int>( height ),
+                                             4, pixels.GetValue().data(), static_cast<int>( width ) * 4 ) != 0;
+        if ( !written )
+        {
+            outError = "stb_image_write refused to write '" + path + "'.";
+            return false;
+        }
+
+        LOG_INFO( "[Control] wrote the presented frame (editor and interface) -> {} ({}x{})", path, width,
+                  height );
+        return true;
     }
 
     void EditorLayer::BuildSceneSystems( Desert::Core::Scene& scene )
@@ -1364,6 +1752,20 @@ namespace Desert::Editor
         if ( std::find( m_DocumentsToClose.begin(), m_DocumentsToClose.end(), subject ) ==
              m_DocumentsToClose.end() )
             m_DocumentsToClose.push_back( subject );
+    }
+
+    void EditorLayer::RequestCloseAllDocuments()
+    {
+        // Collected first and requested after, rather than requested while iterating: RequestDocumentClose
+        // reads the well, and a range-for over a container something else is being asked about is the kind
+        // of thing that survives review and then does not survive a refactor.
+        std::vector<Assets::AssetHandle> subjects;
+        subjects.reserve( m_Documents.Count() );
+        for ( const auto& document : m_Documents )
+            subjects.push_back( document->Subject() );
+
+        for ( const Assets::AssetHandle& subject : subjects )
+            RequestDocumentClose( subject );
     }
 
     void EditorLayer::ServiceDocumentCloses()
@@ -1847,16 +2249,19 @@ namespace Desert::Editor
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer->End();
 #endif
+
+        // AFTER the interface has been recorded into the swapchain pass and BEFORE the frame is submitted:
+        // the only window in which the presented image is legally ours to copy out of. A no-op unless a
+        // `shot.window` is waiting on exactly this frame. See RecordWindowCaptureIfDue.
+        RecordWindowCaptureIfDue();
+
         return BOOLSUCCESS;
     }
 
-    void EditorLayer::DrawCommandPalette()
+    std::vector<PaletteCommand> EditorLayer::BuildPaletteCommands()
     {
-        if ( !m_CommandPalette.IsOpen() )
-            return;
-
         std::vector<PaletteCommand> commands;
-        commands.reserve( m_Panels.Size() + m_Documents.Count() + 8 );
+        commands.reserve( m_Panels.Size() + m_Documents.Count() + 32 );
 
         // Panels — jump to / reveal any tool window. TOOLS ONLY, and by construction rather than by a
         // filter: m_Panels is a PanelRegistry, which cannot hold a document. Before the split this loop
@@ -1885,6 +2290,38 @@ namespace Desert::Editor
                                   [this, subject] { FocusDocument( subject ); } } );
         }
 
+        // Closing one, by name. Never offered before, because a person closes a window with the x on it —
+        // which is exactly the gesture no unattended run can make, and therefore the reason "close a
+        // document and show what the well offers back" was a claim nobody could photograph. It goes
+        // through RequestDocumentClose like the x does, so the destruction still happens between frames
+        // behind the device-idle wait.
+        for ( const auto& document : m_Documents )
+        {
+            const Assets::AssetHandle subject = document->Subject();
+            commands.push_back( { "Document", "Close " + DocumentDisplayName( document->GetName() ),
+                                  [this, subject] { RequestDocumentClose( subject ); } } );
+        }
+
+        // Ctrl+Tab, as a command. The key is bound in OnImGuiRender and a key is not available to a
+        // client either; this is the same CycleDocuments the keystroke calls, so the ring the two walk
+        // cannot differ.
+        if ( m_Documents.Count() > 1 )
+        {
+            commands.push_back(
+                 { "Document", "Cycle to the next most recently used", [this] { CycleDocuments(); } } );
+        }
+
+        // Reopening one that was closed. The list the empty well shows, reachable without a mouse — and
+        // it is the same Core::AssetOpenRequests the Selectable there uses, so a reopen is refused by the
+        // six-slot cap exactly like any other open rather than becoming a second way in.
+        for ( const ClosedDocument& closed : m_Documents.RecentlyClosed() )
+        {
+            const Assets::AssetHandle subject = closed.Subject;
+            const Assets::AssetTypeID type    = closed.Type;
+            commands.push_back( { "Document", "Reopen " + closed.DisplayName,
+                                  [subject, type] { Core::AssetOpenRequests::Request( subject, type ); } } );
+        }
+
         // Entities — select any object in the open scene.
         if ( m_MainScene )
         {
@@ -1901,12 +2338,79 @@ namespace Desert::Editor
             }
         }
 
+        // THE MENU BAR. `--open-menu` is gone and this is where its capability went: a menu can be opened,
+        // photographed and closed again, as many times as a session likes, instead of being pinned open
+        // for a whole run by a flag with no way to say "now let go".
+        for ( const char* menu : kMenuBarMenus )
+        {
+            const std::string name = menu;
+            commands.push_back(
+                 { "Menu", "Open the " + name + " menu", [this, name] { m_HeldOpenMenu = name; } } );
+        }
+        commands.push_back( { "Menu", "Close the open menu", [this] { m_HeldOpenMenu.clear(); } } );
+
+        // OPENABLE ASSETS. This is where `--open-panel <path-to-asset>` went — the half of that flag that
+        // opened a DOCUMENT rather than a tool, and the only way a document has ever been put on screen
+        // unattended, since a document does not exist until something opens its asset and therefore has
+        // no name to be reached by.
+        //
+        // The list is the project's registered assets filtered by "does an editor open this kind", which
+        // is m_AssetEditors and not a hand-written type list — so a new document type appears here the
+        // moment its factory is registered.
+        if ( m_AssetManager )
+        {
+            for ( const auto& [metadata, asset] : m_AssetManager->RegisteredAssets() )
+            {
+                if ( !metadata.IsValid() || !m_AssetEditors.HasEditorFor( metadata.AssetType ) )
+                    continue;
+
+                const Assets::AssetHandle subject = metadata.Handle;
+                const Assets::AssetTypeID type    = metadata.AssetType;
+                commands.push_back( { "Open", metadata.Filepath.filename().generic_string(),
+                                      [subject, type] { Core::AssetOpenRequests::Request( subject, type ); } } );
+            }
+        }
+
+        // NAMED VIEWPOINTS for the focused document's preview — the replacement for `--preview-orbit
+        // yaw,pitch`, whose continuous angle pair a palette entry has nowhere to carry. See
+        // Editor/Core/PreviewViewpoints.hpp for why names are MORE reproducible than numbers, not less.
+        //
+        // Offered for the FOCUSED document only, because that is the one a person means by "the preview"
+        // and because seven entries per open document would bury everything else in the list.
+        if ( IAssetEditorPanel* focused = m_Documents.Find( m_FocusedDocument ); focused && focused->HasPreview() )
+        {
+            for ( const PreviewViewpoint& viewpoint : kPreviewViewpoints )
+            {
+                const PreviewViewpoint* aim = &viewpoint;
+                commands.push_back( { "Preview", std::string( viewpoint.Name ), [this, aim]
+                                      {
+                                          // Re-resolved rather than captured: the focus can move, and the
+                                          // document can be destroyed, between this list being built and
+                                          // the entry being run.
+                                          if ( IAssetEditorPanel* target = m_Documents.Find( m_FocusedDocument );
+                                               target && target->HasPreview() )
+                                          {
+                                              target->SetPreviewViewpoint( *aim );
+                                          }
+                                      } } );
+            }
+        }
+
         // Actions.
         commands.push_back( { "Action", "Save Scene", [this] { (void)SaveOpenScene(); } } );
         commands.push_back( { "Action", "Undo", [] { CommandHistory::Get().Undo(); } } );
         commands.push_back( { "Action", "Redo", [] { CommandHistory::Get().Redo(); } } );
+        commands.push_back( { "Action", "Close All Documents", [this] { RequestCloseAllDocuments(); } } );
 
-        m_CommandPalette.SetCommands( std::move( commands ) );
+        return commands;
+    }
+
+    void EditorLayer::DrawCommandPalette()
+    {
+        if ( !m_CommandPalette.IsOpen() )
+            return;
+
+        m_CommandPalette.SetCommands( BuildPaletteCommands() );
         m_CommandPalette.Draw();
     }
 
@@ -2289,43 +2793,20 @@ namespace Desert::Editor
         if ( !ImGui::BeginMainMenuBar() )
             return;
 
-        // `--open-menu <name>`: hold one menu open so a capture can show what is in it. See
-        // StartupOptions::MenuToOpen for why a flag is the only way to photograph a menu on this platform.
+        // THE MENU HELD OPEN, if the control channel asked for one. `--open-menu <name>` stood here and
+        // it could hold a menu open for the whole run and never let go, because a flag has no later
+        // moment at which to be told otherwise. "Menu" / "Open the View menu" is now an ordinary palette
+        // entry, so a session can photograph a menu and then close it and carry on.
         //
         // OpenPopup here and BeginMenu below derive the same id from the same label in the same window
         // (BeginMenu: window->GetID(label); OpenPopup: CurrentWindow->GetID(str_id)), which is what makes
         // this the menu's own opening rather than a second popup wearing its name. Re-issued every frame
         // because a menu closes as soon as focus leaves it and a shot may land on any frame.
-        {
-            const std::string& wanted = Editor::StartupOptions::Get().MenuToOpen;
-            if ( !wanted.empty() )
-            {
-                static constexpr const char* kMenus[] = { "File",   "Edit",     "View", "Window",
-                                                          "Scenes", "Graphics", "About" };
-                bool                         known    = false;
-                for ( const char* menu : kMenus )
-                    if ( wanted == menu )
-                    {
-                        ImGui::OpenPopup( menu );
-                        known = true;
-                        break;
-                    }
-
-                if ( !known )
-                {
-                    // Named and fatal, the rule --open-panel and --select already follow: a menu that
-                    // silently failed to open is indistinguishable from a menu that failed to draw, and a
-                    // capture of the second presented as the first is the defect this family of flags
-                    // exists to prevent.
-                    std::string names;
-                    for ( const char* menu : kMenus )
-                        names += ( names.empty() ? "" : ", " ) + std::string( menu );
-                    LOG_ERROR( "[Editor] --open-menu '{}' names no menu. Known menus: {}", wanted, names );
-                    const_cast<Engine::Application*>( m_Application )->Close( 2 );
-                    Editor::StartupOptions::Get().MenuToOpen.clear(); // do not repeat it every frame
-                }
-            }
-        }
+        //
+        // The name was validated against kMenuBarMenus when the command was built, so there is no unknown
+        // name to reject here: the palette cannot offer one.
+        if ( !m_HeldOpenMenu.empty() )
+            ImGui::OpenPopup( m_HeldOpenMenu.c_str() );
 
         DrawFileMenu();
         DrawEditMenu();
@@ -3959,60 +4440,6 @@ namespace Desert::Editor
         }
     }
 
-    void EditorLayer::ApplyStartupSelection()
-    {
-        const std::string& wanted = Editor::StartupOptions::Get().SelectEntity;
-        if ( wanted.empty() )
-            return;
-
-        if ( !m_MainScene )
-        {
-            LOG_ERROR( "[Editor] --select '{}' but there is no scene to select in.", wanted );
-            const_cast<Engine::Application*>( m_Application )->Close( 2 );
-            return;
-        }
-
-        // TAG FIRST, UUID SECOND. The tag is what a person reads in the outliner and what a task brief
-        // names; the UUID is what survives a rename and what a script that walked the .desce already has.
-        // Tag first because a tag is what a human writes, and no tag in this engine is a bare decimal
-        // number by convention — so the two namespaces do not realistically collide.
-        std::string                 known;
-        std::optional<Common::UUID> match;
-
-        for ( const auto& entity : m_MainScene->GetAllEntities() )
-        {
-            if ( !entity.HasComponent<ECS::UUIDComponent>() )
-                continue;
-
-            const Common::UUID uuid = entity.GetComponent<ECS::UUIDComponent>().UUID;
-            const std::string  tag  = entity.HasComponent<ECS::TagComponent>()
-                                           ? entity.GetComponent<ECS::TagComponent>().Tag
-                                           : std::string();
-
-            if ( !tag.empty() )
-                known += ( known.empty() ? "" : ", " ) + tag;
-
-            if ( !match && ( tag == wanted || uuid.ToString() == wanted ) )
-                match = uuid;
-        }
-
-        if ( match )
-        {
-            Core::SelectionManager::SetSelected( *match );
-            LOG_INFO( "[Editor] --select '{}' -> entity {} selected.", wanted, match->ToString() );
-            return;
-        }
-
-        // NAMED, WITH THE LIST, AND FATAL — the same rule --open-panel follows next door, taken one step
-        // further. Selecting nothing quietly would be indistinguishable from the editor's ordinary
-        // unselected boot: an empty Details panel is exactly what "nothing is selected" looks like, so a
-        // capture of one would be a picture of the failure presented as a picture of the feature. That is
-        // defect 1 wearing a different hat, and it ends the run rather than the run ending in evidence.
-        LOG_ERROR( "[Editor] --select '{}' matches no entity by tag or UUID in scene '{}'. Entities: {}", wanted,
-                   m_MainScene->GetSceneName(), known.empty() ? "(none)" : known );
-        const_cast<Engine::Application*>( m_Application )->Close( 2 );
-    }
-
     void EditorLayer::DrawWindowMenu()
     {
         namespace ImGui = ::ImGui;
@@ -4078,8 +4505,7 @@ namespace Desert::Editor
 
             ImGui::Separator();
             if ( ImGui::MenuItem( ICON_MDI_CLOSE_BOX_OUTLINE "  Close All Documents" ) )
-                for ( const auto& document : m_Documents )
-                    closeRequests.push_back( document->Subject() );
+                RequestCloseAllDocuments();
 
             for ( const Assets::AssetHandle& subject : closeRequests )
                 RequestDocumentClose( subject );
@@ -4641,6 +5067,22 @@ namespace Desert::Editor
 
     Common::BoolResultStr EditorLayer::OnDetach()
     {
+        // The socket goes first, and its file with it. A leftover path is not harmless: the next editor
+        // to be given it PROBES what is there, and while a dead one only costs a log line, leaving the
+        // file behind on every exit would train everybody to ignore that line.
+        //
+        // A request still in flight is abandoned rather than answered — the frame that would have proved
+        // it is never going to be drawn, and a reply promising otherwise is exactly the lie this channel
+        // is built to prevent. The client sees the connection close, which is the truth.
+        if ( m_ControlInFlight )
+        {
+            LOG_WARN( "[Control] the editor is closing with a '{}' still in flight; it is abandoned rather "
+                      "than answered, because the frame that would have proved it will not be drawn.",
+                      m_ControlInFlight->Group.empty() ? "request" : m_ControlInFlight->Label );
+        }
+        m_ControlGate.Disarm();
+        m_ControlSocket.Close();
+
         // Clean shutdown: drop the session lock so the next start doesn't think we crashed.
         CrashRecovery::DisarmSession();
 

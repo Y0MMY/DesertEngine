@@ -27,6 +27,7 @@ include "Tools/PrefabMigrator/"
 include "Tools/ImageStat/"
 include "Tools/LineJump/"
 include "Tools/ImageDiff/"
+include "Tools/DesertCtl/"
 include "Tools/DomeSheet/"
 group ""
 

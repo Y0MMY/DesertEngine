@@ -8,6 +8,9 @@
 
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Core/FrameManager.hpp>
+#include <Engine/Graphic/PixelPack.hpp> // the one packer both readbacks share
+
+#include <cstring> // std::memcpy — the mapped staging buffer
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -130,7 +133,27 @@ namespace Desert::Graphic::API::Vulkan
         swapChainCreateInfo.presentMode      = swapchainPresentMode;
         swapChainCreateInfo.imageExtent      = swapchainExtent;
         swapChainCreateInfo.imageArrayLayers = 1;
+        // TRANSFER_SRC IS ASKED FOR, NOT ASSUMED, and the answer is remembered rather than re-derived.
+        //
+        // Reading a presented frame back is the only way to photograph the INTERFACE: ImGui is recorded
+        // into the swapchain render pass (VulkanImGuiLayer::End), so the scene's own final image — which is
+        // what every capture in this engine read until now — contains no panel, no menu and no dialog.
+        // Copying out of a swapchain image requires this usage bit, and the spec does not promise a surface
+        // supports it.
+        //
+        // A surface that refuses it must produce a NAMED refusal at the point of capture, never a silent
+        // fall back to the scene image: a picture of the 3D viewport delivered under the name of a picture
+        // of the editor is evidence of the wrong subject, which is worse than no evidence at all.
+        m_SupportsFrameReadback = ( surfCaps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT ) != 0;
+        if ( !m_SupportsFrameReadback )
+        {
+            LOG_WARN( "[SwapChain] the surface does not support TRANSFER_SRC; presented frames cannot be "
+                      "read back, so full-window capture will refuse rather than substitute the viewport." );
+        }
+
         swapChainCreateInfo.imageUsage = ( VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT );
+        if ( m_SupportsFrameReadback )
+            swapChainCreateInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         swapChainCreateInfo.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
         swapChainCreateInfo.queueFamilyIndexCount = 0;
         swapChainCreateInfo.pQueueFamilyIndices   = NULL;
@@ -315,6 +338,178 @@ namespace Desert::Graphic::API::Vulkan
     uint32_t VulkanSwapChain::GetCurrentBufferIndex() const { return m_VulkanQueue->GetImageIndex(); }
     void VulkanSwapChain::PrepareFrame() { m_VulkanQueue->PrepareFrame(); }
     void VulkanSwapChain::Present() { m_VulkanQueue->Present(); }
+
+    namespace
+    {
+        /// The surface layout, in the pack's vocabulary. A format this does not know is REFUSED by the
+        /// caller rather than guessed at: guessing wrong exchanges red and blue, and the result reads as a
+        /// rendering defect rather than as a capture defect.
+        [[nodiscard]] bool SurfaceLayout( VkFormat format, Graphic::PackedPixelSource& out )
+        {
+            switch ( format )
+            {
+                case VK_FORMAT_B8G8R8A8_UNORM:
+                case VK_FORMAT_B8G8R8A8_SRGB:
+                    out = Graphic::PackedPixelSource::BGRA8;
+                    return true;
+                case VK_FORMAT_R8G8B8A8_UNORM:
+                case VK_FORMAT_R8G8B8A8_SRGB:
+                    out = Graphic::PackedPixelSource::RGBA8;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    } // namespace
+
+    Common::BoolResultStr VulkanSwapChain::RecordFrameCapture()
+    {
+        // EVERY refusal below is named, and none of them falls back to another image. The caller asked for
+        // a picture of the editor; a picture of something else carrying that name is the failure this whole
+        // path exists to make impossible.
+        if ( !m_SupportsFrameReadback )
+        {
+            return Common::MakeError<bool>(
+                 "the surface was created without TRANSFER_SRC, so a presented frame cannot be copied off "
+                 "the device on this driver. Refusing rather than substituting the scene image, which holds "
+                 "no interface at all." );
+        }
+
+        if ( HasPendingCapture() )
+        {
+            return Common::MakeError<bool>(
+                 "a frame capture is already recorded and not yet collected; one at a time." );
+        }
+
+        Graphic::PackedPixelSource source{};
+        if ( !SurfaceLayout( m_ColorFormat, source ) )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "the surface format is {}, which this readback does not know how to pack. Refusing rather "
+                 "than reinterpreting the bytes as a layout they are not in.",
+                 static_cast<int>( m_ColorFormat ) );
+        }
+
+        const uint32_t imageIndex = m_VulkanQueue->GetImageIndex();
+        if ( imageIndex >= m_SwapChainImages.Images.size() )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "no swapchain image is acquired (index {} of {}); there is nothing to copy.", imageIndex,
+                 m_SwapChainImages.Images.size() );
+        }
+
+        const uint32_t w = m_Width;
+        const uint32_t h = m_Height;
+        if ( w == 0u || h == 0u )
+            return Common::MakeError<bool>( "the window is zero-sized; there is no frame to capture." );
+
+        auto* allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                               ->GetVulkanAllocator()
+                               .get();
+
+        const std::size_t stagingSize = static_cast<std::size_t>( w ) * h * Graphic::BytesPerPixel( source );
+
+        VkBuffer           staging = VK_NULL_HANDLE;
+        VkBufferCreateInfo bInfo   = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                       .size  = stagingSize,
+                                       .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT };
+        const auto         allocated =
+             allocator->RT_AllocateBuffer( "PresentedFrameCapture", bInfo, VMA_MEMORY_USAGE_GPU_TO_CPU, staging );
+        if ( !allocated.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "capture staging buffer: {}", allocated.GetError() );
+
+        // RECORDED INTO THE FRAME'S OWN COMMAND BUFFER, which is the whole point of this being two calls.
+        // Here the image is between its acquire and its present and is legitimately ours to read; after the
+        // present it belongs to the presentation engine, and copying out of it there is a spec violation
+        // that MoltenVK tolerates silently — the picture comes out correct and only the validation layer
+        // ever mentions it. ("vkQueueSubmit(): performs a layout transition on presentable VkImage, but the
+        // image has not been acquired from VkSwapchainKHR." Measured, on the first capture this took.)
+        VkCommandBuffer cmd   = m_VulkanQueue->GetDrawCommandBuffer();
+        VkImage         image = m_SwapChainImages.Images[imageIndex];
+
+        // The render pass left the image in PRESENT_SRC, and it must be put back: the present that follows
+        // this submit expects to find it there.
+        Utils::InsertImageMemoryBarrier( cmd, image, m_ColorFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
+
+        VkBufferImageCopy copy = {
+             .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
+             .imageExtent      = { w, h, 1 } };
+        vkCmdCopyImageToBuffer( cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging, 1, &copy );
+
+        Utils::InsertImageMemoryBarrier( cmd, image, m_ColorFormat, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR );
+
+        m_CaptureStaging    = staging;
+        m_CaptureAllocation = allocated.GetValue();
+        m_CaptureWidth      = w;
+        m_CaptureHeight     = h;
+        return Common::MakeSuccess( true );
+    }
+
+    Common::ResultStr<std::vector<uint8_t>> VulkanSwapChain::TakeCapturedFrameRGBA8( uint32_t& outWidth,
+                                                                                     uint32_t& outHeight )
+    {
+        using Bytes = std::vector<uint8_t>;
+
+        if ( !HasPendingCapture() )
+            return Common::MakeError<Bytes>( "no frame capture was recorded for this frame." );
+
+        auto* allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                               ->GetVulkanAllocator()
+                               .get();
+
+        // Released whatever happens below. A capture that failed and leaked its staging buffer would cost
+        // a full frame of device memory per attempt, and the attempts are what a client retries.
+        const auto release = [&]()
+        {
+            allocator->RT_DestroyBuffer( m_CaptureStaging, static_cast<VmaAllocation>( m_CaptureAllocation ) );
+            m_CaptureStaging    = VK_NULL_HANDLE;
+            m_CaptureAllocation = nullptr;
+        };
+
+        Graphic::PackedPixelSource source{};
+        if ( !SurfaceLayout( m_ColorFormat, source ) )
+        {
+            release();
+            return Common::MakeError<Bytes>( "the surface format changed between recording and collecting." );
+        }
+
+        const uint32_t    w         = m_CaptureWidth;
+        const uint32_t    h         = m_CaptureHeight;
+        const std::size_t pixels    = static_cast<std::size_t>( w ) * h;
+        const std::size_t stagingSz = pixels * Graphic::BytesPerPixel( source );
+
+        Bytes raw( stagingSz );
+        void* mapped = allocator->MapMemory( static_cast<VmaAllocation>( m_CaptureAllocation ) );
+        if ( mapped == nullptr )
+        {
+            release();
+            return Common::MakeError<Bytes>( "the capture staging buffer could not be mapped." );
+        }
+        std::memcpy( raw.data(), mapped, stagingSz );
+        allocator->UnmapMemory( static_cast<VmaAllocation>( m_CaptureAllocation ) );
+        release();
+
+        Bytes out = Graphic::PackToRGBA8( raw.data(), raw.size(), pixels, source );
+        if ( out.size() != pixels * 4u )
+        {
+            return Common::MakeFormattedError<Bytes>( "the capture packed to {} bytes, expected {}x{}x4 = {}.",
+                                                      out.size(), w, h, pixels * 4u );
+        }
+
+        // ALPHA IS FORCED OPAQUE, and that is a statement about the source rather than a cosmetic touch.
+        // The swapchain is created with VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, so nothing in the pipeline is
+        // obliged to leave anything meaningful in the alpha channel of a presented image. Written straight
+        // out, a zero there produces a PNG that is entirely transparent — a capture that looks blank in
+        // every viewer and reads as "the editor drew nothing".
+        for ( std::size_t i = 0; i < pixels; ++i )
+            out[i * 4u + 3u] = 255u;
+
+        outWidth  = w;
+        outHeight = h;
+        return Common::MakeSuccess( std::move( out ) );
+    }
 
     Common::ResultStr<VkResult> VulkanSwapChain::CreateSwapChainFramebuffers()
     {

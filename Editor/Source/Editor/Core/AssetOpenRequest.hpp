@@ -43,6 +43,17 @@ namespace Desert::Editor::Core
             pending.push_back( AssetOpenRequest{ subject, type } );
         }
 
+        // Is an open still waiting to be serviced?
+        //
+        // Asked by the control channel's quiescence census: opening a document is QUEUED here and built
+        // between frames, so a reply sent before this went empty would be a reply about a frame drawn
+        // before the window existed. Asked of the queue itself rather than of a copy anyone keeps beside
+        // it — a copy is a second answer, and the two disagree on exactly the frame that matters.
+        [[nodiscard]] static bool HasPending()
+        {
+            return !Pending().empty();
+        }
+
         // Everything queued since the last drain; clears the queue.
         static std::vector<AssetOpenRequest> Drain()
         {

@@ -28,6 +28,17 @@ namespace Desert::Editor
         // exist to settle.
         [[nodiscard]] static std::size_t WarningCount();
         [[nodiscard]] static std::size_t ErrorCount();
+        [[nodiscard]] static std::size_t InfoCount();
+
+        // The last @p maxLines written, oldest first — what the control channel hands a client that asks
+        // for the log. Static for the same reason the counters are: this class is the one thing that has
+        // parsed the log file, and a second reader would be a second answer to "what happened", differing
+        // by whatever the two read at different moments.
+        //
+        // Capped by kTailCapacity however much is asked for: a client is reading this to find out what
+        // went wrong, and a whole session's log down a socket is not that.
+        static constexpr std::size_t                  kTailCapacity = 200;
+        [[nodiscard]] static std::vector<std::string> Tail( std::size_t maxLines );
 
     private:
         struct LogEntry

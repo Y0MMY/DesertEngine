@@ -6,6 +6,10 @@
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 #include "Editor/Panels/IPanel.hpp"
 #include "Editor/Core/CommandPalette.hpp"
+#include "Editor/Core/Control/ControlPipeline.hpp"
+#include "Editor/Core/Control/ControlProtocol.hpp"
+#include "Editor/Core/Control/ControlSocket.hpp"
+#include "Editor/Core/Control/ControlState.hpp"
 #include "Editor/Core/SceneViewIdentity.hpp"
 #include "Editor/Core/AssetEditorRegistry.hpp"
 #include "Editor/Core/DocumentWell.hpp"
@@ -31,6 +35,11 @@ namespace Desert::Editor
         [[nodiscard]] virtual Common::BoolResultStr OnUpdate( const Common::Timestep& ts ) override;
         [[nodiscard]] virtual Common::BoolResultStr OnImGuiRender() override;
         virtual void                                OnEvent( Common::Event& event ) override;
+
+        // The frame is out. This is where the control channel keeps its promise: a reply leaves only
+        // after a frame that already reflects the command it answers, and a `shot.window` reads that very
+        // frame back off the swapchain. See ServiceControlChannel.
+        void OnFramePresented() override;
 
     private:
         void DrawMenuBar();
@@ -92,9 +101,44 @@ namespace Desert::Editor
         // Opens/closes panels whose context appeared or vanished (see IPanel::IsContextual).
         void UpdateContextualPanels();
 
-        // Ctrl+P "go to anything": builds the frame's commands (panels, entities, actions) and draws
-        // the overlay. No-op unless the palette is open.
+        // THE DICTIONARY, AND THE ONLY ONE. Every command this editor can be asked to perform without a
+        // mouse: the tool panels, the open documents, the entities in the open scene, the menu bar, the
+        // openable assets, the focused document's preview viewpoints, and the plain actions.
+        //
+        // Extracted from DrawCommandPalette so that the CONTROL CHANNEL runs these same entries and calls
+        // these same closures. That is the whole design of the channel in one function: everything a
+        // person can reach with Ctrl+P, an agent can reach by naming a group and a label, by construction
+        // rather than by anybody maintaining a second list. See Editor/Core/Control/ControlDispatch.hpp.
+        //
+        // Built on demand — when the palette opens, or when a request arrives — never per frame.
+        [[nodiscard]] std::vector<PaletteCommand> BuildPaletteCommands();
+
+        // Ctrl+P "go to anything": draws the overlay over the dictionary above. No-op unless open.
         void DrawCommandPalette();
+
+        // ===== Control channel (Editor/Core/Control) =====
+        // Drained at the TOP of OnUpdate: accept, read one request, execute it. Everything it can run is
+        // a palette entry.
+        void ServiceControlChannel();
+        // Sampled after the deferred queues have drained and BEFORE the scene is rendered — "was anything
+        // outstanding while this frame was being made". Judged later, by the gate, at OnFramePresented.
+        void SampleFrameQuiescence();
+        // Runs one request against the live editor. Never throws, always answers.
+        [[nodiscard]] Control::Response ExecuteControlRequest( const Control::Request& request );
+        // Everything ControlState needs, read off this layer in one pass.
+        [[nodiscard]] Control::EditorSnapshot TakeEditorSnapshot() const;
+        // CAPTURING THE COMPOSITED FRAME, in two halves, because a swapchain image may only be touched
+        // between its acquire and its present.
+        //
+        // Recorded at the end of OnImGuiRender, while the frame is still being built and the image is
+        // legitimately ours; collected in OnFramePresented, once the present that carried the copy has
+        // gone out. Doing it all after the present produced a correct picture and a Vulkan spec violation
+        // that only the validation layer mentioned — see RecordWindowCaptureIfDue.
+        void RecordWindowCaptureIfDue();
+        // Collect what was recorded and write it as a PNG. Distinct from WriteViewportPng, which reads the
+        // scene's own image and holds no interface at all; neither substitutes for the other. False on any
+        // failure, with the reason in @p outError.
+        [[nodiscard]] bool WriteWindowPng( const std::string& path, std::string& outError );
 
         // After an unclean exit, offers to reopen the newest autosave. No-op unless one was found.
         void DrawRecoveryPopup();
@@ -132,10 +176,6 @@ namespace Desert::Editor
         void LoadScene( const Common::Filepath& path );
         void LoadSceneInternal( const Common::Filepath& path );
 
-        // Applies `--select <name-or-uuid>` once the scene has settled — see Editor/Core/StartupOptions.hpp
-        // for why the flag exists at all. Runs exactly once per session; a name that matches nothing ends
-        // the run non-zero rather than selecting nothing quietly.
-        void ApplyStartupSelection();
         void NewSceneInternal(); // clears the current scene to a fresh empty one (File -> New Scene / Ctrl+N)
 
         // ===== Multi-scene editing (independent SceneRenderers) =====
@@ -171,6 +211,10 @@ namespace Desert::Editor
         // Asks for a document to be closed. Queued, never immediate: closing destroys GPU resources, which
         // is not legal from inside the ImGui pass that is drawing them.
         void RequestDocumentClose( const Assets::AssetHandle& subject );
+        // Every open document, queued for closing. One implementation behind Window ▸ Close All Documents
+        // and behind the palette entry of the same name — the menu item used to carry the loop itself, and
+        // a second copy of it in the palette would be two answers to "what does Close All close".
+        void RequestCloseAllDocuments();
         // Brings @p subject's window to the front and makes it the most recently used document.
         void FocusDocument( const Assets::AssetHandle& subject );
         // Ctrl+Tab: move to the next document in most-recently-used order. See DocumentWell::NextMostRecent.
@@ -347,6 +391,17 @@ namespace Desert::Editor
 
         CommandPalette m_CommandPalette;
 
+        // THE MENU HELD OPEN, by name, for as long as the channel says so. Empty = nothing held.
+        //
+        // This is what `--open-menu` used to be, and the difference is the whole point: a flag could hold
+        // one menu open for the WHOLE RUN and could never let go, because there was no later moment at
+        // which to tell it to. A menu is now opened and closed like anything else on the palette, so a
+        // session can photograph the View menu and then carry on working.
+        //
+        // Re-issued every frame rather than opened once, for the reason it always was: a menu closes as
+        // soon as focus leaves it, and a capture may land on any frame.
+        std::string m_HeldOpenMenu;
+
         // Crash recovery: set at startup when the previous session crashed and an autosave was found.
         bool                  m_ShowRecoveryPrompt = false;
         std::filesystem::path m_RecoveryAutosave;
@@ -395,11 +450,39 @@ namespace Desert::Editor
         // Set when any PNG of this capture could not be written; becomes the process exit status.
         bool m_ShotFailed = false;
 
-        // `--select` is applied once, on the first frame where no scene load is outstanding — whether the
-        // scene came from --scene, from the project's default, or nowhere at all. A latch rather than a
-        // check against the flag's own value, because the flag stays set for the life of the process and
-        // re-applying it every frame would fight a person clicking in the outliner.
-        bool m_StartupSelectionApplied = false;
+        // ===== Control channel =====
+        // Present only when `--control-socket` named one; silent otherwise. See
+        // Editor/Core/Control/ControlChannelOptions.hpp for why an editor does not listen by default.
+        Control::ControlSocket m_ControlSocket;
+
+        // The gate that makes "command -> frame -> snapshot" a property rather than a coincidence. Armed
+        // when a request executes; discharged by the first PRESENTED frame that was rendered with nothing
+        // outstanding. Editor/Core/Control/ControlPipeline.hpp has the argument.
+        Control::FrameGate m_ControlGate;
+
+        // The request whose reply the gate is holding, and the reply itself. Held together because they
+        // are one thing: a reply parked without its request could not say what it was answering, and a
+        // request parked without its reply would have to be re-run to produce one.
+        std::optional<Control::Request>  m_ControlInFlight;
+        std::optional<Control::Response> m_ControlPendingReply;
+
+        // The outstanding work sampled while THIS frame was being built. Not read at the moment the gate
+        // judges it: by then the answer has moved on, and the question is about the picture.
+        Control::EditorQuiescence m_FrameQuiescence;
+
+        // Frames since the layer attached. The gate's clock — deliberately this layer's own count and not
+        // the renderer's frame-in-flight index, which wraps at three and could not order anything.
+        uint64_t m_FrameIndex = 0;
+
+        // A capture that could not even be RECORDED — the surface refuses TRANSFER_SRC, the swapchain is
+        // gone. Carried from the record half to the collect half so the refusal names the real reason
+        // rather than "nothing was captured", which would be the symptom and not the cause.
+        std::string m_ControlCaptureError;
+
+        // A `quit` the channel asked for. Honoured after its reply has actually gone out, so the last
+        // answer is not lost to the exit — a client that never hears "ok" cannot tell a clean shutdown
+        // from a crash.
+        std::optional<int32_t> m_ControlQuitCode;
 
         std::optional<Common::Filepath> m_SceneLoadRequested;
         // Stop tears down + recreates GPU render resources (framebuffers / render graph). It must run

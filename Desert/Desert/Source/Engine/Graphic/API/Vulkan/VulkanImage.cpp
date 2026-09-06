@@ -4,6 +4,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Core/EngineContext.hpp>
+#include <Engine/Graphic/PixelPack.hpp> // the one packer this and the swapchain readback share
 #include <Engine/Graphic/RenderConfig.hpp>
 
 #include <Common/Utilities/String.hpp>
@@ -416,10 +417,26 @@ namespace Desert::Graphic::API::Vulkan
         if ( w == 0 || h == 0 || m_Resource.Image == VK_NULL_HANDLE )
             return {};
 
-        const auto fmt = m_Specification.Format;
-        if ( fmt != Core::Formats::ImageFormat::RGBA8F && fmt != Core::Formats::ImageFormat::BGRA8F &&
-             fmt != Core::Formats::ImageFormat::RGBA32F )
-            return {}; // only color formats we know how to pack
+        // The engine's format vocabulary, mapped to the pack's own. The MAPPING belongs here, where the
+        // ImageFormat enum is; the PACK is shared with the swapchain readback next door (PixelPack.hpp),
+        // because two copies of the channel swizzle is how one capture ends up with red and blue exchanged
+        // and gets reported as a rendering defect.
+        const auto                 fmt = m_Specification.Format;
+        Graphic::PackedPixelSource source{};
+        switch ( fmt )
+        {
+            case Core::Formats::ImageFormat::RGBA8F:
+                source = Graphic::PackedPixelSource::RGBA8;
+                break;
+            case Core::Formats::ImageFormat::BGRA8F:
+                source = Graphic::PackedPixelSource::BGRA8;
+                break;
+            case Core::Formats::ImageFormat::RGBA32F:
+                source = Graphic::PackedPixelSource::RGBA32F;
+                break;
+            default:
+                return {}; // only color formats we know how to pack
+        }
 
         auto allocator =
              SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator().get();
@@ -450,33 +467,7 @@ namespace Desert::Graphic::API::Vulkan
         allocator->UnmapMemory( stagingAlloc );
         allocator->RT_DestroyBuffer( staging, stagingAlloc );
 
-        std::vector<uint8_t> out( static_cast<size_t>( w ) * h * 4 );
-        const size_t         pixels = static_cast<size_t>( w ) * h;
-        if ( fmt == Core::Formats::ImageFormat::RGBA32F )
-        {
-            const float* f = reinterpret_cast<const float*>( raw.data() );
-            for ( size_t i = 0; i < pixels * 4; ++i )
-            {
-                float v = f[i];
-                v       = v < 0.0f ? 0.0f : ( v > 1.0f ? 1.0f : v );
-                out[i]  = static_cast<uint8_t>( v * 255.0f + 0.5f );
-            }
-        }
-        else // RGBA8F / BGRA8F (8-bit; swizzle B<->R for BGRA)
-        {
-            const bool bgra = ( fmt == Core::Formats::ImageFormat::BGRA8F );
-            for ( size_t i = 0; i < pixels; ++i )
-            {
-                uint8_t r = raw[i * 4 + 0], g = raw[i * 4 + 1], b = raw[i * 4 + 2], a = raw[i * 4 + 3];
-                if ( bgra )
-                    std::swap( r, b );
-                out[i * 4 + 0] = r;
-                out[i * 4 + 1] = g;
-                out[i * 4 + 2] = b;
-                out[i * 4 + 3] = a;
-            }
-        }
-        return out;
+        return Graphic::PackToRGBA8( raw.data(), raw.size(), static_cast<size_t>( w ) * h, source );
     }
 
     void VulkanImage2D::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout, uint32_t mip )

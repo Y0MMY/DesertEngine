@@ -6,7 +6,7 @@
 #include <Editor/Core/CommandLine.hpp>
 #include <Editor/Core/ProjectContext.hpp>
 #include <Editor/Core/ShotOptions.hpp>
-#include <Editor/Core/StartupOptions.hpp>
+#include <Editor/Core/Control/ControlChannelOptions.hpp>
 
 #include <Common/Core/Profiler.hpp>
 
@@ -77,8 +77,8 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
 
     // Published before the renderer exists: the flags have to be in force for the very first frame, or a
     // measurement would include a few frames of the other configuration.
-    Desert::Editor::ShotOptions::Get()    = options.Shot;
-    Desert::Editor::StartupOptions::Get() = options.Startup;
+    Desert::Editor::ShotOptions::Get()                               = options.Shot;
+    Desert::Editor::Control::ControlChannelOptions::Get().SocketPath = options.ControlSocket;
 
     // GPU timing is OFF unless --gpu-profile asks for it. A run that did not ask to be measured is not
     // measured, and its frame time is the one a budget decision should be taken on.

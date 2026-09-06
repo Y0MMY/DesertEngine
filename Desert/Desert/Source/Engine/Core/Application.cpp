@@ -201,6 +201,16 @@ namespace Desert::Engine
                 DESERT_PROFILE_SCOPE( "PresentFinalImage (Submit)" );
                 m_Window->PresentFinalImage();
             }
+
+            // 7. The frame is OUT. The only point in this loop at which the composited picture — scene and
+            // interface together — exists as bytes on the device; everything above is still building it.
+            // A layer that must read the frame back, or must not answer a question before a frame has
+            // answered it, gets its instant here. Default is a no-op (Common::Layer::OnFramePresented).
+            {
+                DESERT_PROFILE_SCOPE( "OnFramePresented" );
+                for ( Common::Layer* layer : m_LayerStack )
+                    layer->OnFramePresented();
+            }
         }
 
         // Window closed: detach layers (top-down) so each releases its resources and clears its

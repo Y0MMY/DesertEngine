@@ -1,0 +1,401 @@
+// THE TRANSPORT NOTICES A CLIENT THAT HAS GONE, BEFORE IT JUDGES THE NEXT ONE.
+//
+// Everything else in the control channel is a pure header and is asserted as one. This is the socket, and
+// it is here because of a defect that reached a live editor: the client slot was still occupied by a peer
+// that had already closed, so the next connection was refused with "another client already holds this
+// editor's control channel". It was not a race in the client. A disconnected peer is only noticed by
+// READING from it -- recv returning zero is the whole of the signal -- and the accept loop ran first, so
+// the editor simply had not looked yet.
+//
+// It mattered because of how the channel is actually used: one request per invocation of desertctl, which
+// connects, asks, reads and closes. Every second command failed. The fix is an ordering -- service the
+// client we have, then judge a new one -- and an ordering is exactly the kind of thing that gets undone by
+// somebody tidying a function six months from now.
+//
+// The relations:
+//   1. A CLIENT THAT CLOSED FREES THE SLOT, and the next connection is accepted rather than refused.
+//   2. Sequential clients work, over and over -- the real usage pattern, not a single round trip.
+//   3. A request arrives on the poll it was sent to, not a poll later.
+//   4. ONE LINE PER POLL, so a client cannot hand itself two commands in flight and take the channel's
+//      ordering guarantee away from it.
+//   5. A SECOND SIMULTANEOUS CLIENT IS REFUSED IN WORDS, not left hanging -- silence would look exactly
+//      like an editor that had frozen.
+//   6. A socket path another process is serving is REFUSED; a leftover from a dead one is cleared.
+
+#include <Editor/Core/Control/ControlSocket.hpp>
+
+#include <gtest/gtest.h>
+
+#include <string>
+
+#if !defined( DESERT_PLATFORM_WINDOWS )
+#include <cstdio>
+#include <cstring>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#endif
+
+using Desert::Editor::Control::ControlSocket;
+
+#if defined( DESERT_PLATFORM_WINDOWS )
+
+// The transport refuses on Windows, and the refusal must NAME itself. A `--control-socket` that quietly did
+// nothing there would leave a client waiting for a socket that is never going to appear, which is the same
+// silent-no-op shape the whole channel replaced.
+TEST( ControlTransport, WindowsRefusesByNameRatherThanListeningToNothing )
+{
+    EXPECT_FALSE( ControlSocket::SupportedOnThisPlatform() );
+
+    ControlSocket socket;
+    const auto    refused = socket.Listen( "C:/temp/desert.sock" );
+    ASSERT_FALSE( refused.IsSuccess() );
+    EXPECT_NE( refused.GetError().find( "Windows" ), std::string::npos );
+    EXPECT_FALSE( socket.IsListening() );
+}
+
+#else
+
+namespace
+{
+    /// A path in the temp directory, unique to this process so two runs of the suite cannot collide.
+    std::string TempSocketPath( const char* tag )
+    {
+        return std::string( "/tmp/desert_control_test_" ) + tag + "_" + std::to_string( ::getpid() ) + ".sock";
+    }
+
+    /// A bare client: connect, send a line, read a line, close. Deliberately not DesertCtl — the point is
+    /// to exercise the SERVER against an ordinary socket peer.
+    class Client
+    {
+    public:
+        explicit Client( const std::string& path )
+        {
+            m_Fd = ::socket( AF_UNIX, SOCK_STREAM, 0 );
+            if ( m_Fd < 0 )
+                return;
+
+            sockaddr_un address{};
+            address.sun_family = AF_UNIX;
+            std::strncpy( address.sun_path, path.c_str(), sizeof( address.sun_path ) - 1 );
+            if ( ::connect( m_Fd, reinterpret_cast<const sockaddr*>( &address ), sizeof( address ) ) != 0 )
+            {
+                ::close( m_Fd );
+                m_Fd = -1;
+            }
+        }
+
+        ~Client()
+        {
+            Close();
+        }
+
+        Client( const Client& )            = delete;
+        Client& operator=( const Client& ) = delete;
+
+        [[nodiscard]] bool Connected() const
+        {
+            return m_Fd >= 0;
+        }
+
+        void Send( const std::string& line )
+        {
+            const std::string framed = line + "\n";
+            (void)::send( m_Fd, framed.data(), framed.size(), 0 );
+        }
+
+        /// Read until a newline, or give up. Blocking: the server is driven by the test itself, so there
+        /// is nobody to wait for that the test has not already asked to run.
+        [[nodiscard]] std::string ReadLine()
+        {
+            std::string received;
+            char        buffer[512];
+            for ( int attempt = 0; attempt < 64; ++attempt )
+            {
+                const auto newline = received.find( '\n' );
+                if ( newline != std::string::npos )
+                    return received.substr( 0, newline );
+
+                const ssize_t got = ::recv( m_Fd, buffer, sizeof( buffer ), 0 );
+                if ( got <= 0 )
+                    break;
+                received.append( buffer, static_cast<std::size_t>( got ) );
+            }
+            const auto newline = received.find( '\n' );
+            return newline == std::string::npos ? received : received.substr( 0, newline );
+        }
+
+        void Close()
+        {
+            if ( m_Fd >= 0 )
+                ::close( m_Fd );
+            m_Fd = -1;
+        }
+
+    private:
+        int m_Fd = -1;
+    };
+} // namespace
+
+TEST( ControlTransport, ListeningCreatesTheSocketAndClosingRemovesIt )
+{
+    const std::string path = TempSocketPath( "lifecycle" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+    EXPECT_TRUE( socket.IsListening() );
+    EXPECT_EQ( ::access( path.c_str(), F_OK ), 0 );
+
+    socket.Close();
+    EXPECT_FALSE( socket.IsListening() );
+    // A leftover path is not harmless: the next editor given it PROBES what is there, and a file left
+    // behind on every exit would train everybody to ignore the line that says so.
+    EXPECT_NE( ::access( path.c_str(), F_OK ), 0 ) << "the socket file outlived the socket";
+}
+
+// A path another editor is serving must be REFUSED. Two editors sharing one socket would answer each
+// other's clients, and the client could not tell which one it was talking to.
+TEST( ControlTransport, APathAnotherEditorIsServingIsRefused )
+{
+    const std::string path = TempSocketPath( "contested" );
+    ::unlink( path.c_str() );
+
+    ControlSocket first;
+    ASSERT_TRUE( first.Listen( path ).IsSuccess() );
+
+    ControlSocket second;
+    const auto    refused = second.Listen( path );
+    ASSERT_FALSE( refused.IsSuccess() );
+    EXPECT_NE( refused.GetError().find( path ), std::string::npos ) << "the refusal must name the path";
+    EXPECT_FALSE( second.IsListening() );
+
+    first.Close();
+}
+
+// A path left behind by a DEAD editor is cleared and reused. The distinction from the test above is the
+// whole reason the transport probes rather than looking at the file: a socket file outlives its process,
+// so "the file is there" says nothing at all about whether anybody is serving it.
+TEST( ControlTransport, ALeftoverSocketFromADeadEditorIsCleared )
+{
+    const std::string path = TempSocketPath( "stale" );
+    ::unlink( path.c_str() );
+
+    // A CRASHED editor leaves the path behind. ~ControlSocket unlinks on a clean exit, so the leftover is
+    // built directly: a socket bound to the path and then dropped, which is what the filesystem is left
+    // holding when a process dies without running a destructor.
+    {
+        const int fd = ::socket( AF_UNIX, SOCK_STREAM, 0 );
+        ASSERT_GE( fd, 0 );
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        std::strncpy( address.sun_path, path.c_str(), sizeof( address.sun_path ) - 1 );
+        ASSERT_EQ( ::bind( fd, reinterpret_cast<const sockaddr*>( &address ), sizeof( address ) ), 0 );
+        ::close( fd ); // bound, never listened, descriptor gone: nothing is serving this path
+    }
+    ASSERT_EQ( ::access( path.c_str(), F_OK ), 0 );
+
+    ControlSocket fresh;
+    EXPECT_TRUE( fresh.Listen( path ).IsSuccess() )
+         << "a path nothing is serving must be cleared, not treated as a live editor";
+    fresh.Close();
+}
+
+// A path longer than the kernel's sun_path would be TRUNCATED and bound somewhere else, and the editor
+// would report success while listening where the client never looks.
+TEST( ControlTransport, AnOverlongPathIsRefusedRatherThanTruncated )
+{
+    ControlSocket socket;
+    const auto    refused = socket.Listen( std::string( 200, 'x' ) );
+    ASSERT_FALSE( refused.IsSuccess() );
+    EXPECT_NE( refused.GetError().find( "truncated" ), std::string::npos );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 1-3. The defect that reached a live editor.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( ControlTransport, ARequestArrivesOnThePollItWasSentTo )
+{
+    const std::string path = TempSocketPath( "oneshot" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    Client client( path );
+    ASSERT_TRUE( client.Connected() );
+    client.Send( R"({"id":1,"op":"commands"})" );
+
+    // ONE poll. Accepting on this poll and reading on the next would cost every command a frame for a
+    // reason nobody watching the editor could see.
+    const auto line = socket.PollRequestLine();
+    ASSERT_TRUE( line.has_value() ) << "the connection and its first line must both land on one poll";
+    EXPECT_EQ( *line, R"({"id":1,"op":"commands"})" );
+
+    socket.SendResponseLine( R"({"id":1,"ok":true})" );
+    EXPECT_EQ( client.ReadLine(), R"({"id":1,"ok":true})" );
+
+    socket.Close();
+}
+
+// THE DEFECT ITSELF. The first client closed; the slot must be free by the time the second one is judged.
+// Before the fix this returned the "another client already holds this channel" refusal, because a peer
+// that has closed is only noticed by reading from it and the accept loop ran first.
+TEST( ControlTransport, AClientThatClosedFreesTheSlotBeforeTheNextIsJudged )
+{
+    const std::string path = TempSocketPath( "sequential" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    {
+        Client first( path );
+        ASSERT_TRUE( first.Connected() );
+        first.Send( R"({"id":1,"op":"state"})" );
+        ASSERT_TRUE( socket.PollRequestLine().has_value() );
+        socket.SendResponseLine( R"({"id":1,"ok":true})" );
+        EXPECT_EQ( first.ReadLine(), R"({"id":1,"ok":true})" );
+    } // first closes here, exactly as desertctl does after reading its reply
+
+    Client second( path );
+    ASSERT_TRUE( second.Connected() );
+    second.Send( R"({"id":2,"op":"state"})" );
+
+    const auto line = socket.PollRequestLine();
+    ASSERT_TRUE( line.has_value() )
+         << "the previous client had already closed and its slot must have been reaped first";
+    EXPECT_EQ( *line, R"({"id":2,"op":"state"})" );
+
+    socket.SendResponseLine( R"({"id":2,"ok":true})" );
+    const std::string reply = second.ReadLine();
+    EXPECT_EQ( reply, R"({"id":2,"ok":true})" )
+         << "the second client was refused as a duplicate; that is the defect this test exists for";
+
+    socket.Close();
+}
+
+// The real usage pattern, repeated. One round trip working proves less than it looks: the defect above
+// appeared on the SECOND connection and would have been invisible to a single-exchange test.
+TEST( ControlTransport, SequentialClientsWorkOverAndOver )
+{
+    const std::string path = TempSocketPath( "repeated" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    for ( int i = 0; i < 8; ++i )
+    {
+        const std::string request = R"({"id":)" + std::to_string( i ) + R"(,"op":"state"})";
+        const std::string answer  = R"({"id":)" + std::to_string( i ) + R"(,"ok":true})";
+
+        Client client( path );
+        ASSERT_TRUE( client.Connected() ) << "connection " << i;
+        client.Send( request );
+
+        const auto line = socket.PollRequestLine();
+        ASSERT_TRUE( line.has_value() ) << "request " << i << " was not read";
+        EXPECT_EQ( *line, request );
+
+        socket.SendResponseLine( answer );
+        EXPECT_EQ( client.ReadLine(), answer ) << "reply " << i;
+    }
+
+    socket.Close();
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 4-5. One line per poll, and a second simultaneous client.
+// ---------------------------------------------------------------------------------------------------
+
+// A client that pipelines must not get two commands in flight. The channel promises that a reply follows a
+// frame reflecting ITS command; two commands running before either was answered would hand that promise to
+// whoever wrote the client.
+TEST( ControlTransport, OnlyOneLineIsHandedBackPerPoll )
+{
+    const std::string path = TempSocketPath( "pipelined" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    Client client( path );
+    ASSERT_TRUE( client.Connected() );
+    client.Send( R"({"id":1,"op":"state"})" );
+    client.Send( R"({"id":2,"op":"state"})" );
+
+    const auto first = socket.PollRequestLine();
+    ASSERT_TRUE( first.has_value() );
+    EXPECT_EQ( *first, R"({"id":1,"op":"state"})" );
+
+    // The second is BUFFERED, not lost: it is offered on a later poll, once the editor is ready for it.
+    const auto second = socket.PollRequestLine();
+    ASSERT_TRUE( second.has_value() );
+    EXPECT_EQ( *second, R"({"id":2,"op":"state"})" );
+
+    socket.Close();
+}
+
+// A second client while one is live is refused IN WORDS. Left hanging, it would look exactly like an
+// editor that had frozen, and the whole point of this channel is that a failure says what it is.
+TEST( ControlTransport, ASecondSimultaneousClientIsRefusedInWords )
+{
+    const std::string path = TempSocketPath( "twoclients" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    Client holder( path );
+    ASSERT_TRUE( holder.Connected() );
+    holder.Send( R"({"id":1,"op":"state"})" );
+    ASSERT_TRUE( socket.PollRequestLine().has_value() );
+
+    Client intruder( path );
+    ASSERT_TRUE( intruder.Connected() );
+    (void)socket.PollRequestLine(); // the poll on which the second connection is judged
+
+    const std::string refusal = intruder.ReadLine();
+    EXPECT_FALSE( refusal.empty() ) << "a refused client must be told, not left waiting";
+    EXPECT_NE( refusal.find( "\"ok\":false" ), std::string::npos );
+    EXPECT_NE( refusal.find( "another client" ), std::string::npos );
+
+    socket.Close();
+}
+
+// Nothing to read is not an error, and it must not drop the client. This is the ordinary case: the editor
+// polls sixty times a second and the client is usually thinking.
+TEST( ControlTransport, AnIdlePollKeepsTheClient )
+{
+    const std::string path = TempSocketPath( "idle" );
+    ::unlink( path.c_str() );
+
+    ControlSocket socket;
+    ASSERT_TRUE( socket.Listen( path ).IsSuccess() );
+
+    Client client( path );
+    ASSERT_TRUE( client.Connected() );
+    (void)socket.PollRequestLine(); // accept
+    ASSERT_TRUE( socket.HasClient() );
+
+    for ( int i = 0; i < 10; ++i )
+        EXPECT_FALSE( socket.PollRequestLine().has_value() );
+    EXPECT_TRUE( socket.HasClient() ) << "an idle client was dropped for having nothing to say";
+
+    client.Send( R"({"id":9,"op":"state"})" );
+    const auto line = socket.PollRequestLine();
+    ASSERT_TRUE( line.has_value() );
+    EXPECT_EQ( *line, R"({"id":9,"op":"state"})" );
+
+    socket.Close();
+}
+
+#endif // DESERT_PLATFORM_WINDOWS
+
+int main( int argc, char** argv )
+{
+    ::testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
+}

@@ -6,6 +6,7 @@
 
 #include <ImGui/imgui.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -23,6 +24,10 @@ namespace Desert::Editor
     // second parser would be a second answer.
     static std::size_t s_SessionWarnings = 0;
     static std::size_t s_SessionErrors   = 0;
+    static std::size_t s_SessionInfo     = 0;
+    // The tail the control channel serves, refreshed by the same pass that counts. Newest at the back,
+    // capped at kTailCapacity so a long session does not turn this into a second copy of the log file.
+    static std::vector<std::string> s_SessionTail;
 
     std::size_t LogsPanel::WarningCount()
     {
@@ -32,6 +37,18 @@ namespace Desert::Editor
     std::size_t LogsPanel::ErrorCount()
     {
         return s_SessionErrors;
+    }
+
+    std::size_t LogsPanel::InfoCount()
+    {
+        return s_SessionInfo;
+    }
+
+    std::vector<std::string> LogsPanel::Tail( std::size_t maxLines )
+    {
+        const std::size_t take = std::min( maxLines, s_SessionTail.size() );
+        return std::vector<std::string>( s_SessionTail.end() - static_cast<std::ptrdiff_t>( take ),
+                                         s_SessionTail.end() );
     }
 
     LogsPanel::LogsPanel()
@@ -91,6 +108,16 @@ namespace Desert::Editor
 
         s_SessionWarnings = m_CountWarning;
         s_SessionErrors   = m_CountError;
+        s_SessionInfo     = m_CountInfo;
+
+        // Rebuilt from the entries just parsed rather than appended to as lines arrive: Refresh re-reads
+        // the WHOLE file whenever it changes, so an appended tail would accumulate every line several
+        // times over and the channel would report a log the editor never wrote.
+        s_SessionTail.clear();
+        const std::size_t tailStart =
+             m_Entries.size() > kTailCapacity ? m_Entries.size() - kTailCapacity : std::size_t{ 0 };
+        for ( std::size_t i = tailStart; i < m_Entries.size(); ++i )
+            s_SessionTail.push_back( m_Entries[i].Text );
 
         m_ScrollToBottom = true;
     }
