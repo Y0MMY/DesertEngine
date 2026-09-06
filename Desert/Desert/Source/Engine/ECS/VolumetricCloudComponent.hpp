@@ -136,7 +136,6 @@ namespace Desert::ECS
 
         // ---- Weather --------------------------------------------------------------------------------
 
-
         // THE TWO FIELDS THAT USED TO STAND HERE ARE GONE, and neither has moved anywhere. `Cloud Type`
         // was a scalar between "flat sheet" and "heaped cloud" that fed one analytic curve, and
         // `Cloud Type Variance` mixed noise into it so that neighbouring clouds would not all reach the
@@ -177,7 +176,6 @@ namespace Desert::ECS
         // as the cure for the moire at twenty. At the shipped pair the voxel is 187.5 m.
         float RegionSize = 4800000.0f; // 48 km -> 187.5 m per voxel, 1.25 repeats to the vanishing point
 
-
         // ---- Detail ---------------------------------------------------------------------------------
         //
         // The Placement, Layout and per-sample Detail knobs that stood between Weather and here are
@@ -204,7 +202,6 @@ namespace Desert::ECS
         float NearFadeEndDistance = 0.0f;
 
         // ---- Lighting -------------------------------------------------------------------------------
-
 
         PROPERTY( DisplayName( "Sky Occlusion Volume" ), Category( "Lighting" ),
                   Tooltip( "Occlude the sky light by the cloud STANDING OVER a sample instead of by the "
@@ -338,7 +335,6 @@ namespace Desert::ECS
         // reaches 64 rather than stopping where the defect lived.
         int32_t LightMarchSamples = 32;
 
-
         PROPERTY( DisplayName( "Aerial Perspective Start Distance" ), Category( "Lighting" ), Length,
                   Range( 0.0f, 20000000.0f ), Advanced,
                   Tooltip( "Distance inside which the clouds are shown through NO atmosphere at all. Zero "
@@ -383,7 +379,6 @@ namespace Desert::ECS
                            "Zero applies it in full immediately, which is what makes the start distance "
                            "above inert on its own." ) )
         float AerialPerspectiveFadeDistance = 0.0f;
-
 
         // ---- Shadows --------------------------------------------------------------------------------
         //

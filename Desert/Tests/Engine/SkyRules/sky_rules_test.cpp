@@ -749,8 +749,7 @@ TEST( CloudEnvironmentCadence, EveryMaterialKnobTheMarchReadsIsSeen )
 
     const auto moved = [&]( const Desert::Graphic::CloudMaterialValues& changed, const char* what )
     {
-        EXPECT_NE( CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u, changed ),
-                   base )
+        EXPECT_NE( CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u, changed ), base )
              << what;
     };
 

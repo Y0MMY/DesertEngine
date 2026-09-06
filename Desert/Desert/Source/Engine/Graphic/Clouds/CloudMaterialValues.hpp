@@ -59,7 +59,7 @@ namespace Desert::Graphic
         float PlacementScatter     = 1.0f;
         float PlacementSizeVariety = 0.75f;
         float PatchTileSize        = 2100000.0f; // cm; 21 km
-        float PatchStrength       = 0.60f;
+        float PatchStrength        = 0.60f;
 
         // ---- Layout (bake-time; the painted sky) ----------------------------------------------------
         Assets::AssetHandle CloudLayout;

@@ -236,13 +236,12 @@ TEST( SceneMigratorEndToEnd, TheScalarCloudTypeBecomesAPathInTheFirstSlotOfTheSe
     // statement of the library's spelling and it was wrong the first time it was written. What is NOT
     // tautological here is the index — which of the four presets the scalar chose — and that is the part
     // this test exists for.
-    const auto material =
-         rfl::json::read<Desert::Assets::MaterialData>( report.CloudMaterial.Materials[0].Json );
+    const auto material = rfl::json::read<Desert::Assets::MaterialData>( report.CloudMaterial.Materials[0].Json );
     ASSERT_TRUE( material );
     EXPECT_EQ( material.value().GetTexture( "CloudType1" ),
                static_cast<uint64_t>( Common::AssetHandle::FromKey(
-                    "assets:" + Desert::Assets::CloudTypeAssetRelativePath(
-                                     Desert::Assets::kCloudTypeCumulusCongestus ) ) ) );
+                    "assets:" +
+                    Desert::Assets::CloudTypeAssetRelativePath( Desert::Assets::kCloudTypeCumulusCongestus ) ) ) );
 
     // The other three slots are ABSENT — from the payload and from the material alike, which is how both
     // formats spell "the empty handle".

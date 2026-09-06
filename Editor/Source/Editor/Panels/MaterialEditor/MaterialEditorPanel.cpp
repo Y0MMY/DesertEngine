@@ -900,9 +900,9 @@ namespace Desert::Editor
         return changed;
     }
 
-    bool MaterialEditorPanel::DrawCloudAssetRef( Assets::MaterialData&                          data,
+    bool MaterialEditorPanel::DrawCloudAssetRef( Assets::MaterialData&                       data,
                                                  const ::Desert::Core::Formats::ShaderParam& p,
-                                                 const std::string&                hiddenId )
+                                                 const std::string&                          hiddenId )
     {
         bool     changed = false;
         uint64_t handle  = data.GetTexture( p.Name );
@@ -928,7 +928,8 @@ namespace Desert::Editor
             {
                 if ( isType )
                 {
-                    if ( auto type = m_AssetManager->FindByHandle<Assets::CloudTypeAsset>( Common::UUID( handle ) ) )
+                    if ( auto type =
+                              m_AssetManager->FindByHandle<Assets::CloudTypeAsset>( Common::UUID( handle ) ) )
                         preview = type->GetDisplayName();
                 }
                 else if ( auto painting =
@@ -990,8 +991,7 @@ namespace Desert::Editor
                 // payload for every type it has no icon for — without it this slot would bind a dropped
                 // .dcnv to a file that can never parse as what the slot means.
                 const char* wantedExt = isType ? Assets::kCloudTypeExtension : Assets::kCloudLayoutExtension;
-                if ( m_AssetManager && !path.empty() &&
-                     std::filesystem::path( path ).extension() == wantedExt )
+                if ( m_AssetManager && !path.empty() && std::filesystem::path( path ).extension() == wantedExt )
                 {
                     if ( isType )
                     {
@@ -1004,8 +1004,8 @@ namespace Desert::Editor
                             if ( const auto registered =
                                       Runtime::ResourceRegistry::GetCloudTypeService()->Register( type );
                                  !registered )
-                                LOG_ERROR( "[Clouds] Dropped cloud type '{}' could not be registered: {}",
-                                           path, registered.GetError() );
+                                LOG_ERROR( "[Clouds] Dropped cloud type '{}' could not be registered: {}", path,
+                                           registered.GetError() );
                             data.SetTexture( p.Name, static_cast<uint64_t>( type->GetMetadata().Handle ) );
                             changed = true;
                         }
@@ -1021,8 +1021,8 @@ namespace Desert::Editor
                             if ( const auto registered =
                                       Runtime::ResourceRegistry::GetCloudLayoutService()->Register( painting );
                                  !registered )
-                                LOG_ERROR( "[Clouds] Dropped cloud layout '{}' could not be registered: {}",
-                                           path, registered.GetError() );
+                                LOG_ERROR( "[Clouds] Dropped cloud layout '{}' could not be registered: {}", path,
+                                           registered.GetError() );
                             data.SetTexture( p.Name, static_cast<uint64_t>( painting->GetMetadata().Handle ) );
                             changed = true;
                         }

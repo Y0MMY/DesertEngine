@@ -20,6 +20,7 @@
 // It is a pure-function suite: it parses JSON, walks the reflection registry, and asks the loader's own
 // version gate whether each file is one the engine will read. No GPU, no asset manager, no scene graph.
 
+#include <Engine/Assets/MaterialData.hpp>
 #include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
@@ -28,6 +29,7 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <sstream>
 #include <string>
@@ -86,6 +88,13 @@ namespace
     std::string ScenePath( const std::string& name )
     {
         return RepoRoot() + "Editor/Resources/Assets/Scenes/" + name;
+    }
+
+    // A project-relative asset path (as a scene states it) -> a path this suite can open. The cloud
+    // material a layer names since O1 lives here, and comparing two legs' skies means reading it.
+    std::string AssetPath( const std::string& relative )
+    {
+        return RepoRoot() + "Editor/Resources/Assets/" + relative;
     }
 
     std::string ReadAll( const std::string& path )
@@ -225,6 +234,7 @@ TEST( CloudProtocolScene, TheThreeHeroCostLegsDifferOnlyInHowManyHeroCloudsAreEn
     constexpr Leg kLegs[] = { { "PR_Hero0.desce", 0 }, { "PR_Hero3.desce", 3 }, { "PR_Hero8.desce", 8 } };
 
     std::vector<std::string> normalised;
+    std::vector<std::string> cloudLook; // the CONTENT of each leg's cloud material, see below
     for ( const auto& leg : kLegs )
     {
         auto parsed = rfl::json::read<SceneSerialized>( ReadAll( ScenePath( leg.Scene ) ) );
@@ -252,6 +262,46 @@ TEST( CloudProtocolScene, TheThreeHeroCostLegsDifferOnlyInHowManyHeroCloudsAreEn
             entity.Components["HeroCloud"] = rfl::Generic( payload.value() );
         }
         EXPECT_EQ( live, leg.Expected ) << leg.Scene << " does not carry the instance count its name claims";
+
+        // SINCE O1 THE LOOK IS NOT IN THE SCENE, so comparing the scene text alone would no longer be
+        // comparing the sky. Each leg names its own Materials/M_<Scene>_Clouds.demat — the migration is
+        // per-scene and pure, so it cannot know three files should share one, and per-scene is the
+        // behaviour an author wants anyway (editing one leg's material must not move the other two).
+        // The path is therefore normalised out of the comparison and the thing it points AT is compared
+        // instead: three legs whose materials differ by a digit measure three different skies however
+        // identical the .desce files look.
+        for ( auto& entity : scene.Entities )
+        {
+            const auto found = entity.Components.get( "VolumetricCloud" );
+            if ( !found.has_value() )
+                continue;
+
+            auto payload = found.value().to_object();
+            ASSERT_TRUE( payload ) << leg.Scene << ": the VolumetricCloud payload is not an object";
+            const auto material = payload.value()["Material"].to_string();
+            ASSERT_TRUE( material ) << leg.Scene
+                                    << ": the cloud layer names no material, so its look comes from "
+                                       "nowhere this suite can pin";
+
+            const std::string materialJson = ReadAll( AssetPath( *material ) );
+            EXPECT_FALSE( materialJson.empty() )
+                 << leg.Scene << " names '" << *material << "', which is not on disk";
+
+            auto parsedMaterial = rfl::json::read<Desert::Assets::MaterialData>( materialJson );
+            ASSERT_TRUE( parsedMaterial ) << leg.Scene << ": '" << *material << "' is not a material";
+
+            // MaterialId is the FILE's identity, not the sky's — it is derived from the file's own path
+            // so that two runs of the migration produce byte-identical output, which means three legs
+            // that name three files necessarily carry three ids. Comparing it would fail on a difference
+            // that cannot reach a pixel; comparing everything else is the sky.
+            Desert::Assets::MaterialData look = parsedMaterial.value();
+            look.MaterialId                   = ::Common::UUID( static_cast<uint64_t>( 0 ) );
+            cloudLook.push_back( rfl::json::write( look ) );
+
+            payload.value()["Material"]          = std::string( "normalised" );
+            entity.Components["VolumetricCloud"] = rfl::Generic( payload.value() );
+        }
+
         normalised.push_back( rfl::json::write( scene ) );
     }
 
@@ -259,6 +309,13 @@ TEST( CloudProtocolScene, TheThreeHeroCostLegsDifferOnlyInHowManyHeroCloudsAreEn
         EXPECT_EQ( normalised[0], normalised[i] )
              << "the hero cost legs differ in something other than HeroCloud.Enabled, so their A/B measures "
                 "more than the instance count";
+
+    ASSERT_EQ( cloudLook.size(), std::size( kLegs ) )
+         << "a leg carries no cloud layer at all, so there is no sky to compare";
+    for ( std::size_t i = 1; i < cloudLook.size(); ++i )
+        EXPECT_EQ( cloudLook[0], cloudLook[i] )
+             << "the hero cost legs' CLOUD MATERIALS differ, so their A/B measures a different sky as well "
+                "as a different instance count";
 }
 
 int main( int argc, char** argv )

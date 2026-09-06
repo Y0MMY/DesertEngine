@@ -751,7 +751,7 @@ namespace Desert::Editor
         e.CanRemove = true;
         e.Has       = []( ::Desert::ECS::Entity& en )
         { return en.HasComponent<::Desert::ECS::VolumetricCloudComponent>(); };
-        e.Add = []( ::Desert::ECS::Entity& en ) { en.AddComponent<::Desert::ECS::VolumetricCloudComponent>(); };
+        e.Add    = []( ::Desert::ECS::Entity& en ) { en.AddComponent<::Desert::ECS::VolumetricCloudComponent>(); };
         e.Remove = []( ::Desert::ECS::Entity& en )
         { en.RemoveComponent<::Desert::ECS::VolumetricCloudComponent>(); };
         e.Draw = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
@@ -1378,8 +1378,7 @@ namespace
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeTerrainEntry() );
 
     const int _desert_volumetric_cloud_component_reg =
-         ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
-              ::Desert::Editor::MakeVolumetricCloudEntry() );
+         ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeVolumetricCloudEntry() );
 
     const int _desert_ism_component_reg = ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
          ::Desert::Editor::MakeInstancedStaticMeshEntry() );

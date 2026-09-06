@@ -195,7 +195,7 @@ TEST( SceneMigratorWritePath, TwoScenesSharingASceneNameRefuseToShareOneCloudMat
     const auto writeCloudScene = []( const fs::path& p )
     {
         SceneSerialized fixture;
-        fixture.SceneName    = "TwinName"; // deliberately the same for both files
+        fixture.SceneName    = "TwinName";                               // deliberately the same for both files
         fixture.SceneVersion = Desert::Migration::kSceneVersionSSRUnits; // v11: only the cloud step is ahead
         fixture.UnitVersion  = Desert::Migration::kUnitVersion;
 

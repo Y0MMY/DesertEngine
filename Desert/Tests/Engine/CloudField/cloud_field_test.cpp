@@ -2030,7 +2030,11 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
 // in this file noticed that until now. 215.8 m against the 125 m chord today.
 TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers )
 {
-    const Desert::ECS::VolumetricCloudData shipped;
+    // The erosion strength is the MATERIAL's since O1, not the component's — CloudMaterialValues
+    // mirrors the CloudRaymarch schema and the CloudMaterialSchema suite pins the mirror. Read, not
+    // transcribed, for the reason the header of this suite gives: half of this calibration lives here
+    // and the other half in the value, and a copy would let them come apart in silence.
+    const Desert::Graphic::CloudMaterialValues shipped;
 
     const float  aspect   = Desert::Assets::kCloudLumpVerticalOverHorizontal;
     const float  strength = shipped.DetailStrength;
@@ -2086,9 +2090,9 @@ TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAn
     EXPECT_GE( result.TravelM, kRequiredHeadroom * floorM )
          << "THE LUMP AND THE EROSION HAVE COME APART. A lump aspect of " << aspect
          << " (Assets::kCloudLumpVerticalOverHorizontal) against a Detail Strength of " << strength
-         << " (ECS::VolumetricCloudData) moves the visible surface " << result.TravelM << " m, which is "
-         << result.TravelM / floorM << "x the " << floorM << " m the march can be relied on to find — under the "
-         << kRequiredHeadroom
+         << " (Graphic::CloudMaterialValues, the CloudRaymarch schema) moves the visible surface "
+         << result.TravelM << " m, which is " << result.TravelM / floorM << "x the " << floorM
+         << " m the march can be relied on to find — under the " << kRequiredHeadroom
          << "x this pair is calibrated to hold.\n"
             "These two numbers are ONE calibration: a taller lump is optically thicker per metre, so the "
             "same cut moves the surface less far. If the aspect was just raised, the strength has to "

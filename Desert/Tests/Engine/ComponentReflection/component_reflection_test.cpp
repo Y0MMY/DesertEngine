@@ -497,22 +497,48 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     // THE THIRTY-THREE THAT MOVED, pinned as ABSENT so none of them grows a second life here beside its
     // material self — the exact double-write §4.2 forbids, and with a component this big the easiest
     // regression to make by merging an old branch.
-    for ( const char* moved :
-          { "CloudType1", "CloudType2", "CloudType3", "CloudType4", "Coverage", "CoverageContrast",
-            "WeatherTileSize", "Seed", "PlacementDensity", "PlacementScatter", "PlacementSizeVariety",
-            "PatchTileSize", "PatchStrength", "CloudLayout", "LayoutPatternStrength", "LayoutMaskStrength",
-            "LayoutRepeats", "LayoutRotation", "LayoutOffset", "DetailTileSize", "DetailStrength",
-            "DensityScale", "ExtinctionScale", "ScatteringAlbedo", "PhaseG", "PhaseGBackward", "PhaseBlend",
-            "AmbientOcclusionStrength", "MultiScatterOctaves", "MultiScatterContribution",
-            "MultiScatterOcclusion", "MultiScatterEccentricity", "AmbientScale" } )
+    for ( const char* moved : { "CloudType1",
+                                "CloudType2",
+                                "CloudType3",
+                                "CloudType4",
+                                "Coverage",
+                                "CoverageContrast",
+                                "WeatherTileSize",
+                                "Seed",
+                                "PlacementDensity",
+                                "PlacementScatter",
+                                "PlacementSizeVariety",
+                                "PatchTileSize",
+                                "PatchStrength",
+                                "CloudLayout",
+                                "LayoutPatternStrength",
+                                "LayoutMaskStrength",
+                                "LayoutRepeats",
+                                "LayoutRotation",
+                                "LayoutOffset",
+                                "DetailTileSize",
+                                "DetailStrength",
+                                "DensityScale",
+                                "ExtinctionScale",
+                                "ScatteringAlbedo",
+                                "PhaseG",
+                                "PhaseGBackward",
+                                "PhaseBlend",
+                                "AmbientOcclusionStrength",
+                                "MultiScatterOctaves",
+                                "MultiScatterContribution",
+                                "MultiScatterOcclusion",
+                                "MultiScatterEccentricity",
+                                "AmbientScale" } )
         EXPECT_EQ( Find( cloud, moved ), nullptr )
-             << moved << " is a parameter of the cloud MATERIAL (CloudRaymarch schema) since O1 and must "
-                         "not have a second life on the component";
+             << moved
+             << " is a parameter of the cloud MATERIAL (CloudRaymarch schema) since O1 and must "
+                "not have a second life on the component";
 
     // And the pre-O1 removals stay removed, for their original reasons.
-    for ( const char* gone : { "WeatherSeed", "WeatherOctaves", "DetailSeed", "DetailOctaves",
-                               "LayerBottomAltitude", "LayerThickness", "CloudTypeVariance", "NoiseVolume",
-                               "CloudType", "ShapeDistortion" } )
+    for ( const char* gone :
+          { "WeatherSeed", "WeatherOctaves", "DetailSeed", "DetailOctaves", "LayerBottomAltitude",
+            "LayerThickness", "CloudTypeVariance", "NoiseVolume", "CloudType", "ShapeDistortion" } )
         EXPECT_EQ( Find( cloud, gone ), nullptr ) << gone << " must not come back";
 
     // FOUR SPECIES SLOTS is still the number of profile-table channels; the slots just live in the
@@ -665,7 +691,8 @@ TEST( VolumetricCloudPayload, TheNearFadeReachesTheGpuAsAnIntervalOrNotAtAll )
             data.NearFadeEndDistance   = endWorld;
 
             const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
-                 data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
+                 data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u,
+                 atmosphere, glm::vec3( 0.0f ) );
 
             const float endKm   = payload.Fade.z;
             const float startKm = payload.Fade.w;
@@ -703,7 +730,8 @@ TEST( VolumetricCloudPayload, ALegalNearFadeSurvivesThePackerUnchangedAndInKilom
     data.NearFadeEndDistance   = 500000.0f; // 5 km
 
     const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
-         data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
+         data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere,
+         glm::vec3( 0.0f ) );
 
     EXPECT_FLOAT_EQ( payload.Fade.w, 1.0f );
     EXPECT_FLOAT_EQ( payload.Fade.z, 5.0f );
@@ -712,7 +740,8 @@ TEST( VolumetricCloudPayload, ALegalNearFadeSurvivesThePackerUnchangedAndInKilom
     // "apply it in full from the camera".
     data.NearFadeStartDistance = 0.0f;
     const Desert::Graphic::CloudGpuPayload fromCamera = Desert::Graphic::PackCloudParams(
-         data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
+         data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere,
+         glm::vec3( 0.0f ) );
 
     EXPECT_FLOAT_EQ( fromCamera.Fade.w, 0.0f );
     EXPECT_FLOAT_EQ( fromCamera.Fade.z, 5.0f );
@@ -767,7 +796,8 @@ TEST( VolumetricCloudPayload, TheSunColourAndThePerSampleGateAgreeOnEveryCombina
                     EXPECT_EQ( perSample, flag && valid && haveLut && haveSkyLight );
 
                     const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
-                         data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
+                         data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(),
+                         1u, atmosphere, glm::vec3( 0.0f ) );
 
                     const glm::vec3 packed( payload.SunColour );
 
@@ -855,8 +885,8 @@ TEST( VolumetricCloudPayload, TheEnvelopeContainsEveryTypeItIsBuiltFrom )
 
         Desert::ECS::VolumetricCloudData data;
 
-        const Desert::Graphic::CloudGpuPayload payload =
-             Desert::Graphic::PackCloudParams( data, Desert::Graphic::CloudMaterialValues{}, set, count, atmosphere, glm::vec3( 0.0f ) );
+        const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
+             data, Desert::Graphic::CloudMaterialValues{}, set, count, atmosphere, glm::vec3( 0.0f ) );
 
         const float bottomKm = payload.Layer.y;
         const float topKm    = payload.Layer.y + payload.Layer.z;
@@ -901,8 +931,8 @@ TEST( VolumetricCloudPayload, AnEmptySetPacksAShellThatDrawsNothingRatherThanAGu
     const Desert::Graphic::AtmosphereEnv atmosphere{};
     Desert::ECS::VolumetricCloudData     data;
 
-    const Desert::Graphic::CloudGpuPayload payload =
-         Desert::Graphic::PackCloudParams( data, Desert::Graphic::CloudMaterialValues{}, nullptr, 0u, atmosphere, glm::vec3( 0.0f ) );
+    const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
+         data, Desert::Graphic::CloudMaterialValues{}, nullptr, 0u, atmosphere, glm::vec3( 0.0f ) );
 
     EXPECT_FLOAT_EQ( payload.Detail.w, 0.0f ) << "an empty set claims to have species in it";
     EXPECT_GT( payload.Layer.z, 0.0f ) << "a shell of zero thickness divides by zero in the step schedule";
@@ -1000,8 +1030,10 @@ TEST( VolumetricCloudPayload, TheTypesMatterAndEdgeReachTheGpuAsProductsOfTheLay
     // frame can show it. If this ever fails, the library has two names for one cloud.
     Desert::ECS::VolumetricCloudData layer;
 
-    const auto icePayload   = Desert::Graphic::PackCloudParams( layer, Desert::Graphic::CloudMaterialValues{}, &ice, 1u, atmosphere, glm::vec3( 0.0f ) );
-    const auto stormPayload = Desert::Graphic::PackCloudParams( layer, Desert::Graphic::CloudMaterialValues{}, &storm, 1u, atmosphere, glm::vec3( 0.0f ) );
+    const auto icePayload = Desert::Graphic::PackCloudParams( layer, Desert::Graphic::CloudMaterialValues{}, &ice,
+                                                              1u, atmosphere, glm::vec3( 0.0f ) );
+    const auto stormPayload = Desert::Graphic::PackCloudParams( layer, Desert::Graphic::CloudMaterialValues{},
+                                                                &storm, 1u, atmosphere, glm::vec3( 0.0f ) );
 
     EXPECT_LT( icePayload.SpeciesEdge[0].z, stormPayload.SpeciesEdge[0].z );
     EXPECT_LT( icePayload.SpeciesEdge[0].w, stormPayload.SpeciesEdge[0].w );
@@ -1074,8 +1106,9 @@ TEST( VolumetricCloudPayload, TheNoiseVolumesAreDeduplicatedAndEverySlotStaysBin
         Desert::Graphic::AtmosphereEnv   atmosphere;
 
         const auto payload = Desert::Graphic::PackCloudParams(
-             layer, Desert::Graphic::CloudMaterialValues{}, shapes, kCloudSpeciesSlots, atmosphere, glm::vec3( 0.0f ),
-             Desert::Graphic::CloudRegionBinding{}, Desert::ECS::kCloudLightMarchMaxSamples, 0.0f, resolved );
+             layer, Desert::Graphic::CloudMaterialValues{}, shapes, kCloudSpeciesSlots, atmosphere,
+             glm::vec3( 0.0f ), Desert::Graphic::CloudRegionBinding{}, Desert::ECS::kCloudLightMarchMaxSamples,
+             0.0f, resolved );
 
         for ( uint32_t k = 0; k < kCloudSpeciesSlots; ++k )
         {
@@ -1139,9 +1172,9 @@ TEST( VolumetricCloudReflection, DistancesAreLengthsExceptTheTwoThatCarryTheirOw
 {
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
 
-    for ( const char* name : { "MaxViewDistance", "TracingStartDistance", "TracingStartMaxDistance",
-                               "RegionSize", "NearFadeStartDistance", "NearFadeEndDistance",
-                               "LightMarchDistance", "WindSpeed" } )
+    for ( const char* name :
+          { "MaxViewDistance", "TracingStartDistance", "TracingStartMaxDistance", "RegionSize",
+            "NearFadeStartDistance", "NearFadeEndDistance", "LightMarchDistance", "WindSpeed" } )
         EXPECT_TRUE( Find( cloud, name )->Meta.IsLength ) << name;
 
     // The one that is NOT world units, and says which unit it is instead. Marking it as a length would

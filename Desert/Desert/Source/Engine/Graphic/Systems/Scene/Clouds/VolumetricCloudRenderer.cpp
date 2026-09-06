@@ -316,7 +316,8 @@ namespace Desert::Graphic::System
         // layer that never bakes.
         params.LayoutPlacement.RepeatsPerRegion =
              static_cast<uint32_t>( std::clamp( m_Material.LayoutRepeats, 1, 16 ) );
-        params.LayoutPlacement.QuarterTurns = static_cast<uint32_t>( std::clamp( m_Material.LayoutRotation, 0, 3 ) );
+        params.LayoutPlacement.QuarterTurns =
+             static_cast<uint32_t>( std::clamp( m_Material.LayoutRotation, 0, 3 ) );
         params.LayoutPlacement.OffsetKm =
              glm::vec2( m_Material.LayoutOffset.x, m_Material.LayoutOffset.y ) / kCloudWorldUnitsPerKm;
         params.LayoutPlacement.PatternStrength = std::clamp( m_Material.LayoutPatternStrength, 0.0f, 1.0f );

@@ -503,8 +503,7 @@ namespace Desert::Core::Preprocess
                 // validation layer reports and no test that reads either side alone can see.
                 if ( param.IsAssetRef() && ( info.UBBinding || info.TextureBinding ) )
                 {
-                    err = { entryLine, "asset-reference property '" + param.Name +
-                                            "' (" + param.AssetKind +
+                    err = { entryLine, "asset-reference property '" + param.Name + "' (" + param.AssetKind +
                                             ") is CPU-side only and cannot appear in a Properties block "
                                             "that declares Binding()/TextureBinding()" };
                     return false;
