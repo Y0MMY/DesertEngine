@@ -34,7 +34,7 @@ namespace Desert::ECS
             return false;
         }
 
-        void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
+        void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& /*renderCommandBuffer*/,
                      const Common::Timestep& ts ) override
         {
             auto atmospheres = registry.view<ECS::SkyAtmosphereComponent>();

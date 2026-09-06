@@ -22,7 +22,7 @@ namespace Desert::Assets
             return m_Metadata;
         }
 
-        virtual void ResolveDependencies( AssetManager& manager )
+        virtual void ResolveDependencies( AssetManager& /*manager*/ )
         {
         }
 

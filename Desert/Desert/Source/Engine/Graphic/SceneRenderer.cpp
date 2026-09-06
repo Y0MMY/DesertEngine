@@ -1187,11 +1187,6 @@ namespace Desert::Graphic
                                       .Transforms = transforms } );
     }
 
-    const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
-    {
-        return {}; // EnvironmentManager::Create( filepath );
-    }
-
     void SceneRenderer::SetOutlineSettings( const glm::vec3& color, float width, float smoothness, bool enabled )
     {
         const auto& jumpFloodSystem =

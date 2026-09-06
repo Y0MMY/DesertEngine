@@ -67,7 +67,7 @@ namespace Desert::Graphic::API::Vulkan
         {
         }
 
-        virtual Common::BoolResultStr Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) override;
+        Common::BoolResultStr Resize( uint32_t width, uint32_t height ) override;
 
         virtual const std::shared_ptr<Image2D>& GetColorAttachmentImage( uint32_t index = 0 ) const override
         {

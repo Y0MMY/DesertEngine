@@ -119,7 +119,7 @@ namespace Desert::Graphic
     protected:
         void RegisterProperty( IProperty* prop ) override;
 
-        virtual void OnBind( MaterialInstance* instance )
+        virtual void OnBind( MaterialInstance* /*instance*/ )
         {
         }
         void CachePropertyNames();

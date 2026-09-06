@@ -496,7 +496,7 @@ namespace Desert::Editor::Tools
         }
 
         // World coord of a plane (na, planeCell, sign) — the surface a Push extrudes from.
-        auto planeWorldOf = [&]( int na, int sign, int cell )
+        auto planeWorldOf = [&]( int /*na*/, int sign, int cell )
         { return static_cast<float>( cell + ( sign > 0 ? 0 : 1 ) ) * u; };
 
         // --- Targeting: nearest filled cell's face under the cursor, else the ground work-plane. Yields a

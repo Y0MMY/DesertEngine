@@ -19,7 +19,7 @@ namespace Desert::Graphic::System
 
         // Tonemap runs as part of the explicit post-process chain (after the Jump Flood outline),
         // not through the render graph.
-        void RegisterPasses( RenderGraphBuilder& builder ) override
+        void RegisterPasses( RenderGraphBuilder& /*builder*/ ) override
         {
         }
 

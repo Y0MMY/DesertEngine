@@ -20,7 +20,7 @@ namespace Desert::Editor
     {
     }
 
-    void PrefabComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
+    void PrefabComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* /*scene*/ )
     {
         auto& prefab = entity.GetComponent<ECS::PrefabComponent>();
 

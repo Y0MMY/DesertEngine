@@ -3,7 +3,7 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    VulkanRenderCommandBuffer::VulkanRenderCommandBuffer( const std::string& debugName )
+    VulkanRenderCommandBuffer::VulkanRenderCommandBuffer( const std::string& /*debugName*/ )
     {
     }
 

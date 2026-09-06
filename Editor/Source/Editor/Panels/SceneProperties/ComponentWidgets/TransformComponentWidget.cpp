@@ -14,7 +14,7 @@ namespace Desert::Editor
     {
     }
 
-    void TransformComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
+    void TransformComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* /*scene*/ )
     {
         auto& transform = entity.GetComponent<ECS::TransformComponent>();
 

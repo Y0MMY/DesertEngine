@@ -32,7 +32,7 @@ struct Stats
     double meanY, p05Y, p50Y, p95Y, meanSat, contrast;
 };
 
-static Stats Measure( const unsigned char* px, int w, int h, int ch, int x0, int y0, int x1, int y1 )
+static Stats Measure( const unsigned char* px, int w, int /*h*/, int ch, int x0, int y0, int x1, int y1 )
 {
     std::vector<double> lum;
     lum.reserve( ( x1 - x0 ) * ( y1 - y0 ) );

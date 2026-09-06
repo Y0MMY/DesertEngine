@@ -144,12 +144,12 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
-    Common::BoolResultStr VulkanImGui::OnUpdate( const Common::Timestep& ts )
+    Common::BoolResultStr VulkanImGui::OnUpdate( const Common::Timestep& /*ts*/ )
     {
         return BOOLSUCCESS;
     }
 
-    void VulkanImGui::OnEvent( Common::Event& event )
+    void VulkanImGui::OnEvent( Common::Event& /*event*/ )
     {
     }
 

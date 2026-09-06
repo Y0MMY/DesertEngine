@@ -19,8 +19,8 @@ namespace Desert::Graphic
         Core::Formats::ImageProperties Properties;
     };
 
-    static ImageBaseSpec LoadTexture( const std::filesystem::path& path, bool alpha, bool isCube,
-                                      const TextureSpecification& specification )
+    static ImageBaseSpec LoadTexture( const std::filesystem::path& path, bool alpha, bool /*isCube*/,
+                                      const TextureSpecification& /*specification*/ )
     {
 
         bool isHDR = Core::IO::ImageReader::IsHDR( path );

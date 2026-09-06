@@ -42,7 +42,7 @@ namespace Desert::Graphic
 
         // Named command-buffer region for graphics debuggers (RenderDoc shows these as a pass
         // tree). Default no-op so non-debug backends don't have to care.
-        virtual void BeginDebugLabel( const char* name )
+        virtual void BeginDebugLabel( const char* /*name*/ )
         {
         }
         virtual void EndDebugLabel()

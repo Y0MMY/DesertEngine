@@ -47,7 +47,7 @@ namespace Desert::Editor
             entity.template AddComponent<ComponentT>();
         }
 
-        void RemoveComponentFromEntity( ECS::Entity& entity ) override final
+        void RemoveComponentFromEntity( ECS::Entity& /*entity*/ ) override final
         {
             // entity.template RemoveComponent<ComponentT>();
         }

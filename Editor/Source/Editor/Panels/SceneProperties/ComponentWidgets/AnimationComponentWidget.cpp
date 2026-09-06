@@ -25,7 +25,7 @@ namespace Desert::Editor
     {
     }
 
-    void AnimationComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
+    void AnimationComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* /*scene*/ )
     {
         auto& animation = entity.GetComponent<ECS::AnimationComponent>();
 

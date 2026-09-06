@@ -100,7 +100,10 @@ namespace Desert::Editor
             LOG_ERROR( "[UI Editor] {} ({}x{})", m_PreviewError, width, height );
             return false;
         }
-        if ( const auto result = m_Target->Resize( width, height, /*forceRecreate=*/true ); !result )
+        // The `/*forceRecreate=*/true` that used to be here asked for something the parameter never
+        // delivered: `VulkanFramebuffer::Resize` ignored the flag and recreated unconditionally, which is
+        // also what this call site wanted. The parameter is gone; the behaviour is what it always was.
+        if ( const auto result = m_Target->Resize( width, height ); !result )
         {
             m_PreviewError = result.GetError();
             LOG_ERROR( "[UI Editor] preview framebuffer resize to {}x{} failed: {}", width, height,

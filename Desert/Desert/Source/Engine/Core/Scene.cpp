@@ -347,7 +347,7 @@ namespace Desert::Core
                  m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
 
             dirLightGroup.each(
-                 [&]( entt::entity entity, const auto& light, const auto& transform )
+                 [&]( entt::entity /*entity*/, const auto& light, const auto& transform )
                  {
                      const glm::vec3& rawDir = transform.Translation;
                      if ( glm::length( rawDir ) > 0.001f )
@@ -524,11 +524,6 @@ namespace Desert::Core
     NO_DISCARD Common::BoolResultStr Scene::EndScene()
     {
         return m_SceneRenderer->EndScene();
-    }
-
-    NO_DISCARD const Graphic::Environment Scene::CreateEnvironment( const Common::Filepath& filepath )
-    {
-        return m_SceneRenderer->CreateEnvironment( filepath );
     }
 
     std::optional<Graphic::Environment> Scene::GetEnvironment() const

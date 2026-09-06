@@ -127,7 +127,6 @@ namespace Desert::Graphic
         void SubmitInstancedMesh( const Mesh* mesh, MaterialInstance* material,
                                   const std::vector<glm::mat4>* transforms );
 
-        const Environment CreateEnvironment( const Common::Filepath& filepath );
         void SetEnvironment( const std::shared_ptr<MaterialSkybox>& material, float intensity = 1.0f );
 
         // Selection-outline (Jump Flood) appearance. Editor-only: pushed each frame from EditorPreferences

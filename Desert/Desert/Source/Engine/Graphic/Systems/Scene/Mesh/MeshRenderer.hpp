@@ -283,8 +283,6 @@ namespace Desert::Graphic::System
         bool SetupOverdrawPass(); // overdraw accumulation pipeline + FB + fullscreen heat resolve
         void RegisterDebugPass( RenderGraphBuilder& builder );
 
-        void UpdateGlobalUniforms( const Core::Camera* camera, const ShaderProtocols::PointLight& pointLights,
-                                   const ShaderProtocols::DirectionLight& dirLights );
 
     private:
         // Static

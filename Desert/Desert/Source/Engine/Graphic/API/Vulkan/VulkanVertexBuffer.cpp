@@ -38,11 +38,11 @@ namespace Desert::Graphic::API::Vulkan
         allocator->UnmapMemory( m_MemoryAllocation );
     }
 
-    void VulkanVertexBuffer::Use( BindUsage use /*= BindUsage::Bind */ ) const
+    void VulkanVertexBuffer::Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
     {
     }
 
-    void VulkanVertexBuffer::RT_Use( BindUsage use /*= BindUsage::Bind */ ) const
+    void VulkanVertexBuffer::RT_Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
     {
     }
 

@@ -19,7 +19,7 @@ namespace Desert::Graphic::System
         virtual Common::BoolResultStr Initialize() override;
         virtual void                  Shutdown() override {}
 
-        void RegisterPasses( RenderGraphBuilder& builder ) override {}
+        void RegisterPasses( RenderGraphBuilder& /*builder*/ ) override {}
 
         void Execute();
         void Resize( uint32_t width, uint32_t height );

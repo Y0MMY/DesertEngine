@@ -89,7 +89,7 @@ namespace Desert::Engine
         void ReportLayerFailure( const char* stage, Common::Layer* layer, const std::string& error );
 
     private:
-        NO_DISCARD bool OnClose( Common::EventWindowClose& e )
+        NO_DISCARD bool OnClose( Common::EventWindowClose& /*e*/ )
         {
             m_IsRunningApplication = false;
             return true;

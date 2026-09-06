@@ -45,16 +45,23 @@ namespace Desert::Graphic::API::Vulkan
                               ->GetVulkanAllocator()
                               .get();
 
+        // THE OFFSET IS HONOURED, and until this commit it was not. `IndexBuffer::SetData` declares
+        // `uint32_t offset = 0` and `VulkanVertexBuffer::SetData` — the same signature, twenty lines away
+        // in the sibling file — writes at `dst + offset`; this one wrote at `dst` and ignored the argument
+        // entirely. Two implementations of one interface, one of which quietly drops a parameter: any
+        // caller passing a non-zero offset would have overwritten the head of the buffer with no error
+        // anywhere. Every current caller passes 0 or omits it, so nothing changes today; what changes is
+        // that the interface is now telling the truth.
         void* dst = allocator->MapMemory( m_MemoryAllocation );
-        memcpy( dst, data, size );
+        memcpy( (uint8_t*)dst + offset, data, size );
         allocator->UnmapMemory( m_MemoryAllocation );
     }
 
-    void VulkanIndexBuffer::Use( BindUsage use /*= BindUsage::Bind */ ) const
+    void VulkanIndexBuffer::Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
     {
     }
 
-    void VulkanIndexBuffer::RT_Use( BindUsage use /*= BindUsage::Bind */ ) const
+    void VulkanIndexBuffer::RT_Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
     {
     }
 

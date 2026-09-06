@@ -541,9 +541,12 @@ namespace Desert::Graphic::System
                              if ( !camera )
                                  return;
 
-                             UpdateGlobalUniforms( camera, m_SceneRenderer->GetPointLights(),
-                                                   m_SceneRenderer->GetDirectionLights() );
-
+                             // `UpdateGlobalUniforms( camera, points, directionals )` used to be called
+                             // here. Its entire body was `if ( !camera ) return;` — it read neither light
+                             // set, which is what `-Wunused-parameter` reported about both. The lights
+                             // reach the shaders through the material executors' uniform blocks, and the
+                             // two `GetXLights()` calls that fed this one were a per-frame walk of the
+                             // scene's light components for nothing.
                              DrawStaticMeshes();
                              DrawSkinnedMeshes();
                              DrawGenericMeshes();
@@ -740,14 +743,6 @@ namespace Desert::Graphic::System
                                  m_RSMMaterial->GetMaterialExecutor(), 1, 0, obj->HiddenSubmeshes );
         }
         renderer.EndRenderPass();
-    }
-
-    void MeshRenderer::UpdateGlobalUniforms( const Core::Camera*                    camera,
-                                             const ShaderProtocols::PointLight&     pointLights,
-                                             const ShaderProtocols::DirectionLight& dirLights )
-    {
-        if ( !camera )
-            return;
     }
 
     void MeshRenderer::DrawStaticMeshes()

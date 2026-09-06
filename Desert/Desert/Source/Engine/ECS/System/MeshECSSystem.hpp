@@ -40,7 +40,7 @@ namespace Desert::ECS
         }
 
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
-                     const Common::Timestep& ts ) override
+                     const Common::Timestep& /*ts*/ ) override
         {
             // Frame-constant invalidation stamp: cached instance sets built against an older stamp
             // rebuild below (their parent Material may have been graveyarded by Invalidate()).

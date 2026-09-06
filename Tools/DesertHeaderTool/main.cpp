@@ -79,7 +79,7 @@ namespace
     {
         std::string        fqn;          // fully-qualified C++ name, e.g. Desert::Assets::PBRMaterialData
         std::string        registryName; // short name used as the registry key, e.g. PBRMaterialData
-        std::vector<Field> fields = {};
+        std::vector<Field> fields;
         std::string        headerInclude; // include path relative to source root
     };
 
@@ -512,7 +512,7 @@ namespace
         int         depth;    // brace depth at which this scope opened
         bool        isStruct; // struct/class vs namespace
         bool        reflected = false;
-        std::vector<Field> fields;
+        std::vector<Field> fields = {}; // the two `scopes.push_back( { name, depth, isStruct } )` below stop here on purpose
     };
 
     std::string JoinScopes( const std::vector<Scope>& scopes )

@@ -84,7 +84,7 @@ namespace Desert::Editor
     }
 
     void LightGizmoRenderer::RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
-                                                float height, float xpos, float ypos )
+                                                float height, float /*xpos*/, float /*ypos*/ )
     {
         auto entities = m_Scene->GetAllEntities();
 
@@ -263,7 +263,7 @@ namespace Desert::Editor
     }
 
     void LightGizmoRenderer::RenderSpotLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
-                                               float height, float xpos, float ypos )
+                                               float height, float /*xpos*/, float /*ypos*/ )
     {
         auto entities = m_Scene->GetAllEntities();
 
@@ -374,7 +374,7 @@ namespace Desert::Editor
     }
 
     void LightGizmoRenderer::RenderCameras( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
-                                            float height, float xpos, float ypos )
+                                            float height, float /*xpos*/, float /*ypos*/ )
     {
         auto         entities  = m_Scene->GetAllEntities();
         const ImVec2 windowPos = ImGui::GetWindowPos();
@@ -501,7 +501,7 @@ namespace Desert::Editor
     }
 
     void LightGizmoRenderer::RenderSkeleton( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
-                                             float height, float xpos, float ypos )
+                                             float height, float /*xpos*/, float /*ypos*/ )
     {
         const auto& selected = Core::SelectionManager::GetSelected();
         if ( !selected )
@@ -986,8 +986,8 @@ namespace Desert::Editor
 
     void LightGizmoRenderer::DrawLightRadiusSphere( const std::shared_ptr<Desert::Core::Camera>& camera,
                                                     const glm::vec3& worldPos, float radius, float width,
-                                                    float height, float windowX, float windowY, float iconCenterX,
-                                                    float iconCenterY )
+                                                    float height, float windowX, float windowY, float /*iconCenterX*/,
+                                                    float /*iconCenterY*/ )
     {
         ImDrawList* drawList         = ImGui::GetWindowDrawList();
         const auto  viewMatrix       = camera->GetViewMatrix();

@@ -702,7 +702,10 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdSetScissor( m_CurrentCommandBuffer, 0, 1, &scissor );
     }
 
-    void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
+    // Same shape as VulkanContext::OnResize: the RendererAPI interface requires it and the Vulkan backend
+    // has nothing to do here, because SceneRenderer::OnResize already drives the swapchain and every
+    // framebuffer directly a few lines after it calls this.
+    void VulkanRendererAPI::ResizeWindowEvent( uint32_t /*width*/, uint32_t /*height*/ )
     {
     }
 

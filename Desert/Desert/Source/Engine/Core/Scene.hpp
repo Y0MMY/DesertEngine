@@ -67,8 +67,6 @@ namespace Desert::Core
 
         [[nodiscard]] Common::BoolResultStr Init();
 
-        [[nodiscard]] const Graphic::Environment CreateEnvironment( const Common::Filepath& filepath );
-
         const std::shared_ptr<Graphic::Image2D>     GetFinalImage() const;
         const std::shared_ptr<Graphic::Framebuffer> GetTargetFramebuffer() const;
 
