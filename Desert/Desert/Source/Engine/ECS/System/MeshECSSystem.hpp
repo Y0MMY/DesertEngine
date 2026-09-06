@@ -562,7 +562,7 @@ namespace Desert::ECS
                          }
 
                          renderCommandBuffer.Emplace<Graphic::Render::DrawSkinnedMeshCommand>(
-                              skinnedMesh, slots, worldTransform, boneMatrices, isSelected );
+                              skinnedMesh, slots, worldTransform, boneMatrices, isSelected, mesh.CastShadows );
                      } );
             }
         }

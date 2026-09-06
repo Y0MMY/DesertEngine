@@ -200,7 +200,14 @@ namespace Desert::Graphic::System
                  fe.Push.StartColor = glm::vec4( d.StartColor, d.StartAlpha );
                  fe.Push.EndColor   = glm::vec4( d.EndColor, d.EndAlpha );
                  fe.Push.Sizes      = glm::vec4( d.StartSize, d.EndSize, d.SizeCurvePower, 0.0f );
-                 fe.Push.Counts     = glm::uvec4( static_cast<uint32_t>( gpu.MaxParticles ), budget, 1u, 0u );
+                 // Counts.w = local-space simulation (WorldSpace off): the sim keeps each particle's
+                 // offset FROM the emitter and rebases it on the current emitter position every frame, so
+                 // the whole system rides a moving emitter instead of trailing behind it. The particle
+                 // buffer still holds world positions either way — the billboard pass needs no per-emitter
+                 // uniform and does not change. (Only the TRANSLATION rides; the emitter's rotation is not
+                 // applied to the cloud.)
+                 fe.Push.Counts =
+                      glm::uvec4( static_cast<uint32_t>( gpu.MaxParticles ), budget, 1u, d.WorldSpace ? 0u : 1u );
 
                  m_FrameEmitters.push_back( fe );
              } );

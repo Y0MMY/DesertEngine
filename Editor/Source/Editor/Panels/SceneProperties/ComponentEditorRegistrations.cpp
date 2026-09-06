@@ -653,7 +653,7 @@ namespace Desert::Editor
     }
 
     // UI Layout (RectTransform): anchor-preset controls ("Fill / Match Parent" + 4x4 grid) on top of the
-    // reflected anchor/offset/pivot fields, so you can match the parent from the inspector (not just the
+    // reflected anchor/offset fields, so you can match the parent from the inspector (not just the
     // viewport toolbar). Presets act in design space (keep the authored size; stretch fills the axis).
     static ComponentEditorEntry MakeUILayoutEntry()
     {

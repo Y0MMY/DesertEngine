@@ -366,8 +366,11 @@ namespace Desert::Core
         // Other scene-wide settings
         PROPERTY( DisplayName( "Gravity" ), Category( "Physics" ), Range( 0.0f, 5000.0f ) )
         float Gravity = 981.0f; // For physics simulation (cm/s^2 — 1 unit = 1 cm)
-        PROPERTY( DisplayName( "Pause Simulation" ), Category( "Physics" ) )
-        bool  PauseSimulation = false;
+        // "Pause Simulation" used to sit here. It was reflected, serialized and shown beside Gravity, and
+        // read by NOTHING — the editor's transport owns pausing, as runtime state rather than scene data.
+        // Sixteen probe scenes had authored it `true` and got nothing, which is the exact defect §1.3
+        // exists to forbid; deleted by Д26 rather than wired, because a scene file that ships "physics is
+        // paused, forever" is a trap and the transport already answers the real need.
 
         // Wind — a SHARED environment force, deliberately scene-global (like Gravity), NOT owned by the
         // Skybox. It is the single source of truth for the wind that drives grass/foliage sway today and
