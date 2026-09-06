@@ -655,20 +655,18 @@ namespace Desert::Assets
                                                                   "painting: {}",
                                                                   valid.GetError() );
 
-        auto made = MakeCloudLayoutCanvas( data.Resolution );
-        if ( !made )
-            return made;
-
-        CloudLayoutCanvas canvas = made.ExtractValue();
-
         // BOTH TABLES SURVIVE THE TRIP, which they did not before O-4. The mask has its own plane now, so a
         // painting that uses all four species slots AND adds and removes cloud opens exactly as it was
         // saved. There is nothing left for this function to refuse beyond a layout that was never valid.
-        if ( data.HasPattern() )
-            canvas.Pattern = data.Pattern;
-
-        if ( data.HasMask() )
-            canvas.Mask = data.Mask;
+        //
+        // AND AN ABSENT TABLE STAYS ABSENT. Handing back a blank canvas and filling in what the layout has
+        // would give a mask-only painting a flat pattern table it never carried, and saving it again would
+        // write that table to disk — a file that changed because somebody opened it, which is the silent
+        // kind of change §1.4 forbids. The canvas is a copy of the layout and of nothing else.
+        CloudLayoutCanvas canvas;
+        canvas.Side    = data.Resolution;
+        canvas.Pattern = data.Pattern;
+        canvas.Mask    = data.Mask;
 
         return Common::MakeSuccess( std::move( canvas ) );
     }
@@ -682,7 +680,10 @@ namespace Desert::Assets
                                                                 canvas.Side, kCloudLayoutMinResolution,
                                                                 kCloudLayoutMaxResolution );
 
-        if ( canvas.Pattern.size() != texels * kPatternBytesPerTexel )
+        // AN EMPTY PATTERN IS A STATE AND NOT A FAULT — a painting that only adds and removes cloud,
+        // Unreal's mask texture with its pattern slot left alone. Both tables empty is refused, but by
+        // ValidateCloudLayoutData inside the encoder, which is where that rule already lives.
+        if ( !canvas.Pattern.empty() && canvas.Pattern.size() != texels * kPatternBytesPerTexel )
             return Common::MakeFormattedError<CloudLayoutData>(
                  "canvas pattern is {} bytes, expected {} for {}x{} RGBA8", canvas.Pattern.size(),
                  texels * kPatternBytesPerTexel, canvas.Side, canvas.Side );
@@ -778,9 +779,10 @@ namespace Desert::Assets
             return Common::MakeFormattedError<bool>(
                  "the mask is read from source channel {}, and an RGBA image has four", sourceChannel );
 
-        // The same relation as above, from the other side. A canvas with no pattern yet — the state a mask
-        // imported first leaves — takes the mask's own side, so neither order of the two imports is
-        // privileged.
+        // The same relation as above, from the other side. A canvas with no pattern yet takes the mask's
+        // own side, so neither order of the two imports is privileged — and NO pattern table is invented
+        // for it: a mask picture on its own makes a mask-only painting, which is a legal `.dclayout` and
+        // exactly what Unreal's mask texture is with the pattern slot left alone.
         const bool hasPattern = canvas.Side > 0u && !canvas.Pattern.empty();
         if ( hasPattern && width != canvas.Side )
             return Common::MakeFormattedError<bool>(
@@ -790,12 +792,7 @@ namespace Desert::Assets
 
         const size_t texels = static_cast<size_t>( width ) * height;
 
-        if ( !hasPattern )
-        {
-            canvas.Side = width;
-            canvas.Pattern.assign( texels * kPatternBytesPerTexel, 0u );
-        }
-
+        canvas.Side = width;
         canvas.Mask.resize( texels );
         for ( size_t t = 0; t < texels; ++t )
             canvas.Mask[t] = pixels[t * kPatternBytesPerTexel + sourceChannel];

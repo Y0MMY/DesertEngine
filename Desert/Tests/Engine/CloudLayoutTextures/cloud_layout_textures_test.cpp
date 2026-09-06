@@ -234,6 +234,47 @@ TEST( CloudLayoutTextures, ATableOfTheWrongSideIsRefusedFromEitherDirection )
     EXPECT_FALSE( SetCloudLayoutCanvasMaskFromImage( empty, oblong, 32u, 16u, 0u ) );
 }
 
+// A MASK BROUGHT IN ON ITS OWN MAKES A MASK-ONLY PAINTING, and opening it again does not invent a
+// pattern for it. Both halves matter: the first is what "two separate textures" means when only one of
+// them is authored — Unreal's mask parameter with its pattern slot left alone — and the second is a
+// silent-change trap. Filling the canvas from a blank one and copying in what the layout has would give
+// such a file a flat pattern table it never carried, and pressing Bake would write that table to disk: a
+// file that changed because somebody looked at it.
+TEST( CloudLayoutTextures, AMaskOnItsOwnStaysAMaskOnlyPaintingThroughEveryTrip )
+{
+    const size_t               texels = static_cast<size_t>( kSide ) * kSide;
+    std::vector<unsigned char> picture( texels * 4u, 255u );
+    for ( size_t t = 0; t < texels; ++t )
+    {
+        const unsigned char value = static_cast<unsigned char>( 40u + ( t % 100u ) );
+        picture[t * 4u + 0]       = value;
+        picture[t * 4u + 1]       = value;
+        picture[t * 4u + 2]       = value;
+    }
+
+    CloudLayoutCanvas canvas;
+    ASSERT_TRUE( SetCloudLayoutCanvasMaskFromImage( canvas, picture, kSide, kSide, 0u ) );
+
+    EXPECT_EQ( canvas.Side, kSide );
+    EXPECT_TRUE( canvas.Pattern.empty() )
+         << "a mask imported on its own invented a pattern table, so a mask-only painting cannot be "
+            "expressed and every such file grows a plane it did not have";
+    ASSERT_TRUE( canvas.HasMask() );
+
+    auto made = MakeCloudLayoutFromCanvas( canvas );
+    ASSERT_TRUE( made ) << made.GetError();
+    EXPECT_FALSE( made.GetValue().HasPattern() ) << "the layout gained a pattern table on the way to disk";
+    ASSERT_TRUE( made.GetValue().HasMask() );
+
+    // AND BACK ONTO A CANVAS, which is the trip the panel makes when the document is opened.
+    auto reopened = MakeCloudLayoutCanvasFromLayout( made.GetValue() );
+    ASSERT_TRUE( reopened ) << reopened.GetError();
+    EXPECT_TRUE( reopened.GetValue().Pattern.empty() )
+         << "opening a mask-only painting gave it a pattern, so saving it again would write a table the "
+            "file never carried";
+    EXPECT_EQ( reopened.GetValue().Mask, canvas.Mask );
+}
+
 // =====================================================================================================
 // WHAT THE TWO INPUTS DO TO A SKY
 // =====================================================================================================

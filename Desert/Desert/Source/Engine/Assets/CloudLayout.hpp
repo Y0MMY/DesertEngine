@@ -373,7 +373,8 @@ namespace Desert::Assets
 
         /// RGBA8, `4 * Side * Side`, x fastest — channel k is species slot k. This is the exact buffer
         /// stbi_load returns and stbi_write_png takes, so the pattern needs no conversion in either
-        /// direction.
+        /// direction. EMPTY when this painting carries no pattern, which is what a mask brought in on its
+        /// own leaves and what a mask-only `.dclayout` opens as.
         std::vector<unsigned char> Pattern;
 
         /// R8, `Side * Side`. 128 is neutral, above adds cloud and below removes it. EMPTY when this
@@ -415,7 +416,9 @@ namespace Desert::Assets
      * encoder and one around it — is how the mean in memory comes to differ from the mean on disk, and the
      * symptom is a sky whose cover drifts from its slider with nothing anywhere to say why.
      *
-     * A canvas with a flat pattern and no mask is still a layout; a canvas of side 0 is not, and says so.
+     * A canvas with a flat pattern and no mask is still a layout, and so is one with a mask and no
+     * pattern; a canvas of side 0 is not, and neither is one carrying neither table — the second of those
+     * is refused inside the encoder, where that rule already lives.
      */
     Common::ResultStr<CloudLayoutData> MakeCloudLayoutFromCanvas( const CloudLayoutCanvas& canvas );
 

@@ -447,7 +447,10 @@ namespace Desert::Editor
     {
         m_HasLayout = false;
 
-        if ( m_Canvas.Side == 0u || m_Canvas.Pattern.empty() )
+        // A CANVAS CARRYING EITHER TABLE IS A LAYOUT. Requiring a pattern here would leave an artist who
+        // imported only a mask unable to bake at all — the Bake buttons key on m_HasLayout — which is a
+        // dead end reached by doing exactly what the Global Cloud Mask input asks for.
+        if ( m_Canvas.Side == 0u || ( m_Canvas.Pattern.empty() && !m_Canvas.HasMask() ) )
             return;
 
         auto made = Assets::MakeCloudLayoutFromCanvas( m_Canvas );
