@@ -38,6 +38,16 @@ namespace
     // backticks was EXECUTED with its output spliced into the path.
     const std::string kHostileDeproj = "/tmp/Odd $HOME \"q\" & `id -u`/My Game.deproj";
 
+    // An engine root that `std::filesystem` calls ABSOLUTE ON THIS HOST. `/opt/desert` is absolute on
+    // POSIX and NOT on Windows — a leading slash there carries a root directory but no root NAME, so
+    // `is_absolute()` is false and every assertion built on it fails on Windows alone. Written once,
+    // here, so a future fixture cannot reintroduce the same platform-blind literal.
+#ifdef _WIN32
+    const std::string kAbsoluteEngineRoot = "C:\\opt\\desert";
+#else
+    const std::string kAbsoluteEngineRoot = "/opt/desert";
+#endif
+
     fs::path MakeTempDirectory( const std::string& label )
     {
         const fs::path directory =
@@ -89,7 +99,12 @@ TEST( ProjectHubLaunch, TheConfigurationNameIsTheProtocolSpelling )
     // up in the command is the protocol's, not a second literal in the launcher.
     for ( const char* config : { Common::Launch::kConfigDebug, Common::Launch::kConfigRelease } )
     {
-        const Hub::LaunchCommand command = Hub::BuildEditorLaunch( "/opt/desert", config, "/p/P.deproj" );
+        // THE ENGINE ROOT MUST BE ABSOLUTE **BY THE HOST'S RULES**, and `/opt/desert` is not, on
+        // Windows: a leading slash with no drive letter has no root NAME there, so `is_absolute()`
+        // is false and the assertion below failed on Windows Release only. The product was never
+        // wrong — the fixture was, and it was invisible on macOS by construction. Same family as
+        // `far` being a windef.h macro: a platform whose rules nobody here can run locally.
+        const Hub::LaunchCommand command = Hub::BuildEditorLaunch( kAbsoluteEngineRoot, config, "/p/P.deproj" );
 
         std::string whole = command.Program;
         for ( const std::string& argument : command.Arguments )
