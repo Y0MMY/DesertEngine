@@ -4,7 +4,7 @@
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
 #include <Engine/Graphic/Image.hpp>
-#include <Engine/Graphic/Vertexbuffer.hpp>
+#include <Engine/Graphic/VertexBuffer.hpp>
 
 #include <Common/Core/Memory/Buffer.hpp>
 

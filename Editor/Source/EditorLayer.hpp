@@ -2,7 +2,7 @@
 
 #include <Engine/Desert.hpp>
 #include <Engine/Runtime/AssetHotReload.hpp>
-#include <imgui/imgui.h>
+#include <ImGui/imgui.h>
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 #include "Editor/Panels/IPanel.hpp"
 #include "Editor/Core/CommandPalette.hpp"

@@ -9,8 +9,8 @@ namespace Desert::Graphic
     public:
         virtual ~DynamicResources() = default;
 
-        [[NODISCARD]] virtual Common::BoolResultStr Invalidate() = 0;
-        [[NODISCARD]] virtual Common::BoolResultStr Release()    = 0;
+        [[nodiscard]] virtual Common::BoolResultStr Invalidate() = 0;
+        [[nodiscard]] virtual Common::BoolResultStr Release()    = 0;
     };
 
 } // namespace Desert::Graphic

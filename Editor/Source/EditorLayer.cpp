@@ -2401,7 +2401,12 @@ namespace Desert::Editor
 
         ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - size.x - ImGui::GetStyle().ItemSpacing.x * 2.0f );
 
-        ImGui::Text( text.c_str() );
+        // TextUnformatted, not Text: ImGui::Text takes a printf FORMAT, so this passed runtime-built
+        // engine stats as the format string. Today GetFormattedStats() can only produce
+        // "FPS: 60 | Frame: 16.6ms" and contains no '%', so nothing has gone wrong — but the day any
+        // percentage is added to that line (a GPU utilisation, a budget fraction — the obvious next
+        // additions) ImGui's vsnprintf reads a vararg that was never passed.
+        ImGui::TextUnformatted( text.c_str() );
     }
 
     void EditorLayer::DrawPopups()

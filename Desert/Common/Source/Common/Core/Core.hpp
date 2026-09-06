@@ -41,6 +41,17 @@ decltype( auto ) initializeDefaultValue()
 
 #define EBABLE_IMGUI 1
 
+// THE LAST BRANCH USED TO BE `__debugbreak()`, WHICH IS AN MSVC INTRINSIC. Every project file in the
+// tree carries its own `filter "system:*" defines { DESERT_PLATFORM_* }` block, and any target that
+// forgets one — every test suite does, and test suites compile engine sources — fell into that branch
+// and failed to COMPILE with "use of undeclared identifier '__debugbreak'". So a header using
+// DESERT_VERIFY could not be reached from a test at all, and the diagnostic named an MSVC builtin on
+// macOS, which points at nothing.
+//
+// The platform branches below are unchanged, so every configured build breaks exactly as it did. What
+// is new is that the fallback asks the COMPILER instead of giving up: a debug break is a compiler
+// facility, not a platform one, and DESERT_VERIFY calls std::abort() immediately afterwards in any
+// case — so the worst the last branch can cost is the breakpoint, never the abort.
 #if defined( DESERT_PLATFORM_WINDOWS )
 #define DESERT_DEBUG_BREAK __debugbreak()
 #elif defined( DESERT_PLATFORM_MACOS )
@@ -48,8 +59,12 @@ decltype( auto ) initializeDefaultValue()
 #elif defined( DESERT_PLATFORM_LINUX )
 #include <signal.h>
 #define DESERT_DEBUG_BREAK raise( SIGTRAP )
-#else
+#elif defined( _MSC_VER )
 #define DESERT_DEBUG_BREAK __debugbreak()
+#elif defined( __clang__ ) || defined( __GNUC__ )
+#define DESERT_DEBUG_BREAK __builtin_trap()
+#else
+#define DESERT_DEBUG_BREAK ( (void)0 )
 #endif
 
 namespace Common::Detail

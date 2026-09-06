@@ -3,6 +3,10 @@
 #include <Engine/Graphic/RendererTypes.hpp>
 #include <Engine/Graphic/DynamicResources.hpp>
 
+// For DESERT_VERIFY in ShaderDataTypeSize below. Not implicit: this header is reached from
+// Geometry/Mesh.hpp by translation units that never include Core.hpp on their own.
+#include <Common/Core/Core.hpp>
+
 #include <vector>
 
 namespace Desert::Graphic
@@ -43,7 +47,23 @@ namespace Desert::Graphic
 
             case ShaderDataType::Bool:
                 return 1;
+
+            // `None` is the enum's ZERO, so a default-constructed VertexBufferElement carries it. It
+            // was the one value with no case and no fallthrough return, which made the whole function
+            // fall off its end — undefined behaviour returning whatever the ABI's return register
+            // happened to hold, straight into a vertex layout's stride.
+            case ShaderDataType::None:
+                break;
         }
+
+        // An invariant, not an error channel: the only caller is VertexBufferElement's constructor and
+        // every layout in the engine is written by hand with a literal type, so `None` here means
+        // engine code built a layout out of an unset attribute. Same treatment the unreachable
+        // renderer-API cases in VertexBuffer.cpp already get. Returning 0 quietly would have handed
+        // back a zero-stride layout, which is the silent emptiness this project forbids.
+        DESERT_VERIFY( false, "ShaderDataTypeSize: ShaderDataType::None has no size — a vertex layout "
+                              "was built from an unset attribute type" );
+        return 0;
     }
 
     struct VertexBufferElement

@@ -25,7 +25,7 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanShader::VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines,
                                 const std::string& passName )
-        : m_ShaderAsset( asset ), m_PassName( passName )
+         : m_ShaderAsset( asset ), m_PassName( passName ), m_Defines( defines )
     {
         m_ShaderPath = asset->GetMetadata().Filepath;
         m_ShaderName = m_ShaderPath.stem().string();
