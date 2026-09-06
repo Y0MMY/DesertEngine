@@ -86,6 +86,17 @@ namespace Desert::Editor
         void DrawPreviewSection();
         void DrawSaveSection();
 
+        // Import and export through the flat tiled slice sheet — the round trip out to whatever tool the
+        // artist owns and back. Its own section rather than two more buttons under Save, because a sheet is
+        // NOT a `.dcnv` and the difference matters: exporting drops the recipe, and the section says so
+        // where the button is rather than in a log line nobody reads.
+        void DrawSheetSection();
+
+        // Reads a sheet off disk into m_Volume. Named separately from the button so the failure path has one
+        // place to live: an image that will not decode, and a decoded image that is not a sheet, are two
+        // different refusals and the artist needs to be told which one happened.
+        void ImportSheet( const std::filesystem::path& path );
+
         // Rebuilds the slice texture from m_Volume. Called when the volume, the axis, the slice index or
         // the channel view changes — never per frame, because it allocates a device image.
         void RefreshSlice();

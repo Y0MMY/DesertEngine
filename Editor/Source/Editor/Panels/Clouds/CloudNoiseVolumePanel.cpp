@@ -9,6 +9,7 @@
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/CloudNoiseVolumeAsset.hpp>
 #include <Engine/Assets/CloudNoiseVolumeGenerator.hpp>
+#include <Engine/Assets/CloudNoiseVolumeSheet.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
@@ -17,6 +18,9 @@
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <ImGui/imgui.h>
+
+#include <stb_image/stb_image.h>
+#include <stb_image/stb_image_write.h>
 
 #include <chrono>
 #include <cstdio>
@@ -125,6 +129,8 @@ namespace Desert::Editor
         ImGui::Separator();
         DrawPreviewSection();
         ImGui::Separator();
+        DrawSheetSection();
+        ImGui::Separator();
         DrawSaveSection();
 
         if ( !m_Status.empty() )
@@ -203,6 +209,15 @@ namespace Desert::Editor
         const auto valid = Assets::ValidateCloudNoiseVolumeParams( m_Params );
         if ( !valid )
             ImGui::TextColored( ImVec4( 0.95f, 0.45f, 0.40f, 1.0f ), "%s", valid.GetError().c_str() );
+
+        // THE TRAP THIS WARNING EXISTS FOR. The fields above are an editable recipe, and an imported volume
+        // has none — so Bake here does not "re-bake what you are looking at", it discards the artist's
+        // imported voxels and generates unrelated ones from whatever is in the boxes. Said before the click
+        // rather than regretted after it; the button is deliberately still enabled, because generating a
+        // fresh volume in this window is a legitimate thing to want.
+        if ( m_HasVolume && m_Volume.Origin == Assets::CloudNoiseVolumeOrigin::Imported )
+            ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.35f, 1.0f ),
+                                "This volume was imported. Baking REPLACES it with the recipe above." );
 
         ImGui::BeginDisabled( busy || !valid );
         if ( ImGui::Button( "Bake", ImVec2( 120.0f, 0.0f ) ) )
@@ -338,8 +353,16 @@ namespace Desert::Editor
 
         const uint32_t n = m_Volume.Params.Resolution;
 
-        ImGui::Text( "%s - %u^3 RGBA8, %.2f MiB, seed %u", m_SourceName.c_str(), n,
-                     static_cast<double>( m_Volume.Voxels.size() ) / ( 1024.0 * 1024.0 ), m_Volume.Params.Seed );
+        // AN IMPORTED VOLUME HAS NO SEED, so it must not be shown one. Printing "seed 0" beside imported
+        // voxels is the same lie the container's origin field exists to prevent, just told in the UI
+        // instead of in the file.
+        if ( m_Volume.Origin == Assets::CloudNoiseVolumeOrigin::Imported )
+            ImGui::Text( "%s - %u^3 RGBA8, %.2f MiB, imported (no recipe)", m_SourceName.c_str(), n,
+                         static_cast<double>( m_Volume.Voxels.size() ) / ( 1024.0 * 1024.0 ) );
+        else
+            ImGui::Text( "%s - %u^3 RGBA8, %.2f MiB, seed %u", m_SourceName.c_str(), n,
+                         static_cast<double>( m_Volume.Voxels.size() ) / ( 1024.0 * 1024.0 ),
+                         m_Volume.Params.Seed );
 
         int axis = static_cast<int>( m_Axis );
         if ( ImGui::Combo( "Axis", &axis, "X\0Y\0Z\0" ) )
@@ -379,6 +402,156 @@ namespace Desert::Editor
         }
 
         ImGui::TextDisabled( "%s slice %d of %u", AxisName( axis ), m_SliceIndex, n );
+    }
+
+    void CloudNoiseVolumePanel::ImportSheet( const std::filesystem::path& path )
+    {
+        // stb directly, exactly as CloudLayoutPanel::LoadSourceImage does it. There is no cook, no
+        // TextureAsset and no AssetManager on this path, and that is not an omission: a cooked `.tex` in this
+        // engine is an identity record carrying no pixels, so registering the sheet as an asset would buy
+        // nothing and leave a texture in the browser that is not a texture anybody should use.
+        int      width = 0, height = 0, sourceChannels = 0;
+        stbi_uc* decoded = stbi_load( path.string().c_str(), &width, &height, &sourceChannels, 4 );
+        if ( !decoded )
+        {
+            m_Status = "'" + path.filename().string() + "' could not be read as an image: " +
+                       ( stbi_failure_reason() ? stbi_failure_reason() : "unknown" );
+            m_StatusIsError = true;
+            LOG_ERROR( "[Clouds] {}", m_Status );
+            return;
+        }
+
+        const std::vector<unsigned char> pixels( decoded, decoded + static_cast<size_t>( width ) * height * 4 );
+        stbi_image_free( decoded );
+
+        auto imported = Assets::DecodeCloudNoiseVolumeFromSheet( pixels, static_cast<uint32_t>( width ),
+                                                                 static_cast<uint32_t>( height ) );
+        if ( !imported )
+        {
+            // The refusal is shown WHOLE, numbers and all, rather than reduced to "import failed". It already
+            // names the size that arrived and the sizes that would have worked, which is the only form of
+            // this message an artist can act on without opening a log.
+            m_Status        = imported.GetError();
+            m_StatusIsError = true;
+            LOG_ERROR( "[Clouds] Noise sheet '{}' refused: {}", path.string(), imported.GetError() );
+            return;
+        }
+
+        m_Volume    = imported.ExtractValue();
+        m_HasVolume = true;
+
+        // The PARAMETERS PANEL IS NOT UPDATED FROM AN IMPORT, and that is deliberate. m_Params drives the
+        // Bake button; leaving the artist's last recipe in it means Bake still means "generate what I set
+        // up", while the imported volume's own (empty) recipe stays where it belongs — in m_Volume.
+        m_SourceName = path.filename().string() + " (imported, unsaved)";
+        m_SliceIndex = static_cast<int>( m_Volume.Params.Resolution ) / 2;
+        m_SliceDirty = true;
+        m_Status     = "Imported " + std::to_string( width ) + "x" + std::to_string( height ) + " as a " +
+                   std::to_string( m_Volume.Params.Resolution ) +
+                   "^3 volume. It has NO recipe - a picture cannot carry one - so Bake would replace it "
+                   "with something else entirely. Save it to keep it.";
+        m_StatusIsError = false;
+
+        LOG_INFO( "[Clouds] Noise sheet '{}' imported: {}x{} -> {}^3 RGBA8.", path.string(), width, height,
+                  m_Volume.Params.Resolution );
+    }
+
+    void CloudNoiseVolumePanel::DrawSheetSection()
+    {
+        Utils::ImGuiUtilities::SectionHeader( "Slice sheet (import / export)" );
+
+        ImGui::TextWrapped( "A flat picture with the volume's Z slices tiled across it - the format Unreal "
+                            "builds a Volume Texture from and Houdini's Volume Texture Export writes. "
+                            "Export one, edit it in your own tool, bring it back." );
+
+        const bool busy = m_BakeRunning;
+
+        ImGui::BeginDisabled( busy );
+        if ( ImGui::Button( "Import sheet...", ImVec2( 140.0f, 0.0f ) ) )
+        {
+            const std::filesystem::path picked =
+                 Common::Utils::FileSystem::OpenFileDialog( "Image\0*.png;*.tga;*.bmp\0" );
+            if ( !picked.empty() )
+                ImportSheet( picked );
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "%s",
+                               ( "The sheet must be exactly one of: " + Assets::CloudNoiseSheetSizesDescription() +
+                                 ". A size that is not a whole cube is refused with the numbers "
+                                 "rather than resampled - a stretched volume is a cloud shape you "
+                                 "could not trace back to what you exported." )
+                                    .c_str() );
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled( busy || !m_HasVolume );
+        if ( ImGui::Button( "Export sheet...", ImVec2( 140.0f, 0.0f ) ) )
+        {
+            std::filesystem::path target = Common::Utils::FileSystem::SaveFileDialog( "PNG image\0*.png\0" );
+            if ( !target.empty() )
+            {
+                if ( target.extension() != Assets::kCloudNoiseSheetExtension )
+                    target.replace_extension( Assets::kCloudNoiseSheetExtension );
+
+                auto sheet = Assets::EncodeCloudNoiseVolumeToSheet( m_Volume );
+                if ( !sheet )
+                {
+                    m_Status        = "Export failed: " + sheet.GetError();
+                    m_StatusIsError = true;
+                }
+                else
+                {
+                    const auto& image = sheet.GetValue();
+
+                    // CHECKED, not fired and forgotten. stbi_write_png returns 0 on a path it cannot open,
+                    // and an export that silently wrote nothing would be discovered by the artist only when
+                    // the file they went looking for was not there.
+                    const int written =
+                         stbi_write_png( target.string().c_str(), static_cast<int>( image.Layout.Width ),
+                                         static_cast<int>( image.Layout.Height ), 4, image.Pixels.data(),
+                                         static_cast<int>( image.Layout.Width ) * 4 );
+
+                    if ( written == 0 )
+                    {
+                        m_Status        = "Export failed: '" + target.string() + "' could not be written.";
+                        m_StatusIsError = true;
+                        LOG_ERROR( "[Clouds] {}", m_Status );
+                    }
+                    else
+                    {
+                        m_Status = "Exported " + std::to_string( image.Layout.Width ) + "x" +
+                                   std::to_string( image.Layout.Height ) + " (" +
+                                   std::to_string( image.Layout.TilesX ) + "x" +
+                                   std::to_string( image.Layout.TilesY ) + " tiles of " +
+                                   std::to_string( image.Layout.Resolution ) + ") to " + target.string() +
+                                   ". The voxels survive a return trip exactly; the recipe does not.";
+                        m_StatusIsError = false;
+                        LOG_INFO( "[Clouds] Noise sheet written: '{}', {}x{}.", target.string(),
+                                  image.Layout.Width, image.Layout.Height );
+                    }
+                }
+            }
+        }
+        ImGui::EndDisabled();
+
+        if ( m_HasVolume )
+        {
+            const auto layout = Assets::CloudNoiseSheetLayoutFor( m_Volume.Params.Resolution );
+            if ( layout )
+            {
+                ImGui::TextDisabled( "This volume exports as %ux%u (%ux%u tiles of %u).", layout.GetValue().Width,
+                                     layout.GetValue().Height, layout.GetValue().TilesX, layout.GetValue().TilesY,
+                                     layout.GetValue().Resolution );
+
+                // SAID WHERE IT COSTS AN AFTERNOON OTHERWISE. Unreal guesses a sheet's tile size from the
+                // image area assuming a SQUARE sheet, and a 128^3 volume cannot produce one — 2048x1024
+                // makes it derive 186x93 tiles and a depth of 121, which is silently garbage.
+                if ( layout.GetValue().Width != layout.GetValue().Height )
+                    ImGui::TextDisabled( "Taking it into Unreal: set Tile Size X and Y to %u by hand - its "
+                                         "auto-detect only works on square sheets.",
+                                         layout.GetValue().Resolution );
+            }
+        }
     }
 
     void CloudNoiseVolumePanel::DrawSaveSection()
