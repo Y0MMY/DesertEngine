@@ -57,8 +57,9 @@ namespace Desert::Tests::DirectLightingRef
             return glm::max( a, static_cast<float>( b ) );
         }
 
-DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
-        float clamp( float x, double lo, double hi )
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
+             float
+             clamp( float x, double lo, double hi )
         {
             return glm::clamp( x, static_cast<float>( lo ), static_cast<float>( hi ) );
         }
@@ -85,7 +86,7 @@ DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are s
 // fresnelSchlick, exactly as it says at the top of itself and exactly as every shader includes them.
 #include <Mesh/PBRFunctions.glslh>
 #include <Mesh/DirectLighting.glslh>
-DESERT_GLSL_AS_CPP_END
+        DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::DirectLightingRef

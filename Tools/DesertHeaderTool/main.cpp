@@ -512,7 +512,8 @@ namespace
         int         depth;    // brace depth at which this scope opened
         bool        isStruct; // struct/class vs namespace
         bool        reflected = false;
-        std::vector<Field> fields = {}; // the two `scopes.push_back( { name, depth, isStruct } )` below stop here on purpose
+        std::vector<Field> fields =
+             {}; // the two `scopes.push_back( { name, depth, isStruct } )` below stop here on purpose
     };
 
     std::string JoinScopes( const std::vector<Scope>& scopes )

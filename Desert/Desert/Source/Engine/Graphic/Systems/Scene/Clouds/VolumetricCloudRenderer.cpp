@@ -1611,7 +1611,7 @@ namespace Desert::Graphic::System
                 return;
 
             m_CompositeMaterial->BindInputs( m_HistoryImage[m_ResolvedIndex].get(),
-                                       m_HistoryGuideImage[m_ResolvedIndex].get() );
+                                             m_HistoryGuideImage[m_ResolvedIndex].get() );
             Renderer::GetInstance().SubmitFullscreenQuad( m_CompositePipeline.get(),
                                                           m_CompositeMaterial->GetMaterialExecutor() );
         };

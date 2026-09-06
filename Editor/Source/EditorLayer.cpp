@@ -1136,8 +1136,7 @@ namespace Desert::Editor
         // there is nothing to hand a failure to. What matters is that the log names the view — a scene that
         // did not initialise renders an empty viewport, which reads as a content problem, not an engine one.
         if ( const auto inited = doc->Scene->Init(); !inited.IsSuccess() )
-            LOG_ERROR( "[EditorLayer] scene view '{}' failed to initialise: {}", doc->Name,
-                       inited.GetError() );
+            LOG_ERROR( "[EditorLayer] scene view '{}' failed to initialise: {}", doc->Name, inited.GetError() );
         doc->Registry = std::make_unique<Render::RenderRegistry>( doc->Scene );
 
         // Unique ImGui id per viewport — two windows sharing an id would merge into a single dockable window.

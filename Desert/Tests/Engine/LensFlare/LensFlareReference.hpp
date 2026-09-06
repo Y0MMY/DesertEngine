@@ -32,9 +32,9 @@ namespace Desert::Tests::LensFlareRef
         using glm::smoothstep;
         using glm::step;
 
-DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/LensFlare.glslh>
-DESERT_GLSL_AS_CPP_END
+             DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::LensFlareRef

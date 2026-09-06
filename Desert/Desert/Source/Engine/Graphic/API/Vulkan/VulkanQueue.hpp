@@ -5,9 +5,9 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-        // `class` and not `struct`: the definition in VulkanSwapChain.hpp uses class, and the Microsoft C++ ABI
-        // encodes the class-key into the decorated name, so the mismatch is a Windows-only link
-        // error waiting for the day this forward declaration is the one a caller sees first.
+    // `class` and not `struct`: the definition in VulkanSwapChain.hpp uses class, and the Microsoft C++ ABI
+    // encodes the class-key into the decorated name, so the mismatch is a Windows-only link
+    // error waiting for the day this forward declaration is the one a caller sees first.
     class VulkanSwapChain;
 
     class VulkanQueue final

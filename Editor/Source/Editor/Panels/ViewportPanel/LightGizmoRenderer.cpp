@@ -986,8 +986,8 @@ namespace Desert::Editor
 
     void LightGizmoRenderer::DrawLightRadiusSphere( const std::shared_ptr<Desert::Core::Camera>& camera,
                                                     const glm::vec3& worldPos, float radius, float width,
-                                                    float height, float windowX, float windowY, float /*iconCenterX*/,
-                                                    float /*iconCenterY*/ )
+                                                    float height, float windowX, float windowY,
+                                                    float /*iconCenterX*/, float /*iconCenterY*/ )
     {
         ImDrawList* drawList         = ImGui::GetWindowDrawList();
         const auto  viewMatrix       = camera->GetViewMatrix();

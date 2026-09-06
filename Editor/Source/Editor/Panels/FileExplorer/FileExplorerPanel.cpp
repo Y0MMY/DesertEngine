@@ -166,8 +166,8 @@ namespace Desert::Editor
          { FileType::ShaderGraph, ICON_MDI_GRAPH },
     };
 
-    FileExplorerPanel::FileExplorerPanel( const std::filesystem::path& rootPath,
-                                          Assets::AssetManager* assetManager,
+    FileExplorerPanel::FileExplorerPanel( const std::filesystem::path&         rootPath,
+                                          Assets::AssetManager*                assetManager,
                                           std::weak_ptr<::Desert::Core::Scene> viewportScene )
          // IN DECLARATION ORDER. Members are constructed in the order they are DECLARED whatever this list
          // says, so a list in a different order is a reader being told the wrong sequence — harmless here
@@ -1248,7 +1248,6 @@ namespace Desert::Editor
                     const float cardPadX = 8.0f;
                     const float cardPadY = 14.0f;
                     const float cellSize = m_GridSize + 4.0f + cardPadX * 2.0f + ImGui::GetStyle().ItemSpacing.x;
-
 
                     const ImVec2 backgroundThumbnailSize = { scaledThumbnailSizeX + padding * 2,
                                                              scaledThumbnailSize + padding * 2 };

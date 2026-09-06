@@ -192,7 +192,7 @@ namespace Desert::Graphic::System
                 {
                     const int writeIndex = 1 - readIndex;
                     m_StepMaterials[i]->BindInputs( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
-                                              1 << ( m_StepCount - 1 - i ) );
+                                                    1 << ( m_StepCount - 1 - i ) );
                     RunQuad( m_SeedFramebuffers[writeIndex], "JFA_Step", m_StepPipeline.get(),
                              m_StepMaterials[i]->GetMaterialExecutor() );
                     readIndex = writeIndex;
@@ -205,10 +205,8 @@ namespace Desert::Graphic::System
         // No steps ran (nothing selected) -> width 0 makes JFA_Final pass the scene through unchanged.
         const float effectiveWidth = ( m_Enabled && m_OutlineActive ) ? m_OutlineWidth : 0.0f;
         m_MaterialComposite->BindInputs( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
-                                   sceneColor.get(),
-                                   glm::vec4( m_OutlineColor, 1.0f ),
-                                   effectiveWidth,
-                                   m_Smoothness );
+                                         sceneColor.get(), glm::vec4( m_OutlineColor, 1.0f ), effectiveWidth,
+                                         m_Smoothness );
         RunQuad( m_Framebuffer, "JFA_Final", m_FinalPipeline.get(), m_MaterialComposite->GetMaterialExecutor() );
     }
 } // namespace Desert::Graphic::System

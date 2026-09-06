@@ -38,13 +38,13 @@ namespace Desert::Tests::SkyScatteringRef
         using glm::sin;
         using glm::sqrt;
 
-DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/SkyMedium.glslh>
 
-        // The test-controllable LUT stand-ins. Assigned per test; the defaults make the integrator a
-        // pure single-scattering march with an exact (marched) sun transmittance.
-        std::function<vec3( SkyAtmParams, float, float )> g_SunTransmittance =
-             []( SkyAtmParams p, float radiusKm, float sunZenithCos )
+             // The test-controllable LUT stand-ins. Assigned per test; the defaults make the integrator a
+             // pure single-scattering march with an exact (marched) sun transmittance.
+                  std::function<vec3( SkyAtmParams, float, float )>
+                  g_SunTransmittance = []( SkyAtmParams p, float radiusKm, float sunZenithCos )
         { return SkyTransmittanceToTop( p, radiusKm, sunZenithCos, 40 ); };
 
         std::function<vec3( SkyAtmParams, float, float )> g_MultiScatter = []( SkyAtmParams, float, float )
@@ -56,7 +56,7 @@ DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are s
     g_MultiScatter( ( atm ), ( radiusKm ), ( sunZenithCos ) )
 
 #include <Common/SkyScattering.glslh>
-DESERT_GLSL_AS_CPP_END
+        DESERT_GLSL_AS_CPP_END
 
 #undef SKY_SCATTERING_SUN_TRANSMITTANCE
 #undef SKY_SCATTERING_MULTI_SCATTER

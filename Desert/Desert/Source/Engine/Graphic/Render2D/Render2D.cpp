@@ -133,8 +133,7 @@ namespace Desert::Graphic::Render2D
             if ( allocated.IsSuccess() )
                 m_VertexCapacity = cap;
             else
-                LOG_ERROR( "[Render2D] vertex buffer growth to {} verts failed: {}", cap,
-                           allocated.GetError() );
+                LOG_ERROR( "[Render2D] vertex buffer growth to {} verts failed: {}", cap, allocated.GetError() );
         }
         if ( indexCount > m_IndexCapacity )
         {
@@ -144,8 +143,7 @@ namespace Desert::Graphic::Render2D
             if ( allocated.IsSuccess() )
                 m_IndexCapacity = cap;
             else
-                LOG_ERROR( "[Render2D] index buffer growth to {} indices failed: {}", cap,
-                           allocated.GetError() );
+                LOG_ERROR( "[Render2D] index buffer growth to {} indices failed: {}", cap, allocated.GetError() );
         }
     }
 

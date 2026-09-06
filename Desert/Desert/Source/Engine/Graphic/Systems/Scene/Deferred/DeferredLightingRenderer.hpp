@@ -82,9 +82,9 @@ namespace Desert::Graphic::System
             // the deferred meshes over the real forward scene (so the skybox toggle + camera motion still work).
             renderer.BeginRenderPass( renderPass.get(), false );
             m_Material->BindInputs( gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
-                              gbuffer->GetColorAttachmentImage( 2 ), gbuffer->GetColorAttachmentImage( 3 ),
-                              lightDir, lightColor, cameraPos, debugMode, pointLights, spotLights, shadow, aoImage,
-                              giIntensity, ssaoEnabled, giMode, giImage, cloudShadow, environment );
+                                    gbuffer->GetColorAttachmentImage( 2 ), gbuffer->GetColorAttachmentImage( 3 ),
+                                    lightDir, lightColor, cameraPos, debugMode, pointLights, spotLights, shadow,
+                                    aoImage, giIntensity, ssaoEnabled, giMode, giImage, cloudShadow, environment );
             renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_Material->GetMaterialExecutor() );
             renderer.EndRenderPass();
         }

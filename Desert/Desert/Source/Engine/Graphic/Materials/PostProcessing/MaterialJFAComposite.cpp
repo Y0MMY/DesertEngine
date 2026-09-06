@@ -9,7 +9,7 @@ namespace Desert::Graphic
     }
 
     void MaterialJFAComposite::BindInputs( const Image2D* jfaSeed, const Image2D* sceneColor,
-                                     const glm::vec4& outlineColor, float outlineWidth, float smoothness )
+                                           const glm::vec4& outlineColor, float outlineWidth, float smoothness )
     {
         if ( m_JFATexture && jfaSeed )
             m_JFATexture->SetImage( jfaSeed );

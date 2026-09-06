@@ -174,7 +174,8 @@ namespace Desert::Graphic::API::Vulkan
         return VK_NULL_HANDLE;
     }
 
-    void VulkanMaterialBackend::ApplyPushConstants( MaterialExecutor* /*material*/, GraphicsPipeline* /*pipeline*/ )
+    void VulkanMaterialBackend::ApplyPushConstants( MaterialExecutor* /*material*/,
+                                                    GraphicsPipeline* /*pipeline*/ )
     {
     }
 

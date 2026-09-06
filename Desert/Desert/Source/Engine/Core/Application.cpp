@@ -111,8 +111,7 @@ namespace Desert::Engine
             // on it sixty times a second. Refusing to start is the only answer that does not turn a
             // startup failure into a stream of consequences with a nonzero exit code nowhere in sight —
             // Close's own comment already says why exit 0 on a failed run is the worse error.
-            LOG_ERROR( "[Application] layer '{}' failed to attach: {}", layer->GetName(),
-                       attached.GetError() );
+            LOG_ERROR( "[Application] layer '{}' failed to attach: {}", layer->GetName(), attached.GetError() );
             Close( 1 );
         }
     }

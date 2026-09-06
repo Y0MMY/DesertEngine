@@ -222,8 +222,8 @@ namespace Desert::Editor
         ImGui::Unindent( 6.0f );
     }
 
-    DESERT_REGISTER_CUSTOM_COMPONENT(
-         ECS::AnimationComponent, "Animation", false,
-         ( []( ECS::Entity& e, ::Desert::Core::Scene* s, const ComponentEditContext& ctx )
-           { AnimationComponentWidget( ctx.AnimationLibrary ).Render( e, s ); } ) )
+    DESERT_REGISTER_CUSTOM_COMPONENT( ECS::AnimationComponent, "Animation", false,
+                                      ( []( ECS::Entity& e, ::Desert::Core::Scene* s,
+                                            const ComponentEditContext& ctx )
+                                        { AnimationComponentWidget( ctx.AnimationLibrary ).Render( e, s ); } ) )
 } // namespace Desert::Editor

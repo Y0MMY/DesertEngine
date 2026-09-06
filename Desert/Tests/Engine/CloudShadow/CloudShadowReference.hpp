@@ -46,15 +46,15 @@ namespace Desert::Tests::CloudShadowRef
         using glm::mix;
         using glm::sqrt;
 
-DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/CloudGeometry.glslh>
 
-        // The slab the tests drive: constant extinction between two radii, optionally modulated
-        // horizontally so that the "heterogeneous" cases are not the homogeneous one in disguise. Written
-        // as a mutable global because the callback macro's signature is a position and nothing else —
-        // which is exactly the constraint the real shader works under, where the field lives in globals
-        // for the same reason.
-        struct SyntheticMedium
+             // The slab the tests drive: constant extinction between two radii, optionally modulated
+             // horizontally so that the "heterogeneous" cases are not the homogeneous one in disguise. Written
+             // as a mutable global because the callback macro's signature is a position and nothing else —
+             // which is exactly the constraint the real shader works under, where the field lives in globals
+             // for the same reason.
+             struct SyntheticMedium
         {
             float BottomRadiusKm  = 0.0f;
             float TopRadiusKm     = 0.0f;
@@ -82,7 +82,7 @@ DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are s
 #define CLOUD_SHADOW_SAMPLE_EXTINCTION( p ) CloudShadowTestExtinction( p )
 
 #include <Common/CloudShadowMap.glslh>
-DESERT_GLSL_AS_CPP_END
+        DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::CloudShadowRef

@@ -29,9 +29,9 @@
 namespace Desert::Graphic
 {
     class SceneRenderer;
-        // `struct` and not `class`: the definition in Graphic/Environment/SceneEnvironment.hpp uses struct, and the Microsoft C++ ABI
-        // encodes the class-key into the decorated name, so the mismatch is a Windows-only link
-        // error waiting for the day this forward declaration is the one a caller sees first.
+    // `struct` and not `class`: the definition in Graphic/Environment/SceneEnvironment.hpp uses struct, and the
+    // Microsoft C++ ABI encodes the class-key into the decorated name, so the mismatch is a Windows-only link
+    // error waiting for the day this forward declaration is the one a caller sees first.
     struct Environment;
 } // namespace Desert::Graphic
 

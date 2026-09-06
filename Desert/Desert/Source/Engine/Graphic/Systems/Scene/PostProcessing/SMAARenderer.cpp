@@ -144,7 +144,8 @@ namespace Desert::Graphic::System
         {
             auto rp = RenderPass::Create( { .TargetFramebuffer = m_WeightsFB, .DebugName = "SMAAWeightsPass" } );
             renderer.BeginRenderPass( rp.get() );
-            m_MatWeights->BindInputs( m_EdgesFB->GetColorAttachmentImage().get(), m_AreaTex.get(), m_SearchTex.get() );
+            m_MatWeights->BindInputs( m_EdgesFB->GetColorAttachmentImage().get(), m_AreaTex.get(),
+                                      m_SearchTex.get() );
             renderer.SubmitFullscreenQuad( m_WeightsPipeline.get(), m_MatWeights->GetMaterialExecutor() );
             renderer.EndRenderPass();
         }
@@ -154,7 +155,7 @@ namespace Desert::Graphic::System
             auto rp = RenderPass::Create( { .TargetFramebuffer = m_Framebuffer, .DebugName = "SMAABlendPass" } );
             renderer.BeginRenderPass( rp.get() );
             m_MatBlend->BindInputs( inputColor, m_WeightsFB->GetColorAttachmentImage().get(),
-                              m_EdgesFB->GetColorAttachmentImage().get(), m_AreaTex.get() );
+                                    m_EdgesFB->GetColorAttachmentImage().get(), m_AreaTex.get() );
             renderer.SubmitFullscreenQuad( m_BlendPipeline.get(), m_MatBlend->GetMaterialExecutor() );
             renderer.EndRenderPass();
         }

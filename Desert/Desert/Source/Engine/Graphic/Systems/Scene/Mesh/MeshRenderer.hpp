@@ -283,7 +283,6 @@ namespace Desert::Graphic::System
         bool SetupOverdrawPass(); // overdraw accumulation pipeline + FB + fullscreen heat resolve
         void RegisterDebugPass( RenderGraphBuilder& builder );
 
-
     private:
         // Static
         std::shared_ptr<GraphicsPipeline> m_StaticPipeline;

@@ -30,8 +30,9 @@ namespace Desert::Graphic
         };
 
         void BindInputs( const std::shared_ptr<Image2D>& targetImage, const std::shared_ptr<Image2D>& bloomImage,
-                   const std::shared_ptr<Image2D>& avgLuminance, const std::shared_ptr<Image2D>& lightShaftImage,
-                   const std::shared_ptr<Image2D>& lensFlareImage, const Params& params );
+                         const std::shared_ptr<Image2D>& avgLuminance,
+                         const std::shared_ptr<Image2D>& lightShaftImage,
+                         const std::shared_ptr<Image2D>& lensFlareImage, const Params& params );
 
         MPROPERTY( float, Exposure,            "u_Exposure",            1.0f )
         MPROPERTY( float, Gamma,               "u_Gamma",               2.2f )

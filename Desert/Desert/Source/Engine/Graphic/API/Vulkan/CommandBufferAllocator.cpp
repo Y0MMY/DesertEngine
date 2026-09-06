@@ -7,8 +7,8 @@ namespace Desert::Graphic::API::Vulkan
 {
     namespace
     {
-        Common::ResultStr<VkResult> FlushCommandBuffer( VkDevice device, VkCommandPool /*commandPool*/,
-                                                     VkCommandBuffer commandBuffer, VkQueue queue )
+        Common::ResultStr<VkResult> FlushCommandBuffer( VkDevice        device, VkCommandPool /*commandPool*/,
+                                                        VkCommandBuffer commandBuffer, VkQueue queue )
         {
             if ( commandBuffer == VK_NULL_HANDLE )
             {

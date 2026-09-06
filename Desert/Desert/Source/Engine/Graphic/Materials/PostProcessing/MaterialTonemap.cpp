@@ -12,10 +12,10 @@ namespace Desert::Graphic
     }
 
     void MaterialTonemap::BindInputs( const std::shared_ptr<Image2D>& targetImage,
-                                const std::shared_ptr<Image2D>& bloomImage,
-                                const std::shared_ptr<Image2D>& avgLuminance,
-                                const std::shared_ptr<Image2D>& lightShaftImage,
-                                const std::shared_ptr<Image2D>& lensFlareImage, const Params& params )
+                                      const std::shared_ptr<Image2D>& bloomImage,
+                                      const std::shared_ptr<Image2D>& avgLuminance,
+                                      const std::shared_ptr<Image2D>& lightShaftImage,
+                                      const std::shared_ptr<Image2D>& lensFlareImage, const Params& params )
     {
         if ( m_GeometryTexture && targetImage )
             m_GeometryTexture->SetImage( targetImage.get() );

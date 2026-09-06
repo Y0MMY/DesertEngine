@@ -387,9 +387,10 @@ namespace Desert::Graphic::API::Vulkan
                                                      VK_PIPELINE_BIND_POINT_COMPUTE, frameIndex );
     }
 
-    void VulkanPipelineCompute::UpdateDescriptorSet( uint32_t                                 /*frameIndex*/,
+    void VulkanPipelineCompute::UpdateDescriptorSet( uint32_t /*frameIndex*/,
                                                      const std::vector<VkWriteDescriptorSet>& writes,
-                                                     VkDescriptorSet descriptorSet, uint32_t /*setIndex*/ /*= 0 */ )
+                                                     VkDescriptorSet                          descriptorSet,
+                                                     uint32_t /*setIndex*/ /*= 0 */ )
     {
         std::vector<VkWriteDescriptorSet> modifiedWrites = writes;
         for ( auto& write : modifiedWrites )

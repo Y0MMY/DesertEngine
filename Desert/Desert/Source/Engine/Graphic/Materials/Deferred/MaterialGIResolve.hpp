@@ -23,9 +23,9 @@ namespace Desert::Graphic
         }
 
         void BindInputs( const std::shared_ptr<Image2D>& normal, const std::shared_ptr<Image2D>& worldPos,
-                   const std::shared_ptr<Image2D>& rsmAlbedo, const std::shared_ptr<Image2D>& rsmNormal,
-                   const std::shared_ptr<Image2D>& rsmWorldPos, const glm::mat4& rsmViewProj,
-                   const glm::vec4& sunColorIntensity, float giIntensity, float jitterSeed )
+                         const std::shared_ptr<Image2D>& rsmAlbedo, const std::shared_ptr<Image2D>& rsmNormal,
+                         const std::shared_ptr<Image2D>& rsmWorldPos, const glm::mat4& rsmViewProj,
+                         const glm::vec4& sunColorIntensity, float giIntensity, float jitterSeed )
         {
             if ( m_Normal && normal )
                 m_Normal->SetImage( normal.get() );

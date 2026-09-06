@@ -75,20 +75,20 @@ namespace Desert::Tests::CloudFieldRef
         using glm::smoothstep;
         using glm::sqrt;
 
-DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/CloudNoise.glslh>
 #include <Common/CloudGeometry.glslh>
 
-        // ONE call into the ONE function that writes the volume — Common/CloudNoise.glslh's
-        // CloudNoiseVolumeChannels — rather than four calls this file has to keep in step with the
-        // generator's. The four-line copy that used to be here mirrored the compute bake and was a second
-        // statement of the channel layout; it is exactly the shape of duplication that agrees with itself
-        // until the first tuning pass.
-        //
-        // The parameters are the defaults of Engine/Assets/CloudNoiseVolume.hpp's CloudNoiseVolumeParams,
-        // which is what the shipped CloudNoise_Default.dcnv was baked with. A different seed moves
-        // individual clouds and not one of the statistics measured here.
-        constexpr uint  kVolumeSeed     = 1337u;
+             // ONE call into the ONE function that writes the volume — Common/CloudNoise.glslh's
+             // CloudNoiseVolumeChannels — rather than four calls this file has to keep in step with the
+             // generator's. The four-line copy that used to be here mirrored the compute bake and was a second
+             // statement of the channel layout; it is exactly the shape of duplication that agrees with itself
+             // until the first tuning pass.
+             //
+             // The parameters are the defaults of Engine/Assets/CloudNoiseVolume.hpp's CloudNoiseVolumeParams,
+             // which is what the shipped CloudNoise_Default.dcnv was baked with. A different seed moves
+             // individual clouds and not one of the statistics measured here.
+             constexpr uint kVolumeSeed     = 1337u;
         constexpr float kCurlStrength   = 0.33f;
         constexpr float kWispyPeriodLF  = 2.0f;
         constexpr float kWispyPeriodHF  = 4.0f;
@@ -390,7 +390,7 @@ DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are s
         }
 
 #include <Common/CloudField.glslh>
-DESERT_GLSL_AS_CPP_END
+        DESERT_GLSL_AS_CPP_END
 
         // ------------------------------------------------------------------------------------------
         // The species arrays, filled the way Graphic::PackCloudParams fills them

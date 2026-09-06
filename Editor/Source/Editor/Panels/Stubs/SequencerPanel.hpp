@@ -21,9 +21,9 @@ namespace Desert::Animation
     class AnimationLibrary;
     class Animator;
     class Skeleton;
-        // `class` and not `struct`: the definition in Engine/Animation/AnimationClip.hpp uses class, and the Microsoft C++ ABI
-        // encodes the class-key into the decorated name, so the mismatch is a Windows-only link
-        // error waiting for the day this forward declaration is the one a caller sees first.
+    // `class` and not `struct`: the definition in Engine/Animation/AnimationClip.hpp uses class, and the Microsoft
+    // C++ ABI encodes the class-key into the decorated name, so the mismatch is a Windows-only link error waiting
+    // for the day this forward declaration is the one a caller sees first.
     class AnimationClip;
 } // namespace Desert::Animation
 

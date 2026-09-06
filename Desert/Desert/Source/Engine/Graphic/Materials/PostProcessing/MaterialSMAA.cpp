@@ -39,7 +39,7 @@ namespace Desert::Graphic
     }
 
     void MaterialSMAABlend::BindInputs( const std::shared_ptr<Image2D>& color, Image2D* weights, Image2D* edges,
-                                  Image2D* area )
+                                        Image2D* area )
     {
         if ( m_Color && color )
             m_Color->SetImage( color.get() );

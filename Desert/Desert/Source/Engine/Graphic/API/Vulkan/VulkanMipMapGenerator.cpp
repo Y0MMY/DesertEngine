@@ -80,7 +80,8 @@ namespace Desert::Graphic::API::Vulkan
                                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, finalRange );
     }
 
-    Common::BoolResultStr VulkanMipMap2DGeneratorCS::GenerateMips( const std::shared_ptr<Image2D>& /*image*/ ) const
+    Common::BoolResultStr
+    VulkanMipMap2DGeneratorCS::GenerateMips( const std::shared_ptr<Image2D>& /*image*/ ) const
     {
         return Common::MakeError( "Not impl" );
     }

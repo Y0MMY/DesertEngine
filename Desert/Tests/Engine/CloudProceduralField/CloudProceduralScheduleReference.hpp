@@ -31,9 +31,9 @@ namespace Desert::Tests::CloudProceduralScheduleRef
         using glm::min;
         using glm::sqrt;
 
-DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/CloudGeometry.glslh>
-DESERT_GLSL_AS_CPP_END
+             DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::CloudProceduralScheduleRef

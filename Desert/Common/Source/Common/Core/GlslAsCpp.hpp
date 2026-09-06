@@ -21,14 +21,14 @@
 // created by a build arrangement, not of a diagnostic we would rather not answer.
 
 #if defined( __clang__ ) || defined( __GNUC__ )
-#define DESERT_GLSL_AS_CPP_BEGIN                                                                          \
+#define DESERT_GLSL_AS_CPP_BEGIN                                                                                  \
     _Pragma( "GCC diagnostic push" ) _Pragma( "GCC diagnostic ignored \"-Wunused-function\"" )
 #define DESERT_GLSL_AS_CPP_END _Pragma( "GCC diagnostic pop" )
 #elif defined( _MSC_VER )
 // C4505: unreferenced function with internal linkage has been removed — MSVC's spelling of the same
 // diagnostic, and it is a /W4 warning, which is the level this workspace now builds at.
 #define DESERT_GLSL_AS_CPP_BEGIN _Pragma( "warning( push )" ) _Pragma( "warning( disable : 4505 )" )
-#define DESERT_GLSL_AS_CPP_END   _Pragma( "warning( pop )" )
+#define DESERT_GLSL_AS_CPP_END _Pragma( "warning( pop )" )
 #else
 #define DESERT_GLSL_AS_CPP_BEGIN
 #define DESERT_GLSL_AS_CPP_END
