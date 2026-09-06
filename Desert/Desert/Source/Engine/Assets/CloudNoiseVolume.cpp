@@ -72,12 +72,47 @@ namespace Desert::Assets
         return "unknown";
     }
 
+    const char* CloudNoiseVolumeOriginName( CloudNoiseVolumeOrigin origin )
+    {
+        switch ( origin )
+        {
+            case CloudNoiseVolumeOrigin::Generated:
+                return "generated";
+            case CloudNoiseVolumeOrigin::Imported:
+                return "imported";
+        }
+        return "unknown";
+    }
+
+    CloudNoiseVolumeParams EmptyImportedRecipe( uint32_t resolution )
+    {
+        // Zero at every generator field and nothing else. Deliberately NOT the struct's defaults: those are
+        // a real, working recipe (seed 1337, periods 2/4/3/6), and a file carrying them while claiming to be
+        // imported would be the exact lie the origin field was added to prevent.
+        CloudNoiseVolumeParams params;
+        params.Resolution                = resolution;
+        params.Seed                      = 0u;
+        params.CurlStrength              = 0.0f;
+        params.WispyPeriodLowFrequency   = 0.0f;
+        params.WispyPeriodHighFrequency  = 0.0f;
+        params.BillowPeriodLowFrequency  = 0.0f;
+        params.BillowPeriodHighFrequency = 0.0f;
+        return params;
+    }
+
+    Common::BoolResultStr ValidateCloudNoiseVolumeResolution( uint32_t resolution )
+    {
+        if ( resolution < kMinResolution || resolution > kMaxResolution || !IsPowerOfTwo( resolution ) )
+            return Common::MakeFormattedError<bool>( "Resolution must be a power of two between {} and {}, got {}",
+                                                     kMinResolution, kMaxResolution, resolution );
+
+        return Common::MakeSuccess( true );
+    }
+
     Common::BoolResultStr ValidateCloudNoiseVolumeParams( const CloudNoiseVolumeParams& params )
     {
-        if ( params.Resolution < kMinResolution || params.Resolution > kMaxResolution ||
-             !IsPowerOfTwo( params.Resolution ) )
-            return Common::MakeFormattedError<bool>( "Resolution must be a power of two between {} and {}, got {}",
-                                                     kMinResolution, kMaxResolution, params.Resolution );
+        if ( auto r = ValidateCloudNoiseVolumeResolution( params.Resolution ); !r )
+            return r;
 
         // The upper bound is where the shear stops belonging to the cloud it came from; the lower is
         // exactly zero, which is a legal choice (a volume with no curl at all is plain inverted Alligator).
@@ -125,6 +160,11 @@ namespace Desert::Assets
         WriteF32( out, data.Params.BillowPeriodLowFrequency );
         WriteF32( out, data.Params.BillowPeriodHighFrequency );
 
+        // v2's one addition, and it sits AFTER the recipe rather than beside the versions so that every
+        // v1 offset above is still the offset it was — which is what lets the v1 reader below be four lines
+        // instead of a second parser.
+        WriteU32( out, static_cast<uint32_t>( data.Origin ) );
+
         WriteU64( out, static_cast<uint64_t>( data.Voxels.size() ) );
         WriteU32( out, Crc32( data.Voxels.data(), data.Voxels.size() ) );
 
@@ -134,9 +174,9 @@ namespace Desert::Assets
 
     Common::ResultStr<CloudNoiseVolumeData> DecodeCloudNoiseVolume( const std::vector<unsigned char>& bytes )
     {
-        if ( bytes.size() < kCloudNoiseHeaderSize )
+        if ( bytes.size() < kCloudNoiseHeaderSizeV1 )
             return Common::MakeFormattedError<CloudNoiseVolumeData>(
-                 "file is {} bytes, shorter than the {}-byte header", bytes.size(), kCloudNoiseHeaderSize );
+                 "file is {} bytes, shorter than the {}-byte header", bytes.size(), kCloudNoiseHeaderSizeV1 );
 
         const unsigned char* at = bytes.data();
 
@@ -146,10 +186,22 @@ namespace Desert::Assets
                  at[2], at[3] );
 
         const uint32_t containerVersion = ReadU32( at + 4 );
-        if ( containerVersion != kCloudNoiseContainerVersion )
+        if ( containerVersion != kCloudNoiseContainerVersion && containerVersion != 1u )
             return Common::MakeFormattedError<CloudNoiseVolumeData>(
-                 "container version {} is not the {} this build reads", containerVersion,
-                 kCloudNoiseContainerVersion );
+                 "container version {} is neither the {} this build writes nor the 1 it migrates",
+                 containerVersion, kCloudNoiseContainerVersion );
+
+        // MIGRATION 1 -> 2, and it is the whole of it. v1 has no origin field and a header four bytes
+        // shorter; every offset before that field is unchanged, so the only thing that varies is where the
+        // payload starts and whether an origin is there to read. DELETE THIS BRANCH, and the v1 constant
+        // with it, once no .dcnv older than container v2 can still be handed to this build.
+        const bool   isV1       = containerVersion == 1u;
+        const size_t headerSize = isV1 ? kCloudNoiseHeaderSizeV1 : kCloudNoiseHeaderSize;
+
+        if ( bytes.size() < headerSize )
+            return Common::MakeFormattedError<CloudNoiseVolumeData>(
+                 "file is {} bytes, shorter than the {}-byte header a container version {} needs", bytes.size(),
+                 headerSize, containerVersion );
 
         CloudNoiseVolumeData data;
         data.GeneratorVersion  = ReadU32( at + 8 );
@@ -178,8 +230,27 @@ namespace Desert::Assets
         data.Params.BillowPeriodLowFrequency  = ReadF32( at + 52 );
         data.Params.BillowPeriodHighFrequency = ReadF32( at + 56 );
 
-        const uint64_t payloadBytes = ReadU64( at + 60 );
-        const uint32_t storedCrc    = ReadU32( at + 68 );
+        // A v1 file could only have come from the generator — importing did not exist when it was written —
+        // so this is a migration with nothing to guess, not a default standing in for missing information.
+        if ( isV1 )
+        {
+            data.Origin = CloudNoiseVolumeOrigin::Generated;
+        }
+        else
+        {
+            const uint32_t origin = ReadU32( at + 60 );
+            if ( origin != static_cast<uint32_t>( CloudNoiseVolumeOrigin::Generated ) &&
+                 origin != static_cast<uint32_t>( CloudNoiseVolumeOrigin::Imported ) )
+                return Common::MakeFormattedError<CloudNoiseVolumeData>(
+                     "origin {} is neither generated ({}) nor imported ({})", origin,
+                     static_cast<uint32_t>( CloudNoiseVolumeOrigin::Generated ),
+                     static_cast<uint32_t>( CloudNoiseVolumeOrigin::Imported ) );
+            data.Origin = static_cast<CloudNoiseVolumeOrigin>( origin );
+        }
+
+        const size_t   tail         = isV1 ? 60u : 64u;
+        const uint64_t payloadBytes = ReadU64( at + tail );
+        const uint32_t storedCrc    = ReadU32( at + tail + 8u );
 
         // The resolution and the payload length are two statements of one fact, and the whole class of
         // defects this programme keeps meeting is two statements of one fact that disagree. Checked here,
@@ -191,12 +262,12 @@ namespace Desert::Assets
                  "header says {} payload bytes but a {}^3 RGBA8 volume is {} bytes", payloadBytes,
                  data.Params.Resolution, expected );
 
-        if ( bytes.size() - kCloudNoiseHeaderSize != payloadBytes )
+        if ( bytes.size() - headerSize != payloadBytes )
             return Common::MakeFormattedError<CloudNoiseVolumeData>(
-                 "file is truncated: {} payload bytes present, {} declared", bytes.size() - kCloudNoiseHeaderSize,
+                 "file is truncated: {} payload bytes present, {} declared", bytes.size() - headerSize,
                  payloadBytes );
 
-        data.Voxels.assign( bytes.begin() + kCloudNoiseHeaderSize, bytes.end() );
+        data.Voxels.assign( bytes.begin() + static_cast<std::ptrdiff_t>( headerSize ), bytes.end() );
 
         const uint32_t actualCrc = Crc32( data.Voxels.data(), data.Voxels.size() );
         if ( actualCrc != storedCrc )
@@ -206,9 +277,35 @@ namespace Desert::Assets
 
         // Validated LAST, so a corrupt file is reported as corrupt rather than as an illegal parameter set
         // read out of its wreckage.
-        if ( auto valid = ValidateCloudNoiseVolumeParams( data.Params ); !valid )
-            return Common::MakeFormattedError<CloudNoiseVolumeData>( "header parameters are not usable: {}",
-                                                                     valid.GetError() );
+        //
+        // AND ONLY THE HALF THAT APPLIES. An imported volume's recipe is zeroed by construction, so asking
+        // the generator's question of it would reject every legitimate import for a field that carries no
+        // meaning; its resolution, which the voxels really do state, is checked exactly as strictly.
+        if ( data.Origin == CloudNoiseVolumeOrigin::Generated )
+        {
+            if ( auto valid = ValidateCloudNoiseVolumeParams( data.Params ); !valid )
+                return Common::MakeFormattedError<CloudNoiseVolumeData>( "header parameters are not usable: {}",
+                                                                         valid.GetError() );
+        }
+        else
+        {
+            if ( auto valid = ValidateCloudNoiseVolumeResolution( data.Params.Resolution ); !valid )
+                return Common::MakeFormattedError<CloudNoiseVolumeData>( "header parameters are not usable: {}",
+                                                                         valid.GetError() );
+
+            // An imported file that carries a recipe is a file whose two halves disagree about where its
+            // voxels came from, and the sky it renders would be traced back to a seed that never made it.
+            if ( data.Params.Seed != EmptyImportedRecipe( data.Params.Resolution ).Seed ||
+                 data.Params.WispyPeriodLowFrequency != 0.0f || data.Params.WispyPeriodHighFrequency != 0.0f ||
+                 data.Params.BillowPeriodLowFrequency != 0.0f || data.Params.BillowPeriodHighFrequency != 0.0f ||
+                 data.Params.CurlStrength != 0.0f )
+                return Common::MakeFormattedError<CloudNoiseVolumeData>(
+                     "volume declares itself imported but carries a generator recipe (seed {}, periods "
+                     "{}/{}/{}/{}, curl {}); an imported volume has no recipe and must store none",
+                     data.Params.Seed, data.Params.WispyPeriodLowFrequency, data.Params.WispyPeriodHighFrequency,
+                     data.Params.BillowPeriodLowFrequency, data.Params.BillowPeriodHighFrequency,
+                     data.Params.CurlStrength );
+        }
 
         return Common::MakeSuccess( std::move( data ) );
     }

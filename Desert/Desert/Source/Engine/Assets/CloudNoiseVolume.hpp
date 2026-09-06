@@ -95,13 +95,47 @@ namespace Desert::Assets
     inline constexpr uint32_t kCloudNoiseGeneratorVersion = 1u;
 
     /// The container layout's own version, independent of the maths. Bumped when a FIELD moves.
-    inline constexpr uint32_t kCloudNoiseContainerVersion = 1u;
+    ///
+    /// 1 — magic, versions, resolution, format, four channel meanings, the recipe, length and CRC.
+    /// 2 — adds @ref CloudNoiseVolumeOrigin, because a volume can now arrive from OUTSIDE the generator and
+    ///     a file that cannot say so would have to lie about its recipe. See the enum.
+    inline constexpr uint32_t kCloudNoiseContainerVersion = 2u;
+
+    /**
+     * @brief Where a volume's voxels came from — and therefore whether the recipe beside them means
+     *        anything.
+     *
+     * THIS EXISTS BECAUSE IMPORT BROKE AN INVARIANT THIS FILE STATES AT THE TOP: "the file carries its own
+     * recipe". A volume read from a tiled slice sheet has no seed, no periods and no curl strength, because
+     * a picture cannot carry them. Writing plausible-looking defaults into its header would have made the
+     * file claim a recipe that does not reproduce it — and the trap is not theoretical: the editor panel
+     * shows those fields and offers a Bake button, so one click would silently replace an artist's imported
+     * voxels with entirely different generated ones, with nothing on screen having warned them.
+     *
+     * So the file states which of the two it is, and every reader is forced to ask.
+     */
+    enum class CloudNoiseVolumeOrigin : uint32_t
+    {
+        /// Baked by `GenerateCloudNoiseVolume` from the recipe in this header. Re-baking that recipe
+        /// reproduces these exact bytes — that is the property the generator's purity test defends.
+        Generated = 0,
+
+        /// Read from a tiled slice sheet. The recipe fields are ZERO and mean nothing; only Resolution is
+        /// real, because the pixels genuinely state it. Re-baking would produce a DIFFERENT volume.
+        Imported = 1,
+    };
+
+    const char* CloudNoiseVolumeOriginName( CloudNoiseVolumeOrigin origin );
 
     /// A decoded volume: what it contains, how it was made, and the voxels themselves.
     struct CloudNoiseVolumeData
     {
         CloudNoiseVolumeParams Params;
         uint32_t               GeneratorVersion = kCloudNoiseGeneratorVersion;
+
+        /// Defaults to Generated because that is what constructing one in code and filling in a recipe
+        /// means. The sheet importer is the only thing in the tree that sets Imported.
+        CloudNoiseVolumeOrigin Origin = CloudNoiseVolumeOrigin::Generated;
 
         /// RGBA8, four bytes per voxel, tightly packed with x varying fastest and z slowest — the layout
         /// `vkCmdCopyBufferToImage` expects for a whole-volume copy with no row padding, which is how
@@ -117,12 +151,33 @@ namespace Desert::Assets
     };
 
     /**
+     * @brief Rejects a RESOLUTION the container cannot hold, with the offending number in the message.
+     *
+     * Split out of ValidateCloudNoiseVolumeParams when volumes gained an origin, because the two halves of
+     * that check answer different questions and only one of them survives an import. A resolution is a
+     * property of the VOXELS — an imported volume has one, and it must be as legal as any other, or the
+     * payload length check downstream is checking a size nothing bounded. The recipe is a property of the
+     * GENERATOR, and an imported volume simply does not have one.
+     */
+    Common::BoolResultStr ValidateCloudNoiseVolumeResolution( uint32_t resolution );
+
+    /**
      * @brief Rejects a parameter set the generator cannot honour, with the offending number in the message.
      *
      * A pure function so the panel can grey out its Bake button for the same reason the loader refuses the
      * file, rather than the two disagreeing about what is legal.
+     *
+     * ONLY MEANINGFUL FOR A GENERATED VOLUME. Applying it to an imported one would reject every import on
+     * the grounds that zero is not a whole number of lattice cells — a true statement about a field that
+     * carries no meaning. `DecodeCloudNoiseVolume` therefore asks this of Generated volumes and asks only
+     * @ref ValidateCloudNoiseVolumeResolution of Imported ones.
      */
     Common::BoolResultStr ValidateCloudNoiseVolumeParams( const CloudNoiseVolumeParams& params );
+
+    /// The recipe an IMPORTED volume carries: empty, at every field the generator would have filled. A
+    /// function rather than a literal in two places, because the encoder writes it and the decoder asserts
+    /// it, and those are exactly the two sides that must not drift apart.
+    CloudNoiseVolumeParams EmptyImportedRecipe( uint32_t resolution );
 
     /**
      * @brief Serialises a volume into the container.
@@ -139,12 +194,22 @@ namespace Desert::Assets
      * unknown container version, a resolution that does not match the payload length, a truncated file, a
      * payload whose checksum disagrees. A silent fallback here would be a sky that renders from whatever
      * bytes happened to be in the file, which is the single hardest class of defect to trace back.
+     *
+     * ACCEPTS VERSION 1 AND MIGRATES IT, ONCE, HERE. A v1 file predates the origin field, and there was
+     * exactly one way to make one — the generator — so it migrates to Generated with no guesswork at all.
+     * The migration is stated in this function and nowhere else, and it raises 1 to 2 and only that: when
+     * the last v1 file in the wild is gone, the branch marked below is what gets deleted.
      */
     Common::ResultStr<CloudNoiseVolumeData> DecodeCloudNoiseVolume( const std::vector<unsigned char>& bytes );
 
-    /// Byte length of the container header. Exposed because the round-trip test asserts the total file
-    /// size, and a header that grew without the constant moving would pass a test that meant nothing.
-    inline constexpr size_t kCloudNoiseHeaderSize = 72u;
+    /// Byte length of the CURRENT (v2) container header. Exposed because the round-trip test asserts the
+    /// total file size, and a header that grew without the constant moving would pass a test that meant
+    /// nothing.
+    inline constexpr size_t kCloudNoiseHeaderSize = 76u;
+
+    /// Byte length of the v1 header — four bytes shorter, the origin being what v2 added. Named because the
+    /// migration path needs it and a bare 72 in the decoder would be the kind of number nobody dares touch.
+    inline constexpr size_t kCloudNoiseHeaderSizeV1 = 72u;
 
     /// The four bytes every container starts with.
     inline constexpr char kCloudNoiseMagic[4] = { 'D', 'C', 'N', 'V' };

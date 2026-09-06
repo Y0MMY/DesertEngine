@@ -52,20 +52,36 @@ namespace Desert::Assets
         m_Ready  = true;
         ++m_Revision;
 
-        LOG_INFO( "[Clouds] Noise volume '{}' loaded: {}^3 RGBA8, seed {}, generator v{}, periods "
-                  "{:.0f}/{:.0f} wispy and {:.0f}/{:.0f} billowy, curl {:.2f}.",
-                  path, m_Volume.Params.Resolution, m_Volume.Params.Seed, m_Volume.GeneratorVersion,
-                  m_Volume.Params.WispyPeriodLowFrequency, m_Volume.Params.WispyPeriodHighFrequency,
-                  m_Volume.Params.BillowPeriodLowFrequency, m_Volume.Params.BillowPeriodHighFrequency,
-                  m_Volume.Params.CurlStrength );
+        // THE LOG MUST NOT RECITE A RECIPE THAT DOES NOT EXIST. An imported volume's seed and periods are
+        // zero placeholders, and printing them in the shape of a recipe would put a line in the log that
+        // reads exactly like a generated volume with unusual settings — which is the sort of false evidence
+        // somebody eventually spends an afternoon chasing.
+        if ( m_Volume.Origin == CloudNoiseVolumeOrigin::Imported )
+        {
+            LOG_INFO( "[Clouds] Noise volume '{}' loaded: {}^3 RGBA8, imported from a slice sheet - it has no "
+                      "generator recipe, so it cannot be re-baked, only replaced.",
+                      path, m_Volume.Params.Resolution );
+        }
+        else
+        {
+            LOG_INFO( "[Clouds] Noise volume '{}' loaded: {}^3 RGBA8, seed {}, generator v{}, periods "
+                      "{:.0f}/{:.0f} wispy and {:.0f}/{:.0f} billowy, curl {:.2f}.",
+                      path, m_Volume.Params.Resolution, m_Volume.Params.Seed, m_Volume.GeneratorVersion,
+                      m_Volume.Params.WispyPeriodLowFrequency, m_Volume.Params.WispyPeriodHighFrequency,
+                      m_Volume.Params.BillowPeriodLowFrequency, m_Volume.Params.BillowPeriodHighFrequency,
+                      m_Volume.Params.CurlStrength );
 
-        // Said out loud rather than tolerated. A volume baked by an older generator still decodes and still
-        // renders — the container did not change — but it is NOT what this build's maths produces, and an
-        // artist comparing two volumes is entitled to know that one of them predates the noise itself.
-        if ( m_Volume.GeneratorVersion != kCloudNoiseGeneratorVersion )
-            LOG_WARN( "[Clouds] Noise volume '{}' was baked by generator v{}; this build generates v{}. Its "
-                      "channels are whatever the older maths produced — re-bake it to compare like with like.",
-                      path, m_Volume.GeneratorVersion, kCloudNoiseGeneratorVersion );
+            // Said out loud rather than tolerated. A volume baked by an older generator still decodes and
+            // still renders — the container did not change — but it is NOT what this build's maths produces,
+            // and an artist comparing two volumes is entitled to know that one of them predates the noise
+            // itself. Asked only of GENERATED volumes: an imported one's version is zero on purpose, and
+            // warning about that would be warning about a fact the line above already states.
+            if ( m_Volume.GeneratorVersion != kCloudNoiseGeneratorVersion )
+                LOG_WARN( "[Clouds] Noise volume '{}' was baked by generator v{}; this build generates v{}. "
+                          "Its channels are whatever the older maths produced — re-bake it to compare like "
+                          "with like.",
+                          path, m_Volume.GeneratorVersion, kCloudNoiseGeneratorVersion );
+        }
 
         return BOOLSUCCESS;
     }
@@ -81,9 +97,21 @@ namespace Desert::Assets
     Common::BoolResultStr CloudNoiseVolumeAsset::Save( const Common::Filepath&     filepath,
                                                        const CloudNoiseVolumeData& volume )
     {
-        if ( auto valid = ValidateCloudNoiseVolumeParams( volume.Params ); !valid )
-            return Common::MakeFormattedError<bool>( "refusing to write '{}': {}", filepath.string(),
-                                                     valid.GetError() );
+        // THE SAME SPLIT THE DECODER MAKES, for the same reason and so the two cannot disagree about what is
+        // writable. An imported volume's recipe is empty by construction; asking the generator's question of
+        // it would refuse every import at the moment the artist tried to keep it.
+        if ( volume.Origin == CloudNoiseVolumeOrigin::Generated )
+        {
+            if ( auto valid = ValidateCloudNoiseVolumeParams( volume.Params ); !valid )
+                return Common::MakeFormattedError<bool>( "refusing to write '{}': {}", filepath.string(),
+                                                         valid.GetError() );
+        }
+        else
+        {
+            if ( auto valid = ValidateCloudNoiseVolumeResolution( volume.Params.Resolution ); !valid )
+                return Common::MakeFormattedError<bool>( "refusing to write '{}': {}", filepath.string(),
+                                                         valid.GetError() );
+        }
 
         const uint64_t expected = volume.VoxelCount() * 4u;
         if ( volume.Voxels.size() != expected )
