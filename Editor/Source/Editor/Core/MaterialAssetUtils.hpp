@@ -39,7 +39,7 @@ namespace Desert::Editor::MaterialAssetUtils
         if ( !am )
             return Common::UUID::Null();
 
-        const std::string           ext = Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::string           ext( Common::Constants::Extensions::MATERIAL_EXTENSION );
         const std::filesystem::path dir = Common::Constants::Path::MATERIAL_PATH;
         std::error_code             ec;
         std::filesystem::create_directories( dir, ec );

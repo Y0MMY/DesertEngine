@@ -37,7 +37,10 @@ namespace Desert::Assets
         }
         else
         {
-            text = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
+            if ( auto read = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath ); read )
+                text = read.ExtractValue();
+            // A failed read leaves `text` empty on purpose: the branch below is the one refusal that
+            // names both shapes ("empty or could not be opened").
         }
 
         if ( text.empty() )

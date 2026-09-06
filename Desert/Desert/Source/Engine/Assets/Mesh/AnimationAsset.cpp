@@ -17,12 +17,14 @@ namespace Desert::Assets
 
     Common::BoolResultStr AnimationAsset::Load()
     {
-        auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
+        if ( !raw )
+            return Common::MakeError( raw.GetError() );
 
         // DefaultIfMissing: clips cooked before a field existed (e.g. Notifies) still load — the missing
         // field takes its default (empty) instead of failing the whole read.
         const auto dataReflected =
-             rfl::json::read<Serialization::AnimationAssetData, rfl::DefaultIfMissing>( raw );
+             rfl::json::read<Serialization::AnimationAssetData, rfl::DefaultIfMissing>( raw.GetValue() );
         if ( !dataReflected.has_value() )
         {
             return Common::MakeError( dataReflected.error().what() );

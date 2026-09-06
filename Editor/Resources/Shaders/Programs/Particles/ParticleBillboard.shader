@@ -14,7 +14,10 @@ Shader "ParticleBillboard"
             vec4 PosSize; // xyz = world position, w = size
             vec4 Color;   // rgba (a <= 0 => invisible / dead)
             vec4 VelLife; // xyz = velocity, w = lifetime
-            vec4 Age;     // x = age
+            // x = age. yzw are the SIMULATION's local-space offset from the emitter (see
+            // ParticleSimulate.shader) — this pass must not read or repurpose them: the two shaders
+            // declare one buffer layout, and a lane that means two things is how the mirror drifts.
+            vec4 Age;
         };
 
         ReadBuffer(1) Particles

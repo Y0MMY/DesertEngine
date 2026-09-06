@@ -232,7 +232,15 @@ namespace Desert::Editor
         if ( !std::filesystem::exists( fullPath ) )
             return;
 
-        auto parsed = SG::Deserialize( Common::Utils::FileSystem::ReadFileContent( fullPath ) );
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( fullPath );
+        if ( !raw )
+        {
+            m_Status        = raw.GetError();
+            m_StatusIsError = true;
+            return;
+        }
+
+        auto parsed = SG::Deserialize( raw.GetValue() );
         if ( !parsed )
         {
             m_Status        = parsed.GetError();

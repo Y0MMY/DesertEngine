@@ -339,7 +339,8 @@ namespace Desert::Editor
             if ( ImGui::Button( "OK", ImVec2( 120, 0 ) ) )
             {
                 const Common::Filepath fullPath =
-                     Common::Filepath( m_PrefabSavePath ) / ( tag + Common::Constants::Extensions::PREFAB_EXTENSION );
+                     Common::Filepath( m_PrefabSavePath ) /
+                     ( tag + std::string( Common::Constants::Extensions::PREFAB_EXTENSION ) );
 
                 // Register in AssetManager (skip Load — we populate via CreateFromEntity)
                 auto newPrefab = m_AssetManager->CreateAsset<Assets::PrefabAsset>(

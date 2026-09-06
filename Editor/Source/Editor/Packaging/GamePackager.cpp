@@ -1,6 +1,8 @@
 #include "GamePackager.hpp"
+#include "PackageCook.hpp"
 #include "PackagedContentTrees.hpp"
 
+#include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 
 #include <Common/Core/Constants.hpp>
@@ -171,7 +173,14 @@ namespace Desert::Editor
         makeExecutable( binDir / binName );
         ++stats.Files;
 
-        // 3) ALL content goes into ONE Content.dpak (UE .pak model), tree by tree out of the shared
+        // 3) Cook BEFORE packing: every deterministic startup cost — shader SPIR-V, font atlases,
+        // icon SDFs — is paid here, once, into the project's Cooked/ tree, so the census below ships
+        // the artifacts and the player's first launch reads instead of rebuilding. Cooked for the
+        // TARGET runtime's profile (options.Config), not this editor's: a Debug editor packaging a
+        // Release game must produce Release cache keys or the shipped cache never hits.
+        const CookStats cook = CookContentCaches( Core::SpirvDebugInfoForConfigName( options.Config ) );
+
+        // ALL content goes into ONE Content.dpak (UE .pak model), tree by tree out of the shared
         // census (PackagedContentTrees.hpp) — assets, cooked cache, shaders, fonts, icons. The Runtime
         // mounts the archive at startup; every content read resolves through the VFS.
         {
@@ -224,7 +233,10 @@ namespace Desert::Editor
                 fs::copy_file( fs::canonical( mvkSrc, ec ), fwDir / "libMoltenVK.dylib",
                                fs::copy_options::overwrite_existing, ec );
 
-                std::string icd = Common::Utils::FileSystem::ReadFileContent( icdSrc );
+                // Guarded by fs::exists(icdSrc) above; an unreadable file degrades to the same
+                // "library_path key not found" no-op patch the old empty read produced.
+                auto        icdRead = Common::Utils::FileSystem::ReadFileContent( icdSrc );
+                std::string icd     = icdRead ? icdRead.ExtractValue() : std::string{};
                 const auto  keyPos = icd.find( "\"library_path\"" );
                 if ( keyPos != std::string::npos )
                 {
@@ -304,6 +316,14 @@ namespace Desert::Editor
             << stats.Files << " files, " << ( stats.Bytes / ( 1024 * 1024 ) ) << " MB, " << options.Config
             << " runtime" << ( bundle ? ( bundledVulkan ? ", Vulkan bundled" : ", Vulkan NOT bundled" ) : "" )
             << ")";
+        // An artifact the cook could not write is a hole in the shipped cache that nothing downstream
+        // can notice — the pak packs whatever is there and the game starts, just slowly, on the
+        // player's machine. So it is said HERE, in the result the packaging UI shows, and not left to
+        // a log line nobody reads. (Compile/bake failures are NOT raised this way: a project may ship
+        // a deliberately broken shader, and the runtime reports that one for itself.)
+        if ( cook.StoreFailures > 0 )
+            msg << "  WARNING: " << cook.StoreFailures
+                << " cooked artifact(s) could not be written; the game will rebuild them at every start";
         LOG_INFO( "[Package] {}", msg.str() );
         return { true, msg.str(), fs::absolute( root, ec ).string() };
     }
@@ -323,6 +343,12 @@ namespace Desert::Editor
         if ( !pak.IsOpen() )
             return { false, "Cannot create " + pakPath.string(), "" };
 
+        // Same cook as PackageGame, for THIS build's profile: the dev pak serves the runtime the
+        // developer launches next to this editor, which is built in the same configuration. (A
+        // cross-config dev runtime misses and self-heals into loose Cooked/ — dev machines are
+        // writable; only the shipped package must never rely on that.)
+        const CookStats cook = CookContentCaches( Core::SpirvDebugInfoThisBuild() );
+
         // The same census PackageGame packs — one list, two entry points (see PackagedContentTrees.hpp).
         for ( const PackagedTree& tree : PackagedContentTrees() )
             if ( !AddTreeToPak( pak, *tree.Tree, tree.PakKey, tree.StripRawMeshSources, stats, error ) )
@@ -334,6 +360,9 @@ namespace Desert::Editor
         std::ostringstream msg;
         msg << "Content.dpak rebuilt: " << stats.Files << " file(s), " << ( stats.Bytes / ( 1024 * 1024 ) )
             << " MB -> " << fs::absolute( pakPath, ec ).string();
+        if ( cook.StoreFailures > 0 )
+            msg << "  WARNING: " << cook.StoreFailures
+                << " cooked artifact(s) could not be written; the game will rebuild them at every start";
         LOG_INFO( "[Package] {}", msg.str() );
         return { true, msg.str(), fs::absolute( pakPath, ec ).string() };
     }

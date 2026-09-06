@@ -7,19 +7,26 @@
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
 
+#include <Editor/Core/StartupOptions.hpp>
+
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/CloudLayoutAsset.hpp>
 #include <Engine/Assets/CloudTypeAsset.hpp>
+#include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
+#include <Engine/Graphic/Image.hpp>
+#include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
+#include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/CloudLayout/CloudLayoutService.hpp>
 #include <Engine/Runtime/Services/CloudType/CloudTypeService.hpp>
 #include <Engine/Runtime/Services/Material/MaterialService.hpp>
 #include <Engine/Runtime/Services/Shader/ShaderService.hpp>
+#include <Engine/Runtime/Services/Skybox/SkyboxService.hpp>
 
 #include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -93,8 +100,6 @@ namespace Desert::Editor
                     return "draws the scene's terrain and its grass, geometry the renderer synthesizes "
                            "itself, so there is no sphere, cube or plane this pane could put it on. Edit "
                            "it here and look at the terrain in the viewport.";
-                case D::Skybox:
-                    return "draws the sky behind everything else, not an object this pane could place.";
                 case D::PostProcess:
                     return "draws over the whole finished frame, not an object this pane could place.";
                 case D::Volume:
@@ -103,6 +108,9 @@ namespace Desert::Editor
                            "clouds in the viewport; the layer picks it up the same frame.";
                 case D::Unspecified:
                 case D::Surface:
+                case D::Skybox: // no longer a refusal: the pane wraps its cubemap onto a ball (see
+                                // PreviewUnavailableReason's own Skybox branch, which answers before
+                                // this function is ever asked about that domain)
                     break;
             }
             // Surface never reaches here (it is the one domain the pane CAN draw), so this is the
@@ -189,12 +197,111 @@ namespace Desert::Editor
                    "error is in the Logs panel, named after this shader.";
 
         const auto domain = shader->GetProgramMeta().Domain;
+
+        // The cubemap domain previews — as the cubemap wrapped onto an orbitable ball — so its refusals
+        // are about the CUBE, not the domain. Three states an empty ball would render identically, told
+        // apart here because each asks the artist for a different action.
+        if ( domain == ::Desert::Core::Formats::ShaderDomain::Skybox )
+        {
+            const auto& params = shader->GetProgramMeta().Params;
+            const auto  cubeParam =
+                 std::find_if( params.begin(), params.end(), []( const auto& p ) { return p.IsCubeTexture; } );
+            if ( cubeParam == params.end() )
+                return "No preview: '" + shaderName +
+                       "' is a Skybox-domain shader with no TextureCube property, so there is no cubemap "
+                       "this pane could wrap onto the preview ball. Declare one in the shader's "
+                       "Properties block.";
+
+            const auto asset = m_AssetManager
+                                    ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() )
+                                    : nullptr;
+            // Kept alive for the whole read: an instance's textures come from its parent (v1 rule).
+            const auto     parent = asset ? ResolveParent( *asset ) : nullptr;
+            const uint64_t bound =
+                 asset ? ( parent ? parent->Data() : asset->Data() ).GetTexture( cubeParam->Name ) : 0;
+            if ( bound == 0 )
+                return "No preview yet: nothing is bound to '" + cubeParam->DisplayName +
+                       "'. Drop an HDR skybox onto that slot in the parameters beside this pane and the "
+                       "ball appears.";
+
+            auto*      skyboxService = Runtime::ResourceRegistry::GetSkyboxService();
+            const auto skybox = skyboxService ? skyboxService->Get( Assets::AssetHandle( bound ) ) : nullptr;
+            if ( !skybox || !skybox->GetEnvironment() )
+                return "No preview: the skybox bound to '" + cubeParam->DisplayName +
+                       "' is not loaded (its .hdr may have been deleted or moved). Rebind the slot.";
+
+            return {};
+        }
+
         if ( domain != ::Desert::Core::Formats::ShaderDomain::Surface )
             return std::string( "No preview shape for a " ) + DomainName( domain ) + "-domain material.\n\n'" +
                    shaderName + "' " + WhatTheDomainDrawsInstead( domain ) +
                    "\n\nThe parameters beside it edit the material normally.";
 
         return {};
+    }
+
+    std::optional<::Desert::Core::Formats::ShaderDomain> MaterialEditorPanel::EffectiveDomain() const
+    {
+        auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
+        if ( !shaderService )
+            return std::nullopt;
+        const auto shader = shaderService->GetByName( EffectiveShaderName() );
+        if ( !shader )
+            return std::nullopt;
+        return shader->GetProgramMeta().Domain;
+    }
+
+    const Graphic::ImageCube* MaterialEditorPanel::ResolveSubjectCubemap() const
+    {
+        if ( !m_AssetManager )
+            return nullptr;
+        const auto asset = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() );
+        if ( !asset )
+            return nullptr;
+
+        // An instance's textures come from its parent (the same v1 rule DrawParameters states: no
+        // per-instance texture descriptors yet), so the slot is read off the parent's data.
+        const auto  parent = ResolveParent( *asset );
+        const auto& data   = parent ? parent->Data() : asset->Data();
+
+        auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
+        auto  shader        = shaderService ? shaderService->GetByName( data.EffectiveShaderName() ) : nullptr;
+        if ( !shader )
+            return nullptr;
+
+        // The FIRST cube property is the one the ball wraps. Not a hardcoded sampler name: any
+        // Skybox-domain shader an artist writes names its own slot, and the schema is the contract.
+        const auto& params = shader->GetProgramMeta().Params;
+        const auto  cubeParam =
+             std::find_if( params.begin(), params.end(), []( const auto& p ) { return p.IsCubeTexture; } );
+        if ( cubeParam == params.end() )
+            return nullptr;
+
+        const uint64_t bound = data.GetTexture( cubeParam->Name );
+        if ( bound == 0 )
+            return nullptr;
+
+        // The slot holds an HDR skybox asset; its service caches the baked environment (radiance +
+        // IBL) per asset, so this is a map lookup, not a bake.
+        auto*      skyboxService = Runtime::ResourceRegistry::GetSkyboxService();
+        const auto skybox        = skyboxService ? skyboxService->Get( Assets::AssetHandle( bound ) ) : nullptr;
+        if ( !skybox )
+            return nullptr;
+
+        const auto& radiance = skybox->GetEnvironment().RadianceMap;
+        if ( !radiance.IsValid() || radiance.ImageType != Runtime::ImageHandle::Type::ImageCube )
+            return nullptr;
+
+        // Checked like the two services above it. Not because this one is likelier to be absent — it is the
+        // same registry and the same lifetime — but because a third call spelled differently beside two
+        // guarded ones reads as a deliberate exception, and the next person has to work out which of the
+        // three is wrong.
+        auto* imageService = Runtime::ResourceRegistry::GetImageService();
+        if ( !imageService )
+            return nullptr;
+
+        return static_cast<const Graphic::ImageCube*>( imageService->Resolve( radiance ) );
     }
 
     void MaterialEditorPanel::DrawPreviewPlaceholder( float side, const std::string& reason ) const
@@ -284,10 +391,28 @@ namespace Desert::Editor
         // header for why the shader term is hardening rather than a fix — the live path that keeps the
         // preview correct on a shader switch is MaterialService::Invalidate bumping the version that
         // MeshECSSystem rebuilds from, and that was established by rendering the switch, not by reading.
+        //
+        // WHAT gets pushed is the domain's answer to "what fills the pane" — the preview's extension
+        // point. Surface rides a real primitive through the slot route (the Shape combo is ITS
+        // particularity); the cubemap domain brings its own draw, a ball the cubemap is wrapped onto,
+        // resolved through a closure so the pane tracks the material's slot with no copy to invalidate.
+        // A future Volume domain slots in here with a march, not with a new Shape. The domain term of
+        // the identity is the ShaderName term: one names the other.
         if ( const PushedIdentity wanted{ Subject(), m_Shape, EffectiveShaderName() }; !( wanted == m_Pushed ) )
         {
-            m_Preview->SetMaterial( Subject(), m_Shape );
+            if ( EffectiveDomain() == ::Desert::Core::Formats::ShaderDomain::Skybox )
+                m_Preview->SetCubemapMaterial( [this] { return ResolveSubjectCubemap(); } );
+            else
+                m_Preview->SetMaterial( Subject(), m_Shape );
             m_Pushed = wanted;
+
+            // `--preview-orbit`: after the push (every Set* above ends in ResetView, which would eat an
+            // angle applied any earlier), once (so a person's drag is not re-clobbered by a re-push).
+            if ( const auto& startup = StartupOptions::Get(); startup.HasPreviewOrbit && !m_StartupOrbitApplied )
+            {
+                m_Preview->SetOrbit( startup.PreviewOrbitYaw, startup.PreviewOrbitPitch );
+                m_StartupOrbitApplied = true;
+            }
         }
 
         // The shader behind this material was rebuilt: drop the pipelines THIS renderer cached from the old
@@ -312,25 +437,34 @@ namespace Desert::Editor
     {
         // No material combo: this window IS one material. Picking a different one is opening a different
         // document, which is the whole point of the change that deleted the combo.
-        ImGui::SetNextItemWidth( 110.0f );
-        if ( ImGui::BeginCombo( "Shape", ShapeName( m_Shape ) ) )
+        //
+        // The Shape combo is a SURFACE-domain control, not a preview control: only the surface domain
+        // fills the pane with a primitive whose shape is a free choice (a grass card wants a plane). A
+        // cubemap material's content IS a ball — offering Cube/Plane there would be two entries that
+        // rebuild the preview into the same picture — and the refused domains draw nothing at all. So
+        // the combo exists exactly where it means something, instead of being disabled everywhere else.
+        if ( EffectiveDomain() == ::Desert::Core::Formats::ShaderDomain::Surface )
         {
-            for ( auto s :
-                  { PreviewViewport::Shape::Sphere, PreviewViewport::Shape::Cube, PreviewViewport::Shape::Plane } )
+            ImGui::SetNextItemWidth( 110.0f );
+            if ( ImGui::BeginCombo( "Shape", ShapeName( m_Shape ) ) )
             {
-                const bool selected = ( s == m_Shape );
-                if ( ImGui::Selectable( ShapeName( s ), selected ) && !selected )
+                for ( auto s : { PreviewViewport::Shape::Sphere, PreviewViewport::Shape::Cube,
+                                 PreviewViewport::Shape::Plane } )
                 {
-                    // No re-push flag here on purpose: the shape is PART of the pushed identity, so
-                    // changing it announces itself. This site used to carry the only reset that was
-                    // remembered; the shader site next door was the one that was not.
-                    m_Shape = s;
+                    const bool selected = ( s == m_Shape );
+                    if ( ImGui::Selectable( ShapeName( s ), selected ) && !selected )
+                    {
+                        // No re-push flag here on purpose: the shape is PART of the pushed identity, so
+                        // changing it announces itself. This site used to carry the only reset that was
+                        // remembered; the shader site next door was the one that was not.
+                        m_Shape = s;
+                    }
                 }
+                ImGui::EndCombo();
             }
-            ImGui::EndCombo();
+            ImGui::SameLine();
         }
 
-        ImGui::SameLine();
         if ( ImGui::Button( "Reset View" ) && m_Preview )
             m_Preview->ResetView();
 
@@ -407,10 +541,17 @@ namespace Desert::Editor
         // IsUserAssignable() is asked of the MATERIAL'S OWN shader, not of the candidates: inside one
         // domain every entry is assignable by construction, so asking it there would be a tautology. Here
         // it answers the question that is not — whether this material sits in a domain a user authors
-        // materials in at all. A `.demat` naming a Skybox shader, or one with no `Domain` line, is already
-        // drawing nothing; the list it needs is not "more of the same domain".
-        const bool assignable = currentShader->GetProgramMeta().IsUserAssignable();
+        // materials in at all. A `.demat` with no `Domain` line is already drawing nothing; the list it
+        // needs is not "more of the same domain".
+        //
+        // The CUBEMAP domain (Skybox) is authorable in this editor without being slot-assignable, and
+        // the two are different questions: IsUserAssignable() answers "may a mesh/terrain slot draw it"
+        // (it may not — the mesh gate refuses it by name, rightly), while this window edits and
+        // previews such a material as a first-class document. So Skybox joins the same-domain list
+        // here, and ONLY here.
         const auto domain     = currentShader->GetProgramMeta().Domain;
+        const bool assignable = currentShader->GetProgramMeta().IsUserAssignable() ||
+                                domain == ::Desert::Core::Formats::ShaderDomain::Skybox;
 
         if ( assignable )
         {
@@ -586,6 +727,81 @@ namespace Desert::Editor
                     ImGui::PopItemWidth();
                     continue;
                 }
+
+                // A CUBE slot takes an HDR skybox asset, not a 2D texture — different asset type,
+                // different drop payload, and a picker of its own (the same trio the Skybox component
+                // widget offers), so it is a separate row rather than a flag on the 2D one.
+                if ( p.IsCubeTexture )
+                {
+                    std::string disp = "<drop or pick HDR skybox>";
+                    if ( const uint64_t h = data.GetTexture( p.Name ); h != 0 && m_AssetManager )
+                    {
+                        if ( auto sky = m_AssetManager->FindByHandle<Assets::SkyboxAsset>( Common::UUID( h ) ) )
+                            disp = sky->GetMetadata().Filepath.filename().string();
+                        else
+                            disp = "<missing skybox>";
+                    }
+
+                    auto bindSkybox = [&]( const Assets::AssetHandle& handle )
+                    {
+                        // The service caches the baked environment per asset; everything preloaded is
+                        // already registered, so this only fires for a skybox created mid-session.
+                        auto* svc = Runtime::ResourceRegistry::GetSkyboxService();
+                        if ( svc && !svc->Get( handle ) && m_AssetManager )
+                        {
+                            if ( auto a = m_AssetManager->FindByHandle<Assets::SkyboxAsset>( handle ) )
+                            {
+                                Graphic::Renderer::GetInstance().WaitDeviceIdle();
+                                svc->Register( a );
+                            }
+                        }
+                        data.SetTexture( p.Name, static_cast<uint64_t>( handle ) );
+                        changed = true;
+                    };
+
+                    if ( ImGui::Button( ( disp + hiddenId ).c_str(), ImVec2( -FLT_MIN, 0.0f ) ) )
+                        ImGui::OpenPopup( ( "cube_selector" + hiddenId ).c_str() );
+                    if ( ImGui::BeginDragDropTarget() )
+                    {
+                        const char* types[] = { ::Desert::Editor::DragPayloads::SkyboxAsset,
+                                                ::Desert::Editor::DragPayloads::AssetFile };
+                        for ( const char* t : types )
+                        {
+                            if ( const ImGuiPayload* pl = ImGui::AcceptDragDropPayload( t ) )
+                            {
+                                const std::string path( static_cast<const char*>( pl->Data ) );
+                                if ( m_AssetManager )
+                                {
+                                    if ( auto a = m_AssetManager->FindByPath<Assets::SkyboxAsset>( path ) )
+                                        bindSkybox( a->GetMetadata().Handle );
+                                }
+                                break;
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    if ( ImGui::BeginPopup( ( "cube_selector" + hiddenId ).c_str() ) )
+                    {
+                        if ( m_AssetManager )
+                        {
+                            const auto skyboxes = m_AssetManager->FindAllByType<Assets::SkyboxAsset>();
+                            for ( const auto& [handle, sky] : skyboxes )
+                            {
+                                const std::string name = sky->GetMetadata().Filepath.filename().string();
+                                if ( ImGui::Selectable( name.c_str(), static_cast<uint64_t>( handle ) ==
+                                                                           data.GetTexture( p.Name ) ) )
+                                    bindSkybox( handle );
+                            }
+                            if ( skyboxes.empty() )
+                                ImGui::TextDisabled( "No HDR skyboxes in this project"
+                                                     " (drop a .hdr under Assets/Textures/HDR)" );
+                        }
+                        ImGui::EndPopup();
+                    }
+                    ImGui::PopItemWidth();
+                    continue;
+                }
+
                 std::string disp = "<drop texture>";
                 if ( const uint64_t h = data.GetTexture( p.Name ); h != 0 && m_AssetManager )
                 {

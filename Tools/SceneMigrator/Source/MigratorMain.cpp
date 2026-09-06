@@ -34,6 +34,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -97,6 +98,9 @@ namespace Desert::Migration
 
         int changed = 0;
         int failed  = 0;
+
+        // Cloud material relative path -> the scene that produced it, for the collision check below.
+        std::map<std::string, std::string> writtenMaterials;
 
         for ( const auto& path : scenes )
         {
@@ -321,6 +325,27 @@ namespace Desert::Migration
             bool materialsFailed = false;
             for ( const auto& mat : report.CloudMaterial.Materials )
             {
+                // TWO SCENES MUST NOT LAND ON ONE MATERIAL FILE. The name is derived from the scene's
+                // SceneName, which is NOT unique by construction — a .desce copied from another and
+                // edited keeps the original's name, and this repository's own verification protocol
+                // relies on exactly that copying. Two such scenes would produce one path here, the
+                // second write would take the first's look, and BOTH scenes would then name a file that
+                // describes only one of them: a silent whole-sky loss with nothing in the log. The
+                // migration function is pure and per-scene, so it cannot see the collision; this loop is
+                // the only place in the run that can. Named and fatal, never resolved by guessing at a
+                // suffix — the fix is to give the scene its own SceneName, which is what the operator
+                // has to know.
+                const auto claimed = writtenMaterials.emplace( mat.RelativePath, path.string() );
+                if ( !claimed.second && claimed.first->second != path.string() )
+                {
+                    err << "FAIL   " << path.string() << " — its cloud material would be written to "
+                        << mat.RelativePath << ", which " << claimed.first->second
+                        << " already claimed in this run: both scenes state the same SceneName. Give one "
+                        << "of them its own name and re-run; neither scene is modified.\n";
+                    materialsFailed = true;
+                    break;
+                }
+
                 // Under the same assets root MigrateScene measured against (its default argument): the
                 // relative path inside the scene and the file on disk must agree about one root or the
                 // scene names a material that is not where it says.

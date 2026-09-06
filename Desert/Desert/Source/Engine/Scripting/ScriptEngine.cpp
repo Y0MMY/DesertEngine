@@ -130,16 +130,23 @@ namespace Desert::Scripting
         env["self"] = m_Impl->MakeEntity( static_cast<entt::entity>( entity ) );
 
         // Disk scripts load via sol's file path (dev / hot-reload); a packaged game reads the source
-        // out of the mounted .dpak and loads it as a string chunk.
+        // out of the mounted .dpak and loads it as a string chunk. A path the VFS does not know
+        // either — or knows but cannot read — becomes a Lua error() chunk, so the failure surfaces
+        // through the same channel as any script error below.
+        std::string packedSource;
+        if ( !std::filesystem::exists( path ) )
+        {
+            packedSource = std::string( "error('script not found: " ).append( path ).append( "')" );
+            if ( Common::Utils::FileSystem::Exists( path ) )
+            {
+                if ( auto packed = Common::Utils::FileSystem::ReadFileContent( path ); packed )
+                    packedSource = packed.ExtractValue();
+            }
+        }
         sol::protected_function_result r =
              std::filesystem::exists( path )
                   ? m_Impl->Lua.safe_script_file( path, env, sol::script_pass_on_error )
-                  : m_Impl->Lua.safe_script( Common::Utils::FileSystem::Exists( path )
-                                                  ? Common::Utils::FileSystem::ReadFileContent( path )
-                                                  : std::string( "error('script not found: " )
-                                                         .append( path )
-                                                         .append( "')" ),
-                                             env, sol::script_pass_on_error );
+                  : m_Impl->Lua.safe_script( packedSource, env, sol::script_pass_on_error );
         if ( !r.valid() )
         {
             sol::error err = r;
@@ -313,13 +320,17 @@ namespace Desert::Scripting
         // file's top level just sets locals / Properties / defines functions (no engine calls at load time).
         sol::state lua;
         lua.open_libraries( sol::lib::base, sol::lib::math );
-        sol::protected_function_result r =
-             std::filesystem::exists( path )
-                  ? lua.safe_script_file( path, sol::script_pass_on_error )
-                  : lua.safe_script( Common::Utils::FileSystem::Exists( path )
-                                          ? Common::Utils::FileSystem::ReadFileContent( path )
-                                          : std::string( "" ),
-                                     sol::script_pass_on_error );
+        // An unreadable/absent script stays an empty chunk: this probe only harvests Properties, so
+        // "no properties" is the correct answer for a script that cannot run.
+        std::string packedSource;
+        if ( !std::filesystem::exists( path ) && Common::Utils::FileSystem::Exists( path ) )
+        {
+            if ( auto packed = Common::Utils::FileSystem::ReadFileContent( path ); packed )
+                packedSource = packed.ExtractValue();
+        }
+        sol::protected_function_result r = std::filesystem::exists( path )
+                                                ? lua.safe_script_file( path, sol::script_pass_on_error )
+                                                : lua.safe_script( packedSource, sol::script_pass_on_error );
         if ( !r.valid() )
             return out;
 

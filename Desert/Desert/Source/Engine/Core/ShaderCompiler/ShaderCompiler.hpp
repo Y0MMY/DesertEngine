@@ -22,10 +22,20 @@ namespace Desert::Core
          * @param shaderPath The path to the shader file (for error reporting and includes).
          * @return Common::ResultStr<std::vector<uint32_t>> The compiled SPIR-V binary or an error message.
          */
-        static Common::ResultStr<std::vector<uint32_t>> CompileGLSLToSPIRV( 
-            Formats::ShaderStage stage, 
-            const std::string& source, 
-            const std::string& shaderPath );
+        static Common::ResultStr<std::vector<uint32_t>>
+        CompileGLSLToSPIRV( Formats::ShaderStage stage, const std::string& source, const std::string& shaderPath );
+
+        /**
+         * @brief The same compile for an EXPLICIT SPIR-V debug-info profile.
+         *
+         * The overload above compiles the way THIS build runs (debug info in Debug). The game
+         * packager instead cooks for the runtime the player will launch — a Debug editor packaging a
+         * Release game must produce Release artifacts under Release cache keys, or the shipped cache
+         * never hits. Pass Core::SpirvDebugInfoForConfigName(<target config>) here.
+         */
+        static Common::ResultStr<std::vector<uint32_t>>
+        CompileGLSLToSPIRVForProfile( Formats::ShaderStage stage, const std::string& source,
+                                      const std::string& shaderPath, bool spirvDebugInfo );
     };
 
 } // namespace Desert::Core

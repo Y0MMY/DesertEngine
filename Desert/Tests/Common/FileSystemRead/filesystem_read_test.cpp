@@ -1,10 +1,16 @@
 // The read primitives' contract: a path that resolves neither on disk nor in a mounted .dpak is a
-// NAMED failure — the path is logged and an empty result comes back — never process death. Until
-// 2026-09-05 both primitives hit DESERT_VERIFY (LogError + abort in EVERY configuration) on that
-// miss, which made every "file is empty or missing" branch in the asset loaders dead code and
-// crashed the editor over a scene naming a deleted prefab. The tests in this file are alive only
-// because the primitives return: reverting the miss path to DESERT_VERIFY kills the test process,
-// which is exactly the failure mode the suite pins.
+// NAMED failure — the path is logged and a Result carrying the error comes back — never process
+// death. Until 2026-09-05 both primitives hit DESERT_VERIFY (LogError + abort in EVERY
+// configuration) on that miss, which made every "file is empty or missing" branch in the asset
+// loaders dead code and crashed the editor over a scene naming a deleted prefab. The tests in this
+// file are alive only because the primitives return: reverting the miss path to DESERT_VERIFY
+// kills the test process, which is exactly the failure mode the suite pins.
+//
+// Since Ф3 the softness is guarded by the TYPE, not by every caller's diligence: the primitives
+// return ResultStr<...>, so content cannot be used without unwrapping, and the old ambiguity is
+// gone — a MISSING file is an error naming the path while a genuinely EMPTY file is a success
+// holding an empty value. The relation tests below pin that the two are DIFFERENT values; before
+// this change both produced one indistinguishable emptiness.
 //
 // The suite also covers FileSystem::ListFilesRecursive — the ONE enumeration every content scanner
 // shares. Its relation: the union of the loose files on disk and the mounted pak's entries under a
@@ -52,21 +58,88 @@ namespace
     };
 } // namespace
 
-TEST( FileSystemRead, MissingFileReturnsEmptyStringInsteadOfDying )
+TEST( FileSystemRead, MissingFileIsANamedErrorInsteadOfDying )
 {
     const fs::path missing = MakeTempDir( "desert_fsread_test" ) / "does_not_exist.desce";
     ASSERT_FALSE( fs::exists( missing ) );
 
-    // The assertion is not just the emptiness — it is that this line RETURNS at all.
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( missing ), "" );
+    // The assertion is not just the failure — it is that this line RETURNS at all.
+    const auto result = Common::Utils::FileSystem::ReadFileContent( missing );
+    EXPECT_FALSE( result.IsSuccess() );
+    // NAMED: the error carries the path, so a caller that just forwards GetError() still tells the
+    // user which file was missing.
+    EXPECT_NE( result.GetError().find( "does_not_exist.desce" ), std::string::npos ) << result.GetError();
 }
 
-TEST( FileSystemRead, MissingFileReturnsEmptyBytesInsteadOfDying )
+TEST( FileSystemRead, MissingFileIsANamedByteErrorInsteadOfDying )
 {
     const fs::path missing = MakeTempDir( "desert_fsread_test" ) / "does_not_exist.ttf";
     ASSERT_FALSE( fs::exists( missing ) );
 
-    EXPECT_TRUE( Common::Utils::FileSystem::ReadByteFileContent( missing ).empty() );
+    const auto result = Common::Utils::FileSystem::ReadByteFileContent( missing );
+    EXPECT_FALSE( result.IsSuccess() );
+    EXPECT_NE( result.GetError().find( "does_not_exist.ttf" ), std::string::npos ) << result.GetError();
+}
+
+// THE RELATION THIS TASK EXISTS FOR: an absent file and a zero-byte file are DIFFERENT values.
+// Before the typed return both came back as one indistinguishable emptiness, and a caller that
+// cared had to ask Exists() up front — forgetting to was a silent substitution (§1.4).
+TEST( FileSystemRead, MissingAndEmptyAreDistinguishable )
+{
+    const fs::path dir   = MakeTempDir( "desert_fsread_relation" );
+    const fs::path empty = dir / "zero_bytes.desce";
+    WriteFile( empty, "" );
+    ASSERT_TRUE( fs::exists( empty ) );
+
+    const auto emptyRead   = Common::Utils::FileSystem::ReadFileContent( empty );
+    const auto missingRead = Common::Utils::FileSystem::ReadFileContent( dir / "never_written.desce" );
+
+    // A genuinely empty file is a SUCCESS holding "" — not an error.
+    ASSERT_TRUE( emptyRead.IsSuccess() );
+    EXPECT_EQ( emptyRead.GetValue(), "" );
+
+    // A missing file is an ERROR — not a success holding "".
+    EXPECT_FALSE( missingRead.IsSuccess() );
+
+    // The relation itself, stated once: the two outcomes disagree.
+    EXPECT_NE( emptyRead.IsSuccess(), missingRead.IsSuccess() );
+}
+
+TEST( FileSystemRead, MissingAndEmptyAreDistinguishableForBytes )
+{
+    const fs::path dir   = MakeTempDir( "desert_fsread_relation_bytes" );
+    const fs::path empty = dir / "zero_bytes.bin";
+    WriteFile( empty, "" );
+    ASSERT_TRUE( fs::exists( empty ) );
+
+    const auto emptyRead   = Common::Utils::FileSystem::ReadByteFileContent( empty );
+    const auto missingRead = Common::Utils::FileSystem::ReadByteFileContent( dir / "never_written.bin" );
+
+    ASSERT_TRUE( emptyRead.IsSuccess() );
+    EXPECT_TRUE( emptyRead.GetValue().empty() );
+    EXPECT_FALSE( missingRead.IsSuccess() );
+}
+
+// A READ THAT FAILS AFTER THE OPEN SUCCEEDED IS AN ERROR TOO — the third outcome, and the one that
+// had no test. A directory is the portable way to reach it: ifstream opens it and the first read
+// fails, which is the same shape as a racing delete, a truncated pak or an I/O error on a network
+// volume. ReadFileContent used to DISCARD its read result and hand back a SUCCESS holding
+// resize()'s zero fill (measured: 64 NUL bytes on macOS, no error, no log) while
+// ReadByteFileContent got it right — so the two primitives disagreed about their own contract, and
+// the string half was the silent substitution the typed return exists to remove.
+TEST( FileSystemRead, AReadThatFailsAfterOpeningIsANamedErrorNotZeroedContent )
+{
+    const fs::path dir = MakeTempDir( "desert_fsread_unreadable" );
+    ASSERT_TRUE( fs::is_directory( dir ) );
+
+    const auto text = Common::Utils::FileSystem::ReadFileContent( dir );
+    EXPECT_FALSE( text.IsSuccess() ) << "got a success holding " << text.GetValue().size() << " byte(s)";
+    EXPECT_NE( text.GetError().find( "desert_fsread_unreadable" ), std::string::npos ) << text.GetError();
+
+    // The byte primitive answers the same question the same way — the two halves agree.
+    const auto bytes = Common::Utils::FileSystem::ReadByteFileContent( dir );
+    EXPECT_FALSE( bytes.IsSuccess() );
+    EXPECT_EQ( text.IsSuccess(), bytes.IsSuccess() );
 }
 
 TEST( FileSystemRead, MissingFileUnderAMountedPakIsStillSoft )
@@ -83,8 +156,8 @@ TEST( FileSystemRead, MissingFileUnderAMountedPakIsStillSoft )
     }
     ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Content.dpak" ) );
 
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( dir / "Assets/absent.txt" ), "" );
-    EXPECT_TRUE( Common::Utils::FileSystem::ReadByteFileContent( dir / "Assets/absent.txt" ).empty() );
+    EXPECT_FALSE( Common::Utils::FileSystem::ReadFileContent( dir / "Assets/absent.txt" ).IsSuccess() );
+    EXPECT_FALSE( Common::Utils::FileSystem::ReadByteFileContent( dir / "Assets/absent.txt" ).IsSuccess() );
 
     Common::Utils::VFS::Unmount();
 }
@@ -113,7 +186,7 @@ TEST( FileSystemRead, ListFilesRecursiveMergesDiskAndPakAndTheLooseFileWins )
     ASSERT_NE( a, listed.end() );
     // The loose spelling survived the dedup, so a later read of the listed path gets the LOOSE bytes
     // (disk-first VFS override) — the relation the debugging workflow relies on.
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( *a ), "loose-a" );
+    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( *a ).GetValue(), "loose-a" );
 
     Common::Utils::VFS::Unmount();
 }
@@ -140,7 +213,7 @@ TEST( FileSystemRead, ListFilesRecursiveResolvesARelativeRootThroughThePak )
     const auto listed = Common::Utils::FileSystem::ListFilesRecursive( "Resources/Fonts/" );
     ASSERT_EQ( listed.size(), 1u );
     EXPECT_EQ( listed[0].filename(), "fake.ttf" );
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( listed[0] ), "packed-font" );
+    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( listed[0] ).GetValue(), "packed-font" );
 
     Common::Utils::VFS::Unmount();
 }

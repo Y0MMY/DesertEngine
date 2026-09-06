@@ -16,7 +16,7 @@ Shader "ParticleSimulate"
             vec4 PosSize; // xyz = world position, w = current size
             vec4 Color;   // rgba = current colour (a folds in the over-life alpha; 0 => dead/invisible)
             vec4 VelLife; // xyz = velocity, w = lifetime (<= 0 => dead / unspawned)
-            vec4 Age;     // x = age (seconds); yzw spare
+            vec4 Age;     // x = age (seconds); yzw = local-space offset from the emitter (local mode only)
         };
 
         Buffer(0) Particles
@@ -38,7 +38,8 @@ Shader "ParticleSimulate"
             vec4  u_StartColor; // rgb + start alpha (w)
             vec4  u_EndColor;   // rgb + end alpha (w)
             vec4  u_Sizes;      // x = start size, y = end size, z = size-curve power, w = unused
-            uvec4 u_Counts;     // x = maxParticles, y = spawnBudget, z = enabled(0/1), w = unused
+            uvec4 u_Counts;     // x = maxParticles, y = spawnBudget, z = enabled(0/1),
+                                // w = local-space(0/1): particles ride the emitter instead of trailing it
         };
 
         uint Hash( uint x )
@@ -66,11 +67,22 @@ Shader "ParticleSimulate"
             Particle p  = u_Particles[i];
             float    dt = u_EmitterPos.w;
 
-            // Integrate alive particles.
+            // Integrate alive particles. In LOCAL mode (u_Counts.w) the integrated state is the offset
+            // FROM the emitter (kept in the spare Age.yzw lanes) and the world position is rebuilt from
+            // the CURRENT emitter position every frame — that is the whole difference between "the smoke
+            // trails behind the torch" and "the flame rides it".
             if ( p.VelLife.w > 0.0 )
             {
                 p.VelLife.xyz += u_Gravity.xyz * dt;
-                p.PosSize.xyz += p.VelLife.xyz * dt;
+                if ( u_Counts.w == 1u )
+                {
+                    p.Age.yzw += p.VelLife.xyz * dt;
+                    p.PosSize.xyz = u_EmitterPos.xyz + p.Age.yzw;
+                }
+                else
+                {
+                    p.PosSize.xyz += p.VelLife.xyz * dt;
+                }
                 p.Age.x += dt;
                 if ( p.Age.x >= p.VelLife.w )
                     p.VelLife.w = 0.0; // died this frame

@@ -142,7 +142,7 @@ namespace Desert::Editor
             base += ( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == '-' ) ? c : '_';
         base = "M_" + ( base.empty() ? std::string( "Terrain" ) : base ) + "_Terrain";
 
-        const std::string           ext = ::Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::string           ext( ::Common::Constants::Extensions::MATERIAL_EXTENSION );
         const std::filesystem::path dir = ::Common::Constants::Path::MATERIAL_PATH;
         std::error_code             ec;
         std::filesystem::create_directories( dir, ec );
@@ -597,7 +597,10 @@ namespace Desert::Editor
             base += ( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == '-' ) ? c : '_';
         base = "M_" + ( base.empty() ? std::string( "Clouds" ) : base ) + "_Clouds";
 
-        const std::string           ext = ::Common::Constants::Extensions::MATERIAL_EXTENSION;
+        // Explicit construction, not assignment: the extensions became constexpr string_views (А5), and
+        // string_view -> string is deliberately not implicit. Spelled the same way as line 145's terrain
+        // twin so the two read as one idiom.
+        const std::string           ext( ::Common::Constants::Extensions::MATERIAL_EXTENSION );
         const std::filesystem::path dir = ::Common::Constants::Path::MATERIAL_PATH;
         std::error_code             ec;
         std::filesystem::create_directories( dir, ec );
@@ -836,7 +839,7 @@ namespace Desert::Editor
     }
 
     // UI Layout (RectTransform): anchor-preset controls ("Fill / Match Parent" + 4x4 grid) on top of the
-    // reflected anchor/offset/pivot fields, so you can match the parent from the inspector (not just the
+    // reflected anchor/offset fields, so you can match the parent from the inspector (not just the
     // viewport toolbar). Presets act in design space (keep the authored size; stretch fills the axis).
     static ComponentEditorEntry MakeUILayoutEntry()
     {

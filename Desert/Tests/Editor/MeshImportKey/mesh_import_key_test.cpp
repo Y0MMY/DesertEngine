@@ -36,31 +36,24 @@ namespace CookPaths = Desert::Editor::CookPaths;
 
 namespace
 {
-    // Restores the content roots CookPaths reads. They are process-wide mutable globals, so a test that
-    // opens a project and walks away leaves every test after it measuring that project.
+    // Restores the project root CookPaths reads through. The content directories are process-wide
+    // state, so a test that opens a project and walks away leaves every test after it measuring that
+    // project; the directories are all derived from the ONE root pair, so the pair is the whole state
+    // worth saving.
     class ProjectRootGuard
     {
     public:
-        ProjectRootGuard()
-             : m_Assets( Common::Constants::Path::ASSETS_PATH ), m_Mesh( Common::Constants::Path::MESH_PATH ),
-               m_Material( Common::Constants::Path::MATERIAL_PATH ),
-               m_MeshCooked( Common::Constants::Path::MESH_PATH_COOKED )
+        ProjectRootGuard() : m_Saved( Common::Constants::Path::CurrentProjectRoot() )
         {
         }
 
         ~ProjectRootGuard()
         {
-            Common::Constants::Path::ASSETS_PATH      = m_Assets;
-            Common::Constants::Path::MESH_PATH        = m_Mesh;
-            Common::Constants::Path::MATERIAL_PATH    = m_Material;
-            Common::Constants::Path::MESH_PATH_COOKED = m_MeshCooked;
+            Common::Constants::Path::SetProjectRoot( m_Saved.ProjectDir, m_Saved.AssetsRoot );
         }
 
     private:
-        std::filesystem::path m_Assets;
-        std::filesystem::path m_Mesh;
-        std::filesystem::path m_Material;
-        std::filesystem::path m_MeshCooked;
+        Common::Constants::Path::ProjectRootState m_Saved;
     };
 
     // A project opened the way the editor opens one, so that the roots under test are remapped roots and

@@ -18,6 +18,12 @@
 
 #include <glm/trigonometric.hpp>
 
+// The cloud material step is the only migration that PRODUCES a file rather than only rewriting the
+// property tree it was handed, so it is the only one that needs the serializer here. It still writes
+// nothing itself: it returns the JSON text in the report and MigratorMain owns the atomic write, which
+// is what keeps this function pure and testable (contract Section 4.4).
+#include <rflcpp/rfl/json.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>

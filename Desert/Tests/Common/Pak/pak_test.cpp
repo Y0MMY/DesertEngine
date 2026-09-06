@@ -74,7 +74,7 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
 
     EXPECT_TRUE( Common::Utils::VFS::Exists( virtualPath ) );
     EXPECT_TRUE( Common::Utils::FileSystem::Exists( virtualPath ) );                 // VFS-aware
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( virtualPath ),            // read via pak
+    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( virtualPath ).GetValue(), // read via pak
                "{\"scene\":true}" );
     EXPECT_EQ( Common::Utils::FileSystem::GetFileSize( virtualPath ), 14u );
 
@@ -89,7 +89,7 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
     ASSERT_EQ( listed.size(), 1u );
     std::error_code cec;
     EXPECT_EQ( fs::weakly_canonical( listed[0], cec ), fs::weakly_canonical( virtualPath, cec ) );
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( listed[0] ), "{\"scene\":true}" );
+    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( listed[0] ).GetValue(), "{\"scene\":true}" );
 
     // LOOSE FILE OVERRIDE: a real file with the same path wins over the pak entry.
     fs::create_directories( virtualPath.parent_path() );
@@ -97,7 +97,7 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
         std::ofstream out( virtualPath );
         out << "loose";
     }
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( virtualPath ), "loose" );
+    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( virtualPath ).GetValue(), "loose" );
 
     Common::Utils::VFS::Unmount();
     EXPECT_FALSE( Common::Utils::VFS::Exists( virtualPath ) );

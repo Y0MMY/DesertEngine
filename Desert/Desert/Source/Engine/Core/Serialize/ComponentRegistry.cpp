@@ -903,6 +903,11 @@ namespace Desert::Core::Serialize
                     }
                 }
 
+                // Rendering controls: write only non-default values (absent = default on load), exactly
+                // like the static mesh above.
+                if ( !smc.CastShadows )
+                    meshSer.CastShadows = smc.CastShadows;
+
                 return ToGeneric( meshSer );
             };
 
@@ -941,6 +946,8 @@ namespace Desert::Core::Serialize
                         smc.MaterialSlots.push_back( Common::UUID( h ) );
                     }
                 }
+
+                smc.CastShadows = meshData.CastShadows.value_or( smc.CastShadows );
             };
 
             Register( std::move( s ) );

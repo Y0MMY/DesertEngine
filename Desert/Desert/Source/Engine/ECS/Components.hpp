@@ -159,6 +159,7 @@ namespace Desert::ECS
         std::vector<Graphic::MaterialInstancePtr>
                  RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
         uint32_t SeenMaterialsVersion = 0; // see StaticMeshComponent
+        bool     CastShadows          = true; // false = skipped by the shadow (depth) passes, like the static twin
 
         // In-editor rig: a skinned mesh built at runtime by "Convert to Skinned" (from a static mesh + placed
         // bones, auto-weighted), NOT yet a cooked asset. When set, RuntimeMesh overrides MeshHandle in the
@@ -1051,9 +1052,15 @@ namespace Desert::ECS
     };
 
     // Godot Control-like rect: anchors (fraction of the parent rect, 0..1), offsets (pixels from the anchored
-    // edges), a custom minimum size, a pivot and content clipping. The layout solver turns these into a screen
+    // edges), a custom minimum size and content clipping. The layout solver turns these into a screen
     // rect each frame. AnchorMin==AnchorMax => fixed-size element positioned by offsets; spread anchors =>
     // element stretches with the parent.
+    //
+    // There is deliberately NO Pivot here. One shipped for the component's whole life — reflected,
+    // serialized, drawn in Details — and was read by nothing, because the rect is resolved from anchors
+    // and offsets alone and nothing in this UI rotates or scales an element about a point. Deleted by
+    // Д26 (§1.3: a knob that moves nothing may not ship); the day rotation arrives, the field returns
+    // WITH its consumer.
     struct UILayoutData
     {
         REFLECT()
@@ -1072,9 +1079,6 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Custom Minimum Size" ), Category( "UI Layout" ) )
         glm::vec2 CustomMinimumSize = glm::vec2( 0.0f, 0.0f );
-
-        PROPERTY( DisplayName( "Pivot" ), Category( "UI Layout" ) )
-        glm::vec2 Pivot = glm::vec2( 0.5f, 0.5f );
 
         PROPERTY( DisplayName( "Clip Contents" ), Category( "UI Layout" ) )
         bool ClipContents = false;

@@ -680,7 +680,7 @@ namespace Desert::UI
             // draws correctly on its very first frame instead of a frame late.
             fontService->RequestGlyphs( fontHandle, Text::Utf8Decode( t.Text ) );
 
-            Runtime::Font* font = fontService->Get( fontHandle, 48.0f );
+            Runtime::Font* font = fontService->Get( fontHandle, Text::kDefaultBakePixelHeight );
             if ( !font || !font->Atlas || !font->Baked.Valid() || font->Baked.PixelHeight <= 0.0f )
                 return;
 
@@ -905,7 +905,7 @@ namespace Desert::UI
             auto* fs = Runtime::ResourceRegistry::GetFontService();
             if ( !fs )
                 return 0.0f;
-            Runtime::Font* font = fs->Get( fs->DefaultFontHandle(), 48.0f );
+            Runtime::Font* font = fs->Get( fs->DefaultFontHandle(), Text::kDefaultBakePixelHeight );
             if ( !font || !font->Baked.Valid() )
                 return 0.0f;
             const Text::BakedFont& bf = font->Baked;

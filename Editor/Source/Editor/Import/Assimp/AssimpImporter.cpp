@@ -22,6 +22,7 @@
 #include <Editor/Import/CookPaths.hpp>
 #include <Editor/Import/ImportManager.hpp>
 #include <Editor/Import/ImportResult.hpp>
+#include <Editor/Import/TextureSourceFormats.hpp>
 
 struct aiNode;
 struct aiAnimation;
@@ -251,15 +252,16 @@ namespace Desert::Editor
                 if ( fs::exists( literal, ec ) )
                     return literal;
 
-                const std::string            stem = ref.stem().string();
-                const std::string            name = ref.filename().string();
-                const fs::path               dirs[] = { basePath, basePath / "textures" };
-                static const char*           exts[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".exr", ".hdr" };
+                const std::string stem   = ref.stem().string();
+                const std::string name   = ref.filename().string();
+                const fs::path    dirs[] = { basePath, basePath / "textures" };
                 for ( const auto& d : dirs )
                 {
                     if ( fs::exists( d / name, ec ) ) // exact filename
                         return d / name;
-                    for ( const char* e : exts ) // same stem, different extension
+                    // Same stem, different extension — tried in the shared priority order (lossless
+                    // first; see TextureSourceFormats.hpp for why, and for who else reads this list).
+                    for ( const char* e : kTextureSourceExtensions )
                     {
                         const fs::path cand = d / ( stem + e );
                         if ( fs::exists( cand, ec ) )

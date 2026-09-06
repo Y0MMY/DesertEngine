@@ -16,9 +16,11 @@ namespace Desert::Assets
 
     Common::BoolResultStr SkeletonAsset::Load()
     {
-        auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
+        if ( !raw )
+            return Common::MakeError( raw.GetError() );
 
-        const auto dataReflected = rfl::json::read<Serialization::SkeletonAssetData>( raw );
+        const auto dataReflected = rfl::json::read<Serialization::SkeletonAssetData>( raw.GetValue() );
         if ( !dataReflected.has_value() )
         {
             return Common::MakeError( dataReflected.error().what() );

@@ -120,10 +120,11 @@ namespace Desert::Player
             // RETURNED, not logged and stepped over: a cooked game whose boot scene will not load has
             // nothing to run, and starting on an empty world would be the silent substitution §1.4 forbids
             // - the player would see a black screen and the reason would be one line up in a log they do
-            // not have. The loader's error already names the file, the version and the fix.
-            if ( const auto loaded = serializer.DeserializeFromJson(
-                      Common::Utils::FileSystem::ReadFileContent( scenePath ), scenePath );
-                 !loaded )
+            // not have. The read's / loader's error already names the file (and the version and the fix).
+            const auto sceneJson = Common::Utils::FileSystem::ReadFileContent( scenePath );
+            if ( !sceneJson )
+                return Common::MakeError( sceneJson.GetError() );
+            if ( const auto loaded = serializer.DeserializeFromJson( sceneJson.GetValue(), scenePath ); !loaded )
                 return Common::MakeError( loaded.GetError() );
             if ( const auto init = m_Scene->Init(); !init )
                 return init;
@@ -166,7 +167,13 @@ namespace Desert::Player
         // so finding out afterwards that the target will not load would leave the game in an empty world it
         // cannot get out of. The loader asks the same question again and its answer is the authoritative
         // one; this is only the difference between a switch that does not happen and a game that ends.
-        const std::string json = Common::Utils::FileSystem::ReadFileContent( path );
+        const auto jsonRead = Common::Utils::FileSystem::ReadFileContent( path );
+        if ( !jsonRead )
+        {
+            LOG_ERROR( "[Runtime] Scene switch refused, the running scene is untouched: {}", jsonRead.GetError() );
+            return;
+        }
+        const std::string& json = jsonRead.GetValue();
         if ( const auto loadable = Core::ParseLoadableScene( path, json ); !loadable )
         {
             LOG_ERROR( "[Runtime] Scene switch refused, the running scene is untouched: {}", loadable.GetError() );
@@ -206,6 +213,15 @@ namespace Desert::Player
 
     Common::BoolResultStr RuntimeLayer::OnUpdate( const Common::Timestep& ts )
     {
+        // The startup boundary, logged once: everything before this line (preloads, shader compiles,
+        // scene load) is what a player waits through — the millisecond timestamps upstream attribute
+        // that wait to its phases, this line marks where it ended.
+        if ( !m_LoggedFirstUpdate )
+        {
+            m_LoggedFirstUpdate = true;
+            LOG_INFO( "[Runtime] first update — startup work is done, the game is presenting" );
+        }
+
         if ( m_SplashTimer > 0.0f )
             m_SplashTimer -= ts.GetMilliseconds() * 0.001f;
 

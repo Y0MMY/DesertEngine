@@ -104,6 +104,45 @@ namespace
         }
         return code.substr( open, i - open );
     }
+
+    // The balanced { ... } block that follows @p marker. Asks whether a control lives INSIDE a particular
+    // gate, which is a different question from whether it appears somewhere in the same function -- and the
+    // difference is the whole value of the assertion that uses it.
+    std::string BlockAfter( const std::string& code, const std::string& marker )
+    {
+        const size_t at = code.find( marker );
+        if ( at == std::string::npos )
+            return {};
+        const size_t open = code.find( '{', at );
+        if ( open == std::string::npos )
+            return {};
+
+        int    depth = 0;
+        size_t i     = open;
+        for ( ; i < code.size(); ++i )
+        {
+            if ( code[i] == '{' )
+                ++depth;
+            else if ( code[i] == '}' && --depth == 0 )
+                break;
+        }
+        return code.substr( open, i - open );
+    }
+
+    // Non-overlapping occurrences. "Is this control ONLY inside that gate" is a counting question: asking it
+    // by presence alone lets a second copy outside the gate through, which is the shape the gate exists to
+    // forbid.
+    std::size_t CountOf( const std::string& haystack, const std::string& needle )
+    {
+        std::size_t n  = 0;
+        std::size_t at = haystack.find( needle );
+        while ( at != std::string::npos )
+        {
+            ++n;
+            at = haystack.find( needle, at + needle.size() );
+        }
+        return n;
+    }
 } // namespace
 
 class MaterialPreviewRoute : public ::testing::Test
@@ -196,6 +235,83 @@ TEST_F( MaterialPreviewRoute, ThePreviewDropsItsOwnPipelinesOnARecompile )
             "shader modules from before the compile while the viewport draws the ones from after.";
     EXPECT_NE( window.find( "InvalidatePipelines" ), std::string::npos )
          << "MaterialEditorPanel hears about the rebuild and does nothing with it.";
+}
+
+// THE DOMAIN CHOOSES WHAT FILLS THE PANE. This pins that DECISION, not the code that carries it out.
+//
+// The preview's extension point is "what fills the pane", never "which shape from a list". A Surface
+// material rides a real primitive through the slot route the tests above guard; the cubemap (Skybox) domain
+// cannot -- MeshRenderer::DrawGenericMeshes refuses a non-Surface program by name -- so it brings its OWN
+// draw, a ball its cubemap is wrapped onto. A volume domain is already queued behind it and will arrive as a
+// miniature march, again not as a new Shape entry. Get this branch wrong and the pane silently shows the
+// wrong domain's answer: a Skybox material pushed down the slot route draws an empty scene, which is
+// indistinguishable from a preview that merely failed.
+//
+// ASSERTED AS A RELATION between the two halves, not as two presence checks. "OnPreUpdate mentions Skybox
+// and mentions SetCubemapMaterial" stays GREEN when the two calls are swapped -- and swapping them is the
+// one mutation that matters here. Same lesson as the FunctionBody helper above, one level finer: it is not
+// enough to know the right function did something, the right BRANCH has to be the one that did it.
+TEST_F( MaterialPreviewRoute, TheCubemapDomainTakesTheCubemapRouteAndSurfaceTheSlotRoute )
+{
+    const std::string code = Code( "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditorPanel.cpp" );
+    const std::string body = FunctionBody( code, "MaterialEditorPanel::OnPreUpdate" );
+
+    ASSERT_FALSE( body.empty() ) << "MaterialEditorPanel::OnPreUpdate not found — the push site is where the "
+                                    "domain picks the pane's content; if it moved, re-point this guard "
+                                    "rather than deleting it.";
+
+    const std::size_t cubemapGate = body.find( "ShaderDomain::Skybox" );
+    ASSERT_NE( cubemapGate, std::string::npos )
+         << "OnPreUpdate no longer branches on the Skybox domain, so every material now takes one route. A "
+            "cubemap material pushed down the mesh/slot route draws an EMPTY pane, which reads as a broken "
+            "preview rather than as a wrong decision.";
+
+    const std::size_t otherwise = body.find( "else", cubemapGate );
+    ASSERT_NE( otherwise, std::string::npos )
+         << "the Skybox branch has no else — the surface domain must still reach SetMaterial.";
+
+    const std::string cubemapBranch = body.substr( cubemapGate, otherwise - cubemapGate );
+    const std::string surfaceBranch = body.substr( otherwise );
+
+    EXPECT_NE( cubemapBranch.find( "SetCubemapMaterial" ), std::string::npos )
+         << "the Skybox branch does not call PreviewViewport::SetCubemapMaterial. That entry point IS the "
+            "cubemap domain's draw (an external pass ray-tracing the ball, re-resolving the cube every "
+            "frame); without it the domain has no way to fill the pane.";
+    EXPECT_EQ( cubemapBranch.find( "SetMaterial(" ), std::string::npos )
+         << "the Skybox branch reaches for SetMaterial — the mesh/slot route. The routes are SWAPPED. A "
+            "Skybox-domain program cannot ride a StaticMeshComponent slot at all (MeshRenderer refuses it by "
+            "name), so this draws nothing and says nothing.";
+    EXPECT_NE( surfaceBranch.find( "SetMaterial(" ), std::string::npos )
+         << "the non-cubemap branch no longer calls SetMaterial, so an ordinary surface material has lost "
+            "the slot route the rest of this suite exists to protect.";
+}
+
+// The Shape combo is a SURFACE control, not a preview control -- the other half of the same decision.
+//
+// Only the surface domain fills the pane with a primitive whose shape is a free choice (a grass card wants a
+// plane). A cubemap's content IS a ball, so Cube/Plane there would be two menu entries that rebuild the
+// preview into the same picture; the refused domains draw nothing at all. Offering the combo everywhere and
+// disabling it is the version of this that looks harmless and teaches the artist that the pane is a shape
+// picker -- which is precisely the model this design rejects.
+TEST_F( MaterialPreviewRoute, TheShapeComboBelongsToTheSurfaceDomainAlone )
+{
+    const std::string code = Code( "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditorPanel.cpp" );
+    const std::string body = FunctionBody( code, "MaterialEditorPanel::DrawToolbar" );
+
+    ASSERT_FALSE( body.empty() ) << "MaterialEditorPanel::DrawToolbar not found — re-point this guard rather "
+                                    "than deleting it.";
+
+    const std::string surfaceOnly = BlockAfter( body, "ShaderDomain::Surface" );
+    ASSERT_FALSE( surfaceOnly.empty() )
+         << "the toolbar no longer gates anything on the Surface domain, so the Shape combo is offered for "
+            "every domain — including the ones whose content has exactly one shape or no shape at all.";
+
+    EXPECT_NE( surfaceOnly.find( "\"Shape\"" ), std::string::npos )
+         << "the Shape combo is not inside the Surface-domain gate. It is a surface control: it must exist "
+            "where it means something instead of being shown and disabled everywhere else.";
+    EXPECT_EQ( CountOf( body, "\"Shape\"" ), CountOf( surfaceOnly, "\"Shape\"" ) )
+         << "a Shape combo is drawn OUTSIDE the Surface-domain gate as well. One copy inside the gate does "
+            "not help if another is unconditional — a cubemap material would still be offered Cube/Plane.";
 }
 
 int main( int argc, char** argv )

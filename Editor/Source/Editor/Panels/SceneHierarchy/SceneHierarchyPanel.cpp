@@ -436,8 +436,8 @@ namespace Desert::Editor
                     if ( ch == ' ' )
                         ch = '_';
                 m_SavePrefabTarget = UUID;
-                m_SavePrefabPath =
-                     "Resources/Assets/Prefabs/" + stem + Common::Constants::Extensions::PREFAB_EXTENSION;
+                m_SavePrefabPath   = "Resources/Assets/Prefabs/" + stem +
+                                   std::string( Common::Constants::Extensions::PREFAB_EXTENSION );
                 m_OpenSavePrefab = true; // deferred: OpenPopup at panel scope (see OnUIRender)
             }
             if ( ImGui::Selectable( ICON_MDI_PACKAGE_VARIANT " Instantiate Prefab..." ) )

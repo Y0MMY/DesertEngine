@@ -97,7 +97,10 @@ namespace Desert::Editor
 
             if ( IsTextAsset( e.Ext ) )
             {
-                e.Text = Common::Utils::FileSystem::ReadFileContent( p.string() );
+                // An unreadable file indexes with no text — same as the old empty read; the scan
+                // must keep walking, one bad file must not hide the rest of the index.
+                if ( auto text = Common::Utils::FileSystem::ReadFileContent( p.string() ); text )
+                    e.Text = text.ExtractValue();
                 ExtractSelfIds( e.Text, e.Tokens );
             }
 

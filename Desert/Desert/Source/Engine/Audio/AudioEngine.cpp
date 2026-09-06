@@ -64,10 +64,11 @@ namespace Desert::Audio
                 return nullptr;
             }
 
-            auto sound   = std::make_unique<Sound>();
-            sound->Bytes = Common::Utils::FileSystem::ReadByteFileContent( path );
-            if ( sound->Bytes.empty() )
+            auto sound = std::make_unique<Sound>();
+            auto bytes = Common::Utils::FileSystem::ReadByteFileContent( path );
+            if ( !bytes || bytes.GetValue().empty() )
                 return nullptr;
+            sound->Bytes = bytes.ExtractValue();
 
             if ( ma_decoder_init_memory( sound->Bytes.data(), sound->Bytes.size(), nullptr,
                                          &sound->Decoder ) != MA_SUCCESS )

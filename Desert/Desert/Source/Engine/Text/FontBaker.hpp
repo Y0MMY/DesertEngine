@@ -38,6 +38,11 @@ namespace Desert::Text
     // SDF edge lives at this texel value (matches the text shader's smoothstep centre, 128/255 ~ 0.5).
     inline constexpr unsigned char kSdfOnEdgeValue = 128;
 
+    // The ONE bake size the engine requests at runtime (FontService defaults, the UI canvas text
+    // path) and therefore the one the game packager cooks. It used to be a literal in four places;
+    // the packager baking any other number would ship atlases under keys the runtime never asks for.
+    inline constexpr float kDefaultBakePixelHeight = 48.0f;
+
     // Bakes printable ASCII [32,126] — plus any `extraCodepoints` asked for — into an SDF atlas via a
     // simple shelf packer. `pixelHeight` is the SDF bake resolution (bigger = sharper minification
     // headroom, larger atlas). Codepoints the font has no glyph for are skipped, so asking for a
@@ -46,8 +51,9 @@ namespace Desert::Text
     // The extras list is how anything beyond ASCII (Cyrillic, CJK, …) gets into the atlas: a font has
     // thousands of glyphs and baking them all would blow it up, so the text layer asks for exactly the
     // codepoints its strings use. Returns an invalid BakedFont if the TTF cannot be parsed. Never throws.
-    BakedFont BakeFontSDF( const uint8_t* ttf, size_t ttfSize, float pixelHeight = 48.0f, int padding = 5,
-                           uint32_t atlasWidth = 512, const std::vector<uint32_t>& extraCodepoints = {} );
+    BakedFont BakeFontSDF( const uint8_t* ttf, size_t ttfSize, float pixelHeight = kDefaultBakePixelHeight,
+                           int padding = 5, uint32_t atlasWidth = 512,
+                           const std::vector<uint32_t>& extraCodepoints = {} );
 
     // Binary (de)serialization of a BakedFont for the on-disk font cache — pure stdlib so it stays
     // engine-independent and unit-testable. Little-endian, layout-tagged: bump kBakedFontCacheVersion

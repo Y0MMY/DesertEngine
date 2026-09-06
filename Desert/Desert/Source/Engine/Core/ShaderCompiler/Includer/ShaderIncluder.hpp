@@ -2,6 +2,9 @@
 
 #include <Engine/Core/Formats/Shader.hpp>
 
+#include <Common/Core/Core.hpp> // Common::Filepath — this header leaned on the engine PCH for it,
+                                // which broke every PCH-less consumer (the offline cook's tests)
+
 #include <shaderc.hpp>
 
 namespace Desert::Core

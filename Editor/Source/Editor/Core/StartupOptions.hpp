@@ -55,5 +55,18 @@ namespace Desert::Editor
         /// wrong scene, just harder to see, because an empty Details panel is what an unselected editor
         /// looks like anyway.
         std::string SelectEntity;
+
+        /// `--preview-orbit <yaw,pitch>` (degrees on the command line, stored as radians): the angle
+        /// the preview of a material document opened via `--open-panel` starts at. Applied AFTER the
+        /// document's first content push and only once (MaterialEditorPanel::OnPreUpdate) — pushing
+        /// content resets the view, and a person's later drag must not fight the flag.
+        ///
+        /// WHY A FLAG, again: the preview is orbited with the MOUSE, macOS refuses synthetic input on a
+        /// build agent (measured — see SelectEntity above), and "the same ball from the other side" is
+        /// exactly the evidence that separates an object from a background. Without this, no two-sided
+        /// capture of any preview exists at all.
+        bool  HasPreviewOrbit   = false;
+        float PreviewOrbitYaw   = 0.0f; // radians
+        float PreviewOrbitPitch = 0.0f; // radians
     };
 } // namespace Desert::Editor

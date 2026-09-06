@@ -90,6 +90,50 @@ TEST( DShaderParser, ParsesProperties )
     EXPECT_EQ( params[2].DefaultTexture, "white" );
 }
 
+// A TextureCube property is CUBE IN THE SCHEMA, not merely in the generated sampler: the editor's
+// material window decides by ShaderParam::IsCubeTexture which asset a slot takes (an HDR skybox vs a
+// 2D texture) and which slot the cubemap preview wraps onto its ball. The flag used to exist only as a
+// parser-local array parallel to Params, where no consumer outside the generator could read it — and
+// two lists that must agree by index is the defect shape this engine keeps a name for.
+TEST( DShaderParser, CubePropertiesAreCubeInTheSchemaAndInTheGeneratedSampler )
+{
+    const char* src = R"(
+Shader "CubeSky"
+{
+    Domain Skybox
+
+    Properties TextureBinding(4)
+    {
+        TextureCube u_Sky    ("Cubemap")
+        Texture2D   u_Detail ("Detail")
+    }
+
+    Vertex   { void main() { gl_Position = vec4(0.0); } }
+    Fragment
+    {
+        layout( location = 0 ) out vec4 o;
+        void main() { o = texture( u_Sky, vec3(0.0, 1.0, 0.0) ) + texture( u_Detail, vec2(0.5) ); }
+    }
+}
+)";
+    auto        res = DShaderParser::Parse( src );
+    ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
+    const auto& p = res.GetValue();
+
+    EXPECT_EQ( p.Meta.Domain, ShaderDomain::Skybox );
+
+    ASSERT_EQ( p.Meta.Params.size(), 2u );
+    EXPECT_TRUE( p.Meta.Params[0].IsTexture );
+    EXPECT_TRUE( p.Meta.Params[0].IsCubeTexture );
+    EXPECT_TRUE( p.Meta.Params[1].IsTexture );
+    EXPECT_FALSE( p.Meta.Params[1].IsCubeTexture );
+
+    // The generated declarations must agree with the schema, each from the SAME field.
+    const auto& frag = p.Stages.at( ShaderStage::Fragment );
+    EXPECT_NE( frag.find( "layout( binding = 4 ) uniform samplerCube u_Sky;" ), std::string::npos );
+    EXPECT_NE( frag.find( "layout( binding = 5 ) uniform sampler2D u_Detail;" ), std::string::npos );
+}
+
 TEST( DShaderParser, ParsesRenderState )
 {
     auto res = DShaderParser::Parse( kUnlit );

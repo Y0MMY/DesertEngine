@@ -53,6 +53,14 @@ namespace Desert::Core::Formats
         // MaterialData::Textures (name -> handle), which is a name->uint64 map and not texture-specific.
         std::string AssetKind;
 
+        // A `TextureCube` property (IsTexture is also true). Part of the SCHEMA, not a parser detail:
+        // the editor's material window offers a cube slot an HDR skybox asset can be dropped on where a
+        // 2D slot takes a TextureAsset, and the cubemap preview finds the cube it must show by this flag.
+        // It used to live only in a parser-local array parallel to Params ("Extras"), which is exactly
+        // the two-lists-must-agree shape this codebase keeps paying for — now the param carries its own
+        // dimensionality and the parser's copy is gone.
+        bool IsCubeTexture = false;
+
         std::optional<float> Min;                                // present => slider/clamped
         std::optional<float> Max;
 

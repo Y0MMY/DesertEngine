@@ -16,6 +16,8 @@
 #include <MigratorMain.hpp>
 #include <SceneMigration.hpp>
 
+#include <Common/Core/Constants.hpp>
+
 #include <rflcpp/rfl/json.hpp>
 
 #include <gtest/gtest.h>
@@ -170,6 +172,64 @@ TEST( SceneMigratorWritePath, TheThreeCloudStepsAreNamedInTheReportWithTheirVers
              << "step " << StepLabel( from, to ) << " ran silently; report was:\n"
              << report;
 
+    fs::remove_all( dir );
+}
+
+// TWO SCENES, ONE SceneName — the collision the cloud material step cannot see. The file it produces
+// is named after the scene, and a .desce copied from another and edited keeps the original's name;
+// this project's own verification protocol builds A/B pairs exactly that way, and the verify skill
+// records that the editor's log prints the NAME and not the path, so the copy is invisible there too.
+// Without the guard the second scene's material silently overwrites the first's and both scenes then
+// name a file describing only one of them — a whole sky lost with nothing in any log. The run must
+// refuse, name both scenes, and leave the second untouched.
+TEST( SceneMigratorWritePath, TwoScenesSharingASceneNameRefuseToShareOneCloudMaterial )
+{
+    const fs::path dir = MakeTempDir( "desert_migrator_material_collision" );
+
+    // The materials land under the assets root, so point that at the temp tree rather than at whatever
+    // directory the suite happens to run from.
+    Common::Constants::Path::SetProjectRoot( dir, "Assets" );
+
+    // One authored look field is all it takes to produce a bespoke material rather than the shared
+    // default — the collision is a property of the NAME, not of how much was authored.
+    const auto writeCloudScene = []( const fs::path& p )
+    {
+        SceneSerialized fixture;
+        fixture.SceneName    = "TwinName"; // deliberately the same for both files
+        fixture.SceneVersion = Desert::Migration::kSceneVersionSSRUnits; // v11: only the cloud step is ahead
+        fixture.UnitVersion  = Desert::Migration::kUnitVersion;
+
+        Desert::Assets::EntityData clouds;
+        clouds.Tag = "Sky";
+        rfl::Generic::Object payload;
+        payload["Coverage"]                  = 0.77;
+        clouds.Components["VolumetricCloud"] = rfl::Generic( std::move( payload ) );
+        fixture.Entities.push_back( std::move( clouds ) );
+
+        std::ofstream out( p, std::ios::binary );
+        out << rfl::json::write( fixture );
+    };
+
+    const fs::path first  = dir / "first.desce";
+    const fs::path second = dir / "second.desce";
+    writeCloudScene( first );
+    writeCloudScene( second );
+    const std::string secondBefore = ReadRaw( second );
+
+    std::string report;
+    std::string errors;
+    const int   code = RunTool( { first.string(), second.string() }, report, errors );
+
+    EXPECT_EQ( code, 1 ) << report << errors;
+    EXPECT_NE( errors.find( second.string() ), std::string::npos )
+         << "the refusal must name the scene that was refused; errors were:\n"
+         << errors;
+    EXPECT_NE( errors.find( first.string() ), std::string::npos )
+         << "the refusal must also name the scene that already claimed the file; errors were:\n"
+         << errors;
+    EXPECT_EQ( ReadRaw( second ), secondBefore ) << "the refused scene was rewritten anyway";
+
+    Common::Constants::Path::ResetToSandbox();
     fs::remove_all( dir );
 }
 
