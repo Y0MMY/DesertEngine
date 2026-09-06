@@ -3,6 +3,7 @@
 #include <Engine/Assets/Serialization/Texture.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
+#include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Serialization/GlmReflection.hpp>
 
@@ -40,6 +41,43 @@ namespace Desert::Assets
         // it wins over the path-derived handle AssetBase installed. GetHandle() reads this same field, so
         // TextureService and the editor cannot disagree about which id a texture has.
         m_Metadata.Handle = dataReflected->Handle;
+
+        // THE RELATION NOBODY OWNED. The field above is not a free identity: TextureImporter mints it as
+        // `AssetHandle::FromCookedPath(<the source image>)`, so the number in the file and the number the
+        // next cook will derive are two statements of one quantity — and until now nothing compared them.
+        //
+        // What that cost. Four `.tex` files in this repository were written before the derivation became
+        // project-relative and still carried the old absolute-path hash. They loaded fine here, because
+        // nothing re-cooks a `.tex` whose mesh is already cooked; on a machine that cooks from scratch the
+        // importer mints the derived id instead and every `.demat` naming the old number resolves to
+        // nothing. Silently — a handle miss has no filename in it, which is the whole reason §1.4 asks for
+        // this message. (The two materials that carried such numbers were migrated to the derived ones by
+        // the change that added this check; AssetReferenceCensus pins them.)
+        //
+        // The stored value is still what wins. Substituting the derived id here would be a migration at
+        // load that never writes itself back (DC §4.3) — and it would repair the symptom on the one machine
+        // that does not need repairing, leaving the file wrong. The message names the file, both numbers
+        // and the command that fixes it.
+        //
+        // Only when the source is project-relative. A `.tex` whose SourcePath is an absolute path outside
+        // every content root has no derivable identity to compare against — TextureImporter has already
+        // warned at cook time that such a file resolves on one machine only, and repeating it per load
+        // would be noise rather than news.
+        const std::string sourceKey = Common::AssetHandle::StableKeyForPath( m_SourcePath );
+        if ( Common::AssetHandle::IsProjectRelativeKey( sourceKey ) )
+        {
+            const auto derived = Common::AssetHandle::FromKey( sourceKey );
+            if ( static_cast<uint64_t>( derived ) != static_cast<uint64_t>( dataReflected->Handle ) )
+            {
+                LOG_ERROR( "[Textures] '{0}' stores Handle={1}, but its own source '{2}' derives {3}. The "
+                           "stored number is what every reference resolves against, so it is kept — but the "
+                           "next cook of this texture will mint {3} and every `.demat` naming {1} will then "
+                           "resolve to nothing, with no filename anywhere in the log. Re-cook it (Assets > "
+                           "Rebuild Cooked Assets) and re-point the materials that name {1} at {3}.",
+                           m_Metadata.Filepath.string(), static_cast<uint64_t>( dataReflected->Handle ), sourceKey,
+                           static_cast<uint64_t>( derived ) );
+            }
+        }
 
         m_IsReadyForUse = true;
         return BOOLSUCCESS;

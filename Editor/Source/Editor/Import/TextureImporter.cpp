@@ -171,17 +171,10 @@ namespace Desert::Editor
         // A source outside every content root has no project-relative name to store, so the key IS the
         // absolute spelling (StableKeyForPath's documented behaviour) and the cooked file is bound to this
         // machine. Say so once, at cook time, instead of letting the artist discover it on a colleague's
-        // machine as an empty material slot.
-        bool projectRelative = false;
-        for ( const auto& root : Common::AssetHandle::ContentRoots() )
-        {
-            if ( sourceKey.rfind( std::string( root.Tag ) + ':', 0 ) == 0 )
-            {
-                projectRelative = true;
-                break;
-            }
-        }
-        if ( !projectRelative )
+        // machine as an empty material slot. The predicate is AssetHandle's, not a loop over the root
+        // table spelled here: TextureAsset::Load asks the same question for the opposite reason, and two
+        // readings of one table is the drift this file's own history is made of.
+        if ( !Common::AssetHandle::IsProjectRelativeKey( sourceKey ) )
         {
             LOG_WARN( "[TextureImporter] '{0}' lies outside every content root, so its cooked metadata "
                       "stores the absolute path and will not resolve on another machine.",

@@ -162,6 +162,25 @@ namespace Common
             return std::string( bestTag ) + ':' + bestRelative;
         }
 
+        // Does a key produced by StableKeyForPath actually name a place INSIDE the project?
+        //
+        // The two callers ask it for opposite reasons and both need the same answer: TextureImporter warns
+        // at cook time that an untagged key binds the cooked file to one machine, and TextureAsset::Load
+        // uses it to decide whether a stored handle can be compared against the derivation at all (a key
+        // with no tag has no machine-independent identity to compare with). It is one sentence of the root
+        // table's meaning, so it lives beside the table — the importer used to spell the loop inline, which
+        // is how the second asker would have got a second, drifting copy.
+        static bool IsProjectRelativeKey( std::string_view key ) noexcept
+        {
+            for ( const PathRoot& candidate : ContentRoots() )
+            {
+                const std::string prefix = std::string( candidate.Tag ) + ':';
+                if ( key.rfind( prefix, 0 ) == 0 )
+                    return true;
+            }
+            return false;
+        }
+
         // THE EXACT INVERSE of StableKeyForPath: turns `assets:Textures/T.png` back into the path that
         // root spells today. Written here, beside the forward direction, because the two are the classic
         // pair that must agree and the agreement is asserted (AssetHandleStability) rather than hoped for.

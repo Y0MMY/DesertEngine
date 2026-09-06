@@ -62,12 +62,29 @@ Cooked/
 # ...with two deliberate exceptions, both of which are SOURCE that merely lives under a cooked path
 # because that is the only directory the preloader scans for its kind.
 #
-# THE FIRST. A texture only becomes referenceable by a .demat once a .tex exists
-# under Cooked/Textures/ carrying its handle, and the drag-drop importer mints that handle from the
-# texture's ABSOLUTE path — so a texture the repo itself ships would get a different handle on every
-# machine and every material pointing at it would resolve to nothing. This one .tex is therefore SOURCE,
-# not a cook: its handle is fixed and its SourcePath is relative. The importer preserves the handle of an
-# existing .tex, so re-cooking it changes nothing.
+# THE FIRST. A texture only becomes referenceable by a .demat once a .tex exists under Cooked/Textures/
+# carrying its handle — and NOTHING IN THE EDITOR COOKS LOOSE TEXTURES. The startup cook walks
+# Resources/Assets/Meshes/ and Resources/Assets/Collections/ only (EditorLayer's two ImportAllFromDirectory
+# stages), so a .tex under Cooked/Textures/ exists for an image beside a mesh, or for one an artist dragged
+# into the Content Browser by hand, and for nothing else. T_Checker.png is neither: it sits in
+# Resources/Assets/Textures/ and is named by M_CheckerFloor.demat, which eleven shipped scenes use. On a
+# fresh clone without this one file the checkerboard floor draws untextured and no cook ever repairs it.
+# So it is committed because it is UNREPRODUCIBLE HERE, not because it is source.
+#
+# THE REASON THIS PARAGRAPH USED TO GIVE — "the drag-drop importer mints that handle from the texture's
+# ABSOLUTE path", so a shipped .tex would need a frozen handle — HAS NOT BEEN TRUE SINCE FromCookedPath
+# became project-relative. The handle is AssetHandle::FromCookedPath of the SOURCE image's place inside
+# the project, identical on every machine, and TextureImporter re-derives and re-stamps it on every cook
+# (it does NOT "preserve the handle of an existing .tex" either — that branch was deleted for freezing
+# random-era ids). T_Checker.tex's stored handle equals its own derivation today, and TextureAsset::Load
+# now says so loudly when a .tex's does not.
+#
+# WHICH IS WHY THE OTHER .tex FILES STAY IGNORED. They are pure cooks: every field is a function of the
+# source image, the cook is deterministic and cheap, and committing one would put a second copy of a
+# derived number in the repository — the exact thing that broke here. Four .tex files written before the
+# derivation changed carried stale handles, and the two .demat naming them pointed at nothing on any
+# machine that cooked from scratch. Desert/Tests/Engine/AssetReferenceCensus pins every material's
+# references against the derivation instead, which needs no cooked file at all and so holds in CI.
 #
 # Re-included one directory level at a time, and the intermediate `/*` lines are load-bearing: git will
 # not look inside a directory it has already excluded, so `!.../T_Checker.tex` alone matches nothing.

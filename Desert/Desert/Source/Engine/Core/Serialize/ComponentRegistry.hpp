@@ -57,11 +57,13 @@ namespace Desert::Core::Serialize
     // scene's own `SplashSprite` was the last field in the engine still written as a raw 64-bit number.
     Reflection::AssetResolver MakeAssetResolver( const Assets::AssetManager& mgr );
 
-    // Standalone (de)serialization of a single MaterialComponent to/from a JSON string — the generic
-    // ".demat" material file (reusable, data-driven). Reuses the same Ser mirror + asset resolver as the
-    // scene/entity serializers (texture refs round-trip as paths). MVP for a reusable generic material;
-    // full asset-system integration (handle/DnD/live-link) is a later milestone.
-    std::string SaveMaterialComponentToJson( const ECS::MaterialComponent& mc, const Assets::AssetManager& mgr );
-    bool        LoadMaterialComponentFromJson( const std::string& json, ECS::MaterialComponent& mc,
-                                               const Assets::AssetManager& mgr );
+    // SaveMaterialComponentToJson / LoadMaterialComponentFromJson USED TO BE DECLARED HERE and are gone.
+    // They were the "MVP" `.demat` writer from before a material became an ASSET: their own comment still
+    // promised "full asset-system integration is a later milestone", and that milestone arrived —
+    // Assets::MaterialData is the on-disk canon, SurfaceMaterialAsset reads it and MaterialService owns
+    // it. Nothing had called either function for as long as that has been true.
+    //
+    // They are deleted rather than fixed because they were a SECOND, unreachable copy of the component
+    // serializer twenty lines above — including its Path+Guid double write, which is what this change came
+    // to remove. Repairing an unreachable copy leaves two paths, one of which no test can execute (§4.1).
 } // namespace Desert::Core::Serialize

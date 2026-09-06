@@ -33,13 +33,30 @@ namespace Desert::Graphic
         auto bindTexture = [&]( const Assets::AssetHandle& handle, const char* shaderName )
         {
             if ( static_cast<uint64_t>( handle ) == 0 )
-                return;
-            auto* img = resolveImage( handle );
-            LOG_INFO( "[Mat][Bind] {} handle={} resolved={}", shaderName, static_cast<uint64_t>( handle ),
-                      img != nullptr );
-            if ( img )
+                return; // an unset slot is an authored decision, not a failure
+
+            if ( auto* img = resolveImage( handle ) )
+            {
                 if ( auto* prop = material.Get<Texture2DProperty>( shaderName ) )
                     prop->SetImage( img );
+                return;
+            }
+
+            // DC §1.4, and this is THE site the rule was written for. A `.demat` names its textures by
+            // number and by nothing else, so a reference that stops resolving produces a surface that is
+            // merely untextured — no missing file, no failed load, nothing in the log that a search can
+            // start from. This line is the only place that knows all three of: which material, which slot,
+            // and which number.
+            //
+            // It replaces an unconditional LOG_INFO that printed `resolved=true` for every successful bind
+            // of every material every time a mesh was built, which is how a real `resolved=false` went
+            // unread. A message that fires on success is not a message.
+            LOG_ERROR( "[Materials] '{0}' names texture handle {1} in its '{2}' slot and no texture with "
+                       "that handle is registered, so the surface draws UNTEXTURED. A texture's handle is "
+                       "AssetHandle::FromCookedPath of its source image, so this usually means the image "
+                       "was renamed, moved, or cooked before the derivation changed; re-cook it (Assets > "
+                       "Rebuild Cooked Assets) and re-assign the slot.",
+                       asset.GetMetadata().Filepath.string(), static_cast<uint64_t>( handle ), shaderName );
         };
 
         bindTexture( material.Data().AlbedoTexture, "u_AlbedoTexture" );
@@ -56,17 +73,64 @@ namespace Desert::Graphic
         for ( const auto& p : data.Params )
             material.SetParamRaw( p.Name, p.Value );
 
+        // `MaterialData::Textures` is NOT a list of textures. It is the material's generic
+        // name -> asset-handle map, and the SHADER SCHEMA is what says which kind of asset each name
+        // stands for: an ordinary `Texture2D` sampler, a `TextureCube`, or a non-texture asset reference
+        // (`CloudType1`, `CloudLayout`) that a different service consumes entirely. Asking the schema is
+        // what lets the miss below be an ERROR instead of noise — a cloud material's four type slots and
+        // its layout slot are handles this loop must never even look for, and 17 of the 22 distinct
+        // handles in this repository's materials are exactly those.
+        const auto& schema   = material.GetSchema();
+        const auto  paramFor = [&schema]( const std::string& name ) -> const Core::Formats::ShaderParam*
+        {
+            for ( const auto& p : schema.Params )
+                if ( p.Name == name )
+                    return &p;
+            return nullptr;
+        };
+
         for ( const auto& t : data.Textures )
         {
             if ( t.TextureHandle == 0 )
                 continue;
-            auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( Common::UUID( t.TextureHandle ) );
-            if ( !tex )
+
+            const Core::Formats::ShaderParam* param = paramFor( t.Name );
+            if ( !param )
+            {
+                // Only worth saying when there IS a schema to be absent from: a shader that failed to
+                // load leaves this empty, and that failure is already reported by the ShaderService.
+                if ( !schema.Params.empty() )
+                    LOG_WARN( "[Materials] '{0}' carries a value for '{1}', which the shader '{2}' does not "
+                              "declare. The value is ignored — the slot was renamed or removed from the "
+                              "shader since this material was authored.",
+                              asset.GetMetadata().Filepath.string(), t.Name, material.GetShaderName() );
                 continue;
-            auto* img = static_cast<Graphic::Image2D*>(
-                 Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
+            }
+
+            // A non-texture asset reference (its service reads it out of MaterialData directly) or a cube
+            // slot (bound by MaterialSkybox from the environment, not from here). Neither is this loop's.
+            if ( param->IsAssetRef() || param->IsCubeTexture || !param->IsTexture )
+                continue;
+
+            auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( Common::UUID( t.TextureHandle ) );
+            auto* img = tex ? static_cast<Graphic::Image2D*>(
+                                   Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) )
+                            : nullptr;
             if ( img )
+            {
                 material.SetTexture( t.Name, img );
+                continue;
+            }
+
+            // DC §1.4 — the same obligation, and the same wording, as the PBR path above. Both `continue`s
+            // this replaces were silent, and the visible result of either was a shader sampling its
+            // fallback: a surface that looks authored rather than broken.
+            LOG_ERROR( "[Materials] '{0}' names texture handle {1} in its '{2}' slot and no texture with "
+                       "that handle is registered, so '{3}' samples its fallback instead. A texture's "
+                       "handle is AssetHandle::FromCookedPath of its source image, so this usually means "
+                       "the image was renamed, moved, or cooked before the derivation changed; re-cook it "
+                       "(Assets > Rebuild Cooked Assets) and re-assign the slot.",
+                       asset.GetMetadata().Filepath.string(), t.TextureHandle, t.Name, material.GetShaderName() );
         }
     }
 

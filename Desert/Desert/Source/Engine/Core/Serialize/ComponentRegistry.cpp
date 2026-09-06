@@ -479,7 +479,23 @@ namespace Desert::Core::Serialize
             }
             if ( type == "TextureAsset" )
             {
-                return mgr.FindByHandle<Assets::TextureAsset>( handle ) ? guid : 0;
+                if ( mgr.FindByHandle<Assets::TextureAsset>( handle ) )
+                    return guid;
+
+                // DC §1.4. A path that will not resolve breaks LOUDLY and with the filename in it
+                // (TextureSlotFromPath prints the name, its expansion and the roots it searched); an
+                // identifier that will not resolve used to break silently and as a bare 0, and the slot
+                // then reads as "the artist left it empty". Now that the handle is the ONLY spelling of a
+                // texture reference in a component, its miss owes the same message — and a number is
+                // exactly the kind of name a human cannot search for, so the message has to carry the
+                // search: where cooked textures come from, and what actually mints the number.
+                LOG_ERROR( "[Textures] Texture handle {0} named by a component resolves to no registered "
+                           "texture, so the slot stays EMPTY. Cooked textures are scanned from '{1}'; a "
+                           "texture's handle is AssetHandle::FromCookedPath of its SOURCE image, so a "
+                           "handle that has stopped resolving usually means the image was renamed or moved "
+                           "since this was saved. Re-point the slot at the texture in its new place.",
+                           guid, Common::Constants::Path::TEXTURE_PATH_COOKED.string() );
+                return 0;
             }
             if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
             {
@@ -828,11 +844,11 @@ namespace Desert::Core::Serialize
 
                 if ( !mc.Textures.empty() )
                 {
-                    auto                                    resolver = MakeAssetResolver( assetManager );
+                    // The handle alone (DC §4.2). This used to write the resolved path AND the handle into
+                    // every entry; see MaterialTextureSer for why that pairing is worse than either half.
                     std::vector<Assets::MaterialTextureSer> ts;
                     for ( const auto& t : mc.Textures )
-                        ts.push_back(
-                             { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ), t.TextureHandle } );
+                        ts.push_back( { t.Name, t.TextureHandle } );
                     ser.Textures = std::move( ts );
                 }
 
@@ -859,11 +875,14 @@ namespace Desert::Core::Serialize
                     auto resolver = MakeAssetResolver( assetManager );
                     for ( const auto& t : *data.Textures )
                     {
-                        // GUID first (rename-safe), then the legacy path.
-                        uint64_t h = t.Guid ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
-                        if ( h == 0 )
-                            h = resolver.FromPath( t.Path, "TextureAsset" );
-                        mc.Textures.push_back( { t.Name, h } );
+                        // ONE reader for one written value. The path fallback that used to sit under this
+                        // line is gone with the field it read (DC §4.2) — and it was the dangerous half:
+                        // a handle that resolves to nothing is a slot that ends up empty and says so,
+                        // while a stale path that still resolves puts the WRONG texture on the surface.
+                        //
+                        // FromGuid names what it could not find, so a miss here is not silent; that is the
+                        // §1.4 obligation this reference class acquired when it became the only spelling.
+                        mc.Textures.push_back( { t.Name, resolver.FromGuid( t.TextureHandle, "TextureAsset" ) } );
                     }
                 }
             };
@@ -1178,56 +1197,4 @@ namespace Desert::Core::Serialize
         Register( MakeScript() );
     }
 
-    std::string SaveMaterialComponentToJson( const ECS::MaterialComponent& mc, const Assets::AssetManager& mgr )
-    {
-        Assets::MaterialComponentSer ser;
-        ser.ShaderName = mc.ShaderName;
-
-        if ( !mc.Params.empty() )
-        {
-            std::vector<Assets::MaterialParamSer> ps;
-            for ( const auto& p : mc.Params )
-                ps.push_back( { p.Name, p.Value } );
-            ser.Params = std::move( ps );
-        }
-        if ( !mc.Textures.empty() )
-        {
-            auto                                    resolver = MakeAssetResolver( mgr );
-            std::vector<Assets::MaterialTextureSer> ts;
-            for ( const auto& t : mc.Textures )
-                ts.push_back( { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ), t.TextureHandle } );
-            ser.Textures = std::move( ts );
-        }
-        return rfl::json::write( ser );
-    }
-
-    bool LoadMaterialComponentFromJson( const std::string& json, ECS::MaterialComponent& mc,
-                                        const Assets::AssetManager& mgr )
-    {
-        auto parsed = rfl::json::read<Assets::MaterialComponentSer>( json );
-        if ( !parsed )
-            return false;
-        const auto& data = parsed.value();
-
-        mc.ShaderName = data.ShaderName;
-        mc.Params.clear();
-        mc.Textures.clear();
-
-        if ( data.Params.has_value() )
-            for ( const auto& p : *data.Params )
-                mc.Params.push_back( { p.Name, p.Value } );
-
-        if ( data.Textures.has_value() )
-        {
-            auto resolver = MakeAssetResolver( mgr );
-            for ( const auto& t : *data.Textures )
-            {
-                uint64_t h = t.Guid ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
-                if ( h == 0 )
-                    h = resolver.FromPath( t.Path, "TextureAsset" );
-                mc.Textures.push_back( { t.Name, h } );
-            }
-        }
-        return true;
-    }
 } // namespace Desert::Core::Serialize

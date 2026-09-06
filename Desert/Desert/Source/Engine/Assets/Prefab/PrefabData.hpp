@@ -80,11 +80,21 @@ namespace Desert::Assets
         glm::vec4   Value;
     };
 
+    // ONE spelling of a texture reference, and it is the `.demat`'s: `{Name, TextureHandle}`.
+    //
+    // This used to be `{Name, Path, Guid}` and WROTE BOTH — a tagged path and the same reference's handle,
+    // side by side, with the reader preferring Guid and silently falling back to Path. DC §4.2 forbids the
+    // double write for the reason it always gives: two places holding one value drift, and the fallback is
+    // what makes the drift invisible (a stale Path resolves, so the wrong texture appears rather than no
+    // texture). Nothing on disk ever exercised it — the census is zero: no `.desce` in the repository
+    // carries an inline MaterialComponent with a texture — so dropping Path migrated no file.
+    //
+    // The FIELD NAME matches MaterialData's `.demat` form on purpose. The same reference written two ways
+    // by two serializers is the same defect one indirection further out.
     struct MaterialTextureSer
     {
-        std::string             Name;
-        std::string             Path;
-        std::optional<uint64_t> Guid; // stable texture handle (preferred on load; Path = fallback)
+        std::string Name;
+        uint64_t    TextureHandle = 0;
     };
 
     struct MaterialComponentSer

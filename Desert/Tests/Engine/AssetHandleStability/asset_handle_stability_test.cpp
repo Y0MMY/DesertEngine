@@ -773,16 +773,24 @@ TEST( AssetHandleStability, EveryAssetTypeAgreesAcrossProjectRoots )
 // ---------------------------------------------------------------------------------------------------
 // WHY THE RE-STAMP NEEDED NO MIGRATION.
 //
-// Making the derivation project-relative changes the number every path-derived handle takes. That is
-// only safe because no file in the repository refers to a path-derived handle BY NUMBER, and the two
-// classes whose numbers ARE written down — Texture2D and Material — do not take theirs from the path at
-// all: they read an id out of the file and overwrite what AssetBase installed. The audit behind the
-// first half of that claim found exactly five persisted path-derived ids in committed assets, and all
-// five were texture references, i.e. the second half.
+// Making the derivation project-relative changes the number every path-derived handle takes. The two
+// classes whose numbers are written down most often — Texture2D and Material — do not take theirs from
+// the path at all: they read an id out of the file and overwrite what AssetBase installed, and the two
+// tests below are what makes that an assertion rather than a hope.
 //
-// So the migration is the absence of one, and these two tests are what makes that an assertion rather
-// than a hope: if either class ever stopped carrying its own id, the re-stamp WOULD move a number that a
-// `.demat` has written down, and this suite says so before a material silently loses its textures.
+// THE PARAGRAPH THAT USED TO STAND HERE ALSO CLAIMED that "no file in the repository refers to a
+// path-derived handle BY NUMBER", on the strength of an audit that "found exactly five persisted
+// path-derived ids in committed assets, and all five were texture references". BOTH HALVES ARE WRONG, and
+// they are wrong the same way the audit that produced them was: the references were counted by asking
+// whether a `.tex` carried each number, and 17 of the 22 in the shipped materials are not textures at all.
+// They are cloud types (`.decloudtype`), painted layouts (`.dclayout`) and one `.hdr`, sitting in material
+// slots called `CloudType1..4`, `CloudLayout` and `samplerCubeMap` — and every one of them IS a
+// path-derived handle written down as a number.
+//
+// So the re-stamp was not safe by the absence of such references; it was safe because those files were
+// written after it. The protection this comment described did not exist. It does now, one suite over:
+// Desert/Tests/Engine/AssetReferenceCensus pins every reference every shipped `.demat` makes against
+// the derivation, so a change to StableKeyForPath goes red there instead of silently emptying 17 slots.
 // ---------------------------------------------------------------------------------------------------
 
 TEST( AssetHandleStability, ATexturesIdComesFromItsFileAndSurvivesTheProjectMoving )
