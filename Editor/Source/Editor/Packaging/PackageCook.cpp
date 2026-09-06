@@ -49,12 +49,16 @@ namespace Desert::Editor
 
             for ( const fs::path& file : ShippedShaderFiles() )
             {
-                const std::string content = Common::Utils::FileSystem::ReadFileContent( file );
-                if ( content.empty() )
+                // Ф3 made the primitive return a ResultStr, so a miss is a named refusal instead of an
+                // empty string indistinguishable from an empty file. Policy here is unchanged - count it
+                // and move on - but the reason now reaches the log.
+                const auto contentRead = Common::Utils::FileSystem::ReadFileContent( file );
+                if ( !contentRead || contentRead.GetValue().empty() )
                 {
-                    ++stats.Failures; // ReadFileContent already logged the miss
+                    ++stats.Failures; // the primitive already logged a miss; an empty file is silent
                     continue;
                 }
+                const std::string& content = contentRead.GetValue();
 
                 // Pre-check with the parser proper: PreProcessProgramPass aborts (DESERT_VERIFY) on
                 // an unparsable file, and a broken .shader must fail THIS shader's cook, not the
@@ -121,9 +125,22 @@ namespace Desert::Editor
                     if ( p.extension() != ".ttf" ) // FontService::EnsurePreloaded's own filter
                         continue;
 
-                    const auto ttf = Common::Utils::FileSystem::ReadByteFileContent( p );
+                    // Ф3 made the read primitives return a ResultStr, so a miss is a NAMED refusal rather
+                    // than an empty vector indistinguishable from an empty file. This site wants the
+                    // same policy it always had - count the failure and move on to the next font - but
+                    // it now says WHY in the log instead of swallowing the reason.
+                    const auto ttfRead = Common::Utils::FileSystem::ReadByteFileContent( p );
+                    if ( !ttfRead )
+                    {
+                        LOG_ERROR( "[PackageCook] '{}' could not be read, not baking it: {}", p.generic_string(),
+                                   ttfRead.GetError() );
+                        ++stats.Failures;
+                        continue;
+                    }
+                    const auto& ttf = ttfRead.GetValue();
                     if ( ttf.empty() )
                     {
+                        LOG_ERROR( "[PackageCook] '{}' is an empty file, not baking it.", p.generic_string() );
                         ++stats.Failures;
                         continue;
                     }
@@ -169,9 +186,18 @@ namespace Desert::Editor
                     if ( p.extension() != ".svg" ) // IconService::EnsurePreloaded's own filter
                         continue;
 
-                    const auto svg = Common::Utils::FileSystem::ReadByteFileContent( p );
+                    const auto svgRead = Common::Utils::FileSystem::ReadByteFileContent( p );
+                    if ( !svgRead )
+                    {
+                        LOG_ERROR( "[PackageCook] '{}' could not be read, not baking it: {}", p.generic_string(),
+                                   svgRead.GetError() );
+                        ++stats.Failures;
+                        continue;
+                    }
+                    const auto& svg = svgRead.GetValue();
                     if ( svg.empty() )
                     {
+                        LOG_ERROR( "[PackageCook] '{}' is an empty file, not baking it.", p.generic_string() );
                         ++stats.Failures;
                         continue;
                     }
