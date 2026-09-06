@@ -133,9 +133,16 @@ namespace
         const char* Kind;
     };
     constexpr AssetRow kAssets[] = {
-         { "CloudType1", "CloudTypeAsset" },    { "CloudType2", "CloudTypeAsset" },
-         { "CloudType3", "CloudTypeAsset" },    { "CloudType4", "CloudTypeAsset" },
-         { "CloudLayout", "CloudLayoutAsset" },
+         { "CloudType1", "CloudTypeAsset" },
+         { "CloudType2", "CloudTypeAsset" },
+         { "CloudType3", "CloudTypeAsset" },
+         { "CloudType4", "CloudTypeAsset" },
+         // TWO LAYOUT INPUTS AND NOT ONE (O-4), which is Unreal's own arrangement:
+         // `Layout_CloudGlobalPattern` and `Layout_GlobalCloudMask` are separate texture parameters
+         // there. A census that still named the single `CloudLayout` would pass on a shader that had
+         // quietly lost the mask input.
+         { "LayoutPattern", "CloudLayoutAsset" },
+         { "LayoutMask", "CloudLayoutAsset" },
     };
 } // namespace
 
@@ -285,7 +292,8 @@ TEST( CloudMaterialSchema, BuildAppliesSchemaThenOverridesAndSkipsWhatItDoesNotK
     overrides.Params.emplace_back( "MultiScatterOctaves", glm::vec4( 2.0f, 0.0f, 0.0f, 0.0f ) );
     overrides.Params.emplace_back( "NotAKnownParameter", glm::vec4( 42.0f ) );
     overrides.Textures.emplace_back( "CloudType3", 0xBEEFull );
-    overrides.Textures.emplace_back( "CloudLayout", 0xCAFEull );
+    overrides.Textures.emplace_back( "LayoutPattern", 0xCAFEull );
+    overrides.Textures.emplace_back( "LayoutMask", 0xFEEDull );
     overrides.Textures.emplace_back( "NotAKnownSlot", 0xDEADull );
 
     const CloudMaterialValues values = BuildCloudMaterialValues( &Schema(), overrides );
@@ -293,7 +301,10 @@ TEST( CloudMaterialSchema, BuildAppliesSchemaThenOverridesAndSkipsWhatItDoesNotK
     EXPECT_EQ( values.AmbientScale, glm::vec3( 0.5f, 0.25f, 0.125f ) );
     EXPECT_EQ( values.MultiScatterOctaves, 2 );
     EXPECT_EQ( static_cast<uint64_t>( values.CloudType3 ), 0xBEEFull );
-    EXPECT_EQ( static_cast<uint64_t>( values.CloudLayout ), 0xCAFEull );
+    EXPECT_EQ( static_cast<uint64_t>( values.LayoutPattern ), 0xCAFEull );
+    EXPECT_EQ( static_cast<uint64_t>( values.LayoutMask ), 0xFEEDull )
+         << "the pattern and the mask are separate inputs; a reader that folded them together would "
+            "pass this line with one of the two handles in both fields";
     // Untouched neighbours keep the schema defaults.
     EXPECT_FLOAT_EQ( values.CoverageContrast, CloudMaterialValues{}.CoverageContrast );
     EXPECT_EQ( static_cast<uint64_t>( values.CloudType1 ), 0ull );

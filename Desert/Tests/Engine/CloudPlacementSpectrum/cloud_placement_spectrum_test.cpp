@@ -87,9 +87,9 @@ namespace
     /// noise. A stripe rather than a gradient because the tests below have to be able to say WHERE the
     /// painting says cloud is, and a stripe has a side.
     ///
-    /// Built through MakeCloudLayoutFromImage rather than by filling the struct, so that what the tests
-    /// measure is the layout a FILE would produce — means and content hash included. A fixture assembled
-    /// around the encoder is a fixture that can disagree with every layout an artist ever saves.
+    /// Built through the canvas the panel and the tool both fill, so that what the tests measure is the
+    /// layout a FILE would produce — means and content hash included. A fixture assembled around the
+    /// encoder is a fixture that can disagree with every layout an artist ever saves.
     std::shared_ptr<const CloudLayoutData> StripeLayout( uint32_t resolution = 64u, bool withMask = false )
     {
         std::vector<unsigned char> pixels( static_cast<size_t>( resolution ) * resolution * 4u, 0u );
@@ -102,16 +102,22 @@ namespace
                 pixels[at + 0]   = lit ? 255u : 0u;
                 pixels[at + 1]   = lit ? 255u : 0u;
                 pixels[at + 2]   = lit ? 255u : 0u;
-                // The alpha is the MASK source and is mid-grey — neutral — unless the caller wants a mask
-                // that does something. An opaque 255 here would be a mask that adds cloud to the whole sky,
-                // which is the silent, uniform, wrong answer MakeCloudLayoutFromImage's `takeMask` exists
-                // to make impossible by accident.
-                pixels[at + 3] = withMask ? ( lit ? 255u : 0u ) : 128u;
+                pixels[at + 3]   = lit ? 255u : 0u;
             }
 
         const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
 
-        auto made = MakeCloudLayoutFromImage( pixels, resolution, resolution, channels, withMask );
+        CloudLayoutCanvas canvas;
+        if ( !SetCloudLayoutCanvasPatternFromImage( canvas, pixels, resolution, resolution, channels ) )
+            return nullptr;
+
+        // THE MASK IS ITS OWN PICTURE SINCE O-4, and only exists when asked for. The stripe's own bytes
+        // are used for it so the figure and the mask agree about WHERE, which is what the mask tests
+        // below rely on; a layout with no mask carries no mask table at all rather than a neutral one.
+        if ( withMask && !SetCloudLayoutCanvasMaskFromImage( canvas, pixels, resolution, resolution, 0u ) )
+            return nullptr;
+
+        auto made = MakeCloudLayoutFromCanvas( canvas );
         if ( !made )
             return nullptr;
 
@@ -1148,19 +1154,46 @@ TEST( CloudPlacementSpectrum, EveryFieldTheBakeReadsMakesTheCachedVolumeStale )
          << "two paintings of different resolutions hash the same, so this test cannot tell them apart "
             "and neither can the cache";
 
-    moved        = base;
-    moved.Layout = stripe;
-    notices( moved, "binding a cloud layout" );
+    moved               = base;
+    moved.PatternSource = stripe;
+    notices( moved, "binding a cloud layout to the pattern input" );
+
+    moved            = base;
+    moved.MaskSource = stripe;
+    notices( moved, "binding a cloud layout to the mask input" );
 
     CloudProceduralFieldParams painted = base;
-    painted.Layout                     = stripe;
+    painted.PatternSource              = stripe;
+    painted.MaskSource                 = stripe;
 
-    moved        = painted;
-    moved.Layout = other;
+    moved               = painted;
+    moved.PatternSource = other;
     EXPECT_FALSE( CloudProceduralParamsEqual( painted, moved ) )
          << "a DIFFERENT painting was bound and the cached volume was still considered current — which is "
             "what comparing the pointer rather than the content would do only by luck, and what comparing "
             "nothing at all does always";
+
+    moved            = painted;
+    moved.MaskSource = other;
+    EXPECT_FALSE( CloudProceduralParamsEqual( painted, moved ) )
+         << "the MASK input was pointed at a different painting and the cached volume was still considered "
+            "current, so one of the two slots is not in the comparison at all";
+
+    // THE TWO SLOTS ARE COMPARED SEPARATELY, and this is the line that says so. Swapping which painting
+    // feeds which input changes the sky and leaves any COMBINED checksum untouched — the same "two
+    // orderings, one checksum" trap task O-3 measured on the noise sheet, where reversing the tile order
+    // in both codecs at once left the round trip perfect.
+    CloudProceduralFieldParams crossed = painted;
+    crossed.PatternSource              = other;
+    crossed.MaskSource                 = stripe;
+
+    CloudProceduralFieldParams swapped = painted;
+    swapped.PatternSource              = stripe;
+    swapped.MaskSource                 = other;
+
+    EXPECT_FALSE( CloudProceduralParamsEqual( crossed, swapped ) )
+         << "exchanging the pattern's painting for the mask's read as no change at all, so the two hashes "
+            "are being folded into one number and a swap is invisible to the cache";
 
     // AND THE FIVE PLACEMENT NUMBERS, ON A BASE THAT HAS A PAINTING. They are deliberately NOT compared
     // when the slot is empty, because none of them reaches a lump then and a rebake for a slider that
@@ -1220,7 +1253,7 @@ TEST( CloudPlacementSpectrum, AddingAFieldToTheBakesParametersForcesAVisitToTheS
 {
     const CloudProceduralFieldParams params;
 
-    // EIGHTEEN FIELDS. If this line stops compiling, a field was added to or removed from
+    // NINETEEN FIELDS. If this line stops compiling, a field was added to or removed from
     // CloudProceduralFieldParams. Do BOTH of these before you touch this list:
     //
     //   1. add a line for it to EveryFieldTheBakeReadsMakesTheCachedVolumeStale above, and
@@ -1231,13 +1264,17 @@ TEST( CloudPlacementSpectrum, AddingAFieldToTheBakesParametersForcesAVisitToTheS
     // it.
     const auto& [regionSizeKm, layerBottomKm, layerThicknessKm, blendRadiusKm, profileDepthKm, coverage,
                  coverageContrast, seed, placementDensity, placementScatter, placementSizeVariety, patchTileKm,
-                 patchStrength, windAxis, layoutPlacement, layout, resolvableChordKm, species] = params;
+                 patchStrength, windAxis, layoutPlacement, patternSource, maskSource, resolvableChordKm, species] =
+         params;
 
-    // Named so the decomposition is not optimised away as unused, and asserted on the two that the walk
+    // Named so the decomposition is not optimised away as unused, and asserted on the three that the walk
     // above cannot reach through CloudProceduralParamsEqual at all — a defaulted set must be the shipped
-    // state, which is "no painting".
-    EXPECT_EQ( layout, nullptr ) << "a defaulted set of bake parameters arrives with a painting already "
-                                    "bound, so an unpainted scene is not the default state";
+    // state, which is "no painting in either input".
+    EXPECT_EQ( patternSource, nullptr ) << "a defaulted set of bake parameters arrives with a painting "
+                                           "already bound to the pattern input, so an unpainted scene is "
+                                           "not the default state";
+    EXPECT_EQ( maskSource, nullptr ) << "a defaulted set of bake parameters arrives with a painting already "
+                                        "bound to the mask input";
     EXPECT_EQ( layoutPlacement.RepeatsPerRegion, 1u );
     EXPECT_EQ( layoutPlacement.QuarterTurns, 0u );
 
@@ -1258,7 +1295,7 @@ TEST( CloudPlacementSpectrum, AddingAFieldToTheBakesParametersForcesAVisitToTheS
     (void)resolvableChordKm;
     (void)species;
 
-    std::printf( "[CloudPlacementSpectrum] CloudProceduralFieldParams is %zu bytes over 18 fields\n",
+    std::printf( "[CloudPlacementSpectrum] CloudProceduralFieldParams is %zu bytes over 19 fields\n",
                  sizeof( CloudProceduralFieldParams ) );
 }
 
@@ -1352,8 +1389,8 @@ TEST( CloudPlacementSpectrum, APaintedPatternRedistributesTheSkyRatherThanAdding
     ASSERT_GE( unpainted, 0.0 ) << "the unpainted bake failed, so there is nothing to compare against";
 
     CloudProceduralFieldParams painted = plain;
-    painted.Layout                     = StripeLayout();
-    ASSERT_TRUE( painted.Layout ) << "the fixture painting could not be built";
+    painted.PatternSource              = StripeLayout();
+    ASSERT_TRUE( painted.PatternSource ) << "the fixture painting could not be built";
 
     // HALF STRENGTH AND NOT FULL, and the reason is that the fixture is the harshest painting there is: a
     // hard black-and-white stripe. At full strength the lit half asks for twice the slider and the dark
@@ -1402,8 +1439,8 @@ TEST( CloudPlacementSpectrum, APaintedPatternRedistributesTheSkyRatherThanAdding
 TEST( CloudPlacementSpectrum, OnlyOneSourceModulatesACellsCoverage )
 {
     CloudProceduralFieldParams painted = ShippedParams();
-    painted.Layout                     = StripeLayout();
-    ASSERT_TRUE( painted.Layout ) << "the fixture painting could not be built";
+    painted.PatternSource              = StripeLayout();
+    ASSERT_TRUE( painted.PatternSource ) << "the fixture painting could not be built";
 
     const glm::vec2 origin = CloudProceduralRegionOriginKm( painted, 0.0f, 0.0f );
 
@@ -2182,7 +2219,11 @@ namespace
 
         const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
 
-        auto made = MakeCloudLayoutFromImage( pixels, resolution, resolution, channels, /*takeMask=*/false );
+        CloudLayoutCanvas canvas;
+        if ( !SetCloudLayoutCanvasPatternFromImage( canvas, pixels, resolution, resolution, channels ) )
+            return nullptr;
+
+        auto made = MakeCloudLayoutFromCanvas( canvas );
         if ( !made )
             return nullptr;
 
@@ -2217,7 +2258,11 @@ namespace
 
         const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
 
-        auto made = MakeCloudLayoutFromImage( pixels, resolution, resolution, channels, /*takeMask=*/false );
+        CloudLayoutCanvas canvas;
+        if ( !SetCloudLayoutCanvasPatternFromImage( canvas, pixels, resolution, resolution, channels ) )
+            return nullptr;
+
+        auto made = MakeCloudLayoutFromCanvas( canvas );
         if ( !made )
             return nullptr;
 
@@ -2244,7 +2289,11 @@ namespace
 
         const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
 
-        auto made = MakeCloudLayoutFromImage( pixels, resolution, resolution, channels, /*takeMask=*/false );
+        CloudLayoutCanvas canvas;
+        if ( !SetCloudLayoutCanvasPatternFromImage( canvas, pixels, resolution, resolution, channels ) )
+            return CloudLayoutData{};
+
+        auto made = MakeCloudLayoutFromCanvas( canvas );
         return made ? made.ExtractValue() : CloudLayoutData{};
     }
 } // namespace
@@ -2309,13 +2358,13 @@ TEST( CloudPlacementSpectrum, TheMapAgreesWithTheBakesOwnCoverageCellForCell )
     {
         CloudProceduralFieldParams params       = ShippedParams();
         params.Coverage                         = 0.50f;
-        params.Layout                           = RippleLayout();
+        params.PatternSource                    = RippleLayout();
         params.LayoutPlacement.RepeatsPerRegion = 2u;
         params.LayoutPlacement.QuarterTurns     = turns;
         params.LayoutPlacement.OffsetKm         = glm::vec2( 3.5f, -1.25f );
         params.LayoutPlacement.PatternStrength  = 0.35f;
         params.LayoutPlacement.MaskStrength     = 0.0f;
-        ASSERT_TRUE( params.Layout );
+        ASSERT_TRUE( params.PatternSource );
 
         const float spanKm = params.RegionSizeKm;
 
@@ -2355,8 +2404,8 @@ TEST( CloudPlacementSpectrum, TheMapAgreesWithTheBakesOwnCoverageCellForCell )
 TEST( CloudPlacementSpectrum, TheMapIsSampledOnTheMappedSpeciesOwnCellAndNotTheLayersFinest )
 {
     CloudProceduralFieldParams params = ShippedParams();
-    params.Layout                     = StripeLayout();
-    ASSERT_TRUE( params.Layout );
+    params.PatternSource              = StripeLayout();
+    ASSERT_TRUE( params.PatternSource );
 
     // A second species FOUR TIMES coarser. Both ends of the same knob: mapping the fine one and mapping
     // the coarse one must not produce the same lattice.
@@ -2398,9 +2447,13 @@ TEST( CloudPlacementSpectrum, ThePatternSliderIsDeadExactlyWhenTheMaskHasSaturat
 {
     CloudProceduralFieldParams params      = ShippedParams();
     params.Coverage                        = 0.50f;
-    params.Layout                          = StripeLayout( 64u, /*withMask=*/true );
+    // BOTH INPUTS FROM ONE PAINTING, which is how a `.dclayout` carrying both tables is normally bound
+    // and the only arrangement in which the pattern and the mask describe the same figure.
+    const std::shared_ptr<const CloudLayoutData> figure = StripeLayout( 64u, /*withMask=*/true );
+    ASSERT_TRUE( figure );
+    params.PatternSource                   = figure;
+    params.MaskSource                      = figure;
     params.LayoutPlacement.PatternStrength = 0.30f;
-    ASSERT_TRUE( params.Layout );
 
     // MASK OFF: the pattern is the only source, and it has to move the sky.
     params.LayoutPlacement.MaskStrength = 0.0f;
@@ -2507,18 +2560,17 @@ namespace
         if ( !canvas )
             return {};
 
-        std::vector<unsigned char> pixels = canvas.GetValue().Pixels;
+        CloudLayoutCanvas surface = canvas.ExtractValue();
 
         const float     middle = static_cast<float>( side ) * 0.5f;
         const glm::vec2 from( -2.0f, middle );
         const glm::vec2 to( static_cast<float>( side ) + 2.0f, middle );
 
-        const auto painted = PaintCloudLayoutPolyline( pixels, side, channel, { from, to }, brush );
+        const auto painted =
+             PaintCloudLayoutPolyline( surface.Pattern, side, channel, kCloudLayoutChannels, { from, to }, brush );
         EXPECT_TRUE( painted ) << ( painted ? "" : painted.GetError() );
 
-        const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
-
-        auto made = MakeCloudLayoutFromImage( pixels, side, side, channels, /*takeMask=*/false );
+        auto made = MakeCloudLayoutFromCanvas( surface );
         EXPECT_TRUE( made ) << ( made ? "" : made.GetError() );
         return made ? made.ExtractValue() : CloudLayoutData{};
     }
@@ -2627,10 +2679,10 @@ TEST( CloudPlacementSpectrum, AStrokeIsTheSameWhateverRateTheMouseWasSampledAt )
     ASSERT_TRUE( coarse );
     ASSERT_TRUE( fine );
 
-    std::vector<unsigned char> coarsePixels = coarse.GetValue().Pixels;
-    std::vector<unsigned char> finePixels   = fine.GetValue().Pixels;
+    std::vector<unsigned char> coarsePixels = coarse.GetValue().Pattern;
+    std::vector<unsigned char> finePixels   = fine.GetValue().Pattern;
 
-    ASSERT_TRUE( PaintCloudLayoutPolyline( coarsePixels, kSide, 0u, { from, to }, brush ) );
+    ASSERT_TRUE( PaintCloudLayoutPolyline( coarsePixels, kSide, 0u, kCloudLayoutChannels, { from, to }, brush ) );
 
     std::vector<glm::vec2> many;
     for ( int step = 0; step <= 40; ++step )
@@ -2638,7 +2690,7 @@ TEST( CloudPlacementSpectrum, AStrokeIsTheSameWhateverRateTheMouseWasSampledAt )
         const float t = static_cast<float>( step ) / 40.0f;
         many.emplace_back( from + ( to - from ) * t );
     }
-    ASSERT_TRUE( PaintCloudLayoutPolyline( finePixels, kSide, 0u, many, brush ) );
+    ASSERT_TRUE( PaintCloudLayoutPolyline( finePixels, kSide, 0u, kCloudLayoutChannels, many, brush ) );
 
     EXPECT_EQ( coarsePixels, finePixels )
          << "the same drag came out differently when it was sampled forty times instead of once, so the "
@@ -2659,20 +2711,19 @@ TEST( CloudPlacementSpectrum, ABrushStrokeOnTheSeamComesOutOfTheOtherEdge )
 
     auto canvas = MakeCloudLayoutCanvas( kSide );
     ASSERT_TRUE( canvas );
-    std::vector<unsigned char> pixels = canvas.GetValue().Pixels;
+    CloudLayoutCanvas surface = canvas.ExtractValue();
 
     // Straight down the left-hand seam, so half the stroke belongs to the right-hand edge.
     ASSERT_TRUE( PaintCloudLayoutPolyline(
-         pixels, kSide, 0u, { glm::vec2( 0.0f, -4.0f ), glm::vec2( 0.0f, static_cast<float>( kSide ) + 4.0f ) },
-         brush ) );
+         surface.Pattern, kSide, 0u, kCloudLayoutChannels,
+         { glm::vec2( 0.0f, -4.0f ), glm::vec2( 0.0f, static_cast<float>( kSide ) + 4.0f ) }, brush ) );
 
-    EXPECT_GT( pixels[( 32u * kSide + 0u ) * 4u], 200u ) << "the seam column itself was not painted";
-    EXPECT_GT( pixels[( 32u * kSide + ( kSide - 1u ) ) * 4u], 200u )
+    EXPECT_GT( surface.Pattern[( 32u * kSide + 0u ) * 4u], 200u ) << "the seam column itself was not painted";
+    EXPECT_GT( surface.Pattern[( 32u * kSide + ( kSide - 1u ) ) * 4u], 200u )
          << "the stroke stopped at the edge instead of wrapping, so a figure on the seam is cut in half at "
             "every region face";
 
-    const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
-    auto           made = MakeCloudLayoutFromImage( pixels, kSide, kSide, channels, /*takeMask=*/false );
+    auto made = MakeCloudLayoutFromCanvas( surface );
     ASSERT_TRUE( made ) << made.GetError();
 
     EXPECT_FLOAT_EQ( MeasureCloudLayoutStrokes( made.GetValue(), 0u, 0.0f ).MedianTexels,
@@ -2699,20 +2750,27 @@ TEST( CloudPlacementSpectrum, ABlankCanvasIsExactlyTheCoverageSliderAndSwitchesT
     auto canvas = MakeCloudLayoutCanvas( 64u );
     ASSERT_TRUE( canvas );
 
-    EXPECT_FALSE( canvas.GetValue().TakeMask )
-         << "a blank canvas claimed to carry a mask, so an empty slot would not be free";
+    EXPECT_FALSE( canvas.GetValue().HasMask() )
+         << "a blank canvas came with a mask plane, so every new painting would carry a table that does "
+            "nothing and an empty slot would not be free";
 
-    const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
+    CloudLayoutCanvas surface = canvas.ExtractValue();
 
-    // takeMask TRUE on purpose: the neutral alpha is the interesting case. An opaque white canvas here
-    // would add a whole unit of coverage to every cell in the sky.
-    auto made = MakeCloudLayoutFromImage( canvas.GetValue().Pixels, 64u, 64u, channels, /*takeMask=*/true );
+    // A MASK IS ADDED ON PURPOSE: the NEUTRAL mask is the interesting case, because a mask flooded with
+    // opaque white here would add a whole unit of coverage to every cell in the sky. SetCloudLayoutCanvasMask
+    // is what an artist presses, and what it lays down is the value that does nothing.
+    ASSERT_TRUE( SetCloudLayoutCanvasMask( surface, true ) );
+
+    auto made = MakeCloudLayoutFromCanvas( surface );
     ASSERT_TRUE( made ) << made.GetError();
     ASSERT_TRUE( made.GetValue().HasMask() );
 
     CloudProceduralFieldParams painted = ShippedParams();
     painted.Coverage                   = 0.50f;
-    painted.Layout                     = std::make_shared<const CloudLayoutData>( made.ExtractValue() );
+
+    auto blank            = std::make_shared<const CloudLayoutData>( made.ExtractValue() );
+    painted.PatternSource = blank;
+    painted.MaskSource    = blank;
 
     auto withCanvas = BuildCloudLayoutPreview( painted, 0u, painted.RegionSizeKm, kMapSide );
     ASSERT_TRUE( withCanvas ) << withCanvas.GetError();
@@ -2759,32 +2817,46 @@ TEST( CloudPlacementSpectrum, APaintedLayoutReopensAsExactlyTheCanvasItWasPainte
 
     auto canvas = MakeCloudLayoutCanvas( kSide );
     ASSERT_TRUE( canvas );
-    std::vector<unsigned char> pixels = canvas.GetValue().Pixels;
+    CloudLayoutCanvas surface = canvas.ExtractValue();
+    ASSERT_TRUE( SetCloudLayoutCanvasMask( surface, true ) );
 
-    // A figure on the pattern AND on the alpha, so the mask is the interesting case rather than absent.
-    ASSERT_TRUE( FillCloudLayoutCanvasChannel( pixels, kSide, 3u, 0u ) );
+    // ALL FIVE PLANES CARRY A FIGURE, and the mask's is a DIFFERENT one from the fourth species slot's.
+    // Before O-4 that combination could not be expressed at all — the mask was the pattern's alpha, four
+    // planes for five tables — and MakeCloudLayoutCanvasFromLayout refused it by name. This is the case
+    // the split exists for, so it is the case the round trip is measured on.
     for ( uint32_t channel = 0; channel < kCloudLayoutChannels; ++channel )
-        ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, channel,
+        ASSERT_TRUE( PaintCloudLayoutPolyline( surface.Pattern, kSide, channel, kCloudLayoutChannels,
                                                { glm::vec2( 10.0f, 12.0f ), glm::vec2( 50.0f, 44.0f ) }, brush ) );
 
-    const uint32_t channels[kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
-    auto           made = MakeCloudLayoutFromImage( pixels, kSide, kSide, channels, /*takeMask=*/true );
+    ASSERT_TRUE( PaintCloudLayoutPolyline( surface.Mask, kSide, 0u, 1u,
+                                           { glm::vec2( 50.0f, 12.0f ), glm::vec2( 10.0f, 44.0f ) }, brush ) );
+
+    ASSERT_NE( surface.Mask[( 20u * kSide + 40u )], surface.Pattern[( 20u * kSide + 40u ) * 4u + 3u] )
+         << "the fixture's mask and its fourth pattern channel agree, so it is the case that always "
+            "worked and this test is measuring itself";
+
+    auto made = MakeCloudLayoutFromCanvas( surface );
     ASSERT_TRUE( made ) << made.GetError();
 
     auto reopened = MakeCloudLayoutCanvasFromLayout( made.GetValue() );
     ASSERT_TRUE( reopened ) << reopened.GetError();
 
     EXPECT_EQ( reopened.GetValue().Side, kSide );
-    EXPECT_TRUE( reopened.GetValue().TakeMask )
+    EXPECT_TRUE( reopened.GetValue().HasMask() )
          << "a layout with a mask reopened as a canvas that would bake without one";
-    EXPECT_EQ( reopened.GetValue().Pixels, pixels )
-         << "the canvas came back different from the one the layout was painted on";
+    EXPECT_EQ( reopened.GetValue().Pattern, surface.Pattern )
+         << "the pattern came back different from the one the layout was painted on";
+    EXPECT_EQ( reopened.GetValue().Mask, surface.Mask )
+         << "the mask came back different from the one the layout was painted on";
 }
 
-// AND A LAYOUT THAT CANNOT BE EXPRESSED AS ONE CANVAS IS REFUSED BY NAME rather than half kept. Five
-// tables do not fit in four planes; quietly dropping whichever one the code wrote last would change
-// somebody's sky with nothing on screen to explain it. This is the shape of silent fallback §1.4 forbids.
-TEST( CloudPlacementSpectrum, AMaskDrawnApartFromTheFourthChannelRefusesToOpenAsACanvas )
+// AND THE LAYOUT THAT USED TO BE REFUSED NOW OPENS WITH BOTH TABLES INTACT. This test is the inverse of
+// the one it replaces: while the mask was the pattern's alpha, a `.dclayout` whose mask differed from its
+// fourth channel needed five planes and a canvas had four, so it could be bound and rendered but never
+// edited — MakeCloudLayoutCanvasFromLayout said so by name. O-4 gave the mask its own plane, and the
+// refusal has nothing left to refuse. Kept as a test rather than deleted with the refusal, because
+// "this case now works" is the deliverable and a case nobody asserts is a case that regresses quietly.
+TEST( CloudPlacementSpectrum, AMaskDrawnApartFromTheFourthChannelOpensWithBothTablesIntact )
 {
     constexpr uint32_t kSide  = 32u;
     const size_t       texels = static_cast<size_t>( kSide ) * kSide;
@@ -2803,8 +2875,15 @@ TEST( CloudPlacementSpectrum, AMaskDrawnApartFromTheFourthChannelRefusesToOpenAs
     ASSERT_TRUE( decoded ) << decoded.GetError();
 
     auto opened = MakeCloudLayoutCanvasFromLayout( decoded.GetValue() );
-    EXPECT_FALSE( opened ) << "a layout whose mask differs from its fourth pattern channel opened as a "
-                              "canvas, so one of its two tables was silently discarded";
+    ASSERT_TRUE( opened ) << opened.GetError();
+
+    EXPECT_EQ( opened.GetValue().Pattern, decoded.GetValue().Pattern )
+         << "the pattern was altered on the way onto the canvas";
+    EXPECT_EQ( opened.GetValue().Mask, decoded.GetValue().Mask )
+         << "the mask was altered or dropped on the way onto the canvas, which is exactly the silent "
+            "loss the old refusal existed to prevent";
+    EXPECT_EQ( opened.GetValue().Mask[7], 200u )
+         << "the one texel that makes this layout need a fifth plane did not survive";
 }
 
 // THE ERASER IS THE SAME BRUSH WITH THE REST VALUE AS ITS INK, and the rest value differs per plane — a
@@ -2821,16 +2900,25 @@ TEST( CloudPlacementSpectrum, ErasingReturnsThePatternToNothingAndTheMaskToNeutr
 
     auto canvas = MakeCloudLayoutCanvas( kSide );
     ASSERT_TRUE( canvas );
-    std::vector<unsigned char> pixels = canvas.GetValue().Pixels;
+    CloudLayoutCanvas surface = canvas.ExtractValue();
+    ASSERT_TRUE( SetCloudLayoutCanvasMask( surface, true ) );
 
     const std::vector<glm::vec2> path = { glm::vec2( 8.0f, 24.0f ), glm::vec2( 40.0f, 24.0f ) };
 
-    ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, 0u, path, lay ) );
-    ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, 3u, path, lay ) );
+    // THE SAME STROKE ON A FOUR-CHANNEL PLANE AND ON A ONE-CHANNEL PLANE. That the brush takes a stride
+    // is the other half of what this asserts: a stroke laid on the mask with the pattern's stride of four
+    // would paint every fourth texel and leave a comb.
+    ASSERT_TRUE( PaintCloudLayoutPolyline( surface.Pattern, kSide, 0u, kCloudLayoutChannels, path, lay ) );
+    ASSERT_TRUE( PaintCloudLayoutPolyline( surface.Mask, kSide, 0u, 1u, path, lay ) );
 
-    const size_t middle = ( 24u * kSide + 24u ) * 4u;
-    ASSERT_EQ( pixels[middle + 0], 255u );
-    ASSERT_EQ( pixels[middle + 3], 255u );
+    const size_t middle = 24u * kSide + 24u;
+    ASSERT_EQ( surface.Pattern[middle * 4u], 255u );
+    ASSERT_EQ( surface.Mask[middle], 255u );
+
+    // AND NO GAPS: the neighbour texel along the stroke is painted too, which is what a wrong stride
+    // would break and what a single-texel probe would miss.
+    ASSERT_EQ( surface.Mask[middle + 1u], 255u ) << "the stroke on the mask skipped a texel, so the plane "
+                                                    "was walked with the wrong stride";
 
     CloudLayoutBrush erasePattern = lay;
     erasePattern.Ink              = 0.0f;
@@ -2838,12 +2926,13 @@ TEST( CloudPlacementSpectrum, ErasingReturnsThePatternToNothingAndTheMaskToNeutr
     CloudLayoutBrush eraseMask = lay;
     eraseMask.Ink              = static_cast<float>( kCloudLayoutMaskNeutral ) / 255.0f;
 
-    ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, 0u, path, erasePattern ) );
-    ASSERT_TRUE( PaintCloudLayoutPolyline( pixels, kSide, 3u, path, eraseMask ) );
+    ASSERT_TRUE(
+         PaintCloudLayoutPolyline( surface.Pattern, kSide, 0u, kCloudLayoutChannels, path, erasePattern ) );
+    ASSERT_TRUE( PaintCloudLayoutPolyline( surface.Mask, kSide, 0u, 1u, path, eraseMask ) );
 
-    EXPECT_EQ( pixels[middle + 0], 0u ) << "erasing a pattern channel left cloud behind";
-    EXPECT_EQ( pixels[middle + 3], kCloudLayoutMaskNeutral )
-         << "erasing the mask left it at " << static_cast<int>( pixels[middle + 3] )
+    EXPECT_EQ( surface.Pattern[middle * 4u], 0u ) << "erasing a pattern channel left cloud behind";
+    EXPECT_EQ( surface.Mask[middle], kCloudLayoutMaskNeutral )
+         << "erasing the mask left it at " << static_cast<int>( surface.Mask[middle] )
          << " rather than at neutral, so an erased mask still says something about the sky";
 }
 

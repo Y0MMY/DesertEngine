@@ -64,6 +64,14 @@ namespace
          { "Editor/Source/Editor/Panels/Clouds/CloudLayoutPanel.cpp",
            "an ||-chain answering 'can this dropped file be a cloud mask?' plus the open-file dialog's "
            "display filter. Both are membership; nothing competes with anything" },
+         // ADDED 2026-09-07, and it was RED on dev before this branch: task O-3 gave the noise panel a
+         // sheet import and export in commit 8618daba, and the two file dialogs that came with it were
+         // never declared here. Same shape as its neighbour above and for the same reason — an open
+         // dialog's display filter and a save dialog's, both presentation, nothing choosing between two
+         // files of one stem.
+         { "Editor/Source/Editor/Panels/Clouds/CloudNoiseVolumePanel.cpp",
+           "the sheet import dialog's display filter and the export dialog's. Presentation only; no "
+           "priority between formats is expressed" },
          { "Editor/Source/Editor/Panels/FileExplorer/FileExplorerPanel.cpp",
            "the extension -> FileType icon map and the import dialog's display filter. Membership and "
            "presentation; two same-stem files both simply appear in the tree" },
