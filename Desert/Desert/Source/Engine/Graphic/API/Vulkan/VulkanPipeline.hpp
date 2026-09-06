@@ -24,12 +24,12 @@ namespace Desert::Graphic::API::Vulkan
             return m_Specification;
         }
 
-        const VkPipeline GetVkPipeline() const
+        VkPipeline GetVkPipeline() const
         {
             return m_Pipeline;
         }
 
-        const VkPipelineLayout GetVkPipelineLayout() const
+        VkPipelineLayout GetVkPipelineLayout() const
         {
             return m_PipelineLayout;
         }

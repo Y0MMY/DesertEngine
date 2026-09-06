@@ -85,7 +85,7 @@ namespace Desert::Graphic::API::Vulkan
             return set < m_DescriptorSetLayouts.size() ? m_DescriptorSetLayouts[set] : nullptr;
         }
 
-        const auto GetDescriptorSetLayoutCount() const
+        auto GetDescriptorSetLayoutCount() const
         {
             return m_DescriptorSetLayouts.size();
         }

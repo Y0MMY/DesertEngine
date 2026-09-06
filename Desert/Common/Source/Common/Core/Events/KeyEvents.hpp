@@ -22,7 +22,7 @@ namespace Common
     class KeyPressedEvent : public KeyEvent
     {
     public:
-        virtual const EventType GetEventType() const
+        virtual EventType GetEventType() const
         {
             return GetStaticType();
         }
@@ -46,7 +46,7 @@ namespace Common
     class KeyTypedEvent : public Event
     {
     public:
-        virtual const EventType GetEventType() const
+        virtual EventType GetEventType() const
         {
             return GetStaticType();
         }

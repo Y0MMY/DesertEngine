@@ -12,7 +12,7 @@ namespace Common
 	class EventWindowFileDrop : public Event
 	{
 	public:
-		virtual const EventType GetEventType() const { return GetStaticType(); }
+		virtual EventType GetEventType() const { return GetStaticType(); }
 		static EventType GetStaticType() { return EventType::WindowFileDrop; }
 		explicit EventWindowFileDrop(std::vector<std::string> paths)
 			: Paths(std::move(paths)) {}
@@ -23,14 +23,14 @@ namespace Common
 	class EventWindowClose : public Event
 	{
 	public:
-		virtual const EventType GetEventType() const { return GetStaticType(); }
+		virtual EventType GetEventType() const { return GetStaticType(); }
 		static EventType GetStaticType() { return EventType::WindowClose; }
 	};
 
 	class EventWindowResize : public Event
 	{
 	public:
-		virtual const EventType GetEventType() const { return GetStaticType(); }
+		virtual EventType GetEventType() const { return GetStaticType(); }
 		static EventType GetStaticType() { return EventType::WindowResize; }
 		EventWindowResize(uint32_t width, uint32_t height)
 			: width(width), height(height)

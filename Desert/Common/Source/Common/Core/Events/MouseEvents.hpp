@@ -16,7 +16,7 @@ namespace Common {
 		inline float GetX() const { return m_MouseX; }
 		inline float GetY() const { return m_MouseY; }
 
-		virtual const EventType GetEventType() const { return GetStaticType(); }
+		virtual EventType GetEventType() const { return GetStaticType(); }
 		static EventType GetStaticType() { return EventType::MouseMoved; }
 
 	private:
@@ -32,7 +32,7 @@ namespace Common {
 		inline float GetXOffset() const { return m_XOffset; }
 		inline float GetYOffset() const { return m_YOffset; }
 
-		virtual const EventType GetEventType() const { return GetStaticType(); }
+		virtual EventType GetEventType() const { return GetStaticType(); }
 		static EventType GetStaticType() { return EventType::MouseScroll; }
 	private:
 		float m_XOffset, m_YOffset;
@@ -55,7 +55,7 @@ namespace Common {
 		explicit MouseButtonPressedEvent(MouseButton button)
 			: MouseButtonEvent(button) {}
 
-		virtual const EventType GetEventType() const { return GetStaticType(); }
+		virtual EventType GetEventType() const { return GetStaticType(); }
 		static EventType GetStaticType() { return EventType::MousePressed; }
 
 	};

@@ -138,7 +138,7 @@ namespace Desert::Graphic
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const                      = 0;
 
     public:
-        static const RendererAPIType GetAPIType()
+        static RendererAPIType GetAPIType()
         {
             return s_RenderingAPI;
         }

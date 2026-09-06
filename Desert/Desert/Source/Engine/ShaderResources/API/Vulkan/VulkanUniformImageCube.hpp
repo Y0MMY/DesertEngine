@@ -13,7 +13,7 @@ namespace Desert::ShaderResources::API::Vulkan
         VulkanUniformImageCube( const std::string_view debugName, uint32_t binding );
         virtual ~VulkanUniformImageCube();
 
-        virtual const uint32_t GetBinding() const override
+        virtual uint32_t GetBinding() const override
         {
             return m_Binding;
         }

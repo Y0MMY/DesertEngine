@@ -23,7 +23,7 @@ namespace Desert::Engine
             return m_FrameTime.GetMilliseconds();
         }
 
-        const auto GetDeltaTime() const
+        auto GetDeltaTime() const
         {
             return Common::Timestep( std::min<float>( m_FrameTime.GetSeconds(), 0.0333F ) );
         }

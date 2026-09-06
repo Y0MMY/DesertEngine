@@ -72,12 +72,12 @@ namespace Desert::Graphic::API::Vulkan
             return m_DepthStencilImages;
         }
 
-        const auto GetRenderPass() const
+        auto GetRenderPass() const
         {
             return m_VkRenderPass;
         }
 
-        const auto GetVKFramebuffers() const
+        auto GetVKFramebuffers() const
         {
             return m_SwapChainFramebuffers;
         }

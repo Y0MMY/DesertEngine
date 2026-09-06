@@ -20,7 +20,7 @@ namespace Common
     class Event
     {
     public:
-        virtual const EventType GetEventType() const = 0;
+        virtual EventType GetEventType() const = 0;
 
         bool m_Handled = false;
     };

@@ -43,17 +43,17 @@ namespace Desert::Graphic::API::Vulkan
         virtual void Invalidate() override;
         virtual void Release() override;
 
-        const VkPipeline GetVkPipeline() const
+        VkPipeline GetVkPipeline() const
         {
             return m_ComputePipeline;
         }
 
-        const VkPipelineLayout GetVkPipelineLayout() const
+        VkPipelineLayout GetVkPipelineLayout() const
         {
             return m_ComputePipelineLayout;
         }
 
-        const auto GetCommandBuffer() const
+        auto GetCommandBuffer() const
         {
             return m_ActiveComputeCommandBuffer;
         }

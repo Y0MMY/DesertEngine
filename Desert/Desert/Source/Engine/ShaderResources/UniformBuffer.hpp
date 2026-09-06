@@ -19,12 +19,12 @@ namespace Desert::ShaderResources
         }
         virtual ~UniformBuffer() = default;
 
-        virtual const uint32_t GetBinding() const override final
+        virtual uint32_t GetBinding() const override final
         {
             return m_UniformModel.BindingPoint;
         }
 
-        virtual const uint32_t GetSize() const override final
+        virtual uint32_t GetSize() const override final
         {
             return m_UniformModel.Size;
         }

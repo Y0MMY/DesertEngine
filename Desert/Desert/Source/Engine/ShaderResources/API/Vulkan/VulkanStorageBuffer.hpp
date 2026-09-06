@@ -23,12 +23,12 @@ namespace Desert::ShaderResources::API::Vulkan
         virtual void     UnmapMemory() override;
 
         virtual void           SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
-        virtual const uint32_t GetBinding() const override
+        virtual uint32_t GetBinding() const override
         {
             return m_Binding;
         }
 
-        virtual const uint32_t GetSize() const override
+        virtual uint32_t GetSize() const override
         {
             return m_Size;
         }
