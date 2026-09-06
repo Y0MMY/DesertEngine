@@ -136,6 +136,38 @@ namespace
         Common::Constants::Path::ProjectRootState m_Saved;
     };
 
+    // A file that exists for the duration of one test and is removed afterwards.
+    //
+    // WHY THE REGISTRY TESTS NEED ONE. SkyboxAsset::Load used to be `m_ReadyForUse = true; return
+    // BOOLSUCCESS;` — it never opened the file it named, so a skybox whose .hdr had been moved or left
+    // out of a package loaded, registered and reported ready while the sky came out black. It verifies
+    // the file's presence now, and AssetManager::CreateAsset drops an asset whose Load fails, so the
+    // tests below have to give it something to find. The CONTENT is irrelevant: this asset carries an
+    // identity, and the panorama's bytes are read by the GPU environment bake, not by Load.
+    class ScratchFile
+    {
+    public:
+        explicit ScratchFile( const std::filesystem::path& path ) : m_Path( path )
+        {
+            std::error_code ec;
+            std::filesystem::create_directories( m_Path.parent_path(), ec );
+            std::ofstream out( m_Path, std::ios::binary );
+            out << "scratch";
+        }
+
+        ~ScratchFile()
+        {
+            std::error_code ec;
+            std::filesystem::remove( m_Path, ec );
+        }
+
+        ScratchFile( const ScratchFile& )            = delete;
+        ScratchFile& operator=( const ScratchFile& ) = delete;
+
+    private:
+        std::filesystem::path m_Path;
+    };
+
     uint64_t HandleValue( const std::filesystem::path& path )
     {
         return static_cast<uint64_t>( Common::AssetHandle::FromCookedPath( path ) );
@@ -385,10 +417,14 @@ TEST( AssetHandleStability, AMaterialsExternalIdIsItsHandleWhenTheFileCarriesNoG
 // reports the handle a scene would have written down. Process B — a genuinely separate run, the "restart"
 // — registers the same asset from the same path and asks the AssetManager for that number.
 //
-// Skybox is the subject because it was one of the five types that carried the random handle, and because
-// its Load touches no file, so what is measured is identity and nothing else.
+// Skybox is the subject because it was one of the five types that carried the random handle. Its Load
+// now checks that the file it names exists (and nothing more), so the scratch file below is what keeps
+// this measuring identity and nothing else.
 TEST( AssetHandleStability, AHandleSavedByOneRunResolvesInTheNext )
 {
+    // The child process registers this path, and registering now requires the file to be there.
+    const ScratchFile subject( kPathA );
+
     const uint64_t saved = HandleOf<Desert::Assets::SkyboxAsset>( kPathA );
 
     const std::string verdict = ResolveInAnIndependentProcess( kPathA, saved );
@@ -403,7 +439,11 @@ TEST( AssetHandleStability, AHandleSavedByOneRunResolvesInTheNext )
 TEST( AssetHandleStability, AHandleFromNoAssetStillFailsToResolve )
 {
     // The companion the test above needs to mean anything: if FindByHandle returned something for every
-    // number, "RESOLVED" would be worthless.
+    // number, "RESOLVED" would be worthless. The scratch file is here for the same reason it is there —
+    // the child registers this path, and a registration that fails would print its reason onto the
+    // single line this test reads back.
+    const ScratchFile subject( kPathA );
+
     const std::string verdict = ResolveInAnIndependentProcess( kPathA, 12345ull );
     ASSERT_FALSE( verdict.empty() );
     EXPECT_EQ( verdict, "MISSED" );
@@ -823,6 +863,8 @@ TEST( AssetHandleStability, TwoSpellingsOfOneFileRegisterAsOneAsset )
 
     Desert::Assets::AssetManager manager;
 
+    const ScratchFile dawn( projectDir / "Content" / "Sky" / "Dawn.hdr" );
+
     const auto viaAbsolute = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
          AssetPriority::Medium, Common::Filepath( projectDir / "Content" / "Sky" / "Dawn.hdr" ) );
     const auto viaRelative = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
@@ -847,6 +889,8 @@ TEST( AssetHandleStability, TwoDifferentFilesStillRegisterSeparately )
     Common::Constants::Path::SetProjectRoot( std::filesystem::current_path() / "RegistryProbe", "Content" );
 
     Desert::Assets::AssetManager manager;
+    const ScratchFile            a( "RegistryProbe/Content/A.hdr" );
+    const ScratchFile            b( "RegistryProbe/Content/B.hdr" );
     manager.CreateAsset<Desert::Assets::SkyboxAsset>( AssetPriority::Medium,
                                                       Common::Filepath( "RegistryProbe/Content/A.hdr" ) );
     manager.CreateAsset<Desert::Assets::SkyboxAsset>( AssetPriority::Medium,
@@ -864,6 +908,7 @@ TEST( AssetHandleStability, TwoAssetTypesMayShareOnePathAndStayTwoRecords )
     Common::Constants::Path::SetProjectRoot( std::filesystem::current_path() / "RegistryProbe", "Content" );
 
     Desert::Assets::AssetManager manager;
+    const ScratchFile            shared( "RegistryProbe/Content/Shared.asset" );
     const auto                   sky = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
          AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Shared.asset" ) );
     // loadAfterCreate=false: no such file exists, and this test is about the registry key, not parsing.
@@ -908,7 +953,8 @@ TEST( AssetHandleStability, ATypedLookupRefusesARecordOfAnotherType )
     // derivation is type-blind by design (asserted at the top of this file), so this same number is what a
     // CloudTypeAsset at this path would carry — which is exactly how a request for the wrong type arrives
     // at a real record: a saved scene stores a bare 64-bit number with no type beside it.
-    const auto sky = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
+    const ScratchFile impostor( "RegistryProbe/Content/Impostor.asset" );
+    const auto        sky = manager.CreateAsset<Desert::Assets::SkyboxAsset>(
          AssetPriority::Medium, Common::Filepath( "RegistryProbe/Content/Impostor.asset" ) );
     ASSERT_NE( sky, nullptr );
 
