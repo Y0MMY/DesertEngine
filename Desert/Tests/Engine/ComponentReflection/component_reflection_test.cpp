@@ -428,68 +428,32 @@ TEST( HeightFogReflection, DistancesAreLengthsAndEveryFieldIsAnnotatedWellEnough
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 38 fields in seven groups. The layer geometry and the tracing limits are
-// UVolumetricCloudComponent's name for name, so a UE-calibrated sky transplants number for number; the
-// shape group is ours, because UE has no cloud-shape parameter on the component at all (its density is a
-// material graph). Every scalar is packed into Graphic::CloudGpuPayload and the one asset field names the
-// CLOUD TYPE, which carries both the twelve numbers the shell and the profile are built from and the noise
-// volume the edge is cut from — SettingConsumers holds that half of the promise, this test holds the
-// roster, the order and the defaults.
+// VolumetricCloudData — 21 fields since O1: the LOOK is a MATERIAL. What stays is exactly what
+// UVolumetricCloudComponent keeps, name for name — tracing budgets, pass routing, world integration —
+// plus the Material handle that is the seam itself, the region budget, and the wind pair (the one named
+// divergence from the UE split: the collector integrates the offset and may not touch the registry).
+// The thirty-three moved fields have their own census now: Desert/Tests/Engine/CloudMaterialSchema pins
+// the CloudRaymarch schema against Graphic::CloudMaterialValues in both directions, defaults included.
 // ---------------------------------------------------------------------------------------------------
 
 TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
 {
     const std::vector<std::string> expected = {
          "Enabled",
-         "CloudType1",
-         "CloudType2",
-         "CloudType3",
-         "CloudType4",
+         "Material",
          "PlanetRadius",
          "MaxViewDistance",
          "TracingStartMaxDistance",
          "TracingStartDistance",
-         "Coverage",
-         "CoverageContrast",
-         "WeatherTileSize",
          "RegionSize",
-         "Seed",
-         "PlacementDensity",
-         "PlacementScatter",
-         "PlacementSizeVariety",
-         "PatchTileSize",
-         "PatchStrength",
-         // Layout — the PAINTED sky. Six fields rather than one, because a painting has to be placed as
-         // well as bound: an asset slot on its own would put an artist's picture over the world at one
-         // scale, one orientation and one position, none of which they chose.
-         "CloudLayout",
-         "LayoutPatternStrength",
-         "LayoutMaskStrength",
-         "LayoutRepeats",
-         "LayoutRotation",
-         "LayoutOffset",
-         "DetailTileSize",
-         "DetailStrength",
-         "DensityScale",
-         "ExtinctionScale",
          "NearFadeStartDistance",
          "NearFadeEndDistance",
-         "ScatteringAlbedo",
-         "PhaseG",
-         "PhaseGBackward",
-         "PhaseBlend",
-         "AmbientOcclusionStrength",
          "SkyOcclusionVolume",
          "PerSampleAtmosphereTransmittance",
          "LightMarchDistance",
          "LightMarchSamples",
-         "MultiScatterOctaves",
-         "MultiScatterContribution",
-         "MultiScatterOcclusion",
-         "MultiScatterEccentricity",
          "AerialPerspectiveStartDistance",
          "AerialPerspectiveFadeDistance",
-         "AmbientScale",
          "CastShadows",
          "ShadowStrength",
          "MaxSteps",
@@ -499,86 +463,86 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 53u );
+    EXPECT_EQ( cloud.Fields.size(), 21u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
-    EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 9u );
-    EXPECT_EQ( CountInCategory( cloud, "Weather" ), 5u );
-    // The five that decide whether the sky reads as a grid. See CALIBRATION.md section RW: the placement
-    // that shipped before them put a measurable lattice bump at every multiple of the weather tile's
-    // quarter, and each of these attacks one reason for it.
-    EXPECT_EQ( CountInCategory( cloud, "Placement" ), 5u );
-    // The painted layout: one slot and five numbers that place the painting in the world. Its own group
-    // rather than more rows under Placement, because the two answer different questions — Placement is how
-    // the ENGINE arranges clouds when nobody has said, and Layout is what happens when somebody has.
-    EXPECT_EQ( CountInCategory( cloud, "Layout" ), 6u );
-    // NO "Noise" GROUP ANY MORE: it held one row, the noise volume slot, and that moved onto the cloud
-    // type. A group with nothing in it is a heading an artist opens and finds empty.
+    EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 5u );
+    EXPECT_EQ( CountInCategory( cloud, "Materials" ), 1u );
+    // ONE Weather row: the region is a MEMORY budget (how much world the modelling volume covers), not a
+    // look. The look's own weather — coverage, the tile, the seed — is material schema now.
+    EXPECT_EQ( CountInCategory( cloud, "Weather" ), 1u );
+    // Placement and Layout are EMPTY BY DESIGN since O1, not shrunk: both categories were bake-time look
+    // and the look is the material's. A row that came back here would be a second author for a value the
+    // material already owns — the §4.2 double-write, one component further out.
+    EXPECT_EQ( CountInCategory( cloud, "Placement" ), 0u );
+    EXPECT_EQ( CountInCategory( cloud, "Layout" ), 0u );
     EXPECT_EQ( CountInCategory( cloud, "Noise" ), 0u );
-    EXPECT_EQ( CountInCategory( cloud, "Detail" ), 6u );
-    // FIFTEEN SINCE Р4, and the row that arrived is Sky Occlusion Volume — a bool, and deliberately the
-    // ONLY field that feature added. What it chooses is which geometry AmbientOcclusionStrength measures,
-    // so the strength stayed one knob with one meaning; a second strength beside it would have been a
-    // parameter whose only job is to say the same thing twice.
-    //
-    // SIXTEEN SINCE Р14, and the row that arrived is Per Sample Atmosphere Transmittance — again a bool
-    // and again the only field its feature added. It chooses WHERE the atmosphere's cut is taken, not how
-    // much of it: there is no strength beside it, because a physical transmittance scaled by taste is a
-    // knob that hides the calibration rather than a parameter.
-    EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 16u );
-    // THE SHADOWS GROUP IS TWO ROWS AND NOT FOUR. The map's extent and resolution are engine constants
-    // like the step schedule (they trade cost against quality identically in every scene, and the extent
-    // is DERIVED from the march's own resolvable chord). The sky-light occlusion under a deck is a
-    // different quantity with a different geometry, and it now has its own volume — but it belongs to
-    // LIGHTING, not here: what it occludes is the sky's ambient, not the sun, and nothing about it reaches
-    // the shadow map on the ground.
+    // The near-camera fade pair: march control at the camera, not the cloud's look.
+    EXPECT_EQ( CountInCategory( cloud, "Detail" ), 2u );
+    // Pass routing and cross-system lighting: the occlusion-volume switch, the per-sample-transmittance
+    // switch, the shadow-ray budget pair and the aerial-perspective art direction pair.
+    EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 6u );
     EXPECT_EQ( CountInCategory( cloud, "Shadows" ), 2u );
     EXPECT_EQ( CountInCategory( cloud, "Quality" ), 2u );
     EXPECT_EQ( CountInCategory( cloud, "Animation" ), 2u );
 
-    // THE FOUR BAKE SETTINGS ARE GONE, and this is where that is pinned. WeatherSeed, WeatherOctaves,
-    // DetailSeed and DetailOctaves parameterised a GPU bake that no longer exists; the seed and the
-    // lattice periods that make a volume live in the volume asset's own header now, and the component
-    // names the volume instead. A field that came back here would be a knob that rebakes nothing.
-    for ( const char* gone : { "WeatherSeed", "WeatherOctaves", "DetailSeed", "DetailOctaves" } )
-        EXPECT_EQ( Find( cloud, gone ), nullptr ) << gone << " is a bake setting and the bake is gone";
+    // THE SEAM ITSELF: one material handle, hidden from the reflected pass because its row is the
+    // terrain-style New/Edit/Clear widget in ComponentEditorRegistrations.cpp.
+    const FieldInfo* material = Find( cloud, "Material" );
+    ASSERT_NE( material, nullptr );
+    EXPECT_TRUE( material->Meta.IsAsset );
+    EXPECT_EQ( material->Meta.AssetType, "MaterialAsset" );
+    EXPECT_TRUE( material->Meta.Hidden ) << "the material draws as a custom row, not a texture slot";
 
-    // AND SO ARE THE THREE THE PROFILE TABLE REPLACED. LayerBottomAltitude and LayerThickness stated by
-    // hand a shell that is now computed from the type's own altitudes — two numbers obliged to agree with
-    // a third, which is the §2.3.1 defect class — and CloudTypeVariance mixed noise into one analytic
-    // profile curve, which is now a per-type table indexed by the placement pattern. A field that came
-    // back here would be an authored value contradicting a computed one.
-    //
-    // (There IS a "CloudType" now, and it is the asset handle below rather than the old scalar. The name
-    // was reused deliberately: it is what the thing has always been called in the UI, and the v3 -> v4
-    // migration had already deleted every occurrence of the scalar before v4 -> v5 wrote the handle.)
-    for ( const char* gone : { "LayerBottomAltitude", "LayerThickness", "CloudTypeVariance" } )
-        EXPECT_EQ( Find( cloud, gone ), nullptr )
-             << gone << " was replaced by the cloud type and must not have a second life";
+    // THE THIRTY-THREE THAT MOVED, pinned as ABSENT so none of them grows a second life here beside its
+    // material self — the exact double-write §4.2 forbids, and with a component this big the easiest
+    // regression to make by merging an old branch.
+    for ( const char* moved : { "CloudType1",
+                                "CloudType2",
+                                "CloudType3",
+                                "CloudType4",
+                                "Coverage",
+                                "CoverageContrast",
+                                "WeatherTileSize",
+                                "Seed",
+                                "PlacementDensity",
+                                "PlacementScatter",
+                                "PlacementSizeVariety",
+                                "PatchTileSize",
+                                "PatchStrength",
+                                "CloudLayout",
+                                "LayoutPatternStrength",
+                                "LayoutMaskStrength",
+                                "LayoutRepeats",
+                                "LayoutRotation",
+                                "LayoutOffset",
+                                "DetailTileSize",
+                                "DetailStrength",
+                                "DensityScale",
+                                "ExtinctionScale",
+                                "ScatteringAlbedo",
+                                "PhaseG",
+                                "PhaseGBackward",
+                                "PhaseBlend",
+                                "AmbientOcclusionStrength",
+                                "MultiScatterOctaves",
+                                "MultiScatterContribution",
+                                "MultiScatterOcclusion",
+                                "MultiScatterEccentricity",
+                                "AmbientScale" } )
+        EXPECT_EQ( Find( cloud, moved ), nullptr )
+             << moved
+             << " is a parameter of the cloud MATERIAL (CloudRaymarch schema) since O1 and must "
+                "not have a second life on the component";
 
-    // AND THE NOISE VOLUME SLOT IS GONE FROM HERE, because it moved onto the cloud type: the character of
-    // an edge is a property of the KIND of cloud. A slot that came back would be a second source of truth
-    // for one thing (§4.2), and the two would disagree the first time an artist set only one of them.
-    EXPECT_EQ( Find( cloud, "NoiseVolume" ), nullptr )
-         << "the noise volume is a field of the cloud type now, not of the layer";
+    // And the pre-O1 removals stay removed, for their original reasons.
+    for ( const char* gone :
+          { "WeatherSeed", "WeatherOctaves", "DetailSeed", "DetailOctaves", "LayerBottomAltitude",
+            "LayerThickness", "CloudTypeVariance", "NoiseVolume", "CloudType", "ShapeDistortion" } )
+        EXPECT_EQ( Find( cloud, gone ), nullptr ) << gone << " must not come back";
 
-    // FOUR SLOTS AND NOT ONE, and the singular name is gone rather than kept as the first of them. A
-    // `CloudType` standing beside `CloudType2` would read as one field of a different kind next to three
-    // of another; the v5 -> v6 migration renames it, and this is what stops it coming back.
-    EXPECT_EQ( Find( cloud, "CloudType" ), nullptr )
-         << "the single cloud type slot became a set of four and must not have a second life";
-
-    for ( const char* slot : { "CloudType1", "CloudType2", "CloudType3", "CloudType4" } )
-    {
-        const FieldInfo* type = Find( cloud, slot );
-        ASSERT_NE( type, nullptr ) << slot;
-        EXPECT_TRUE( type->Meta.IsAsset ) << slot;
-        EXPECT_EQ( type->Meta.AssetType, "CloudTypeAsset" ) << slot;
-    }
-
-    // AND THERE ARE EXACTLY AS MANY AS THE PROFILE TABLE HAS CHANNELS. The ceiling is the width of a
-    // texel, so a fifth slot here would be a slot with nowhere to put its profile — and the failure would
-    // be a species that silently never appears rather than an error.
+    // FOUR SPECIES SLOTS is still the number of profile-table channels; the slots just live in the
+    // material schema now. CloudMaterialSchema asserts the schema names exactly four.
     EXPECT_EQ( Desert::Graphic::kCloudSpeciesSlots, 4u );
 
     // The wind OFFSET is not a field: it is state the ECS system integrates against the timestep. A
@@ -586,136 +550,65 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     EXPECT_EQ( Find( cloud, "WindOffset" ), nullptr );
 }
 
-// The authored defaults, each of which was argued for in the component's own comments and several of
-// which were corrected against a rendered frame. Pinned so that a change to any of them is a reviewable
-// edit rather than a sky that quietly became a different sky.
+// The authored defaults of what REMAINS on the component. The moved thirty-three have their defaults
+// pinned by Desert/Tests/Engine/CloudMaterialSchema — against the schema, which owns them now.
 TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
 {
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
 
     EXPECT_TRUE( DefaultOf<bool>( cloud, "Enabled" ) );
 
+    // AN EMPTY MATERIAL SLOT is the documented "render the schema defaults" — which are the moved
+    // fields' old defaults digit for digit, so a scene created from these defaults renders the sky it
+    // always did. NOT the id of a shipped file, which would make every new scene depend on one existing.
+    EXPECT_EQ( DefaultOf<uint64_t>( cloud, "Material" ), 0u );
+
     // Layer: THE SHELL IS NOT AUTHORED. It is computed from the species' own altitudes by
-    // Graphic::PackCloudParams, and the relation `envelope contains the species` is asserted further
-    // down on the packed block. What is left here is the planet the shell curves around — UE's own
-    // 6360 km — and the species itself.
-    // AN EMPTY SLOT, which is the documented "use the engine's built-in cumulus congestus". A scene that
-    // names no type — and a scene created from these defaults names none — must still have a sky, and
-    // that requirement is why the empty handle has a meaning rather than being a hole. The default is NOT
-    // the id of a shipped file, which would make every new scene depend on a file being present.
-    for ( const char* slot : { "CloudType1", "CloudType2", "CloudType3", "CloudType4" } )
-        EXPECT_EQ( DefaultOf<uint64_t>( cloud, slot ), 0u ) << slot;
+    // Graphic::PackCloudParams — the species being the MATERIAL's CloudType1..4 now — and the relation
+    // `envelope contains the species` is asserted further down on the packed block. What is left here is
+    // the planet the shell curves around — UE's own 6360 km — and the ray budgets.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PlanetRadius" ), 6360.0f );
-    // 60 km, half of the calibrated pair; the relation the pair exists for is asserted separately below.
+    // 60 km, half of the calibrated pair; the relation the pair exists for is asserted below against the
+    // schema's own tile default.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MaxViewDistance" ), 6000000.0f );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartDistance" ), 0.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartMaxDistance" ), 35000000.0f );
 
-    // Weather: the coverage default is a MEASURED point inside the slider's useful band, not a taste. It
-    // has moved twice, each time to keep the SKY the same while the field under it changed — to 0.15 when
-    // the coverage field became a quantile rather than a level, and to 0.10 when the envelope stopped
-    // being an authored ten kilometres and became the species' own three-and-a-half. Both numbers come
-    // from the table Desert/Tests/Engine/CloudField prints.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "Coverage" ), 0.45f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "CoverageContrast" ), 1.0f );
-    // AND NOTHING ELSE ABOUT THE SHAPE IS AUTHORED HERE. The species decides the altitudes and the profile
-    // table decides the silhouette at each of them. The domain warp that briefly stood between the two was
-    // measured and removed; VolumetricCloudComponent.hpp records with what numbers.
-    EXPECT_EQ( Find( cloud, "ShapeDistortion" ), nullptr );
-    // 12 km, the other half of the calibrated pair.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "WeatherTileSize" ), 1200000.0f );
+    // 48 km — half of a relation whose other half (the march's resolvable chord) is asserted where the
+    // bake validates it; see the component's own comment for the two bounds.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "RegionSize" ), 4800000.0f );
 
-    // Detail: BOTH of these are relations rather than tastes, and both were re-measured after phase Э5
-    // moved the producer under them (Desert/Tests/Engine/CloudField owns the measurements and asserts the
-    // relations; what is pinned here is only that the shipped numbers are the ones it measured).
-    //
-    // The tile is one kilometre because the erosion's wave has to be SHORTER than a cloud — at the four
-    // kilometres this used to carry, one wave spanned 0.83 of a body and scaled it instead of texturing
-    // it — and LONGER than the march's 125 m resolvable chord, which half a kilometre already is not.
-    //
-    // The strength is the smallest value with REAL headroom over the floor that the cut must clear: it has
-    // to move the surface the eye sees by more than the 125 m the march can find, or the erosion carves
-    // structure finer than the renderer represents — and above that floor every step costs cloud for a gain
-    // nothing has measured.
-    //
-    // 0.65 AND NOT §DS'S 0.40, AND THE REASON IS NOT IN THIS COMPONENT. This number is one half of a pair
-    // whose other half is Assets::kCloudLumpVerticalOverHorizontal, the shape of the lump a body is built
-    // from. §SIL2 raised that from 0.45 to 0.75 so a cloud reads as a body rather than a plate; a taller
-    // lump is optically thicker per metre, so the SAME cut moves the visible surface a shorter distance,
-    // and at §DS's 0.40 the travel fell to 101 m — under the floor. 0.65 restores it to 139 m, which is
-    // §DS's own 1.11x to the metre. Docs/Clouds/CALIBRATION.md §SIL2 carries the ladder and the frames, and
-    // Desert/Tests/Engine/CloudField asserts the PAIR rather than either number.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailTileSize" ), 100000.0f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DetailStrength" ), 0.65f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "DensityScale" ), 1.0f );
-    // The EFFECTIVE extinction of a three-octave approximation, not the ~45/km of real cloud: at the
-    // physical value every scattering order arrives at zero and the cloud renders uniformly grey.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "ExtinctionScale" ), 8.0f );
-
-    // Lighting: UE's Cloud_AlbedoColor, and a forward-scattering phase.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "ScatteringAlbedo" ), 0.98f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PhaseG" ), 0.8f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PhaseGBackward" ), 0.1667f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "PhaseBlend" ), 0.575f );
-    // THE OCCLUSION IS ONE CALIBRATION AND THESE ARE ITS TWO HALVES, so they are asserted together and
-    // the message names the other one. The strength is 1.0 and not UE's 0.5 because Р7's composition
-    // halves what any strength buys — `1 - s(1 - T)` became `1 - (s/2)(1 - T)` — so 1.0 against the
-    // VOLUME is the same amount of occlusion UE's 0.5 describes, and it is the setting Р4 measured as
-    // closing 34 % and 29 % of the contrast gap at the two horizon points. Against the PROFILE term the
-    // same 1.0 means something else entirely: the local occluder at its ceiling, which Р0 measured at
-    // 17 % there. A default pair that drifted apart would therefore not be two settings slightly wrong,
-    // it would be a sky nobody chose — §2.3.1's "two values obliged to agree".
+    // THE OCCLUSION VOLUME IS ON, and its strength dial lives in the MATERIAL now
+    // (AmbientOcclusionStrength, default 1.0 — pinned by CloudMaterialSchema). The pair is still one
+    // calibration: the volume's geometry is what the material's 1.0 was measured against (Р12), so a
+    // default of false here would silently re-base the strength's meaning onto the profile term.
     EXPECT_TRUE( DefaultOf<bool>( cloud, "SkyOcclusionVolume" ) )
-         << "the sky-light occlusion volume is off by default again, but AmbientOcclusionStrength's "
-            "default of 1.0 is calibrated for the volume's geometry, not the profile term's";
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "AmbientOcclusionStrength" ), 1.0f )
-         << "the strength no longer matches the geometry SkyOcclusionVolume's default selects";
-    // OFF, WHICH IS UNREAL'S DEFAULT for the same field and the reason the whole calibration below is
-    // still readable: every number this programme has measured was measured against the sun colour
+         << "the material's AmbientOcclusionStrength default of 1.0 is calibrated for the volume's "
+            "geometry, not the profile term's";
+    // OFF, WHICH IS UNREAL'S DEFAULT for the same field and the reason the whole calibration is still
+    // readable: every number this programme has measured was measured against the sun colour
     // `OuterSpaceIlluminance x T(ground)`, and turning this on replaces that colour everywhere in the
     // shell at once. A default of true would silently re-base CALIBRATION.md.
     EXPECT_FALSE( DefaultOf<bool>( cloud, "PerSampleAtmosphereTransmittance" ) )
          << "the per-sample atmospheric sun transmittance is on by default, which moves every frame this "
             "programme has calibrated against and is not what Unreal ships";
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "TracingStartMaxDistance" ), 35000000.0f );
-    // FIFTEEN kilometres, not the five hundred metres this line used to assert, and the change was
-    // forced by a measurement rather than chosen: a shadow ray that starts inside a two-kilometre cloud
-    // and is only 500 m long never leaves it, so every sample in the body reads the same optical depth
-    // and the body shades flat. Docs/Clouds/CALIBRATION.md holds the frame it was found in; Unreal's
-    // own ShadowTracingDistance is the same 15 km.
-    //
-    // AND THE SAMPLE COUNT HAD TO MOVE WITH THE LENGTH, which is what the paragraph that used to stand
-    // here got wrong. It said a longer ray costs almost nothing because the squared distribution keeps
-    // the first samples near the shaded point. It does not: on a squared distribution the FIRST segment
-    // is the march length over the SQUARE of the count, so lengthening the ray from 500 m to 15 km at a
-    // fixed six samples coarsened the near field from 13.9 m to 417 m — by exactly the factor it
-    // lengthened the ray. Thirty-two is where the rendered sunward highlight stops moving; see
-    // Docs/Clouds/CALIBRATION.md section OE-FIX for the convergence table and the price.
+    // FIFTEEN kilometres — Unreal's own ShadowTracingDistance; a shadow ray that never leaves the cloud
+    // it starts inside shades the body flat. Docs/Clouds/CALIBRATION.md holds the frame it was found in.
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "LightMarchDistance" ), 1500000.0f );
     EXPECT_EQ( DefaultOf<int32_t>( cloud, "LightMarchSamples" ), 32 );
     // The slider must be able to REACH the value that converges, and the old ceiling of sixteen could
     // not — sixteen renders the sunward zenith 34% too bright in linear radiance. The top is the shared
-    // constant, so this assertion is about the relation and not about the number: if somebody lowers the
-    // ceiling below the default, the range test further down catches it too.
+    // constant, so this assertion is about the relation and not about the number.
     EXPECT_FLOAT_EQ( Find( cloud, "LightMarchSamples" )->Meta.RangeMax,
                      static_cast<float>( Desert::ECS::kCloudLightMarchMaxSamples ) );
     EXPECT_GE( Desert::ECS::kCloudLightMarchMaxSamples, DefaultOf<int32_t>( cloud, "LightMarchSamples" ) );
-    // THREE, not one. A cloud lit by single scattering alone is physically grey; what makes a real one
-    // white is light that has bounced inside it many times.
-    EXPECT_EQ( DefaultOf<int32_t>( cloud, "MultiScatterOctaves" ), 3 );
-    // And the same relation the shadow ray's ceiling has, for the same reason: the Range, the payload's
-    // clamp and the clamp in Common/CloudLighting.glslh are three copies of one number. Р18 made them
-    // one constant while measuring whether more octaves buy anything — they do not, and the constant
-    // carries the measurement.
-    EXPECT_FLOAT_EQ( Find( cloud, "MultiScatterOctaves" )->Meta.RangeMax,
-                     static_cast<float>( Desert::ECS::kCloudMultiScatterMaxOctaves ) );
-    EXPECT_GE( Desert::ECS::kCloudMultiScatterMaxOctaves, DefaultOf<int32_t>( cloud, "MultiScatterOctaves" ) );
-    // UE's shipped Multiscatter_Controls, channel for channel. The occlusion is the one that matters:
-    // at 0.5 each successive order was absorbed twice as hard as it should be, light never reached the
-    // core, and the cloud read grey rather than white.
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MultiScatterContribution" ), 0.667f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MultiScatterOcclusion" ), 0.25f );
-    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "MultiScatterEccentricity" ), 0.18f );
-    EXPECT_EQ( DefaultOf<glm::vec3>( cloud, "AmbientScale" ), glm::vec3( 1.0f ) );
+
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "AerialPerspectiveStartDistance" ), 0.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "AerialPerspectiveFadeDistance" ), 0.0f );
+
+    // Shadows on the world: on, at the physical strength.
+    EXPECT_TRUE( DefaultOf<bool>( cloud, "CastShadows" ) );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "ShadowStrength" ), 1.0f );
 
     // Quality: a ceiling rather than a fixed cost, affordable only because the march spends a coarse step
     // on empty sky.
@@ -748,7 +641,10 @@ TEST( VolumetricCloudReflection, TheWeatherTileRepeatsNoMoreOftenToTheHorizonTha
     constexpr float kCalibratedRepeats = 5.0f;
 
     const float viewDistance = DefaultOf<float>( cloud, "MaxViewDistance" );
-    const float tileSize     = DefaultOf<float>( cloud, "WeatherTileSize" );
+    // THE TILE IS THE MATERIAL'S NOW. Its default is read from the pinned mirror of the schema
+    // (CloudMaterialSchema asserts mirror == schema), so this relation still spans the two defaults a
+    // fresh scene actually gets — one from the component, one from the material.
+    const float tileSize = Desert::Graphic::CloudMaterialValues{}.WeatherTileSize;
 
     ASSERT_GT( tileSize, 0.0f ) << "a tile of zero size makes the repeat count infinite";
 
@@ -795,7 +691,8 @@ TEST( VolumetricCloudPayload, TheNearFadeReachesTheGpuAsAnIntervalOrNotAtAll )
             data.NearFadeEndDistance   = endWorld;
 
             const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
-                 data, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
+                 data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u,
+                 atmosphere, glm::vec3( 0.0f ) );
 
             const float endKm   = payload.Fade.z;
             const float startKm = payload.Fade.w;
@@ -833,7 +730,8 @@ TEST( VolumetricCloudPayload, ALegalNearFadeSurvivesThePackerUnchangedAndInKilom
     data.NearFadeEndDistance   = 500000.0f; // 5 km
 
     const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
-         data, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
+         data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere,
+         glm::vec3( 0.0f ) );
 
     EXPECT_FLOAT_EQ( payload.Fade.w, 1.0f );
     EXPECT_FLOAT_EQ( payload.Fade.z, 5.0f );
@@ -842,7 +740,8 @@ TEST( VolumetricCloudPayload, ALegalNearFadeSurvivesThePackerUnchangedAndInKilom
     // "apply it in full from the camera".
     data.NearFadeStartDistance = 0.0f;
     const Desert::Graphic::CloudGpuPayload fromCamera = Desert::Graphic::PackCloudParams(
-         data, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
+         data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere,
+         glm::vec3( 0.0f ) );
 
     EXPECT_FLOAT_EQ( fromCamera.Fade.w, 0.0f );
     EXPECT_FLOAT_EQ( fromCamera.Fade.z, 5.0f );
@@ -897,7 +796,8 @@ TEST( VolumetricCloudPayload, TheSunColourAndThePerSampleGateAgreeOnEveryCombina
                     EXPECT_EQ( perSample, flag && valid && haveLut && haveSkyLight );
 
                     const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
-                         data, &Desert::Assets::CloudTypeDefaultShape(), 1u, atmosphere, glm::vec3( 0.0f ) );
+                         data, Desert::Graphic::CloudMaterialValues{}, &Desert::Assets::CloudTypeDefaultShape(),
+                         1u, atmosphere, glm::vec3( 0.0f ) );
 
                     const glm::vec3 packed( payload.SunColour );
 
@@ -985,8 +885,8 @@ TEST( VolumetricCloudPayload, TheEnvelopeContainsEveryTypeItIsBuiltFrom )
 
         Desert::ECS::VolumetricCloudData data;
 
-        const Desert::Graphic::CloudGpuPayload payload =
-             Desert::Graphic::PackCloudParams( data, set, count, atmosphere, glm::vec3( 0.0f ) );
+        const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
+             data, Desert::Graphic::CloudMaterialValues{}, set, count, atmosphere, glm::vec3( 0.0f ) );
 
         const float bottomKm = payload.Layer.y;
         const float topKm    = payload.Layer.y + payload.Layer.z;
@@ -1031,8 +931,8 @@ TEST( VolumetricCloudPayload, AnEmptySetPacksAShellThatDrawsNothingRatherThanAGu
     const Desert::Graphic::AtmosphereEnv atmosphere{};
     Desert::ECS::VolumetricCloudData     data;
 
-    const Desert::Graphic::CloudGpuPayload payload =
-         Desert::Graphic::PackCloudParams( data, nullptr, 0u, atmosphere, glm::vec3( 0.0f ) );
+    const Desert::Graphic::CloudGpuPayload payload = Desert::Graphic::PackCloudParams(
+         data, Desert::Graphic::CloudMaterialValues{}, nullptr, 0u, atmosphere, glm::vec3( 0.0f ) );
 
     EXPECT_FLOAT_EQ( payload.Detail.w, 0.0f ) << "an empty set claims to have species in it";
     EXPECT_GT( payload.Layer.z, 0.0f ) << "a shell of zero thickness divides by zero in the step schedule";
@@ -1089,13 +989,14 @@ TEST( VolumetricCloudPayload, TheTypesMatterAndEdgeReachTheGpuAsProductsOfTheLay
 
     for ( const Desert::Graphic::CloudTypeShape& shape : { ice, storm, Desert::Assets::CloudTypeDefaultShape() } )
     {
-        Desert::ECS::VolumetricCloudData data;
-        data.DensityScale    = 0.5f;
-        data.ExtinctionScale = 8.0f;
-        data.DetailStrength  = 0.2f;
+        Desert::ECS::VolumetricCloudData     data;
+        Desert::Graphic::CloudMaterialValues material;
+        material.DensityScale    = 0.5f;
+        material.ExtinctionScale = 8.0f;
+        material.DetailStrength  = 0.2f;
 
         const Desert::Graphic::CloudGpuPayload payload =
-             Desert::Graphic::PackCloudParams( data, &shape, 1u, atmosphere, glm::vec3( 0.0f ) );
+             Desert::Graphic::PackCloudParams( data, material, &shape, 1u, atmosphere, glm::vec3( 0.0f ) );
 
         // THE PRODUCT IS NO LONGER FORMED HERE, and that is T3's one change to this relation. With four
         // kinds of cloud in one shell the march does not know which factor it needs until it knows which
@@ -1129,8 +1030,10 @@ TEST( VolumetricCloudPayload, TheTypesMatterAndEdgeReachTheGpuAsProductsOfTheLay
     // frame can show it. If this ever fails, the library has two names for one cloud.
     Desert::ECS::VolumetricCloudData layer;
 
-    const auto icePayload   = Desert::Graphic::PackCloudParams( layer, &ice, 1u, atmosphere, glm::vec3( 0.0f ) );
-    const auto stormPayload = Desert::Graphic::PackCloudParams( layer, &storm, 1u, atmosphere, glm::vec3( 0.0f ) );
+    const auto icePayload = Desert::Graphic::PackCloudParams( layer, Desert::Graphic::CloudMaterialValues{}, &ice,
+                                                              1u, atmosphere, glm::vec3( 0.0f ) );
+    const auto stormPayload = Desert::Graphic::PackCloudParams( layer, Desert::Graphic::CloudMaterialValues{},
+                                                                &storm, 1u, atmosphere, glm::vec3( 0.0f ) );
 
     EXPECT_LT( icePayload.SpeciesEdge[0].z, stormPayload.SpeciesEdge[0].z );
     EXPECT_LT( icePayload.SpeciesEdge[0].w, stormPayload.SpeciesEdge[0].w );
@@ -1203,8 +1106,9 @@ TEST( VolumetricCloudPayload, TheNoiseVolumesAreDeduplicatedAndEverySlotStaysBin
         Desert::Graphic::AtmosphereEnv   atmosphere;
 
         const auto payload = Desert::Graphic::PackCloudParams(
-             layer, shapes, kCloudSpeciesSlots, atmosphere, glm::vec3( 0.0f ),
-             Desert::Graphic::CloudRegionBinding{}, Desert::ECS::kCloudLightMarchMaxSamples, 0.0f, resolved );
+             layer, Desert::Graphic::CloudMaterialValues{}, shapes, kCloudSpeciesSlots, atmosphere,
+             glm::vec3( 0.0f ), Desert::Graphic::CloudRegionBinding{}, Desert::ECS::kCloudLightMarchMaxSamples,
+             0.0f, resolved );
 
         for ( uint32_t k = 0; k < kCloudSpeciesSlots; ++k )
         {
@@ -1268,28 +1172,29 @@ TEST( VolumetricCloudReflection, DistancesAreLengthsExceptTheTwoThatCarryTheirOw
 {
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
 
-    for ( const char* name : { "MaxViewDistance", "TracingStartDistance", "WeatherTileSize", "DetailTileSize",
-                               "LightMarchDistance", "WindSpeed" } )
+    for ( const char* name :
+          { "MaxViewDistance", "TracingStartDistance", "TracingStartMaxDistance", "RegionSize",
+            "NearFadeStartDistance", "NearFadeEndDistance", "LightMarchDistance", "WindSpeed" } )
         EXPECT_TRUE( Find( cloud, name )->Meta.IsLength ) << name;
 
-    // The two that are NOT world units, and say which units they are instead. Marking either as a length
-    // would be a lie, and the editor would convert it.
+    // The one that is NOT world units, and says which unit it is instead. Marking it as a length would
+    // be a lie, and the editor would convert it. (Extinction — the other own-unit field — is material
+    // schema now, its "/km" spelled in its display name there.)
     EXPECT_FALSE( Find( cloud, "PlanetRadius" )->Meta.IsLength );
     EXPECT_EQ( Find( cloud, "PlanetRadius" )->Meta.Units, "km" );
-    EXPECT_FALSE( Find( cloud, "ExtinctionScale" )->Meta.IsLength );
-    EXPECT_EQ( Find( cloud, "ExtinctionScale" )->Meta.Units, "/km" );
 
     // The dimensionless ones stay dimensionless.
-    for ( const char* name : { "Coverage", "CoverageContrast", "DetailStrength", "DensityScale",
-                               "ScatteringAlbedo", "PhaseG", "StopTransmittance" } )
+    for ( const char* name : { "ShadowStrength", "StopTransmittance" } )
         EXPECT_FALSE( Find( cloud, name )->Meta.IsLength ) << name;
 
-    EXPECT_TRUE( Find( cloud, "AmbientScale" )->Meta.IsColor ) << "the ambient scale must draw as a colour";
-    EXPECT_EQ( Find( cloud, "AmbientScale" )->Type, FieldType::Vec3 );
     EXPECT_EQ( Find( cloud, "WindDirection" )->Type, FieldType::Vec3 );
 
     for ( const auto& f : cloud.Fields )
     {
+        // The hidden material row draws its own widget with its own tooltip; every visible field still
+        // documents itself.
+        if ( f.Meta.Hidden )
+            continue;
         EXPECT_FALSE( f.Meta.Tooltip.empty() ) << f.Name << " has no tooltip";
         EXPECT_FALSE( f.Meta.DisplayName.empty() ) << f.Name << " has no display name";
         if ( f.Type == FieldType::Float || f.Type == FieldType::Int )
@@ -1431,6 +1336,10 @@ TEST( CloudQualityTier, TheTierCapsTheShadowRayAndLeavesTheMarchAlone )
     data.LightMarchSamples = 32; // the shipped default, and above Low's ceiling
     data.MaxSteps          = static_cast<int32_t>( kTierMaxSteps );
 
+    // The look at its schema defaults: the tier's business is budgets, and budgets stayed on the
+    // component — the material only has to be present for the packer's signature.
+    const Desert::Graphic::CloudMaterialValues material{};
+
     Desert::Graphic::AtmosphereEnv atmosphere;
     atmosphere.Valid         = true;
     atmosphere.SunDirection  = glm::normalize( glm::vec3( 0.3f, 0.75f, 0.55f ) );
@@ -1449,7 +1358,7 @@ TEST( CloudQualityTier, TheTierCapsTheShadowRayAndLeavesTheMarchAlone )
     {
         const Desert::Graphic::CloudQualityScale scale = Desert::Graphic::CloudQualityFor( tier );
         const Desert::Graphic::CloudGpuPayload   payload = Desert::Graphic::PackCloudParams(
-             data, &shape, 1u, atmosphere, glm::vec3( 0.0f ), Desert::Graphic::CloudRegionBinding{},
+             data, material, &shape, 1u, atmosphere, glm::vec3( 0.0f ), Desert::Graphic::CloudRegionBinding{},
              scale.LightMarchSampleCeiling, scale.StopTransmittanceFloor );
 
         // The shadow ray is min(authored, ceiling) — the tier lowers it and never raises it.
@@ -1484,7 +1393,7 @@ TEST( CloudQualityTier, TheTierCapsTheShadowRayAndLeavesTheMarchAlone )
     {
         const Desert::Graphic::CloudQualityScale scale = Desert::Graphic::CloudQualityFor( tier );
         const Desert::Graphic::CloudGpuPayload   payload = Desert::Graphic::PackCloudParams(
-             data, &shape, 1u, atmosphere, glm::vec3( 0.0f ), Desert::Graphic::CloudRegionBinding{},
+             data, material, &shape, 1u, atmosphere, glm::vec3( 0.0f ), Desert::Graphic::CloudRegionBinding{},
              scale.LightMarchSampleCeiling, scale.StopTransmittanceFloor );
         EXPECT_FLOAT_EQ( payload.SunColour.w, 8.0f ) << QualityTierName( tier ) << " overruled an authored 8";
         EXPECT_FLOAT_EQ( payload.March.y, 0.2f ) << QualityTierName( tier ) << " overruled an authored 0.2";

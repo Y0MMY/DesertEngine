@@ -221,12 +221,22 @@ TEST( SceneSSRUnitsMigration, AV10FileRunsTheStepOnceAndComesOutStamped )
          << "an unstamped result is a file the next run would scale again";
 }
 
-TEST( SceneSSRUnitsMigration, TheStepHasItsOwnVersionAndItIsTheHead )
+// NOT THE HEAD ANY MORE, and that is why this test still exists rather than being deleted. It asserted
+// two things at once — "SSR is step 11" and "step 11 is what the loader requires" — and O1 added step 12
+// above it, which turned the second into a claim about the newest step wearing this step's name. The
+// first half is this step's own and stays; the second belongs to whichever step is last, is enforced at
+// COMPILE time beside kSceneVersionCloudMaterial in SceneMigration.hpp, and is asserted at run time by
+// SceneCloudMaterialMigration. What is left here is the ORDER, which is this step's business: SSR sits
+// above UI visibility and below the cloud material, and a step inserted out of order would run against a
+// tree that has not been through its predecessor.
+TEST( SceneSSRUnitsMigration, TheStepHasItsOwnVersionAndItSitsBetweenItsNeighbours )
 {
     EXPECT_EQ( 11, Migration::kSceneVersionSSRUnits );
-    EXPECT_EQ( Core::kSceneVersion, Migration::kSceneVersionSSRUnits )
-         << "this is the newest step, so it must be the generation the loader requires";
     EXPECT_GT( Migration::kSceneVersionSSRUnits, Migration::kSceneVersionUIVisibility );
+    EXPECT_LT( Migration::kSceneVersionSSRUnits, Migration::kSceneVersionCloudMaterial )
+         << "the cloud material step is the one above this; if it stopped being, the head assertion that "
+            "moved out of this test moved to the wrong suite";
+    EXPECT_LE( Migration::kSceneVersionSSRUnits, Core::kSceneVersion );
 }
 
 // ── The relation, and the class ────────────────────────────────────────────────────────────────────

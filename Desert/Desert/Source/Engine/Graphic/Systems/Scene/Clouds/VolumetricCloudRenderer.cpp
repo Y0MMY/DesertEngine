@@ -23,7 +23,8 @@ namespace Desert::Graphic::System
         // size is fine.
         constexpr uint32_t kMarchWorkGroupSize = 8;
 
-        constexpr const char* kMarchShaderName        = "CloudRaymarch";
+        // One spelling with the material schema's own — the march program IS the cloud material shader.
+        constexpr const char* kMarchShaderName        = kCloudMaterialShaderName;
         constexpr const char* kResolveShaderName      = "CloudTemporalResolve";
         constexpr const char* kCompositeShaderName    = "CloudComposite";
         constexpr const char* kShadowMapShaderName    = "CloudShadowMap";
@@ -195,7 +196,10 @@ namespace Desert::Graphic::System
         // Cloud Layout panel has to name the type behind channel 2, and a panel that compacted the slots
         // for itself would name a different one the day this rule moved. Empty slots are skipped and a
         // repeated type is dropped there, for the reason given there.
-        const ECS::CloudSpeciesResolution resolved = ECS::ResolveCloudSpecies( m_Data );
+        Assets::AssetHandle authored[ECS::kCloudTypeSlots];
+        m_Material.TypeSlots( authored );
+
+        const ECS::CloudSpeciesResolution resolved = ECS::ResolveCloudSpecies( authored );
 
         if ( resolved.BuiltInDefault )
         {
@@ -206,9 +210,6 @@ namespace Desert::Graphic::System
             shapes[0]  = Assets::CloudTypeDefaultShape();
             return 1;
         }
-
-        const Assets::AssetHandle authored[ECS::kCloudTypeSlots] = { m_Data.CloudType1, m_Data.CloudType2,
-                                                                     m_Data.CloudType3, m_Data.CloudType4 };
 
         for ( uint32_t species = 0; species < resolved.Count; ++species )
         {
@@ -235,26 +236,26 @@ namespace Desert::Graphic::System
         params.LayerBottomKm    = std::max( envelope.BottomKm, 0.0f );
         params.LayerThicknessKm = std::max( envelope.TopKm - params.LayerBottomKm, 0.001f );
 
-        params.Coverage         = std::clamp( m_Data.Coverage, 0.0f, 1.0f );
-        params.CoverageContrast = std::max( m_Data.CoverageContrast, 0.01f );
-        params.Seed             = static_cast<uint32_t>( m_Data.Seed );
+        params.Coverage         = std::clamp( m_Material.Coverage, 0.0f, 1.0f );
+        params.CoverageContrast = std::max( m_Material.CoverageContrast, 0.01f );
+        params.Seed             = static_cast<uint32_t>( m_Material.Seed );
 
         // THE FOUR PLACEMENT NUMBERS PASS THROUGH UNCHANGED, and the clamps here are the component's own
         // ranges rather than second opinions: a scene file is a text file and an out-of-range number in
         // one must produce a sky rather than a refusal. Assets::ValidateCloudProceduralParams refuses
         // anything outside them by name, so a clamp that disagreed with a range would turn an artist's
         // typo into a layer that never bakes.
-        params.PlacementDensity     = std::clamp( m_Data.PlacementDensity, 0.25f, 8.0f );
-        params.PlacementScatter     = std::clamp( m_Data.PlacementScatter, 0.0f, 4.0f );
-        params.PlacementSizeVariety = std::clamp( m_Data.PlacementSizeVariety, 0.0f, 1.0f );
-        params.PatchStrength        = std::clamp( m_Data.PatchStrength, 0.0f, 1.0f );
+        params.PlacementDensity     = std::clamp( m_Material.PlacementDensity, 0.25f, 8.0f );
+        params.PlacementScatter     = std::clamp( m_Material.PlacementScatter, 0.0f, 4.0f );
+        params.PlacementSizeVariety = std::clamp( m_Material.PlacementSizeVariety, 0.0f, 1.0f );
+        params.PatchStrength        = std::clamp( m_Material.PatchStrength, 0.0f, 1.0f );
 
         // THE PATCH IS THE ONE THAT CAN REFUSE, because it is half of a RELATION — a modulation finer than
         // three cells decides cells one at a time and reads as a checkerboard. Floored against the
         // lattice HERE rather than left to fail validation, for the same reason: the layer has to draw a
         // sky for whatever the file says. An artist who wants finer patches gets them by shrinking the
         // weather tile, which is what the tooltip names.
-        params.PatchTileKm = std::max( m_Data.PatchTileSize, 1.0f ) / kCloudWorldUnitsPerKm;
+        params.PatchTileKm = std::max( m_Material.PatchTileSize, 1.0f ) / kCloudWorldUnitsPerKm;
 
         // THE BLEND RADIUS AND THE PROFILE DEPTH ARE DERIVED FROM THE LATTICE rather than exposed, and
         // that is a decision with a number behind it. The join inflates its own surface by
@@ -266,7 +267,7 @@ namespace Desert::Graphic::System
         // means it.
         // ONE STATEMENT OF "four cells to a tile", shared with the Cloud Layout panel, which measures a
         // painting's strokes against the cell and must not compute the ratio a second time.
-        const float latticeKm = ECS::CloudLayerLatticeKm( m_Data );
+        const float latticeKm = ECS::CloudLayerLatticeKm( m_Material.WeatherTileSize );
 
         params.BlendRadiusKm  = std::max( 0.02f * latticeKm, 1e-3f );
         params.ProfileDepthKm = std::max( 0.12f * latticeKm, 1e-3f );
@@ -314,18 +315,19 @@ namespace Desert::Graphic::System
         // anything outside them by name — so a clamp that disagreed with a range would turn a typo into a
         // layer that never bakes.
         params.LayoutPlacement.RepeatsPerRegion =
-             static_cast<uint32_t>( std::clamp( m_Data.LayoutRepeats, 1, 16 ) );
-        params.LayoutPlacement.QuarterTurns = static_cast<uint32_t>( std::clamp( m_Data.LayoutRotation, 0, 3 ) );
+             static_cast<uint32_t>( std::clamp( m_Material.LayoutRepeats, 1, 16 ) );
+        params.LayoutPlacement.QuarterTurns =
+             static_cast<uint32_t>( std::clamp( m_Material.LayoutRotation, 0, 3 ) );
         params.LayoutPlacement.OffsetKm =
-             glm::vec2( m_Data.LayoutOffset.x, m_Data.LayoutOffset.y ) / kCloudWorldUnitsPerKm;
-        params.LayoutPlacement.PatternStrength = std::clamp( m_Data.LayoutPatternStrength, 0.0f, 1.0f );
-        params.LayoutPlacement.MaskStrength    = std::clamp( m_Data.LayoutMaskStrength, 0.0f, 1.0f );
+             glm::vec2( m_Material.LayoutOffset.x, m_Material.LayoutOffset.y ) / kCloudWorldUnitsPerKm;
+        params.LayoutPlacement.PatternStrength = std::clamp( m_Material.LayoutPatternStrength, 0.0f, 1.0f );
+        params.LayoutPlacement.MaskStrength    = std::clamp( m_Material.LayoutMaskStrength, 0.0f, 1.0f );
 
         // A NULL HERE IS THE SHIPPED STATE AND NOT A FAILURE — every scene in this repository carries an
         // empty slot, and the bake reads null as "there is no painting" and places the sky exactly as it
         // did before this field existed. A handle that names a layout nobody registered is logged by the
         // service, once, and also arrives here as null.
-        params.Layout = Runtime::ResourceRegistry::GetCloudLayoutService()->Get( m_Data.CloudLayout );
+        params.Layout = Runtime::ResourceRegistry::GetCloudLayoutService()->Get( m_Material.CloudLayout );
 
         // WHEN THE PAINTING CANNOT BE HONOURED IT IS DROPPED, NOT THE SKY. The narrow validator is the one
         // called here on purpose — handed the whole one, a mistyped patch tile would have dropped the
@@ -780,7 +782,7 @@ namespace Desert::Graphic::System
         // §2.3.1 of the contract is about.
         const CloudQualityScale quality = CloudQualityFor( m_Quality );
 
-        payload = PackCloudParams( m_Data, shapes, speciesCount, atmosphere, m_WindOffset,
+        payload = PackCloudParams( m_Data, m_Material, shapes, speciesCount, atmosphere, m_WindOffset,
                                    CloudRegionBinding{ m_ModellingOriginKm, m_ModellingParams.RegionSizeKm },
                                    quality.LightMarchSampleCeiling, quality.StopTransmittanceFloor, m_NoiseSlots );
         return true;
@@ -955,6 +957,48 @@ namespace Desert::Graphic::System
         }
 
         m_HeroClouds = heroClouds;
+
+        ResolveMaterial();
+    }
+
+    void VolumetricCloudRenderer::ResolveMaterial()
+    {
+        // THE LOOK IS RESOLVED HERE, ONCE PER FRAME, AND NOWHERE ELSE (O1, D-35). The march schema —
+        // CloudRaymarch's own Properties block — supplies every default, the `.demat` chain overwrites by
+        // name, and everything downstream (the packer, the bake decision, the species resolve) reads the
+        // one m_Material this fills. Resolving per frame is what the terrain does for the same reason:
+        // an artist dragging a slider in the Material Editor must see the sky move the same frame, and
+        // the whole resolve is two vector copies plus a name map.
+        const Core::Formats::ShaderProgramMeta* schema = nullptr;
+        if ( const auto shaderService = Runtime::ResourceRegistry::GetShaderService() )
+        {
+            if ( const auto marchShader = shaderService->GetByName( kMarchShaderName ) )
+                schema = &marchShader->GetProgramMeta();
+        }
+        // A missing march shader is already a loud failure in CreatePipelines — nothing marches at all —
+        // so no second message here; BuildCloudMaterialValues degrades to its pinned mirror of the schema.
+
+        MaterialOverrides overrides;
+        if ( static_cast<uint64_t>( m_Data.Material ) != 0 )
+        {
+            auto* materialService = Runtime::ResourceRegistry::GetMaterialService();
+            if ( !materialService || !materialService->ResolveOverrides( m_Data.Material, overrides ) )
+            {
+                // Not a silent default: a handle that resolves to nothing is a material the scene names
+                // and the asset database does not have — the sky then renders the schema defaults, which
+                // LOOKS like an unauthored layer rather than a broken one. Said once per handle; this
+                // runs every frame.
+                const uint64_t raw = static_cast<uint64_t>( m_Data.Material );
+                if ( m_WarnedMissingMaterials.insert( raw ).second )
+                {
+                    LOG_WARN( "[Clouds] material handle {} does not resolve to a registered material — "
+                              "the layer renders with the CloudRaymarch schema defaults.",
+                              raw );
+                }
+            }
+        }
+
+        m_Material = BuildCloudMaterialValues( schema, overrides );
     }
 
     void VolumetricCloudRenderer::BuildAuthoredPayload( const CloudGpuPayload& payload )

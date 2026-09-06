@@ -109,6 +109,11 @@ namespace Desert::Editor
         // @p parentData / @p isInstance: material-INSTANCE mode — the schema comes from the parent's
         // shader, non-overridden rows display the PARENT's value, edits write overrides into the child,
         // and texture rows are read-only (per-instance texture descriptors are a v2).
+        /// One non-texture asset-reference row of the schema (CloudType / CloudLayout — the kinds the
+        /// Volume domain declares). Combo + AssetFile drag-drop, value in MaterialData::Textures by name.
+        bool DrawCloudAssetRef( Assets::MaterialData& data, const ::Desert::Core::Formats::ShaderParam& p,
+                                const std::string& hiddenId );
+
         bool DrawParameters( Assets::SurfaceMaterialAsset& asset, const Assets::MaterialData* parentData,
                              bool isInstance );
 

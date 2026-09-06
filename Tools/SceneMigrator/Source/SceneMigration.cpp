@@ -8,10 +8,21 @@
 // no asset manager, so it does not bring another layer into this one.
 #include <Engine/Assets/CloudTypeData.hpp>
 
+#include <Engine/Assets/MaterialData.hpp>
+#include <Engine/Core/Serialize/CustomReflect.hpp>
+#include <Engine/Core/Serialize/GLMReflect.hpp>
+
+#include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Units.hpp>
 
 #include <glm/trigonometric.hpp>
+
+// The cloud material step is the only migration that PRODUCES a file rather than only rewriting the
+// property tree it was handed, so it is the only one that needs the serializer here. It still writes
+// nothing itself: it returns the JSON text in the report and MigratorMain owns the atomic write, which
+// is what keeps this function pure and testable (contract Section 4.4).
+#include <rflcpp/rfl/json.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -1347,6 +1358,260 @@ namespace Desert::Migration
         return report;
     }
 
+    CloudMaterialMigrationReport MigrateCloudMaterialV11ToV12( std::vector<Assets::EntityData>& entities,
+                                                               const std::string&               sceneName )
+    {
+        // The thirty-three moved keys, spelled ONCE. Components: how many numbers the value carries
+        // (1 scalar, 2/3 vector); the material stores every value as a vec4 with the tail zeroed, which
+        // is the `.demat` format's own convention for scalars.
+        struct MovedValue
+        {
+            const char* Key;
+            int         Components;
+        };
+        static constexpr MovedValue kValues[] = {
+             { "Coverage", 1 },
+             { "CoverageContrast", 1 },
+             { "WeatherTileSize", 1 },
+             { "Seed", 1 },
+             { "PlacementDensity", 1 },
+             { "PlacementScatter", 1 },
+             { "PlacementSizeVariety", 1 },
+             { "PatchTileSize", 1 },
+             { "PatchStrength", 1 },
+             { "LayoutPatternStrength", 1 },
+             { "LayoutMaskStrength", 1 },
+             { "LayoutRepeats", 1 },
+             { "LayoutRotation", 1 },
+             { "LayoutOffset", 2 },
+             { "DetailTileSize", 1 },
+             { "DetailStrength", 1 },
+             { "DensityScale", 1 },
+             { "ExtinctionScale", 1 },
+             { "ScatteringAlbedo", 1 },
+             { "PhaseG", 1 },
+             { "PhaseGBackward", 1 },
+             { "PhaseBlend", 1 },
+             { "AmbientOcclusionStrength", 1 },
+             { "MultiScatterOctaves", 1 },
+             { "MultiScatterContribution", 1 },
+             { "MultiScatterOcclusion", 1 },
+             { "MultiScatterEccentricity", 1 },
+             { "AmbientScale", 3 },
+        };
+        static constexpr const char* kAssets[]   = { "CloudType1", "CloudType2", "CloudType3", "CloudType4",
+                                                     "CloudLayout" };
+        static constexpr size_t      kMovedCount = std::size( kValues ) + std::size( kAssets );
+
+        const auto isMovedValue = []( const std::string& key ) -> const MovedValue*
+        {
+            for ( const MovedValue& v : kValues )
+                if ( key == v.Key )
+                    return &v;
+            return nullptr;
+        };
+        const auto isMovedAsset = []( const std::string& key )
+        {
+            for ( const char* a : kAssets )
+                if ( key == a )
+                    return true;
+            return false;
+        };
+
+        // A number in whichever of the two spellings JSON parsing gave it. reflect-cpp keeps 1 as an int
+        // and 1.0 as a double, and a migration that accepted only one spelling would reject half the
+        // hand-edited scenes in the repository for stating "Seed": 1.
+        const auto asNumber = []( const rfl::Generic& g ) -> std::optional<double>
+        {
+            if ( const auto d = g.to_double(); d )
+                return *d;
+            if ( const auto i = g.to_int(); i )
+                return static_cast<double>( *i );
+            return std::nullopt;
+        };
+
+        CloudMaterialMigrationReport report;
+
+        // The material's file name comes from the SCENE, sanitized exactly as the editor sanitizes an
+        // entity name into "M_<...>": the file lands in the shared Materials/ directory and has to say
+        // whose sky it is. A second cloud entity in one scene (nothing renders it - the collector takes
+        // the lowest id - but a file may carry one) gets a numbered sibling rather than clobbering.
+        std::string base;
+        for ( const char c : sceneName )
+            base += ( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == '-' ) ? c : '_';
+        if ( base.empty() )
+            base = "Scene";
+
+        int cloudEntityIndex = 0;
+
+        for ( auto& entity : entities )
+        {
+            const auto clouds = entity.Components.get( "VolumetricCloud" );
+            if ( !clouds.has_value() )
+                continue;
+
+            const auto fields = clouds.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] entity '{0}': the VolumetricCloud payload is {1}, not an "
+                          "object - its look could not be moved into a material",
+                          entity.Tag.value_or( "Entity" ), Describe( clouds.value() ) );
+                continue;
+            }
+
+            ++cloudEntityIndex;
+
+            Assets::MaterialData material;
+            material.ShaderName = "CloudRaymarch"; // = Graphic::kCloudMaterialShaderName; the migration
+                                                   // suite pins the two spellings together
+
+            rfl::Generic::Object kept;
+            int                  movedHere = 0;
+
+            for ( const auto& [key, value] : fields.value() )
+            {
+                if ( const MovedValue* moved = isMovedValue( key ) )
+                {
+                    glm::vec4 packed( 0.0f );
+                    bool      usable = true;
+
+                    if ( moved->Components == 1 )
+                    {
+                        if ( const auto n = asNumber( value ); n )
+                            packed.x = static_cast<float>( *n );
+                        else
+                            usable = false;
+                    }
+                    else
+                    {
+                        const auto arr = value.to_array();
+                        usable         = arr.has_value() && arr.value().size() >= size_t( moved->Components );
+                        if ( usable )
+                        {
+                            for ( int i = 0; i < moved->Components; ++i )
+                            {
+                                if ( const auto n = asNumber( arr.value()[size_t( i )] ); n )
+                                    packed[i] = static_cast<float>( *n );
+                                else
+                                    usable = false;
+                            }
+                        }
+                    }
+
+                    if ( !usable )
+                    {
+                        // The key still LEAVES the payload - the runtime knows nothing about the old
+                        // format (§4.3) - but the value it carried is named, out loud, because a number
+                        // somebody authored did not reach the material and will read as the default.
+                        report.Rejected += 1;
+                        report.RejectedNames.push_back( key );
+                        LOG_WARN( "[SceneMigration] entity '{0}': VolumetricCloud.{1} is {2} and could "
+                                  "not be carried into the cloud material - the schema default stands",
+                                  entity.Tag.value_or( "Entity" ), key, Describe( value ) );
+                        ++movedHere; // the payload still changed shape
+                        continue;
+                    }
+
+                    material.Params.push_back( { key, packed } );
+                    report.ValuesMoved += 1;
+                    ++movedHere;
+                    continue;
+                }
+
+                if ( isMovedAsset( key ) )
+                {
+                    const auto text = value.to_string();
+                    if ( !text.has_value() )
+                    {
+                        report.Rejected += 1;
+                        report.RejectedNames.push_back( key );
+                        LOG_WARN( "[SceneMigration] entity '{0}': VolumetricCloud.{1} is {2}, not a "
+                                  "path - the slot arrives empty in the material",
+                                  entity.Tag.value_or( "Entity" ), key, Describe( value ) );
+                        ++movedHere;
+                        continue;
+                    }
+                    const std::string& path = text.value();
+                    if ( path.empty() )
+                    {
+                        // An empty slot is the shipped state of most scenes; it needs no entry - an
+                        // absent name resolves to the null handle exactly as an empty string did.
+                        ++movedHere;
+                        continue;
+                    }
+                    if ( path.front() == '/' || path.find( ':' ) != std::string::npos )
+                    {
+                        // A pure function cannot resolve an absolute path against a root it must not
+                        // read; and no scene in the repository carries one here (the cloud branches
+                        // were relative from the day they existed). Named rather than guessed at.
+                        report.Rejected += 1;
+                        report.RejectedNames.push_back( key );
+                        LOG_WARN( "[SceneMigration] entity '{0}': VolumetricCloud.{1} names a "
+                                  "non-relative path '{2}' - the slot arrives empty in the material",
+                                  entity.Tag.value_or( "Entity" ), key, path );
+                        ++movedHere;
+                        continue;
+                    }
+
+                    // THE SAME HANDLE THE RUNTIME MINTS for this file: FNV over "assets:<relative>",
+                    // which is AssetHandle::FromCookedPath's own key for a content asset
+                    // (Common/Core/AssetHandle.hpp, StableKeyForPath). Deriving it here rather than
+                    // resolving through a filesystem is what keeps this function pure - and the
+                    // migration suite pins the two derivations together.
+                    const auto handle = ::Common::AssetHandle::FromKey( "assets:" + path );
+                    material.Textures.push_back( { key, static_cast<uint64_t>( handle ) } );
+                    report.AssetsMoved += 1;
+                    ++movedHere;
+                    continue;
+                }
+
+                kept[key] = value;
+            }
+
+            if ( movedHere == 0 )
+            {
+                // Either already raised (a bespoke or shared "Material" is already present - untouched,
+                // idempotent), or a layer that never authored a single look field. D-37: the second case
+                // is NOT left byte-identical any more - it is pointed at the shared default so that every
+                // migrated layer names some material and "the look lives in the material" holds without
+                // an empty-slot exception. `kept` is an exact copy of the original payload here (nothing
+                // matched a moved key), so checking IT for "Material" is checking the payload as it was.
+                bool alreadyNamed = false;
+                for ( const auto& [key, value] : kept )
+                    alreadyNamed = alreadyNamed || key == "Material";
+
+                if ( !alreadyNamed )
+                {
+                    kept["Material"] = rfl::Generic( std::string( kDefaultCloudMaterialRelativePath ) );
+                    entity.Components["VolumetricCloud"] = rfl::Generic( std::move( kept ) );
+                    report.Entities += 1;
+                    report.DefaultsAssigned += 1;
+                    report.Defaulted += static_cast<int>( kMovedCount );
+                }
+                continue;
+            }
+
+            const std::string suffix  = cloudEntityIndex > 1 ? "_" + std::to_string( cloudEntityIndex ) : "";
+            const std::string relPath = "Materials/M_" + base + "_Clouds" + suffix + ".demat";
+
+            // DERIVED, NOT GENERATED: the MaterialId is the FNV of the file's own relative path, so two
+            // runs of this migration produce byte-identical files and byte-identical scenes - which is
+            // what lets the suite pin the output and the repository diff show only real change.
+            material.MaterialId = ::Common::UUID(
+                 static_cast<uint64_t>( ::Common::AssetHandle::FromKey( "cloudmat:" + relPath ) ) );
+
+            kept["Material"] = rfl::Generic( relPath );
+
+            report.Materials.push_back( { relPath, rfl::json::write( material ) } );
+
+            entity.Components["VolumetricCloud"] = rfl::Generic( std::move( kept ) );
+            report.Entities += 1;
+            report.Defaulted += static_cast<int>( kMovedCount ) - movedHere;
+        }
+
+        return report;
+    }
+
     SceneMigrationReport MigrateScene( SceneSerialized& scene, const std::filesystem::path& assetsRoot )
     {
         SceneMigrationReport report;
@@ -1445,6 +1710,15 @@ namespace Desert::Migration
         {
             report.SSRUnitsRaised = true;
             report.SSRUnits       = MigrateSSRUnitsV10ToV11( scene.Settings );
+        }
+
+        // AFTER the cloud chain above (v3 -> v6 write and rename the very keys this one moves out) and
+        // independent of everything since: no other step reads a VolumetricCloud payload. The material
+        // files it returns are the TOOL's to write - this function stays pure.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionCloudMaterial )
+        {
+            report.CloudMaterialRaised = true;
+            report.CloudMaterial       = MigrateCloudMaterialV11ToV12( scene.Entities, scene.SceneName );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

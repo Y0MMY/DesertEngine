@@ -27,6 +27,7 @@
 
 // The LAYER's Detail Strength, for the one relation that is between the library and the layer: the cut's
 // depth is their product and it is clamped. PROPERTY expands to nothing, so this costs no reflection.
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 
 #include <Common/Core/Constants.hpp>
@@ -1040,7 +1041,11 @@ TEST( CloudTypeLibrary, TheLayersDetailStrengthStillMovesEveryShippedType )
     // congestus whose factor is 1 by definition, because past that depth the measurement says a thin body
     // stops being a cloud. A type that genuinely wants a deeper cut needs the density to carry it, and
     // that is content work with its own frames.
-    const Desert::ECS::VolumetricCloudData layer;
+    // The layer's Detail Strength is the MATERIAL's since O1, and CloudMaterialValues is the mirror of
+    // the CloudRaymarch schema the CloudMaterialSchema suite pins. Read rather than transcribed: this
+    // whole test is about the product of the layer's value and the type's factor, so a copy of one
+    // side would let the bound go on passing after the value it bounds had moved.
+    const Desert::Graphic::CloudMaterialValues layer;
 
     float       largestFactor = 0.0f;
     const char* largestName   = "";
@@ -1128,7 +1133,11 @@ TEST( CloudTypeLibrary, TheLayersDetailStrengthStillMovesEveryShippedType )
 // below is a thousand times looser than that and a thousand times tighter than a typo.
 TEST( CloudTypeLibrary, TheReBasedTypesKeepTheCutDepthTheirFilesWereAuthoredAt )
 {
-    const Desert::ECS::VolumetricCloudData layer;
+    // The layer's Detail Strength is the MATERIAL's since O1, and CloudMaterialValues is the mirror of
+    // the CloudRaymarch schema the CloudMaterialSchema suite pins. Read rather than transcribed: this
+    // whole test is about the product of the layer's value and the type's factor, so a copy of one
+    // side would let the bound go on passing after the value it bounds had moved.
+    const Desert::Graphic::CloudMaterialValues layer;
 
     // The depth each of these files has been authored at since before task DS, and which no re-base of the
     // layer's Detail Strength is permitted to move.

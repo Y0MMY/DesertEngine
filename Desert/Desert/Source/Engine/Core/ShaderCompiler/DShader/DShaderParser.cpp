@@ -252,6 +252,19 @@ namespace Desert::Core::Preprocess
                 param.IsCubeTexture = true;
                 param.Type          = VT::Unknown;
             }
+            // Non-texture asset references — CPU-side inputs a renderer resolves through its own service,
+            // never a GLSL declaration. The keyword is the ASSET CLASS so the schema names what the slot
+            // accepts; a new asset-reference kind is one line here plus a widget branch in the editor.
+            else if ( s == "cloudtype" )
+            {
+                param.AssetKind = "CloudTypeAsset";
+                param.Type      = VT::Unknown;
+            }
+            else if ( s == "cloudlayout" )
+            {
+                param.AssetKind = "CloudLayoutAsset";
+                param.Type      = VT::Unknown;
+            }
             else
                 return false;
             return true;
@@ -344,9 +357,16 @@ namespace Desert::Core::Preprocess
                          !Expect( c, ')', err, "closing Category" ) )
                         return false;
                 }
+                else if ( attr == "tooltip" )
+                {
+                    if ( !Expect( c, '(', err, "after Tooltip" ) || !ReadQuoted( c, param.Tooltip, err ) ||
+                         !Expect( c, ')', err, "closing Tooltip" ) )
+                        return false;
+                }
                 else
                 {
-                    err = { c.Line, "unknown property attribute '" + attr + "' (expected Range or Category)" };
+                    err = { c.Line,
+                            "unknown property attribute '" + attr + "' (expected Range, Category or Tooltip)" };
                     return false;
                 }
                 SkipTrivia( c );
@@ -476,6 +496,18 @@ namespace Desert::Core::Preprocess
 
                 if ( !ParsePropertyDefault( c, param, err ) )
                     return false;
+
+                // An asset reference inside a GPU-bound Properties block is refused HERE, at parse, with
+                // the parameter named. Skipping it silently instead would shift every row field after it
+                // by one slot — a divergence between the C++ row upload and the generated struct that no
+                // validation layer reports and no test that reads either side alone can see.
+                if ( param.IsAssetRef() && ( info.UBBinding || info.TextureBinding ) )
+                {
+                    err = { entryLine, "asset-reference property '" + param.Name + "' (" + param.AssetKind +
+                                            ") is CPU-side only and cannot appear in a Properties block "
+                                            "that declares Binding()/TextureBinding()" };
+                    return false;
+                }
 
                 meta.Params.push_back( std::move( param ) );
             }
@@ -758,7 +790,7 @@ namespace Desert::Core::Preprocess
             {
                 bool any = false;
                 for ( const auto& p : meta.Params )
-                    if ( !p.IsTexture )
+                    if ( !p.IsTexture && !p.IsAssetRef() )
                         any = true;
 
                 if ( any )
@@ -1066,6 +1098,8 @@ namespace Desert::Core::Preprocess
                     result.Meta.Domain = ShaderDomain::Skybox;
                 else if ( v == "postprocess" )
                     result.Meta.Domain = ShaderDomain::PostProcess;
+                else if ( v == "volume" )
+                    result.Meta.Domain = ShaderDomain::Volume;
                 else
                 {
                     err = { line, "unknown Domain '" + v + "'" };

@@ -24,12 +24,21 @@
 // CloudPlacementSpectrum.WithNoPaintingBoundTheLayoutKnobsCannotReachOneCloud. This is the cheapest of the
 // three and the one that localises a regression, because a frame that moved says only that something did.
 //
+// AND WHAT O1 CHANGED, because the paragraphs above are about a v6->v7 that was never written and are
+// still true of it. The six keys DO migrate now — not at v6->v7 but at v11->v12, out of the component
+// and into a cloud material, along with twenty-seven others. That does not retire this suite: the
+// question it asks is still "what does an absent key mean", and the answer simply moved from a member
+// initializer on the component to the CloudRaymarch schema, which is where the assertions below now read
+// it. MigrateCloudMaterialV11ToV12 does not invent a value for a key the file never stated, so a v6 file
+// arrives at v12 with those six still unstated, and this suite is still what says that is the old sky.
+//
 // Everything below runs on the parsed tree and on pure functions. No GPU, no scene graph, no asset
 // manager.
 
 #include <Engine/Assets/CloudProceduralVolume.hpp>
 #include <Engine/Core/Serialize/SceneFormat.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionSerializer.hpp>
 
@@ -149,32 +158,43 @@ TEST( SceneCloudLayoutDefault, AV6PayloadWithNoLayoutKeysBindsNoPainting )
     Desert::ECS::VolumetricCloudData layer;
     DeserializeReflected( CloudType(), &layer, payload );
 
-    // The settings that were in the file arrived, so the deserialiser ran and the rest of the test is
-    // about absence rather than about nothing having happened.
+    // The settings that were in the file AND still belong to the component arrived, so the deserialiser
+    // ran and the rest of the test is about absence rather than about nothing having happened. Coverage,
+    // Patch Strength and Placement Density used to stand here; since O1 they are the material's, so the
+    // two budget values the fixture also states carry that job.
     EXPECT_TRUE( layer.Enabled );
-    EXPECT_FLOAT_EQ( layer.Coverage, 0.762f );
-    EXPECT_FLOAT_EQ( layer.PatchStrength, 0.60f );
-    EXPECT_FLOAT_EQ( layer.PlacementDensity, 1.75f );
+    EXPECT_FLOAT_EQ( layer.RegionSize, 4800000.0f );
+    EXPECT_EQ( layer.MaxSteps, 192 );
 
-    // AND THE SIX THAT WERE NOT IN IT ARE THE DEFAULTS. The one that decides everything is the first:
-    // an empty handle is what the renderer resolves to a null painting, and a null painting is what makes
-    // the bake take the procedural branch it has always taken.
-    EXPECT_EQ( layer.CloudLayout, Desert::Assets::AssetHandle::Null() )
+    // AND THE SIX THAT WERE NOT IN IT ARE THE DEFAULTS — read where they now live. Since O1 an absent
+    // layout key does not fall through to a C++ member initializer on the component; it falls through to
+    // the CloudRaymarch schema, because a v6 payload migrates to a material that states only the keys the
+    // file stated, and BuildCloudMaterialValues fills the rest from the schema. That is the SAME
+    // relation this suite has always asserted — "an absent key spells the old behaviour" — measured on
+    // the side the value moved to. Empty overrides are exactly what such a migrated material carries for
+    // these six.
+    const Desert::Graphic::CloudMaterialValues look =
+         Desert::Graphic::BuildCloudMaterialValues( nullptr, Desert::Graphic::MaterialOverrides{} );
+
+    // The one that decides everything is the first: an empty handle is what the renderer resolves to a
+    // null painting, and a null painting is what makes the bake take the procedural branch it has always
+    // taken.
+    EXPECT_EQ( look.CloudLayout, Desert::Assets::AssetHandle::Null() )
          << "a scene written before the painted layout existed came back with a painting bound, so every "
             "shipped scene changed the day this phase landed and nothing in the file says so";
 
-    EXPECT_EQ( layer.LayoutRepeats, 1 );
-    EXPECT_EQ( layer.LayoutRotation, 0 );
-    EXPECT_FLOAT_EQ( layer.LayoutOffset.x, 0.0f );
-    EXPECT_FLOAT_EQ( layer.LayoutOffset.y, 0.0f );
+    EXPECT_EQ( look.LayoutRepeats, 1 );
+    EXPECT_EQ( look.LayoutRotation, 0 );
+    EXPECT_FLOAT_EQ( look.LayoutOffset.x, 0.0f );
+    EXPECT_FLOAT_EQ( look.LayoutOffset.y, 0.0f );
 
     // THE TWO STRENGTHS DEFAULT TO ONE AND THAT IS DELIBERATE, so it is asserted rather than left to look
     // like an oversight. They are inert while no painting is bound — proved by the test below and by
     // CloudPlacementSpectrum.WithNoPaintingBoundTheLayoutKnobsCannotReachOneCloud — and defaulting them to
     // zero instead would mean an artist who drops a painting into the slot sees nothing happen and cannot
     // tell a slot that is not wired from a slider that is down.
-    EXPECT_FLOAT_EQ( layer.LayoutPatternStrength, 1.0f );
-    EXPECT_FLOAT_EQ( layer.LayoutMaskStrength, 1.0f );
+    EXPECT_FLOAT_EQ( look.LayoutPatternStrength, 1.0f );
+    EXPECT_FLOAT_EQ( look.LayoutMaskStrength, 1.0f );
 }
 
 // AND THE DEFAULTS PLACE THE CLOUDS THE OLD WAY. The assertion above says the fields arrive unset; this
@@ -186,35 +206,40 @@ TEST( SceneCloudLayoutDefault, AV6PayloadWithNoLayoutKeysBindsNoPainting )
 // through the deserialiser would pass there and fail here.
 TEST( SceneCloudLayoutDefault, TheDefaultsFromAV6FileArePlacementNothingCanTellFromTheOldOne )
 {
-    Desert::ECS::VolumetricCloudData layer;
-    DeserializeReflected( CloudType(), &layer, CloudPayloadV6() );
+    // WHERE THE FILE'S SILENCE IS NOW ANSWERED. Before O1 an absent layout key fell through the reflected
+    // deserialiser to a member initializer on the component; since O1 the six keys are the material's, a
+    // v6 payload migrates to a material stating only the keys the file stated, and the absent ones are
+    // answered by the CloudRaymarch schema through BuildCloudMaterialValues. Empty overrides ARE a v6
+    // file's silence about all six — so this is the same claim, read on the side the values moved to.
+    const Desert::Graphic::CloudMaterialValues look =
+         Desert::Graphic::BuildCloudMaterialValues( nullptr, Desert::Graphic::MaterialOverrides{} );
 
     CloudProceduralFieldParams fromFile = ShippedParams();
-    fromFile.Coverage                   = layer.Coverage;
-    fromFile.PatchStrength              = layer.PatchStrength;
-    fromFile.PlacementDensity           = layer.PlacementDensity;
-    fromFile.PlacementScatter           = layer.PlacementScatter;
-    fromFile.PlacementSizeVariety       = layer.PlacementSizeVariety;
+    fromFile.Coverage                   = look.Coverage;
+    fromFile.PatchStrength              = look.PatchStrength;
+    fromFile.PlacementDensity           = look.PlacementDensity;
+    fromFile.PlacementScatter           = look.PlacementScatter;
+    fromFile.PlacementSizeVariety       = look.PlacementSizeVariety;
 
     // The layout numbers as the file's silence produced them, mapped the way
     // VolumetricCloudRenderer::BuildProceduralParams maps them. `Layout` stays null because the handle is
     // empty and the service answers null for an empty handle.
-    fromFile.LayoutPlacement.RepeatsPerRegion = static_cast<uint32_t>( layer.LayoutRepeats );
-    fromFile.LayoutPlacement.QuarterTurns     = static_cast<uint32_t>( layer.LayoutRotation );
-    fromFile.LayoutPlacement.OffsetKm         = glm::vec2( layer.LayoutOffset.x, layer.LayoutOffset.y );
-    fromFile.LayoutPlacement.PatternStrength  = layer.LayoutPatternStrength;
-    fromFile.LayoutPlacement.MaskStrength     = layer.LayoutMaskStrength;
+    fromFile.LayoutPlacement.RepeatsPerRegion = static_cast<uint32_t>( look.LayoutRepeats );
+    fromFile.LayoutPlacement.QuarterTurns     = static_cast<uint32_t>( look.LayoutRotation );
+    fromFile.LayoutPlacement.OffsetKm         = glm::vec2( look.LayoutOffset.x, look.LayoutOffset.y );
+    fromFile.LayoutPlacement.PatternStrength  = look.LayoutPatternStrength;
+    fromFile.LayoutPlacement.MaskStrength     = look.LayoutMaskStrength;
 
     ASSERT_EQ( fromFile.Layout, nullptr );
 
     // The same parameters with the layout block never touched at all — which is literally the struct as it
     // was before this phase, since the six fields did not exist.
     CloudProceduralFieldParams asBefore = ShippedParams();
-    asBefore.Coverage                   = layer.Coverage;
-    asBefore.PatchStrength              = layer.PatchStrength;
-    asBefore.PlacementDensity           = layer.PlacementDensity;
-    asBefore.PlacementScatter           = layer.PlacementScatter;
-    asBefore.PlacementSizeVariety       = layer.PlacementSizeVariety;
+    asBefore.Coverage                   = look.Coverage;
+    asBefore.PatchStrength              = look.PatchStrength;
+    asBefore.PlacementDensity           = look.PlacementDensity;
+    asBefore.PlacementScatter           = look.PlacementScatter;
+    asBefore.PlacementSizeVariety       = look.PlacementSizeVariety;
 
     const glm::vec2 origin = CloudProceduralRegionOriginKm( asBefore, 0.0f, 0.0f );
 
@@ -280,7 +305,7 @@ TEST( SceneCloudLayoutDefault, ThePaintedLayoutDidNotMoveTheSchemaVersion )
 // not the numbering the painting uses, and the symptom of not knowing that is a channel somebody swears
 // they painted that does nothing at all. The Cloud Layout panel names the type behind every channel, and
 // it can only do that because ECS::ResolveCloudSpecies states the rule once — the renderer resolves the
-// same call.
+// same call — over the MATERIAL's four slots since O1, which is also where the panel reads them.
 //
 // These are the cases the panel's labels are wrong about if the rule ever moves.
 TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsFollowThem )
@@ -291,10 +316,9 @@ TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsF
     // A LAYER WITH ONE TYPE IN THE THIRD SLOT IS DRIVEN BY THE PAINTING'S FIRST CHANNEL. This is the case
     // that reads as a broken feature: an artist paints blue for "Cloud Type 3" and the sky ignores it.
     {
-        Desert::ECS::VolumetricCloudData data;
-        data.CloudType3 = cumulus;
+        const Desert::Assets::AssetHandle slots[Desert::ECS::kCloudTypeSlots] = { {}, {}, cumulus, {} };
 
-        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( slots );
 
         EXPECT_EQ( resolved.Count, 1u );
         EXPECT_FALSE( resolved.BuiltInDefault );
@@ -305,11 +329,9 @@ TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsF
 
     // ORDER IS THE ORDER OF THE SLOTS, not of anything else, and a gap does not reserve a channel.
     {
-        Desert::ECS::VolumetricCloudData data;
-        data.CloudType2 = cirrus;
-        data.CloudType4 = cumulus;
+        const Desert::Assets::AssetHandle slots[Desert::ECS::kCloudTypeSlots] = { {}, cirrus, {}, cumulus };
 
-        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( slots );
 
         EXPECT_EQ( resolved.Count, 2u );
         EXPECT_EQ( resolved.AuthoredSlot[0], 1u );
@@ -320,12 +342,9 @@ TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsF
     // of cloud at twice the cost. The second slot's channel therefore drives NOTHING, and an artist who
     // painted it is owed that sentence rather than a shrug.
     {
-        Desert::ECS::VolumetricCloudData data;
-        data.CloudType1 = cumulus;
-        data.CloudType2 = cumulus;
-        data.CloudType3 = cirrus;
+        const Desert::Assets::AssetHandle slots[Desert::ECS::kCloudTypeSlots] = { cumulus, cumulus, cirrus, {} };
 
-        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( slots );
 
         EXPECT_EQ( resolved.Count, 2u );
         EXPECT_EQ( resolved.AuthoredSlot[0], 0u );
@@ -338,8 +357,8 @@ TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsF
     // authored a type for from having no sky — and what keeps the panel's channel slider from having an
     // empty range.
     {
-        const Desert::ECS::VolumetricCloudData    data;
-        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+        const Desert::Assets::AssetHandle         slots[Desert::ECS::kCloudTypeSlots] = {};
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( slots );
 
         EXPECT_EQ( resolved.Count, 1u );
         EXPECT_TRUE( resolved.BuiltInDefault );

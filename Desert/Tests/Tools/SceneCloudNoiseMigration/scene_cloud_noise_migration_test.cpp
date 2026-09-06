@@ -21,6 +21,7 @@
 #include <Engine/Assets/CloudTypeData.hpp>
 #include <SceneMigration.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
@@ -232,20 +233,24 @@ TEST( SceneCloudNoiseMigration, TheVolumeSlotThatReplacedThemHasMovedOntoTheClou
          << "the layer carries a noise volume slot again, and the cloud type carries one too — two sources "
             "of truth for one thing";
 
+    // AND THE SLOT MOVED AGAIN, one more version later: O1 took the four type slots off the component
+    // and into the cloud MATERIAL, whose schema is CloudRaymarch's Properties block. So the component
+    // must not carry them either — two places to name a kind of cloud is the same two-sources-of-truth
+    // this test was already watching for one level up.
     const auto slot = std::find_if( type->Fields.begin(), type->Fields.end(),
                                     []( const auto& field ) { return field.Name == "CloudType1"; } );
-    ASSERT_NE( slot, type->Fields.end() ) << "the component has no cloud type, so nothing replaced the "
-                                             "four fields the migration deletes";
-
-    EXPECT_TRUE( slot->Meta.IsAsset );
-    EXPECT_EQ( slot->Meta.AssetType, "CloudTypeAsset" );
+    EXPECT_EQ( slot, type->Fields.end() )
+         << "the layer carries a cloud type slot again, and the material carries one too — two sources of "
+            "truth for what kind of cloud this is";
 
     // The default is an EMPTY handle, which is the documented "use the built-in type, whose own volume
     // slot is empty, which is the built-in default volume". A scene that names neither must still render,
     // and that chain of two documented empties is what this asserts.
     // FOUR SLOTS SINCE T3, and every one of them is empty by default: a scene created from these
-    // defaults names no kind of cloud at all and still has to have a sky.
-    const Desert::ECS::VolumetricCloudData defaults;
+    // defaults names no kind of cloud at all and still has to have a sky. Read from the material's mirror
+    // since O1 — that the four are asset references of kind CloudTypeAsset is the CloudMaterialSchema
+    // suite's census, which reads the shader itself.
+    const Desert::Graphic::CloudMaterialValues defaults;
     EXPECT_EQ( static_cast<uint64_t>( defaults.CloudType1 ), 0u );
     EXPECT_EQ( static_cast<uint64_t>( defaults.CloudType2 ), 0u );
     EXPECT_EQ( static_cast<uint64_t>( defaults.CloudType3 ), 0u );

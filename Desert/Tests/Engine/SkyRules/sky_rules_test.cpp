@@ -691,13 +691,14 @@ namespace
     // rather than constants — a helper that could not vary them could not state the property.
     uint64_t CloudTestFingerprint( const Desert::ECS::VolumetricCloudData& data, const glm::vec3& wind,
                                    const glm::vec2& regionOrigin, bool skyOcclusionValid = false,
-                                   uint32_t shapeGeneration = 0u )
+                                   uint32_t                                    shapeGeneration = 0u,
+                                   const Desert::Graphic::CloudMaterialValues& material        = {} )
     {
         const CloudTypeShape shape      = CloudTestShape();
         const auto           atmosphere = CloudTestAtmosphere();
 
-        const CloudGpuPayload payload =
-             PackCloudParams( data, &shape, 1u, atmosphere, wind, CloudRegionBinding{ regionOrigin, 30.0f } );
+        const CloudGpuPayload payload = PackCloudParams( data, material, &shape, 1u, atmosphere, wind,
+                                                         CloudRegionBinding{ regionOrigin, 30.0f } );
         return CloudEnvironmentFingerprint( payload, /*marched=*/true, skyOcclusionValid, shapeGeneration );
     }
 } // namespace
@@ -740,30 +741,36 @@ TEST( CloudEnvironmentCadence, EveryMaterialKnobTheMarchReadsIsSeen )
     // The half of the trigger that lives in the packed block: what the cloud is MADE OF and how it is lit.
     // Taken through the WHOLE block rather than field by field, so a parameter appended to
     // CloudGpuPayload tomorrow is in the fingerprint the moment it exists.
-    Desert::ECS::VolumetricCloudData data;
-    const uint64_t                   base = CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ) );
+    // THE KNOBS ARE THE MATERIAL'S SINCE O1 — the fingerprint has to see a `.demat` edit exactly as it
+    // saw the component fields, because the material editor's live drag is now how these values move.
+    Desert::ECS::VolumetricCloudData           data;
+    const Desert::Graphic::CloudMaterialValues stock{};
+    const uint64_t base = CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ) );
 
-    const auto moved = [&]( const Desert::ECS::VolumetricCloudData& changed, const char* what )
-    { EXPECT_NE( CloudTestFingerprint( changed, glm::vec3( 0.0f ), glm::vec2( 0.0f ) ), base ) << what; };
+    const auto moved = [&]( const Desert::Graphic::CloudMaterialValues& changed, const char* what )
+    {
+        EXPECT_NE( CloudTestFingerprint( data, glm::vec3( 0.0f ), glm::vec2( 0.0f ), false, 0u, changed ), base )
+             << what;
+    };
 
-    Desert::ECS::VolumetricCloudData density = data;
-    density.DensityScale                     = data.DensityScale * 1.5f + 0.1f;
+    Desert::Graphic::CloudMaterialValues density = stock;
+    density.DensityScale                         = stock.DensityScale * 1.5f + 0.1f;
     moved( density, "Density Scale" );
 
-    Desert::ECS::VolumetricCloudData extinction = data;
-    extinction.ExtinctionScale                  = data.ExtinctionScale * 1.5f + 0.1f;
+    Desert::Graphic::CloudMaterialValues extinction = stock;
+    extinction.ExtinctionScale                      = stock.ExtinctionScale * 1.5f + 0.1f;
     moved( extinction, "Extinction Scale" );
 
-    Desert::ECS::VolumetricCloudData albedo = data;
-    albedo.ScatteringAlbedo                 = data.ScatteringAlbedo * 0.5f;
+    Desert::Graphic::CloudMaterialValues albedo = stock;
+    albedo.ScatteringAlbedo                     = stock.ScatteringAlbedo * 0.5f;
     moved( albedo, "Scattering Albedo" );
 
-    Desert::ECS::VolumetricCloudData detail = data;
-    detail.DetailStrength                   = data.DetailStrength * 0.5f + 0.05f;
+    Desert::Graphic::CloudMaterialValues detail = stock;
+    detail.DetailStrength                       = stock.DetailStrength * 0.5f + 0.05f;
     moved( detail, "Detail Strength" );
 
-    Desert::ECS::VolumetricCloudData phase = data;
-    phase.PhaseG                           = data.PhaseG * 0.5f;
+    Desert::Graphic::CloudMaterialValues phase = stock;
+    phase.PhaseG                               = stock.PhaseG * 0.5f;
     moved( phase, "Phase G" );
 }
 

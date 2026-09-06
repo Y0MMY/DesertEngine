@@ -33,6 +33,7 @@
 // The LAYER's two erosion settings are the component's, and this suite is where their justification is
 // measured — so they are read from the component rather than transcribed. PROPERTY expands to nothing, so
 // this costs the suite no reflection and no registry.
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 
 #include <gtest/gtest.h>
@@ -147,7 +148,9 @@ namespace
         // MEASURES — the erosion's wave against a body's chord, the cut's depth against the surface the
         // eye sees — so a copy here would be a second statement of a number whose whole justification
         // lives in the assertions below it.
-        const Desert::ECS::VolumetricCloudData shipped;
+        // The MATERIAL's own two since O1 (CloudMaterialValues mirrors the CloudRaymarch schema; the
+        // CloudMaterialSchema suite pins the mirror), read rather than copied for the same reason.
+        const Desert::Graphic::CloudMaterialValues shipped;
 
         CloudFieldParams params;
         params.DetailTileKm   = shipped.DetailTileSize / 100000.0f; // centimetres to kilometres
@@ -213,7 +216,7 @@ namespace
     // cloud can have — is a DIRECT function of this value, so a task that moved the extinction and did not
     // notice this line would have left the whole finding asserted against the old medium while every
     // sentence about it said otherwise.
-    const float kExtinctionPerKm = Desert::ECS::VolumetricCloudData{}.ExtinctionScale;
+    const float kExtinctionPerKm = Desert::Graphic::CloudMaterialValues{}.ExtinctionScale;
 
     constexpr float kOpaqueOpticalDepth = 0.6931472f; // half the sky behind it is hidden
 
@@ -1888,7 +1891,7 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
     ASSERT_GT( census.Surfaces, 0 )
          << "no column in the fixture ever became opaque, so there is no surface to move";
 
-    const Desert::ECS::VolumetricCloudData shipped;
+    const Desert::Graphic::CloudMaterialValues shipped;
 
     const auto shippedResult = census.At( shipped.DetailStrength );
 
@@ -1947,7 +1950,7 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
 // in two files and neither names the other:
 //
 //     Assets::kCloudLumpVerticalOverHorizontal   the shape of the lump a cloud is built out of
-//     ECS::VolumetricCloudData::DetailStrength   how deeply the erosion cuts into it
+//     Graphic::CloudMaterialValues::DetailStrength (the CloudRaymarch schema)   how deeply the erosion cuts
 //
 // They are not independent. A taller lump packs more density into a metre of ray, so the altitude at which
 // the optical depth first reaches 1 — the surface the eye puts the cloud at — sits at a SHALLOWER profile
@@ -2027,7 +2030,11 @@ TEST( CloudFieldErosion, TheShippedStrengthMovesTheSurfaceTheEyeSeesWithoutEatin
 // in this file noticed that until now. 215.8 m against the 125 m chord today.
 TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAndNotTwoNumbers )
 {
-    const Desert::ECS::VolumetricCloudData shipped;
+    // The erosion strength is the MATERIAL's since O1, not the component's — CloudMaterialValues
+    // mirrors the CloudRaymarch schema and the CloudMaterialSchema suite pins the mirror. Read, not
+    // transcribed, for the reason the header of this suite gives: half of this calibration lives here
+    // and the other half in the value, and a copy would let them come apart in silence.
+    const Desert::Graphic::CloudMaterialValues shipped;
 
     const float  aspect   = Desert::Assets::kCloudLumpVerticalOverHorizontal;
     const float  strength = shipped.DetailStrength;
@@ -2083,9 +2090,9 @@ TEST( CloudFieldErosion, TheLumpsAspectAndTheErosionsStrengthAreOneCalibrationAn
     EXPECT_GE( result.TravelM, kRequiredHeadroom * floorM )
          << "THE LUMP AND THE EROSION HAVE COME APART. A lump aspect of " << aspect
          << " (Assets::kCloudLumpVerticalOverHorizontal) against a Detail Strength of " << strength
-         << " (ECS::VolumetricCloudData) moves the visible surface " << result.TravelM << " m, which is "
-         << result.TravelM / floorM << "x the " << floorM << " m the march can be relied on to find — under the "
-         << kRequiredHeadroom
+         << " (Graphic::CloudMaterialValues, the CloudRaymarch schema) moves the visible surface "
+         << result.TravelM << " m, which is " << result.TravelM / floorM << "x the " << floorM
+         << " m the march can be relied on to find — under the " << kRequiredHeadroom
          << "x this pair is calibrated to hold.\n"
             "These two numbers are ONE calibration: a taller lump is optically thicker per metre, so the "
             "same cut moves the surface less far. If the aspect was just raised, the strength has to "
@@ -2241,7 +2248,7 @@ namespace
         std::vector<double> eroded( static_cast<size_t>( kN ) * kN, -1.0 );
         std::vector<float>  atSurface( static_cast<size_t>( kN ) * kN, -1.0f );
 
-        const float shipped = glm::clamp( Desert::ECS::VolumetricCloudData{}.DetailStrength, 0.0f, 1.0f );
+        const float shipped = glm::clamp( Desert::Graphic::CloudMaterialValues{}.DetailStrength, 0.0f, 1.0f );
 
         double penetration = 0.0;
         long   surfaces    = 0;

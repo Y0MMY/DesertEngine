@@ -34,6 +34,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -97,6 +98,9 @@ namespace Desert::Migration
 
         int changed = 0;
         int failed  = 0;
+
+        // Cloud material relative path -> the scene that produced it, for the collision check below.
+        std::map<std::string, std::string> writtenMaterials;
 
         for ( const auto& path : scenes )
         {
@@ -282,6 +286,27 @@ namespace Desert::Migration
                     out << "stamp only - the scene states no SSR max distance";
                 out << ")";
             }
+            if ( report.CloudMaterialRaised )
+            {
+                out << " scene v" << Desert::Migration::kSceneVersionSSRUnits << "->v"
+                    << Desert::Migration::kSceneVersionCloudMaterial << " (";
+                if ( report.CloudMaterial.Entities > 0 )
+                {
+                    out << report.CloudMaterial.ValuesMoved << " value(s) and " << report.CloudMaterial.AssetsMoved
+                        << " asset slot(s) moved into " << report.CloudMaterial.Materials.size()
+                        << " bespoke cloud material(s), " << report.CloudMaterial.DefaultsAssigned
+                        << " layer(s) pointed at the shared "
+                        << Desert::Migration::kDefaultCloudMaterialRelativePath << " (D-37), "
+                        << report.CloudMaterial.Defaulted << " field(s) left at the schema default";
+                }
+                else
+                    out << "stamp only - no VolumetricCloud payload in this scene";
+                // Named, not counted, like every step above that can refuse a value: a rejected number is
+                // an authored one that will now read as the default, and the operator has to see which.
+                for ( const auto& name : report.CloudMaterial.RejectedNames )
+                    out << "; NOT carried, schema default stands: " << name;
+                out << ")";
+            }
             if ( report.UnitsRaised )
                 out << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
                     << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected
@@ -291,6 +316,54 @@ namespace Desert::Migration
             if ( check )
             {
                 ++changed;
+                continue;
+            }
+
+            // The material files the v11 -> v12 step produced, written FIRST and atomically, like the
+            // scene below: a scene that names a material which does not exist is worse than a scene not
+            // yet migrated, so if a material cannot be written the scene is not either.
+            bool materialsFailed = false;
+            for ( const auto& mat : report.CloudMaterial.Materials )
+            {
+                // TWO SCENES MUST NOT LAND ON ONE MATERIAL FILE. The name is derived from the scene's
+                // SceneName, which is NOT unique by construction — a .desce copied from another and
+                // edited keeps the original's name, and this repository's own verification protocol
+                // relies on exactly that copying. Two such scenes would produce one path here, the
+                // second write would take the first's look, and BOTH scenes would then name a file that
+                // describes only one of them: a silent whole-sky loss with nothing in the log. The
+                // migration function is pure and per-scene, so it cannot see the collision; this loop is
+                // the only place in the run that can. Named and fatal, never resolved by guessing at a
+                // suffix — the fix is to give the scene its own SceneName, which is what the operator
+                // has to know.
+                const auto claimed = writtenMaterials.emplace( mat.RelativePath, path.string() );
+                if ( !claimed.second && claimed.first->second != path.string() )
+                {
+                    err << "FAIL   " << path.string() << " — its cloud material would be written to "
+                        << mat.RelativePath << ", which " << claimed.first->second
+                        << " already claimed in this run: both scenes state the same SceneName. Give one "
+                        << "of them its own name and re-run; neither scene is modified.\n";
+                    materialsFailed = true;
+                    break;
+                }
+
+                // Under the same assets root MigrateScene measured against (its default argument): the
+                // relative path inside the scene and the file on disk must agree about one root or the
+                // scene names a material that is not where it says.
+                const std::filesystem::path matPath = Common::Constants::Path::ASSETS_PATH / mat.RelativePath;
+                std::error_code             ec;
+                std::filesystem::create_directories( matPath.parent_path(), ec );
+                if ( !Common::Utils::FileSystem::WriteContentToFileAtomic( matPath, mat.Json ) )
+                {
+                    err << "FAIL   " << matPath.string() << " — the cloud material could not be written; "
+                        << path.string() << " is left at its old version\n";
+                    materialsFailed = true;
+                    break;
+                }
+                out << "        wrote " << mat.RelativePath << "\n";
+            }
+            if ( materialsFailed )
+            {
+                ++failed;
                 continue;
             }
 

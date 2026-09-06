@@ -2,6 +2,7 @@
 
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Graphic/AtmosphereEnv.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
@@ -630,7 +631,8 @@ namespace Desert::Graphic
                atmosphere.TransmittanceLut != nullptr && atmosphere.DistantSkyLight != nullptr;
     }
 
-    inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const CloudTypeShape* shapes,
+    inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data,
+                                            const CloudMaterialValues& material, const CloudTypeShape* shapes,
                                             uint32_t speciesCount, const AtmosphereEnv& atmosphere,
                                             const glm::vec3&          windOffsetWorld,
                                             const CloudRegionBinding& region  = CloudRegionBinding{},
@@ -683,7 +685,7 @@ namespace Desert::Graphic
             sunIrradiance = CloudUsesPerSampleSunTransmittance( data, atmosphere )
                                  ? atmosphere.SunOuterSpaceIlluminance
                                  : ( physical ? atmosphere.SunIlluminanceOnGround : atmosphere.SunIrradiance );
-            ambient       = physical ? data.AmbientScale : data.AmbientScale * atmosphere.ZenithRadiance;
+            ambient       = physical ? material.AmbientScale : material.AmbientScale * atmosphere.ZenithRadiance;
         }
 
         CloudGpuPayload p{};
@@ -696,17 +698,18 @@ namespace Desert::Graphic
         const float stopTransmittance =
              std::clamp( std::max( data.StopTransmittance, stopTransmittanceFloor ), 0.0f, 1.0f );
 
-        p.March   = glm::vec4( static_cast<float>( std::clamp( data.MaxSteps, 8, 512 ) ), stopTransmittance,
-                               std::max( data.TracingStartDistance, 0.0f ) / kCloudWorldUnitsPerKm,
-                               std::max( data.ExtinctionScale, 0.0f ) );
+        p.March = glm::vec4( static_cast<float>( std::clamp( data.MaxSteps, 8, 512 ) ), stopTransmittance,
+                             std::max( data.TracingStartDistance, 0.0f ) / kCloudWorldUnitsPerKm,
+                             std::max( material.ExtinctionScale, 0.0f ) );
         // Floored so the reciprocal is finite for a caller that has not bound a region yet — the frames
         // before the first bake finishes, where the species count is what stops the volume being read.
         const float regionSideKm = std::max( region.SideKm, 1e-3f );
 
-        p.Region  = glm::vec4( region.OriginKm.x, region.OriginKm.y, 1.0f / regionSideKm,
-                               std::max( data.DetailTileSize, 1.0f ) / kCloudWorldUnitsPerKm );
-        p.Detail  = glm::vec4( std::clamp( data.DetailStrength, 0.0f, 1.0f ), std::max( data.DensityScale, 0.0f ),
-                               std::clamp( data.ScatteringAlbedo, 0.0f, 1.0f ), static_cast<float>( species ) );
+        p.Region = glm::vec4( region.OriginKm.x, region.OriginKm.y, 1.0f / regionSideKm,
+                              std::max( material.DetailTileSize, 1.0f ) / kCloudWorldUnitsPerKm );
+        p.Detail =
+             glm::vec4( std::clamp( material.DetailStrength, 0.0f, 1.0f ), std::max( material.DensityScale, 0.0f ),
+                        std::clamp( material.ScatteringAlbedo, 0.0f, 1.0f ), static_cast<float>( species ) );
 
         // THE TYPES' FACTORS ARE NO LONGER FOLDED INTO THE LAYER'S, and the reason is arithmetic rather
         // than taste. A cumulonimbus is made of more water than a stratus, a cirrus is a quarter as opaque
@@ -747,7 +750,7 @@ namespace Desert::Graphic
             p.SpeciesNoise[static_cast<int>( slot )] = static_cast<float>( index );
         }
 
-        p.Wind    = glm::vec4( windOffsetWorld / kCloudWorldUnitsPerKm, std::clamp( data.PhaseG, -0.9f, 0.9f ) );
+        p.Wind = glm::vec4( windOffsetWorld / kCloudWorldUnitsPerKm, std::clamp( material.PhaseG, -0.9f, 0.9f ) );
         p.Sun     = glm::vec4( sunDirection, std::max( data.LightMarchDistance, 0.0f ) / kCloudWorldUnitsPerKm );
         // The ceiling is ECS::kCloudLightMarchMaxSamples and NOT a literal, because this clamp, the
         // slider's Range and the clamp inside CloudRaymarch.shader are three copies of one number. While
@@ -768,11 +771,11 @@ namespace Desert::Graphic
         // The ceiling is ECS::kCloudMultiScatterMaxOctaves and NOT a literal, for the reason the shadow
         // ray's neighbour above gives: this clamp, the slider's Range and the clamp inside
         // Common/CloudLighting.glslh are three copies of one number.
-        p.MultiScatter = glm::vec4(
-             static_cast<float>( std::clamp( data.MultiScatterOctaves, 1, ECS::kCloudMultiScatterMaxOctaves ) ),
-             std::clamp( data.MultiScatterContribution, 0.0f, 1.0f ),
-             std::clamp( data.MultiScatterOcclusion, 0.0f, 1.0f ),
-             std::clamp( data.MultiScatterEccentricity, 0.0f, 1.0f ) );
+        p.MultiScatter = glm::vec4( static_cast<float>( std::clamp( material.MultiScatterOctaves, 1,
+                                                                    ECS::kCloudMultiScatterMaxOctaves ) ),
+                                    std::clamp( material.MultiScatterContribution, 0.0f, 1.0f ),
+                                    std::clamp( material.MultiScatterOcclusion, 0.0f, 1.0f ),
+                                    std::clamp( material.MultiScatterEccentricity, 0.0f, 1.0f ) );
 
         // The aerial perspective is a coupling, not a dependency: without a volume the gate is 0 and the
         // shader composes the exact identity. The two scalars are read from AtmosphereEnv rather than
@@ -786,10 +789,10 @@ namespace Desert::Graphic
         // traced at all. The last is Unreal's TracingStartMaxDistance, and its absence was found on review:
         // without it a ray that enters the shell twelve thousand kilometres away — which the geometry can
         // legitimately report before the planet test rejects it — is a ray the march would still try.
-        p.Phase =
-             glm::vec4( std::clamp( data.PhaseGBackward, -0.9f, 0.9f ), std::clamp( data.PhaseBlend, 0.0f, 1.0f ),
-                        std::clamp( data.AmbientOcclusionStrength, 0.0f, 1.0f ),
-                        std::max( data.TracingStartMaxDistance, 0.0f ) / kCloudWorldUnitsPerKm );
+        p.Phase = glm::vec4( std::clamp( material.PhaseGBackward, -0.9f, 0.9f ),
+                             std::clamp( material.PhaseBlend, 0.0f, 1.0f ),
+                             std::clamp( material.AmbientOcclusionStrength, 0.0f, 1.0f ),
+                             std::max( data.TracingStartMaxDistance, 0.0f ) / kCloudWorldUnitsPerKm );
         // The two fades, both of which UE carries and neither of which is physics. The aerial perspective
         // is CORRECT at ninety kilometres and it correctly erases a cloud on the horizon; whether a sky is
         // wanted to look that way is an art decision, so it gets a dial rather than an argument. Zero fade

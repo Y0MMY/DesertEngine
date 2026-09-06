@@ -223,9 +223,14 @@ namespace
     //
     // And ONE more with T1: NoiseVolume. It was not removed - it MOVED, onto the cloud type asset, because
     // the character of a cloud's edge is a property of the kind of cloud rather than of the layer's
-    // weather. There is no row for it here because it is no longer a field of this component; the row that
-    // replaced it is CloudType, and the renderer is what resolves that handle into both the type's numbers
-    // and the volume.
+    // weather.
+    //
+    // AND THEN THIRTY-THREE AT ONCE, WITH O1: everything that described the LOOK - the four type slots,
+    // the weather, the placement, the painted layout, the per-sample detail and the medium's lighting -
+    // became parameters of the Volume-domain material (CloudRaymarch.shader's Properties block), authored
+    // in a `.demat` the one new row below names. Their fifth-link guarantee did not lapse with the move:
+    // Desert/Tests/Engine/CloudMaterialSchema holds the schema-side census on the same terms this table
+    // holds the reflected one.
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kCloudPayload = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp";
@@ -236,114 +241,45 @@ namespace
     constexpr Row kCloudRows[] = {
          { "Enabled", kCloudRenderer }, // the zero-cost gate: off means no allocation and no dispatch
 
-         // Cloud Layer - the shell the march intersects. The CLOUD TYPES are what the shell is built
-         // from, and unlike every other row here they are resolved rather than packed: the renderer turns
-         // each handle into thirteen numbers and a vertical profile curve through Runtime::CloudTypeService,
-         // and those become
-         // Layer.y/Layer.z (the shell, the UNION of the set's bands) and one entry each of SpeciesEdge
-         // and SpeciesPlacement. Two fields that used to state the shell by hand are gone, because an
-         // authored shell and a type's altitudes are two numbers obliged to agree.
-         //
-         // FOUR ROWS AND NOT ONE SINCE T3: a layer carries a SET of kinds of cloud. Every one of them has
-         // to have a consumer or it is a slot an artist can fill and never see - which is the exact shape
-         // of the defect this whole suite exists to catch, and the easiest one to introduce by wiring only
-         // the first slot.
-         { "CloudType1", kCloudRenderer },
-         { "CloudType2", kCloudRenderer },
-         { "CloudType3", kCloudRenderer },
-         { "CloudType4", kCloudRenderer },
+         // THE MATERIAL - the one field O1 added while thirty-three left. The renderer resolves it
+         // through Runtime::MaterialService into Graphic::CloudMaterialValues (schema defaults, then the
+         // `.demat` chain), and everything the moved fields used to feed now reads THAT. The moved
+         // fields' own census lives with the schema: Desert/Tests/Engine/CloudMaterialSchema pins every
+         // schema parameter to a CloudMaterialValues field in both directions, which is this suite's
+         // §1.3 guarantee restated for parameters that are no longer reflected C++.
+         { "Material", kCloudRenderer },
+
+         // Cloud Layer - the shell the march intersects and the budgets of the trace. The cloud TYPES
+         // that build the shell are MATERIAL parameters now (CloudType1..4 of the CloudRaymarch schema);
+         // the component keeps the planet and the ray budgets, name for name UE's.
          { "PlanetRadius", kCloudPayload },
          { "MaxViewDistance", kCloudPayload },
          { "TracingStartDistance", kCloudPayload },
          { "TracingStartMaxDistance", kCloudPayload },
 
-         // Weather - THE BAKE, and not the payload. Phase E5 moved the four numbers that decide WHERE
-         // cloud is out of the parameter block: the lumps of the modelling volume are placed on a lattice
-         // on the CPU, once, when the settings change or the region shifts, so what reads them is
-         // VolumetricCloudRenderer::BuildProceduralParams and what the march is handed instead is where
-         // the volume is. A row still pointing at CloudPayload.hpp would have been this suite failing for
-         // the right reason - the read WAS removed - and it did.
-         { "Coverage", kCloudRenderer },
-         { "CoverageContrast", kCloudRenderer },
-
-         // WEATHER TILE SIZE IS READ IN THE COMPONENT'S OWN HEADER NOW, and this suite is what noticed.
-         // `ECS::CloudLayerLatticeKm` states "four cells to a tile" ONCE, because a second reader appeared
-         // — the Cloud Layout panel measures a painting's strokes against the cell — and the renderer calls
-         // it instead of spelling the ratio out a second time. The field's last textual mention in
-         // VolumetricCloudRenderer.cpp went with it, and the row pointing there went red. That is this
-         // suite failing for exactly the reason it exists: the named consumer stopped reading the field.
-         { "WeatherTileSize", "Desert/Desert/Source/Engine/ECS/VolumetricCloudComponent.hpp" },
-
+         // Weather's one surviving field: the REGION is a memory budget (how much world the modelling
+         // volume covers), not a look - the look's own weather (Coverage, the tile, the seed) moved into
+         // the material with everything else.
          { "RegionSize", kCloudRenderer },
-         { "Seed", kCloudRenderer },
 
-         // Placement - where the clouds are, which is baked and not marched. Same consumer as the four
-         // rows above it and for the same reason: VolumetricCloudRenderer::BuildProceduralParams turns
-         // them into CloudProceduralFieldParams and the bake reads them there.
-         { "PlacementDensity", kCloudRenderer },
-         { "PlacementScatter", kCloudRenderer },
-         { "PlacementSizeVariety", kCloudRenderer },
-         { "PatchTileSize", kCloudRenderer },
-         { "PatchStrength", kCloudRenderer },
-
-         // Layout - the PAINTED sky, and the same consumer as Placement for the same reason: the painting
-         // decides which lattice cells carry a cloud, which is a bake question and not a march one.
-         // `CloudLayout` is a handle the renderer resolves through Runtime::CloudLayoutService and hands to
-         // the bake as bytes; the other five are numbers that travel in CloudProceduralFieldParams.
-         //
-         // THE ROW FOR `CloudLayout` IS THE ONE WORTH LOOKING AT TWICE. An asset slot that resolves to
-         // nothing renders exactly like an asset slot that is not wired, so this is precisely the shape of
-         // dead setting this suite exists to catch — and unlike a slider, nobody notices, because the sky
-         // an unwired painting produces is a perfectly good procedural sky.
-         { "CloudLayout", kCloudRenderer },
-         { "LayoutPatternStrength", kCloudRenderer },
-         { "LayoutMaskStrength", kCloudRenderer },
-         { "LayoutRepeats", kCloudRenderer },
-         { "LayoutRotation", kCloudRenderer },
-         { "LayoutOffset", kCloudRenderer },
-
-         // Detail - the erosion field.
-         { "DetailTileSize", kCloudPayload },
-         { "DetailStrength", kCloudPayload },
-         { "DensityScale", kCloudPayload },
+         // Detail's two survivors: march control at the camera, not the cloud's look.
          { "NearFadeStartDistance", kCloudPayload },
          { "NearFadeEndDistance", kCloudPayload },
-         { "ExtinctionScale", kCloudPayload },
 
-         // Lighting.
-         { "ScatteringAlbedo", kCloudPayload },
-         { "PhaseG", kCloudPayload },
-         { "PhaseGBackward", kCloudPayload },
-         { "PhaseBlend", kCloudPayload },
-         { "AmbientOcclusionStrength", kCloudPayload },
-         // THE RENDERER AND NOT THE PAYLOAD, and the difference is the point: this field never reaches the
-         // parameter block at all. It decides whether ExecuteInFrame dispatches the sky-light occlusion
-         // volume, and what the march is told is only whether that dispatch HAPPENED — a property of the
-         // frame rather than of the weather, on CloudPush::Frame.
+         // Lighting - the pass-routing and cross-system halves stay; the medium (albedo, phase, the
+         // multi-scattering series, the ambient tint) is material now.
          { "SkyOcclusionVolume", kCloudRenderer },
-         // THE PAYLOAD AND NOT THE RENDERER, which is the opposite of the row above and for a reason worth
-         // stating: this field changes WHAT THE PARAMETER BLOCK MEANS. With it on, SunColour.rgb is the
-         // sun's outer-space illuminance and both marches of the field apply the atmosphere themselves;
-         // with it off, the same field is the ground-level product. The renderer reads the field too — it
-         // raises CloudPush::Frame.y, binds the LUT, and tells the environment bake — but it does so
-         // through the packer's own CloudUsesPerSampleSunTransmittance, so the packer is where the
-         // decision lives.
          { "PerSampleAtmosphereTransmittance", kCloudPayload },
          { "AerialPerspectiveStartDistance", kCloudPayload },
          { "AerialPerspectiveFadeDistance", kCloudPayload },
          { "LightMarchDistance", kCloudPayload },
          { "LightMarchSamples", kCloudPayload },
-         { "MultiScatterOctaves", kCloudPayload },
-         { "MultiScatterContribution", kCloudPayload },
-         { "MultiScatterOcclusion", kCloudPayload },
-         { "MultiScatterEccentricity", kCloudPayload },
-         { "AmbientScale", kCloudPayload },
 
          // Shadows on the world. NEITHER GOES THROUGH THE PACKER, and that is the one thing worth
          // knowing about this pair: the shadow map is not part of CloudGpuPayload at all. `CastShadows`
          // is the zero-cost gate the renderer tests before it allocates or dispatches anything, and
-         // `ShadowStrength` reaches the GPU through the CONSUMER — CloudShadowUniforms::Params.w in
-         // MaterialDeferredLighting — because the map holds the medium's own physical numbers and the
+         // `ShadowStrength` reaches the GPU through the CONSUMER - CloudShadowUniforms::Params.w in
+         // MaterialDeferredLighting - because the map holds the medium's own physical numbers and the
          // artist's dial is applied where the transmittance is reconstructed. Both are read by
          // VolumetricCloudRenderer::GetShadowStrength(), which is the one place the two are combined.
          { "CastShadows", kCloudRenderer },
@@ -354,7 +290,9 @@ namespace
          { "StopTransmittance", kCloudPayload },
 
          // Animation - integrated against the timestep by the system that owns it, and handed to the
-         // packer as an offset.
+         // packer as an offset. WIND STAYS ON THE COMPONENT deliberately (the one named divergence from
+         // the UE split): the collector may not touch Runtime::ResourceRegistry, and accumulating in the
+         // renderer would let two viewports of one scene drift apart.
          { "WindDirection", kCloudSystem },
          { "WindSpeed", kCloudSystem },
     };
