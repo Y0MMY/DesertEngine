@@ -77,11 +77,6 @@ namespace
         return value;
     }
 
-    bool EndsWith( const std::string& s, const char* suffix )
-    {
-        const std::string suf( suffix );
-        return s.size() >= suf.size() && s.compare( s.size() - suf.size(), suf.size(), suf ) == 0;
-    }
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------

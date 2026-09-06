@@ -1245,9 +1245,6 @@ namespace Desert::Editor
                     const float cardPadY = 14.0f;
                     const float cellSize = m_GridSize + 4.0f + cardPadX * 2.0f + ImGui::GetStyle().ItemSpacing.x;
 
-                    constexpr float overlayPaddingY  = 6.0f * padding;
-                    constexpr float thumbnailPadding = overlayPaddingY * 0.5f;
-                    const float     thumbnailSize    = scaledThumbnailSizeX - thumbnailPadding;
 
                     const ImVec2 backgroundThumbnailSize = { scaledThumbnailSizeX + padding * 2,
                                                              scaledThumbnailSize + padding * 2 };
@@ -1257,8 +1254,7 @@ namespace Desert::Editor
                     if ( columnCount < 1 )
                         columnCount = 1;
 
-                    float lineHeight = ImGui::GetTextLineHeight();
-                    int   flags      = ImGuiTableFlags_ContextMenuInBody | ImGuiTableFlags_ScrollY;
+                    int flags = ImGuiTableFlags_ContextMenuInBody | ImGuiTableFlags_ScrollY;
 
                     if ( m_IsInListView )
                     {
@@ -1300,8 +1296,6 @@ namespace Desert::Editor
                         m_GridItemsPerRow =
                              (int)floor( xAvail / ( m_GridSize + ImGui::GetStyle().ItemSpacing.x ) );
                         m_GridItemsPerRow = std::max( 1, m_GridItemsPerRow );
-
-                        bool textureCreated = false;
 
                         // ImGuiUtilities::PushID();
 

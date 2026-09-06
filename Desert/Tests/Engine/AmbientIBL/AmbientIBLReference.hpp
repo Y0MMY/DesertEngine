@@ -20,6 +20,7 @@
 #include <glm/glm.hpp>
 
 #include <cmath>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::AmbientIBLRef
 {
@@ -53,6 +54,7 @@ namespace Desert::Tests::AmbientIBLRef
             return glm::max( a, static_cast<float>( b ) );
         }
 
+DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
         float clamp( float x, double lo, double hi )
         {
             return glm::clamp( x, static_cast<float>( lo ), static_cast<float>( hi ) );
@@ -66,6 +68,7 @@ namespace Desert::Tests::AmbientIBLRef
 #define AMBIENT_IBL_NO_SAMPLERS
 #include <Mesh/PBRFunctions.glslh>
 #include <Mesh/AmbientIBL.glslh>
+DESERT_GLSL_AS_CPP_END
 #undef AMBIENT_IBL_NO_SAMPLERS
 
     } // namespace

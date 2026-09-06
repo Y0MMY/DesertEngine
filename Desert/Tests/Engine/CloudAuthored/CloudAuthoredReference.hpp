@@ -42,6 +42,7 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::CloudAuthoredRef
 {
@@ -66,6 +67,7 @@ namespace Desert::Tests::CloudAuthoredRef
         using glm::smoothstep;
         using glm::sqrt;
 
+DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/CloudNoise.glslh>
 #include <Common/CloudGeometry.glslh>
 
@@ -419,6 +421,7 @@ namespace Desert::Tests::CloudAuthoredRef
         }
 
 #include <Common/CloudField.glslh>
+DESERT_GLSL_AS_CPP_END
 
         // ------------------------------------------------------------------------------------------
         // Setting the scene

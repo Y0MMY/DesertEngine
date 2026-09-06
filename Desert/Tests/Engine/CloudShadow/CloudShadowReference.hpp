@@ -26,6 +26,7 @@
 #include <glm/glm.hpp>
 
 #include <cmath>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::CloudShadowRef
 {
@@ -45,6 +46,7 @@ namespace Desert::Tests::CloudShadowRef
         using glm::mix;
         using glm::sqrt;
 
+DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/CloudGeometry.glslh>
 
         // The slab the tests drive: constant extinction between two radii, optionally modulated
@@ -80,6 +82,7 @@ namespace Desert::Tests::CloudShadowRef
 #define CLOUD_SHADOW_SAMPLE_EXTINCTION( p ) CloudShadowTestExtinction( p )
 
 #include <Common/CloudShadowMap.glslh>
+DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::CloudShadowRef

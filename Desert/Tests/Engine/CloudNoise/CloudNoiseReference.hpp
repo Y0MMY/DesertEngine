@@ -17,6 +17,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::CloudNoiseRef
 {
@@ -35,7 +36,9 @@ namespace Desert::Tests::CloudNoiseRef
         using glm::mod;
         using glm::pow;
 
+DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/CloudNoise.glslh>
+DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::CloudNoiseRef

@@ -193,8 +193,6 @@ namespace Desert::Editor
     void CollectionsPanel::Rescan()
     {
         m_Collections.clear();
-        m_Categories.clear();
-        m_Categories.emplace_back( "All" );
 
         std::error_code ec;
         const std::filesystem::path root( CollectionsRoot() );
@@ -239,8 +237,6 @@ namespace Desert::Editor
                 ci.Category  = it.Category.value_or( "Uncategorized" );
                 ci.MeshPath  = it.Mesh;
                 ci.Thumbnail = it.Thumbnail.value_or( "" );
-                if ( std::find( m_Categories.begin(), m_Categories.end(), ci.Category ) == m_Categories.end() )
-                    m_Categories.push_back( ci.Category );
                 lc.Items.push_back( std::move( ci ) );
             }
             m_Collections.push_back( std::move( lc ) );

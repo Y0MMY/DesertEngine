@@ -18,8 +18,6 @@ namespace Desert::Editor
 
     void ShaderLibraryPanel::OnUIRender()
     {
-        auto flags = ImGuiWindowFlags_NoCollapse;
-
         ImRect windowRect = { ImGui::GetWindowContentRegionMin(), ImGui::GetWindowContentRegionMax() };
 
         ImGui::PushStyleColor( ImGuiCol_MenuBarBg, ImGui::GetStyleColorVec4( ImGuiCol_TabActive ) );

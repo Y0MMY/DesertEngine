@@ -14,6 +14,7 @@
 //     has no `inline`, so the shared text cannot carry one.
 
 #include <glm/glm.hpp>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::LensFlareRef
 {
@@ -31,7 +32,9 @@ namespace Desert::Tests::LensFlareRef
         using glm::smoothstep;
         using glm::step;
 
+DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/LensFlare.glslh>
+DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::LensFlareRef

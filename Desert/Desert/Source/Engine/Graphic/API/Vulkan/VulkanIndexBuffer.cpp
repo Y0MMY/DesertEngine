@@ -65,8 +65,6 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResultStr VulkanIndexBuffer::RT_Invalidate()
     {
-        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
-                              ->GetVulkanLogicalDevice();
         auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
                               ->GetVulkanAllocator()
                               .get();

@@ -117,7 +117,9 @@ namespace
         const uint32_t height = Desert::Assets::kCloudProceduralVolumeHeight;
         const uint32_t depth  = Desert::Assets::kCloudProceduralVolumeDepth;
 
-        const auto at = [width, height]( uint32_t x, uint32_t y, uint32_t z )
+        // `width` and `height` are const integrals with constant initialisers, so they are not odr-used
+        // here and capturing them captures nothing.
+        const auto at = []( uint32_t x, uint32_t y, uint32_t z )
         {
             return ( ( static_cast<size_t>( z ) * height + y ) * width + x ) *
                    Desert::Assets::kCloudProceduralBytesPerVoxel;

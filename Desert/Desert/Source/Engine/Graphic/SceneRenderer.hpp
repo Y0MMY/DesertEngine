@@ -294,7 +294,6 @@ namespace Desert::Graphic
         Engine::RendererSlotLease m_SlotLease;
 
         void ClearMainFramebuffer();
-        void CompositeRenderPass();
         void ExecuteRenderGraph();
         // Debug-phase passes (bounding boxes, colliders) drawn as a LOAD overlay AFTER the deferred
         // lighting composite — in Deferred the composite would otherwise paint lit meshes over any

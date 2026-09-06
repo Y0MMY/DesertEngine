@@ -103,17 +103,16 @@ namespace Desert::Graphic::API::Vulkan
 
             bool validationLayerPresent = false;
             LOG_INFO( "Vulkan Instance Layers:" );
+            // The inner loop that used to be here walked `availableLayers` a SECOND time and never touched
+            // its own loop variable: every iteration re-ran `strcmp( layer.layerName, validationLayers )`
+            // on the OUTER layer, so the whole thing was one comparison performed N times. That unused
+            // variable is what `-Wunused-variable` was pointing at. Behaviour is unchanged; the work is now
+            // O(N) instead of O(N^2).
             for ( const VkLayerProperties& layer : availableLayers )
             {
                 LOG_INFO( "  {0}", layer.layerName );
-                for ( const auto& layerProperties : availableLayers )
-                {
-                    if ( strcmp( layer.layerName, validationLayers ) == 0 )
-                    {
-                        validationLayerPresent = true;
-                        break;
-                    }
-                }
+                if ( strcmp( layer.layerName, validationLayers ) == 0 )
+                    validationLayerPresent = true;
             }
 
             if ( validationLayerPresent )

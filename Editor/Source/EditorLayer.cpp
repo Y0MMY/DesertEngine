@@ -117,8 +117,6 @@
 
 namespace Desert::Editor
 {
-    static constexpr uint32_t s_ShaderLibraryPanelIndex = 2;
-
     // "Unsaved changes" marker: the CommandHistory revision at the last save/load. Compared against the
     // current revision for the status-bar dirty dot; reset wherever the scene is (re)loaded or saved.
     static uint64_t s_SavedRevision = 0;

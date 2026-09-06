@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::SkyScatteringRef
 {
@@ -37,6 +38,7 @@ namespace Desert::Tests::SkyScatteringRef
         using glm::sin;
         using glm::sqrt;
 
+DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/SkyMedium.glslh>
 
         // The test-controllable LUT stand-ins. Assigned per test; the defaults make the integrator a
@@ -54,6 +56,7 @@ namespace Desert::Tests::SkyScatteringRef
     g_MultiScatter( ( atm ), ( radiusKm ), ( sunZenithCos ) )
 
 #include <Common/SkyScattering.glslh>
+DESERT_GLSL_AS_CPP_END
 
 #undef SKY_SCATTERING_SUN_TRANSMITTANCE
 #undef SKY_SCATTERING_MULTI_SCATTER

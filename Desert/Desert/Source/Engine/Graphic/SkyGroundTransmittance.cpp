@@ -1,6 +1,7 @@
 #include "SkyGroundTransmittance.hpp"
 
 #include <Engine/Graphic/SkyPayload.hpp>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Graphic
 {
@@ -32,7 +33,9 @@ namespace Desert::Graphic
         using glm::sin;
         using glm::sqrt;
 
+DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/SkyMedium.glslh>
+DESERT_GLSL_AS_CPP_END
 
     } // namespace
 
