@@ -64,6 +64,10 @@ namespace
          { "Editor/Source/Editor/Panels/Clouds/CloudLayoutPanel.cpp",
            "an ||-chain answering 'can this dropped file be a cloud mask?' plus the open-file dialog's "
            "display filter. Both are membership; nothing competes with anything" },
+         { "Editor/Source/Editor/Panels/Clouds/CloudNoiseVolumePanel.cpp",
+           "the open-file dialog's display filter for a noise SLICE SHEET, and the save dialog's. The "
+           "sheet is read whole by stbi and its pixels are voxels, so no format outranks another here — "
+           "the same membership-only case as CloudLayoutPanel one row up" },
          { "Editor/Source/Editor/Panels/FileExplorer/FileExplorerPanel.cpp",
            "the extension -> FileType icon map and the import dialog's display filter. Membership and "
            "presentation; two same-stem files both simply appear in the tree" },
