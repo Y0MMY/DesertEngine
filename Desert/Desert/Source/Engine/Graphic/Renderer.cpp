@@ -28,6 +28,16 @@ namespace Desert::Graphic
 
                 break;
             }
+
+            // The ONLY other value of the enum, and it used to fall straight through to the
+            // dereference below with s_RendererAPI still null. It is unreachable today —
+            // RendererAPI::s_RenderingAPI is a static inline fixed at Vulkan with no setter anywhere in
+            // the tree — so this is a latent null dereference, not a live one. It is also exactly the
+            // kind of latency that ends the day someone adds the setter that the enum's existence
+            // promises. This function already returns BoolResultStr; refusing by name costs nothing.
+            case RendererAPIType::None:
+                return Common::MakeError( "Renderer::InitGraphicAPI: no rendering API selected "
+                                          "(RendererAPIType::None)" );
         }
         s_RendererAPI->Init();
 
