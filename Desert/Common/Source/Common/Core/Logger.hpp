@@ -15,7 +15,9 @@ namespace Common::Logger
         auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>("engine_log.txt", true);
 
         spdlog::set_default_logger(std::make_shared<spdlog::logger>("desert", spdlog::sinks_init_list{console_sink, file_sink}));
-        spdlog::set_pattern( "%^[%T][%l][Desert]: %v%$" );
+        // Millisecond timestamps (%e): startup-phase costs — a shader compile, an atlas bake — are
+        // tens-to-hundreds of ms each, and a 1-second clock cannot attribute them to anything.
+        spdlog::set_pattern( "%^[%T.%e][%l][Desert]: %v%$" );
         spdlog::set_level( spdlog::level::trace );
         spdlog::flush_on( spdlog::level::trace );
     }
