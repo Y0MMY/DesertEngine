@@ -1,8 +1,11 @@
 #include "AssetThumbnailRenderer.hpp"
 
+#include <Editor/Widgets/ThumbnailFraming.hpp>
+
 #include <Engine/ECS/Components.hpp>
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
@@ -49,9 +52,24 @@ namespace Desert::Editor
         // but this offscreen renderer is never fed, so disable it explicitly).
         m_Renderer->SetOutlineSettings( glm::vec3( 0.0f ), 0.0f, 0.0f, false );
 
-        // NOTE: the runtime Core::Camera is a fixed orbit camera (input-driven, ignores the ECS transform).
-        // It sits at ~(-4.33, 6.12, -4.33) looking at the origin (distance ~8.66). We can't reposition it,
-        // so thumbnails are framed by SCALING the target object at the origin to fit that fixed view.
+        // WHERE THIS SCENE'S CAPTURE CAMERA COMES FROM, and why nothing here may state its pose.
+        //
+        // Scene::Init() has already made the camera: it constructs a Core::EditorCamera and hands it to
+        // SetActiveCamera, which also publishes it as the scene's MAIN camera — and SceneRenderer::BeginScene
+        // captures through `scene.GetMainCamera()`. So the camera that takes the picture is the engine's
+        // default editor camera, owned by the engine, positioned by the engine's own defaults.
+        //
+        // The comment that stood here asserted those defaults as literals — "sits at ~(-4.33, 6.12, -4.33)
+        // looking at the origin (distance ~8.66), so thumbnails are framed by SCALING the target at the
+        // origin to fit that fixed view". Every number in it was true when it was written and false
+        // afterwards: the centimetre migration moved the default camera to eye height, focal (0, 200, 0),
+        // and a subject left at the world origin then sits 200 units BELOW where the camera aims — 70
+        // degrees off a view axis with a 38-degree half-FOV, entirely outside the frustum. That is Д30:
+        // the thumbnail stopped containing its subject at all, and only surfaced when a material Save
+        // deleted a pre-migration PNG and forced a re-capture.
+        //
+        // So FitTarget reads the pose from the camera's OWN matrices (ThumbnailFraming::PlaceInView) and no
+        // camera constant is written down anywhere in this file. A pose that is measured cannot go stale.
         m_Camera = m_Scene->CreateNewEntity( "ThumbCam" );
         m_Camera.AddComponent<ECS::CameraComponent>().Data.IsMainCamera = true;
 
@@ -76,11 +94,16 @@ namespace Desert::Editor
         // the light's Translation is the direction it TRAVELS, the sky wants the direction toward the sun.
         const glm::vec3 sunDir = ECS::Rules::AtmosphereSunDirection( glm::vec3( 2.0f, -6.0f, 5.0f ) );
 
-        // IMPORTANT: the fixed preview camera sits ABOVE the object (y=6.12) looking DOWN, so the backdrop
-        // samples the sky's LOWER (ground) hemisphere — NOT the zenith. So GroundColor is what's actually
-        // visible behind the object; we make it a soft sky-blue (a dark ground read as muddy gray after
-        // tonemap, which looked like "no sky"). The whole dome is a cohesive light blue so any view angle
-        // gives a pleasant backdrop.
+        // IMPORTANT: which part of the dome ends up behind the subject is NOT knowable here. The subject is
+        // placed on whatever view axis the engine's default camera currently has (see FitTarget), so the
+        // backdrop is whatever that camera looks at — and the last time this comment named a pose ("sits
+        // ABOVE the object at y=6.12 looking DOWN, so the backdrop samples the ground hemisphere") it was
+        // describing a camera that had already moved, which is the mistake Д30 was made of.
+        //
+        // So the dome is authored to be a cohesive light blue at EVERY angle rather than tuned for one:
+        // ground, horizon and zenith are all set, and GroundColor in particular is a soft sky-blue because
+        // a dark ground reads as muddy grey after tonemap and looked like "no sky" when it was in shot.
+        // That is a property of the backdrop, and it survives the camera moving again.
         auto  skyEnt             = m_Scene->CreateNewEntity( "ThumbSky" );
         auto& skyC               = skyEnt.AddComponent<ECS::SkyAtmosphereComponent>();
         skyC.Data.ZenithColor    = { 0.26f, 0.46f, 0.78f };
@@ -113,15 +136,26 @@ namespace Desert::Editor
 
     void AssetThumbnailRenderer::FitTarget( const glm::vec3& center, float worldSize )
     {
-        // Recenter the target at the origin and scale it so its largest extent spans ~kFitSpan world units,
-        // which fills the fixed 45-deg camera (distance ~8.66) with a little margin.
-        constexpr float kFitSpan = 4.0f;
-        const float     scale    = worldSize > 1e-4f ? kFitSpan / worldSize : kFitSpan;
+        auto& tc    = m_Target.GetComponent<ECS::TransformComponent>();
+        tc.Rotation = glm::vec3( 0.0f );
 
-        auto& tc       = m_Target.GetComponent<ECS::TransformComponent>();
-        tc.Scale       = glm::vec3( scale );
-        tc.Rotation    = glm::vec3( 0.0f );
-        tc.Translation = -center * scale; // bring the object's center to the origin
+        // Frame from the camera's OWN view/projection rather than an assumed pose (see ThumbnailFraming
+        // for why: the preview camera's position and look-at both moved in the centimetre migration, which
+        // is what made re-captured material thumbnails come out as a wall of colour or an empty sky — Д30).
+        auto cam = m_Scene->GetMainCamera().lock();
+        if ( !cam )
+        {
+            // No camera yet (should not happen after EnsureInit): keep the subject visible at unit scale
+            // rather than divide framing math by a matrix that is not there.
+            tc.Scale       = glm::vec3( 1.0f );
+            tc.Translation = -center;
+            return;
+        }
+
+        const auto placement =
+             ThumbnailFraming::PlaceInView( cam->GetViewMatrix(), cam->GetProjectionMatrix(), worldSize, center );
+        tc.Scale       = glm::vec3( placement.Scale );
+        tc.Translation = placement.Translation;
     }
 
     void AssetThumbnailRenderer::RecordRender()
@@ -191,26 +225,12 @@ namespace Desert::Editor
             float     extent = 1.0f;
             if ( auto* mesh = Runtime::ResourceRegistry::GetMeshService()->Get( m_PendingHandle ) )
             {
-                // Union the submesh AABBs in MESH space (apply each submesh transform to its 8 corners) so
-                // meshes with per-submesh transforms frame correctly (otherwise some come out huge / off-screen).
-                glm::vec3 mn( 1e9f ), mx( -1e9f );
-                for ( const auto& sm : mesh->GetSubmeshes() )
+                // Union of the submesh AABBs in MESH space — ThumbnailFraming::MeasureSubmeshes, shared
+                // with the material branch below so both frame what is actually drawn.
+                if ( const auto frame = ThumbnailFraming::MeasureSubmeshes( mesh->GetSubmeshes() ); frame.Valid )
                 {
-                    const glm::vec3 lo = sm.BoundingBox.Min, hi = sm.BoundingBox.Max;
-                    for ( int corner = 0; corner < 8; ++corner )
-                    {
-                        const glm::vec3 p( ( corner & 1 ) ? hi.x : lo.x, ( corner & 2 ) ? hi.y : lo.y,
-                                           ( corner & 4 ) ? hi.z : lo.z );
-                        const glm::vec3 w = glm::vec3( sm.Transform * glm::vec4( p, 1.0f ) );
-                        mn               = glm::min( mn, w );
-                        mx               = glm::max( mx, w );
-                    }
-                }
-                if ( mx.x >= mn.x )
-                {
-                    center               = ( mn + mx ) * 0.5f;
-                    const glm::vec3 size = mx - mn;
-                    extent               = std::max( size.x, std::max( size.y, size.z ) );
+                    center = frame.Center;
+                    extent = frame.Extent;
                 }
 
                 // Slot count = submesh count; fill with the linked material (or leave default if none).
@@ -237,18 +257,37 @@ namespace Desert::Editor
             smc.MaterialSlots = { m_PendingHandle };
             smc.RuntimeMaterialInstances.clear();
             smc.RuntimeMesh.reset(); // drop any previously-built primitive so the type change rebuilds
-            FitTarget( glm::vec3( 0.0f ), 1.0f );
+
+            // MEASURED from the very mesh MeshECSSystem will draw for this component (the process-wide
+            // shared primitive), never assumed. The assumption this replaces — the literal `worldSize = 1.0`
+            // passed to FitTarget — was minted when primitives were authored at one unit, and survived the
+            // centimetre migration that scales every primitive by Common::Units::UnitsPerMetre: the sphere
+            // is 100 units across, so the old rule scaled it by 4 instead of 0.04 and drew it 100x too big.
+            // Combined with the second half of Д30 (the subject was also left at the world origin, which
+            // the migrated camera no longer looks at), the capture came out as the flank of a 400-unit
+            // sphere the camera was practically resting on: a wall of albedo under sky, with no sphere in
+            // it. See ThumbnailFraming for the framing rule and the measured geometry.
+            glm::vec3 matCenter( 0.0f );
+            float     matExtent = 1.0f;
+            if ( auto* prim = Geometry::PrimitiveMeshFactory::GetShared( *smc.Primitive ) )
+            {
+                if ( const auto frame = ThumbnailFraming::MeasureSubmeshes( prim->GetSubmeshes() ); frame.Valid )
+                {
+                    matCenter = frame.Center;
+                    matExtent = frame.Extent;
+                }
+            }
+            FitTarget( matCenter, matExtent );
 
             if ( m_PendingFlatPreview )
             {
-                // The plane's default normal is +Z; yaw it about Y so the front faces the fixed orbit camera
-                // (kept upright — a grass card grows along +Y). Camera sits in the -X/-Z quadrant looking at
-                // the origin, so yaw = atan2(camX, camZ).
-                glm::vec3 camPos( -4.33f, 6.12f, -4.33f );
+                // Turn the card to face the camera. Through ThumbnailFraming::FacingYaw, which takes BOTH
+                // points as arguments — the card is no longer at the world origin, and the eye is no longer
+                // a constant anyone may write down here.
+                auto& tc = m_Target.GetComponent<ECS::TransformComponent>();
                 if ( auto cam = m_Scene->GetMainCamera().lock() )
-                    camPos = cam->GetPosition();
-                m_Target.GetComponent<ECS::TransformComponent>().Rotation =
-                     glm::vec3( 0.0f, std::atan2( camPos.x, camPos.z ), 0.0f );
+                    tc.Rotation = glm::vec3(
+                         0.0f, ThumbnailFraming::FacingYaw( cam->GetPosition(), tc.Translation ), 0.0f );
             }
         }
 
