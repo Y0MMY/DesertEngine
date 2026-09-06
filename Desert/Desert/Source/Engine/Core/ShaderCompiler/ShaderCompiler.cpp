@@ -1,6 +1,7 @@
 #include "ShaderCompiler.hpp"
 #include <Engine/Core/ShaderCompiler/Includer/ShaderIncluder.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderSpirvCache.hpp>
 #include <Engine/Graphic/Shader.hpp>
 
 #include <shaderc/shaderc.hpp>
@@ -8,6 +9,7 @@
 #include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -31,58 +33,30 @@ namespace Desert::Core
                     return (shaderc_shader_kind)0;
             }
         }
+    } // namespace
 
-        // ---- SPIR-V disk cache -------------------------------------------------------------------
-        // Content-addressed: the key hashes the assembled stage source PLUS the content of every
-        // (recursively) included file — Core::ComputeShaderCacheKey, shared with the hot-reload
-        // watcher so "what this stage is made of" has exactly one definition. Cache artifacts live in
-        // Cooked/ShaderCache/<key>.spv next to the other cooked assets.
+    // ---- SPIR-V disk cache -----------------------------------------------------------------------
+    // Content-addressed: the key hashes the assembled stage source PLUS the content of every
+    // (recursively) included file — Core::ComputeShaderCacheKey, shared with the hot-reload
+    // watcher so "what this stage is made of" has exactly one definition. Artifact location and
+    // (VFS-aware) load/store live in ShaderSpirvCache — the seam the game packager cooks into and a
+    // packaged game reads back out of its mounted archive.
 
-        std::filesystem::path CachePathForKey( uint64_t key )
-        {
-            return Common::Constants::Path::COOKED_PATH / "ShaderCache" /
-                   std::format( "{:016x}.spv", key );
-        }
-
-        std::optional<std::vector<uint32_t>> TryLoadCachedSpirv( uint64_t key )
-        {
-            const auto path = CachePathForKey( key );
-            std::error_code ec;
-            const auto size = std::filesystem::file_size( path, ec );
-            if ( ec || size == 0 || ( size % sizeof( uint32_t ) ) != 0 )
-                return std::nullopt;
-
-            std::ifstream in( path, std::ios::binary );
-            if ( !in )
-                return std::nullopt;
-            std::vector<uint32_t> words( size / sizeof( uint32_t ) );
-            in.read( reinterpret_cast<char*>( words.data() ), static_cast<std::streamsize>( size ) );
-            if ( !in )
-                return std::nullopt;
-            return words;
-        }
-
-        void StoreCachedSpirv( uint64_t key, const std::vector<uint32_t>& spirv )
-        {
-            const auto path = CachePathForKey( key );
-            std::error_code ec;
-            std::filesystem::create_directories( path.parent_path(), ec );
-            std::ofstream out( path, std::ios::binary | std::ios::trunc );
-            if ( !out ) // read-only install (e.g. inside an .app bundle) — cache is best-effort
-                return;
-            out.write( reinterpret_cast<const char*>( spirv.data() ),
-                       static_cast<std::streamsize>( spirv.size() * sizeof( uint32_t ) ) );
-        }
+    Common::ResultStr<std::vector<uint32_t>> ShaderCompiler::CompileGLSLToSPIRV( Formats::ShaderStage stage,
+                                                                                 const std::string&   source,
+                                                                                 const std::string&   shaderPath )
+    {
+        return CompileGLSLToSPIRVForProfile( stage, source, shaderPath, SpirvDebugInfoThisBuild() );
     }
 
-    Common::ResultStr<std::vector<uint32_t>> ShaderCompiler::CompileGLSLToSPIRV( 
-        Formats::ShaderStage stage, 
-        const std::string& source, 
-        const std::string& shaderPath )
+    Common::ResultStr<std::vector<uint32_t>>
+    ShaderCompiler::CompileGLSLToSPIRVForProfile( Formats::ShaderStage stage, const std::string& source,
+                                                  const std::string& shaderPath, bool spirvDebugInfo )
     {
-        // Cache key: stage + compile-options fingerprint + assembled source + every included file's
-        // content (recursive). Content-addressed, so any edit produces a fresh key — no mtime races.
-        const uint64_t key = ComputeShaderCacheKey( stage, source, shaderPath );
+        // Cache key: stage + compile-options fingerprint (incl. the debug-info profile) + assembled
+        // source + every included file's content (recursive). Content-addressed, so any edit produces
+        // a fresh key — no mtime races.
+        const uint64_t key = ComputeShaderCacheKeyForProfile( stage, source, shaderPath, spirvDebugInfo );
 
         if ( auto cached = TryLoadCachedSpirv( key ) )
             return Common::MakeSuccess( std::move( *cached ) );
@@ -94,9 +68,10 @@ namespace Desert::Core
         options.SetTargetEnvironment( shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1 );
         options.SetWarningsAsErrors();
 
-#ifdef DESERT_CONFIG_DEBUG
-        options.SetGenerateDebugInfo();
-#endif
+        if ( spirvDebugInfo )
+            options.SetGenerateDebugInfo();
+
+        const auto compileStart = std::chrono::steady_clock::now();
 
         const shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(
              source, ConvertShaderStage( stage ), shaderPath.c_str(), options );
@@ -112,6 +87,15 @@ namespace Desert::Core
             LOG_ERROR( "{}", errorMsg );
             return Common::MakeError<std::vector<uint32_t>>( errorMsg );
         }
+
+        // A cache MISS is the event worth a line: a warm start compiles nothing, so every one of these
+        // at startup is time the cook (or a previous run) should have paid already. Hits stay silent —
+        // they are the normal case and there are hundreds of them.
+        const auto compileMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - compileStart )
+                                    .count();
+        LOG_INFO( "[ShaderCompiler] cache miss {:016x}: compiled {} [{}] in {} ms", key, shaderPath,
+                  Graphic::Shader::GetStringShaderStage( stage ), compileMs );
 
         std::vector<uint32_t> spirv( result.begin(), result.end() );
         StoreCachedSpirv( key, spirv );

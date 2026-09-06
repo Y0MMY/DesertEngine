@@ -9,6 +9,7 @@
 #include <Engine/Core/EngineContext.hpp>
 
 #include <Common/Core/Constants.hpp>
+#include <Common/Utilities/VFS.hpp>
 
 #include <algorithm> // std::max — largest device-local heap
 #include <filesystem>
@@ -405,6 +406,13 @@ namespace Desert::Graphic::API::Vulkan
                         initial.clear();
                 }
             }
+            // No loose blob: a packaged game ships the packaging machine's one inside Content.dpak
+            // (the census packs the whole Cooked/ tree, and the pak is mounted before the device
+            // exists). Same-GPU installs seed from it; the driver's header check discards it anywhere
+            // else — exactly the harmlessness contract above.
+            if ( initial.empty() )
+                if ( auto packed = Common::Utils::VFS::ReadFile( path ) )
+                    initial.assign( packed->begin(), packed->end() );
         }
 
         VkPipelineCacheCreateInfo info{ .sType           = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,

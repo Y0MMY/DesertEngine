@@ -1,7 +1,10 @@
 #include "ShaderIncluder.hpp"
 
+#include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
+
+#include <format>
 
 namespace Desert::Core
 {

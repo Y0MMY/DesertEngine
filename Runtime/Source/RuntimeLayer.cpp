@@ -213,6 +213,15 @@ namespace Desert::Player
 
     Common::BoolResultStr RuntimeLayer::OnUpdate( const Common::Timestep& ts )
     {
+        // The startup boundary, logged once: everything before this line (preloads, shader compiles,
+        // scene load) is what a player waits through — the millisecond timestamps upstream attribute
+        // that wait to its phases, this line marks where it ended.
+        if ( !m_LoggedFirstUpdate )
+        {
+            m_LoggedFirstUpdate = true;
+            LOG_INFO( "[Runtime] first update — startup work is done, the game is presenting" );
+        }
+
         if ( m_SplashTimer > 0.0f )
             m_SplashTimer -= ts.GetMilliseconds() * 0.001f;
 

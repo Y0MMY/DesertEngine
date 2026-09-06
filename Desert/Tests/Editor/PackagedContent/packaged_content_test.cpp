@@ -14,10 +14,16 @@
 //      scene inside it.
 
 #include <Editor/Packaging/GamePackager.hpp>
+#include <Editor/Packaging/PackageCook.hpp>
 #include <Editor/Packaging/PackagedContentTrees.hpp>
 
+#include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderSpirvCache.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 #include <Engine/Runtime/Services/ServiceScanRoots.hpp>
+#include <Engine/Text/FontCache.hpp>
+#include <Engine/Vector/IconBake.hpp>
 
 #include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -27,6 +33,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -184,6 +191,210 @@ TEST( PackagedContent, BuildContentPakPacksWhatTheScannersFind )
     ASSERT_EQ( assets.size(), 1u );
     EXPECT_EQ( assets[0].filename(), "level.desce" );
     EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( assets[0] ).GetValue(), "scene-body" );
+}
+
+// ---- The COOKED-CACHE relation ------------------------------------------------------------------------
+//
+// П2's defect, stated as the relation these tests pin: what the packager cooks into the archive must be
+// what the runtime's cache lookups read back out of it. Both halves used to be individually "correct" —
+// the census packed the whole Cooked/ tree, and the runtime kept a working cache — but the lookups were
+// raw ifstreams, so a packaged game (no loose Cooked/ at all) recompiled every shader and rebaked every
+// atlas at every cold start, with its warm cache sitting unread in the mounted pak.
+
+// A cooked artifact of each kind, stored through the packager's own store seam, packed by
+// BuildContentPak, and read back through the runtime's own lookup — in a bare directory whose only
+// content is the archive, exactly what a player's machine has.
+TEST( PackagedContent, CookedArtifactsTravelFromThePackagerToTheRuntimeLookup )
+{
+    EnvironmentGuard guard;
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_cooked";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+    const fs::path pkg  = base / "pkg";
+
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+    SetEnv( "HOME", base.string() );
+    fs::create_directories( proj / "GameAssets" );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    // The dev side stores one artifact of each kind, exactly as the cook does.
+    const std::vector<uint32_t> spirv    = { 0x07230203u, 1u, 2u, 3u };
+    const uint64_t              spirvKey = 0xA5A5A5A5DEADBEEFull;
+    Desert::Core::StoreCachedSpirv( spirvKey, spirv );
+
+    Desert::Text::BakedFont font;
+    font.AtlasWidth        = 2;
+    font.AtlasHeight       = 2;
+    font.AtlasR8           = { 10, 20, 30, 40 };
+    font.PixelHeight       = Desert::Text::kDefaultBakePixelHeight;
+    const uint64_t fontKey = Desert::Text::FontCacheKey( { 1, 2, 3 }, font.PixelHeight, {} );
+    Desert::Text::StoreBakedFont( Desert::Text::FontCachePath( fontKey ), font );
+
+    Desert::Vector::BakedIcon icon;
+    icon.Aspect = 2.0f;
+    icon.Layers.push_back(
+         { std::vector<uint8_t>( Desert::Vector::kIconCellDim * Desert::Vector::kIconCellDim, 7 ), 0x11223344u } );
+    const uint64_t iconKey = Desert::Vector::IconCacheKey( { 4, 5, 6 } );
+    Desert::Vector::StoreBakedIcon( Desert::Vector::IconCachePath( iconKey ), icon );
+
+    const auto result = Desert::Editor::BuildContentPak();
+    ASSERT_TRUE( result.Success ) << result.Message;
+
+    // The packaged side: pak + descriptor, nothing loose.
+    fs::create_directories( pkg );
+    fs::copy_file( proj / "Content.dpak", pkg / "Content.dpak" );
+    WriteFile( pkg / "Game.deproj", std::string( "{\"Name\":\"T\",\"AssetsRoot\":\"" ) +
+                                         Desert::Editor::kPackagedAssetsRoot + "\",\"DefaultScene\":\"\"}" );
+    fs::current_path( pkg );
+    ASSERT_TRUE( Common::Utils::VFS::MountPak( pkg / "Content.dpak" ) );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( pkg / "Game.deproj" ).string() ) );
+
+    // The runtime's own lookups, byte for byte, with no loose Cooked/ anywhere.
+    const auto loadedSpirv = Desert::Core::TryLoadCachedSpirv( spirvKey );
+    ASSERT_TRUE( loadedSpirv.has_value() ) << "the packed SPIR-V cache is invisible to the runtime's cache lookup";
+    EXPECT_EQ( *loadedSpirv, spirv );
+
+    Desert::Text::BakedFont loadedFont;
+    ASSERT_TRUE( Desert::Text::TryLoadBakedFont( Desert::Text::FontCachePath( fontKey ), loadedFont ) )
+         << "the packed font atlas is invisible to the runtime's cache lookup";
+    EXPECT_EQ( loadedFont.AtlasR8, font.AtlasR8 );
+    EXPECT_EQ( loadedFont.PixelHeight, font.PixelHeight );
+
+    Desert::Vector::BakedIcon loadedIcon;
+    ASSERT_TRUE( Desert::Vector::TryLoadBakedIcon( Desert::Vector::IconCachePath( iconKey ), loadedIcon ) )
+         << "the packed icon bake is invisible to the runtime's cache lookup";
+    ASSERT_EQ( loadedIcon.Layers.size(), 1u );
+    EXPECT_EQ( loadedIcon.Layers[0].Sdf, icon.Layers[0].Sdf );
+    EXPECT_EQ( loadedIcon.Layers[0].RGBA, icon.Layers[0].RGBA );
+    EXPECT_EQ( loadedIcon.Aspect, icon.Aspect );
+
+    // The archive keys, spelled BY HAND. The load/store pair above shares one path function, so a
+    // mutation of that function alone (renaming "ShaderCache", dropping the "Cooked" prefix) would
+    // move both ends together and stay green — these three literals are the external contract that
+    // must not drift, because every already-shipped archive spells its entries this way.
+    EXPECT_TRUE(
+         Common::Utils::VFS::ReadFile( pkg / "Cooked" / "ShaderCache" / std::format( "{:016x}.spv", spirvKey ) )
+              .has_value() );
+    EXPECT_TRUE(
+         Common::Utils::VFS::ReadFile( pkg / "Cooked" / "FontCache" / std::format( "{:016x}.dfont", fontKey ) )
+              .has_value() );
+    EXPECT_TRUE(
+         Common::Utils::VFS::ReadFile( pkg / "Cooked" / "IconCache" / std::format( "{:016x}.dicon", iconKey ) )
+              .has_value() );
+}
+
+// The cook produces artifacts under the very keys the runtime computes when it loads the same shader —
+// over a real (minimal) DSL shader, through the real preprocessor and the real compiler. A cook that
+// hashed different inputs, assembled stages differently, or keyed for the wrong profile would leave
+// this lookup cold, which is precisely the shipped-cache-dead-on-arrival failure П2 was.
+TEST( PackagedContent, TheCookCompilesWhatTheRuntimeWillAskFor )
+{
+    EnvironmentGuard guard;
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_cook";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+
+    const char* kProbeShader = "Shader \"CookProbe\"\n"
+                               "{\n"
+                               "    Domain Surface\n"
+                               "    Vertex\n"
+                               "    {\n"
+                               "        In(0) vec3 a_Position;\n"
+                               "        void main() { gl_Position = vec4( a_Position, 1.0 ); }\n"
+                               "    }\n"
+                               "    Fragment\n"
+                               "    {\n"
+                               "        Out(0) vec4 o_Color;\n"
+                               "        void main() { o_Color = vec4( 1.0 ); }\n"
+                               "    }\n"
+                               "}\n";
+
+    WriteFile( proj / "Resources" / "Shaders" / "CookProbe.shader", kProbeShader );
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+    SetEnv( "HOME", base.string() );
+    fs::create_directories( proj / "GameAssets" );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    // The packager's cook, at this build's own profile (what BuildContentPak passes).
+    const auto stats = Desert::Editor::CookContentCaches( Desert::Core::SpirvDebugInfoThisBuild() );
+    EXPECT_EQ( stats.ShadersCompiled, 2u ) << "vertex + fragment of the one probe shader";
+    EXPECT_EQ( stats.Failures, 0u );
+
+    // The runtime's side of the relation: assemble the same stages the way VulkanShader::Reload does
+    // and ask the cache with the runtime's own key overload. Every stage must already be there.
+    const fs::path    shaderFile = fs::path( "Resources" ) / "Shaders" / "CookProbe.shader";
+    const std::string content    = Common::Utils::FileSystem::ReadFileContent( shaderFile );
+    ASSERT_FALSE( content.empty() );
+
+    const auto stages =
+         Desert::Core::Preprocess::ShaderPreprocess::PreProcessProgramPass( content, shaderFile, "" );
+    ASSERT_EQ( stages.size(), 2u );
+    for ( const auto& [stage, source] : stages )
+    {
+        const uint64_t key = Desert::Core::ComputeShaderCacheKey( stage, source, shaderFile );
+        EXPECT_TRUE( Desert::Core::TryLoadCachedSpirv( key ).has_value() )
+             << "the cook left the " << static_cast<int>( stage )
+             << " stage cold — the runtime would recompile it at startup";
+    }
+
+    // And the cook is incremental: a second pass finds everything under its key and compiles nothing.
+    const auto again = Desert::Editor::CookContentCaches( Desert::Core::SpirvDebugInfoThisBuild() );
+    EXPECT_EQ( again.ShadersCompiled, 0u );
+    EXPECT_EQ( again.ShadersCached, 2u );
+}
+
+// A cook that could not WRITE what it produced must not report it as cooked. Without this the
+// packager's own summary is the defect in miniature: it says the shader was compiled, the pak packs
+// the directory that does not contain it, and the first place anyone learns otherwise is a player's
+// slow startup — which is exactly the failure П2 is about, arriving one artifact at a time.
+//
+// The store is made to fail the way a read-only install makes it fail: the directory the artifact
+// must go in cannot be created, because a FILE already occupies that name.
+TEST( PackagedContent, ACookThatCannotWriteDoesNotReportTheArtifactAsCooked )
+{
+    EnvironmentGuard guard;
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_unwritable";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+
+    WriteFile( proj / "Resources" / "Shaders" / "CookProbe.shader",
+               "Shader \"CookProbe\"\n"
+               "{\n"
+               "    Domain Surface\n"
+               "    Vertex\n"
+               "    {\n"
+               "        In(0) vec3 a_Position;\n"
+               "        void main() { gl_Position = vec4( a_Position, 1.0 ); }\n"
+               "    }\n"
+               "    Fragment\n"
+               "    {\n"
+               "        Out(0) vec4 o_Color;\n"
+               "        void main() { o_Color = vec4( 1.0 ); }\n"
+               "    }\n"
+               "}\n" );
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+    SetEnv( "HOME", base.string() );
+    fs::create_directories( proj / "GameAssets" );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    // Occupy Cooked/ShaderCache with a regular file, so create_directories cannot make the folder
+    // and every store into it fails.
+    const fs::path cacheDir = Desert::Core::SpirvCachePathForKey( 0 ).parent_path();
+    fs::create_directories( cacheDir.parent_path() );
+    WriteFile( cacheDir, "not a directory" );
+    ASSERT_TRUE( fs::is_regular_file( cacheDir ) );
+
+    const auto stats = Desert::Editor::CookContentCaches( Desert::Core::SpirvDebugInfoThisBuild() );
+
+    EXPECT_EQ( stats.ShadersCompiled, 0u ) << "an artifact that never reached the disk was counted as cooked";
+    EXPECT_EQ( stats.StoreFailures, 2u ) << "vertex + fragment, each produced and each unwritten";
+    EXPECT_EQ( stats.Failures, 0u ) << "the shader compiles fine — this is a WRITE failure, not a bad shader";
 }
 
 int main( int argc, char** argv )

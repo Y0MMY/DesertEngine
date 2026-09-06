@@ -87,6 +87,9 @@ namespace Desert::Player
         // A UI button clicked this frame with an "scene:<path>" OnClickMessage — applied next OnUpdate.
         std::optional<std::string> m_PendingSceneLoad;
 
+        // One-shot "startup is over" log marker (see OnUpdate) — the boundary startup timings end at.
+        bool m_LoggedFirstUpdate = false;
+
         // Splash screen (SceneSettings.Splash*): a full-screen image shown when a scene loads, fading in/out.
         // Armed by TriggerSplash() on load; m_SplashTimer counts down each frame.
         Assets::AssetHandle m_SplashSprite;
