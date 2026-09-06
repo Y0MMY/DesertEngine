@@ -61,6 +61,25 @@ namespace Desert::Editor::Utils
         // A full-width accent ("primary") button — for the one obvious action of a section (Convert, Create…).
         static bool AccentButton( const char* label, float height = 0.0f );
 
+        // 1234567 -> "1 234 567". Every large count the editor SHOWS a person goes through here: a raw run
+        // of digits is not read, it is estimated, and "148902" and "1489020" look the same at a glance.
+        // Shared rather than per-panel because the Mesh section and the status bar print the same triangle
+        // count, and two formatters would eventually group it two ways.
+        static std::string FormatThousands( uint64_t value );
+
+        // What a panel draws when it has no subject: a large muted glyph, the panel's own name for the
+        // state, one sentence saying how to leave it, and — optionally — the button that leaves it.
+        //
+        // This exists because the alternative is a blank grey rectangle, and a blank rectangle is
+        // indistinguishable from a panel that is broken. It also has to say what the panel IS: a Details
+        // dock with nothing selected carries no other clue about what it would show.
+        //
+        // Returns true on the frame `action` is clicked; pass nullptr for a state with no next step.
+        // Centres itself in the remaining content region, so call it instead of the panel body, not
+        // alongside it.
+        static bool EmptyState( const char* icon, const char* title, const char* body,
+                                const char* action = nullptr );
+
         // A vector value the way UE draws one: N drag fields side by side, each with a thin coloured left
         // edge — X red, Y green, Z blue, the SAME colours as the viewport gizmo's axes, so the field you
         // type into and the handle you drag in the scene are visibly the same thing. (The old control gave
@@ -91,7 +110,13 @@ namespace Desert::Editor::Utils
         // is over it (a fill drawn after the row would cover the widgets). `height` overrides the assumed
         // row height for rows taller than one control (a material slot with its preview) — without it the
         // rule and the hover band would cut straight through the row's content.
-        static bool PropertyRowBackground( float height = 0.0f );
+        //
+        // `modified` paints a 2px accent tick down the row's left edge: "this value is not the type's
+        // default". It is the CHEAP half of the signal — the reset arrow in the label column is the other
+        // half, but the arrow only appears where the eye is already looking, and a panel of forty rows is
+        // read by scanning the margin. Both are driven off ONE comparison at the call site so they cannot
+        // disagree about which rows are dirty.
+        static bool PropertyRowBackground( float height = 0.0f, bool modified = false );
         // The vertical rule between the label and value columns, for the row currently being submitted.
         // Call it while the columns are still open, just before closing them.
         static void PropertyColumnRule();

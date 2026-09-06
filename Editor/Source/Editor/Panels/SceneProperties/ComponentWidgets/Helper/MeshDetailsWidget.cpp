@@ -21,19 +21,14 @@ namespace Desert::Editor
     {
         // 1234567 -> "1 234 567". Big triangle counts are unreadable as a raw run of digits, and that
         // readout is the whole point of the section.
-        std::string FormatCount( uint64_t value )
+        //
+        // Moved to ImGuiUtilities when the status bar started printing the same triangle count: this
+        // section and that bar have to group the same number the same way, and the only way to guarantee
+        // that is for there to be one function. Kept as a local alias so the call sites below read the
+        // same as they did.
+        inline std::string FormatCount( uint64_t value )
         {
-            std::string digits = std::to_string( value );
-            std::string out;
-            out.reserve( digits.size() + digits.size() / 3 );
-            const size_t lead = digits.size() % 3 == 0 ? 3 : digits.size() % 3;
-            for ( size_t i = 0; i < digits.size(); ++i )
-            {
-                if ( i > 0 && ( i - lead ) % 3 == 0 )
-                    out += ' ';
-                out += digits[i];
-            }
-            return out;
+            return Utils::ImGuiUtilities::FormatThousands( value );
         }
 
         // One read-only fact, on the panel's shared property row: same label column, same rules, same

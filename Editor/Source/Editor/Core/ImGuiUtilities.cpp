@@ -1,5 +1,6 @@
 #include "ImGuiUtilities.hpp"
 
+#include <Editor/Core/EditorResources.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 #include <ImGui/imgui.h>
@@ -86,7 +87,7 @@ namespace Desert::Editor::Utils
         return std::clamp( ImGui::GetWindowWidth() * 0.42f, 110.0f, 230.0f );
     }
 
-    bool ImGuiUtilities::PropertyRowBackground( float height )
+    bool ImGuiUtilities::PropertyRowBackground( float height, bool modified )
     {
         const ImGuiStyle& style  = ImGui::GetStyle();
         const ImVec2      rowMin = ImGui::GetCursorScreenPos();
@@ -122,6 +123,15 @@ namespace Desert::Editor::Utils
         }
         dl->AddLine( ImVec2( bandMin.x, bandMin.y ), ImVec2( bandMax.x, bandMin.y ),
                      ImGui::GetColorU32( ImGuiCol_Border ) );
+
+        // "Not the default" as a 2px edge on the band, drawn AFTER the fill so the stripe cannot hide it.
+        // The accent, not the selection blue: this reports a VALUE, which is the line the theme draws
+        // between its two blues (see ThemeManager::SetDarkTheme).
+        if ( modified )
+        {
+            dl->AddRectFilled( bandMin, ImVec2( bandMin.x + 2.0f, bandMax.y ),
+                               ImGui::GetColorU32( ThemeManager::GetSelectedColor() ) );
+        }
 
         ++s_PropertyRowIndex;
 
@@ -179,6 +189,85 @@ namespace Desert::Editor::Utils
         const bool clicked = ImGui::Button( label, ImVec2( ImGui::GetContentRegionAvail().x, height ) );
         ImGui::PopStyleVar();
         ImGui::PopStyleColor( 3 );
+        return clicked;
+    }
+
+    std::string ImGuiUtilities::FormatThousands( uint64_t value )
+    {
+        std::string digits = std::to_string( value );
+        std::string out;
+        out.reserve( digits.size() + digits.size() / 3 );
+        const size_t lead = digits.size() % 3 == 0 ? 3 : digits.size() % 3;
+        for ( size_t i = 0; i < digits.size(); ++i )
+        {
+            if ( i > 0 && ( i - lead ) % 3 == 0 )
+                out += ' ';
+            out += digits[i];
+        }
+        return out;
+    }
+
+    bool ImGuiUtilities::EmptyState( const char* icon, const char* title, const char* body, const char* action )
+    {
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        if ( avail.x <= 0.0f || avail.y <= 0.0f )
+            return false;
+
+        // Slightly above centre, the way an empty state sits in UE and in every file dialog: dead centre
+        // reads as "loading", a little high reads as "this is the content".
+        ImGui::Dummy( ImVec2( 0.0f, avail.y * 0.22f ) );
+
+        const auto centred = [avail]( float width )
+        { ImGui::SetCursorPosX( ImGui::GetCursorPosX() + std::max( 0.0f, ( avail.x - width ) * 0.5f ) ); };
+
+        // The glyph is the thing that reads at a glance, so it gets the big icon font and a colour well
+        // below the body text: it is a mood, not information.
+        if ( ImFont* big = EditorResources::GetBigIconFont() )
+            ImGui::PushFont( big );
+        centred( ImGui::CalcTextSize( icon ).x );
+        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.42f, 0.42f, 0.42f, 1.0f ) );
+        ImGui::TextUnformatted( icon );
+        ImGui::PopStyleColor();
+        if ( EditorResources::GetBigIconFont() )
+            ImGui::PopFont();
+
+        ImGui::Dummy( ImVec2( 0.0f, 8.0f ) );
+        if ( ImFont* bold = EditorResources::GetBoldFont() )
+            ImGui::PushFont( bold );
+        centred( ImGui::CalcTextSize( title ).x );
+        ImGui::TextUnformatted( title );
+        if ( EditorResources::GetBoldFont() )
+            ImGui::PopFont();
+
+        ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+        // Wrapped to a column narrower than the dock: a sentence running the full width of a wide panel
+        // is read as a paragraph and skipped.
+        const float wrap = std::min( avail.x - 32.0f, 300.0f );
+        if ( wrap > 40.0f )
+        {
+            centred( wrap );
+            ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+            ImGui::PushTextWrapPos( ImGui::GetCursorPosX() + wrap );
+            ImGui::TextWrapped( "%s", body );
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+        }
+
+        bool clicked = false;
+        if ( action )
+        {
+            ImGui::Dummy( ImVec2( 0.0f, 10.0f ) );
+            const float buttonW = ImGui::CalcTextSize( action ).x + ImGui::GetFontSize() * 2.0f;
+            centred( buttonW );
+            // AccentButton takes the full remaining width, so it is fenced into a child of exactly the
+            // width we want rather than reimplemented with a second set of accent colours.
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
+            ImGui::BeginChild( "##EmptyStateAction", ImVec2( buttonW, ImGui::GetFrameHeight() ), false,
+                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
+            clicked = AccentButton( action );
+            ImGui::EndChild();
+            ImGui::PopStyleVar();
+        }
         return clicked;
     }
 
