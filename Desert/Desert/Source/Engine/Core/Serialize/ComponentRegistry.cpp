@@ -17,9 +17,7 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
-#include <Engine/Assets/CloudTypeAsset.hpp>
 #include <Engine/Assets/CloudModellingVolumeAsset.hpp>
-#include <Engine/Assets/CloudLayoutAsset.hpp>
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -256,29 +254,11 @@ namespace Desert::Core::Serialize
             // cloud layer's own noise slot — and that field moved onto the cloud TYPE, which stores its
             // volume as a path of its own rather than through this resolver. A branch keyed on a
             // metadata string no reflected field produces is a path nothing can reach (§4.1).
-            if ( type == "CloudTypeAsset" )
-            {
-                auto a = mgr.FindByHandle<Assets::CloudTypeAsset>( Common::UUID( handle ) );
-                if ( !a )
-                    return "";
-
-                // RELATIVE to the assets root, unlike every branch around it, and the difference is
-                // deliberate rather than an oversight. Those branches write absolute paths, so every
-                // scene in this repository carries one developer's home directory and a cloud type
-                // shipped with the engine would be unresolvable on any other machine — while the
-                // library it names is content that ships WITH the project. The v4 -> v5 migration has
-                // to produce this string too, and it is a pure function that cannot read a path root,
-                // so relative is also the only form it could write. FromPath below accepts either.
-                std::error_code ec;
-                const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
-                                                                 Common::Constants::Path::ASSETS_PATH, ec );
-                // generic_string() rather than native(): native() is a WIDE string on Windows and a
-                // narrow one here, so a narrow ".." literal only compiles on this platform.
-                const auto relStr = rel.generic_string();
-                if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
-                    return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
-                return relStr;
-            }
+            // THE "CloudTypeAsset" AND "CloudLayoutAsset" BRANCHES ARE GONE WITH THE FIELDS THEY
+            // SERVED (O1): the four type slots and the layout are MATERIAL schema parameters now, stored
+            // in the `.demat` as path-derived handles, so no reflected field produces either metadata
+            // string and a branch keyed on one is a path nothing can reach (§4.1). The write side of the
+            // relative-path rule they pioneered lives on in the MaterialAsset branch above.
             if ( type == "CloudModellingVolumeAsset" )
             {
                 auto a = mgr.FindByHandle<Assets::CloudModellingVolumeAsset>( Common::UUID( handle ) );
@@ -288,25 +268,6 @@ namespace Desert::Core::Serialize
                 // RELATIVE, on exactly the terms the cloud type above is relative: a sculpted body is
                 // content that ships WITH the project, and an absolute path would carry one
                 // developer's home directory into every scene that uses one.
-                std::error_code ec;
-                const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
-                                                                 Common::Constants::Path::ASSETS_PATH, ec );
-                // generic_string() rather than native(): native() is a WIDE string on Windows and a
-                // narrow one here, so a narrow ".." literal only compiles on this platform.
-                const auto relStr = rel.generic_string();
-                if ( ec || rel.empty() || relStr.rfind( "..", 0 ) == 0 )
-                    return a->GetMetadata().Filepath.string(); // outside the project — say so plainly
-                return relStr;
-            }
-            if ( type == "CloudLayoutAsset" )
-            {
-                auto a = mgr.FindByHandle<Assets::CloudLayoutAsset>( Common::UUID( handle ) );
-                if ( !a )
-                    return "";
-
-                // RELATIVE, on exactly the terms the two cloud assets above are relative: a painting is
-                // content that ships WITH the project, and an absolute path would carry one developer's
-                // home directory into every scene that names one.
                 std::error_code ec;
                 const auto      rel = std::filesystem::relative( a->GetMetadata().Filepath,
                                                                  Common::Constants::Path::ASSETS_PATH, ec );
@@ -430,31 +391,13 @@ namespace Desert::Core::Serialize
             // reason: no reflected field names that asset type any more. A cloud type's own volume is
             // bound in Assets::CloudTypeAsset::ResolveDependencies, from the path inside the type's
             // file, which is where a reference to a `.dcnv` now lives.
-            if ( type == "CloudTypeAsset" )
-            {
-                // BOTH FORMS ARE ACCEPTED, and neither is a legacy path. A file written by ToPath above
-                // (or by the v4 -> v5 migration) carries a path relative to the assets root, because
-                // the library ships with the project; a file an artist points at outside the project
-                // carries an absolute one. Joining a relative path to the root is the whole difference,
-                // and doing it here means it happens exactly once.
-                const std::filesystem::path named( path );
-                const std::filesystem::path full =
-                     named.is_absolute() ? named
-                                         : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
-
-                auto a = mgr.FindByPath<Assets::CloudTypeAsset>( full );
-                if ( !a )
-                    a = m.CreateAsset<Assets::CloudTypeAsset>( Assets::AssetPriority::Medium, full );
-                if ( !a )
-                    return 0;
-                if ( !a->IsReadyForUse() && !a->Load() )
-                    return 0;
-                if ( const auto registered = Runtime::ResourceRegistry::GetCloudTypeService()->Register( a );
-                     !registered )
-                    LOG_ERROR( "[Clouds] Cloud type '{}' named by the scene could not be registered: {}",
-                               full.string(), registered.GetError() );
-                return static_cast<uint64_t>( a->GetMetadata().Handle );
-            }
+            // THE READ-SIDE "CloudTypeAsset" AND "CloudLayoutAsset" BRANCHES ARE GONE WITH THE WRITE
+            // SIDE ABOVE (O1). What replaced their register-on-load duty: AssetPreloader::PreloadCloudTypes
+            // / PreloadCloudLayouts registers the library directories at startup, and the Material Editor's
+            // drop target registers an out-of-library file the moment it is bound. A file outside the
+            // library that only a `.demat` names is NOT re-registered on the next launch — the renderer
+            // and the services say so loudly, once, with the handle — which is the named cost of the
+            // deletion rather than an oversight.
             if ( type == "CloudModellingVolumeAsset" )
             {
                 // Both forms accepted, for the reason the cloud type's branch gives above.
@@ -474,27 +417,6 @@ namespace Desert::Core::Serialize
                      !registered )
                     LOG_ERROR( "[Clouds] Cloud modelling volume '{}' named by the scene could not be "
                                "uploaded: {}",
-                               full.string(), registered.GetError() );
-                return static_cast<uint64_t>( a->GetMetadata().Handle );
-            }
-            if ( type == "CloudLayoutAsset" )
-            {
-                // Both forms accepted, for the reason the cloud type's branch gives above.
-                const std::filesystem::path named( path );
-                const std::filesystem::path full =
-                     named.is_absolute() ? named
-                                         : ( Common::Constants::Path::ASSETS_PATH / named ).lexically_normal();
-
-                auto a = mgr.FindByPath<Assets::CloudLayoutAsset>( full );
-                if ( !a )
-                    a = m.CreateAsset<Assets::CloudLayoutAsset>( Assets::AssetPriority::Medium, full );
-                if ( !a )
-                    return 0;
-                if ( !a->IsReadyForUse() && !a->Load() )
-                    return 0;
-                if ( const auto registered = Runtime::ResourceRegistry::GetCloudLayoutService()->Register( a );
-                     !registered )
-                    LOG_ERROR( "[Clouds] Cloud layout '{}' named by the scene could not be registered: {}",
                                full.string(), registered.GetError() );
                 return static_cast<uint64_t>( a->GetMetadata().Handle );
             }

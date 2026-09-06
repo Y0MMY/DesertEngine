@@ -544,7 +544,7 @@ namespace Desert::Editor
             // The schema's own Tooltip attribute, on the LABEL: the cloud material carries the calibrated
             // tooltips its component fields used to, and a parameter whose meaning the panel cannot show
             // is a parameter the artist reads the shader file to use.
-            if ( !p.Tooltip.empty() && ImGui::IsItemHovered( ImGuiHoveredFlags_DelayShort ) )
+            if ( !p.Tooltip.empty() && ImGui::IsItemHovered() )
             {
                 ImGui::BeginTooltip();
                 ImGui::PushTextWrapPos( ImGui::GetFontSize() * 30.0f );
@@ -684,8 +684,8 @@ namespace Desert::Editor
         return changed;
     }
 
-    bool MaterialEditorPanel::DrawCloudAssetRef( Assets::MaterialData& data,
-                                                 const Core::Formats::ShaderParam& p,
+    bool MaterialEditorPanel::DrawCloudAssetRef( Assets::MaterialData&                          data,
+                                                 const ::Desert::Core::Formats::ShaderParam& p,
                                                  const std::string&                hiddenId )
     {
         bool     changed = false;

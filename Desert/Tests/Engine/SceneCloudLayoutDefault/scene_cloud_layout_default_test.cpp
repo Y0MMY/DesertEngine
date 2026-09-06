@@ -280,7 +280,7 @@ TEST( SceneCloudLayoutDefault, ThePaintedLayoutDidNotMoveTheSchemaVersion )
 // not the numbering the painting uses, and the symptom of not knowing that is a channel somebody swears
 // they painted that does nothing at all. The Cloud Layout panel names the type behind every channel, and
 // it can only do that because ECS::ResolveCloudSpecies states the rule once — the renderer resolves the
-// same call.
+// same call — over the MATERIAL's four slots since O1, which is also where the panel reads them.
 //
 // These are the cases the panel's labels are wrong about if the rule ever moves.
 TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsFollowThem )
@@ -291,10 +291,9 @@ TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsF
     // A LAYER WITH ONE TYPE IN THE THIRD SLOT IS DRIVEN BY THE PAINTING'S FIRST CHANNEL. This is the case
     // that reads as a broken feature: an artist paints blue for "Cloud Type 3" and the sky ignores it.
     {
-        Desert::ECS::VolumetricCloudData data;
-        data.CloudType3 = cumulus;
+        const Desert::Assets::AssetHandle slots[Desert::ECS::kCloudTypeSlots] = { {}, {}, cumulus, {} };
 
-        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( slots );
 
         EXPECT_EQ( resolved.Count, 1u );
         EXPECT_FALSE( resolved.BuiltInDefault );
@@ -305,11 +304,9 @@ TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsF
 
     // ORDER IS THE ORDER OF THE SLOTS, not of anything else, and a gap does not reserve a channel.
     {
-        Desert::ECS::VolumetricCloudData data;
-        data.CloudType2 = cirrus;
-        data.CloudType4 = cumulus;
+        const Desert::Assets::AssetHandle slots[Desert::ECS::kCloudTypeSlots] = { {}, cirrus, {}, cumulus };
 
-        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( slots );
 
         EXPECT_EQ( resolved.Count, 2u );
         EXPECT_EQ( resolved.AuthoredSlot[0], 1u );
@@ -320,12 +317,9 @@ TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsF
     // of cloud at twice the cost. The second slot's channel therefore drives NOTHING, and an artist who
     // painted it is owed that sentence rather than a shrug.
     {
-        Desert::ECS::VolumetricCloudData data;
-        data.CloudType1 = cumulus;
-        data.CloudType2 = cumulus;
-        data.CloudType3 = cirrus;
+        const Desert::Assets::AssetHandle slots[Desert::ECS::kCloudTypeSlots] = { cumulus, cumulus, cirrus, {} };
 
-        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( slots );
 
         EXPECT_EQ( resolved.Count, 2u );
         EXPECT_EQ( resolved.AuthoredSlot[0], 0u );
@@ -338,8 +332,8 @@ TEST( SceneCloudLayoutDefault, TheSpeciesAreTheTypeSlotsCompactedAndTheChannelsF
     // authored a type for from having no sky — and what keeps the panel's channel slider from having an
     // empty range.
     {
-        const Desert::ECS::VolumetricCloudData    data;
-        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( data );
+        const Desert::Assets::AssetHandle         slots[Desert::ECS::kCloudTypeSlots] = {};
+        const Desert::ECS::CloudSpeciesResolution resolved = Desert::ECS::ResolveCloudSpecies( slots );
 
         EXPECT_EQ( resolved.Count, 1u );
         EXPECT_TRUE( resolved.BuiltInDefault );

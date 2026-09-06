@@ -27,6 +27,7 @@
 
 // For the shipped multiple-scattering defaults and the octave ceiling, so the reference below measures
 // the series the artist actually gets rather than a copy of its numbers that can drift from it.
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 
 #include <algorithm>
@@ -1015,16 +1016,18 @@ namespace
         return image;
     }
 
-    // The component's shipped series, so the test moves with the defaults instead of restating them.
+    // The MATERIAL's shipped series, so the test moves with the defaults instead of restating them —
+    // the four numbers are schema parameters since O1, and CloudMaterialValues is their pinned mirror
+    // (Desert/Tests/Engine/CloudMaterialSchema holds mirror == schema).
     CloudScatterSeries ShippedSeries()
     {
-        const Desert::ECS::VolumetricCloudData data;
+        const Desert::Graphic::CloudMaterialValues material;
 
         CloudScatterSeries series;
-        series.Octaves     = static_cast<float>( data.MultiScatterOctaves );
-        series.ScatterStep = data.MultiScatterContribution;
-        series.ExtinctStep = data.MultiScatterOcclusion;
-        series.PhaseStep   = data.MultiScatterEccentricity;
+        series.Octaves     = static_cast<float>( material.MultiScatterOctaves );
+        series.ScatterStep = material.MultiScatterContribution;
+        series.ExtinctStep = material.MultiScatterOcclusion;
+        series.PhaseStep   = material.MultiScatterEccentricity;
         return series;
     }
 

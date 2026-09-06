@@ -15,6 +15,11 @@
 // suite's own choosing instead of whatever content root a process happens to have open.
 
 #include <SceneMigration.hpp>
+#include <Engine/Assets/MaterialData.hpp>
+#include <Engine/Core/Serialize/CustomReflect.hpp>
+#include <Engine/Core/Serialize/GLMReflect.hpp>
+
+#include <Common/Core/AssetHandle.hpp>
 
 // For TonemapOperator::Reinhard, which the v1 -> v2 step pins and this suite reads back. The engine owns
 // the enum; naming its value here rather than the integer 0 is what keeps the assertion true if the
@@ -200,6 +205,7 @@ TEST( SceneMigratorEndToEnd, EveryStepAboveV1IsReportedAsHavingRun )
     EXPECT_TRUE( report.CloudSetRaised );
     EXPECT_TRUE( report.TerrainMaterialRaised );
     EXPECT_TRUE( report.MaterialPathRaised );
+    EXPECT_TRUE( report.CloudMaterialRaised );
 }
 
 // THE CLOUD CHAIN, WHICH IS THE PART THAT CANNOT BE PROVED ONE STEP AT A TIME. A v1 scalar `CloudType` of
@@ -208,14 +214,17 @@ TEST( SceneMigratorEndToEnd, EveryStepAboveV1IsReportedAsHavingRun )
 // wrote, and a break anywhere in the middle leaves a layer with no cloud in it.
 TEST( SceneMigratorEndToEnd, TheScalarCloudTypeBecomesAPathInTheFirstSlotOfTheSet )
 {
-    SceneSerialized scene = SceneAtV1();
-    MigrateScene( scene, kAssetsRoot );
+    SceneSerialized scene  = SceneAtV1();
+    const auto      report = MigrateScene( scene, kAssetsRoot );
 
     const rfl::Generic::Object clouds = Payload( scene.Entities[0], "VolumetricCloud" );
 
-    // It arrived in slot 1, under the set's name and not the old one.
+    // It left the payload entirely — the chain is four long since O1, and the last link lifts the slot
+    // into the cloud MATERIAL the payload now names.
     EXPECT_FALSE( HasKey( clouds, "CloudType" ) ) << "the single-type key survived the rename to a set";
-    ASSERT_TRUE( HasKey( clouds, "CloudType1" ) );
+    EXPECT_FALSE( HasKey( clouds, "CloudType1" ) ) << "the slot survived the move into the material";
+    ASSERT_TRUE( HasKey( clouds, "Material" ) );
+    ASSERT_EQ( report.CloudMaterial.Materials.size(), 1u );
 
     // And it is the CONGESTUS that the old scalar 0.6 named — that is the claim, and it is what a break
     // anywhere in the chain would change: the quarters could have landed on stratus, or the species integer
@@ -227,20 +236,27 @@ TEST( SceneMigratorEndToEnd, TheScalarCloudTypeBecomesAPathInTheFirstSlotOfTheSe
     // statement of the library's spelling and it was wrong the first time it was written. What is NOT
     // tautological here is the index — which of the four presets the scalar chose — and that is the part
     // this test exists for.
-    EXPECT_EQ( StringAt( clouds, "CloudType1" ),
-               Desert::Assets::CloudTypeAssetRelativePath( Desert::Assets::kCloudTypeCumulusCongestus ) );
+    const auto material =
+         rfl::json::read<Desert::Assets::MaterialData>( report.CloudMaterial.Materials[0].Json );
+    ASSERT_TRUE( material );
+    EXPECT_EQ( material.value().GetTexture( "CloudType1" ),
+               static_cast<uint64_t>( Common::AssetHandle::FromKey(
+                    "assets:" + Desert::Assets::CloudTypeAssetRelativePath(
+                                     Desert::Assets::kCloudTypeCumulusCongestus ) ) ) );
 
-    // The other three slots are ABSENT, which is how the reflected serializer spells "the empty handle".
+    // The other three slots are ABSENT — from the payload and from the material alike, which is how both
+    // formats spell "the empty handle".
     EXPECT_FALSE( HasKey( clouds, "CloudType2" ) );
-    EXPECT_FALSE( HasKey( clouds, "CloudType3" ) );
-    EXPECT_FALSE( HasKey( clouds, "CloudType4" ) );
+    EXPECT_EQ( material.value().GetTexture( "CloudType2" ), 0u );
+    EXPECT_EQ( material.value().GetTexture( "CloudType3" ), 0u );
+    EXPECT_EQ( material.value().GetTexture( "CloudType4" ), 0u );
 }
 
 // The keys with nowhere to go are gone, and the ones that still mean something are untouched.
 TEST( SceneMigratorEndToEnd, TheRetiredCloudKeysAreGoneAndTheSurvivingOnesAreNot )
 {
-    SceneSerialized scene = SceneAtV1();
-    MigrateScene( scene, kAssetsRoot );
+    SceneSerialized scene  = SceneAtV1();
+    const auto      report = MigrateScene( scene, kAssetsRoot );
 
     const rfl::Generic::Object clouds = Payload( scene.Entities[0], "VolumetricCloud" );
 
@@ -249,7 +265,16 @@ TEST( SceneMigratorEndToEnd, TheRetiredCloudKeysAreGoneAndTheSurvivingOnesAreNot
         EXPECT_FALSE( HasKey( clouds, dropped ) ) << dropped << " survived the chain";
 
     EXPECT_TRUE( HasKey( clouds, "Enabled" ) );
-    EXPECT_DOUBLE_EQ( NumberAt( clouds, "Coverage" ), 0.5 );
+    // Coverage SURVIVES the chain, but as the material's parameter: v11 -> v12 lifts every look field
+    // into the `.demat`, values verbatim.
+    EXPECT_FALSE( HasKey( clouds, "Coverage" ) ) << "a look field survived on the payload";
+    ASSERT_EQ( report.CloudMaterial.Materials.size(), 1u );
+    {
+        const auto material =
+             rfl::json::read<Desert::Assets::MaterialData>( report.CloudMaterial.Materials[0].Json );
+        ASSERT_TRUE( material );
+        EXPECT_DOUBLE_EQ( material.value().GetFloat( "Coverage" ), 0.5 );
+    }
 }
 
 // THE TERRAIN'S INLINE MATERIAL IS GONE AND WHAT IT HELD IS NAMED. This step DROPS values, so the report
@@ -420,7 +445,8 @@ TEST( SceneMigratorEndToEnd, AMalformedCloudTypeCostsTheLayerItsTypeAndNothingEl
     EXPECT_FALSE( HasKey( out, "CloudType1" ) )
          << "a value nobody could read became a cloud type, which is a guess about intent";
     EXPECT_TRUE( HasKey( out, "Enabled" ) );
-    EXPECT_DOUBLE_EQ( NumberAt( out, "Coverage" ), 0.5 );
+    // The good value beside it still arrives — in the material, where the look lives since O1.
+    EXPECT_FALSE( HasKey( out, "Coverage" ) );
     EXPECT_EQ( *scene.SceneVersion, kSceneVersion );
 }
 

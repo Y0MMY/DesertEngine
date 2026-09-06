@@ -104,7 +104,7 @@ namespace Desert::Editor
         // and texture rows are read-only (per-instance texture descriptors are a v2).
         /// One non-texture asset-reference row of the schema (CloudType / CloudLayout — the kinds the
         /// Volume domain declares). Combo + AssetFile drag-drop, value in MaterialData::Textures by name.
-        bool DrawCloudAssetRef( Assets::MaterialData& data, const Core::Formats::ShaderParam& p,
+        bool DrawCloudAssetRef( Assets::MaterialData& data, const ::Desert::Core::Formats::ShaderParam& p,
                                 const std::string& hiddenId );
 
         bool DrawParameters( Assets::SurfaceMaterialAsset& asset, const Assets::MaterialData* parentData,

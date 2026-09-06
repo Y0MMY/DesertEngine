@@ -295,7 +295,16 @@ TEST( SceneCloudSpeciesMigration, MigrateSceneRunsItAndStampsTheFileSoItNeverRun
     EXPECT_TRUE( report.CloudSetRaised );
     EXPECT_EQ( report.CloudSet.SlotsCarried, 1 );
     EXPECT_FALSE( Has( CloudPayloadOf( scene.Entities.front() ), "CloudType" ) );
-    EXPECT_TRUE( Has( CloudPayloadOf( scene.Entities.front() ), "CloudType1" ) );
+
+    // AND THE CHAIN GREW A FOURTH LINK WITH O1: the slot the set-step wrote is moved into the cloud
+    // MATERIAL by v11 -> v12, so at the head it lives in the `.demat` the payload names, not in the
+    // payload. The material step's own suite (SceneCloudMaterialMigration) owns the file's contents;
+    // what this chain assertion keeps is that the slot LEFT through the material step rather than
+    // evaporating.
+    EXPECT_TRUE( report.CloudMaterialRaised );
+    EXPECT_EQ( report.CloudMaterial.AssetsMoved, 1 );
+    EXPECT_FALSE( Has( CloudPayloadOf( scene.Entities.front() ), "CloudType1" ) );
+    EXPECT_TRUE( Has( CloudPayloadOf( scene.Entities.front() ), "Material" ) );
 
     // Second pass over the stamped tree: nothing left to do.
     const auto again = MigrateScene( scene );
@@ -347,16 +356,16 @@ TEST( SceneCloudSpeciesMigration, TheReflectedComponentCarriesTheSlotThatReplace
                type->Fields.end() )
          << "the singular cloud type slot is still a field, so the set did not replace it";
 
-    const auto slot = std::find_if( type->Fields.begin(), type->Fields.end(),
-                                    []( const auto& field ) { return field.Name == "CloudType1"; } );
-    ASSERT_NE( slot, type->Fields.end() ) << "the component has no cloud type, so nothing replaced the "
-                                             "four fields the migration deletes";
-
-    // It draws as an ASSET SLOT and not as a number: an artist drops a file into it, which is what the
-    // whole programme was asked for and what neither a slider nor a combo of four could be.
-    EXPECT_EQ( slot->Type, Desert::Reflection::FieldType::AssetHandle );
-    EXPECT_TRUE( slot->Meta.IsAsset );
-    EXPECT_EQ( slot->Meta.AssetType, "CloudTypeAsset" );
+    // THE SLOT MOVED AGAIN WITH O1 — off the component entirely, into the cloud MATERIAL's schema
+    // (CloudRaymarch.shader, `CloudType CloudType1`). What replaced the four deleted fields is therefore
+    // no longer a reflected field at all; Desert/Tests/Engine/CloudMaterialSchema asserts the schema
+    // carries exactly four CloudType slots, which is this assertion continued on the other side of the
+    // seam. What this suite keeps is that no SECOND copy grows back here.
+    EXPECT_EQ( std::find_if( type->Fields.begin(), type->Fields.end(),
+                             []( const auto& field ) { return field.Name == "CloudType1"; } ),
+               type->Fields.end() )
+         << "the cloud type slot is a material schema parameter since O1 and must not have a second life "
+            "on the component";
 }
 
 int main( int argc, char** argv )

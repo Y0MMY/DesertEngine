@@ -301,6 +301,11 @@ TEST( SceneCloudSetMigration, TheMigratedFileLoadsIntoTheFirstSlotOfTheComponent
     //
     // Asserted against the reflection table rather than against a string literal, so a field renamed in
     // the component fails here instead of six weeks later.
+    // THE KEY THIS FUNCTION WRITES IS THE KEY THE NEXT MIGRATION MOVES — since O1 the reader is no
+    // longer the reflected serializer (the slot is a material schema parameter, and the component must
+    // NOT carry it) but the v11 -> v12 step, which lifts `CloudType1` into the `.demat`. Asserted by
+    // running that step on this one's output: a rename to `CloudTypeOne` would leave the slot stranded
+    // in the payload and this test names it.
     const Desert::Reflection::TypeInfo* cloud =
          Desert::Reflection::ReflectionRegistry::Get().Find( "VolumetricCloudData" );
     ASSERT_NE( cloud, nullptr );
@@ -310,10 +315,11 @@ TEST( SceneCloudSetMigration, TheMigratedFileLoadsIntoTheFirstSlotOfTheComponent
         const auto found =
              std::find_if( cloud->Fields.begin(), cloud->Fields.end(),
                            [slot]( const Desert::Reflection::FieldInfo& field ) { return field.Name == slot; } );
-        EXPECT_NE( found, cloud->Fields.end() ) << slot << " is not a field of the component any more";
+        EXPECT_EQ( found, cloud->Fields.end() )
+             << slot << " is a material schema parameter since O1 and must not also be a component field";
     }
 
-    // And the number of slots the component has is the number of channels the profile table has, which is
+    // And the number of slots the schema has is the number of channels the profile table has, which is
     // what fixes the ceiling at four on both sides of the seam.
     EXPECT_EQ( Desert::Graphic::kCloudSpeciesSlots, 4u );
 
@@ -321,6 +327,10 @@ TEST( SceneCloudSetMigration, TheMigratedFileLoadsIntoTheFirstSlotOfTheComponent
     MigrateCloudSetV5ToV6( entities );
 
     EXPECT_TRUE( Has( CloudPayloadOf( entities.front() ), kSlots[0] ) );
+
+    const auto material = Desert::Migration::MigrateCloudMaterialV11ToV12( entities, "Clouds" );
+    EXPECT_EQ( material.AssetsMoved, 1 ) << "the slot the set-step wrote is not one the material step moves";
+    EXPECT_FALSE( Has( CloudPayloadOf( entities.front() ), kSlots[0] ) );
 }
 
 int main( int argc, char** argv )

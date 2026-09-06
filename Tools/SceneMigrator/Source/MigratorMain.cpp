@@ -287,12 +287,16 @@ namespace Desert::Migration
                 out << " scene v" << Desert::Migration::kSceneVersionSSRUnits << "->v"
                     << Desert::Migration::kSceneVersionCloudMaterial << " (";
                 if ( report.CloudMaterial.Entities > 0 )
+                {
                     out << report.CloudMaterial.ValuesMoved << " value(s) and " << report.CloudMaterial.AssetsMoved
                         << " asset slot(s) moved into " << report.CloudMaterial.Materials.size()
-                        << " cloud material(s), " << report.CloudMaterial.Defaulted
-                        << " left at the schema default";
+                        << " bespoke cloud material(s), " << report.CloudMaterial.DefaultsAssigned
+                        << " layer(s) pointed at the shared "
+                        << Desert::Migration::kDefaultCloudMaterialRelativePath << " (D-37), "
+                        << report.CloudMaterial.Defaulted << " field(s) left at the schema default";
+                }
                 else
-                    out << "stamp only - no cloud layer stated a look field";
+                    out << "stamp only - no VolumetricCloud payload in this scene";
                 // Named, not counted, like every step above that can refuse a value: a rejected number is
                 // an authored one that will now read as the default, and the operator has to see which.
                 for ( const auto& name : report.CloudMaterial.RejectedNames )

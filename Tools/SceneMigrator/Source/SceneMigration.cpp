@@ -1364,37 +1364,37 @@ namespace Desert::Migration
             int         Components;
         };
         static constexpr MovedValue kValues[] = {
-            { "Coverage", 1 },
-            { "CoverageContrast", 1 },
-            { "WeatherTileSize", 1 },
-            { "Seed", 1 },
-            { "PlacementDensity", 1 },
-            { "PlacementScatter", 1 },
-            { "PlacementSizeVariety", 1 },
-            { "PatchTileSize", 1 },
-            { "PatchStrength", 1 },
-            { "LayoutPatternStrength", 1 },
-            { "LayoutMaskStrength", 1 },
-            { "LayoutRepeats", 1 },
-            { "LayoutRotation", 1 },
-            { "LayoutOffset", 2 },
-            { "DetailTileSize", 1 },
-            { "DetailStrength", 1 },
-            { "DensityScale", 1 },
-            { "ExtinctionScale", 1 },
-            { "ScatteringAlbedo", 1 },
-            { "PhaseG", 1 },
-            { "PhaseGBackward", 1 },
-            { "PhaseBlend", 1 },
-            { "AmbientOcclusionStrength", 1 },
-            { "MultiScatterOctaves", 1 },
-            { "MultiScatterContribution", 1 },
-            { "MultiScatterOcclusion", 1 },
-            { "MultiScatterEccentricity", 1 },
-            { "AmbientScale", 3 },
+             { "Coverage", 1 },
+             { "CoverageContrast", 1 },
+             { "WeatherTileSize", 1 },
+             { "Seed", 1 },
+             { "PlacementDensity", 1 },
+             { "PlacementScatter", 1 },
+             { "PlacementSizeVariety", 1 },
+             { "PatchTileSize", 1 },
+             { "PatchStrength", 1 },
+             { "LayoutPatternStrength", 1 },
+             { "LayoutMaskStrength", 1 },
+             { "LayoutRepeats", 1 },
+             { "LayoutRotation", 1 },
+             { "LayoutOffset", 2 },
+             { "DetailTileSize", 1 },
+             { "DetailStrength", 1 },
+             { "DensityScale", 1 },
+             { "ExtinctionScale", 1 },
+             { "ScatteringAlbedo", 1 },
+             { "PhaseG", 1 },
+             { "PhaseGBackward", 1 },
+             { "PhaseBlend", 1 },
+             { "AmbientOcclusionStrength", 1 },
+             { "MultiScatterOctaves", 1 },
+             { "MultiScatterContribution", 1 },
+             { "MultiScatterOcclusion", 1 },
+             { "MultiScatterEccentricity", 1 },
+             { "AmbientScale", 3 },
         };
-        static constexpr const char* kAssets[] = { "CloudType1", "CloudType2", "CloudType3", "CloudType4",
-                                                   "CloudLayout" };
+        static constexpr const char* kAssets[]   = { "CloudType1", "CloudType2", "CloudType3", "CloudType4",
+                                                     "CloudLayout" };
         static constexpr size_t      kMovedCount = std::size( kValues ) + std::size( kAssets );
 
         const auto isMovedValue = []( const std::string& key ) -> const MovedValue*
@@ -1479,7 +1479,7 @@ namespace Desert::Migration
                     else
                     {
                         const auto arr = value.to_array();
-                        usable = arr.has_value() && arr.value().size() >= size_t( moved->Components );
+                        usable         = arr.has_value() && arr.value().size() >= size_t( moved->Components );
                         if ( usable )
                         {
                             for ( int i = 0; i < moved->Components; ++i )
@@ -1563,7 +1563,27 @@ namespace Desert::Migration
             }
 
             if ( movedHere == 0 )
-                continue; // already raised, or a defaults-only payload - byte-identical either way
+            {
+                // Either already raised (a bespoke or shared "Material" is already present - untouched,
+                // idempotent), or a layer that never authored a single look field. D-37: the second case
+                // is NOT left byte-identical any more - it is pointed at the shared default so that every
+                // migrated layer names some material and "the look lives in the material" holds without
+                // an empty-slot exception. `kept` is an exact copy of the original payload here (nothing
+                // matched a moved key), so checking IT for "Material" is checking the payload as it was.
+                bool alreadyNamed = false;
+                for ( const auto& [key, value] : kept )
+                    alreadyNamed = alreadyNamed || key == "Material";
+
+                if ( !alreadyNamed )
+                {
+                    kept["Material"] = rfl::Generic( std::string( kDefaultCloudMaterialRelativePath ) );
+                    entity.Components["VolumetricCloud"] = rfl::Generic( std::move( kept ) );
+                    report.Entities += 1;
+                    report.DefaultsAssigned += 1;
+                    report.Defaulted += static_cast<int>( kMovedCount );
+                }
+                continue;
+            }
 
             const std::string suffix  = cloudEntityIndex > 1 ? "_" + std::to_string( cloudEntityIndex ) : "";
             const std::string relPath = "Materials/M_" + base + "_Clouds" + suffix + ".demat";
