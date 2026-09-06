@@ -61,6 +61,7 @@ namespace Desert::Editor
          { "--shot-every", true, "1" },
          { "--open-panel", true, "Details" },
          { "--select", true, "Directional Light" },
+         { "--preview-orbit", true, "160,15" },
          { "--gpu-profile", false, nullptr },
          { "--no-gpu-timing", false, nullptr },
          { "--gpu-profile-frame-only", false, nullptr },
@@ -131,6 +132,19 @@ namespace Desert::Editor
 
             out = glm::vec3( x, y, z );
             return true;
+        }
+
+        /// Exactly two comma-separated floats (yaw,pitch for `--preview-orbit`). The same totality rule
+        /// as ParseVec3Strict above: a third component is a person who meant something else.
+        inline bool ParseVec2Strict( const std::string& text, float& outX, float& outY )
+        {
+            const std::size_t comma = text.find( ',' );
+            if ( comma == std::string::npos )
+                return false;
+            if ( text.find( ',', comma + 1 ) != std::string::npos )
+                return false;
+            return ParseFloatStrict( text.substr( 0, comma ), outX ) &&
+                   ParseFloatStrict( text.substr( comma + 1 ), outY );
         }
 
         /// An integer that consumes its entire text. `atoi` — which this replaces — answers 0 for "abc"
@@ -238,6 +252,21 @@ namespace Desert::Editor
                 options.Startup.PanelsToOpen.emplace_back( value );
             else if ( arg == "--select" )
                 options.Startup.SelectEntity = value;
+            else if ( arg == "--preview-orbit" )
+            {
+                float yawDeg   = 0.0f;
+                float pitchDeg = 0.0f;
+                if ( !ParseVec2Strict( value, yawDeg, pitchDeg ) )
+                {
+                    return Common::MakeFormattedError<CommandLineOptions>(
+                         "--preview-orbit '{}' is not an angle pair (yaw,pitch in degrees, e.g. 160,15).", value );
+                }
+                // Degrees on the wire — a person types 160, not 2.79 — radians in the options, because
+                // every consumer downstream is trigonometry.
+                options.Startup.HasPreviewOrbit   = true;
+                options.Startup.PreviewOrbitYaw   = glm::radians( yawDeg );
+                options.Startup.PreviewOrbitPitch = glm::radians( pitchDeg );
+            }
             else if ( arg == "--shot-frames" )
             {
                 int frames = 0;
