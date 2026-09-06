@@ -25,16 +25,18 @@ project(test_name)
         -- for why they moved out of the engine). This resolves <MigratorMain.hpp> and
         -- <SceneMigration.hpp>, and their own includes of themselves.
         "%{wks.location}/Tools/SceneMigrator/Source",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/entt/include/",       -- Components.hpp is an entt registry away
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the scene tree is rfl::Generic
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

@@ -22,11 +22,13 @@ project "ProjectHub"
     }
 
     includedirs {
-        "%{wks.location}/ThirdParty/ImGui/",
-        "%{wks.location}/ThirdParty/GLFW/include/",
         -- desert-shared: formats + launch protocol + ResultStr. Its host-supplied dependencies:
         -- reflect-cpp (the serializer) and the fmt headers (ResultStr) via the vendored spdlog.
         "%{wks.location}/ThirdParty/desert-shared/Include/",
+    }
+    externalincludedirs {
+        "%{wks.location}/ThirdParty/ImGui/",
+        "%{wks.location}/ThirdParty/GLFW/include/",
         "%{wks.location}/ThirdParty/reflect-cpp/include/",
         "%{wks.location}/ThirdParty/spdlog/include/",
     }

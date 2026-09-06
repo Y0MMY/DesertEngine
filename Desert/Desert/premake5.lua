@@ -31,7 +31,6 @@ project "Desert"
     includedirs {
         "Source/",
         "%{wks.location}/Desert/Common/Source",
-        "%{wks.location}/ThirdParty/pl_mpeg/include",
         -- The SHADER ROOT, for the one engine translation unit that compiles a shared `.glslh` AS C++:
         -- Graphic/SkyGroundTransmittance.cpp includes Common/SkyMedium.glslh so the sun light's colour
         -- and the transmittance LUT's texels come from one text (the arrangement the test references
@@ -39,13 +38,16 @@ project "Desert"
         -- contract travels as payload structs with static_asserted offsets.
         "%{wks.location}/Editor/Resources/Shaders",
     }
+    externalincludedirs {
+        "%{wks.location}/ThirdParty/pl_mpeg/include",
+    }
     
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
     
     for name, path in pairs(deps.DesertSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     links {

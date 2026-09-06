@@ -37,17 +37,19 @@ project(test_name)
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
         "%{wks.location}/Editor/Source",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/reflect-cpp/include",
         "%{wks.location}/ThirdParty",
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     -- Vulkan headers + shaderc, exactly as Tests/Engine/PBRSceneFrame pulls them.
     for name, path in pairs(deps.DesertSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     -- DESERT_DEBUG_BREAK needs the platform macro; any engine header reaching DESERT_VERIFY fails to
@@ -68,7 +70,7 @@ project(test_name)
     filter {}
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

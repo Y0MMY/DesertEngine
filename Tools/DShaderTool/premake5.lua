@@ -21,7 +21,7 @@ project "DShaderTool"
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     links { "Common" }

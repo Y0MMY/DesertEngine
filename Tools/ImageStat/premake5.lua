@@ -10,7 +10,7 @@ project "ImageStat"
         "Source/**.cpp",
     }
 
-    includedirs {
+    externalincludedirs {
         "%{wks.location}/ThirdParty/stb/include",
     }
 

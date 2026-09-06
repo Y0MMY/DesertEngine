@@ -12,7 +12,7 @@ project "LineJump"
         "Source/**.cpp",
     }
 
-    includedirs {
+    externalincludedirs {
         "%{wks.location}/ThirdParty/stb/include",
     }
 
