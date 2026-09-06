@@ -127,9 +127,9 @@ TEST( CloudShadowMap, ReconstructionMatchesTheMarchThroughAUniformSlab )
     SetUniformSlab( 8.0f ); // the component's shipped Extinction Scale
 
     const TexelRay         ray     = MakeTexelRay( 60.0f, 0.0f );
-    const float            far     = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
+    const float            farKm   = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
     const CloudShadowTexel data    = CloudShadowTraceRay( ray.OriginKm, ray.Direction, ray.EnterKm, ray.ExitKm,
-                                                          static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), far );
+                                                          static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), farKm );
     const vec3             encoded = CloudShadowEncode( data );
 
     // Sampled from above the cloud, at its front, through it, and out the far side onto the ground.
@@ -178,9 +178,9 @@ TEST( CloudShadowMap, ExactBelowTheLayerAndBoundedInsideIt )
     g_Medium.ModulationPeriodKm = 0.4f;
 
     const TexelRay         ray     = MakeTexelRay( 60.0f, 0.35f );
-    const float            far     = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
+    const float            farKm   = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
     const CloudShadowTexel data    = CloudShadowTraceRay( ray.OriginKm, ray.Direction, ray.EnterKm, ray.ExitKm,
-                                                          static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), far );
+                                                          static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), farKm );
     const vec3             encoded = CloudShadowEncode( data );
 
     const double referenceTotal = ReferenceOpticalDepth( ray, ray.ExitKm );
@@ -199,7 +199,7 @@ TEST( CloudShadowMap, ExactBelowTheLayerAndBoundedInsideIt )
     // without the min() the mean extinction would keep accumulating through the clear air under the
     // cloud until the ground went black at a distance rather than under a cloud.
     EXPECT_FLOAT_EQ( CloudShadowTransmittance( encoded, ray.ExitKm + 50.0f, 1.0f ),
-                     CloudShadowTransmittance( encoded, far, 1.0f ) );
+                     CloudShadowTransmittance( encoded, farKm, 1.0f ) );
 
     // THE INSIDE CASE, and it is a bound. The worst pointwise error is printed so the number is on the
     // record rather than implied by a tolerance.
@@ -242,9 +242,9 @@ TEST( CloudShadowMap, TheMeanIsOverTheMaterialAndNotOverTheChord )
     g_Medium.TopRadiusKm    = kPlanetKm + 3.5f;
 
     const TexelRay         ray     = MakeTexelRay( 60.0f, 0.0f );
-    const float            far     = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
+    const float            farKm   = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
     const CloudShadowTexel data    = CloudShadowTraceRay( ray.OriginKm, ray.Direction, ray.EnterKm, ray.ExitKm,
-                                                          static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), far );
+                                                          static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), farKm );
     const vec3             encoded = CloudShadowEncode( data );
 
     // The stored mean is the medium's own extinction, not a seventh of it.
@@ -271,14 +271,14 @@ TEST( CloudShadowMap, OpticalDepthNeverDecreasesWithDepth )
     SetUniformSlab( 8.0f );
 
     const TexelRay         ray  = MakeTexelRay( 60.0f, 0.2f );
-    const float            far  = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
-    const CloudShadowTexel data = CloudShadowTraceRay( ray.OriginKm, ray.Direction, ray.EnterKm, ray.ExitKm,
-                                                       static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), far );
+    const float            farKm = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
+    const CloudShadowTexel data  = CloudShadowTraceRay( ray.OriginKm, ray.Direction, ray.EnterKm, ray.ExitKm,
+                                                        static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), farKm );
 
     float previous = -1.0f;
     for ( int i = 0; i <= 200; ++i )
     {
-        const float depthKm = far * ( i / 200.0f );
+        const float depthKm = farKm * ( i / 200.0f );
         const float tau     = CloudShadowOpticalDepth( data, depthKm );
         EXPECT_GE( tau, previous );
         previous = tau;
@@ -292,14 +292,14 @@ TEST( CloudShadowMap, AMissedShellIsFullyLitEverywhere )
 {
     SetUniformSlab( 8.0f );
 
-    const float far = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
+    const float farKm = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
     // tExit <= tEnter is CloudLayerIntersect's own encoding of "nothing to march".
     const CloudShadowTexel data    = CloudShadowTraceRay( vec3( 0.0f, kPlanetKm + 60.0f, 0.0f ),
-                                                          vec3( 0.0f, -1.0f, 0.0f ), 1.0f, -1.0f, 32, far );
+                                                          vec3( 0.0f, -1.0f, 0.0f ), 1.0f, -1.0f, 32, farKm );
     const vec3             encoded = CloudShadowEncode( data );
 
     for ( int i = 0; i <= 20; ++i )
-        EXPECT_FLOAT_EQ( CloudShadowTransmittance( encoded, far * ( i / 20.0f ), 1.0f ), 1.0f );
+        EXPECT_FLOAT_EQ( CloudShadowTransmittance( encoded, farKm * ( i / 20.0f ), 1.0f ), 1.0f );
 }
 
 // The strength is applied at READ time rather than baked into the map, which is where this parts company
@@ -310,9 +310,9 @@ TEST( CloudShadowMap, StrengthScalesTheOpticalDepthAndCommutesWithTheClamp )
     SetUniformSlab( 8.0f );
 
     const TexelRay         ray  = MakeTexelRay( 60.0f, 0.0f );
-    const float            far  = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
-    const CloudShadowTexel data = CloudShadowTraceRay( ray.OriginKm, ray.Direction, ray.EnterKm, ray.ExitKm,
-                                                       static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), far );
+    const float            farKm = CloudShadowFarDepthKm( CLOUD_SHADOWMAP_EXTENT_KM );
+    const CloudShadowTexel data  = CloudShadowTraceRay( ray.OriginKm, ray.Direction, ray.EnterKm, ray.ExitKm,
+                                                        static_cast<int>( CLOUD_SHADOWMAP_BASE_SAMPLES ), farKm );
 
     // The same texel with both channels pre-scaled — Unreal's arrangement — must give the same answer as
     // scaling the reconstruction.
@@ -326,14 +326,14 @@ TEST( CloudShadowMap, StrengthScalesTheOpticalDepthAndCommutesWithTheClamp )
 
     for ( int i = 0; i <= 40; ++i )
     {
-        const float depthKm = far * ( i / 40.0f );
+        const float depthKm = farKm * ( i / 40.0f );
         EXPECT_NEAR( CloudShadowTransmittance( encodedRaw, depthKm, strength ),
                      CloudShadowTransmittance( encodedBaked, depthKm, 1.0f ), 1e-6f );
     }
 
     // Zero strength is fully lit everywhere, which is what makes the component's Shadow Strength dial
     // reach "off" exactly rather than nearly.
-    EXPECT_FLOAT_EQ( CloudShadowTransmittance( encodedRaw, far, 0.0f ), 1.0f );
+    EXPECT_FLOAT_EQ( CloudShadowTransmittance( encodedRaw, farKm, 0.0f ), 1.0f );
 }
 
 // ---------------------------------------------------------------------------------------------------
