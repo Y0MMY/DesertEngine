@@ -1,15 +1,17 @@
-// Desert Project Hub — standalone launcher (separate from the Editor; links Common + ReflectCpp but
-// no engine/renderer code). UE/Unity-hub-style UI: sidebar navigation, project cards, a New Project
-// flow.
+// Desert Project Hub — standalone launcher, fully separate from the Editor: it links NO engine
+// code (R1) — only GLFW + ImGui + ReflectCpp, and compiles the shared serializer from the
+// desert-shared submodule itself. UE/Unity-hub-style UI: sidebar navigation, project cards, a New
+// Project flow.
 //
 //   * lists recent projects from ~/.desertengine/projects.json (same file the Editor maintains)
 //   * creates new projects: folder structure + <Name>.deproj
 //   * "Open" launches the Editor (Debug/Release pick in the sidebar) via the platform run script
 //
-// Both file formats AND the content-folder layout come from Common/Project/ProjectFormat.hpp — the
-// same header the engine reads them through, so what the hub writes is by construction what the
-// Editor parses. (This file used to splice the JSON by hand next to a "keep the field names in
-// sync" comment; a typo here produced a project the Editor silently refused to open.)
+// Both file formats AND the content-folder layout come from the desert-shared submodule
+// (<DesertShared/ProjectFormat.hpp>) — the same definition the engine reads them through, so what
+// the hub writes is by construction what the Editor parses. (This file used to splice the JSON by
+// hand next to a "keep the field names in sync" comment; a typo here produced a project the Editor
+// silently refused to open.)
 //
 // Run through scripts/MacOS/RunProjectHub.sh or scripts/Windows/RunProjectHub.bat — they export
 // DESERT_ROOT / DESERT_CONFIG. Fonts load from $DESERT_ROOT/Editor/Resources/Fonts (falls back to
@@ -21,9 +23,8 @@
 
 #include <GLFW/glfw3.h>
 
-#include <Common/Core/Version.hpp>
-#include <Common/Project/ProjectFormat.hpp>
-#include <Common/Utilities/FileSystem.hpp>
+#include <DesertShared/LaunchProtocol.hpp>
+#include <DesertShared/ProjectFormat.hpp>
 
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
@@ -41,6 +42,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -55,6 +57,12 @@
 namespace
 {
     namespace fs = std::filesystem;
+
+    // The hub's OWN version (R1: no engine linkage, so Common::Version is gone — that was the last
+    // thread). The version of the ENGINE a project will open with is a property of the engine
+    // install, and will be read from ~/.desertengine/engines.json when that registry lands (L2 §7
+    // item 4); until then the hub reports only itself. Bump by hand on user-visible changes.
+    constexpr const char* kHubVersion = "0.1.0";
 
     // ------------------------------------------------------------------ persistence (unchanged logic)
 
@@ -86,15 +94,55 @@ namespace
         return ss.str();
     }
 
-    // Atomic (write-then-rename) through the shared Common primitive, for two reasons. First, the
-    // registry this writes is shared with the Editor, and the old in-place truncate meant an
-    // interruption left a torn projects.json for BOTH of them — the whole recent list gone over one
-    // crash. Second, the old function was called WriteFile, which windows.h #defines to WriteFileA;
-    // it compiled by coincidence and the coincidence was one macro away from not holding.
-    // Returns false on failure with the destination untouched (the primitive logs the step and path).
+    // Atomic (write-then-rename), for two reasons. First, the registry this writes is shared with
+    // the Editor, and an in-place truncate means an interruption leaves a torn projects.json for
+    // BOTH of them — the whole recent list gone over one crash. Second, the obvious name WriteFile
+    // is a windows.h macro (WriteFileA); this one compiles on purpose, not by coincidence.
+    //
+    // The hub links no engine code (R1), so this is its OWN copy of the engine's
+    // Common::Utils::FileSystem::WriteContentToFileAtomic, same steps for the same reasons: the
+    // temp lands BESIDE the destination (rename is only atomic within one filesystem), the stream
+    // is checked after close() (where a buffered failure finally surfaces), the temp name is FIXED
+    // so concurrent writers race to a whole file instead of interleaving into a torn one, and a
+    // failure at any step leaves the original untouched. If a third copy of these steps ever
+    // threatens to appear, the primitive belongs in desert-shared — two processes already guard
+    // one shared file with it.
+    // Returns false on failure with the destination untouched, after naming the step on stderr.
     [[nodiscard]] bool WriteTextFile( const fs::path& path, const std::string& content )
     {
-        return Common::Utils::FileSystem::WriteContentToFileAtomic( path, content );
+        fs::path temp = path;
+        temp += ".tmp";
+
+        std::ofstream out( temp, std::ios::binary | std::ios::trunc );
+        if ( !out )
+        {
+            std::fprintf( stderr, "[Hub] Atomic write failed: could not open temporary %s (original untouched)\n",
+                          temp.string().c_str() );
+            return false;
+        }
+
+        out << content;
+        out.close(); // flushes; a buffered failure (disk full, volume gone) may only surface here
+        if ( !out )
+        {
+            std::fprintf( stderr, "[Hub] Atomic write failed: writing %zu bytes to %s (original untouched)\n",
+                          content.size(), temp.string().c_str() );
+            std::error_code removeEc;
+            fs::remove( temp, removeEc );
+            return false;
+        }
+
+        std::error_code renameEc;
+        fs::rename( temp, path, renameEc ); // POSIX rename(2) / MoveFileExW: replaces atomically
+        if ( renameEc )
+        {
+            std::fprintf( stderr, "[Hub] Atomic write failed: renaming %s over %s: %s (original untouched)\n",
+                          temp.string().c_str(), path.string().c_str(), renameEc.message().c_str() );
+            std::error_code removeEc;
+            fs::remove( temp, removeEc );
+            return false;
+        }
+        return true;
     }
 
     // The registry is read and written through the SAME serializer the Editor uses (a hand-rolled
@@ -121,9 +169,8 @@ namespace
     // change is. Callers decide whether that is worth telling the user about.
     [[nodiscard]] bool SaveRecentProjects( const std::vector<std::string>& projects )
     {
-        return WriteTextFile(
-             RegistryFile(),
-             Common::Project::WriteProjectsRegistry( Common::Project::ProjectsRegistry{ projects } ) );
+        return WriteTextFile( RegistryFile(), Common::Project::WriteProjectsRegistry(
+                                                   Common::Project::ProjectsRegistry{ projects } ) );
     }
 
     void RememberProject( std::vector<std::string>& recent, const std::string& deprojPath )
@@ -195,8 +242,8 @@ namespace
         if ( tpl.SetDefaultScene )
             deproj.DefaultScene = deproj.AssetsRoot + "/Scenes/" + name + ".desce";
 
-        for ( const auto& folder : Common::Project::StandardContentFolders )
-            fs::create_directories( root / deproj.AssetsRoot / folder.RelativePath, ec );
+        for ( const std::string_view folder : Common::Project::StandardContentFolders )
+            fs::create_directories( root / deproj.AssetsRoot / folder, ec );
         for ( const char* sub : tpl.ExtraFolders )
             fs::create_directories( root / deproj.AssetsRoot / sub, ec );
         if ( ec )
@@ -244,19 +291,23 @@ namespace
 #endif
             return false;
         }
+        // The flag comes from the shared launch protocol (<DesertShared/LaunchProtocol.hpp>) — the
+        // Editor's own suite asserts its parser accepts it, so the two processes cannot drift on
+        // the spelling. Still a shell string through the run scripts; moving to an argv spawn is
+        // L3's, together with the exit-code half of the protocol.
 #ifdef _WIN32
         // `start "" /D <dir> <program> <args>`: the empty first token is the window TITLE (start treats
         // a leading quoted argument as one), /D sets the working directory, and start returns
         // immediately — the same detach the macOS branch gets from trailing '&'.
         std::ostringstream cmd;
-        cmd << "start \"\" /D \"" << root << "\" \"" << root << "\\scripts\\Windows\\RunEditor.bat\" "
-            << config << " --project \"" << deprojPath << "\"";
+        cmd << "start \"\" /D \"" << root << "\" \"" << root << "\\scripts\\Windows\\RunEditor.bat\" " << config
+            << " " << Common::Launch::kProjectFlag << " \"" << deprojPath << "\"";
         std::system( cmd.str().c_str() );
         return true;
 #else
         std::ostringstream cmd;
-        cmd << "cd \"" << root << "\" && ./scripts/MacOS/RunEditor.sh " << config << " --project \""
-            << deprojPath << "\" >/dev/null 2>&1 &";
+        cmd << "cd \"" << root << "\" && ./scripts/MacOS/RunEditor.sh " << config << " "
+            << Common::Launch::kProjectFlag << " \"" << deprojPath << "\" >/dev/null 2>&1 &";
         std::system( cmd.str().c_str() );
         return true;
 #endif
@@ -400,7 +451,8 @@ namespace
             return;
         }
         std::string error;
-        if ( LaunchEditor( path, st.Config == 0 ? "Debug" : "Release", error ) )
+        if ( LaunchEditor( path, st.Config == 0 ? Common::Launch::kConfigDebug : Common::Launch::kConfigRelease,
+                           error ) )
         {
             RememberProject( st.Recent, path );
             glfwSetWindowShouldClose( st.Window, GLFW_TRUE ); // hub's job is done
@@ -453,12 +505,12 @@ namespace
         ImGui::TextColored( kTextDim, "Editor build" );
         ImGui::SetCursorPosX( 24.0f );
         ImGui::SetNextItemWidth( 182.0f );
-        const char* configs[] = { "Debug", "Release" };
+        // The labels ARE the config names the run scripts receive — one spelling, the protocol's.
+        const char* configs[] = { Common::Launch::kConfigDebug, Common::Launch::kConfigRelease };
         ImGui::Combo( "##config", &st.Config, configs, 2 );
 
         ImGui::SetCursorPosX( 24.0f );
-        ImGui::TextColored( kTextDim, "%s | %s", Common::Version::Full(),
-                            Common::Version::Branch() );
+        ImGui::TextColored( kTextDim, "Hub %s", kHubVersion );
 
         ImGui::EndChild();
         ImGui::PopStyleColor();

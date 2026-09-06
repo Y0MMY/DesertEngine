@@ -72,11 +72,13 @@ namespace Desert::Project
         // a packaged game (opened from a read-only .dpak) — its content lives in the archive, not on disk.
         if ( onDisk )
         {
-            // The census lives beside the format (ProjectFormat.hpp) — the same rows the Project Hub
-            // scaffolds a new project from, so "what a project has" cannot fork between creator and opener.
+            // The census lives beside the format (desert-shared ProjectFormat.hpp) — the same rows the
+            // launcher scaffolds a new project from, so "what a project has" cannot fork between creator
+            // and opener. ASSETS_PATH was just remapped above, so each row lands inside this project;
+            // Tests/Engine/ProjectFormat asserts every row equals the Constants::Path global it answers to.
             std::error_code ec;
-            for ( const auto& folder : Common::Project::StandardContentFolders )
-                std::filesystem::create_directories( *folder.EnginePath, ec );
+            for ( const std::string_view folder : Common::Project::StandardContentFolders )
+                std::filesystem::create_directories( Common::Constants::Path::ASSETS_PATH / folder, ec );
         }
 
         if ( onDisk ) // don't pollute the dev hub's recent-projects list from a packaged game

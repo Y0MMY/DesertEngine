@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <DesertShared/LaunchProtocol.hpp>
 #include <Editor/Core/CommandLine.hpp>
 
 #include <string>
@@ -169,6 +170,16 @@ TEST( CommandLine, TheDocumentedCaptureCommandResolvesToExactlyItsOldValues )
     EXPECT_EQ( options.Shot.Forward, glm::vec3( 0.0f, 0.9f, -1.0f ) );
     EXPECT_FALSE( options.Shot.HasMotion() );
     EXPECT_TRUE( options.Shot.Active() );
+}
+
+// The Editor's half of the shared launch protocol (desert-shared LaunchProtocol.hpp): the launcher
+// composes its command from these constants, so the parser accepting them is a RELATION between two
+// repositories, not a spelling — and after the launcher moves out (L3), this test is the only thing
+// on this side holding it.
+TEST( CommandLine, TheLaunchProtocolFlagIsAccepted )
+{
+    const CommandLineOptions options = ParseOk( { Common::Launch::kProjectFlag, "MyGame.deproj" } );
+    EXPECT_EQ( options.Project, "MyGame.deproj" );
 }
 
 // An empty command line is a plain interactive launch, and it must resolve to the built-in defaults with

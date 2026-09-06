@@ -143,6 +143,11 @@ end
 Dependencies = {
     Common = {
         IncludeDir = {
+            -- First-party shared-format submodule (desert-shared): <DesertShared/ProjectFormat.hpp>
+            -- et al. In Common's own headers the redirects use relative includes instead, so only
+            -- code that names <DesertShared/...> directly needs this path — but it rides in the
+            -- Common group because every project that compiles such code already loops this table.
+            desert_shared = baseDir .. "/desert-shared/Include",
             spdlog = baseDir .. "/spdlog/include",
             yaml_cpp = baseDir .. "/yaml-cpp/include",
             glm = baseDir .. "/glm",

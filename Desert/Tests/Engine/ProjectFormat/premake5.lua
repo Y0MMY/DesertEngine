@@ -8,12 +8,13 @@ project(test_name)
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
-    -- Common/Project/ProjectFormat.{hpp,cpp} is the ONE definition of the .deproj / projects.json
-    -- formats shared by the engine, the Project Hub and the GamePackager. The suite needs nothing
-    -- but Common (the serializer lives there) and ReflectCpp (its rfl::json backend) — no window,
-    -- no device, no engine.
+    -- The formats live in the desert-shared submodule; so does their CONFORMANCE suite, which both
+    -- the engine and the launcher must run — this project compiles the submodule's test file next
+    -- to the engine-local half (census vs Constants::Path + the gtest main). Needs only Common
+    -- (the serializer is compiled into it) and ReflectCpp — no window, no device, no engine.
     files {
         test_files,
+        "%{wks.location}/ThirdParty/desert-shared/Tests/project_format_test.cpp",
     }
 
     includedirs {
