@@ -378,6 +378,28 @@ never reproduced — five later runs of the same shader were byte-identical to t
 first run after any shader edit, exactly as for a fresh worktree, and take the second. A knockout that
 rests on one post-edit frame is not a knockout.
 
+### A cross-tree pixel A/B is silently incomparable by default
+
+**Found 2026-09-06, and it nearly invalidated a whole verification.** Comparing a frame taken in the
+main tree against one taken in an agent worktree looks like the obvious A/B. It is not: the viewport
+size comes from **`Editor/imgui.ini`, which is UNTRACKED**. The main tree shot at 1104x668, the
+worktree at 1280x766, and the worktree's own layout was still settling — one tile came out 32x2.
+
+Nothing in the PNG says which resolution produced it. A pixel diff between two such frames is
+meaningless in both directions: "identical" cannot happen, and "different" says nothing about the code.
+
+The developer caught it only because **the log prints the trace resolution**, not because any check
+fired.
+
+**Before any two-tree comparison:** copy one `imgui.ini` to both trees, freeze it for the whole run,
+and restore the owner's afterwards. Or take both frames in ONE tree by swapping the binary — the
+shaders cook at runtime, so a shader-only A/B needs no second checkout at all.
+
+**And measure the floor in the same pairing you are about to compare.** Two runs of the SAME command
+in the SAME tree first; only then is a difference between trees attributable to the change. On
+clock-driven content — particles, anything on `steady_clock` — that floor is NOT zero: measured at
+4.4% / 6.4% / 0.26% of pixels across three views on the same day.
+
 ### Regenerate the makefiles after ANY merge that added a file
 
 The generated `*.make` files list sources EXPLICITLY, so a merge that brings in a new `.cpp` produces
