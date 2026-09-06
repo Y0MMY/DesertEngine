@@ -3,9 +3,10 @@
 // desert-shared submodule itself. UE/Unity-hub-style UI: sidebar navigation, project cards, a New
 // Project flow.
 //
-//   * lists recent projects from ~/.desertengine/projects.json (same file the Editor maintains)
+//   * lists recent projects from ~/.desertengine/projects.json (same file the Editor maintains),
+//     each resolved against the disk so a project that is gone or corrupt says so on its card
 //   * creates new projects: folder structure + <Name>.deproj
-//   * "Open" launches the Editor (Debug/Release pick in the sidebar) via the platform run script
+//   * "Open" launches the Editor (Debug/Release pick in the sidebar) through an argv spawn
 //
 // Both file formats AND the content-folder layout come from the desert-shared submodule
 // (<DesertShared/ProjectFormat.hpp>) — the same definition the engine reads them through, so what
@@ -13,9 +14,19 @@
 // hand next to a "keep the field names in sync" comment; a typo here produced a project the Editor
 // silently refused to open.)
 //
+// This file is the WINDOW. Everything it does that could be wrong without a window on screen lives
+// next door and is covered by Tests/Tools/ProjectHubContracts: Projects.hpp (registry entries,
+// recent-list policy, name validation, project creation), Launch.hpp (the argv the Editor is
+// started with), Files.hpp (the two file primitives), FileDialog.hpp (native panels).
+//
 // Run through scripts/MacOS/RunProjectHub.sh or scripts/Windows/RunProjectHub.bat — they export
 // DESERT_ROOT / DESERT_CONFIG. Fonts load from $DESERT_ROOT/Editor/Resources/Fonts (falls back to
 // the ImGui default when missing).
+//
+// STILL OPENGL2, and deliberately: R2 makes Vulkan the only supported backend, but porting the
+// window is L2 stage E2 / L3 (§6.2) — it needs the shared VulkanWindow and the MoltenVK ICD
+// environment, and doing it here would collide with the repository move. The four GL calls at the
+// bottom of the frame loop are the whole of it.
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -25,6 +36,11 @@
 
 #include <DesertShared/LaunchProtocol.hpp>
 #include <DesertShared/ProjectFormat.hpp>
+
+#include "FileDialog.hpp"
+#include "Files.hpp"
+#include "Launch.hpp"
+#include "Projects.hpp"
 
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
@@ -38,12 +54,9 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
-#include <string_view>
-#include <utility>
 #include <vector>
 
 // Material Design icon literals (byte-identical to the editor's IconsMaterialDesignIcons.hpp).
@@ -52,6 +65,7 @@
 #define HUB_ICON_DELETE "\xf3\xb0\x86\xb4"
 #define HUB_ICON_ROCKET "\xf3\xb1\x93\x9e"
 #define HUB_ICON_PACKAGE "\xf3\xb0\x8f\x96"
+#define HUB_ICON_ALERT "\xf3\xb0\x80\xa3"
 #define HUB_ICON_CHEVRON_LEFT "\xf3\xb0\x85\x81"
 
 namespace
@@ -64,7 +78,7 @@ namespace
     // item 4); until then the hub reports only itself. Bump by hand on user-visible changes.
     constexpr const char* kHubVersion = "0.1.0";
 
-    // ------------------------------------------------------------------ persistence (unchanged logic)
+    // ------------------------------------------------------------------ persistence
 
     std::string ConfigDir()
     {
@@ -84,233 +98,39 @@ namespace
         return ConfigDir() + "/projects.json";
     }
 
-    std::string ReadFile( const std::string& path )
-    {
-        std::ifstream f( path );
-        if ( !f )
-            return {};
-        std::ostringstream ss;
-        ss << f.rdbuf();
-        return ss.str();
-    }
-
-    // Atomic (write-then-rename), for two reasons. First, the registry this writes is shared with
-    // the Editor, and an in-place truncate means an interruption leaves a torn projects.json for
-    // BOTH of them — the whole recent list gone over one crash. Second, the obvious name WriteFile
-    // is a windows.h macro (WriteFileA); this one compiles on purpose, not by coincidence.
-    //
-    // The hub links no engine code (R1), so this is its OWN copy of the engine's
-    // Common::Utils::FileSystem::WriteContentToFileAtomic, same steps for the same reasons: the
-    // temp lands BESIDE the destination (rename is only atomic within one filesystem), the stream
-    // is checked after close() (where a buffered failure finally surfaces), the temp name is FIXED
-    // so concurrent writers race to a whole file instead of interleaving into a torn one, and a
-    // failure at any step leaves the original untouched. If a third copy of these steps ever
-    // threatens to appear, the primitive belongs in desert-shared — two processes already guard
-    // one shared file with it.
-    // Returns false on failure with the destination untouched, after naming the step on stderr.
-    [[nodiscard]] bool WriteTextFile( const fs::path& path, const std::string& content )
-    {
-        fs::path temp = path;
-        temp += ".tmp";
-
-        std::ofstream out( temp, std::ios::binary | std::ios::trunc );
-        if ( !out )
-        {
-            std::fprintf( stderr, "[Hub] Atomic write failed: could not open temporary %s (original untouched)\n",
-                          temp.string().c_str() );
-            return false;
-        }
-
-        out << content;
-        out.close(); // flushes; a buffered failure (disk full, volume gone) may only surface here
-        if ( !out )
-        {
-            std::fprintf( stderr, "[Hub] Atomic write failed: writing %zu bytes to %s (original untouched)\n",
-                          content.size(), temp.string().c_str() );
-            std::error_code removeEc;
-            fs::remove( temp, removeEc );
-            return false;
-        }
-
-        std::error_code renameEc;
-        fs::rename( temp, path, renameEc ); // POSIX rename(2) / MoveFileExW: replaces atomically
-        if ( renameEc )
-        {
-            std::fprintf( stderr, "[Hub] Atomic write failed: renaming %s over %s: %s (original untouched)\n",
-                          temp.string().c_str(), path.string().c_str(), renameEc.message().c_str() );
-            std::error_code removeEc;
-            fs::remove( temp, removeEc );
-            return false;
-        }
-        return true;
-    }
-
     // The registry is read and written through the SAME serializer the Editor uses (a hand-rolled
     // quoted-string scanner used to live here; it could not unescape a JSON string, so any Windows
     // path the Editor had written — backslashes escaped as `\\` — came back mangled).
     std::vector<std::string> LoadRecentProjects()
     {
-        const std::string raw = ReadFile( RegistryFile() );
-        if ( raw.empty() ) // no registry yet — a fresh machine, not an error
+        std::error_code ec;
+        if ( !fs::exists( RegistryFile(), ec ) ) // no registry yet — a fresh machine, not an error
             return {};
-        auto parsed = Common::Project::ReadProjectsRegistry( raw );
+
+        const auto raw = Hub::ReadTextFile( RegistryFile() );
+        if ( !raw.IsSuccess() )
+        {
+            std::fprintf( stderr, "[Hub] %s\n", raw.GetError().c_str() );
+            return {};
+        }
+        auto parsed = Common::Project::ReadProjectsRegistry( raw.GetValue() );
         if ( !parsed.IsSuccess() )
         {
             // The hub has no log window at startup; stderr with the reason beats an empty list that
             // reads as "my projects vanished".
-            std::fprintf( stderr, "[ProjectHub] %s: %s\n", RegistryFile().c_str(), parsed.GetError().c_str() );
+            std::fprintf( stderr, "[Hub] %s: %s\n", RegistryFile().c_str(), parsed.GetError().c_str() );
             return {};
         }
         return parsed.ExtractValue().Projects;
     }
 
-    // Returns false when the registry could not be written — the file on disk then keeps its
-    // previous list, which for a convenience file is the right failure: nothing is lost, the one
-    // change is. Callers decide whether that is worth telling the user about.
-    [[nodiscard]] bool SaveRecentProjects( const std::vector<std::string>& projects )
+    // Returns the reason on failure — the file on disk then keeps its previous list, which for a
+    // convenience file is the right failure: nothing is lost, the one change is. Callers decide
+    // whether that is worth telling the user about; all of them now do.
+    [[nodiscard]] Common::BoolResultStr SaveRecentProjects( const std::vector<std::string>& projects )
     {
-        return WriteTextFile( RegistryFile(), Common::Project::WriteProjectsRegistry(
-                                                   Common::Project::ProjectsRegistry{ projects } ) );
-    }
-
-    void RememberProject( std::vector<std::string>& recent, const std::string& deprojPath )
-    {
-        recent.erase( std::remove( recent.begin(), recent.end(), deprojPath ), recent.end() );
-        recent.insert( recent.begin(), deprojPath );
-        if ( recent.size() > 10 )
-            recent.resize( 10 );
-        // The project is already launching when this runs, so a failure must not stop the open —
-        // but it is named (here and by the primitive's log): the registry keeps its previous list.
-        if ( !SaveRecentProjects( recent ) )
-            std::fprintf( stderr, "[Hub] Could not update %s — the recent list keeps its previous contents\n",
-                          RegistryFile().c_str() );
-    }
-
-    // A starter project template: extra folders on top of the standard set, whether the .deproj points
-    // at a default scene, and any starter files to drop in. ProjectHub does not link the engine, so it
-    // can't author a binary .desce — templates differ by scaffolding (folders / config / sample files).
-    struct ProjectTemplate
-    {
-        const char*                                      Id;
-        const char*                                      Title;
-        const char*                                      Description;
-        std::vector<const char*>                         ExtraFolders;    // under Assets/
-        bool                                             SetDefaultScene; // write a DefaultScene into the .deproj
-        std::vector<std::pair<std::string, std::string>> Files;           // project-relative path -> contents
-    };
-
-    const std::vector<ProjectTemplate>& Templates()
-    {
-        static const std::vector<ProjectTemplate> s_Templates = {
-            { "empty", "Empty Project", "Standard content folders — start from scratch.", {}, false, {} },
-            { "3d", "3D Sandbox",
-              "Content folders, a default-scene entry and a starter Lua script.", {}, true,
-              { { "Assets/Scripts/Spin.lua",
-                  "-- Starter script: rotates the entity it is attached to.\n"
-                  "function OnUpdate(dt)\n"
-                  "    -- self.transform.rotation.y = self.transform.rotation.y + dt\n"
-                  "end\n" },
-                { "README.md", "# 3D Sandbox\n\nCreated with the Desert Project Hub.\n" } } },
-            { "2d", "2D", "Adds a Sprites folder for 2D content.", { "Sprites" }, false,
-              { { "README.md", "# 2D Project\n\nCreated with the Desert Project Hub.\n" } } },
-        };
-        return s_Templates;
-    }
-
-    std::string CreateProject( const std::string& parentDir, const std::string& name,
-                               const ProjectTemplate& tpl, std::string& error )
-    {
-        if ( name.empty() || parentDir.empty() )
-        {
-            error = "Project name and location are required.";
-            return {};
-        }
-
-        const fs::path  root = fs::path( parentDir ) / name;
-        std::error_code ec;
-        if ( fs::exists( root ) && !fs::is_empty( root, ec ) )
-        {
-            error = "Folder already exists and is not empty: " + root.string();
-            return {};
-        }
-
-        // Folder layout comes from the shared census (ProjectFormat.hpp) — the same rows the engine
-        // re-creates on open — plus any template-specific folders. `deproj.AssetsRoot` below is the
-        // root these are created under, so the descriptor and the disk cannot disagree either.
-        Common::Project::ProjectFile deproj;
-        deproj.Name = name;
-        if ( tpl.SetDefaultScene )
-            deproj.DefaultScene = deproj.AssetsRoot + "/Scenes/" + name + ".desce";
-
-        for ( const std::string_view folder : Common::Project::StandardContentFolders )
-            fs::create_directories( root / deproj.AssetsRoot / folder, ec );
-        for ( const char* sub : tpl.ExtraFolders )
-            fs::create_directories( root / deproj.AssetsRoot / sub, ec );
-        if ( ec )
-        {
-            error = "Could not create the project folders: " + ec.message();
-            return {};
-        }
-
-        // Starter files from the template.
-        for ( const auto& [rel, content] : tpl.Files )
-        {
-            const fs::path p = root / rel;
-            fs::create_directories( p.parent_path(), ec );
-            if ( !WriteTextFile( p, content ) )
-            {
-                error = "Could not write the starter file: " + p.string();
-                return {};
-            }
-        }
-
-        // Written by the same serializer the Editor parses with — the struct is the format, so a
-        // project name containing a quote or backslash is escaped instead of corrupting the file.
-        // The descriptor is the project: a create that cannot write it has created a folder tree the
-        // engine will never open, so it fails loudly instead of returning a path to nothing.
-        const std::string deprojPath = ( root / ( name + ".deproj" ) ).string();
-        if ( !WriteTextFile( deprojPath, Common::Project::WriteProjectFile( deproj ) ) )
-        {
-            error = "Could not write the project descriptor: " + deprojPath;
-            return {};
-        }
-
-        error.clear();
-        return deprojPath;
-    }
-
-    bool LaunchEditor( const std::string& deprojPath, const std::string& config, std::string& error )
-    {
-        const char* root = std::getenv( "DESERT_ROOT" );
-        if ( !root )
-        {
-#ifdef _WIN32
-            error = "DESERT_ROOT is not set — start the hub via scripts\\Windows\\RunProjectHub.bat";
-#else
-            error = "DESERT_ROOT is not set — start the hub via scripts/MacOS/RunProjectHub.sh";
-#endif
-            return false;
-        }
-        // The flag comes from the shared launch protocol (<DesertShared/LaunchProtocol.hpp>) — the
-        // Editor's own suite asserts its parser accepts it, so the two processes cannot drift on
-        // the spelling. Still a shell string through the run scripts; moving to an argv spawn is
-        // L3's, together with the exit-code half of the protocol.
-#ifdef _WIN32
-        // `start "" /D <dir> <program> <args>`: the empty first token is the window TITLE (start treats
-        // a leading quoted argument as one), /D sets the working directory, and start returns
-        // immediately — the same detach the macOS branch gets from trailing '&'.
-        std::ostringstream cmd;
-        cmd << "start \"\" /D \"" << root << "\" \"" << root << "\\scripts\\Windows\\RunEditor.bat\" " << config
-            << " " << Common::Launch::kProjectFlag << " \"" << deprojPath << "\"";
-        std::system( cmd.str().c_str() );
-        return true;
-#else
-        std::ostringstream cmd;
-        cmd << "cd \"" << root << "\" && ./scripts/MacOS/RunEditor.sh " << config << " "
-            << Common::Launch::kProjectFlag << " \"" << deprojPath << "\" >/dev/null 2>&1 &";
-        std::system( cmd.str().c_str() );
-        return true;
-#endif
+        return Hub::WriteTextFile( RegistryFile(), Common::Project::WriteProjectsRegistry(
+                                                        Common::Project::ProjectsRegistry{ projects } ) );
     }
 
     // ------------------------------------------------------------------ theme / fonts
@@ -320,10 +140,12 @@ namespace
     constexpr ImVec4 kSidebar  = ImVec4( 0.075f, 0.075f, 0.095f, 1.0f );
     constexpr ImVec4 kPanel    = ImVec4( 0.100f, 0.100f, 0.125f, 1.0f );
     constexpr ImVec4 kPanelHov = ImVec4( 0.140f, 0.140f, 0.175f, 1.0f );
+    constexpr ImVec4 kPanelDim = ImVec4( 0.080f, 0.078f, 0.090f, 1.0f ); // an entry that cannot open
     constexpr ImVec4 kAccent   = ImVec4( 0.910f, 0.530f, 0.170f, 1.0f ); // desert orange
     constexpr ImVec4 kAccentHi = ImVec4( 0.980f, 0.620f, 0.250f, 1.0f );
     constexpr ImVec4 kText     = ImVec4( 0.920f, 0.915f, 0.900f, 1.0f );
     constexpr ImVec4 kTextDim  = ImVec4( 0.560f, 0.560f, 0.620f, 1.0f );
+    constexpr ImVec4 kBad      = ImVec4( 1.000f, 0.420f, 0.380f, 1.0f );
 
     ImFont* g_FontBody  = nullptr;
     ImFont* g_FontTitle = nullptr;
@@ -417,6 +239,22 @@ namespace
         return pressed;
     }
 
+    // Trims a path from the FRONT until it fits, because the identifying end of a path is its tail.
+    // Card text used to be drawn unclipped and ran underneath the Open/Reveal/Remove buttons.
+    std::string ElideFront( const std::string& text, float maxWidth )
+    {
+        if ( ImGui::CalcTextSize( text.c_str() ).x <= maxWidth )
+            return text;
+        // Three ASCII dots, not U+2026: the body font is loaded over the default (Latin-1) range
+        // with only the icon block merged on top, so the real ellipsis draws as a missing-glyph box.
+        const std::string ellipsis = "...";
+        size_t            start    = 0;
+        while ( start < text.size() &&
+                ImGui::CalcTextSize( ( ellipsis + text.substr( start ) ).c_str() ).x > maxWidth )
+            ++start;
+        return ellipsis + text.substr( start );
+    }
+
     // ------------------------------------------------------------------ app state
 
     enum class View
@@ -427,41 +265,101 @@ namespace
 
     struct HubState
     {
-        std::vector<std::string> Recent = LoadRecentProjects();
-        View                     Screen = View::Projects;
-        int                      Config = 1; // 0 = Debug, 1 = Release
+        std::vector<std::string>       Recent = LoadRecentProjects();
+        std::vector<Hub::ProjectEntry> Entries;
+        double                         EntriesResolvedAt = -1.0;
+        View                           Screen            = View::Projects;
+        int                            Config            = 1; // 0 = Debug, 1 = Release
 
         char        NewName[128]     = "MyGame";
         char        NewLocation[512] = "";
-        char        OpenPath[512]    = "";
-        int         Template         = 0; // index into Templates()
-        bool        OpenPopup        = false;
+        int         Template         = 0; // index into Hub::Templates()
         std::string Status;
         bool        StatusIsError = false;
 
         GLFWwindow* Window = nullptr;
+
+        // Re-resolves every registry line against the disk. Called on every mutation, and at most
+        // once a second while the window is up: a project can be deleted, restored or repaired by
+        // some other program while the hub sits open, and a card claiming otherwise is the defect
+        // this whole state exists to close. It is ten small reads — measurably nothing.
+        void ResolveEntries()
+        {
+            Entries           = Hub::ResolveProjectEntries( Recent );
+            EntriesResolvedAt = ImGui::GetTime();
+        }
+
+        void ResolveEntriesIfStale()
+        {
+            if ( ImGui::GetTime() - EntriesResolvedAt >= 1.0 )
+                ResolveEntries();
+        }
+
+        void SetError( const std::string& message )
+        {
+            Status        = message;
+            StatusIsError = true;
+        }
     };
 
-    void OpenProject( HubState& st, const std::string& path )
+    // Writes the recent list and reports a failed write to the user. Used everywhere the list
+    // changes, so no call site can forget that a registry write is an operation that can fail.
+    void PersistRecent( HubState& st )
     {
-        if ( !fs::exists( path ) )
+        if ( const auto saved = SaveRecentProjects( st.Recent ); !saved.IsSuccess() )
+            st.SetError( "Could not update " + RegistryFile() + ": " + saved.GetError() );
+        st.ResolveEntries();
+    }
+
+    void OpenProject( HubState& st, const Hub::ProjectEntry& entry )
+    {
+        // The entry already knows why it cannot open; re-deriving it here would be a second answer
+        // to one question.
+        if ( !entry.IsOpenable() )
         {
-            st.Status        = "File not found: " + path;
-            st.StatusIsError = true;
+            st.SetError( entry.Path + " - " + entry.Trouble );
             return;
         }
-        std::string error;
-        if ( LaunchEditor( path, st.Config == 0 ? Common::Launch::kConfigDebug : Common::Launch::kConfigRelease,
-                           error ) )
+
+        const char* root = std::getenv( "DESERT_ROOT" );
+        if ( !root )
         {
-            RememberProject( st.Recent, path );
-            glfwSetWindowShouldClose( st.Window, GLFW_TRUE ); // hub's job is done
+#ifdef _WIN32
+            st.SetError( "DESERT_ROOT is not set - start the hub via scripts\\Windows\\RunProjectHub.bat" );
+#else
+            st.SetError( "DESERT_ROOT is not set - start the hub via scripts/MacOS/RunProjectHub.sh" );
+#endif
+            return;
         }
-        else
+
+        const std::string config = st.Config == 0 ? Common::Launch::kConfigDebug : Common::Launch::kConfigRelease;
+        const auto        launched = Hub::SpawnDetached( Hub::BuildEditorLaunch( root, config, entry.Path ) );
+        if ( !launched.IsSuccess() )
         {
-            st.Status        = error;
-            st.StatusIsError = true;
+            // The old code discarded std::system()'s result and returned true no matter what, so a
+            // launch that never happened still closed the window.
+            st.SetError( "Could not start the Editor: " + launched.GetError() );
+            return;
         }
+
+        Hub::PromoteRecent( st.Recent, entry.Path );
+        if ( const auto saved = SaveRecentProjects( st.Recent ); !saved.IsSuccess() )
+        {
+            // The Editor IS starting, so this must not read as a failed open — but the hub stays up
+            // instead of closing over an error nobody would ever see.
+            st.SetError( "The Editor is starting, but " + RegistryFile() +
+                         " could not be updated: " + saved.GetError() );
+            st.ResolveEntries();
+            return;
+        }
+        glfwSetWindowShouldClose( st.Window, GLFW_TRUE ); // hub's job is done
+    }
+
+    void RevealProject( HubState& st, const Hub::ProjectEntry& entry )
+    {
+        if ( const auto revealed = Hub::SpawnDetached( Hub::BuildRevealCommand( entry.Path ) );
+             !revealed.IsSuccess() )
+            st.SetError( "Could not reveal " + entry.Path + ": " + revealed.GetError() );
     }
 
     // ------------------------------------------------------------------ views
@@ -516,72 +414,95 @@ namespace
         ImGui::PopStyleColor();
     }
 
-    void DrawProjectCard( HubState& st, const std::string& path, int index )
+    // Draws one card. Returns true when the user asked to forget this entry.
+    bool DrawProjectCard( HubState& st, const Hub::ProjectEntry& entry, int index )
     {
-        const std::string name = fs::path( path ).stem().string();
+        const bool  openable = entry.IsOpenable();
+        const float height   = openable ? 76.0f : 96.0f;
 
         ImGui::PushID( index );
-        ImGui::PushStyleColor( ImGuiCol_ChildBg, kPanel );
-        ImGui::BeginChild( "##card", ImVec2( 0.0f, 72.0f ), false,
+        ImGui::PushStyleColor( ImGuiCol_ChildBg, openable ? kPanel : kPanelDim );
+        ImGui::BeginChild( "##card", ImVec2( 0.0f, height ), false,
                            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
-        // Whole-card interaction: click selects visual hover, double-click opens.
+        // Whole-card interaction: hover highlights, double-click opens. A card that cannot open
+        // gets neither — an inert card is the honest shape of "there is nothing behind this".
         const ImVec2 cardMin = ImGui::GetWindowPos();
         const ImVec2 cardMax = ImVec2( cardMin.x + ImGui::GetWindowWidth(),
                                        cardMin.y + ImGui::GetWindowHeight() );
-        const bool hovered = ImGui::IsMouseHoveringRect( cardMin, cardMax );
+        const bool   hovered = openable && ImGui::IsMouseHoveringRect( cardMin, cardMax );
         if ( hovered )
             ImGui::GetWindowDrawList()->AddRectFilled( cardMin, cardMax,
                                                        ImGui::GetColorU32( kPanelHov ), 10.0f );
         if ( hovered && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
-            OpenProject( st, path );
+            OpenProject( st, entry );
 
         // Icon
-        ImGui::SetCursorPos( ImVec2( 18.0f, 20.0f ) );
+        ImGui::SetCursorPos( ImVec2( 18.0f, 22.0f ) );
         ImGui::PushFont( g_FontH1 );
-        ImGui::TextColored( kAccent, HUB_ICON_PACKAGE );
+        ImGui::TextColored( openable ? kAccent : kBad, openable ? HUB_ICON_PACKAGE : HUB_ICON_ALERT );
         ImGui::PopFont();
 
-        // Name + path
-        ImGui::SetCursorPos( ImVec2( 66.0f, 14.0f ) );
+        const float right     = ImGui::GetWindowWidth();
+        const float textWidth = right - 66.0f - 220.0f; // stop before the buttons
+
+        // Name — from the .deproj the Editor will read, not from the path's stem.
+        ImGui::SetCursorPos( ImVec2( 66.0f, 12.0f ) );
         ImGui::PushFont( g_FontTitle );
-        ImGui::TextUnformatted( name.c_str() );
+        ImGui::TextColored( openable ? kText : kTextDim, "%s", ElideFront( entry.Name, textWidth ).c_str() );
         ImGui::PopFont();
-        ImGui::SetCursorPos( ImVec2( 66.0f, 40.0f ) );
-        ImGui::TextColored( kTextDim, "%s", path.c_str() );
 
-        // Right-side actions
-        const float right = ImGui::GetWindowWidth();
-        ImGui::SetCursorPos( ImVec2( right - 210.0f, 18.0f ) );
-        if ( PrimaryButton( HUB_ICON_ROCKET "  Open", ImVec2( 96.0f, 36.0f ) ) )
-            OpenProject( st, path );
-        ImGui::SetCursorPos( ImVec2( right - 104.0f, 18.0f ) );
-#ifdef __APPLE__
-        if ( ImGui::Button( HUB_ICON_FOLDER_OPEN, ImVec2( 40.0f, 36.0f ) ) )
-            std::system( ( "open \"" + fs::path( path ).parent_path().string() + "\"" ).c_str() );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Reveal in Finder" );
+        ImGui::SetCursorPos( ImVec2( 66.0f, 42.0f ) );
+        ImGui::TextColored( kTextDim, "%s", ElideFront( entry.Path, textWidth ).c_str() );
+
+        if ( !openable )
+        {
+            ImGui::SetCursorPos( ImVec2( 66.0f, 66.0f ) );
+            ImGui::TextColored( kBad, "%s", ElideFront( "Unavailable: " + entry.Trouble, textWidth ).c_str() );
+        }
+
+        // Right-side actions. Open is absent, not greyed: there is no version of this click that
+        // does anything, and a button that only ever refuses is worse than no button.
+        const float buttonY = ( height - 36.0f ) * 0.5f;
+        if ( openable )
+        {
+            ImGui::SetCursorPos( ImVec2( right - 210.0f, buttonY ) );
+            if ( PrimaryButton( HUB_ICON_ROCKET "  Open", ImVec2( 96.0f, 36.0f ) ) )
+                OpenProject( st, entry );
+        }
+
+        std::error_code ec;
+        if ( fs::exists( fs::path( entry.Path ).parent_path(), ec ) )
+        {
+            ImGui::SetCursorPos( ImVec2( right - 104.0f, buttonY ) );
+            if ( ImGui::Button( HUB_ICON_FOLDER_OPEN, ImVec2( 40.0f, 36.0f ) ) )
+                RevealProject( st, entry );
+            if ( ImGui::IsItemHovered() )
+#ifdef _WIN32
+                ImGui::SetTooltip( "Show in Explorer" );
+#else
+                ImGui::SetTooltip( "Reveal in Finder" );
 #endif
-        ImGui::SetCursorPos( ImVec2( right - 56.0f, 18.0f ) );
-        bool removed = false;
-        if ( ImGui::Button( HUB_ICON_DELETE, ImVec2( 40.0f, 36.0f ) ) )
-            removed = true;
+        }
+
+        ImGui::SetCursorPos( ImVec2( right - 56.0f, buttonY ) );
+        const bool removed = ImGui::Button( HUB_ICON_DELETE, ImVec2( 40.0f, 36.0f ) );
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "Remove from list (files stay on disk)" );
 
         ImGui::EndChild();
         ImGui::PopStyleColor();
         ImGui::PopID();
+        return removed;
+    }
 
-        if ( removed )
-        {
-            st.Recent.erase( st.Recent.begin() + index );
-            if ( !SaveRecentProjects( st.Recent ) )
-            {
-                st.Status        = "Could not update " + RegistryFile() + " — the list on disk is unchanged";
-                st.StatusIsError = true;
-            }
-        }
+    void OpenExisting( HubState& st )
+    {
+        const std::string chosen =
+             Hub::FileDialog::OpenFile( "Open existing project", "Desert project (.deproj)", "deproj" );
+        if ( chosen.empty() ) // cancelled
+            return;
+        OpenProject( st, Hub::ResolveProjectEntry( chosen ) );
     }
 
     void DrawProjectsView( HubState& st )
@@ -593,14 +514,14 @@ namespace
 
         ImGui::SameLine( ImGui::GetContentRegionAvail().x - 300.0f );
         if ( ImGui::Button( HUB_ICON_FOLDER_OPEN "  Open existing", ImVec2( 150.0f, 38.0f ) ) )
-            st.OpenPopup = true;
+            OpenExisting( st );
         ImGui::SameLine();
         if ( PrimaryButton( HUB_ICON_PLUS "  New Project", ImVec2( 140.0f, 38.0f ) ) )
             st.Screen = View::NewProject;
 
         ImGui::Dummy( ImVec2( 0, 6 ) );
 
-        if ( st.Recent.empty() )
+        if ( st.Entries.empty() )
         {
             ImGui::Dummy( ImVec2( 0, 90 ) );
             ImGui::PushFont( g_FontTitle );
@@ -617,9 +538,19 @@ namespace
         }
 
         ImGui::BeginChild( "##cards", ImVec2( 0, 0 ), false );
-        for ( int i = 0; i < (int)st.Recent.size(); ++i )
-            DrawProjectCard( st, st.Recent[i], i );
+        // Collected, not applied in the loop: erasing while drawing shifts every card below the
+        // one that was removed into a different index for the rest of the frame.
+        int removeIndex = -1;
+        for ( int i = 0; i < (int)st.Entries.size(); ++i )
+            if ( DrawProjectCard( st, st.Entries[i], i ) )
+                removeIndex = i;
         ImGui::EndChild();
+
+        if ( removeIndex >= 0 && removeIndex < (int)st.Recent.size() )
+        {
+            st.Recent.erase( st.Recent.begin() + removeIndex );
+            PersistRecent( st );
+        }
     }
 
     void DrawNewProjectView( HubState& st )
@@ -635,11 +566,11 @@ namespace
 
         // Template picker: one selectable card per starter template.
         ImGui::TextColored( kTextDim, "TEMPLATE" );
-        const auto& templates = Templates();
+        const auto& templates = Hub::Templates();
         for ( int i = 0; i < static_cast<int>( templates.size() ); ++i )
         {
-            const ProjectTemplate& tpl      = templates[i];
-            const bool             selected = ( st.Template == i );
+            const Hub::ProjectTemplate& tpl      = templates[i];
+            const bool                  selected = ( st.Template == i );
 
             ImGui::PushID( tpl.Id );
             ImGui::PushStyleColor( ImGuiCol_ChildBg, selected ? kAccent : kPanel );
@@ -666,55 +597,31 @@ namespace
         ImGui::TextColored( kTextDim, "PROJECT NAME" );
         ImGui::SetNextItemWidth( 380.0f );
         ImGui::InputText( "##name", st.NewName, sizeof( st.NewName ) );
+        // Said while typing, not after Create: the rule is the same one CreateProject enforces.
+        if ( const std::string reason = Hub::ValidateProjectName( st.NewName ); !reason.empty() )
+            ImGui::TextColored( kBad, "%s", reason.c_str() );
 
         ImGui::TextColored( kTextDim, "LOCATION" );
         ImGui::SetNextItemWidth( 380.0f );
         ImGui::InputText( "##loc", st.NewLocation, sizeof( st.NewLocation ) );
+        ImGui::SameLine();
+        if ( ImGui::Button( HUB_ICON_FOLDER_OPEN "  Browse", ImVec2( 130.0f, 38.0f ) ) )
+        {
+            const std::string chosen =
+                 Hub::FileDialog::PickDirectory( "Where to create the project", st.NewLocation );
+            if ( !chosen.empty() ) // "" is a cancel, and a cancel must not wipe the field
+                std::snprintf( st.NewLocation, sizeof( st.NewLocation ), "%s", chosen.c_str() );
+        }
 
         ImGui::Dummy( ImVec2( 0, 10 ) );
         if ( PrimaryButton( HUB_ICON_ROCKET "  Create & Open", ImVec2( 190.0f, 42.0f ) ) )
         {
-            std::string       error;
-            const auto&       tpl = Templates()[st.Template];
-            if ( const std::string deproj = CreateProject( st.NewLocation, st.NewName, tpl, error );
-                 !deproj.empty() )
-                OpenProject( st, deproj );
+            auto created = Hub::CreateProject( st.NewLocation, st.NewName, templates[st.Template] );
+            if ( created.IsSuccess() )
+                OpenProject( st, Hub::ResolveProjectEntry( created.ExtractValue() ) );
             else
-            {
-                st.Status        = error;
-                st.StatusIsError = true;
-            }
+                st.SetError( created.GetError() );
         }
-    }
-
-    void DrawOpenPopup( HubState& st )
-    {
-        if ( st.OpenPopup )
-        {
-            ImGui::OpenPopup( "Open existing project" );
-            st.OpenPopup = false;
-        }
-        ImGui::SetNextWindowPos( ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
-                                 ImVec2( 0.5f, 0.5f ) );
-        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 18, 18 ) );
-        if ( ImGui::BeginPopupModal( "Open existing project", nullptr,
-                                     ImGuiWindowFlags_AlwaysAutoResize ) )
-        {
-            ImGui::TextColored( kTextDim, "PATH TO .DEPROJ" );
-            ImGui::SetNextItemWidth( 480.0f );
-            ImGui::InputText( "##openPath", st.OpenPath, sizeof( st.OpenPath ) );
-            ImGui::Dummy( ImVec2( 0, 4 ) );
-            if ( PrimaryButton( "Open", ImVec2( 110.0f, 36.0f ) ) && st.OpenPath[0] )
-            {
-                OpenProject( st, st.OpenPath );
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::SameLine();
-            if ( ImGui::Button( "Cancel", ImVec2( 96.0f, 36.0f ) ) )
-                ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
-        }
-        ImGui::PopStyleVar();
     }
 } // namespace
 
@@ -745,6 +652,21 @@ int main()
     if ( const char* home = std::getenv( "HOME" ) )
         std::snprintf( st.NewLocation, sizeof( st.NewLocation ), "%s/DesertProjects", home );
 
+    // DESERT_CONFIG was a dead contract: both run scripts export it "for the hub" and this file's
+    // header comment said so, but nothing ever read it — the picker always started on Release, so
+    // `RunProjectHub.sh Debug` launched a Release Editor. Now it selects, and a value that is
+    // neither configuration name is REFUSED out loud rather than quietly ignored.
+    if ( const char* config = std::getenv( "DESERT_CONFIG" ); config && config[0] )
+    {
+        if ( std::strcmp( config, Common::Launch::kConfigDebug ) == 0 )
+            st.Config = 0;
+        else if ( std::strcmp( config, Common::Launch::kConfigRelease ) == 0 )
+            st.Config = 1;
+        else
+            st.SetError( std::string( "DESERT_CONFIG=" ) + config + " is neither " + Common::Launch::kConfigDebug +
+                         " nor " + Common::Launch::kConfigRelease + " - the picker is showing the default." );
+    }
+
     while ( !glfwWindowShouldClose( window ) )
     {
         glfwPollEvents();
@@ -752,6 +674,7 @@ int main()
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         ImGui::PushFont( g_FontBody );
+        st.ResolveEntriesIfStale();
 
         int w, h;
         glfwGetWindowSize( window, &w, &h );
@@ -770,7 +693,19 @@ int main()
         {
             // Constrain the content column with right padding.
             ImGui::PushItemWidth( -28.0f );
-            ImGui::BeginChild( "##content", ImVec2( ImGui::GetContentRegionAvail().x - 28.0f, 0 ),
+            const float contentWidth = ImGui::GetContentRegionAvail().x - 28.0f;
+
+            // The status line gets its space RESERVED before the views are drawn, instead of being
+            // appended after them. It used to live inside the scrolling child at the end of the
+            // project list, so the one moment it matters most — a launch that failed with fourteen
+            // projects on screen — was the moment it sat below the fold, unread.
+            const float statusHeight =
+                 st.Status.empty()
+                      ? 0.0f
+                      : ImGui::CalcTextSize( st.Status.c_str(), nullptr, false, contentWidth ).y + 14.0f;
+
+            ImGui::BeginChild( "##content",
+                               ImVec2( contentWidth, ImGui::GetContentRegionAvail().y - statusHeight - 24.0f ),
                                false );
 
             if ( st.Screen == View::Projects )
@@ -778,24 +713,19 @@ int main()
             else
                 DrawNewProjectView( st );
 
-            // Status line (errors from create/open).
+            ImGui::EndChild();
+
             if ( !st.Status.empty() )
             {
-                ImGui::Dummy( ImVec2( 0, 6 ) );
-                ImGui::PushTextWrapPos( 0.0f );
-                ImGui::TextColored( st.StatusIsError ? ImVec4( 1.0f, 0.42f, 0.38f, 1.0f )
-                                                     : ImVec4( 0.5f, 0.9f, 0.5f, 1.0f ),
-                                    "%s", st.Status.c_str() );
+                ImGui::PushTextWrapPos( ImGui::GetCursorPosX() + contentWidth );
+                ImGui::TextColored( st.StatusIsError ? kBad : ImVec4( 0.5f, 0.9f, 0.5f, 1.0f ), "%s",
+                                    st.Status.c_str() );
                 ImGui::PopTextWrapPos();
             }
-
-            ImGui::EndChild();
             ImGui::PopItemWidth();
         }
         ImGui::EndGroup();
         ImGui::EndChild();
-
-        DrawOpenPopup( st );
 
         ImGui::End();
         ImGui::PopFont();

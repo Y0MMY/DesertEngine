@@ -162,11 +162,17 @@ namespace Desert::Project
 
     void ProjectContext::RegisterRecent( const std::string& deprojPath )
     {
+        // Most recent first, unique, and NOT capped. There used to be a silent cap of ten here and
+        // an identical one in the launcher (Tools/ProjectHub, Hub::PromoteRecent) — this file is
+        // shared, so the two had to be lifted together: an uncapped hub next to a capped engine
+        // would have dropped everything past the tenth entry the moment any project was opened.
+        // The cap was safe to lose only once a dead entry became visible: the launcher now resolves
+        // every line against the disk and offers Remove, so the list is curated rather than
+        // truncated. Both copies of this policy move into desert-shared with the {Path, LastOpened}
+        // registry (L2 §10.4, stage E1); until then they are two places that must say the same thing.
         auto projects = RecentProjects();
         projects.erase( std::remove( projects.begin(), projects.end(), deprojPath ), projects.end() );
         projects.insert( projects.begin(), deprojPath );
-        if ( projects.size() > 10 )
-            projects.resize( 10 );
 
         // Atomic (write-then-rename): this file is shared with the Project Hub, and an interrupted
         // in-place write left a torn projects.json that neither side could parse — every recent

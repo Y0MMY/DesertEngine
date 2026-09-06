@@ -11,8 +11,10 @@ project "ProjectHub"
     cppdialect "C++20"
 
     files {
-        "Source/**.cpp",
-        "Source/**.hpp",
+        -- Flat glob on purpose: Source/Platform/ holds one file per OS and each is added by the
+        -- filter that wants it, so a `**` here would hand the Windows COM dialog to clang.
+        "Source/*.cpp",
+        "Source/*.hpp",
         -- ImGui platform backends compiled directly into the hub (the ImGui static lib holds core only).
         "%{wks.location}/ThirdParty/ImGui/backends/imgui_impl_glfw.cpp",
         "%{wks.location}/ThirdParty/ImGui/backends/imgui_impl_opengl2.cpp",
@@ -46,18 +48,23 @@ project "ProjectHub"
         optimize "On"
 
     filter "system:macosx"
+        files { "Source/Platform/FileDialog_Mac.mm" }
         links {
             "Cocoa.framework",
             "IOKit.framework",
             "CoreFoundation.framework",
             "CoreVideo.framework",
             "OpenGL.framework",
+            -- NSOpenPanel + the UTType its allowedContentTypes takes (Source/Platform/FileDialog_Mac.mm)
+            "AppKit.framework",
+            "UniformTypeIdentifiers.framework",
             "Foundation.framework",
         }
         -- The OpenGL2 backend uses the (deprecated but present) system GL — silence the warning spam.
         defines { "GL_SILENCE_DEPRECATION" }
 
     filter "system:windows"
-        links { "opengl32" }
+        files { "Source/Platform/FileDialog_Windows.cpp" }
+        links { "opengl32", "ole32", "shell32" } -- IFileOpenDialog (Source/Platform/FileDialog_Windows.cpp)
 
     filter {}
