@@ -237,13 +237,33 @@ namespace Desert::Core
         return BOOLSUCCESS;
     }
 
-    void SceneSerializer::SaveToFile() const
+    Common::Filepath SceneSerializer::TargetPath() const
     {
-        const auto& serialized = SerializeToJson();
-        auto        sceneName  = std::regex_replace( m_Scene->GetSceneName(), std::regex( "\\s+" ), "_" );
+        auto sceneName = std::regex_replace( m_Scene->GetSceneName(), std::regex( "\\s+" ), "_" );
         sceneName += Common::Constants::Extensions::SCENE_EXTENSION;
-        const Common::Filepath pathToSave = Common::Constants::Path::SCENE_PATH / sceneName;
-        Common::Utils::FileSystem::WriteContentToFile( pathToSave, serialized );
+        return Common::Constants::Path::SCENE_PATH / sceneName;
+    }
+
+    Common::BoolResultStr SceneSerializer::SaveToFile() const
+    {
+        const Common::Filepath pathToSave = TargetPath();
+
+        // The directory is created here rather than assumed: an ofstream silently writes NOTHING when
+        // the parent is missing, and a project whose Scene/ folder has never existed is the ordinary
+        // case on the first save after "New Project".
+        std::error_code ec;
+        std::filesystem::create_directories( pathToSave.parent_path(), ec );
+        if ( ec )
+            return Common::MakeFormattedError( "could not create the directory {} for '{}': {}",
+                                               pathToSave.parent_path().string(), m_Scene->GetSceneName(),
+                                               ec.message() );
+
+        if ( const auto written =
+                  Common::Utils::FileSystem::WriteContentToFileAtomic( pathToSave, SerializeToJson() );
+             !written )
+            return Common::MakeFormattedError( "could not write {}: {}", pathToSave.string(), written.GetError() );
+
+        return BOOLSUCCESS;
     }
 
 } // namespace Desert::Core
