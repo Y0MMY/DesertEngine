@@ -30,11 +30,22 @@ namespace Common::Memory
             Size = size;
         }
 
+        // THE CAST IS THE WHOLE POINT, not tidiness. `Data` is `void*` and this said `delete[] Data;`,
+        // which C++ does not define: with no type there is no array cookie to consult and no element
+        // type to destroy, so what the deallocation does is up to the implementation. clang accepts it
+        // as an extension and says so (`-Wdelete-incomplete`, on by DEFAULT) — the workspace's `-w`
+        // was the only reason nobody heard it.
+        //
+        // `std::byte` is not a guess: Allocate() below is `new std::byte[size]` and Copy() goes
+        // through Allocate(), so every Buffer that owns memory owns a `std::byte[]`. Restoring that
+        // type is what makes this a defined array delete. (The `Buffer(void*, size)` constructor
+        // adopts a pointer of unknown origin and has no user in the tree; if one ever appears, this
+        // Release() is wrong for it and the ownership has to become explicit rather than assumed.)
         void Release()
         {
             if ( Data )
             {
-                delete[] Data;
+                delete[] static_cast<std::byte*>( Data );
                 Data = nullptr;
 
                 Size          = 0;
