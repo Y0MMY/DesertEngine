@@ -39,4 +39,4 @@
 	url = https://github.com/thedmd/imgui-node-editor
 [submodule "ThirdParty/desert-shared"]
 	path = ThirdParty/desert-shared
-	url = git@github.com:desert-studio/desert-shared.git
+	url = https://github.com/desert-studio/desert-shared
