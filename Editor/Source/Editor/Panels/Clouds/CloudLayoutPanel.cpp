@@ -27,6 +27,7 @@
 #include <ImGui/imgui.h>
 
 #include <stb_image/stb_image.h>
+#include <stb_image/stb_image_write.h>
 
 #include <algorithm>
 #include <cmath>
@@ -436,18 +437,30 @@ namespace Desert::Editor
                 LoadSourceImage( picked );
         }
 
-        // The same generic Content Browser payload the Details slot accepts, filtered HERE by extension
-        // for the same reason it filters there: the browser emits one AssetFile payload for everything it
-        // has no icon for, so without this the panel would hand a dropped .desce to an image decoder.
+        // BOTH PAYLOADS, and accepting only the generic one was a live defect: the tooltip below invites the
+        // artist to "drag a .png here from the Content Browser", and that is precisely the drag this target
+        // used to ignore. FileExplorerPanel::EmitAssetDragSource types a payload by FileType, and every
+        // image is FileType::Texture, so the browser emits TEXTURE_ASSET for a .png and falls back to
+        // AssetFile only for what it has no specific type for. A payload id that does not match fails
+        // SILENTLY in ImGui — nothing logs, the drop simply does nothing — which is why this survived.
+        // SkyboxComponent's slot already accepts the pair; this is the same fix.
+        //
+        // The extension filter stays for the AssetFile half, for its original reason: that payload carries
+        // everything the browser has no icon for, so without it a dropped .desce would reach an image decoder.
         if ( ImGui::BeginDragDropTarget() )
         {
-            if ( const ImGuiPayload* payload =
-                      ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::AssetFile ) )
+            for ( const char* accepted :
+                  { ::Desert::Editor::DragPayloads::TextureAsset, ::Desert::Editor::DragPayloads::AssetFile } )
             {
+                const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( accepted );
+                if ( !payload )
+                    continue;
+
                 const std::string dropped( static_cast<const char*>( payload->Data ),
                                            payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
                 if ( !dropped.empty() && LooksLikeAnImage( dropped ) )
                     LoadSourceImage( dropped );
+                break;
             }
             ImGui::EndDragDropTarget();
         }
@@ -1477,6 +1490,60 @@ namespace Desert::Editor
         ImGui::TextDisabled( "Paintings live in %s", Common::Constants::Path::CLOUD_LAYOUT_PATH.string().c_str() );
 
         ImGui::TextDisabled( "Then drag it onto a cloud layer's Cloud Layout slot in Details." );
+
+        // THE WAY BACK OUT. Importing a picture has been here since this panel was written; exporting one
+        // had not, so a `.dclayout` was a one-way door — an artist could bring a painting in but never get
+        // it back to touch up in the tool they drew it with. This is the other half of that trip and it
+        // reuses the panel's own canvas recovery, so what comes out is exactly what "Image..." would take
+        // back in, rather than a second reading of a layout.
+        ImGui::BeginDisabled( !m_HasLayout );
+        if ( ImGui::Button( "Export image...", ImVec2( 180.0f, 0.0f ) ) )
+        {
+            auto canvas = Assets::MakeCloudLayoutCanvasFromLayout( m_Layout );
+            if ( !canvas )
+            {
+                // REFUSES RATHER THAN DROPS A PLANE. A layout whose mask differs from its fourth pattern
+                // channel needs five planes and an RGBA image has four; the recovery says so by name, and
+                // silently discarding one would be a painting that changed for no reason the artist can see.
+                m_Status        = "Export failed: " + canvas.GetError();
+                m_StatusIsError = true;
+            }
+            else
+            {
+                std::filesystem::path target = Common::Utils::FileSystem::SaveFileDialog( "PNG image\0*.png\0" );
+                if ( !target.empty() )
+                {
+                    if ( target.extension() != ".png" )
+                        target.replace_extension( ".png" );
+
+                    const auto& surface = canvas.GetValue();
+                    const int written = stbi_write_png( target.string().c_str(), static_cast<int>( surface.Side ),
+                                                        static_cast<int>( surface.Side ), 4, surface.Pixels.data(),
+                                                        static_cast<int>( surface.Side ) * 4 );
+
+                    if ( written == 0 )
+                    {
+                        m_Status        = "Export failed: '" + target.string() + "' could not be written.";
+                        m_StatusIsError = true;
+                        LOG_ERROR( "[CloudLayout] {}", m_Status );
+                    }
+                    else
+                    {
+                        m_Status = "Exported " + std::to_string( surface.Side ) + "x" +
+                                   std::to_string( surface.Side ) + " to " + target.string() +
+                                   ( surface.TakeMask ? ". Alpha is the mask." : ". Alpha is the fourth slot." );
+                        m_StatusIsError = false;
+                        LOG_INFO( "[CloudLayout] Painting exported: '{}', {}x{}, alpha is the {}.",
+                                  target.string(), surface.Side, surface.Side,
+                                  surface.TakeMask ? "mask" : "fourth pattern channel" );
+                    }
+                }
+            }
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Writes the painting back out as the same kind of RGBA picture 'Image...' "
+                               "reads. Lossless, so a painting that goes out and comes straight back in is "
+                               "the same table byte for byte." );
 
         std::filesystem::path target;
         if ( bake )
