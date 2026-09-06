@@ -2427,7 +2427,9 @@ namespace Desert::Editor
             {
                 // Loaded once per selection change; excerpt only (previewing must never hitch the UI).
                 m_PreviewTextPath = entry->AssetPath;
-                m_PreviewText     = Common::Utils::FileSystem::ReadFileContent( entry->AssetPath );
+                // An unreadable file previews as its error line rather than as silent emptiness.
+                auto preview                 = Common::Utils::FileSystem::ReadFileContent( entry->AssetPath );
+                m_PreviewText                = preview ? preview.ExtractValue() : preview.GetError();
                 constexpr size_t kMaxPreview = 2048;
                 if ( m_PreviewText.size() > kMaxPreview )
                 {

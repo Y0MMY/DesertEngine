@@ -82,9 +82,11 @@ namespace Desert::Assets
             m_ReadyForUse = true;
         };
 
-        if ( raw.empty() )
+        if ( !raw || raw.GetValue().empty() )
         {
-            // New / empty material — canonical defaults; editable and re-savable.
+            // New / empty material — canonical defaults; editable and re-savable. A MISSING file is
+            // this branch by design too: the editor creates a material by naming a file that does
+            // not exist yet (pinned by the AssetMissingFile suite).
             m_Data = MaterialData{};
             finalize();
             return BOOLSUCCESS;
@@ -92,7 +94,7 @@ namespace Desert::Assets
 
         // The unified MaterialData protocol is the ONLY on-disk format (pre-protocol migration
         // readers were removed with the rest of the legacy paths).
-        if ( const auto parsed = rfl::json::read<MaterialData>( raw ); parsed.has_value() )
+        if ( const auto parsed = rfl::json::read<MaterialData>( raw.GetValue() ); parsed.has_value() )
         {
             m_Data = parsed.value();
             finalize();

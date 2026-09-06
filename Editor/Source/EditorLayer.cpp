@@ -2805,7 +2805,15 @@ namespace Desert::Editor
         // refuse - an old autosave, a scene saved by an older build - would then have cost the user the
         // scene they had and given them nothing. So an unloadable file leaves the editor exactly as it is
         // and says why, with the command that fixes the file.
-        const std::string content = Common::Utils::FileSystem::ReadFileContent( path );
+        const auto contentRead = Common::Utils::FileSystem::ReadFileContent( path );
+        if ( !contentRead )
+        {
+            LOG_ERROR( "{0}", contentRead.GetError() );
+            Editor::ToastManager::Push( "Scene not loaded — the file could not be read (see the log)",
+                                        Editor::ToastLevel::Error );
+            return;
+        }
+        const std::string& content = contentRead.GetValue();
         if ( const auto loadable = Desert::Core::ParseLoadableScene( path.string(), content ); !loadable )
         {
             LOG_ERROR( "{0}", loadable.GetError() );

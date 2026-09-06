@@ -64,12 +64,13 @@ namespace Desert::Runtime
         Icon* raw     = icon.get();
         m_Icons[path] = std::move( icon ); // insert first: a failed import negative-caches itself
 
-        const auto svgFile = Common::Utils::FileSystem::ReadByteFileContent( path );
-        if ( svgFile.empty() )
+        const auto svgRead = Common::Utils::FileSystem::ReadByteFileContent( path );
+        if ( !svgRead || svgRead.GetValue().empty() )
         {
             LOG_ERROR( "[IconService] Cannot read icon '{}'", path );
             return raw;
         }
+        const auto& svgFile = svgRead.GetValue();
 
         const Vector::VectorImage image =
              Vector::ParseSvg( reinterpret_cast<const char*>( svgFile.data() ), svgFile.size() );

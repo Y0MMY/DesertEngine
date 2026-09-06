@@ -12,17 +12,25 @@ namespace Desert::Assets
 {
     Common::BoolResultStr PrefabAsset::Load()
     {
-        auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
-        if ( raw.empty() )
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
+        if ( !raw )
         {
-            return Common::MakeError<bool>( "Prefab file is empty or missing: " + m_Metadata.Filepath.string() );
+            return Common::MakeError<bool>( raw.GetError() );
+        }
+        if ( raw.GetValue().empty() )
+        {
+            return Common::MakeError<bool>( "Prefab file is empty: " + m_Metadata.Filepath.string() );
         }
 
         // The version gate (Д28): a prefab is the scene's own entity payloads in a different container,
         // so it is held to the same generation the scene loader requires. An old file is refused BY NAME
         // — file, found versions, required versions, and the PrefabMigrator command that converts it —
         // instead of being read into whatever the current parser happens to make of it.
-        auto loadable = ParseLoadablePrefab( m_Metadata.Filepath.string(), raw );
+        //
+        // The argument is raw.GetValue() and not raw because Ф3 made the read primitive return a
+        // ResultStr: both halves of this merge are kept, and the unwrap is safe precisely because the
+        // two guards above already refused the miss and the empty file by name.
+        auto loadable = ParseLoadablePrefab( m_Metadata.Filepath.string(), raw.GetValue() );
         if ( !loadable )
         {
             return Common::MakeError<bool>( loadable.GetError() );

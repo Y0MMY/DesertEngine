@@ -132,7 +132,9 @@ namespace Desert::Editor
             // Context menu
             if ( ImGui::BeginPopupContextItem( (const char*)name.c_str() ) )
             {
-                const auto sourceCode = Common::Utils::FileSystem::ReadFileContent( shader->GetFilepath() );
+                // A debug viewer: an unreadable file shows its error line instead of an empty pane.
+                const auto        sourceRead = Common::Utils::FileSystem::ReadFileContent( shader->GetFilepath() );
+                const std::string sourceCode = sourceRead ? sourceRead.GetValue() : sourceRead.GetError();
                 if ( ImGui::Selectable( "View Code" ) )
                 {
                     m_SelectedShader = shader.get();
@@ -172,7 +174,8 @@ namespace Desert::Editor
                 ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.7f, 0.7f, 0.7f, 0.0f ) );
                 if ( ImGui::Button( ICON_MDI_EYE ) )
                 {
-                    const auto sourceCode = Common::Utils::FileSystem::ReadFileContent( shader->GetFilepath() );
+                    const auto sourceRead = Common::Utils::FileSystem::ReadFileContent( shader->GetFilepath() );
+                    const std::string sourceCode = sourceRead ? sourceRead.GetValue() : sourceRead.GetError();
 
                     m_SelectedShader = shader.get();
                     m_ShaderSource   = sourceCode;

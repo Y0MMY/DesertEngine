@@ -11,7 +11,12 @@ namespace Desert::Assets
 
     Common::BoolResultStr ShaderAsset::Load()
     {
-        m_ShaderContent = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
+        // A missing .shader file used to "load" as empty content and fail later, inside the
+        // compiler, with a message that no longer named the file. Refuse here, with the path.
+        auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
+        if ( !raw )
+            return Common::MakeError( raw.GetError() );
+        m_ShaderContent = raw.ExtractValue();
 
         m_ReadyForUse = true;
         return BOOLSUCCESS;

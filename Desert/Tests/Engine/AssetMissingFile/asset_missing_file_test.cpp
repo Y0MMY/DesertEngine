@@ -6,7 +6,8 @@
 //     not exist yet);
 //   - CloudTypeAsset::Load: "a file that is missing ... is an ERROR carrying the reason" (its own
 //     header says so);
-//   - PrefabAsset::Load: "Prefab file is empty or missing" (an error the scene loader logs and
+//   - PrefabAsset::Load: a missing file is the read's own named error, an empty file is "Prefab
+//     file is empty" — both errors (the scene loader logs and
 //     survives — covered by the live editor run, not here, because PrefabAsset.cpp includes
 //     Scene.hpp and no GPU-free suite can compile it).
 //
