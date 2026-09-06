@@ -15,6 +15,7 @@
 #include <GLFW/glfw3.h>
 
 #include <Common/Core/Version.hpp>
+#include <Common/Utilities/FileSystem.hpp>
 
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
@@ -26,6 +27,7 @@
 #endif
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -76,10 +78,15 @@ namespace
         return ss.str();
     }
 
-    void WriteFile( const std::string& path, const std::string& content )
+    // Atomic (write-then-rename) through the shared Common primitive, for two reasons. First, the
+    // registry this writes is shared with the Editor, and the old in-place truncate meant an
+    // interruption left a torn projects.json for BOTH of them — the whole recent list gone over one
+    // crash. Second, the old function was called WriteFile, which windows.h #defines to WriteFileA;
+    // it compiled by coincidence and the coincidence was one macro away from not holding.
+    // Returns false on failure with the destination untouched (the primitive logs the step and path).
+    [[nodiscard]] bool WriteTextFile( const fs::path& path, const std::string& content )
     {
-        std::ofstream f( path, std::ios::trunc );
-        f << content;
+        return Common::Utils::FileSystem::WriteContentToFileAtomic( path, content );
     }
 
     // ~/.desertengine/projects.json has the trivial shape {"Projects":["...","..."]} — a tiny
@@ -108,7 +115,10 @@ namespace
         return result;
     }
 
-    void SaveRecentProjects( const std::vector<std::string>& projects )
+    // Returns false when the registry could not be written — the file on disk then keeps its
+    // previous list, which for a convenience file is the right failure: nothing is lost, the one
+    // change is. Callers decide whether that is worth telling the user about.
+    [[nodiscard]] bool SaveRecentProjects( const std::vector<std::string>& projects )
     {
         std::ostringstream ss;
         ss << "{\"Projects\":[";
@@ -119,7 +129,7 @@ namespace
             ss << '"' << projects[i] << '"';
         }
         ss << "]}";
-        WriteFile( RegistryFile(), ss.str() );
+        return WriteTextFile( RegistryFile(), ss.str() );
     }
 
     void RememberProject( std::vector<std::string>& recent, const std::string& deprojPath )
@@ -128,7 +138,11 @@ namespace
         recent.insert( recent.begin(), deprojPath );
         if ( recent.size() > 10 )
             recent.resize( 10 );
-        SaveRecentProjects( recent );
+        // The project is already launching when this runs, so a failure must not stop the open —
+        // but it is named (here and by the primitive's log): the registry keeps its previous list.
+        if ( !SaveRecentProjects( recent ) )
+            std::fprintf( stderr, "[Hub] Could not update %s — the recent list keeps its previous contents\n",
+                          RegistryFile().c_str() );
     }
 
     // A starter project template: extra folders on top of the standard set, whether the .deproj points
@@ -197,7 +211,11 @@ namespace
         {
             const fs::path p = root / rel;
             fs::create_directories( p.parent_path(), ec );
-            WriteFile( p.string(), content );
+            if ( !WriteTextFile( p, content ) )
+            {
+                error = "Could not write the starter file: " + p.string();
+                return {};
+            }
         }
 
         // Field names must match the Editor's ProjectFile struct (rfl::json parses this).
@@ -207,7 +225,13 @@ namespace
         std::ostringstream ss;
         ss << "{\"Name\":\"" << name << "\",\"AssetsRoot\":\"Assets\",\"DefaultScene\":\"" << defaultScene
            << "\"}";
-        WriteFile( deproj, ss.str() );
+        // The descriptor is the project: a create that cannot write it has created a folder tree the
+        // engine will never open, so it fails loudly instead of returning a path to nothing.
+        if ( !WriteTextFile( deproj, ss.str() ) )
+        {
+            error = "Could not write the project descriptor: " + deproj;
+            return {};
+        }
 
         error.clear();
         return deproj;
@@ -505,7 +529,11 @@ namespace
         if ( removed )
         {
             st.Recent.erase( st.Recent.begin() + index );
-            SaveRecentProjects( st.Recent );
+            if ( !SaveRecentProjects( st.Recent ) )
+            {
+                st.Status        = "Could not update " + RegistryFile() + " — the list on disk is unchanged";
+                st.StatusIsError = true;
+            }
         }
     }
 
