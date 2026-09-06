@@ -31,12 +31,14 @@
 #include <Engine/Graphic/Clouds/CloudShadowPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudSkyOcclusionPayload.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
+#include <Engine/Graphic/Systems/Scene/Particles/ParticleGpuLayout.hpp>
 
 #include <Common/Core/Constants.hpp>
 
 #include <shaderc/shaderc.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -1226,6 +1228,143 @@ TEST_F( ShaderRootFixture, TheTerrainKeepsPerDrawDataOutOfItsSharedUniformBlock 
     EXPECT_TRUE( HasBinding( bindings, 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // u_CloudShadowMap
     EXPECT_TRUE( HasBinding( bindings, 7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) );         // CloudShadowUB
     EXPECT_TRUE( HasBinding( bindings, 8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // TerrainInstances[]
+}
+
+// ---- The particle state: one layout, three statements of it, and the dispatch that divides by a fourth --
+//
+// The particle subsystem carried the defect shape this file exists for, in its purest form. Two shaders
+// declared `struct Particle` INDEPENDENTLY — the simulation that writes the storage and the billboard draw
+// that reads it — and ParticleRenderer sized and zeroed that storage from a C++ constant whose entire
+// guard was the comment `must match the shader's Particle`. Д26 then gave Age.yzw a meaning in one of the
+// two declarations, so the copies had already begun to diverge in MEANING while still agreeing in SIZE.
+//
+// Г4 removed the mirror where it could: the struct now lives in Common/ParticleState.glslh and both stages
+// include it. The C++ stride cannot be folded into GLSL, so it is asserted here instead — against the
+// array stride the COMPILER produced for each stage, which is the number the GPU actually indexes by.
+//
+// The same treatment for the workgroup: LocalSize is declared in the shader, the group count is computed
+// in C++, and a disagreement leaves the tail of every emitter unsimulated with nothing in any log.
+
+namespace
+{
+    // The ARRAY STRIDE of the runtime array inside a storage block, read from the compiled SPIR-V.
+    //
+    // Not ShaderReflection's block Size, for the reason the terrain test above gives: a block whose only
+    // member is a runtime array reflects as size 0 by definition. The stride is the number that matters
+    // anyway — it is what `u_Particles[i]` multiplies i by.
+    uint32_t StorageArrayStride( const std::filesystem::path& shaderFile, ShaderStage stage,
+                                 shaderc_shader_kind kind, uint32_t binding )
+    {
+        const auto spirv = CompileStage( StageSource( shaderFile, stage ), shaderFile, kind );
+        if ( spirv.empty() )
+            return 0u;
+
+        spirv_cross::Compiler              compiler( spirv );
+        const spirv_cross::ShaderResources resources = compiler.get_shader_resources();
+        for ( const auto& resource : resources.storage_buffers )
+        {
+            if ( compiler.get_decoration( resource.id, spv::DecorationBinding ) != binding )
+                continue;
+            const spirv_cross::SPIRType& block = compiler.get_type( resource.base_type_id );
+            if ( block.member_types.empty() )
+                return 0u;
+            return compiler.type_struct_member_array_stride( block, 0 );
+        }
+        return 0u;
+    }
+
+    // The declared workgroup size of a compute stage, as the compiled module states it. Zeroes when the
+    // stage did not compile, which every caller treats as a failure rather than as a size.
+    std::array<uint32_t, 3> ComputeLocalSize( const std::filesystem::path& shaderFile )
+    {
+        const auto spirv =
+             CompileStage( StageSource( shaderFile, ShaderStage::Compute ), shaderFile, shaderc_compute_shader );
+        if ( spirv.empty() )
+            return { 0u, 0u, 0u };
+
+        spirv_cross::Compiler compiler( spirv );
+        return { compiler.get_execution_mode_argument( spv::ExecutionModeLocalSize, 0 ),
+                 compiler.get_execution_mode_argument( spv::ExecutionModeLocalSize, 1 ),
+                 compiler.get_execution_mode_argument( spv::ExecutionModeLocalSize, 2 ) };
+    }
+
+    bool ClosureNames( const std::vector<std::filesystem::path>& includes, const char* filename )
+    {
+        for ( const auto& include : includes )
+            if ( include.filename() == filename )
+                return true;
+        return false;
+    }
+} // namespace
+
+TEST_F( ShaderRootFixture, BothParticleStagesIndexTheStateByTheStrideTheEngineAllocates )
+{
+    // THE RELATION, stated against BOTH readers of the storage because the engine writes only one of the
+    // two numbers it needs to be right about. ParticleRenderer allocates MaxParticles * kParticleStride
+    // and zeroes exactly that many bytes; the simulation writes element i at i * (its own stride) and the
+    // draw reads element i at i * (its own stride). Any one of the three moving alone is a frame in which
+    // particles are read from bytes nobody wrote — and the shipped symptom of that is an emitter that
+    // looks mistuned, not an error.
+    const uint32_t simulate  = StorageArrayStride( ShaderPath( "Particles/ParticleSimulate.shader" ),
+                                                   ShaderStage::Compute, shaderc_compute_shader, 0 );
+    const uint32_t billboard = StorageArrayStride( ShaderPath( "Particles/ParticleBillboard.shader" ),
+                                                   ShaderStage::Vertex, shaderc_vertex_shader, 1 );
+
+    EXPECT_GT( simulate, 0u ) << "ParticleSimulate declares no storage block at slot 0";
+    EXPECT_GT( billboard, 0u ) << "ParticleBillboard declares no storage block at slot 1";
+
+    EXPECT_EQ( simulate, Desert::Graphic::System::kParticleStride )
+         << "the simulation indexes the state by " << simulate << " bytes and ParticleRenderer allocates "
+         << Desert::Graphic::System::kParticleStride << " per particle";
+    EXPECT_EQ( billboard, Desert::Graphic::System::kParticleStride )
+         << "the billboard draw indexes the state by " << billboard << " bytes and ParticleRenderer allocates "
+         << Desert::Graphic::System::kParticleStride << " per particle";
+
+    // ...and therefore each other. Stated separately, because the two equalities above would both hold in
+    // a world where the constant was edited to follow ONE of the shaders and this line is what names the
+    // pair that actually shares the bytes.
+    EXPECT_EQ( simulate, billboard ) << "the two particle stages read one storage with two layouts";
+}
+
+TEST_F( ShaderRootFixture, TheParticleStructIsCompiledFromOneTextByBothStages )
+{
+    // WHY THE EQUALITY ABOVE IS NOT ENOUGH. Two independent declarations that happen to be the same size
+    // pass it — which was exactly the state Д26 left behind, one copy having gained a meaning for Age.yzw
+    // that the other did not know about. Sizes are what a stride can see; MEANING is not, and the only
+    // way to assert it is that there is one text.
+    //
+    // Membership rather than absence of the word `struct`, because what must hold is that both stages
+    // COMPILE the shared header — a second declaration alongside it would not even build.
+    const auto simulate = CollectShaderIncludes(
+         StageSource( ShaderPath( "Particles/ParticleSimulate.shader" ), ShaderStage::Compute ),
+         ShaderPath( "Particles/ParticleSimulate.shader" ) );
+    const auto billboard = CollectShaderIncludes(
+         StageSource( ShaderPath( "Particles/ParticleBillboard.shader" ), ShaderStage::Vertex ),
+         ShaderPath( "Particles/ParticleBillboard.shader" ) );
+
+    EXPECT_TRUE( ClosureNames( simulate, "ParticleState.glslh" ) )
+         << "the simulation declares the particle layout itself again";
+    EXPECT_TRUE( ClosureNames( billboard, "ParticleState.glslh" ) )
+         << "the billboard draw declares the particle layout itself again";
+}
+
+TEST_F( ShaderRootFixture, TheParticleDispatchDividesByTheWorkgroupTheShaderDeclares )
+{
+    // The second of the two numbers, and the one whose failure is the quietest of any in this file: too
+    // large a group size in C++ and SimulateInFrame launches too few groups, so the tail of every emitter
+    // is never touched by the simulation. Those particles keep their zeroed state — dead, alpha 0, never
+    // respawned — so the emitter simply carries fewer particles than it was configured for, forever, with
+    // nothing logged and nothing invalid anywhere.
+    const auto local = ComputeLocalSize( ShaderPath( "Particles/ParticleSimulate.shader" ) );
+
+    EXPECT_EQ( local[0], Desert::Graphic::System::kParticleLocalSize )
+         << "ParticleSimulate runs " << local[0] << " threads per group and SimulateInFrame divides by "
+         << Desert::Graphic::System::kParticleLocalSize;
+
+    // One thread per particle over a one-dimensional dispatch: the group count C++ computes is a division
+    // of a particle COUNT, which is only the right arithmetic while the other two extents are one.
+    EXPECT_EQ( local[1], 1u );
+    EXPECT_EQ( local[2], 1u );
 }
 
 // ---- The debug-info PROFILE, asserted as a relation --------------------------------------------------

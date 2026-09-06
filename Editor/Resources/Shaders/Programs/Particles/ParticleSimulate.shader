@@ -9,15 +9,14 @@ Shader "ParticleSimulate"
         // via DispatchComputeCull so the writes are visible to the billboard VERTEX shader that reads the same
         // buffer.
 
+        // 64 is Graphic::System::kParticleLocalSize, which is what the dispatch divides the particle
+        // count by. Tests/Engine/ShaderCacheKey reads this number back out of the compiled module and
+        // asserts it against that constant; a workgroup edited here alone would leave the tail of every
+        // emitter unsimulated, with nothing to say so.
         LocalSize(64, 1, 1);
 
-        struct Particle
-        {
-            vec4 PosSize; // xyz = world position, w = current size
-            vec4 Color;   // rgba = current colour (a folds in the over-life alpha; 0 => dead/invisible)
-            vec4 VelLife; // xyz = velocity, w = lifetime (<= 0 => dead / unspawned)
-            vec4 Age;     // x = age (seconds); yzw = local-space offset from the emitter (local mode only)
-        };
+        // The element layout, shared with ParticleBillboard.shader rather than restated here.
+        #include <Common/ParticleState.glslh>
 
         Buffer(0) Particles
         {

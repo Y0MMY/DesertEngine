@@ -1,5 +1,7 @@
 #include "ParticleRenderer.hpp"
 
+#include "ParticleGpuLayout.hpp"
+
 #include <Engine/Graphic/Materials/Particles/MaterialParticleBillboard.hpp>
 #include <Engine/Graphic/RenderPhase.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
@@ -20,9 +22,6 @@ namespace Desert::Graphic::System
 {
     namespace
     {
-        constexpr uint32_t kParticleStride = 64; // sizeof( 4 * vec4 ) — must match the shader's Particle
-        constexpr uint32_t kLocalSize      = 64; // ParticleSimulate LocalSize.x
-
         double NowSeconds()
         {
             static const auto start = std::chrono::steady_clock::now();
@@ -226,7 +225,7 @@ namespace Desert::Graphic::System
             m_SimPipeline->SetPushConstants( &fe.Push, sizeof( fe.Push ) );
 
             const uint32_t groups =
-                 ( static_cast<uint32_t>( fe.Gpu->MaxParticles ) + kLocalSize - 1 ) / kLocalSize;
+                 ( static_cast<uint32_t>( fe.Gpu->MaxParticles ) + kParticleLocalSize - 1 ) / kParticleLocalSize;
             // DispatchComputeCull (not InFrame): its barrier makes the writes visible to the VERTEX stage that
             // the billboard shader reads the particle buffer from.
             renderer.DispatchComputeCull( m_SimPipeline.get(), groups, 1, 1 );
