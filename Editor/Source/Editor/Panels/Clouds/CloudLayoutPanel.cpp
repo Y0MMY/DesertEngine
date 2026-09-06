@@ -11,10 +11,14 @@
 #include <Engine/Assets/CloudTypeAsset.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/CloudType/CloudTypeService.hpp>
+#include <Engine/Runtime/Services/Material/MaterialService.hpp>
+#include <Engine/Runtime/Services/Shader/ShaderService.hpp>
+#include <Engine/Graphic/Shader.hpp>
 
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Logger.hpp>
@@ -163,32 +167,51 @@ namespace Desert::Editor
 
         const ECS::VolumetricCloudData& data = view.get<ECS::VolumetricCloudComponent>( *view.begin() ).Data;
 
+        // THE LOOK IS THE MATERIAL'S SINCE O1, resolved here exactly as the renderer resolves it —
+        // schema defaults, `.demat` chain over them — so the map this panel draws is the sky the layer
+        // renders, whichever `.demat` the component names and even when it names none.
+        const Core::Formats::ShaderProgramMeta* schema = nullptr;
+        if ( const auto shaderService = Runtime::ResourceRegistry::GetShaderService() )
+        {
+            if ( const auto marchShader = shaderService->GetByName( Graphic::kCloudMaterialShaderName ) )
+                schema = &marchShader->GetProgramMeta();
+        }
+        Graphic::MaterialOverrides overrides;
+        if ( static_cast<uint64_t>( data.Material ) != 0 )
+        {
+            if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
+                materialService->ResolveOverrides( data.Material, overrides );
+            // An unresolvable handle is the renderer's warning to give (once, with the number); the map
+            // simply shows the schema defaults the sky is actually rendering.
+        }
+        const Graphic::CloudMaterialValues material = Graphic::BuildCloudMaterialValues( schema, overrides );
+
         layer.FromScene     = true;
         layer.RegionSizeKm  = std::max( data.RegionSize, 1.0f ) / Graphic::kCloudWorldUnitsPerKm;
-        layer.Coverage      = std::clamp( data.Coverage, 0.0f, 1.0f );
-        layer.PatchStrength = std::clamp( data.PatchStrength, 0.0f, 1.0f );
-        layer.Seed          = static_cast<uint32_t>( std::max( data.Seed, 0 ) );
+        layer.Coverage      = std::clamp( material.Coverage, 0.0f, 1.0f );
+        layer.PatchStrength = std::clamp( material.PatchStrength, 0.0f, 1.0f );
+        layer.Seed          = static_cast<uint32_t>( std::max( material.Seed, 0 ) );
         layer.ResolvableChordKm =
              Graphic::CloudFinestResolvableChordKm( static_cast<float>( std::clamp( data.MaxSteps, 8, 512 ) ) );
 
-        layer.LatticeKm = ECS::CloudLayerLatticeKm( data );
+        layer.LatticeKm = ECS::CloudLayerLatticeKm( material.WeatherTileSize );
 
         // THE LAYER'S OWN WEATHER PATCH TILE, and not a constant. It used to be a hard-coded 21 km here,
         // which is the component's DEFAULT — so the map agreed with the sky in every scene that had never
         // touched the field and disagreed silently in every scene that had. The patch is what decides a
         // cell's coverage whenever the painting is not the source (no layout bound, or Layout Pattern
         // Strength at zero), so getting it wrong draws a plausible sky that is not this layer's.
-        layer.PatchTileKm = std::max( data.PatchTileSize, 1.0f ) / Graphic::kCloudWorldUnitsPerKm;
+        layer.PatchTileKm = std::max( material.PatchTileSize, 1.0f ) / Graphic::kCloudWorldUnitsPerKm;
 
         // WHICH SLOT IS WHICH SPECIES IS ASKED OF THE ENGINE, never worked out here — the renderer resolves
         // the same call, so a channel this panel labels "Cirrus" is the channel the sky gives to cirrus.
-        const ECS::CloudSpeciesResolution resolved = ECS::ResolveCloudSpecies( data );
+        Assets::AssetHandle authored[ECS::kCloudTypeSlots];
+        material.TypeSlots( authored );
+
+        const ECS::CloudSpeciesResolution resolved = ECS::ResolveCloudSpecies( authored );
         layer.SpeciesCount                         = resolved.Count;
 
         auto* types = Runtime::ResourceRegistry::GetCloudTypeService();
-
-        const Assets::AssetHandle authored[ECS::kCloudTypeSlots] = { data.CloudType1, data.CloudType2,
-                                                                     data.CloudType3, data.CloudType4 };
 
         for ( uint32_t species = 0; species < resolved.Count; ++species )
         {
@@ -222,14 +245,14 @@ namespace Desert::Editor
                 slot.TypeName = "an unregistered type " + std::to_string( static_cast<uint64_t>( handle ) );
         }
 
-        layer.Placement.RepeatsPerRegion = static_cast<uint32_t>( std::clamp( data.LayoutRepeats, 1, 16 ) );
-        layer.Placement.QuarterTurns     = static_cast<uint32_t>( std::clamp( data.LayoutRotation, 0, 3 ) );
+        layer.Placement.RepeatsPerRegion = static_cast<uint32_t>( std::clamp( material.LayoutRepeats, 1, 16 ) );
+        layer.Placement.QuarterTurns     = static_cast<uint32_t>( std::clamp( material.LayoutRotation, 0, 3 ) );
         layer.Placement.OffsetKm =
-             glm::vec2( data.LayoutOffset.x, data.LayoutOffset.y ) / Graphic::kCloudWorldUnitsPerKm;
-        layer.Placement.PatternStrength = std::clamp( data.LayoutPatternStrength, 0.0f, 1.0f );
-        layer.Placement.MaskStrength    = std::clamp( data.LayoutMaskStrength, 0.0f, 1.0f );
+             glm::vec2( material.LayoutOffset.x, material.LayoutOffset.y ) / Graphic::kCloudWorldUnitsPerKm;
+        layer.Placement.PatternStrength = std::clamp( material.LayoutPatternStrength, 0.0f, 1.0f );
+        layer.Placement.MaskStrength    = std::clamp( material.LayoutMaskStrength, 0.0f, 1.0f );
 
-        layer.BoundLayout = static_cast<uint64_t>( data.CloudLayout );
+        layer.BoundLayout = static_cast<uint64_t>( material.CloudLayout );
 
         return layer;
     }

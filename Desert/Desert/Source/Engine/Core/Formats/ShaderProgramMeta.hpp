@@ -41,15 +41,28 @@ namespace Desert::Core::Formats
         std::string       Name;                                  // UB field / sampler name (the binding key)
         std::string       DisplayName;                           // editor label (defaults to Name)
         std::string       Category;                              // optional Details grouping
+        std::string       Tooltip;                               // editor hover text (optional)
         ShaderValueType   Type   = ShaderValueType::Float;       // numeric storage type
         ShaderParamWidget Widget = ShaderParamWidget::Auto;
         bool              IsTexture = false;                     // sampler param (uses DefaultTexture)
+
+        // Non-texture ASSET reference (e.g. "CloudTypeAsset", "CloudLayoutAsset"). Empty for ordinary
+        // params. Such a parameter is CPU-side only: it never becomes a GLSL declaration, so the parser
+        // refuses it inside a Properties block that opted into Binding()/TextureBinding() — a reference
+        // the row layout silently skipped would shift every field after it. The value lives in
+        // MaterialData::Textures (name -> handle), which is a name->uint64 map and not texture-specific.
+        std::string AssetKind;
 
         std::optional<float> Min;                                // present => slider/clamped
         std::optional<float> Max;
 
         glm::vec4   Default        = glm::vec4( 0.0f );          // numeric default (xyzw as needed)
         std::string DefaultTexture;                              // texture param default (e.g. "white")
+
+        bool IsAssetRef() const
+        {
+            return !AssetKind.empty();
+        }
     };
 
     // ---- Render state (maps to GraphicsPipelineSpecification in the Graphic layer's pipeline cache) ----
@@ -103,7 +116,8 @@ namespace Desert::Core::Formats
         Surface,         // lit/unlit surface materials on meshes
         Terrain,         // tessellated terrain materials
         Skybox,
-        PostProcess
+        PostProcess,
+        Volume // participating media marched by a compute pass (the volumetric cloud layer)
     };
 
     // The enum's own spelling, for diagnostics. It lives beside the enum so a domain added above cannot
@@ -128,6 +142,8 @@ namespace Desert::Core::Formats
                 return "Skybox";
             case ShaderDomain::PostProcess:
                 return "PostProcess";
+            case ShaderDomain::Volume:
+                return "Volume";
         }
         return "Unspecified";
     }
@@ -152,6 +168,7 @@ namespace Desert::Core::Formats
     // place the comparison does or the message can describe a rule the code is not applying.
     inline constexpr ShaderDomain kMeshPathDomain    = ShaderDomain::Surface;
     inline constexpr ShaderDomain kTerrainPathDomain = ShaderDomain::Terrain;
+    inline constexpr ShaderDomain kVolumePathDomain  = ShaderDomain::Volume;
 
     constexpr bool DrawnByMeshPath( ShaderDomain domain )
     {
@@ -161,6 +178,14 @@ namespace Desert::Core::Formats
     constexpr bool DrawnByTerrainPath( ShaderDomain domain )
     {
         return domain == kTerrainPathDomain;
+    }
+
+    // The volume path is VolumetricCloudRenderer: a compute march, not a rasterized draw. Its material
+    // slot lives on VolumetricCloudComponent (ECS), never on a mesh — MeshRenderer asks DrawnByMeshPath
+    // and refuses a Volume material by name, exactly as it refuses a Terrain one.
+    constexpr bool DrawnByVolumePath( ShaderDomain domain )
+    {
+        return domain == kVolumePathDomain;
     }
 
     struct ShaderProgramMeta
@@ -187,7 +212,7 @@ namespace Desert::Core::Formats
         // must still ask its OWN predicate, never this one (see the note above DrawnByMeshPath).
         bool IsUserAssignable() const
         {
-            return DrawnByMeshPath( Domain ) || DrawnByTerrainPath( Domain );
+            return DrawnByMeshPath( Domain ) || DrawnByTerrainPath( Domain ) || DrawnByVolumePath( Domain );
         }
     };
 

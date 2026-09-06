@@ -14,6 +14,7 @@
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Font/FontService.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/Graphic/Shader.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -102,8 +103,9 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIDropdownComponent, Data, "
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::ExponentialHeightFogComponent, Data,
                                      "ExponentialHeightFogData", "Exponential Height Fog" )
 
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::VolumetricCloudComponent, Data, "VolumetricCloudData",
-                                     "Volumetric Cloud" )
+// Volumetric Cloud is a CUSTOM entry since O1: the reflected budget/routing fields PLUS the material
+// row — the same one-handle-with-Edit-button arrangement the terrain has, for the same Stage 3 reason.
+// See MakeVolumetricCloudEntry below.
 
 // The seam's AUTHORED producer: one sculpted body, placed by this entity's transform. It is a per-entity
 // component rather than another field of the layer, because there may be several of them and each has a
@@ -181,8 +183,8 @@ namespace Desert::Editor
     // Opens the Material Editor window on the terrain's material — the same seam, and the same three
     // outcomes, the mesh slot editor's Edit button uses. After M2 this is the only place a material's
     // parameters and textures are edited, terrain included.
-    static void OpenTerrainMaterialEditor( const ::Desert::Assets::AssetHandle& handle,
-                                           ::Desert::Assets::AssetManager*      assetMgr )
+    static void OpenMaterialEditorFor( const ::Desert::Assets::AssetHandle& handle,
+                                       ::Desert::Assets::AssetManager* assetMgr, const char* tag )
     {
         if ( !assetMgr )
             return;
@@ -190,9 +192,9 @@ namespace Desert::Editor
              ::Common::UUID( static_cast<uint64_t>( handle ) ) );
         if ( !asset )
         {
-            LOG_ERROR( "[Terrain] the material in this slot (handle {}) is not in the asset database — no "
+            LOG_ERROR( "{} the material in this slot (handle {}) is not in the asset database — no "
                        "window was opened.",
-                       static_cast<uint64_t>( handle ) );
+                       tag, static_cast<uint64_t>( handle ) );
             return;
         }
 
@@ -204,9 +206,9 @@ namespace Desert::Editor
                 break;
             case ::Desert::Editor::MaterialDocumentRequest::NotAMaterialPath:
                 // The slot resolves to an asset whose file is not on disk. Silence would read as a dead button.
-                LOG_ERROR( "[Terrain] the terrain's material has no `.demat` on disk ('{}') — no window was "
+                LOG_ERROR( "{} this slot's material has no `.demat` on disk ('{}') — no window was "
                            "opened. Save it first, or reassign the slot.",
-                           path );
+                           tag, path );
                 break;
         }
     }
@@ -312,7 +314,7 @@ namespace Desert::Editor
                 if ( static_cast<uint64_t>( created ) != 0 )
                 {
                     terrain.Material = created;
-                    OpenTerrainMaterialEditor( created, assetMgr );
+                    OpenMaterialEditorFor( created, assetMgr, "[Terrain]" );
                 }
             }
         }
@@ -320,7 +322,7 @@ namespace Desert::Editor
         {
             const float half = ( ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x ) * 0.5f;
             if ( ImGui::Button( "Edit", ImVec2( half, 0.0f ) ) )
-                OpenTerrainMaterialEditor( terrain.Material, assetMgr );
+                OpenMaterialEditorFor( terrain.Material, assetMgr, "[Terrain]" );
             ImGui::SameLine();
             if ( ImGui::Button( "Clear", ImVec2( half, 0.0f ) ) )
                 terrain.Material = ::Desert::Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
@@ -579,6 +581,187 @@ namespace Desert::Editor
     // The removal no longer takes a MaterialComponent with it. It used to, because the terrain's material
     // WAS a MaterialComponent on this entity; it is now a `.demat` the TerrainData names by handle, and an
     // asset outlives the entity that referenced it.
+    // Creates a `.demat` already set to the Volume-domain cloud shader and registers its shell — the cloud
+    // twin of CreateTerrainMaterial above, on the same argument: there is exactly ONE program of domain
+    // Volume (CloudRaymarch, whose Properties block IS the cloud material schema), so a picker would be a
+    // control with a single entry. Pressing New is how you say "a cloud material".
+    static ::Desert::Assets::AssetHandle CreateCloudMaterial( const std::string&              entityName,
+                                                              ::Desert::Assets::AssetManager* assetMgr )
+    {
+        if ( !assetMgr )
+            return ::Desert::Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+
+        std::string base;
+        base.reserve( entityName.size() + 8 );
+        for ( const char c : entityName )
+            base += ( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == '-' ) ? c : '_';
+        base = "M_" + ( base.empty() ? std::string( "Clouds" ) : base ) + "_Clouds";
+
+        const std::string           ext = ::Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::filesystem::path dir = ::Common::Constants::Path::MATERIAL_PATH;
+        std::error_code             ec;
+        std::filesystem::create_directories( dir, ec );
+
+        std::filesystem::path path = dir / ( base + ext );
+        for ( int n = 1; std::filesystem::exists( path, ec ); ++n )
+            path = dir / ( base + "_" + std::to_string( n ) + ext );
+
+        // Write the file FIRST (cloud shader + a freshly stamped MaterialId), then create-with-load — the
+        // same order CreateTerrainMaterial documents, and for the same handle-adoption reason.
+        {
+            ::Desert::Assets::MaterialData data;
+            data.ShaderName = ::Desert::Graphic::kCloudMaterialShaderName;
+            data.MaterialId = ::Common::UUID::Generate();
+            ::Common::Utils::FileSystem::WriteContentToFile( path.generic_string(), rfl::json::write( data ) );
+        }
+
+        auto asset = assetMgr->CreateAsset<::Desert::Assets::SurfaceMaterialAsset>(
+             ::Desert::Assets::AssetPriority::High, path.generic_string() );
+        if ( !asset )
+        {
+            LOG_ERROR( "[Clouds] could not create a cloud material at '{}' — the layer's material slot is "
+                       "unchanged.",
+                       path.generic_string() );
+            return ::Desert::Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+        }
+
+        // The SHELL only, exactly as the terrain registers: a cloud material never becomes a runtime
+        // Graphic::Material — VolumetricCloudRenderer asks MaterialService for its VALUES
+        // (ResolveOverrides) and packs them itself.
+        if ( auto* materialService = ::Desert::Runtime::ResourceRegistry::GetMaterialService() )
+            materialService->RegisterAsset( asset );
+        return asset->GetMetadata().Handle;
+    }
+
+    // The cloud layer's MATERIAL row — the terrain row's twin (O1). One handle, drag a `.demat`, New
+    // authors one on the cloud shader, Edit opens the Material Editor window; nothing edits a material
+    // here. An EMPTY slot is a working sky: the CloudRaymarch schema's own defaults.
+    static void DrawCloudMaterialRow( ::Desert::ECS::VolumetricCloudData& cloud, const std::string& entityName,
+                                      ::Desert::Assets::AssetManager* assetMgr )
+    {
+        namespace ImGui = ::ImGui;
+
+        const ::Desert::Assets::SurfaceMaterialAsset* asset = nullptr;
+        if ( assetMgr && static_cast<uint64_t>( cloud.Material ) != 0 )
+        {
+            asset = assetMgr
+                         ->FindByHandle<::Desert::Assets::SurfaceMaterialAsset>(
+                              ::Common::UUID( static_cast<uint64_t>( cloud.Material ) ) )
+                         .get();
+        }
+
+        // Empty means the schema defaults and SAYS so — for every other slot "None" reads as a hole, but
+        // an unauthored sky is the shipped state of most scenes in the repository.
+        std::string display = "Default (schema)";
+        if ( static_cast<uint64_t>( cloud.Material ) != 0 )
+        {
+            display = asset ? std::filesystem::path( asset->GetMetadata().Filepath.string() ).stem().string()
+                            : "(missing)";
+        }
+
+        if ( !ImGui::BeginTable( "##cloud_mat", 2,
+                                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )
+            return;
+        ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.38f );
+        ImGui::TableSetupColumn( "control", ImGuiTableColumnFlags_WidthStretch, 0.62f );
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted( "Material" );
+        ImGui::TableNextColumn();
+
+        ImGui::PushItemWidth( -FLT_MIN );
+        ImGui::Button( ( display + "##cloud_mat_slot" ).c_str(), ImVec2( -FLT_MIN, 0.0f ) );
+        ImGui::PopItemWidth();
+        if ( ImGui::BeginDragDropTarget() )
+        {
+            if ( const ImGuiPayload* pl =
+                      ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ) )
+            {
+                const std::string path( static_cast<const char*>( pl->Data ),
+                                        pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                if ( assetMgr && !path.empty() )
+                {
+                    auto dropped = assetMgr->FindByPath<::Desert::Assets::SurfaceMaterialAsset>( path );
+                    if ( !dropped )
+                    {
+                        dropped = assetMgr->CreateAsset<::Desert::Assets::SurfaceMaterialAsset>(
+                             ::Desert::Assets::AssetPriority::High, path );
+                        if ( dropped && !dropped->IsReadyForUse() )
+                            dropped->Load();
+                    }
+                    if ( dropped )
+                    {
+                        // The shell only: the layer asks MaterialService for this material's VALUES.
+                        if ( auto* materialService = ::Desert::Runtime::ResourceRegistry::GetMaterialService() )
+                            materialService->RegisterAsset( dropped );
+                        cloud.Material = dropped->GetMetadata().Handle;
+                    }
+                    else
+                    {
+                        LOG_ERROR( "[Clouds] '{}' could not be opened as a material — the layer's material "
+                                   "slot is unchanged.",
+                                   path );
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "The cloud LOOK — species, weather, placement, layout, detail, lighting — "
+                               "authored as a material. Drag a .demat here, or press New to author one on "
+                               "the cloud shader. Empty renders the schema defaults." );
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TableNextColumn();
+        if ( static_cast<uint64_t>( cloud.Material ) == 0 )
+        {
+            if ( ImGui::Button( "New Cloud Material", ImVec2( -FLT_MIN, 0.0f ) ) )
+            {
+                const auto created = CreateCloudMaterial( entityName, assetMgr );
+                if ( static_cast<uint64_t>( created ) != 0 )
+                {
+                    cloud.Material = created;
+                    OpenMaterialEditorFor( created, assetMgr, "[Clouds]" );
+                }
+            }
+        }
+        else
+        {
+            const float half = ( ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x ) * 0.5f;
+            if ( ImGui::Button( "Edit", ImVec2( half, 0.0f ) ) )
+                OpenMaterialEditorFor( cloud.Material, assetMgr, "[Clouds]" );
+            ImGui::SameLine();
+            if ( ImGui::Button( "Clear", ImVec2( half, 0.0f ) ) )
+                cloud.Material = ::Desert::Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+        }
+        ImGui::EndTable();
+    }
+
+    // The cloud layer: reflected budget/routing fields, then the material row — the terrain arrangement.
+    static ComponentEditorEntry MakeVolumetricCloudEntry()
+    {
+        ComponentEditorEntry e;
+        e.Name      = "Volumetric Cloud";
+        e.CanRemove = true;
+        e.Has       = []( ::Desert::ECS::Entity& en )
+        { return en.HasComponent<::Desert::ECS::VolumetricCloudComponent>(); };
+        e.Add = []( ::Desert::ECS::Entity& en ) { en.AddComponent<::Desert::ECS::VolumetricCloudComponent>(); };
+        e.Remove = []( ::Desert::ECS::Entity& en )
+        { en.RemoveComponent<::Desert::ECS::VolumetricCloudComponent>(); };
+        e.Draw = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
+        {
+            auto& c = en.GetComponent<::Desert::ECS::VolumetricCloudComponent>();
+            PropertyEditorBuilder::Draw( &c.Data, "VolumetricCloudData", ctx.AssetMgr(), ctx.UIHelper );
+
+            ::ImGui::Separator();
+            DrawCloudMaterialRow( c.Data, en.GetComponent<::Desert::ECS::TagComponent>().Tag, ctx.AssetMgr() );
+        };
+        return e;
+    }
+
     static ComponentEditorEntry MakeTerrainEntry()
     {
         ComponentEditorEntry e;
@@ -1190,6 +1373,10 @@ namespace
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeColliderEntry() );
     const int _desert_terrain_component_reg =
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeTerrainEntry() );
+
+    const int _desert_volumetric_cloud_component_reg =
+         ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
+              ::Desert::Editor::MakeVolumetricCloudEntry() );
 
     const int _desert_ism_component_reg = ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
          ::Desert::Editor::MakeInstancedStaticMeshEntry() );

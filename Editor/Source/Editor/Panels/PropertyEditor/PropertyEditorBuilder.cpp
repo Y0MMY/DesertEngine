@@ -6,9 +6,7 @@
 #include <Engine/Graphic/ColorTemperature.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
-#include <Engine/Assets/CloudTypeAsset.hpp>
 #include <Engine/Assets/CloudModellingVolumeAsset.hpp>
-#include <Engine/Assets/CloudLayoutAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Font/FontService.hpp>
 #include <Engine/Graphic/Texture.hpp>
@@ -808,97 +806,11 @@ namespace Desert::Editor
                 // the Cloud Type panel, so no reflected field carries that asset type and this branch
                 // could never be entered — which is the dead path §4.1 says goes with the value it served.
 
-                // Cloud type slot: the named kind of cloud a layer is made of. Its own branch rather than
-                // the texture one below for three reasons — there is nothing to thumbnail (twelve numbers
-                // have no picture), the file is authored in a panel rather than imported, and "Default"
-                // MEANS something (the built-in cumulus congestus) rather than being an empty slot.
-                //
-                // Shown by DISPLAY NAME rather than by file name, unlike every other slot here: a type
-                // carries one, and "Lenticular (orographic)" is what an artist called it where
-                // "Lenticular.decloudtype" is where they happened to put it.
-                if ( field.Meta.AssetType == "CloudTypeAsset" )
-                {
-                    uint64_t* typeHandle = static_cast<uint64_t*>( p );
-
-                    std::string preview = "Default (cumulus congestus)";
-                    if ( *typeHandle != 0 )
-                    {
-                        preview = "(missing)";
-                        if ( assetMgr )
-                        {
-                            if ( auto type = assetMgr->FindByHandle<Assets::CloudTypeAsset>(
-                                      Common::UUID( *typeHandle ) ) )
-                                preview = type->GetDisplayName();
-                        }
-                    }
-
-                    ImGui::SetNextItemWidth( -1.0f );
-                    if ( ImGui::BeginCombo( "##cloudtype", preview.c_str() ) )
-                    {
-                        if ( ImGui::Selectable( "Default (cumulus congestus)", *typeHandle == 0 ) )
-                        {
-                            *typeHandle = 0;
-                            changed     = true;
-                        }
-                        if ( assetMgr )
-                        {
-                            for ( const auto& [h, type] : assetMgr->FindAllByType<Assets::CloudTypeAsset>() )
-                            {
-                                const bool selected = ( static_cast<uint64_t>( h ) == *typeHandle );
-                                if ( ImGui::Selectable( type->GetDisplayName().c_str(), selected ) )
-                                {
-                                    *typeHandle = static_cast<uint64_t>( h );
-                                    changed     = true;
-                                }
-                                if ( selected )
-                                    ImGui::SetItemDefaultFocus();
-                            }
-                        }
-                        ImGui::EndCombo();
-                    }
-
-                    if ( ImGui::BeginDragDropTarget() )
-                    {
-                        if ( const ImGuiPayload* pl =
-                                  ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::AssetFile ) )
-                        {
-                            const std::string path( static_cast<const char*>( pl->Data ),
-                                                    pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
-                            // The extension is checked HERE because the Content Browser emits one generic
-                            // AssetFile payload for every type it has no icon for. Without the check this
-                            // slot would accept a dropped .dcnv and bind a handle to a file that can never
-                            // parse as a cloud type.
-                            if ( assetMgr && !path.empty() &&
-                                 std::filesystem::path( path ).extension() == Assets::kCloudTypeExtension )
-                            {
-                                auto& mutableManager = const_cast<Assets::AssetManager&>( *assetMgr );
-                                auto  type           = mutableManager.FindByPath<Assets::CloudTypeAsset>( path );
-                                if ( !type )
-                                    type = mutableManager.CreateAsset<Assets::CloudTypeAsset>(
-                                         Assets::AssetPriority::Medium, path );
-                                if ( type && type->IsReadyForUse() )
-                                {
-                                    if ( const auto registered =
-                                              Runtime::ResourceRegistry::GetCloudTypeService()->Register( type );
-                                         !registered )
-                                        LOG_ERROR( "[Clouds] Dropped cloud type '{}' could not be "
-                                                   "registered: {}",
-                                                   path, registered.GetError() );
-
-                                    *typeHandle = static_cast<uint64_t>( type->GetMetadata().Handle );
-                                    changed     = true;
-                                }
-                            }
-                        }
-                        ImGui::EndDragDropTarget();
-                    }
-                    if ( ImGui::IsItemHovered() )
-                        ImGui::SetTooltip( "Pick a cloud type or drag a .decloudtype here. \"Default\" is "
-                                           "the engine's built-in cumulus congestus, so a scene nobody has "
-                                           "authored a type for still has a sky. Double-click a "
-                                           ".decloudtype in the Content Browser to edit it." );
-                    break;
-                }
+                // THE CLOUD TYPE AND CLOUD LAYOUT SLOTS USED TO BE HERE, and they went with the fields
+                // they drew (O1): CloudType1..4 and CloudLayout are MATERIAL schema parameters of
+                // CloudRaymarch.shader now, and their rows moved into MaterialEditorPanel::DrawCloudAssetRef
+                // — no reflected component field carries either asset type any more, so a branch here
+                // could never be entered, which is the dead path §4.1 says goes with the value it served.
 
                 // Cloud modelling volume slot: the sculpted body a hero cloud IS. Its own branch rather
                 // than the texture one below for two reasons — there is nothing to thumbnail, and "None"
@@ -994,98 +906,6 @@ namespace Desert::Editor
                                            "entity draws no cloud at all — there is no built-in hero cloud, "
                                            "because a body nobody sculpted appearing in a scene is a cloud "
                                            "nobody can explain." );
-                    break;
-                }
-
-                // Cloud layout slot: the PAINTED sky. Its own branch for the same two reasons the
-                // sculpted body has one — there is nothing to thumbnail, and "None" here means something
-                // specific and good rather than something missing: the sky places its clouds procedurally,
-                // which is what every scene in this repository does. Drawing it like a texture slot would
-                // make the shipped state read as an unfilled one.
-                if ( field.Meta.AssetType == "CloudLayoutAsset" )
-                {
-                    uint64_t* layoutHandle = static_cast<uint64_t*>( p );
-
-                    std::string preview = "None (procedural weather)";
-                    if ( *layoutHandle != 0 )
-                    {
-                        preview = "(missing)";
-                        if ( assetMgr )
-                        {
-                            if ( auto painting = assetMgr->FindByHandle<Assets::CloudLayoutAsset>(
-                                      Common::UUID( *layoutHandle ) ) )
-                                preview = painting->GetMetadata().Filepath.filename().string();
-                        }
-                    }
-
-                    ImGui::SetNextItemWidth( -1.0f );
-                    if ( ImGui::BeginCombo( "##cloudlayout", preview.c_str() ) )
-                    {
-                        if ( ImGui::Selectable( "None (procedural weather)", *layoutHandle == 0 ) )
-                        {
-                            *layoutHandle = 0;
-                            changed       = true;
-                        }
-                        if ( assetMgr )
-                        {
-                            for ( const auto& [h, painting] : assetMgr->FindAllByType<Assets::CloudLayoutAsset>() )
-                            {
-                                const bool selected = ( static_cast<uint64_t>( h ) == *layoutHandle );
-                                if ( ImGui::Selectable(
-                                          painting->GetMetadata().Filepath.filename().string().c_str(),
-                                          selected ) )
-                                {
-                                    *layoutHandle = static_cast<uint64_t>( h );
-                                    changed       = true;
-                                }
-                                if ( selected )
-                                    ImGui::SetItemDefaultFocus();
-                            }
-                        }
-                        ImGui::EndCombo();
-                    }
-
-                    if ( ImGui::BeginDragDropTarget() )
-                    {
-                        if ( const ImGuiPayload* pl =
-                                  ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::AssetFile ) )
-                        {
-                            const std::string path( static_cast<const char*>( pl->Data ),
-                                                    pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
-                            // The extension is checked HERE for the reason the branch above gives: the
-                            // Content Browser emits one generic AssetFile payload for every type it has no
-                            // icon for, so without this the slot would accept a dropped .dcmv and bind a
-                            // handle to a file that can never parse as a painting.
-                            if ( assetMgr && !path.empty() &&
-                                 std::filesystem::path( path ).extension() == Assets::kCloudLayoutExtension )
-                            {
-                                auto& mutableManager = const_cast<Assets::AssetManager&>( *assetMgr );
-                                auto  painting       = mutableManager.FindByPath<Assets::CloudLayoutAsset>( path );
-                                if ( !painting )
-                                    painting = mutableManager.CreateAsset<Assets::CloudLayoutAsset>(
-                                         Assets::AssetPriority::Medium, path );
-                                if ( painting && painting->IsReadyForUse() )
-                                {
-                                    if ( const auto registered =
-                                              Runtime::ResourceRegistry::GetCloudLayoutService()->Register(
-                                                   painting );
-                                         !registered )
-                                        LOG_ERROR( "[Clouds] Dropped cloud layout '{}' could not be "
-                                                   "registered: {}",
-                                                   path, registered.GetError() );
-
-                                    *layoutHandle = static_cast<uint64_t>( painting->GetMetadata().Handle );
-                                    changed       = true;
-                                }
-                            }
-                        }
-                        ImGui::EndDragDropTarget();
-                    }
-                    if ( ImGui::IsItemHovered() )
-                        ImGui::SetTooltip( "Pick a painted sky or drag a .dclayout here. \"None\" is the "
-                                           "normal state and not an empty slot: the clouds are placed "
-                                           "procedurally, and Weather Patch Strength decides which parts of "
-                                           "the sky are busy." );
                     break;
                 }
 

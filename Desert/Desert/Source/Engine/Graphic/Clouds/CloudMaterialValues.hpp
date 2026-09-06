@@ -1,0 +1,217 @@
+#pragma once
+
+#include <Common/Core/AssetHandle.hpp>
+#include <Common/Core/Logger.hpp>
+
+#include <Engine/Core/Formats/ShaderProgramMeta.hpp>
+#include <Engine/ECS/VolumetricCloudComponent.hpp>
+#include <Engine/Graphic/Materials/MaterialOverrides.hpp>
+
+#include <glm/glm.hpp>
+
+#include <cstdint>
+#include <string_view>
+
+namespace Desert::Graphic
+{
+    /// The Volume-domain shader whose Properties block IS the cloud material schema. One spelling for its
+    /// three readers — the renderer's pipelines, the renderer's schema lookup and the Cloud Layout
+    /// panel's — because a name that three files spell for themselves is a name that can fork.
+    inline constexpr const char* kCloudMaterialShaderName = "CloudRaymarch";
+
+    /**
+     * @brief The cloud LOOK, resolved from the layer's material — the thirty-three values O1 moved out of
+     *        ECS::VolumetricCloudData.
+     *
+     * WHO FILLS IT AND FROM WHAT. VolumetricCloudRenderer::SetCloudSettings calls
+     * BuildCloudMaterialValues once per frame: the CloudRaymarch shader's OWN schema supplies every
+     * default, and the flattened `.demat` chain (Runtime::MaterialService::ResolveOverrides) overwrites
+     * by name, last write winning. A null material handle therefore means exactly the schema defaults —
+     * which the CloudMaterialSchema suite pins byte-for-byte against the member initializers below, so
+     * this struct is a test-enforced MIRROR of the schema and never a second source of truth.
+     *
+     * WHY A TYPED STRUCT AND NOT name->vec4 LOOKUPS AT EVERY READ SITE. The packer and the bake read
+     * these values dozens of times per frame between them; a typed field is one load, and — the real
+     * reason — a typo in a name would compile and silently read zero, which is the "middle link drops a
+     * property" defect this project has paid for seven times in one day. Field names equal schema names
+     * equal old component names, and the census test asserts the correspondence in both directions.
+     *
+     * UNITS ARE THE COMPONENT'S OLD UNITS UNCHANGED: world units (centimetres) for every length,
+     * per-kilometre for extinction — the migration copies scene numbers verbatim, and
+     * Graphic::PackCloudParams keeps doing the one cm->km conversion it always did.
+     */
+    struct CloudMaterialValues
+    {
+        // ---- Cloud Types (species slots; empty slot = skipped, all empty = built-in congestus) -------
+        Assets::AssetHandle CloudType1;
+        Assets::AssetHandle CloudType2;
+        Assets::AssetHandle CloudType3;
+        Assets::AssetHandle CloudType4;
+
+        // ---- Weather --------------------------------------------------------------------------------
+        float   Coverage         = 0.45f;
+        float   CoverageContrast = 1.0f;
+        float   WeatherTileSize  = 1200000.0f; // cm; 12 km -> 3 km lattice cells
+        int32_t Seed             = 1;
+
+        // ---- Placement (bake-time) ------------------------------------------------------------------
+        float PlacementDensity     = 1.75f;
+        float PlacementScatter     = 1.0f;
+        float PlacementSizeVariety = 0.75f;
+        float PatchTileSize        = 2100000.0f; // cm; 21 km
+        float PatchStrength       = 0.60f;
+
+        // ---- Layout (bake-time; the painted sky) ----------------------------------------------------
+        Assets::AssetHandle CloudLayout;
+        float               LayoutPatternStrength = 1.0f;
+        float               LayoutMaskStrength    = 1.0f;
+        int32_t             LayoutRepeats         = 1;
+        int32_t             LayoutRotation        = 0;
+        glm::vec2           LayoutOffset          = { 0.0f, 0.0f }; // cm
+
+        // ---- Detail (march-time) --------------------------------------------------------------------
+        float DetailTileSize  = 100000.0f; // cm; 1 km
+        float DetailStrength  = 0.65f;
+        float DensityScale    = 1.0f;
+        float ExtinctionScale = 8.0f; // per km
+
+        // ---- Lighting -------------------------------------------------------------------------------
+        float     ScatteringAlbedo         = 0.98f;
+        float     PhaseG                   = 0.8f;
+        float     PhaseGBackward           = 0.1667f;
+        float     PhaseBlend               = 0.575f;
+        float     AmbientOcclusionStrength = 1.0f;
+        int32_t   MultiScatterOctaves      = 3;
+        float     MultiScatterContribution = 0.667f;
+        float     MultiScatterOcclusion    = 0.25f;
+        float     MultiScatterEccentricity = 0.18f;
+        glm::vec3 AmbientScale             = { 1.0f, 1.0f, 1.0f };
+
+        /// The species slots in their one canonical order (ECS::kCloudTypeSlots of them).
+        void TypeSlots( Assets::AssetHandle ( &out )[ECS::kCloudTypeSlots] ) const
+        {
+            out[0] = CloudType1;
+            out[1] = CloudType2;
+            out[2] = CloudType3;
+            out[3] = CloudType4;
+        }
+    };
+
+    namespace Detail
+    {
+        // One override application. Values by name from the params list, handles by name from the
+        // textures list (asset references share that map — it is name -> uint64, nothing texture-specific).
+        inline void ApplyCloudOverride( CloudMaterialValues& v, std::string_view name, const glm::vec4& p )
+        {
+            if ( name == "Coverage" )
+                v.Coverage = p.x;
+            else if ( name == "CoverageContrast" )
+                v.CoverageContrast = p.x;
+            else if ( name == "WeatherTileSize" )
+                v.WeatherTileSize = p.x;
+            else if ( name == "Seed" )
+                v.Seed = static_cast<int32_t>( p.x );
+            else if ( name == "PlacementDensity" )
+                v.PlacementDensity = p.x;
+            else if ( name == "PlacementScatter" )
+                v.PlacementScatter = p.x;
+            else if ( name == "PlacementSizeVariety" )
+                v.PlacementSizeVariety = p.x;
+            else if ( name == "PatchTileSize" )
+                v.PatchTileSize = p.x;
+            else if ( name == "PatchStrength" )
+                v.PatchStrength = p.x;
+            else if ( name == "LayoutPatternStrength" )
+                v.LayoutPatternStrength = p.x;
+            else if ( name == "LayoutMaskStrength" )
+                v.LayoutMaskStrength = p.x;
+            else if ( name == "LayoutRepeats" )
+                v.LayoutRepeats = static_cast<int32_t>( p.x );
+            else if ( name == "LayoutRotation" )
+                v.LayoutRotation = static_cast<int32_t>( p.x );
+            else if ( name == "LayoutOffset" )
+                v.LayoutOffset = { p.x, p.y };
+            else if ( name == "DetailTileSize" )
+                v.DetailTileSize = p.x;
+            else if ( name == "DetailStrength" )
+                v.DetailStrength = p.x;
+            else if ( name == "DensityScale" )
+                v.DensityScale = p.x;
+            else if ( name == "ExtinctionScale" )
+                v.ExtinctionScale = p.x;
+            else if ( name == "ScatteringAlbedo" )
+                v.ScatteringAlbedo = p.x;
+            else if ( name == "PhaseG" )
+                v.PhaseG = p.x;
+            else if ( name == "PhaseGBackward" )
+                v.PhaseGBackward = p.x;
+            else if ( name == "PhaseBlend" )
+                v.PhaseBlend = p.x;
+            else if ( name == "AmbientOcclusionStrength" )
+                v.AmbientOcclusionStrength = p.x;
+            else if ( name == "MultiScatterOctaves" )
+                v.MultiScatterOctaves = static_cast<int32_t>( p.x );
+            else if ( name == "MultiScatterContribution" )
+                v.MultiScatterContribution = p.x;
+            else if ( name == "MultiScatterOcclusion" )
+                v.MultiScatterOcclusion = p.x;
+            else if ( name == "MultiScatterEccentricity" )
+                v.MultiScatterEccentricity = p.x;
+            else if ( name == "AmbientScale" )
+                v.AmbientScale = { p.x, p.y, p.z };
+            // An unknown name is NOT an error here: a `.demat` may carry params for a shader revision
+            // ahead of or behind this binary, and the schema census — not this switch — is what pins the
+            // live set. It is skipped, and the material editor shows the value it stored.
+        }
+
+        inline void ApplyCloudAssetRef( CloudMaterialValues& v, std::string_view name, uint64_t handle )
+        {
+            if ( name == "CloudType1" )
+                v.CloudType1 = Assets::AssetHandle( handle );
+            else if ( name == "CloudType2" )
+                v.CloudType2 = Assets::AssetHandle( handle );
+            else if ( name == "CloudType3" )
+                v.CloudType3 = Assets::AssetHandle( handle );
+            else if ( name == "CloudType4" )
+                v.CloudType4 = Assets::AssetHandle( handle );
+            else if ( name == "CloudLayout" )
+                v.CloudLayout = Assets::AssetHandle( handle );
+        }
+    } // namespace Detail
+
+    /**
+     * @brief Schema defaults + `.demat` overrides -> the frame's cloud look.
+     *
+     * @param schema    CloudRaymarch's parsed Properties (null = shader not loaded; the member
+     *                  initializers stand in and the caller has already logged the missing shader).
+     * @param overrides The flattened material chain from MaterialService::ResolveOverrides; empty for a
+     *                  null material handle.
+     *
+     * The schema pass exists so that the shader file is the ONE runtime source of defaults: if a default
+     * is retuned in the Properties block, every scene with an empty slot follows it without this file
+     * being touched. The member initializers are the pinned mirror (CloudMaterialSchema asserts equality),
+     * kept so a missing shader degrades to the same sky loudly rather than to a zeroed one silently.
+     */
+    inline CloudMaterialValues BuildCloudMaterialValues( const Core::Formats::ShaderProgramMeta* schema,
+                                                         const MaterialOverrides&                overrides )
+    {
+        CloudMaterialValues values;
+
+        if ( schema )
+        {
+            for ( const auto& param : schema->Params )
+            {
+                if ( param.IsAssetRef() )
+                    continue; // an asset reference's "default" is null, which the fields already are
+                Detail::ApplyCloudOverride( values, param.Name, param.Default );
+            }
+        }
+
+        for ( const auto& [name, value] : overrides.Params )
+            Detail::ApplyCloudOverride( values, name, value );
+        for ( const auto& [name, handle] : overrides.Textures )
+            Detail::ApplyCloudAssetRef( values, name, handle );
+
+        return values;
+    }
+} // namespace Desert::Graphic

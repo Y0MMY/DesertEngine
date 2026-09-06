@@ -9,11 +9,15 @@
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
+#include <Engine/Assets/CloudLayoutAsset.hpp>
+#include <Engine/Assets/CloudTypeAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/CloudLayout/CloudLayoutService.hpp>
+#include <Engine/Runtime/Services/CloudType/CloudTypeService.hpp>
 #include <Engine/Runtime/Services/Material/MaterialService.hpp>
 #include <Engine/Runtime/Services/Shader/ShaderService.hpp>
 
@@ -71,6 +75,8 @@ namespace Desert::Editor
                     return "Skybox";
                 case D::PostProcess:
                     return "Post Process";
+                case D::Volume:
+                    return "Volume";
             }
             return "engine-internal";
         }
@@ -91,6 +97,10 @@ namespace Desert::Editor
                     return "draws the sky behind everything else, not an object this pane could place.";
                 case D::PostProcess:
                     return "draws over the whole finished frame, not an object this pane could place.";
+                case D::Volume:
+                    return "is marched as the scene's volumetric cloud layer — a medium filling the sky, "
+                           "not an object this pane could put on a sphere. Edit it here and look at the "
+                           "clouds in the viewport; the layer picks it up the same frame.";
                 case D::Unspecified:
                 case D::Surface:
                     break;
@@ -531,8 +541,40 @@ namespace Desert::Editor
                 ImGui::TextColored( ImVec4( 1.0f, 0.85f, 0.4f, 1.0f ), "%s *", label );
             else
                 ImGui::TextUnformatted( label );
+            // The schema's own Tooltip attribute, on the LABEL: the cloud material carries the calibrated
+            // tooltips its component fields used to, and a parameter whose meaning the panel cannot show
+            // is a parameter the artist reads the shader file to use.
+            if ( !p.Tooltip.empty() && ImGui::IsItemHovered( ImGuiHoveredFlags_DelayShort ) )
+            {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos( ImGui::GetFontSize() * 30.0f );
+                ImGui::TextUnformatted( p.Tooltip.c_str() );
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
             ImGui::TableNextColumn();
             ImGui::PushItemWidth( -FLT_MIN );
+
+            // Non-texture asset references (CloudType / CloudLayout) — the schema declares the asset
+            // class, the value rides the same name->handle map the textures use. The rows are the ones
+            // the Details panel drew while these were component fields, moved here with the fields (O1):
+            // there is nothing to thumbnail, the files are authored in their own document windows, and an
+            // empty slot MEANS something good in both cases.
+            if ( p.IsAssetRef() )
+            {
+                if ( isInstance )
+                {
+                    // Same v1 restriction as textures, same reason: asset references travel in the
+                    // Textures map, which instances take whole from the parent.
+                    ImGui::TextDisabled( "from parent material" );
+                    ImGui::PopItemWidth();
+                    continue;
+                }
+                if ( DrawCloudAssetRef( data, p, hiddenId ) )
+                    changed = true;
+                ImGui::PopItemWidth();
+                continue;
+            }
 
             if ( p.IsTexture )
             {
@@ -590,6 +632,27 @@ namespace Desert::Editor
                 edited = ( p.Type == VT::Float3 ) ? ImGui::ColorEdit3( hiddenId.c_str(), &value.x )
                                                   : ImGui::ColorEdit4( hiddenId.c_str(), &value.x );
             }
+            else if ( p.Type == VT::Int )
+            {
+                // An Int schema param stores in vec4.x like everything else; the widget is what keeps an
+                // artist from authoring 2.37 octaves and wondering which sky that is. Before this branch
+                // an Int drew as a float drag — the cloud schema is the first to carry Int params.
+                int iv = static_cast<int>( value.x );
+                if ( p.Min.has_value() && p.Max.has_value() )
+                    edited = ImGui::SliderInt( hiddenId.c_str(), &iv, static_cast<int>( *p.Min ),
+                                               static_cast<int>( *p.Max ) );
+                else
+                    edited = ImGui::DragInt( hiddenId.c_str(), &iv );
+                if ( edited )
+                    value.x = static_cast<float>( iv );
+            }
+            else if ( p.Type == VT::Bool )
+            {
+                bool bv = value.x > 0.5f;
+                edited  = ImGui::Checkbox( hiddenId.c_str(), &bv );
+                if ( edited )
+                    value.x = bv ? 1.0f : 0.0f;
+            }
             else
             {
                 const int comps = ( p.Type == VT::Float2 )   ? 2
@@ -618,6 +681,141 @@ namespace Desert::Editor
         }
 
         ImGui::EndTable();
+        return changed;
+    }
+
+    bool MaterialEditorPanel::DrawCloudAssetRef( Assets::MaterialData& data,
+                                                 const Core::Formats::ShaderParam& p,
+                                                 const std::string&                hiddenId )
+    {
+        bool     changed = false;
+        uint64_t handle  = data.GetTexture( p.Name );
+
+        const bool isType   = p.AssetKind == "CloudTypeAsset";
+        const bool isLayout = p.AssetKind == "CloudLayoutAsset";
+        if ( !isType && !isLayout )
+        {
+            // A kind this panel has no row for is a schema ahead of this binary — said instead of drawn
+            // wrong, and the value the material stores is left exactly as it is.
+            ImGui::TextDisabled( "unknown asset kind '%s'", p.AssetKind.c_str() );
+            return false;
+        }
+
+        // "Default"/"None" mean something in both slots — the built-in congestus, the procedural sky —
+        // so the empty state is named rather than left reading as unfilled. Same rows the Details panel
+        // drew while these were component fields; moved here with them (O1).
+        std::string preview = isType ? "Default (cumulus congestus)" : "None (procedural weather)";
+        if ( handle != 0 )
+        {
+            preview = "(missing)";
+            if ( m_AssetManager )
+            {
+                if ( isType )
+                {
+                    if ( auto type = m_AssetManager->FindByHandle<Assets::CloudTypeAsset>( Common::UUID( handle ) ) )
+                        preview = type->GetDisplayName();
+                }
+                else if ( auto painting =
+                               m_AssetManager->FindByHandle<Assets::CloudLayoutAsset>( Common::UUID( handle ) ) )
+                {
+                    preview = painting->GetMetadata().Filepath.filename().string();
+                }
+            }
+        }
+
+        if ( ImGui::BeginCombo( hiddenId.c_str(), preview.c_str() ) )
+        {
+            const char* emptyLabel = isType ? "Default (cumulus congestus)" : "None (procedural weather)";
+            if ( ImGui::Selectable( emptyLabel, handle == 0 ) && handle != 0 )
+            {
+                data.SetTexture( p.Name, 0 );
+                changed = true;
+            }
+            if ( m_AssetManager && isType )
+            {
+                for ( const auto& [h, type] : m_AssetManager->FindAllByType<Assets::CloudTypeAsset>() )
+                {
+                    const bool selected = ( static_cast<uint64_t>( h ) == handle );
+                    if ( ImGui::Selectable( type->GetDisplayName().c_str(), selected ) )
+                    {
+                        data.SetTexture( p.Name, static_cast<uint64_t>( h ) );
+                        changed = true;
+                    }
+                    if ( selected )
+                        ImGui::SetItemDefaultFocus();
+                }
+            }
+            else if ( m_AssetManager && isLayout )
+            {
+                for ( const auto& [h, painting] : m_AssetManager->FindAllByType<Assets::CloudLayoutAsset>() )
+                {
+                    const bool selected = ( static_cast<uint64_t>( h ) == handle );
+                    if ( ImGui::Selectable( painting->GetMetadata().Filepath.filename().string().c_str(),
+                                            selected ) )
+                    {
+                        data.SetTexture( p.Name, static_cast<uint64_t>( h ) );
+                        changed = true;
+                    }
+                    if ( selected )
+                        ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        if ( ImGui::BeginDragDropTarget() )
+        {
+            if ( const ImGuiPayload* pl =
+                      ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::AssetFile ) )
+            {
+                const std::string path( static_cast<const char*>( pl->Data ),
+                                        pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                // The extension is checked HERE because the Content Browser emits one generic AssetFile
+                // payload for every type it has no icon for — without it this slot would bind a dropped
+                // .dcnv to a file that can never parse as what the slot means.
+                const char* wantedExt = isType ? Assets::kCloudTypeExtension : Assets::kCloudLayoutExtension;
+                if ( m_AssetManager && !path.empty() &&
+                     std::filesystem::path( path ).extension() == wantedExt )
+                {
+                    if ( isType )
+                    {
+                        auto type = m_AssetManager->FindByPath<Assets::CloudTypeAsset>( path );
+                        if ( !type )
+                            type = m_AssetManager->CreateAsset<Assets::CloudTypeAsset>(
+                                 Assets::AssetPriority::Medium, path );
+                        if ( type && type->IsReadyForUse() )
+                        {
+                            if ( const auto registered =
+                                      Runtime::ResourceRegistry::GetCloudTypeService()->Register( type );
+                                 !registered )
+                                LOG_ERROR( "[Clouds] Dropped cloud type '{}' could not be registered: {}",
+                                           path, registered.GetError() );
+                            data.SetTexture( p.Name, static_cast<uint64_t>( type->GetMetadata().Handle ) );
+                            changed = true;
+                        }
+                    }
+                    else
+                    {
+                        auto painting = m_AssetManager->FindByPath<Assets::CloudLayoutAsset>( path );
+                        if ( !painting )
+                            painting = m_AssetManager->CreateAsset<Assets::CloudLayoutAsset>(
+                                 Assets::AssetPriority::Medium, path );
+                        if ( painting && painting->IsReadyForUse() )
+                        {
+                            if ( const auto registered =
+                                      Runtime::ResourceRegistry::GetCloudLayoutService()->Register( painting );
+                                 !registered )
+                                LOG_ERROR( "[Clouds] Dropped cloud layout '{}' could not be registered: {}",
+                                           path, registered.GetError() );
+                            data.SetTexture( p.Name, static_cast<uint64_t>( painting->GetMetadata().Handle ) );
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
         return changed;
     }
 

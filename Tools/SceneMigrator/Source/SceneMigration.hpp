@@ -90,12 +90,20 @@ namespace Desert::Migration
     inline constexpr int kSceneVersionGravityUnits    = 9;
     inline constexpr int kSceneVersionUIVisibility    = 10;
     inline constexpr int kSceneVersionSSRUnits        = 11;
+    //  12             - the cloud LOOK is a MATERIAL (O1, D-35). Thirty-three fields leave the
+    //                   VolumetricCloud payload for a `.demat` on the Volume-domain CloudRaymarch shader:
+    //                   the species slots, weather, placement, layout, per-sample detail and lighting.
+    //                   A scene that stated any of them gets a material file written beside the assets
+    //                   root carrying exactly the stated values; a scene that stated none names no
+    //                   material and renders the schema defaults, which are the old component defaults
+    //                   digit for digit
+    inline constexpr int kSceneVersionCloudMaterial   = 12;
 
     // The last step this tool knows and the generation the engine requires are ONE number, and this is
     // where that is checked. If a schema step is ever added here without raising Core::kSceneVersion, the
     // tool would stamp files at a version the loader refuses - every scene in the repository would stop
     // opening at once, and the file that caused it would look correct in isolation.
-    static_assert( kSceneVersionSSRUnits == kSceneVersion,
+    static_assert( kSceneVersionCloudMaterial == kSceneVersion,
                    "the last migration step and the engine's required scene version must be the same "
                    "generation - raise Core::kSceneVersion in Engine/Core/Serialize/SceneFormat.hpp" );
 
@@ -557,6 +565,55 @@ namespace Desert::Migration
     // SHELF LIFE: this raises v10 to v11 and nothing else. It is deleted once no v10 file remains.
     SSRUnitsMigrationReport MigrateSSRUnitsV10ToV11( std::optional<rfl::Generic>& settings );
 
+    // A `.demat` this migration produced and the TOOL must write: the step is pure, so the bytes and
+    // the assets-root-relative path come back to the caller, and main.cpp is the one place that touches
+    // the filesystem — the same division every step above keeps.
+    struct CloudMaterialFile
+    {
+        std::string RelativePath; // e.g. "Materials/M_Clouds_Protocol_Clouds.demat", relative to assets root
+        std::string Json;         // the full MaterialData serialization, ready to write verbatim
+    };
+
+    // What MigrateCloudMaterialV11ToV12 did, returned rather than logged, like every report above.
+    struct CloudMaterialMigrationReport
+    {
+        int Entities     = 0; // entities whose VolumetricCloud payload lost fields to a material
+        int ValuesMoved  = 0; // value keys found in the payload and copied into the material verbatim
+        int AssetsMoved  = 0; // asset keys (CloudType1..4 / CloudLayout) carried as handles
+        int Defaulted    = 0; // moved keys ABSENT from the payload - they keep the schema default
+        int Rejected     = 0; // present but unusable (wrong JSON type / non-relative path) - named below
+
+        // Named, not counted: a rejected value is an authored number that did NOT reach the material,
+        // and the operator has to see which one (§1.4 - nothing is dropped silently).
+        std::vector<std::string> RejectedNames;
+
+        std::vector<CloudMaterialFile> Materials; // for the tool to write; empty when nothing moved
+    };
+
+    // Raises a scene from schema v11 to v12: the thirty-three cloud LOOK fields leave the
+    // "VolumetricCloud" payload for a `.demat` material on the Volume-domain cloud shader (O1, D-35).
+    //
+    // PURE - no GPU, no filesystem, no global state. The material file's BYTES are part of the return
+    // value rather than a side effect, and its MaterialId is DERIVED (FNV of the scene name), not drawn
+    // from a generator, so the function is deterministic and its test can pin exact output.
+    //
+    // WHAT MOVES AND HOW. A value key present in the payload becomes a material Param with the same name
+    // and the same number - verbatim, no unit change, no re-scaling. An asset key present and non-empty
+    // becomes a material Textures entry whose handle is the same path-derived FNV the runtime mints for
+    // that file (AssetHandle::FromKey over "assets:<relative path>"). Keys ABSENT stay absent: the
+    // schema's defaults are the old component defaults digit for digit, so an unauthored value keeps
+    // meaning "the default" without being written down - the same philosophy the .desce format itself
+    // has. The payload keeps its other keys untouched and gains "Material" naming the new file.
+    //
+    // A scene that stated NONE of the thirty-three keys is left byte-identical (no material file, no
+    // "Material" key): its sky was the defaults and still is.
+    //
+    // Idempotent: a payload that already carries "Material" and none of the moved keys is not touched.
+    //
+    // SHELF LIFE: this raises v11 to v12 and nothing else. It is deleted once no v11 file remains.
+    CloudMaterialMigrationReport MigrateCloudMaterialV11ToV12( std::vector<Assets::EntityData>& entities,
+                                                               const std::string&               sceneName );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -588,12 +645,15 @@ namespace Desert::Migration
         // the schema was below kSceneVersionSSRUnits
         bool                    SSRUnitsRaised = false;
         SSRUnitsMigrationReport SSRUnits;
+        // the schema was below kSceneVersionCloudMaterial
+        bool                         CloudMaterialRaised = false;
+        CloudMaterialMigrationReport CloudMaterial;
 
         bool Changed() const
         {
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
                    CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised ||
-                   GravityUnitsRaised || UIVisibilityRaised || SSRUnitsRaised;
+                   GravityUnitsRaised || UIVisibilityRaised || SSRUnitsRaised || CloudMaterialRaised;
         }
     };
 

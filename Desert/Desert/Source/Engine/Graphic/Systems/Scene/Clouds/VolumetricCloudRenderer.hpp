@@ -6,6 +6,7 @@
 #include <Engine/ECS/VolumetricCloudComponent.hpp>
 #include <Engine/Graphic/Clouds/CloudAuthoredPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudEnvironmentBake.hpp>
+#include <Engine/Graphic/Clouds/CloudMaterialValues.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudTypeShape.hpp>
 #include <Engine/Graphic/Clouds/CloudQuality.hpp>
@@ -23,6 +24,7 @@
 #include <future>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 namespace Desert::Graphic::System
@@ -282,6 +284,10 @@ namespace Desert::Graphic::System
         Assets::CloudProceduralFieldParams BuildProceduralParams( const CloudTypeShape* shapes,
                                                                   uint32_t              speciesCount ) const;
 
+        /// Schema defaults + the `.demat` chain of m_Data.Material -> m_Material, once per frame from
+        /// SetCloudSettings. See the definition for why per frame and why the schema is the source.
+        void ResolveMaterial();
+
         /**
          * Turns this frame's hero clouds into the instance buffer the two cloud passes read, and points
          * m_AuthoredAtlas at the image holding their bodies.
@@ -492,6 +498,16 @@ namespace Desert::Graphic::System
 
         ECS::VolumetricCloudData m_Data{};
         glm::vec3                m_WindOffset{ 0.0f };
+
+        /// The frame's resolved cloud LOOK — CloudRaymarch schema defaults with the `.demat` chain of
+        /// m_Data.Material applied over them (O1). Filled by ResolveMaterial() from SetCloudSettings,
+        /// read by everything downstream; never read m_Data for a look value again — the component does
+        /// not carry them.
+        CloudMaterialValues m_Material{};
+
+        /// Material handles already reported as unresolvable, so the warning in ResolveMaterial is said
+        /// once per handle and not once per frame.
+        std::unordered_set<uint64_t> m_WarnedMissingMaterials;
         bool                     m_Present = false;
 
         // This view's quality tier and the numbers it derives. The scale is held rather than re-derived at

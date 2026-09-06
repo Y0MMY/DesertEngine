@@ -228,6 +228,21 @@ int main( int argc, char** argv )
                 std::cout << "stamp only - the scene states no SSR max distance";
             std::cout << ")";
         }
+        if ( report.CloudMaterialRaised )
+        {
+            std::cout << " scene v" << Desert::Migration::kSceneVersionSSRUnits << "->v"
+                      << Desert::Migration::kSceneVersionCloudMaterial << " (";
+            if ( report.CloudMaterial.Entities > 0 )
+                std::cout << report.CloudMaterial.ValuesMoved << " value(s) and "
+                          << report.CloudMaterial.AssetsMoved << " asset slot(s) moved into "
+                          << report.CloudMaterial.Materials.size() << " cloud material(s), "
+                          << report.CloudMaterial.Defaulted << " left at the schema default";
+            else
+                std::cout << "stamp only - no cloud layer stated a look field";
+            for ( const auto& name : report.CloudMaterial.RejectedNames )
+                std::cout << "; NOT carried, schema default stands: " << name;
+            std::cout << ")";
+        }
         if ( report.UnitsRaised )
             std::cout << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
                       << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected
@@ -236,6 +251,35 @@ int main( int argc, char** argv )
 
         if ( check )
             continue;
+
+        // The material files the v11 -> v12 step produced, written FIRST: a scene that names a
+        // material which does not exist is worse than a scene not yet migrated, so if a material
+        // cannot be written the scene is not either.
+        bool materialsFailed = false;
+        for ( const auto& mat : report.CloudMaterial.Materials )
+        {
+            // Under the same assets root MigrateScene measured against (its default argument): the
+            // relative path inside the scene and the file on disk must agree about one root or the
+            // scene names a material that is not where it says.
+            const std::filesystem::path matPath = Common::Constants::Path::ASSETS_PATH / mat.RelativePath;
+            std::error_code             ec;
+            std::filesystem::create_directories( matPath.parent_path(), ec );
+            std::ofstream matOut( matPath, std::ios::binary | std::ios::trunc );
+            if ( !matOut )
+            {
+                std::cerr << "FAIL   " << matPath.string() << " — could not write the cloud material; "
+                          << path.string() << " is left at its old version\n";
+                materialsFailed = true;
+                break;
+            }
+            matOut << mat.Json;
+            std::cout << "        wrote " << mat.RelativePath << "\n";
+        }
+        if ( materialsFailed )
+        {
+            ++failed;
+            continue;
+        }
 
         std::ofstream out( path, std::ios::binary | std::ios::trunc );
         if ( !out )
