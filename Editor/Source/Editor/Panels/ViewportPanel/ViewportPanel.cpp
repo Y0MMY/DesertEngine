@@ -1565,6 +1565,12 @@ namespace Desert::Editor
                             if ( auto ref = m_Scene->FindEntityByID( *sel ) )
                                 editorCam->Focus( glm::vec3( ref->get().GetWorldTransform()[3] ) );
                 break;
+            // A `default` and not 115 empty cases: this is a KEYBOARD, and the shortcuts it handles are a
+            // deliberately small set. Enumerating the rest would make every key an editing decision and
+            // would say nothing true — unlike the renderer-backend switches above, where a new enumerator
+            // is a new backend and must not compile until every factory has answered for it.
+            default:
+                break;
         }
         return false;
     }

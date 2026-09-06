@@ -140,12 +140,17 @@ namespace Desert
 
         // LOD chain (built by StaticMesh on load). LODs[0] is the original geometry, so drawing LOD 0 is
         // byte-identical to (IndexOffset, IndexCount). Empty for meshes with no LODs (procedural / skinned).
-        std::vector<LODRange> LODs;
+        //
+        // `= {}` on this and on BakedLODs below is not decoration: the five aggregate initialisations of
+        // Submesh in the engine and the editor deliberately stop at BoundingBox, and without a default
+        // member initialiser each of them is a `-Wmissing-field-initializers` asking whether the author
+        // MEANT to stop. Stated once here, where the answer is.
+        std::vector<LODRange> LODs = {};
 
         // Pre-baked LOD triangle sets (cooked at import, submesh-local, coarsest last). When non-empty,
         // BuildLODIndexBuffer APPENDS these instead of generating LODs — so cooked assets skip the load-time
         // meshopt pass. Transient input to StaticMesh; not itself the LODRange chain above.
-        std::vector<std::vector<Index>> BakedLODs;
+        std::vector<std::vector<Index>> BakedLODs = {};
     };
 
     enum class MeshType

@@ -35,7 +35,7 @@ namespace Desert::Assets
             m_SkeletonSignature = clip.SkeletonSignature;
         }
 
-        virtual bool IsReadyForUse() const
+        bool IsReadyForUse() const override
         {
             return true;
         }

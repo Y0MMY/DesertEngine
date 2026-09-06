@@ -28,7 +28,7 @@ namespace Desert::ShaderResources::API::Vulkan
             return m_ImageCube->GetHash();
         }
 
-        virtual void SetImageCube( const Graphic::ImageCube* imageCube );
+        void SetImageCube( const Graphic::ImageCube* imageCube ) override;
 
     private:
         void RT_Invalidate();

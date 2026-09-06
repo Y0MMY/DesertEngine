@@ -79,7 +79,7 @@ namespace
     {
         std::string        fqn;          // fully-qualified C++ name, e.g. Desert::Assets::PBRMaterialData
         std::string        registryName; // short name used as the registry key, e.g. PBRMaterialData
-        std::vector<Field> fields;
+        std::vector<Field> fields = {};
         std::string        headerInclude; // include path relative to source root
     };
 
@@ -216,7 +216,7 @@ namespace
     std::string VectorElement( const std::string& typeRaw )
     {
         std::string t = TrimCopy( typeRaw );
-        for ( const std::string pre : { std::string( "std::vector<" ), std::string( "vector<" ) } )
+        for ( const std::string& pre : { std::string( "std::vector<" ), std::string( "vector<" ) } )
         {
             if ( t.rfind( pre, 0 ) == 0 && !t.empty() && t.back() == '>' )
                 return TrimCopy( t.substr( pre.size(), t.size() - pre.size() - 1 ) );

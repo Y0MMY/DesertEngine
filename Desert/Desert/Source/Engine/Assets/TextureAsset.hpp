@@ -34,7 +34,7 @@ namespace Desert::Assets
 
         virtual Common::BoolResultStr Unload() override;
 
-        virtual bool IsReadyForUse() const
+        bool IsReadyForUse() const override
         {
             return m_IsReadyForUse;
         }

@@ -12,8 +12,7 @@ namespace Desert::Graphic
     }
 
     Material::Material( std::string&& debugName, std::string&& shaderName )
-         : m_MaterialExecutor(
-                std::move( Graphic::MaterialExecutor::Create( std::move( debugName ), std::move( shaderName ) ) ) )
+         : m_MaterialExecutor( Graphic::MaterialExecutor::Create( std::move( debugName ), std::move( shaderName ) ) )
     {
         CachePropertyNames();
     }

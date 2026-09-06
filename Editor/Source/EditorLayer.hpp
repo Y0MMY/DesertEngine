@@ -209,7 +209,7 @@ namespace Desert::Editor
             // slot". The main viewport and the Details preview carry no handle — neither is a window a
             // person closes to make room. Last in the struct so the two- and three-field aggregate
             // initialisations below keep meaning what they say.
-            std::optional<Assets::AssetHandle> Document;
+            std::optional<Assets::AssetHandle> Document = {};
         };
         [[nodiscard]] std::vector<RendererSlotConsumer> RendererSlotCensus() const;
         // Rebinds the editor to a focused document: m_MainScene (and thus every play/save/gizmo call site)

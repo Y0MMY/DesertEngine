@@ -78,7 +78,7 @@ namespace Desert::Graphic
         const auto                                mipGenerator =
              m_Specification.GenerateMips ? MipMap2DGenerator::Create( MipGenStrategy::TransferOps ) : nullptr;
         m_Handle = Runtime::ResourceRegistry::GetImageService()->Register(
-             std::move( Image2D::Create( imageSpec, mipGenerator ) ), Runtime::ImageHandle::Type::Image2D );
+             Image2D::Create( imageSpec, mipGenerator ), Runtime::ImageHandle::Type::Image2D );
         return Common::MakeSuccess( true ); // TODO
         // return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
     }
@@ -115,7 +115,7 @@ namespace Desert::Graphic
             .Properties = Core::Formats::Sample };
 
         texture->m_Handle = Runtime::ResourceRegistry::GetImageService()->Register(
-             std::move( Image2D::Create( imageSpec, nullptr ) ), Runtime::ImageHandle::Type::Image2D );
+             Image2D::Create( imageSpec, nullptr ), Runtime::ImageHandle::Type::Image2D );
         return Common::MakeSuccess( texture );
     }
 
@@ -143,7 +143,7 @@ namespace Desert::Graphic
         const auto mipGenerator =
              m_Specification.GenerateMips ? MipMapCubeGenerator::Create( MipGenStrategy::TransferOps ) : nullptr;
         m_Handle = Runtime::ResourceRegistry::GetImageService()->Register(
-             std::move( ImageCube::Create( imageSpec, mipGenerator ) ), Runtime::ImageHandle::Type::ImageCube );
+             ImageCube::Create( imageSpec, mipGenerator ), Runtime::ImageHandle::Type::ImageCube );
         return Common::MakeSuccess( true ); // TODO
         // return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
     }

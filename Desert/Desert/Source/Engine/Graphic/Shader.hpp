@@ -60,6 +60,10 @@ namespace Desert::Graphic
                     return "TessControl";
                 case Core::Formats::ShaderStage::TessEvaluation:
                     return "TessEvaluation";
+                // `None` is the enum's zero and names no stage; the fallthrough below is its answer, and
+                // writing the case is what makes a NEW stage a compiler error here instead of "Unknown".
+                case Core::Formats::ShaderStage::None:
+                    break;
             }
             return "Unknown";
         }

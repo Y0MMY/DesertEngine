@@ -169,11 +169,15 @@ namespace Desert::Editor
     FileExplorerPanel::FileExplorerPanel( const std::filesystem::path& rootPath,
                                           Assets::AssetManager* assetManager,
                                           std::weak_ptr<::Desert::Core::Scene> viewportScene )
-         : IPanel( "Assets" ), m_CurrentPath( rootPath ), m_CurrentDir( nullptr ),
-           m_BaseProjectDir( nullptr ), m_PreviousDirectory( nullptr ), m_GridSize( 120.0f ),
-           m_MinGridSize( 40.0f ), m_MaxGridSize( 400.0f ), m_IsInListView( false ), m_IsDragging( false ),
-           m_ShowHiddenFiles( false ), m_UpdateNavigationPath( true ), m_Refresh( false ),
-           m_AssetManager( assetManager ), m_ViewportScene( std::move( viewportScene ) )
+         // IN DECLARATION ORDER. Members are constructed in the order they are DECLARED whatever this list
+         // says, so a list in a different order is a reader being told the wrong sequence — harmless here
+         // because every initialiser is a literal or a parameter, and exactly how a later initialiser that
+         // reads an earlier member becomes a use-before-init nobody can see.
+         : IPanel( "Assets" ), m_CurrentPath( rootPath ), m_MinGridSize( 40.0f ), m_MaxGridSize( 400.0f ),
+           m_IsDragging( false ), m_IsInListView( false ), m_ShowHiddenFiles( false ), m_GridSize( 120.0f ),
+           m_Refresh( false ), m_UpdateNavigationPath( true ), m_CurrentDir( nullptr ),
+           m_BaseProjectDir( nullptr ), m_PreviousDirectory( nullptr ), m_AssetManager( assetManager ),
+           m_ViewportScene( std::move( viewportScene ) )
     {
         m_UIHelper = std::make_unique<UI::UIHelper>();
         m_UIHelper->Init();

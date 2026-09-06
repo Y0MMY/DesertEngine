@@ -23,7 +23,7 @@ namespace Desert::Graphic::System
         using RenderSystem::RenderSystem;
 
         virtual Common::BoolResultStr Initialize() override;
-        void                          Shutdown()
+        void                          Shutdown() override
         {
         }
 

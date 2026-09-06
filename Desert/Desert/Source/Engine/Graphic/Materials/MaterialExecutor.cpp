@@ -111,7 +111,7 @@ namespace Desert::Graphic
             {
                 return std::make_unique<MaterialExecutor>(
                      std::move( debugName ), resolvedShader,
-                     std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>( resolvedShader ) ) );
+                     std::make_unique<API::Vulkan::VulkanMaterialBackend>( resolvedShader ) );
             }
         }
         DESERT_VERIFY( false, "Unknown RendererAPI" );
@@ -129,7 +129,7 @@ namespace Desert::Graphic
             {
                 return std::make_unique<MaterialExecutor>(
                      std::move( debugName ), shader,
-                     std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>( shader ) ) );
+                     std::make_unique<API::Vulkan::VulkanMaterialBackend>( shader ) );
             }
         }
         DESERT_VERIFY( false, "Unknown RendererAPI" );

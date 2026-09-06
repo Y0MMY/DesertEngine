@@ -13,6 +13,11 @@ namespace Desert::Graphic
             {
                 return std::make_shared<API::Vulkan::VulkanContext>( window );
             }
+            // NAMED RATHER THAN LEFT TO FALL THROUGH. `None` is the enum's zero, not a backend, and the
+            // verify below is what answers it — but with the case unwritten this switch also stayed silent
+            // the day a SECOND backend is added, which is the one moment a factory needs to complain.
+            case RendererAPIType::None:
+                break;
         }
         DESERT_VERIFY( false );
         return nullptr;

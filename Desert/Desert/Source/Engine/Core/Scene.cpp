@@ -201,7 +201,9 @@ namespace Desert::Core
         return true;
     }
     Scene::Scene( std::string&& sceneName, Graphic::SceneRenderer* sceneRenderer )
-         : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( sceneRenderer )
+         // Declaration order: m_SceneRenderer is declared before m_SceneName, and members are constructed
+         // in declaration order no matter what this list says.
+         : m_SceneRenderer( sceneRenderer ), m_SceneName( std::move( sceneName ) )
     {
         SetupRegistryCallbacks();
     }
@@ -484,7 +486,11 @@ namespace Desert::Core
             const auto& system = m_Systems[index];
             // Per-system timing (named by the system's type) so every ECS system is individually
             // visible in the profiler — no per-system edits.
-            DESERT_PROFILE_SCOPE_DYNAMIC( typeid( *system ).name() );
+            // The dereference is bound to a reference first because `typeid` on an expression WITH SIDE
+            // EFFECTS evaluates it — `*system` is `unique_ptr::operator*`, a function call, so the operand
+            // is not the plain lvalue it looks like. Same dynamic type, and the intent is now stated.
+            const auto& systemRef = *system;
+            DESERT_PROFILE_SCOPE_DYNAMIC( typeid( systemRef ).name() );
             system->Update( m_Registry, *m_SystemCommandBuffers[index], gameplayTs );
         };
 

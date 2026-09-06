@@ -56,7 +56,7 @@ namespace Desert::Assets
         }
 
         // Blendshapes (empty when the mesh has none). Deltas are index-aligned with GetVertices().
-        const std::vector<MorphTarget>& GetMorphTargets() const
+        const std::vector<MorphTarget>& GetMorphTargets() const override
         {
             return m_MorphTargets;
         }

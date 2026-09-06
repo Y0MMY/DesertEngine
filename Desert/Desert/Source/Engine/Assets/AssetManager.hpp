@@ -195,10 +195,14 @@ namespace Desert::Assets
             auto typed = std::dynamic_pointer_cast<TypeAsset>( stored );
             if ( !typed )
             {
+                // The dereference is bound to a reference first because `typeid` on an expression WITH
+                // SIDE EFFECTS evaluates it, and `*stored` is `shared_ptr::operator*` — a function call,
+                // so the operand is not the plain lvalue it reads as. Same dynamic type, intent stated.
+                const AssetBase& storedRef = *stored;
                 LOG_ERROR( "AssetManager::{}: '{}' holds a {} asset (type id {}, class '{}') but was "
                            "requested as {}. Refusing to reinterpret it; returning null.",
                            who, subject, AssetTypeName( stored->GetMetadata().AssetType ),
-                           static_cast<int>( stored->GetMetadata().AssetType ), typeid( *stored ).name(),
+                           static_cast<int>( stored->GetMetadata().AssetType ), typeid( storedRef ).name(),
                            AssetTypeName( TypeAsset::GetTypeID() ) );
             }
 
