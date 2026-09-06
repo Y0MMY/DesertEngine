@@ -284,4 +284,45 @@ namespace Common::Utils
         fout.close();
     }
 
+    bool FileSystem::WriteContentToFileAtomic( const std::filesystem::path& filepath, const std::string& content )
+    {
+        // Contract and the reasoning behind every step are in the header. In one line: the original
+        // file must survive a failure at ANY point, so nothing here ever opens the original for write.
+        std::filesystem::path temp = filepath;
+        temp += ".tmp";
+
+        std::ofstream out( temp, std::ios::binary | std::ios::trunc );
+        if ( !out )
+        {
+            LOG_ERROR( "[FileSystem] Atomic write failed: could not open temporary {} (original untouched)",
+                       temp.string() );
+            return false;
+        }
+
+        out << content;
+        // close() explicitly, BEFORE the verdict: it flushes, and a buffered failure (disk full, the
+        // volume going away) may only surface here. The destructor would swallow exactly that.
+        out.close();
+        if ( !out )
+        {
+            LOG_ERROR( "[FileSystem] Atomic write failed: writing {} bytes to {} (original untouched)",
+                       content.size(), temp.string() );
+            std::error_code removeEc;
+            fs::remove( temp, removeEc );
+            return false;
+        }
+
+        std::error_code renameEc;
+        fs::rename( temp, filepath, renameEc ); // POSIX rename(2) / MoveFileExW: replaces atomically
+        if ( renameEc )
+        {
+            LOG_ERROR( "[FileSystem] Atomic write failed: renaming {} over {}: {} (original untouched)",
+                       temp.string(), filepath.string(), renameEc.message() );
+            std::error_code removeEc;
+            fs::remove( temp, removeEc );
+            return false;
+        }
+        return true;
+    }
+
 } // namespace Common::Utils
