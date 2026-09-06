@@ -310,6 +310,13 @@ namespace Desert::Editor
              { "Preloading cloud types...", [this] { m_AssetPreloader->PreloadCloudTypes(); } } );
         m_StartupStages.push_back(
              { "Preloading hero clouds...", [this] { m_AssetPreloader->PreloadCloudModellingVolumes(); } } );
+        // THIS LINE WAS MISSING FROM THE DAY THE PAINTED LAYOUT SHIPPED, and its absence made the whole
+        // feature dead: AssetPreloader::PreloadCloudLayouts existed, scanned Clouds/Layouts and registered
+        // every `.dclayout` with the service — and nothing ever called it. Every scene binding a painting
+        // logged "referenced but not registered" and rendered its sky procedurally. Order-free, like the
+        // hero clouds above: a layout names nothing and is named only by a material.
+        m_StartupStages.push_back(
+             { "Preloading painted layouts...", [this] { m_AssetPreloader->PreloadCloudLayouts(); } } );
 
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );

@@ -40,17 +40,6 @@ namespace Desert::Assets
     {
     }
 
-    void AssetPreloader::PreloadAllAssets()
-    {
-        PreloadShaders();
-        PreloadMeshes();
-        PreloadSkyboxes();
-        PreloadCloudNoiseVolumes();
-        PreloadCloudTypes();
-        PreloadCloudModellingVolumes();
-        PreloadCloudLayouts();
-    }
-
     namespace
     {
         template <typename AssetType, typename Extensions, typename... Args>
