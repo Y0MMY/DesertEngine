@@ -212,8 +212,15 @@ namespace Desert::Editor
             deproj.Name         = projectName;
             deproj.AssetsRoot   = kPackagedAssetsRoot;
             deproj.DefaultScene = defaultScene;
-            Common::Utils::FileSystem::WriteContentToFile( resDir / ( safeName + ".deproj" ),
-                                                           Common::Project::WriteProjectFile( deproj ) );
+            // FAILS THE PACKAGE, like every other step in this function. The .deproj is the file the
+            // Runtime is handed on the command line by the launcher below; without it the shipped
+            // build starts, finds no project and exits. Package() already refuses on a missing pak, a
+            // bad tree and a failed finalize — these five writes were the only steps outside that.
+            const fs::path deprojPath = resDir / ( safeName + ".deproj" );
+            if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
+                      deprojPath, Common::Project::WriteProjectFile( deproj ) );
+                 !written )
+                return { false, "Could not write " + deprojPath.string() + ": " + written.GetError(), "" };
         }
 
         // 5) Bundle only: MoltenVK + the Vulkan loader travel INSIDE Contents/Frameworks so the player
@@ -250,9 +257,18 @@ namespace Desert::Editor
                     if ( valStart != std::string::npos && valEnd != std::string::npos )
                         icd = icd.substr( 0, valStart + 1 ) + "./libMoltenVK.dylib" + icd.substr( valEnd );
                 }
-                Common::Utils::FileSystem::WriteContentToFile( fwDir / "MoltenVK_icd.json", icd );
+                const auto icdWritten =
+                     Common::Utils::FileSystem::WriteContentToFileAtomic( fwDir / "MoltenVK_icd.json", icd );
+                if ( !icdWritten )
+                    LOG_WARN( "[Package] MoltenVK_icd.json was not written: {} — the .app falls back to "
+                              "the target machine's Homebrew Vulkan",
+                              icdWritten.GetError() );
 
-                bundledVulkan = !ec;
+                // Not fatal, and now honest about it: the bundle only CLAIMS to carry Vulkan when the
+                // ICD that points at the bundled dylib is really there. It used to claim it whenever
+                // the copies succeeded, so a package with an unwritten ICD reported "Vulkan bundled"
+                // and then failed to find a driver on a machine without Homebrew.
+                bundledVulkan = !ec && icdWritten.IsSuccess();
                 stats.Files += 3;
             }
             else
@@ -283,7 +299,12 @@ namespace Desert::Editor
                 << "cd \"$DIR/../Resources\"\n"
                 << "exec \"$DIR/Runtime-bin\" --project " << safeName << ".deproj \"$@\"\n";
             const fs::path launcher = binDir / "Runtime";
-            Common::Utils::FileSystem::WriteContentToFile( launcher, run.str() );
+            // This script IS the bundle's CFBundleExecutable — without it macOS reports the app as
+            // damaged, which is the least diagnosable failure in this whole function.
+            if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( launcher, run.str() );
+                 !written )
+                return { false, "Could not write the launcher " + launcher.string() + ": " + written.GetError(),
+                         "" };
             makeExecutable( launcher );
 
             std::ostringstream plist;
@@ -298,7 +319,11 @@ namespace Desert::Editor
                   << "  <key>CFBundleShortVersionString</key><string>1.0</string>\n"
                   << "  <key>NSHighResolutionCapable</key><true/>\n"
                   << "</dict></plist>\n";
-            Common::Utils::FileSystem::WriteContentToFile( root / "Contents" / "Info.plist", plist.str() );
+            const fs::path plistPath = root / "Contents" / "Info.plist";
+            if ( const auto written =
+                      Common::Utils::FileSystem::WriteContentToFileAtomic( plistPath, plist.str() );
+                 !written )
+                return { false, "Could not write " + plistPath.string() + ": " + written.GetError(), "" };
         }
         else
         {
@@ -312,7 +337,9 @@ namespace Desert::Editor
                 << "export DYLD_FALLBACK_LIBRARY_PATH=\"$BREW_PREFIX/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}\"\n"
                 << "exec ./Runtime --project " << safeName << ".deproj \"$@\"\n";
             const fs::path runSh = root / "run.sh";
-            Common::Utils::FileSystem::WriteContentToFile( runSh, run.str() );
+            if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( runSh, run.str() );
+                 !written )
+                return { false, "Could not write " + runSh.string() + ": " + written.GetError(), "" };
             makeExecutable( runSh );
         }
 

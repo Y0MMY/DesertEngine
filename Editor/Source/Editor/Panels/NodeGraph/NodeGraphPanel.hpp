@@ -49,8 +49,11 @@ namespace Desert::Editor
 
         // Creates a starter .dgraph (unique name) in @p directory and returns its path — the File
         // Explorer's "New Shader Graph" context action; pair with RequestOpen to jump right in.
-        static std::string CreateNewGraphFile( const std::string&  directory,
-                                               ShaderGraph::Domain domain = ShaderGraph::Domain::Surface );
+        // EMPTY when the file could not be written (the reason is logged); the path is the caller's
+        // proof that there is something to open, so an empty one must not be passed to RequestOpen.
+        [[nodiscard]] static std::string
+        CreateNewGraphFile( const std::string&  directory,
+                            ShaderGraph::Domain domain = ShaderGraph::Domain::Surface );
 
     private:
         void NewGraph();

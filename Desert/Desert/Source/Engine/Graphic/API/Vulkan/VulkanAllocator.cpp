@@ -52,12 +52,26 @@ namespace Desert::Graphic::API::Vulkan
         VkBufferCreateInfo localInfo = bufferCreateInfo;
         if ( localInfo.size == 0 ) localInfo.size = 1; // Vulkan requires size > 0
 
-        VmaAllocation allocation;
+        // Initialised, because a caller that ignores the result below must get a NULL handle rather
+        // than a stack value: null is refused by the validation layers at the point of use and names
+        // the buffer, whereas garbage is undefined behaviour with no diagnostic anywhere.
+        VmaAllocation allocation = VK_NULL_HANDLE;
         VkResult res = vmaCreateBuffer( s_VmaAllocator, &localInfo, &allocInfo, &outBuffer, &allocation, nullptr );
         if ( res != VK_SUCCESS )
         {
+            // ANSWER THE FAILURE THROUGH THE RESULT — the channel is already in the signature. This
+            // used to LOG_ERROR, DESERT_VERIFY( false ) and then `return MakeSuccess( allocation )`,
+            // which is worse than either half on its own: the verify aborted the process in EVERY
+            // configuration (it has no NDEBUG guard), so a player hit by VK_ERROR_OUT_OF_DEVICE_MEMORY
+            // - an external, recoverable condition - crashed outright; and on the paths that somehow
+            // got past it the function reported SUCCESS carrying an uninitialised handle, which made
+            // every `if ( !result )` above it dead code. ReadFileContent lost its own DESERT_VERIFY
+            // for exactly this reason: a primitive cannot know whether its caller can survive the
+            // failure, so it names the failure and lets the caller decide.
             LOG_ERROR( "[VmaAllocator] vmaCreateBuffer failed for tag '{}' (requested size: {}) with VkResult: {} ({})", tag, bufferCreateInfo.size, (int)res, VkResultToString(res) );
-            DESERT_VERIFY( false );
+            return Common::MakeFormattedError<VmaAllocation>(
+                 "vmaCreateBuffer failed for tag '{}' (requested size: {}) with VkResult {} ({})", tag,
+                 bufferCreateInfo.size, (int)res, VkResultToString( res ) );
         }
 
         return Common::MakeSuccess( allocation );
@@ -71,12 +85,15 @@ namespace Desert::Graphic::API::Vulkan
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage                   = usage;
 
-        VmaAllocation allocation;
+        VmaAllocation allocation = VK_NULL_HANDLE; // see RT_AllocateBuffer above
         VkResult res = vmaCreateImage( s_VmaAllocator, &imageCreateInfo, &allocInfo, &outImage, &allocation, nullptr );
         if ( res != VK_SUCCESS )
         {
+            // Same reasoning as RT_AllocateBuffer above, and the same defect it fixes.
             LOG_ERROR( "[VmaAllocator] vmaCreateImage failed for tag '{}' with VkResult: {} ({})", tag, (int)res, VkResultToString(res) );
-            DESERT_VERIFY( false );
+            return Common::MakeFormattedError<VmaAllocation>(
+                 "vmaCreateImage failed for tag '{}' with VkResult {} ({})", tag, (int)res,
+                 VkResultToString( res ) );
         }
 
         return Common::MakeSuccess( allocation );

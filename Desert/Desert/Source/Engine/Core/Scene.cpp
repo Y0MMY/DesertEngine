@@ -593,7 +593,7 @@ namespace Desert::Core
         }
     }
 
-    void Scene::Serialize( const Assets::AssetManager* assetManager ) const
+    Common::BoolResultStr Scene::Serialize( const Assets::AssetManager* assetManager ) const
     {
         SceneSerializer serializer( this, assetManager );
         return serializer.SaveToFile();

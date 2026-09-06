@@ -67,6 +67,6 @@ namespace Desert::Core
         // words. Returns false on any failure, having logged which step failed and where.
         const std::string bytes( reinterpret_cast<const char*>( spirv.data() ),
                                  spirv.size() * sizeof( uint32_t ) );
-        return Common::Utils::FileSystem::WriteContentToFileAtomic( path, bytes );
+        return Common::Utils::FileSystem::WriteContentToFileAtomic( path, bytes ).IsSuccess();
     }
 } // namespace Desert::Core

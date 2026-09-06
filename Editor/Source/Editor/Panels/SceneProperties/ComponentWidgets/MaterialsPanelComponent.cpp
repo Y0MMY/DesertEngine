@@ -288,8 +288,16 @@ namespace Desert::Editor
         {
             Assets::MaterialData defaults;
             defaults.MaterialId = Common::UUID::Generate();
-            Common::Utils::FileSystem::WriteContentToFile( path.generic_string(),
-                                                           rfl::json::write( defaults ) );
+            // Checked because the create-with-load below DEPENDS on the file: without it the asset
+            // adopts no in-file GUID, so the handle registered here is not the one a later run
+            // resolves, and the mesh slot points at a material that will not come back.
+            if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
+                      path.generic_string(), rfl::json::write( defaults ) );
+                 !written )
+            {
+                LOG_ERROR( "[Material] '{}' was not created: {}", path.generic_string(), written.GetError() );
+                return {};
+            }
         }
 
         auto asset = const_cast<Assets::AssetManager&>( *m_AssetManager )
@@ -326,7 +334,14 @@ namespace Desert::Editor
             data.ParentMaterialId = ( parent.Data().MaterialId && !parent.Data().MaterialId->IsNull() )
                                          ? *parent.Data().MaterialId
                                          : Common::UUID( static_cast<uint64_t>( parent.GetMetadata().Handle ) );
-            Common::Utils::FileSystem::WriteContentToFile( path.generic_string(), rfl::json::write( data ) );
+            if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
+                      path.generic_string(), rfl::json::write( data ) );
+                 !written ) // same reason as CreateAndRegisterMaterial above
+            {
+                LOG_ERROR( "[Material] instance '{}' was not created: {}", path.generic_string(),
+                           written.GetError() );
+                return Common::UUID::Null();
+            }
         }
 
         auto asset = const_cast<Assets::AssetManager&>( *m_AssetManager )

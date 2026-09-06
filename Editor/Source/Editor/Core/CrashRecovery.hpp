@@ -21,8 +21,10 @@ namespace Desert::Editor
         // Call ONCE at startup, before ArmSession(): true if the last session left the lock behind.
         static bool WasUncleanExit();
 
-        // Create/refresh the session lock ("editor running").
-        static void ArmSession();
+        // Create/refresh the session lock ("editor running"). FALSE when the lock could not be
+        // written, which means WasUncleanExit() will report "clean" after a crash of THIS session —
+        // the caller is the only place that can say so while the fact is still knowable.
+        static bool ArmSession();
 
         // Remove the session lock (clean shutdown).
         static void DisarmSession();

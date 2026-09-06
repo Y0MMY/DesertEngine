@@ -140,7 +140,10 @@ namespace Desert::Core
             return m_Settings;
         }
 
-        void Serialize( const Assets::AssetManager* assetManager ) const;
+        // The engine's ONE "save this scene" entry point — and therefore the one that has to answer
+        // whether the save happened. It used to return void into a void (SceneSerializer::SaveToFile),
+        // so the editor could only assume; see SceneSerializer::SaveToFile for what that cost.
+        [[nodiscard]] Common::BoolResultStr Serialize( const Assets::AssetManager* assetManager ) const;
 
         // Editor Pass API: inject a render pass into the scene render graph from outside the engine
         // (debug draw, gizmos, authoring aids). See Graphic::ExternalPassSpecification for placement.

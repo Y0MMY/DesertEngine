@@ -188,7 +188,17 @@ namespace Desert::Editor
         // can be serialized to a .desce ONCE and loaded like any scene afterwards.
         void BuildStarterScene();    // fresh Hub project's DefaultScene: sun/ground/cube/light/camera
         void BuildCornellShowcase(); // sandbox demo: baked into CornellDemo.desce on first launch
-        void SaveSceneTo( const std::string& path );
+        // Serializes m_MainScene to @p path. False when the bytes did not land, with the reason logged;
+        // the file that was there (if any) is unchanged. Both callers generate startup content, so a
+        // false here means the project's own default scene is not on disk.
+        [[nodiscard]] bool SaveSceneTo( const std::string& path );
+
+        // THE ONE place the open scene is saved from. Every entry point (Ctrl+S, File -> Save, the
+        // command palette, the "Save and Open" button) goes through it, so the policy — clear the
+        // unsaved-changes mark and announce success ONLY when the bytes landed — is written once and
+        // decided by a pure, tested rule (Editor/Core/SceneSaveRules.hpp). Returns whether the scene on
+        // disk is now current; a caller about to destroy the in-memory scene MUST branch on it.
+        [[nodiscard]] bool SaveOpenScene();
 
         // Force re-cook of Cooked/ from sources, re-register cooked assets, refresh the asset panel.
         void RebuildCookedAssets();
@@ -283,6 +293,10 @@ namespace Desert::Editor
         std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;
         bool                                    m_OpenScenePopup        = false;
         bool                                    m_SaveSceneRequested    = false;
+        // Set when "Save and Open" could not write the scene: the modal STAYS OPEN and shows this, so
+        // the choice the user is making ("throw this scene away") is made knowing the save did not
+        // happen. Cleared whenever the modal is dismissed.
+        std::string                             m_SaveAndOpenError;
         bool                                    m_NewSceneRequested     = false;
         bool                                    m_AddSceneViewRequested = false; // Scenes -> New Scene View
 

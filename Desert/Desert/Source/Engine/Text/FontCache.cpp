@@ -83,6 +83,7 @@ namespace Desert::Text
         // a key that claims to be valid is worse than no atlas at all.
         const std::vector<uint8_t> bytes = SerializeBakedFont( font );
         return Common::Utils::FileSystem::WriteContentToFileAtomic(
-             path, std::string( reinterpret_cast<const char*>( bytes.data() ), bytes.size() ) );
+                    path, std::string( reinterpret_cast<const char*>( bytes.data() ), bytes.size() ) )
+             .IsSuccess();
     }
 } // namespace Desert::Text

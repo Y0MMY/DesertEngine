@@ -88,6 +88,21 @@ namespace Desert::Assets
             // this branch by design too: the editor creates a material by naming a file that does
             // not exist yet (pinned by the AssetMissingFile suite).
             m_Data = MaterialData{};
+
+            // BUT a file that IS there and could not be read is NOT a new material. Both used to land
+            // here identically, with the reason ReadFileContent gave thrown away — so a .demat locked
+            // by permissions, racing a delete or coming out of a truncated pak was presented to the
+            // editor as a blank material somebody had just made, and the next save wrote that over it.
+            // Exists() asks the VFS as well, so a packaged game answers this the same way.
+            if ( !raw && Common::Utils::FileSystem::Exists( m_Metadata.Filepath ) )
+            {
+                LOG_ERROR( "[SurfaceMaterialAsset] '{}' EXISTS but could not be read ({}) — rendering "
+                           "with DEFAULTS; the authored parameters are not applied and this material "
+                           "will refuse to save over the file.",
+                           m_Metadata.Filepath.string(), raw.GetError() );
+                m_RunningOnSubstitutedDefaults = true;
+            }
+
             finalize();
             return BOOLSUCCESS;
         }
@@ -96,25 +111,44 @@ namespace Desert::Assets
         // readers were removed with the rest of the legacy paths).
         if ( const auto parsed = rfl::json::read<MaterialData>( raw.GetValue() ); parsed.has_value() )
         {
-            m_Data = parsed.value();
+            m_Data                         = parsed.value();
+            m_RunningOnSubstitutedDefaults = false; // a reload that parses clears a previous failure
             finalize();
             return BOOLSUCCESS;
         }
 
-        // Nothing parsed — keep the editor usable with defaults; a re-save fixes the file.
-        // ERROR (not warn) on purpose: the authored parameters are LOST for this session and a
-        // re-save makes that permanent — this must not scroll by silently.
+        // Nothing parsed — keep the editor usable with defaults.
+        //
+        // THIS BRANCH RETURNS SUCCESS DELIBERATELY, and the reason belongs here rather than in a
+        // review comment: AssetManager::CreateAsset drops the asset entirely when Load answers an
+        // error, so an unparseable .demat would vanish from the asset database, every mesh slot
+        // pointing at it would resolve to nothing, and the user would be shown an empty material
+        // picker instead of a material they can look at and fix. Refusing to load is a worse answer
+        // than loading degraded — for the FILE, though, not for the DATA: the half that was actually
+        // destructive is the re-save this message used to warn about while nothing could stop it, and
+        // that is now refused by Save() below. Whether an unloadable asset should additionally mark
+        // the whole SCENE as degraded is a larger change to the load path (audit Д31-8) and is not
+        // decided here.
         LOG_ERROR( "[SurfaceMaterialAsset] '{}' is corrupted/unparseable — rendering with DEFAULTS; "
-                   "authored parameters are NOT applied and re-saving will overwrite the file.",
+                   "authored parameters are NOT applied and this material will refuse to save over "
+                   "the file.",
                    m_Metadata.Filepath.string() );
-        m_Data = MaterialData{};
+        m_Data                         = MaterialData{};
+        m_RunningOnSubstitutedDefaults = true;
         finalize();
         return BOOLSUCCESS;
     }
 
-    std::string SurfaceMaterialAsset::Save() const
+    Common::ResultStr<std::string> SurfaceMaterialAsset::Save() const
     {
-        return rfl::json::write( m_Data );
+        if ( m_RunningOnSubstitutedDefaults )
+            return Common::MakeFormattedError<std::string>(
+                 "'{}' is running on substituted defaults because its file could not be read or parsed; "
+                 "writing them out would destroy the authored parameters permanently. Fix or delete the "
+                 "file first.",
+                 m_Metadata.Filepath.string() );
+
+        return Common::MakeSuccess( rfl::json::write( m_Data ) );
     }
 
     Common::BoolResultStr SurfaceMaterialAsset::Unload()

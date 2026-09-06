@@ -9,6 +9,8 @@
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
+#include <filesystem>
+
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
@@ -85,8 +87,24 @@ namespace Desert::Editor
             {
                 asset->CreateFromEntity( entity, *m_AssetManager );
                 const std::string serialized = asset->Serialize();
-                Common::Utils::FileSystem::WriteContentToFile( asset->GetMetadata().Filepath, serialized );
-                LOG_INFO( "Prefab applied: {0}", asset->GetMetadata().Filepath.string() );
+                // The directory is created for the same reason SceneCommands::ApplyPrefabInstance
+                // creates it — an ofstream into a missing directory writes nothing at all — and this
+                // twin of that function was the one place that did not.
+                std::error_code dirEc;
+                std::filesystem::create_directories( asset->GetMetadata().Filepath.parent_path(), dirEc );
+
+                const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
+                     asset->GetMetadata().Filepath, serialized );
+                if ( written )
+                {
+                    LOG_INFO( "Prefab applied: {0}", asset->GetMetadata().Filepath.string() );
+                }
+                else
+                {
+                    LOG_ERROR( "[Prefab] '{}' was NOT written: {} — the file on disk still holds the "
+                               "previous state.",
+                               asset->GetMetadata().Filepath.string(), written.GetError() );
+                }
             }
             Utils::ImGuiUtilities::Tooltip( "Overwrite the prefab file with the current entity state" );
 

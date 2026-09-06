@@ -384,17 +384,32 @@ namespace Desert::Editor
                 {
                     newPrefab->CreateFromEntity( const_cast<ECS::Entity&>( selectedEntity ), *m_AssetManager );
 
+                    // The user types this path by hand, so its directory may not exist at all — and an
+                    // ofstream into a missing directory writes NOTHING, silently. Created here, checked
+                    // below, and the entity is only tagged as an instance once the file is really there.
+                    std::error_code dirEc;
+                    std::filesystem::create_directories( fullPath.parent_path(), dirEc );
+
                     const std::string serialized = newPrefab->Serialize();
-                    Common::Utils::FileSystem::WriteContentToFile( fullPath, serialized );
+                    const auto        written =
+                         Common::Utils::FileSystem::WriteContentToFileAtomic( fullPath, serialized );
+                    if ( !written )
+                    {
+                        LOG_ERROR( "[Prefab] '{}' was NOT written: {} — the entity is unchanged and is "
+                                   "NOT marked as a prefab instance.",
+                                   fullPath.string(), written.GetError() );
+                    }
+                    else
+                    {
+                        // Tag the source entity as a prefab instance so the hierarchy panel shows it
+                        auto& sourceEntity = const_cast<ECS::Entity&>( selectedEntity );
+                        auto& pc           = sourceEntity.HasComponent<ECS::PrefabComponent>()
+                                                  ? sourceEntity.GetComponent<ECS::PrefabComponent>()
+                                                  : sourceEntity.AddComponent<ECS::PrefabComponent>();
+                        pc.Prefab          = newPrefab->GetMetadata().Handle;
 
-                    // Tag the source entity as a prefab instance so the hierarchy panel shows it
-                    auto& sourceEntity = const_cast<ECS::Entity&>( selectedEntity );
-                    auto& pc = sourceEntity.HasComponent<ECS::PrefabComponent>()
-                        ? sourceEntity.GetComponent<ECS::PrefabComponent>()
-                        : sourceEntity.AddComponent<ECS::PrefabComponent>();
-                    pc.Prefab = newPrefab->GetMetadata().Handle;
-
-                    LOG_INFO( "Prefab saved: {0}", fullPath.string() );
+                        LOG_INFO( "Prefab saved: {0}", fullPath.string() );
+                    }
                 }
                 else
                 {

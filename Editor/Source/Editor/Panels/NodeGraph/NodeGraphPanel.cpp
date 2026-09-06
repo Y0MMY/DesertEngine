@@ -217,7 +217,17 @@ namespace Desert::Editor
         std::error_code ec;
         std::filesystem::create_directories( GraphsDirectory(), ec );
         const auto path = GraphsDirectory() / ( m_Doc.Name + ".dgraph" );
-        Common::Utils::FileSystem::WriteContentToFile( path, SG::Serialize( m_Doc ) );
+        // The status line is the only feedback this panel has, and it used to say "Saved <file>" for a
+        // write nobody had checked — while the same file's LOAD and COMPILE paths below both report
+        // their failures properly.
+        if ( const auto written =
+                  Common::Utils::FileSystem::WriteContentToFileAtomic( path, SG::Serialize( m_Doc ) );
+             !written )
+        {
+            m_Status        = "NOT saved: " + written.GetError();
+            m_StatusIsError = true;
+            return;
+        }
         m_Status        = "Saved " + path.filename().string();
         m_StatusIsError = false;
     }
@@ -291,7 +301,15 @@ namespace Desert::Editor
         doc.Domain = static_cast<int>( domain );
         PopulateStarter( doc, domain );
 
-        Common::Utils::FileSystem::WriteContentToFile( path, ShaderGraph::Serialize( doc ) );
+        // The returned path IS the proof the file exists — the caller opens it. An unwritten graph came
+        // back as a path all the same, and the panel then opened nothing and said nothing.
+        if ( const auto written =
+                  Common::Utils::FileSystem::WriteContentToFileAtomic( path, ShaderGraph::Serialize( doc ) );
+             !written )
+        {
+            LOG_ERROR( "[ShaderGraph] '{}' was not created: {}", path.string(), written.GetError() );
+            return {};
+        }
         return path.string();
     }
 
@@ -404,7 +422,15 @@ namespace Desert::Editor
         const auto path = CompiledShaderPath( m_Doc.Name );
         std::error_code ec;
         std::filesystem::create_directories( path.parent_path(), ec );
-        Common::Utils::FileSystem::WriteContentToFile( path, source.GetValue() );
+        // A compile that produced correct source and could not store it is still a failed compile: the
+        // status line below promises "hot reload applies it", and hot reload reads this file.
+        if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( path, source.GetValue() );
+             !written )
+        {
+            m_Status        = "Compiled, but NOT written: " + written.GetError();
+            m_StatusIsError = true;
+            return;
+        }
 
         const auto shaderService = Runtime::ResourceRegistry::GetShaderService();
         if ( shaderService->GetByName( m_Doc.Name ) )
@@ -465,7 +491,24 @@ namespace Desert::Editor
         asset->Data().ShaderName = m_Doc.Name;
         if ( !asset->Data().MaterialId.has_value() || asset->Data().MaterialId->IsNull() )
             asset->Data().MaterialId = Common::UUID::Generate();
-        Common::Utils::FileSystem::WriteContentToFile( path, asset->Save() );
+        // Logged, and then carried on with deliberately: the preview material lives in memory for this
+        // session and the registration below is what makes the preview render. The file only matters to
+        // the NEXT session, so a failed write costs a stale preview material next launch — worth saying,
+        // not worth refusing a preview for.
+        const auto serialized = asset->Save();
+        if ( !serialized )
+        {
+            LOG_ERROR( "[NodeGraph] the preview material '{}' was not written: {}", path.string(),
+                       serialized.GetError() );
+        }
+        else if ( const auto written =
+                       Common::Utils::FileSystem::WriteContentToFileAtomic( path, serialized.GetValue() );
+                  !written )
+        {
+            LOG_ERROR( "[NodeGraph] the preview material '{}' was not written: {} — the preview works "
+                       "this session, but the file will be stale on the next one.",
+                       path.string(), written.GetError() );
+        }
 
         if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
             materialService->Register( asset );

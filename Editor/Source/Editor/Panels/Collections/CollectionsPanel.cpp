@@ -154,7 +154,26 @@ namespace Desert::Editor
                 p.MaterialId       = asset->Data().MaterialId;
                 asset->Data()      = p.ToMaterialData();
 
-                Common::Utils::FileSystem::WriteContentToFile( dematPath, asset->Save() );
+                // Freshly created and populated above, so Save() cannot refuse here — but it is asked
+                // rather than assumed, because "cannot refuse" is a property of THIS call site and the
+                // asset does not know that.
+                const auto serialized = asset->Save();
+                if ( !serialized )
+                {
+                    LOG_ERROR( "[Collections] '{}' was NOT materialized: {}", mat.Name, serialized.GetError() );
+                    continue;
+                }
+                if ( const auto written =
+                          Common::Utils::FileSystem::WriteContentToFileAtomic( dematPath, serialized.GetValue() );
+                     !written )
+                {
+                    // Not registered on a failed write: registering would put a material into the
+                    // service under a handle whose .demat does not exist, so every mesh that adopts it
+                    // renders from values no future run can reload.
+                    LOG_ERROR( "[Collections] '{}' was NOT materialized — {} could not be written: {}", mat.Name,
+                               dematPath.generic_string(), written.GetError() );
+                    continue;
+                }
                 Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
                 LOG_INFO( "[Collections] Materialized '{}' -> {}", mat.Name, dematPath.generic_string() );
             }

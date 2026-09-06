@@ -463,7 +463,16 @@ namespace Desert::Editor
              { return std::filesystem::exists( std::filesystem::path( m_CurrentDir->AssetPath ) / n ); } );
         const auto path = std::filesystem::path( m_CurrentDir->AssetPath ) / name;
         // Minimal valid material: no params, no textures — the engine derives a stable id from the path.
-        Common::Utils::FileSystem::WriteContentToFile( path, "{\"Params\":[],\"Textures\":[]}" );
+        // The refresh below is what puts the new material in front of the user, so it runs only when
+        // there is a file to show: a refresh over a failed write just redraws the old listing and the
+        // user is left believing the "New Material" menu item did nothing at all.
+        if ( const auto written =
+                  Common::Utils::FileSystem::WriteContentToFileAtomic( path, "{\"Params\":[],\"Textures\":[]}" );
+             !written )
+        {
+            LOG_ERROR( "[Content] '{}' was not created: {}", path.generic_string(), written.GetError() );
+            return;
+        }
         QueueRefresh();
     }
 
@@ -1350,6 +1359,8 @@ namespace Desert::Editor
                                 {
                                     const auto path = NodeGraphPanel::CreateNewGraphFile(
                                          m_CurrentDir->AssetPath, domain );
+                                    if ( path.empty() ) // not written — nothing to open, nothing new to list
+                                        return;
                                     NodeGraphPanel::RequestOpen( path );
                                     QueueRefresh();
                                 };

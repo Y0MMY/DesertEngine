@@ -17,8 +17,10 @@ namespace Desert::Editor
         // Names of saved layouts (the .ini file stems), sorted.
         static std::vector<std::string> List();
 
-        // Capture the current ImGui layout under @p name (overwrites). Returns false on an empty/invalid name.
-        static bool Save( const std::string& name );
+        // Capture the current ImGui layout under @p name (overwrites). Returns false on an empty or
+        // invalid name AND on a write that did not land — in both cases there is no layout by that
+        // name, which is the only thing a caller can act on.
+        [[nodiscard]] static bool Save( const std::string& name );
 
         // Apply a saved layout. Returns false if it does not exist.
         static bool Load( const std::string& name );

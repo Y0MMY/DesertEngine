@@ -158,7 +158,19 @@ namespace Desert::Editor
             ::Desert::Assets::MaterialData data;
             data.ShaderName = "Terrain";
             data.MaterialId = ::Common::UUID::Generate();
-            ::Common::Utils::FileSystem::WriteContentToFile( path.generic_string(), rfl::json::write( data ) );
+            // The second step below is checked carefully and the first was not, even though the whole
+            // point of this order is that the asset ADOPTS the GUID out of the file: an unwritten file
+            // means CreateAsset loads defaults, the material is not a Terrain material at all, and the
+            // handle is not the one any future run will resolve.
+            if ( const auto written = ::Common::Utils::FileSystem::WriteContentToFileAtomic(
+                      path.generic_string(), rfl::json::write( data ) );
+                 !written )
+            {
+                LOG_ERROR( "[Terrain] could not write the terrain material '{}': {} — the terrain's "
+                           "material slot is unchanged.",
+                           path.generic_string(), written.GetError() );
+                return ::Desert::Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+            }
         }
 
         auto asset = assetMgr->CreateAsset<::Desert::Assets::SurfaceMaterialAsset>(
@@ -615,7 +627,16 @@ namespace Desert::Editor
             ::Desert::Assets::MaterialData data;
             data.ShaderName = ::Desert::Graphic::kCloudMaterialShaderName;
             data.MaterialId = ::Common::UUID::Generate();
-            ::Common::Utils::FileSystem::WriteContentToFile( path.generic_string(), rfl::json::write( data ) );
+            // Checked for the same reason CreateTerrainMaterial checks it, one function above.
+            if ( const auto written = ::Common::Utils::FileSystem::WriteContentToFileAtomic(
+                      path.generic_string(), rfl::json::write( data ) );
+                 !written )
+            {
+                LOG_ERROR( "[Clouds] could not write the cloud material '{}': {} — the layer's material "
+                           "slot is unchanged.",
+                           path.generic_string(), written.GetError() );
+                return ::Desert::Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+            }
         }
 
         auto asset = assetMgr->CreateAsset<::Desert::Assets::SurfaceMaterialAsset>(

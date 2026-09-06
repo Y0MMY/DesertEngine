@@ -732,19 +732,32 @@ namespace Desert::Editor
         }
         if ( ImGui::BeginPopupModal( "ApplyPrefabPopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
         {
+            static std::string s_applyError;
+
             ImGui::TextUnformatted( "Overwrite the source .deprefab file with this instance's current state?" );
             ImGui::TextDisabled( "Other instances pick the changes up when they are (re)instantiated." );
+            if ( !s_applyError.empty() )
+                ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ), "%s", s_applyError.c_str() );
             ImGui::Spacing();
             if ( ImGui::Button( "Apply", ImVec2( 120, 0 ) ) )
             {
-                if ( m_ApplyPrefabTarget )
-                    Commands::ApplyPrefabInstance( *m_ApplyPrefabTarget ); // file write only (safe here)
-                m_ApplyPrefabTarget.reset();
-                ImGui::CloseCurrentPopup();
+                // The popup used to close whatever ApplyPrefabInstance answered, so a refused apply
+                // looked exactly like a successful one. It closes only when the file was written.
+                if ( m_ApplyPrefabTarget && !Commands::ApplyPrefabInstance( *m_ApplyPrefabTarget ) )
+                {
+                    s_applyError = "The prefab file was NOT written (see the log). Nothing has changed.";
+                }
+                else
+                {
+                    s_applyError.clear();
+                    m_ApplyPrefabTarget.reset();
+                    ImGui::CloseCurrentPopup();
+                }
             }
             ImGui::SameLine();
             if ( ImGui::Button( "Cancel", ImVec2( 90, 0 ) ) )
             {
+                s_applyError.clear();
                 m_ApplyPrefabTarget.reset();
                 ImGui::CloseCurrentPopup();
             }
@@ -999,18 +1012,29 @@ namespace Desert::Editor
                 {
                     ECS::Entity root = entityRef->get();
                     prefabAsset->CreateFromEntity( root, *m_AssetManager );
-                    Common::Utils::FileSystem::WriteContentToFile( Common::Filepath( m_SavePrefabPath ),
-                                                                   prefabAsset->Serialize() );
+                    const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
+                         Common::Filepath( m_SavePrefabPath ), prefabAsset->Serialize() );
 
-                    // Mark the live entity as an instance of the prefab it was just saved as.
-                    if ( !root.HasComponent<ECS::PrefabComponent>() )
-                        root.AddComponent<ECS::PrefabComponent>();
-                    root.GetComponent<ECS::PrefabComponent>().Prefab = prefabAsset->GetMetadata().Handle;
+                    if ( !written )
+                    {
+                        // The PrefabComponent below is NOT attached on a failed write. It would make
+                        // the live entity declare itself an instance of a file that does not exist —
+                        // the hierarchy draws it with a prefab badge, "Revert to Prefab" reverts it to
+                        // nothing, and the next scene save persists the dangling reference.
+                        s_error = "The prefab file was NOT written: " + written.GetError();
+                    }
+                    else
+                    {
+                        // Mark the live entity as an instance of the prefab it was just saved as.
+                        if ( !root.HasComponent<ECS::PrefabComponent>() )
+                            root.AddComponent<ECS::PrefabComponent>();
+                        root.GetComponent<ECS::PrefabComponent>().Prefab = prefabAsset->GetMetadata().Handle;
 
-                    LOG_INFO( "[Prefab] Saved '{}' -> {}", root.GetComponent<ECS::TagComponent>().Tag,
-                              m_SavePrefabPath );
-                    s_error.clear();
-                    ImGui::CloseCurrentPopup();
+                        LOG_INFO( "[Prefab] Saved '{}' -> {}", root.GetComponent<ECS::TagComponent>().Tag,
+                                  m_SavePrefabPath );
+                        s_error.clear();
+                        ImGui::CloseCurrentPopup();
+                    }
                 }
             }
         }

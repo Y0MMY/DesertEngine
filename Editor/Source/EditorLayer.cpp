@@ -25,6 +25,7 @@
 #include "Editor/Core/LayoutManager.hpp"
 #include "Editor/Core/PanelRequests.hpp"
 #include "Editor/Core/SceneOpenRequest.hpp"
+#include "Editor/Core/SceneSaveRules.hpp"
 #include "Editor/Core/ShotOptions.hpp"
 #include "Editor/Core/MaterialAssetUtils.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
@@ -304,9 +305,20 @@ namespace Desert::Editor
             {
                 m_MainScene->Clear();
                 BuildCornellShowcase();
-                SaveSceneTo( demoPath.generic_string() );
+                // The success line is inside the branch: this bake exists so the demo can be OPENED
+                // later, and announcing a file that is not there sends the next reader looking for a
+                // corrupt scene instead of a failed write.
+                if ( SaveSceneTo( demoPath.generic_string() ) )
+                {
+                    LOG_INFO( "[Editor] Baked the Cornell showcase -> {}", demoPath.string() );
+                }
+                else
+                {
+                    LOG_ERROR( "[Editor] The Cornell showcase was NOT baked to {} — the sandbox has no "
+                               "demo scene to open (see the write failure above).",
+                               demoPath.string() );
+                }
                 m_MainScene->Clear();
-                LOG_INFO( "[Editor] Baked the Cornell showcase -> {}", demoPath.string() );
             }
         }
 
@@ -354,8 +366,22 @@ namespace Desert::Editor
                 else
                 {
                     BuildStarterScene();
-                    SaveSceneTo( scenePath );
-                    LOG_INFO( "[Editor] Generated the Starter scene -> {}", scenePath );
+                    if ( SaveSceneTo( scenePath ) )
+                    {
+                        LOG_INFO( "[Editor] Generated the Starter scene -> {}", scenePath );
+                    }
+                    else
+                    {
+                        // The scene is BUILT and open — only the file is missing. Saying so is the
+                        // difference between "your new project opens empty next time" being a mystery
+                        // and being a known, fixable write failure the user can still Ctrl+S past.
+                        LOG_ERROR( "[Editor] The Starter scene was built but NOT written to {} — this "
+                                   "project will open empty next time unless it is saved.",
+                                   scenePath );
+                        Editor::ToastManager::Push( "The Starter scene could not be written — save it "
+                                                    "before closing (see the log)",
+                                                    Editor::ToastLevel::Error );
+                    }
                 }
             }
         }
@@ -370,7 +396,10 @@ namespace Desert::Editor
             m_RecoveryAutosave   = CrashRecovery::LatestAutosave();
             m_ShowRecoveryPrompt = !m_RecoveryAutosave.empty();
         }
-        CrashRecovery::ArmSession();
+        if ( !CrashRecovery::ArmSession() )
+            Editor::ToastManager::Push( "Crash recovery is OFF for this session — the lock file could "
+                                        "not be written (see the log)",
+                                        Editor::ToastLevel::Error );
 
         // LoadScene( "Resources/Assets/Scene/HouseDemo.desce" );
     }
@@ -724,7 +753,6 @@ namespace Desert::Editor
                     const uint64_t rev = CommandHistory::Get().Revision();
                     if ( rev != s_LastAutosaveRevision )
                     {
-                        s_LastAutosaveRevision = rev;
                         Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
                         std::string                   name = m_MainScene->GetSceneName();
                         for ( auto& ch : name )
@@ -735,8 +763,26 @@ namespace Desert::Editor
                         std::filesystem::create_directories( dir, ec );
                         const auto path = dir / ( name + "_autosave" +
                                                   std::string( Common::Constants::Extensions::SCENE_EXTENSION ) );
-                        Common::Utils::FileSystem::WriteContentToFile( path, serializer.SerializeToJson() );
-                        LOG_INFO( "[Autosave] {}", path.string() );
+                        const auto written = ec ? Common::MakeFormattedError( "could not create {}: {}",
+                                                                              dir.string(), ec.message() )
+                                                : Common::Utils::FileSystem::WriteContentToFileAtomic(
+                                                       path, serializer.SerializeToJson() );
+                        if ( written )
+                        {
+                            // The revision is marked done ONLY on a write that landed. It used to be
+                            // marked before the write, so a failed autosave was never retried: the next
+                            // tick saw the same revision, decided nothing had changed, and skipped —
+                            // and the log said the autosave had happened. A user going for their
+                            // autosave after a crash found an old file or none.
+                            s_LastAutosaveRevision = rev;
+                            LOG_INFO( "[Autosave] {}", path.string() );
+                        }
+                        else
+                        {
+                            LOG_ERROR( "[Autosave] {} was NOT written: {}. The next autosave tick will "
+                                       "try this revision again.",
+                                       path.string(), written.GetError() );
+                        }
                     }
                 }
             }
@@ -1388,11 +1434,10 @@ namespace Desert::Editor
 
                 if ( ::ImGui::IsKeyPressed( ImGuiKey_S, false ) )
                 {
-                    m_MainScene->Serialize( m_AssetManager.get() );
-                    s_SavedRevision = CommandHistory::Get().Revision();
-                    LOG_INFO( "[Scene] Saved '{}' (Ctrl+S)", m_MainScene->GetSceneName() );
-                    Editor::ToastManager::Push( "Saved '" + m_MainScene->GetSceneName() + "'",
-                                                Editor::ToastLevel::Success );
+                    // Deliberately discarded HERE and only here: Ctrl+S destroys nothing, so there is
+                    // no next step to gate. SaveOpenScene has already put the star back on and told the
+                    // user why if the write failed.
+                    (void)SaveOpenScene();
                 }
             }
 
@@ -1660,8 +1705,7 @@ namespace Desert::Editor
         }
 
         // Actions.
-        commands.push_back(
-             { "Action", "Save Scene", [this] { m_MainScene->Serialize( m_AssetManager.get() ); } } );
+        commands.push_back( { "Action", "Save Scene", [this] { (void)SaveOpenScene(); } } );
         commands.push_back( { "Action", "Undo", [] { CommandHistory::Get().Undo(); } } );
         commands.push_back( { "Action", "Redo", [] { CommandHistory::Get().Redo(); } } );
 
@@ -1731,7 +1775,9 @@ namespace Desert::Editor
             ImGui::BeginDisabled( !valid );
             if ( ( ImGui::Button( "Save", ImVec2( 110.0f, 0.0f ) ) || submit ) && valid )
             {
-                LayoutManager::Save( m_LayoutNameBuf );
+                if ( !LayoutManager::Save( m_LayoutNameBuf ) )
+                    Editor::ToastManager::Push( "The layout was not saved (see the log)",
+                                                Editor::ToastLevel::Error );
                 m_ShowSaveLayoutPopup = false;
                 ImGui::CloseCurrentPopup();
             }
@@ -2916,12 +2962,47 @@ namespace Desert::Editor
         ImGui::EndMenu();
     }
 
-    void EditorLayer::SaveSceneTo( const std::string& path )
+    bool EditorLayer::SaveSceneTo( const std::string& path )
     {
         std::error_code ec;
         std::filesystem::create_directories( std::filesystem::path( path ).parent_path(), ec );
+        if ( ec )
+        {
+            LOG_ERROR( "[Scene] Could not create the directory for '{}': {}", path, ec.message() );
+            return false;
+        }
+
         Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
-        Common::Utils::FileSystem::WriteContentToFile( path, serializer.SerializeToJson() );
+        if ( const auto written =
+                  Common::Utils::FileSystem::WriteContentToFileAtomic( path, serializer.SerializeToJson() );
+             !written )
+        {
+            LOG_ERROR( "[Scene] Could not write '{}': {}", path, written.GetError() );
+            return false;
+        }
+        return true;
+    }
+
+    bool EditorLayer::SaveOpenScene()
+    {
+        const auto verdict = Editor::Core::Rules::DecideAfterSceneSave(
+             m_MainScene->Serialize( m_AssetManager.get() ), m_MainScene->GetSceneName() );
+
+        if ( verdict.MarkSceneSaved )
+            s_SavedRevision = CommandHistory::Get().Revision();
+
+        if ( verdict.IsError )
+        {
+            LOG_ERROR( "[Scene] {}", verdict.Message );
+        }
+        else
+        {
+            LOG_INFO( "[Scene] {}", verdict.Message );
+        }
+
+        Editor::ToastManager::Push( verdict.Message,
+                                    verdict.IsError ? Editor::ToastLevel::Error : Editor::ToastLevel::Success );
+        return verdict.MayDiscardScene;
     }
 
     void EditorLayer::BuildStarterScene()
@@ -3682,6 +3763,9 @@ namespace Desert::Editor
         {
             ImGui::OpenPopup( "Open Scene?" );
             m_ConfirmOpenScenePopup = false;
+            // A failure belongs to the attempt that produced it. Without this a save that failed once
+            // would keep warning about a scene the user has since saved by hand.
+            m_SaveAndOpenError.clear();
         }
 
         ImGui::SetNextWindowPos( ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
@@ -3694,22 +3778,47 @@ namespace Desert::Editor
 
         ImGui::TextUnformatted( "The current scene has unsaved changes." );
         ImGui::TextDisabled( "Open %s", havePending ? SceneLabel( *m_PendingOpenScene ).c_str() : "" );
+
+        // A failed "Save and Open" from a previous click of this same modal. It is shown INSIDE the
+        // modal rather than only as a toast because the buttons below are still live: the user is about
+        // to decide whether to discard this scene, and that decision changes completely once the save
+        // they asked for turns out not to have happened.
+        if ( !m_SaveAndOpenError.empty() )
+        {
+            ImGui::Separator();
+            ImGui::TextColored( ThemeManager::GetErrorColor(), "%s", m_SaveAndOpenError.c_str() );
+            ImGui::TextDisabled( "\"Discard\" below would throw these changes away for good." );
+        }
+
         ImGui::Separator();
 
         if ( ImGui::Button( "Save and Open", ImVec2( 130, 0 ) ) )
         {
-            m_MainScene->Serialize( m_AssetManager.get() );
-            s_SavedRevision = CommandHistory::Get().Revision();
-            if ( havePending )
-                LoadScene( *m_PendingOpenScene );
-            m_PendingOpenScene.reset();
-            ImGui::CloseCurrentPopup();
+            // THE GATE THIS WHOLE TASK EXISTS FOR. LoadScene below clears the command history and calls
+            // m_MainScene->Clear() — it destroys the only copy of the work the user just asked to have
+            // saved. Before the save chain returned a result this ran unconditionally, so a scene that
+            // failed to reach the disk was then deleted from memory, with a green "Saved" toast over it
+            // and nowhere to recover from. The modal now stays open on a failed write and says so.
+            if ( SaveOpenScene() )
+            {
+                m_SaveAndOpenError.clear();
+                if ( havePending )
+                    LoadScene( *m_PendingOpenScene );
+                m_PendingOpenScene.reset();
+                ImGui::CloseCurrentPopup();
+            }
+            else
+            {
+                m_SaveAndOpenError = "The scene was NOT saved — see the log for the failing step. "
+                                     "Nothing has been opened and nothing has been thrown away.";
+            }
         }
 
         ImGui::SameLine();
 
         if ( ImGui::Button( "Discard", ImVec2( 110, 0 ) ) )
         {
+            m_SaveAndOpenError.clear();
             if ( havePending )
                 LoadScene( *m_PendingOpenScene );
             m_PendingOpenScene.reset();
@@ -3720,6 +3829,7 @@ namespace Desert::Editor
 
         if ( ImGui::Button( "Cancel", ImVec2( 110, 0 ) ) )
         {
+            m_SaveAndOpenError.clear();
             m_PendingOpenScene.reset();
             ImGui::CloseCurrentPopup();
         }
@@ -3735,8 +3845,9 @@ namespace Desert::Editor
         }
 
         m_SaveSceneRequested = false;
-        m_MainScene->Serialize( m_AssetManager.get() );
-        s_SavedRevision = CommandHistory::Get().Revision();
+        // Discarded for the same reason as Ctrl+S: File -> Save destroys nothing, and SaveOpenScene has
+        // already reported the outcome and left the unsaved mark standing if the write failed.
+        (void)SaveOpenScene();
     }
 
     void EditorLayer::DrawNewScenePopup()

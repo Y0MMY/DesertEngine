@@ -1075,21 +1075,24 @@ namespace Desert::Editor
 
     void MaterialEditorPanel::SaveSubject( Assets::SurfaceMaterialAsset& asset )
     {
-        const auto        path = asset.GetMetadata().Filepath;
-        const std::string text = asset.Save();
-        Common::Utils::FileSystem::WriteContentToFile( path, text );
-
-        // WriteContentToFile reports nothing, so the write is confirmed by looking at the result. Without
-        // this a read-only file or a missing directory would leave the user with a Save button that appears
-        // to work and a material whose edits die with the session — and the thumbnail below would be
-        // discarded for a change that never landed.
-        std::error_code      sizeEc;
-        const std::uintmax_t written = std::filesystem::file_size( path, sizeEc );
-        if ( sizeEc || written != text.size() )
+        const auto path       = asset.GetMetadata().Filepath;
+        const auto serialized = asset.Save();
+        if ( !serialized )
         {
-            LOG_ERROR( "[MaterialEditor] '{}' was not written ({} bytes on disk, {} expected): this "
-                       "material's edits are still only in memory.",
-                       path.generic_string(), sizeEc ? 0ull : static_cast<uint64_t>( written ), text.size() );
+            LOG_ERROR( "[MaterialEditor] {}", serialized.GetError() );
+            return;
+        }
+        const std::string& text = serialized.GetValue();
+
+        // The write primitive answers now, so the size-on-disk cross-check that used to stand here is
+        // gone with it: it existed only because the old primitive reported nothing, it could not tell a
+        // failed write from a torn one, and it read the file back on every save to find out something
+        // the write itself knew.
+        if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( path, text ); !written )
+        {
+            LOG_ERROR( "[MaterialEditor] '{}' was not written: {} — this material's edits are still only "
+                       "in memory.",
+                       path.generic_string(), written.GetError() );
             return;
         }
 
