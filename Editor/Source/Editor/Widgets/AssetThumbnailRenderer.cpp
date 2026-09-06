@@ -52,26 +52,35 @@ namespace Desert::Editor
         // but this offscreen renderer is never fed, so disable it explicitly).
         m_Renderer->SetOutlineSettings( glm::vec3( 0.0f ), 0.0f, 0.0f, false );
 
-        // WHERE THIS SCENE'S CAPTURE CAMERA COMES FROM, and why nothing here may state its pose.
+        // WHERE THIS SCENE'S CAPTURE CAMERA COMES FROM, and why this scene has no camera ENTITY.
         //
         // Scene::Init() has already made the camera: it constructs a Core::EditorCamera and hands it to
         // SetActiveCamera, which also publishes it as the scene's MAIN camera — and SceneRenderer::BeginScene
         // captures through `scene.GetMainCamera()`. So the camera that takes the picture is the engine's
         // default editor camera, owned by the engine, positioned by the engine's own defaults.
         //
-        // The comment that stood here asserted those defaults as literals — "sits at ~(-4.33, 6.12, -4.33)
-        // looking at the origin (distance ~8.66), so thumbnails are framed by SCALING the target at the
-        // origin to fit that fixed view". Every number in it was true when it was written and false
-        // afterwards: the centimetre migration moved the default camera to eye height, focal (0, 200, 0),
-        // and a subject left at the world origin then sits 200 units BELOW where the camera aims — 70
-        // degrees off a view axis with a 38-degree half-FOV, entirely outside the frustum. That is Д30:
-        // the thumbnail stopped containing its subject at all, and only surfaced when a material Save
-        // deleted a pre-migration PNG and forced a re-capture.
+        // There USED to be a `ThumbCam` entity here carrying a CameraComponent with IsMainCamera = true,
+        // which read as the thing that made the capture work and was in fact inert. A scene
+        // CameraComponent is a GAME camera: the only code that turns one into a camera object is
+        // Scene::FindMainCamera (which nothing in the repository calls) and Scene::UpdateActiveCameraSource,
+        // which consults camera entities only while the scene is in SceneState::Play. This scene is created,
+        // rendered and destroyed in Edit, so the component was never read by anything. Measured rather
+        // than argued: three material captures taken with the entity and without it are byte-identical
+        // 1024px PNGs, against a repeat-run noise floor of zero bytes for this scene. Keeping it was worse
+        // than useless — it invited the next reader to "fix" the thumbnail camera by editing a component
+        // that does not reach the renderer.
+        //
+        // The comment that stood here also asserted the engine camera's defaults as literals — "sits at
+        // ~(-4.33, 6.12, -4.33) looking at the origin (distance ~8.66), so thumbnails are framed by SCALING
+        // the target at the origin to fit that fixed view". Every number in it was true when it was written
+        // and false afterwards: the centimetre migration moved the default camera to eye height, focal
+        // (0, 200, 0), and a subject left at the world origin then sits 200 units BELOW where the camera
+        // aims — 70 degrees off a view axis with a 38-degree half-FOV, entirely outside the frustum. That
+        // is Д30: the thumbnail stopped containing its subject at all, and only surfaced when a material
+        // Save deleted a pre-migration PNG and forced a re-capture.
         //
         // So FitTarget reads the pose from the camera's OWN matrices (ThumbnailFraming::PlaceInView) and no
         // camera constant is written down anywhere in this file. A pose that is measured cannot go stale.
-        m_Camera = m_Scene->CreateNewEntity( "ThumbCam" );
-        m_Camera.AddComponent<ECS::CameraComponent>().Data.IsMainCamera = true;
 
         // Key light pointing toward the camera-facing hemisphere (DirectionLight stores the *travel*
         // direction in Translation; the shader lights along -Direction). From above + the camera's side.

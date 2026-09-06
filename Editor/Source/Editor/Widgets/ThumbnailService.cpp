@@ -1,6 +1,7 @@
 #include "ThumbnailService.hpp"
 
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailKey.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
@@ -39,11 +40,11 @@ namespace Desert::Editor
         return s_Instance;
     }
 
-    bool ThumbnailService::ShouldQueue( const std::string& assetPath, const std::string& png )
+    bool ThumbnailService::ShouldQueue( const std::string& identity, const std::string& png )
     {
-        if ( assetPath.empty() )
+        if ( identity.empty() )
             return false;
-        if ( m_Failed.count( assetPath ) || m_Queued.count( assetPath ) )
+        if ( m_Failed.count( identity ) || m_Queued.count( identity ) )
             return false;
 
         // Already captured in a previous session: the on-disk PNG IS the cache, so nothing to do. Staleness
@@ -59,12 +60,17 @@ namespace Desert::Editor
     std::string ThumbnailService::RequestMaterial( const Assets::AssetHandle& material,
                                                    const std::string& assetPath, bool flatPreview )
     {
-        const std::string png = ThumbnailCache::DiskPath( assetPath );
-        if ( ShouldQueue( assetPath, png ) )
+        // The deduplication sets are keyed on the asset's IDENTITY, for the same reason the PNG is
+        // (ThumbnailKey): panels do not agree on how to spell a path, and a set that remembered spellings
+        // would let one panel's Invalidate leave another panel's entry standing — which is a queue slot
+        // that never drains and a thumbnail that never refreshes.
+        const std::string identity = ThumbnailKey::Identity( assetPath );
+        const std::string png      = ThumbnailCache::DiskPath( assetPath );
+        if ( ShouldQueue( identity, png ) )
         {
             m_Queue.push_back( { Kind::Material, material, Assets::AssetHandle( static_cast<uint64_t>( 0 ) ),
-                                 assetPath, png, flatPreview } );
-            m_Queued.insert( assetPath );
+                                 identity, png, flatPreview } );
+            m_Queued.insert( identity );
         }
         return png;
     }
@@ -72,19 +78,23 @@ namespace Desert::Editor
     std::string ThumbnailService::RequestMesh( const Assets::AssetHandle& mesh, const std::string& assetPath,
                                                const Assets::AssetHandle& material )
     {
-        const std::string png = ThumbnailCache::DiskPath( assetPath );
-        if ( ShouldQueue( assetPath, png ) )
+        const std::string identity = ThumbnailKey::Identity( assetPath );
+        const std::string png      = ThumbnailCache::DiskPath( assetPath );
+        if ( ShouldQueue( identity, png ) )
         {
-            m_Queue.push_back( { Kind::Mesh, mesh, material, assetPath, png, false } );
-            m_Queued.insert( assetPath );
+            m_Queue.push_back( { Kind::Mesh, mesh, material, identity, png, false } );
+            m_Queued.insert( identity );
         }
         return png;
     }
 
     void ThumbnailService::Invalidate( const std::string& assetPath )
     {
-        m_Failed.erase( assetPath );
-        m_Queued.erase( assetPath );
+        // Through the same identity the Request* entry points inserted under, so a caller holding any
+        // spelling of the asset clears the right entries.
+        const std::string identity = ThumbnailKey::Identity( assetPath );
+        m_Failed.erase( identity );
+        m_Queued.erase( identity );
     }
 
     void ThumbnailService::Shutdown()
@@ -185,7 +195,7 @@ namespace Desert::Editor
         else
             m_Renderer->RequestMesh( req.Handle, req.Png, req.Material );
 
-        m_InFlight      = req.AssetPath;
+        m_InFlight      = req.Identity;
         m_InFlightPng   = req.Png;
         m_InFlightTicks = 0;
     }

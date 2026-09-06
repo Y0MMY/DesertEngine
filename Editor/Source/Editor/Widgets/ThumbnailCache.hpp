@@ -67,9 +67,15 @@ namespace Desert::Editor
         // compares the source asset's modtime, so it can't notice when the thumbnail RENDERER improves — bump
         // CacheVersion() to invalidate every old thumbnail at once, and call PurgeOldVersions() once at startup
         // to delete the stale folders/files so they regenerate cleanly with the current renderer.
-        static int         CacheVersion();
-        static std::string DiskPath( const std::string& assetPath ); // versioned PNG path for an asset
-        static void        PurgeOldVersions();                        // drop everything except the current version
+        static int CacheVersion();
+
+        // The versioned PNG path for an asset. `assetPath` may be ANY spelling of the asset's location:
+        // the file name comes from the asset's project-relative identity (Editor/Widgets/ThumbnailKey.hpp),
+        // so every panel that names the same asset lands on the same file, and the same project opened
+        // from a different directory keeps its cache instead of re-rendering the whole content tree.
+        static std::string DiskPath( const std::string& assetPath );
+
+        static void PurgeOldVersions(); // drop everything except the current version
 
     private:
         // Display cap: the on-disk PNG can be large (1024), but the grid shows it tiny, so decode it into a
