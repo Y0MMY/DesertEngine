@@ -427,10 +427,25 @@ namespace Desert::Editor
 
         ImGui::PushID( field.Name.c_str() );
 
+        // "Differs from the type's default" — computed ONCE, here, because two things downstream have to
+        // agree about it: the accent tick on the row's left edge (painted by the background below, before
+        // any widget) and the reset arrow in the label column (drawn after it). Two independent memcmps
+        // would be two chances to disagree, and a row marked dirty with no way to revert it is worse than
+        // no mark at all.
+        //
+        // Byte-level, exactly like ResetFieldToDefault: only trivially-copyable value fields qualify, so
+        // the reset that this mark advertises is always the memcpy that PropertyReset performs.
+        const bool resettable = defFieldPtr && !field.Meta.ReadOnly && !field.IsContainer &&
+                                field.Type != FieldType::String && field.Type != FieldType::Struct &&
+                                field.Size > 0;
+        // `mixed` counts as modified: with several objects selected the primary may sit at the default
+        // while the others do not, and the row IS offering a reset that will change something.
+        const bool differsFromDefault = resettable && ( mixed || std::memcmp( p, defFieldPtr, field.Size ) != 0 );
+
         // Row background (stripe + hover) comes from the shared property-row primitive, so this grid and
         // a hand-written widget cannot drift apart. Painted BEFORE the row: a fill drawn afterwards would
         // cover the widgets.
-        const bool rowHovered = Utils::ImGuiUtilities::PropertyRowBackground();
+        const bool rowHovered = Utils::ImGuiUtilities::PropertyRowBackground( 0.0f, differsFromDefault );
 
         ImGui::Columns( 2 );
         ImGui::SetColumnWidth( 0, Utils::ImGuiUtilities::PropertyLabelWidth() );
@@ -487,14 +502,11 @@ namespace Desert::Editor
         // Reset-to-default: for trivially-copyable value fields (not strings/structs/containers) that DIFFER
         // from their default, show a revert button right-aligned in the label column (UE-style). memcpy is
         // safe here because these field types own no heap.
-        const bool resettable = defFieldPtr && !field.Meta.ReadOnly && !field.IsContainer &&
-                                field.Type != FieldType::String && field.Type != FieldType::Struct &&
-                                field.Size > 0;
-        // Offered when THIS object differs from the default — or when the selection is mixed: with
-        // several objects selected the primary may already sit at the default while the others do not,
-        // and hiding the button there would make the default unreachable for exactly the objects that
-        // need it (the broadcast below only runs off this row's report).
-        if ( resettable && ( mixed || std::memcmp( p, defFieldPtr, field.Size ) != 0 ) )
+        //
+        // Same `differsFromDefault` the accent tick was painted from, so the mark in the margin and the
+        // control that clears it appear and disappear together. (Mixed selections are included there for
+        // the reason spelled out at its definition: the broadcast below only runs off this row's report.)
+        if ( differsFromDefault )
         {
             const float bw = ImGui::GetFrameHeight();
             // Sits left of the pin when one is showing (rightEdge already stepped past it).

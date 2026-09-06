@@ -184,6 +184,68 @@ TEST( PropertyReset, MixedSelectionWithPrimaryAtDefaultStillReachesTheOthers )
     EXPECT_TRUE( FieldEqualsDefault( other, def, kCoverage ) );
 }
 
+// --- The MARK and the ACTION must agree (У5-3) --------------------------------------------------
+//
+// Details now paints a 2px accent tick down the left edge of any row whose value differs from the
+// type's default, beside the reset arrow that was already there. That is a PROMISE: the tick says
+// "there is something here to revert". A row marked dirty whose reset does nothing is a worse state
+// than no mark at all, because the mark is what the eye scans for.
+//
+// DrawField makes them agree by construction — one `differsFromDefault` drives both the background and
+// the button. What that construction rests on is the predicate itself matching the operation, which is
+// exactly the relation below: memcmp-differs must equal reset-reports-a-change, for every field, both
+// ways round. If ResetFieldToDefault ever grows a case it declines to handle, this fails rather than
+// the editor growing rows that are marked and inert.
+
+namespace
+{
+    // The predicate PropertyEditorBuilder::DrawField uses to decide the tick AND the arrow.
+    bool MarkedAsModified( const void* object, const FieldInfo& field, const void* defaultObject )
+    {
+        return std::memcmp( static_cast<const std::byte*>( object ) + field.Offset,
+                            static_cast<const std::byte*>( defaultObject ) + field.Offset, field.Size ) != 0;
+    }
+} // namespace
+
+TEST( PropertyReset, TheModifiedMarkAppearsExactlyWhenTheResetWouldDoSomething )
+{
+    const CloudLike                     def{};
+    const std::vector<const FieldInfo*> fields{ &kEnabled, &kCoverage, &kSeed };
+
+    for ( const FieldInfo* field : fields )
+    {
+        // At the default: no mark, and the reset is a no-op that records nothing.
+        {
+            CloudLike      object;
+            CommandHistory history;
+            const uint64_t before = history.Revision();
+
+            EXPECT_FALSE( MarkedAsModified( &object, *field, &def ) ) << field->Name;
+            EXPECT_FALSE( ResetFieldToDefault( &object, *field, &def, history ) ) << field->Name;
+            EXPECT_EQ( history.Revision(), before ) << field->Name;
+        }
+
+        // Moved away from the default: marked, and the reset really does move it back.
+        {
+            CloudLike object;
+            // Flip the field's bytes without knowing its type — the same byte-level view the mark and
+            // the reset both take.
+            std::byte* p = reinterpret_cast<std::byte*>( &object ) + field->Offset;
+            for ( std::size_t i = 0; i < field->Size; ++i )
+                p[i] = static_cast<std::byte>( static_cast<unsigned char>( p[i] ) ^ 0xFFu );
+
+            CommandHistory history;
+            const uint64_t before = history.Revision();
+
+            EXPECT_TRUE( MarkedAsModified( &object, *field, &def ) ) << field->Name;
+            EXPECT_TRUE( ResetFieldToDefault( &object, *field, &def, history ) ) << field->Name;
+            EXPECT_GT( history.Revision(), before ) << field->Name;
+            // And the mark clears itself, because it is the same comparison.
+            EXPECT_FALSE( MarkedAsModified( &object, *field, &def ) ) << field->Name;
+        }
+    }
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
