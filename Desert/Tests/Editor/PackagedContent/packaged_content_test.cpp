@@ -326,8 +326,14 @@ TEST( PackagedContent, TheCookCompilesWhatTheRuntimeWillAskFor )
 
     // The runtime's side of the relation: assemble the same stages the way VulkanShader::Reload does
     // and ask the cache with the runtime's own key overload. Every stage must already be there.
-    const fs::path    shaderFile = fs::path( "Resources" ) / "Shaders" / "CookProbe.shader";
-    const std::string content    = Common::Utils::FileSystem::ReadFileContent( shaderFile );
+    const fs::path shaderFile = fs::path( "Resources" ) / "Shaders" / "CookProbe.shader";
+
+    // Ф3 made the primitive return a ResultStr. Asserting on the read ITSELF rather than on an empty
+    // string is the point of that change: a probe file this test cannot read is a broken fixture and
+    // must say so by name, not fail three lines later as "the shader has no stages".
+    const auto contentRead = Common::Utils::FileSystem::ReadFileContent( shaderFile );
+    ASSERT_TRUE( static_cast<bool>( contentRead ) ) << contentRead.GetError();
+    const std::string& content = contentRead.GetValue();
     ASSERT_FALSE( content.empty() );
 
     const auto stages =
