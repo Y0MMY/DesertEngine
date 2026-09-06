@@ -209,6 +209,28 @@ namespace Desert::Assets
             return typed;
         }
 
+    public:
+        /**
+         * @brief Every registered asset's METADATA, in registration order. Read-only, and metadata only.
+         *
+         * The typed lookups above answer "give me THIS asset, as THIS type", which is right for using one
+         * and useless for listing them: a caller that wants to offer the user (or a control-channel
+         * client) every material in the project has no handle to ask with and no business loading each
+         * one to find out what it is.
+         *
+         * METADATA AND NOT ASSETS, for the reason FindMetadataByHandle gives next to it: there is nothing
+         * here to cast, so the failure the typed lookups exist to prevent — a plausible pointer to an
+         * object of another class — cannot occur. The record's own AssetType says what it is.
+         *
+         * The reference is into the manager's storage and is invalidated by anything that registers a new
+         * asset. Callers walk it and copy what they keep; nothing here hands out a handle to hold.
+         */
+        [[nodiscard]] const AssetContainer& RegisteredAssets() const noexcept
+        {
+            return m_AssetsCache;
+        }
+
+    private:
         // "Which file is this, and as what type?" — the asset's identity key with its type appended,
         // because two asset classes are allowed to sit on one path (the handle derivation deliberately
         // gives them the same number) and they are still two records.

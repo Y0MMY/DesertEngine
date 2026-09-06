@@ -82,6 +82,17 @@ namespace Desert::Editor
             return m_PreviewUnavailable.empty();
         }
 
+        // THE PREVIEW CAN BE AIMED, and the command palette is what aims it — the replacement for
+        // `--preview-orbit yaw,pitch`, which existed only because macOS refuses this machine synthetic
+        // input and "the same ball from the other side" is what separates an object from its background.
+        // A named viewpoint is the same evidence and reproduces without anybody remembering two numbers.
+        [[nodiscard]] bool HasPreview() const override
+        {
+            return m_Preview != nullptr;
+        }
+
+        void SetPreviewViewpoint( const PreviewViewpoint& viewpoint ) override;
+
     private:
         // @p asset is null while the material is not loaded — the toolbar still draws its view controls,
         // but the actions that write the asset are not offered rather than offered and doing nothing.
@@ -231,11 +242,6 @@ namespace Desert::Editor
         // Set in OnUIRender, consumed in OnPreUpdate: the render is only paid for while the window really
         // drew last frame, so a hidden dock tab costs nothing even before the window is closed outright.
         bool m_DrewThisFrame = false;
-
-        // `--preview-orbit` has been applied to this window's preview. Applied AFTER the first push —
-        // every Set* on the viewport ends in ResetView(), which would silently eat an angle applied at
-        // construction — and only once, so the person who then drags the ball is not fighting the flag.
-        bool m_StartupOrbitApplied = false;
 
         // PreviewUnavailableReason for the material as it stood on the last drawn frame; empty means the
         // pane shows a real render. Computed in OnUIRender and read by OnPreUpdate on the next frame —

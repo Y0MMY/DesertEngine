@@ -3,7 +3,6 @@
 #include <Common/Core/ResultStr.hpp>
 
 #include <Editor/Core/ShotOptions.hpp>
-#include <Editor/Core/StartupOptions.hpp>
 
 #include <charconv>
 #include <cerrno>
@@ -36,6 +35,22 @@ namespace Desert::Editor
      *
      * @note The engine reads argv nowhere else — `CreateApplication` is its only consumer — so this
      *       function may reject what it does not know without stepping on a flag somebody else handles.
+     *
+     * WHERE THE BOUNDARY OF THIS FILE NOW RUNS, because four flags left it and one arrived.
+     *
+     * The flags that remain all do the same kind of thing: they put the editor in a KNOWN STATE AT BOOT
+     * and then have nothing further to say — `--project` and `--scene` decide what is loaded, and the
+     * `--shot*` / `--camera*` / `--look*` / `--play` family decides what is captured and from where. Those
+     * are for runs with nobody watching AND nobody connected: the editor renders, writes a PNG, and exits
+     * with a status a script can trust. Nothing about them wants a session.
+     *
+     * `--select`, `--open-panel`, `--open-menu` and `--preview-orbit` were a different animal wearing the
+     * same coat. Each was added because macOS refuses this machine synthetic input, so a panel, a menu, a
+     * selection or a preview angle could not be reached by a click — and each could only be spent ONCE, at
+     * boot, because that is all a flag can do. They are gone, and what replaces them is a session: the
+     * control channel (`--control-socket`), which runs the command palette's own entries at any moment,
+     * as many times as asked. Two ways to open a panel would have been the defect this project spends its
+     * days removing; the flag family is the side that lost, because it was the side that could not grow.
      */
 
     /// One accepted flag. The table exists so the error message that lists the known flags cannot drift
@@ -59,10 +74,7 @@ namespace Desert::Editor
          { "--look-to", true, "0,0.5,-1" },
          { "--shot-sequence", true, "/tmp/seq" },
          { "--shot-every", true, "1" },
-         { "--open-panel", true, "Details" },
-         { "--open-menu", true, "View" },
-         { "--select", true, "Directional Light" },
-         { "--preview-orbit", true, "160,15" },
+         { "--control-socket", true, "/tmp/desert-editor.sock" },
          { "--gpu-profile", false, nullptr },
          { "--no-gpu-timing", false, nullptr },
          { "--gpu-profile-frame-only", false, nullptr },
@@ -75,9 +87,16 @@ namespace Desert::Editor
     {
         /// `--project <path.deproj>`. Whether the path OPENS is the caller's business — this function never
         /// touches the disk, which is exactly what lets it be tested without one.
-        std::string    Project;
-        ShotOptions    Shot;
-        StartupOptions Startup;
+        std::string Project;
+        ShotOptions Shot;
+
+        /// `--control-socket <path>`: listen for the control channel there. Empty — the default — means
+        /// the editor listens for NOTHING, which is the only safe default for a socket that can run every
+        /// command the palette offers, including saving over the user's scene.
+        ///
+        /// The path is named rather than fixed so two editors on one machine each get their own; a shared
+        /// one would have them answering each other's clients, and the client could not tell.
+        std::string ControlSocket;
     };
 
     namespace CommandLineDetail
@@ -133,19 +152,6 @@ namespace Desert::Editor
 
             out = glm::vec3( x, y, z );
             return true;
-        }
-
-        /// Exactly two comma-separated floats (yaw,pitch for `--preview-orbit`). The same totality rule
-        /// as ParseVec3Strict above: a third component is a person who meant something else.
-        inline bool ParseVec2Strict( const std::string& text, float& outX, float& outY )
-        {
-            const std::size_t comma = text.find( ',' );
-            if ( comma == std::string::npos )
-                return false;
-            if ( text.find( ',', comma + 1 ) != std::string::npos )
-                return false;
-            return ParseFloatStrict( text.substr( 0, comma ), outX ) &&
-                   ParseFloatStrict( text.substr( comma + 1 ), outY );
         }
 
         /// An integer that consumes its entire text. `atoi` — which this replaces — answers 0 for "abc"
@@ -249,27 +255,8 @@ namespace Desert::Editor
                 options.Shot.Output = value;
             else if ( arg == "--shot-sequence" )
                 options.Shot.Sequence = value;
-            else if ( arg == "--open-panel" )
-                options.Startup.PanelsToOpen.emplace_back( value );
-            else if ( arg == "--open-menu" )
-                options.Startup.MenuToOpen = value;
-            else if ( arg == "--select" )
-                options.Startup.SelectEntity = value;
-            else if ( arg == "--preview-orbit" )
-            {
-                float yawDeg   = 0.0f;
-                float pitchDeg = 0.0f;
-                if ( !ParseVec2Strict( value, yawDeg, pitchDeg ) )
-                {
-                    return Common::MakeFormattedError<CommandLineOptions>(
-                         "--preview-orbit '{}' is not an angle pair (yaw,pitch in degrees, e.g. 160,15).", value );
-                }
-                // Degrees on the wire — a person types 160, not 2.79 — radians in the options, because
-                // every consumer downstream is trigonometry.
-                options.Startup.HasPreviewOrbit   = true;
-                options.Startup.PreviewOrbitYaw   = glm::radians( yawDeg );
-                options.Startup.PreviewOrbitPitch = glm::radians( pitchDeg );
-            }
+            else if ( arg == "--control-socket" )
+                options.ControlSocket = value;
             else if ( arg == "--shot-frames" )
             {
                 int frames = 0;

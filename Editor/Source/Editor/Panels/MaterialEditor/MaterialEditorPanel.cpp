@@ -7,8 +7,6 @@
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
 
-#include <Editor/Core/StartupOptions.hpp>
-
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/CloudLayoutAsset.hpp>
@@ -405,14 +403,6 @@ namespace Desert::Editor
             else
                 m_Preview->SetMaterial( Subject(), m_Shape );
             m_Pushed = wanted;
-
-            // `--preview-orbit`: after the push (every Set* above ends in ResetView, which would eat an
-            // angle applied any earlier), once (so a person's drag is not re-clobbered by a re-push).
-            if ( const auto& startup = StartupOptions::Get(); startup.HasPreviewOrbit && !m_StartupOrbitApplied )
-            {
-                m_Preview->SetOrbit( startup.PreviewOrbitYaw, startup.PreviewOrbitPitch );
-                m_StartupOrbitApplied = true;
-            }
         }
 
         // The shader behind this material was rebuilt: drop the pipelines THIS renderer cached from the old
@@ -431,6 +421,20 @@ namespace Desert::Editor
         }
 
         m_Preview->Update( kPreviewRenderSize, kPreviewRenderSize );
+    }
+
+    void MaterialEditorPanel::SetPreviewViewpoint( const PreviewViewpoint& viewpoint )
+    {
+        // Guarded even though the palette only offers these entries while HasPreview() is true: the two
+        // are read a frame apart — the entries are built when the command arrives, and the preview can be
+        // torn down by OnPreUpdate in between (a material whose shader stopped drawing geometry). A null
+        // here is that race, not a caller's mistake, and it is quieter to skip than to crash a session.
+        if ( !m_Preview )
+            return;
+
+        // Degrees in the table, radians at the setter — a person and a document both read "Front, 35, 20",
+        // and everything downstream of SetOrbit is trigonometry.
+        m_Preview->SetOrbit( glm::radians( viewpoint.YawDegrees ), glm::radians( viewpoint.PitchDegrees ) );
     }
 
     void MaterialEditorPanel::DrawToolbar( Assets::SurfaceMaterialAsset* asset, bool isInstance )

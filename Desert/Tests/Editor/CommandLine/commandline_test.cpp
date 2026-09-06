@@ -192,8 +192,7 @@ TEST( CommandLine, NoArgumentsIsNotAnError )
     EXPECT_FALSE( options.Shot.Active() );
     EXPECT_FALSE( options.Shot.HasCamera );
     EXPECT_EQ( options.Shot.Frames, 90 );
-    EXPECT_TRUE( options.Startup.PanelsToOpen.empty() );
-    EXPECT_TRUE( options.Startup.SelectEntity.empty() );
+    EXPECT_TRUE( options.ControlSocket.empty() ) << "an editor nobody asked to listen must not listen";
 }
 
 // The path flags imply --camera, because a path that nothing places is a path the scene's own camera
@@ -224,38 +223,44 @@ TEST( CommandLine, TheEndpointFlagsDoNotDependOnTheOrderTheyAreWrittenIn )
     EXPECT_EQ( before.Shot.CameraAt( 1.0f ).Position, glm::vec3( 10.0f, 20.0f, 30.0f ) );
 }
 
-TEST( CommandLine, RepeatedOpenPanelAccumulatesAndSelectIsCaptured )
+// THE FOUR CONTROL FLAGS ARE GONE, AND THIS IS WHERE THEIR ABSENCE IS ASSERTED.
+//
+// `--open-panel`, `--select`, `--open-menu` and `--preview-orbit` each existed for one reason: macOS
+// refuses this machine synthetic input, so a panel, a selection, a menu or a preview angle could not be
+// reached by a click. Each could be spent exactly ONCE, at boot, because that is all a flag can do — and
+// every task that needed a different window added another flag beside it.
+//
+// The control channel replaces the whole family with a session (`--control-socket`), running the command
+// palette's own entries at any moment and as many times as asked. Keeping the flags beside it would have
+// been two ways to open a panel: the defect shape this project spends its days removing, whose losing side
+// is always the one nobody remembers to update.
+//
+// They must therefore be REJECTED, not ignored. A retired flag that parsed to nothing would be the silent
+// no-op this entire file exists to forbid — and worse than the general case, because a script that still
+// passed `--select Sun` would boot, render, and write a plausible PNG with nothing selected.
+TEST( CommandLine, TheRetiredControlFlagsAreRejectedRatherThanIgnored )
 {
-    const CommandLineOptions options =
-         ParseOk( { "--open-panel", "Details", "--open-panel", "Cloud Layout", "--select", "Directional Light" } );
-
-    ASSERT_EQ( options.Startup.PanelsToOpen.size(), 2u );
-    EXPECT_EQ( options.Startup.PanelsToOpen[0], "Details" );
-    EXPECT_EQ( options.Startup.PanelsToOpen[1], "Cloud Layout" );
-    EXPECT_EQ( options.Startup.SelectEntity, "Directional Light" );
-}
-
-// `--preview-orbit` is degrees on the wire (a person types 160, not 2.79) and radians in the options
-// (every consumer is trigonometry) — the conversion is the flag's whole parse, so it is what is pinned.
-TEST( CommandLine, PreviewOrbitIsDegreesInRadiansOut )
-{
-    const CommandLineOptions options = ParseOk( { "--preview-orbit", "180,-90" } );
-    ASSERT_TRUE( options.Startup.HasPreviewOrbit );
-    EXPECT_FLOAT_EQ( options.Startup.PreviewOrbitYaw, glm::radians( 180.0f ) );
-    EXPECT_FLOAT_EQ( options.Startup.PreviewOrbitPitch, glm::radians( -90.0f ) );
-
-    EXPECT_FALSE( ParseOk( {} ).Startup.HasPreviewOrbit );
-}
-
-TEST( CommandLine, APreviewOrbitThatIsNotTwoNumbersIsRejected )
-{
-    // One number, three numbers, and a partial parse — each of these used to be the silent-no-op shape
-    // this parser exists to forbid.
-    for ( const char* bad : { "160", "160,15,0", "160,abc", "" } )
+    for ( const char* retired : { "--open-panel", "--open-menu", "--select", "--preview-orbit" } )
     {
-        const auto result = ParseCommandLine( { "--preview-orbit", bad } );
-        EXPECT_FALSE( result.IsSuccess() ) << "accepted '" << bad << "'";
+        const auto result = ParseCommandLine( { retired, "Details" } );
+        ASSERT_FALSE( result.IsSuccess() ) << retired << " still parses";
+        EXPECT_NE( result.GetError().find( retired ), std::string::npos )
+             << "the refusal must name the flag that was passed";
+        EXPECT_NE( result.GetError().find( "--control-socket" ), std::string::npos )
+             << "and point at what replaced it, since the list of known flags is what it prints";
     }
+}
+
+// `--control-socket <path>` is the one flag that arrived with the channel. Empty by default, and empty is
+// load-bearing: an editor that listened without being asked would be a hole, because the channel can run
+// every entry the palette offers — including saving over the user's scene.
+TEST( CommandLine, TheControlSocketIsOffUnlessNamed )
+{
+    EXPECT_TRUE( ParseOk( {} ).ControlSocket.empty() );
+    EXPECT_EQ( ParseOk( { "--control-socket", "/tmp/desert-a6.sock" } ).ControlSocket, "/tmp/desert-a6.sock" );
+
+    // Written last with its value forgotten — the shape that used to drop a flag entirely.
+    EXPECT_FALSE( ParseCommandLine( { "--control-socket" } ).IsSuccess() );
 }
 
 TEST( CommandLine, TheValuelessFlagsSetTheirOwnField )

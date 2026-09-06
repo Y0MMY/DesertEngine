@@ -7,6 +7,8 @@
 
 #include <Common/Core/Events/Event.hpp>
 
+#include <Editor/Core/PreviewViewpoints.hpp>
+
 #include <Engine/Assets/Common.hpp>
 
 namespace Desert::Core
@@ -191,6 +193,24 @@ namespace Desert::Editor
         [[nodiscard]] virtual bool ClaimsRendererSlot() const
         {
             return true;
+        }
+
+        // Does this document show a 3D PREVIEW that can be put at a named viewpoint?
+        //
+        // Asked by the command palette, which offers "Preview: Front", "Preview: Back" and the rest for
+        // whichever document has the focus — the replacement for `--preview-orbit yaw,pitch`, whose
+        // continuous angle pair a palette entry has nowhere to carry (Editor/Core/PreviewViewpoints.hpp
+        // has the whole argument). A document with no preview offers none of those entries, rather than
+        // offering seven that do nothing.
+        [[nodiscard]] virtual bool HasPreview() const
+        {
+            return false;
+        }
+
+        // Put that preview at @p viewpoint. Only called when HasPreview(); the default does nothing
+        // because a document without a preview is never asked.
+        virtual void SetPreviewViewpoint( const PreviewViewpoint& /*viewpoint*/ )
+        {
         }
 
     private:
