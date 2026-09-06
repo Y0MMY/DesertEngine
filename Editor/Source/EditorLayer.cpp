@@ -112,6 +112,7 @@
 #include <Engine/ECS/System/AudioECSSystem.hpp>
 
 #include <algorithm> // std::sort / std::transform (scene list)
+#include <span>      // the View menu's groups, declared as data rather than as control flow
 #include <cctype>    // std::tolower (scene filter)
 
 namespace Desert::Editor
@@ -239,6 +240,44 @@ namespace Desert::Editor
         if ( const auto pos = label.find( "###" ); pos != std::string::npos )
             label.erase( pos ); // visible part only (drop any existing ###id)
         return std::string( PanelIcon( name ) ) + "  " + label + "###" + name;
+    }
+
+    // THE DOCUMENT WELL'S OWN WINDOW (layout option B.1). A permanent occupant of the document dock node,
+    // for two reasons that are both structural rather than decorative: an empty dock node is not drawn at
+    // all, so without it the reserved area would be invisible for exactly as long as it was empty; and it is
+    // the only stable window name in that node, which is how DrawDocumentWell recovers the node's runtime id
+    // in a session that did not build the layout.
+    static constexpr const char* kDocumentWellWindow =
+         ICON_MDI_FILE_DOCUMENT_MULTIPLE_OUTLINE "  Documents###documentwell";
+
+    // A document's icon comes from WHAT IT EDITS, not from its name — a document is named after an asset the
+    // user chose, so a lookup table of names (PanelIcon, above) has nothing to match.
+    static const char* DocumentIcon( const Assets::AssetTypeID type )
+    {
+        switch ( type )
+        {
+            case Assets::AssetTypeID::Material:
+                return ICON_MDI_PALETTE_SWATCH;
+            case Assets::AssetTypeID::CloudType:
+                return ICON_MDI_WEATHER_CLOUDY;
+            case Assets::AssetTypeID::CloudNoiseVolume:
+                return ICON_MDI_GRID;
+            case Assets::AssetTypeID::CloudModellingVolume:
+                return ICON_MDI_CUBE_OUTLINE;
+            case Assets::AssetTypeID::CloudLayout:
+                return ICON_MDI_IMAGE_FILTER_HDR;
+            default:
+                return ICON_MDI_FILE_DOCUMENT_OUTLINE;
+        }
+    }
+
+    // The window title a document is drawn with: its type's icon, its asset name, and the "###assetdoc<n>"
+    // identity AssetDocumentTitle already baked into GetName(). NOT PanelDisplayTitle, which would look the
+    // icon up by a name that is an asset's and give every document the same fallback.
+    static std::string DocumentDisplayTitle( const IAssetEditorPanel& document )
+    {
+        return std::string( DocumentIcon( document.SubjectType() ) ) + "  " +
+               DocumentDisplayName( document.GetName() ) + "###" + document.GetName();
     }
 
     EditorLayer::EditorLayer( const Engine::Application* application, const std::string& layerName )
@@ -463,29 +502,30 @@ namespace Desert::Editor
         m_MainScene->Init();
 
 #ifdef EBABLE_IMGUI
-        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
-        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager,
-                                                                               m_AnimationLibrary.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
+        // EVERY TOOL ENTERS THROUGH PanelRegistry::Add / Adopt, and that is the whole of the guarantee that
+        // the View menu lists tools only: the registry REFUSES an IAssetEditorPanel at compile time, so a
+        // document cannot be here to be listed. See Editor/Core/PanelRegistry.hpp.
+        m_Panels.Add<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager );
+        m_Panels.Add<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager, m_AnimationLibrary.get() );
+        m_Panels.Add<Editor::ShaderLibraryPanel>();
         {
             auto primaryViewport = std::make_unique<Editor::ViewportPanel>( m_MainScene, m_AssetManager.get() );
             // Focusing the main viewport rebinds the editor back to the primary scene.
             primaryViewport->SetOnActivate( [this] { SetActiveScene( kPrimarySceneViewId ); } );
-            m_Panels.emplace_back( std::move( primaryViewport ) );
+            m_Panels.Adopt( std::move( primaryViewport ) );
         }
         {
             auto fileExplorer = std::make_unique<Editor::FileExplorerPanel>( Common::Constants::Path::ASSETS_PATH,
                                                                              m_AssetManager.get(), m_MainScene );
             m_FileExplorerPanel = fileExplorer.get();
-            m_Panels.emplace_back( std::move( fileExplorer ) );
+            m_Panels.Adopt( std::move( fileExplorer ) );
         }
-        m_Panels.emplace_back( std::make_unique<Editor::ModelingPanel>( m_MainScene ) );
-        m_Panels.emplace_back( std::make_unique<Editor::SceneSettingsPanel>( m_MainScene ) );
-        m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
-        m_Panels.emplace_back( std::make_unique<Editor::CollectionsPanel>( m_AssetManager.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::HistoryPanel>() );
-        m_Panels.emplace_back(
-             std::make_unique<Editor::SceneValidationPanel>( m_MainScene, m_AssetManager.get() ) );
+        m_Panels.Add<Editor::ModelingPanel>( m_MainScene );
+        m_Panels.Add<Editor::SceneSettingsPanel>( m_MainScene );
+        m_Panels.Add<Editor::LogsPanel>();
+        m_Panels.Add<Editor::CollectionsPanel>( m_AssetManager.get() );
+        m_Panels.Add<Editor::HistoryPanel>();
+        m_Panels.Add<Editor::SceneValidationPanel>( m_MainScene, m_AssetManager.get() );
         // THE FOUR CLOUD PANELS ARE NOT CONSTRUCTED HERE ANY MORE. They were singletons in this list, each
         // reached from the View menu and bound to whatever file its own combo had last opened; they are now
         // asset DOCUMENTS, built on demand by the registry below. Dropping them from the list is what
@@ -495,20 +535,16 @@ namespace Desert::Editor
 
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
-        m_Panels.emplace_back( std::make_unique<Editor::NodeGraphPanel>( m_AssetManager ) );
-        m_Panels.emplace_back( std::make_unique<Editor::AnimGraphPanel>( m_MainScene, m_AnimationLibrary.get() ) );
-        m_Panels.emplace_back(
-             std::make_unique<Editor::PhotogrammetryPanel>( m_MainScene, m_AssetManager.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::ParticleEditorPanel>( m_MainScene ) );
-        m_Panels.emplace_back( std::make_unique<Editor::UIEditorPanel>( m_MainScene ) );
-        m_Panels.emplace_back( std::make_unique<Editor::AssetReferencesPanel>( m_MainScene, m_AssetManager ) );
-        m_Panels.emplace_back(
-             std::make_unique<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::SequencerPanel>( m_MainScene, m_AnimationLibrary.get(),
-                                                                         m_AssetManager.get() ) );
-        m_Panels.emplace_back(
-             std::make_unique<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::BuildSettingsPanel>() );
+        m_Panels.Add<Editor::NodeGraphPanel>( m_AssetManager );
+        m_Panels.Add<Editor::AnimGraphPanel>( m_MainScene, m_AnimationLibrary.get() );
+        m_Panels.Add<Editor::PhotogrammetryPanel>( m_MainScene, m_AssetManager.get() );
+        m_Panels.Add<Editor::ParticleEditorPanel>( m_MainScene );
+        m_Panels.Add<Editor::UIEditorPanel>( m_MainScene );
+        m_Panels.Add<Editor::AssetReferencesPanel>( m_MainScene, m_AssetManager );
+        m_Panels.Add<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() );
+        m_Panels.Add<Editor::SequencerPanel>( m_MainScene, m_AnimationLibrary.get(), m_AssetManager.get() );
+        m_Panels.Add<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() );
+        m_Panels.Add<Editor::BuildSettingsPanel>();
 
         // Which editor opens which kind of asset. Double-clicking a `.demat` in the browser opens ONE window
         // bound to THAT material, and a second material is a second window; the four cloud formats follow
@@ -544,6 +580,11 @@ namespace Desert::Editor
         // Editor/Core/StartupOptions.hpp for why it is an argument rather than a click. A CONTEXTUAL
         // panel is also PINNED, because opening one by hand is what pinning means and a name on the
         // command line is as deliberate as a menu tick.
+        //
+        // The loop is over the TOOLS, and it can be nothing else: m_Panels is a PanelRegistry, so there is
+        // no document in it whose name could be matched here and whose "visibility" could then be set. The
+        // asset-path fallback below is how a document is put on screen, and it goes through the ordinary
+        // open request rather than through a flag on a panel.
         for ( const std::string& wanted : Editor::StartupOptions::Get().PanelsToOpen )
         {
             bool found = false;
@@ -712,10 +753,10 @@ namespace Desert::Editor
         CloseDismissedSceneViews();
 
         // Asset documents follow the scene views exactly, and for the same reason: closing one destroys a
-        // Scene, a SceneRenderer and a panel in m_Panels, none of which is legal from inside the ImGui pass
-        // that noticed the click. Closes run BEFORE opens so a slot handed back this frame is available to
-        // whatever the user is opening in it.
-        CloseDismissedAssetDocuments();
+        // Scene and a SceneRenderer, neither of which is legal from inside the ImGui pass that noticed the
+        // click. Closes run BEFORE opens so a slot handed back this frame is available to whatever the user
+        // is opening in it.
+        ServiceDocumentCloses();
         ServiceAssetOpenRequests();
 
         // Stop is deferred here (between frames) so it never destroys/recreates render resources while a
@@ -793,6 +834,11 @@ namespace Desert::Editor
         // never destroyed while their DS are bound to the recording command buffer.
         for ( auto& panel : m_Panels )
             panel->OnPreUpdate();
+        // The documents get the same call, from their own owner. Two loops rather than one is the visible
+        // cost of the split, and it is the cost that buys "the View menu cannot list a document": every
+        // place that used to iterate one container now names which of the two it means.
+        for ( auto& document : m_Documents )
+            document->OnPreUpdate();
 
         // ONE thumbnail capture pump for the whole editor. Panels only request; whether the asset browser
         // is open, hidden or closed no longer changes whether previews progress, and a request made by one
@@ -1096,7 +1142,7 @@ namespace Desert::Editor
         vp->SetOnActivate( [this, id] { SetActiveScene( id ); } );
         vp->GetVisibility() = true;
         doc->Viewport       = vp.get();
-        m_Panels.emplace_back( std::move( vp ) );
+        m_Panels.Adopt( std::move( vp ) );
 
         m_ExtraScenes.emplace_back( std::move( doc ) );
         LOG_INFO( "[Editor] Opened scene view #{} (now {} scenes open, {}/{} renderer slots in use)", id,
@@ -1156,7 +1202,7 @@ namespace Desert::Editor
 
         IPanel* panel = doc->Viewport;
         m_ContextualShown.erase( panel );
-        std::erase_if( m_Panels, [panel]( const std::unique_ptr<IPanel>& p ) { return p.get() == panel; } );
+        m_Panels.Remove( panel );
         doc->Viewport = nullptr;
 
         doc->Registry.reset();
@@ -1179,22 +1225,22 @@ namespace Desert::Editor
         for ( const auto& doc : m_ExtraScenes )
             census.push_back( { "scene view '" + doc->Name + "'", true } );
 
+        // The Details preview is a TOOL that happens to own a renderer, so it is found among the panels.
         for ( const auto& panel : m_Panels )
-        {
             if ( const auto* details = dynamic_cast<const ScenePropertiesPanel*>( panel.get() ) )
                 census.push_back( { "Details preview", details->HoldsRendererSlot() } );
-            else if ( const auto* document = dynamic_cast<const IAssetEditorPanel*>( panel.get() ) )
-            {
-                // The VISIBLE half of the name. The census tells a user what to close, and they close a
-                // window titled "MP_GreenTint", not one titled "MP_GreenTint###assetdoc3333333333333333333".
-                std::string label = document->GetName();
-                if ( const auto pos = label.find( "###" ); pos != std::string::npos )
-                    label.erase( pos );
 
-                census.push_back( { std::string( Assets::AssetTypeName( document->SubjectType() ) ) +
-                                         " document '" + label + "'",
-                                    document->HoldsRendererSlot(), document->ClaimsRendererSlot() } );
-            }
+        // The documents are asked of their own owner rather than sifted out of the panel list with a
+        // dynamic_cast. That cast was the seam this whole task closes: it only existed because the two
+        // kinds shared a container, and every place that had to write it was a place that could forget to.
+        for ( const auto& document : m_Documents )
+        {
+            // The VISIBLE half of the name. The census tells a user what to close, and they close a window
+            // titled "MP_GreenTint", not one titled "MP_GreenTint###assetdoc3333333333333333333".
+            census.push_back( { std::string( Assets::AssetTypeName( document->SubjectType() ) ) + " document '" +
+                                     DocumentDisplayName( document->GetName() ) + "'",
+                                document->HoldsRendererSlot(), document->ClaimsRendererSlot(),
+                                document->Subject() } );
         }
 
         return census;
@@ -1204,13 +1250,12 @@ namespace Desert::Editor
     {
         for ( const auto& request : Core::AssetOpenRequests::Drain() )
         {
-            // OPEN-OR-FOCUS, keyed by the subject. Asked of the panel list itself rather than of a map kept
-            // beside it, so there is no second answer to "which documents are open" to fall out of step —
-            // see the note in AssetEditorRegistry.hpp.
-            if ( IAssetEditorPanel* open = FindOpenAssetDocument( m_Panels, request.Subject ) )
+            // OPEN-OR-FOCUS, keyed by the subject, asked of the one owner of open documents. It does NOT
+            // set a visibility flag any more: a document that is open is open, and "focus" is the only
+            // thing a second request for the same asset can mean.
+            if ( IAssetEditorPanel* open = m_Documents.Find( request.Subject ) )
             {
-                open->GetVisibility() = true;
-                m_FocusPanel          = open->GetName(); // brings it forward in whatever dock it lives
+                FocusDocument( open->Subject() );
                 continue;
             }
 
@@ -1236,12 +1281,13 @@ namespace Desert::Editor
             // The counting rule itself lives in AssetEditorRegistry.hpp, not here: this file is compiled by
             // no suite, and a rule written in it is a rule nothing can assert.
             const uint32_t live    = Graphic::SceneRenderer::GetLiveRendererCount();
-            const uint32_t pending = PendingRendererSlotDemand( m_Panels );
+            const uint32_t pending = PendingRendererSlotDemand( m_Documents.Documents() );
 
             if ( live + pending >= EngineContext::kMaxRendererSlots )
             {
+                auto        rows = RendererSlotCensus();
                 std::string census;
-                for ( const auto& consumer : RendererSlotCensus() )
+                for ( const auto& consumer : rows )
                 {
                     const char* state = consumer.HoldsSlot ? "holds a slot"
                                         : consumer.ClaimsSlot
@@ -1254,6 +1300,31 @@ namespace Desert::Editor
                            "in use and {} more are already committed. Close one of these first:{}",
                            Assets::AssetTypeName( request.Type ), static_cast<uint64_t>( request.Subject ), live,
                            EngineContext::kMaxRendererSlots, pending, census );
+
+                // AND THE SAME THING WHERE THE USER IS. The census above has always been written; it went
+                // to a log the user was not reading, so a double-click on the seventh document did nothing
+                // at all as far as the screen was concerned. The dialog carries the identical rows and, for
+                // the ones that are documents, a button that acts on them.
+                //
+                // The asset is named by its FILE NAME where one is known: "handle 3333333333333333333" is
+                // the log's identifier, not the user's.
+                std::string assetName;
+                if ( m_AssetManager )
+                {
+                    // The UNTYPED metadata lookup, deliberately: the refusal happens before any editor for
+                    // this type is consulted, so all that is known about the subject is that it is an
+                    // asset — and a typed lookup would have to guess which class to ask for. Metadata
+                    // carries no cast, so there is nothing here that could answer with a stranger.
+                    if ( const auto* metadata = m_AssetManager->FindMetadataByHandle( request.Subject ) )
+                        assetName = metadata->Filepath.stem().string();
+                }
+                if ( assetName.empty() )
+                    assetName = "this asset";
+
+                m_OpenRefusal =
+                     OpenRefusal{ std::move( assetName ), std::string( Assets::AssetTypeName( request.Type ) ),
+                                  live, pending, std::move( rows ) };
+                m_OpenRefusalPending = true;
                 continue;
             }
 
@@ -1267,45 +1338,92 @@ namespace Desert::Editor
             // document as a claim on a slot it does not take. See IAssetEditorPanel::ClaimsRendererSlot.
             const uint32_t committed = pending + ( document->ClaimsRendererSlot() ? 1u : 0u );
 
-            m_Panels.emplace_back( std::move( document ) );
-            m_FocusPanel = name;
-            LOG_INFO( "[Editor] Opened a '{}' document '{}' ({}/{} renderer slots in use, {} committed).",
-                      Assets::AssetTypeName( request.Type ), name, Graphic::SceneRenderer::GetLiveRendererCount(),
-                      EngineContext::kMaxRendererSlots, committed );
+            const Assets::AssetHandle subject = document->Subject();
+            m_Documents.Add( std::move( document ) );
+            m_FocusPanel      = name; // brings the new window forward in the document well
+            m_FocusedDocument = subject;
+            LOG_INFO( "[Editor] Opened a '{}' document '{}' ({} open, {}/{} renderer slots in use, {} "
+                      "committed).",
+                      Assets::AssetTypeName( request.Type ), name, m_Documents.Count(),
+                      Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots,
+                      committed );
         }
     }
 
-    void EditorLayer::CloseDismissedAssetDocuments()
+    void EditorLayer::RequestDocumentClose( const Assets::AssetHandle& subject )
     {
-        // Collect first, erase after: deciding and mutating in one pass over m_Panels would be iterating a
-        // container while emptying it — the same reason CloseDismissedSceneViews is written this way.
-        std::vector<IPanel*> dismissed;
-        for ( const auto& panel : m_Panels )
-        {
-            auto* document = dynamic_cast<IAssetEditorPanel*>( panel.get() );
-            if ( document && !document->GetVisibility() )
-                dismissed.push_back( panel.get() );
-        }
+        if ( !m_Documents.Find( subject ) )
+            return; // already gone, or never open — a second x on one window in one frame is not an error
 
-        if ( dismissed.empty() )
+        if ( std::find( m_DocumentsToClose.begin(), m_DocumentsToClose.end(), subject ) ==
+             m_DocumentsToClose.end() )
+            m_DocumentsToClose.push_back( subject );
+    }
+
+    void EditorLayer::ServiceDocumentCloses()
+    {
+        if ( m_DocumentsToClose.empty() )
             return;
 
-        // Destroying the panel is what destroys its PreviewViewport, and with it the scene, the renderer and
-        // the renderer slot. The last submitted frame may still be executing against that renderer's
-        // pipelines, framebuffers and descriptor pools, so the device is idled first — the ordering
-        // ~PreviewViewport and CloseSceneView both established, not a precaution invented here.
+        // ONE device-idle wait for the whole batch. Destroying a document destroys its PreviewViewport, and
+        // with it the scene, the renderer and the renderer slot; the last submitted frame may still be
+        // executing against that renderer's pipelines, framebuffers and descriptor pools. The ordering is
+        // the one ~PreviewViewport and CloseSceneView both established, not a precaution invented here.
         Graphic::Renderer::GetInstance().WaitDeviceIdle();
 
-        for ( IPanel* panel : dismissed )
+        for ( const Assets::AssetHandle& subject : m_DocumentsToClose )
         {
-            const std::string name = panel->GetName();
-            m_ContextualShown.erase( panel );
-            std::erase_if( m_Panels, [panel]( const std::unique_ptr<IPanel>& p ) { return p.get() == panel; } );
+            // Released, then destroyed HERE. The well hands ownership back rather than dropping the object
+            // itself, because it is this function that knows the device is idle — see DocumentWell.
+            std::unique_ptr<IAssetEditorPanel> closed = m_Documents.Release( subject );
+            if ( !closed )
+                continue;
+
+            const std::string name = closed->GetName();
+            m_ContextualShown.erase( closed.get() );
+            if ( m_FocusedDocument == subject )
+                m_FocusedDocument = Common::UUID::Null();
+
+            closed.reset();
+
             // Printed rather than derived: a document that failed to return its slot produces no error at
             // all, and this line beside the one in ServiceAssetOpenRequests is what makes the leak readable.
-            LOG_INFO( "[Editor] Closed asset document '{}' ({}/{} renderer slots in use after release).", name,
-                      Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots );
+            LOG_INFO( "[Editor] Closed asset document '{}' ({} open, {}/{} renderer slots in use after "
+                      "release).",
+                      name, m_Documents.Count(), Graphic::SceneRenderer::GetLiveRendererCount(),
+                      EngineContext::kMaxRendererSlots );
         }
+
+        m_DocumentsToClose.clear();
+    }
+
+    void EditorLayer::FocusDocument( const Assets::AssetHandle& subject )
+    {
+        IAssetEditorPanel* document = m_Documents.Find( subject );
+        if ( !document )
+            return;
+
+        m_Documents.Touch( subject );
+        m_FocusedDocument = subject;
+        m_FocusPanel      = document->GetName(); // brings it forward in whatever dock it lives
+    }
+
+    void EditorLayer::CycleDocuments()
+    {
+        const auto next = m_Documents.NextMostRecent( m_FocusedDocument );
+        if ( !next )
+            return;
+
+        IAssetEditorPanel* document = m_Documents.Find( *next );
+        if ( !document )
+            return;
+
+        // Focus WITHOUT touching the ring. Committing the new order on every press would make the second
+        // Ctrl+Tab return to where the first started, so the order is committed when Ctrl is released —
+        // see m_CyclingDocuments in OnImGuiRender.
+        m_FocusedDocument  = *next;
+        m_FocusPanel       = document->GetName();
+        m_CyclingDocuments = true;
     }
 
     void EditorLayer::SetActiveScene( uint64_t id )
@@ -1334,6 +1452,12 @@ namespace Desert::Editor
         Commands::SetContext( m_MainScene.get(), m_AssetManager.get() );
         for ( auto& panel : m_Panels )
             panel->SetScene( m_MainScene );
+        // Documents follow the active scene too. The Cloud Layout document READS the focused scene's cloud
+        // layer for its preview numbers — the scene is an input, never a second subject — and it stopped
+        // following it the moment documents left the panel list, which is exactly the "a middle link drops a
+        // property" shape this codebase has paid for seven times.
+        for ( auto& document : m_Documents )
+            document->SetScene( m_MainScene );
 
         // Selection is per-scene (entity UUIDs belong to one registry) — don't carry a stale one across.
         Core::SelectionManager::ClearSelection();
@@ -1445,6 +1569,33 @@ namespace Desert::Editor
             // so it stays reachable; the palette grabs the keyboard once open.
             if ( io.KeyCtrl && !io.KeyShift && ::ImGui::IsKeyPressed( ImGuiKey_P, false ) )
                 m_CommandPalette.Open();
+
+            // CTRL+TAB THROUGH THE DOCUMENTS, most recently used first. This is what makes ten open
+            // documents bearable: past about six the tab you want is off the end of the strip, and the
+            // keyboard is the only route to it that does not involve reading a list first.
+            //
+            // Outside the edit-mode guard on purpose — switching document is not an edit — but not over a
+            // text field, where Tab belongs to the field.
+            //
+            // ImGui BINDS Ctrl+Tab ITSELF (NavUpdateWindowing, enabled by NavEnableKeyboard) and it runs in
+            // NewFrame, before this layer draws — so both would fire on one press: ImGui's window-ring
+            // overlay AND this. The overlay is cancelled here rather than the key being fought for, and
+            // ONLY when there was a document to switch to: with no documents open, Ctrl+Tab keeps ImGui's
+            // ordinary window ring, which is a reasonable thing for it to do and not ours to remove.
+            if ( io.KeyCtrl && !io.WantTextInput && ::ImGui::IsKeyPressed( ImGuiKey_Tab, false ) )
+            {
+                const Assets::AssetHandle before = m_FocusedDocument;
+                CycleDocuments();
+                if ( m_FocusedDocument != before )
+                    ::ImGui::GetCurrentContext()->NavWindowingTarget = nullptr;
+            }
+
+            // The ring is committed when Ctrl comes back up, not on each press: see CycleDocuments.
+            if ( m_CyclingDocuments && !io.KeyCtrl )
+            {
+                m_CyclingDocuments = false;
+                m_Documents.Touch( m_FocusedDocument );
+            }
         }
 
         static bool               dockspaceOpen  = true;
@@ -1523,9 +1674,20 @@ namespace Desert::Editor
             // One-time auto-relayout: when the default layout's window IDs change (panel-title icons add a
             // ### suffix, changing every window's ImGui ID), old imgui.ini bindings stop matching and panels
             // scatter. Bump kDockLayoutVersion to force a single clean rebuild for everyone, then persist it.
-            constexpr int kDockLayoutVersion = 2; // 2: Mesh Editor removed, contextual tools docked
+            // 3: the centre is split and documents get a node of their own (layout option B.1).
+            constexpr int kDockLayoutVersion = 3;
             if ( EditorPreferences::Get().DockLayoutVersion < kDockLayoutVersion )
             {
+                // SAID OUT LOUD. Every existing imgui.ini is rebuilt once here, and a layout that changes
+                // in silence is read as the editor having lost the user's panels — which is the same
+                // complaint an area that collapses on its own produces, and the reason B.1 does not
+                // collapse. One line naming the old and new versions is the difference between "my layout
+                // was reset by the update" and "my layout is gone".
+                LOG_INFO( "[Editor] Docking layout rebuilt once: saved layout is version {}, this build lays "
+                          "out version {} (the centre column now holds the level on the left and a Documents "
+                          "area on the right). Your named layouts under View -> Layouts are untouched.",
+                          EditorPreferences::Get().DockLayoutVersion, kDockLayoutVersion );
+
                 m_ResetDefaultLayout                       = true;
                 EditorPreferences::Get().DockLayoutVersion = kDockLayoutVersion;
                 EditorPreferences::Save();
@@ -1549,18 +1711,30 @@ namespace Desert::Editor
                                                                     ? dockSize
                                                                     : ::ImGui::GetMainViewport()->Size );
 
-                //  ┌───────────┬──────────────────────┬──────────────┐
-                //  │ Scene     │                      │ Details      │
-                //  │ Outliner  │   Scene (viewport)   ├──────────────┤
-                //  ├───────────┤                      │ SceneSettings│
-                //  │Collections├──────────────────────┤ / Profiler   │
-                //  │           │ Assets / Logs        │ / Foliage    │
-                //  └───────────┴──────────────────────┴──────────────┘
+                //  ┌───────────┬────────────────┬───────────┬──────────────┐
+                //  │ Scene     │                │           │ Details      │
+                //  │ Outliner  │ Scene(viewport)│ Documents ├──────────────┤
+                //  ├───────────┤                │           │ SceneSettings│
+                //  │Collections├────────────────┴───────────┤ / Profiler   │
+                //  │           │ Assets / Logs              │ / Foliage    │
+                //  └───────────┴────────────────────────────┴──────────────┘
+                //
+                // THE DOCUMENT AREA IS A NODE, NOT A SET OF FLOATING WINDOWS (option B.1). The level never
+                // leaves the screen: change a roughness in a material document and the crate in the viewport
+                // beside it re-renders. It is paid for out of the centre's width permanently, whether or not
+                // anything is open, and that permanence is the feature — an area that appeared and vanished
+                // with the last document would resize the viewport under the user's cursor, which is what
+                // people report as "the editor lost my panel". The splitter between the two is draggable
+                // like every other, so a session that wants the width back can take it.
                 ImGuiID center = dockspace_id;
                 ImGuiID right  = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Right, 0.20f, nullptr, &center );
                 ImGuiID left   = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Left, 0.22f, nullptr, &center );
                 ImGuiID bottom = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Down, 0.28f, nullptr, &center );
                 m_BottomDockId = bottom; // remembered so the drawer can be collapsed/restored later
+                // Split AFTER the bottom drawer, so Assets/Logs still span the whole centre rather than
+                // only the level's half of it.
+                ImGuiID documents =
+                     ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Right, 0.44f, nullptr, &center );
                 ImGuiID leftBottom = ::ImGui::DockBuilderSplitNode( left, ImGuiDir_Down, 0.40f, nullptr, &left );
                 ImGuiID rightBottom =
                      ::ImGui::DockBuilderSplitNode( right, ImGuiDir_Down, 0.50f, nullptr, &right );
@@ -1589,17 +1763,22 @@ namespace Desert::Editor
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "UI Editor" ).c_str(), right );
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Modeling" ).c_str(), left );
 
+                // The well itself. It is what makes the document node FINDABLE: a dock node with nothing in
+                // it is not drawn at all, so without a permanent occupant the area would exist in the
+                // layout and be invisible on screen the whole time no document was open. It is also where
+                // every document reads its dock id from at runtime — see DrawDocumentWell.
+                ::ImGui::DockBuilderDockWindow( kDocumentWellWindow, documents );
+
                 ::ImGui::DockBuilderFinish( dockspace_id );
             }
         }
 
-        // Asset documents CASCADE instead of stacking. Every panel with a default size is centred on the
-        // main viewport, which is right for a tool the user opens one of — and wrong the moment there are
-        // several of one kind: two Material Editor windows would open at the same place at the same size,
-        // and the second would hide the first exactly. Each document is stepped down-right from the last, as
-        // every application that has more than one document window does.
-        int documentIndex = 0;
-
+        // THE TOOLS. The document loop is DrawDocuments, below, and the two are separate for the reason the
+        // whole task exists: a tool passes &GetVisibility() to Begin, which is right for a setting the user
+        // keeps, and a document must not — its false would be read as "destroy this window".
+        //
+        // The cascade this loop used to carry for documents is gone with them: a document is DOCKED into the
+        // well now, so there is no floating window to step down-right from the last one.
         for ( const auto& panel : m_Panels )
         {
             if ( !panel->GetVisibility() )
@@ -1617,15 +1796,8 @@ namespace Desert::Editor
             if ( const ImVec2 defSize = panel->GetDefaultSize(); defSize.x > 0.0f && defSize.y > 0.0f )
             {
                 ImGui::SetNextWindowSize( defSize, ImGuiCond_FirstUseEver );
-                ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-                if ( dynamic_cast<const IAssetEditorPanel*>( panel.get() ) )
-                {
-                    constexpr float kCascadeStep = 32.0f;
-                    center.x += kCascadeStep * static_cast<float>( documentIndex );
-                    center.y += kCascadeStep * static_cast<float>( documentIndex );
-                    ++documentIndex;
-                }
-                ImGui::SetNextWindowPos( center, ImGuiCond_FirstUseEver, ImVec2( 0.5f, 0.5f ) );
+                ImGui::SetNextWindowPos( ImGui::GetMainViewport()->GetCenter(), ImGuiCond_FirstUseEver,
+                                         ImVec2( 0.5f, 0.5f ) );
             }
 
             // p_open: the title-bar X closes the panel and stays in sync with the View menu. The display
@@ -1647,6 +1819,11 @@ namespace Desert::Editor
             ImGui::End();
         }
 
+        // The well BEFORE the documents: it reads back the dock node id the documents are about to be
+        // docked into, and a document opened this frame would otherwise float once and settle next frame.
+        DrawDocumentWell();
+        DrawDocuments();
+
         DrawProfilerWindow();
 
         DrawStatusBar();
@@ -1654,6 +1831,7 @@ namespace Desert::Editor
         DrawCommandPalette();
         DrawRecoveryPopup();
         DrawLayoutSavePopup();
+        DrawOpenRefusedPopup();
 
         // Transient bottom-right notifications (save/import/validation). Drawn last so they float on top.
         Editor::ToastManager::Get().Draw();
@@ -1672,9 +1850,12 @@ namespace Desert::Editor
             return;
 
         std::vector<PaletteCommand> commands;
-        commands.reserve( m_Panels.size() + 8 );
+        commands.reserve( m_Panels.Size() + m_Documents.Count() + 8 );
 
-        // Panels — jump to / reveal any tool window.
+        // Panels — jump to / reveal any tool window. TOOLS ONLY, and by construction rather than by a
+        // filter: m_Panels is a PanelRegistry, which cannot hold a document. Before the split this loop
+        // offered "Open M_Crate_Painted###assetdoc..." as a panel, and running it set a visibility flag that
+        // the close pass then read as "the user dismissed this window".
         for ( const auto& panel : m_Panels )
         {
             IPanel*     p    = panel.get();
@@ -1686,6 +1867,16 @@ namespace Desert::Editor
                                       p->GetVisibility() = true;
                                       p->Pinned()        = true; // asked for explicitly: keep it open
                                   } } );
+        }
+
+        // Documents — FOCUS an open one. A separate category because the verb is different and the
+        // difference is the point of this task: a tool is opened, a document is switched to. Nothing here
+        // creates or destroys a window, so a mistyped search cannot cost the user one.
+        for ( const auto& document : m_Documents )
+        {
+            const Assets::AssetHandle subject = document->Subject();
+            commands.push_back( { "Document", "Go to " + DocumentDisplayName( document->GetName() ),
+                                  [this, subject] { FocusDocument( subject ); } } );
         }
 
         // Entities — select any object in the open scene.
@@ -1711,6 +1902,299 @@ namespace Desert::Editor
 
         m_CommandPalette.SetCommands( std::move( commands ) );
         m_CommandPalette.Draw();
+    }
+
+    void EditorLayer::DrawDocumentWell()
+    {
+        namespace ImGui = ::ImGui;
+
+        // No p_open: THE AREA DOES NOT CLOSE AND DOES NOT COLLAPSE WHEN IT EMPTIES. The alternative was
+        // drawn and rejected — a node that appears and disappears gives the viewport its width back and
+        // takes it away again, resizing the level view under the user's cursor, and a layout that moves on
+        // its own is what people report as "the editor lost my panel". The splitter is draggable: a session
+        // that wants the pixels can take them, deliberately and once.
+        ImGui::Begin( kDocumentWellWindow, nullptr, ImGuiWindowFlags_NoCollapse );
+
+        // READ BACK, not remembered. The id is only known at DockBuilder time in the ONE session that built
+        // the layout; every later session loads it from imgui.ini and a captured value would be 0 — which is
+        // the bug the bottom drawer's own m_BottomDockId still has. Asking the window where it is docked
+        // gives the same answer in every session, including after the user drags the well somewhere else.
+        m_DocumentDockId = ImGui::GetWindowDockID();
+
+        if ( m_Documents.Empty() )
+        {
+            // THE EMPTY STATE SAYS WHAT THE AREA IS FOR. A reserved column that is blank most of the time
+            // is a column nobody learns the purpose of; this is the price B.1 pays for stable geometry and
+            // it is paid in words rather than in pixels.
+            const float avail = ImGui::GetContentRegionAvail().x;
+
+            ImGui::Dummy( ImVec2( 0.0f, 24.0f ) );
+            {
+                // The DEFAULT font, not the bold one: the icon range is merged into the default face only,
+                // so the same glyph drawn in bold comes out as the missing-glyph box. (Measured — the first
+                // capture of this empty state had a "?" where the document icon belongs.)
+                const char* icon = ICON_MDI_FILE_DOCUMENT_OUTLINE;
+                ImGui::SetCursorPosX( ImGui::GetCursorPosX() + ( avail - ImGui::CalcTextSize( icon ).x ) * 0.5f );
+                ImGui::TextDisabled( "%s", icon );
+            }
+
+            ImGui::Dummy( ImVec2( 0.0f, 8.0f ) );
+            {
+                const char* title = "No document open";
+                ImGui::PushFont( EditorResources::GetBoldFont() );
+                ImGui::SetCursorPosX( ImGui::GetCursorPosX() + ( avail - ImGui::CalcTextSize( title ).x ) * 0.5f );
+                ImGui::TextUnformatted( title );
+                ImGui::PopFont();
+            }
+
+            ImGui::Dummy( ImVec2( 0.0f, 6.0f ) );
+            {
+                // Both doors named, because both exist and neither is discoverable from an empty area:
+                // the browser's double-click and the pencil on an asset slot in Details.
+                const char* body = "Double-click a material, a cloud type, a noise volume or a layout in the "
+                                   "Content Browser \xe2\x80\x94 or press the pencil on any asset slot in "
+                                   "Details.";
+                ImGui::PushTextWrapPos( ImGui::GetCursorPosX() + avail );
+                ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+                ImGui::TextUnformatted( body );
+                ImGui::PopStyleColor();
+                ImGui::PopTextWrapPos();
+            }
+
+            ImGui::Dummy( ImVec2( 0.0f, 10.0f ) );
+            {
+                const char*  label = ICON_MDI_FOLDER_MULTIPLE_OUTLINE "  Browse assets";
+                const ImVec2 size( ImGui::CalcTextSize( label ).x + ImGui::GetStyle().FramePadding.x * 2.0f,
+                                   0.0f );
+                ImGui::SetCursorPosX( ImGui::GetCursorPosX() + ( avail - size.x ) * 0.5f );
+                if ( ImGui::Button( label, size ) )
+                    Core::PanelRequests::Open( "Assets" );
+            }
+
+            // RECENTLY CLOSED: the one thing an area that stays can offer that a vanishing one cannot.
+            // Reopening goes through the ordinary open request, so it is refused by the slot cap exactly
+            // like any other open and cannot become a second way in.
+            if ( !m_Documents.RecentlyClosed().empty() )
+            {
+                ImGui::Dummy( ImVec2( 0.0f, 12.0f ) );
+                ImGui::Separator();
+                ImGui::TextDisabled( "RECENTLY CLOSED" );
+                for ( const ClosedDocument& closed : m_Documents.RecentlyClosed() )
+                {
+                    ImGui::PushID( static_cast<int>( static_cast<uint64_t>( closed.Subject ) & 0x7fffffff ) );
+                    const std::string row = std::string( DocumentIcon( closed.Type ) ) + "  " + closed.DisplayName;
+                    if ( ImGui::Selectable( row.c_str() ) )
+                        Core::AssetOpenRequests::Request( closed.Subject, closed.Type );
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Reopen this %s document", Assets::AssetTypeName( closed.Type ) );
+                    ImGui::PopID();
+                }
+            }
+
+            ImGui::End();
+            return;
+        }
+
+        // SOMETHING IS OPEN: the well becomes the INDEX of the area it names. Past about six documents the
+        // tab strip has the one you want off its end, so a list is not a fallback here — it is the primary
+        // way to switch, and it carries the two facts a tab cannot: which type each document is, and
+        // whether it is holding one of the six renderer slots.
+        ImGui::TextDisabled( "OPEN DOCUMENTS \xe2\x80\x94 %zu", m_Documents.Count() );
+        ImGui::Separator();
+
+        // Most recently used first, the same order Ctrl+Tab walks — one order, read in two places, so the
+        // list cannot teach a different sequence from the key.
+        std::vector<Assets::AssetHandle> closeRequests;
+        for ( const Assets::AssetHandle& subject : m_Documents.MostRecentOrder() )
+        {
+            const IAssetEditorPanel* document = m_Documents.Find( subject );
+            if ( !document )
+                continue;
+
+            ImGui::PushID( static_cast<int>( static_cast<uint64_t>( subject ) & 0x7fffffff ) );
+
+            const std::string row = std::string( DocumentIcon( document->SubjectType() ) ) + "  " +
+                                    DocumentDisplayName( document->GetName() );
+            if ( ImGui::Selectable( row.c_str(), subject == m_FocusedDocument,
+                                    ImGuiSelectableFlags_AllowItemOverlap ) )
+                FocusDocument( subject );
+
+            // The slot column. "Cloud - no slot" is not trivia: it is the answer to "I closed four windows
+            // and it still will not open", because closing a CPU-drawn document frees nothing.
+            const char*       slot = document->HoldsRendererSlot()    ? "1 slot"
+                                     : document->ClaimsRendererSlot() ? "claiming"
+                                                                      : "no slot";
+            const std::string right =
+                 std::string( Assets::AssetTypeName( document->SubjectType() ) ) + " \xc2\xb7 " + slot;
+            const float rightW = ImGui::CalcTextSize( right.c_str() ).x;
+            ImGui::SameLine( ImGui::GetContentRegionMax().x - rightW - 28.0f );
+            ImGui::TextDisabled( "%s", right.c_str() );
+
+            ImGui::SameLine( ImGui::GetContentRegionMax().x - 18.0f );
+            if ( ImGui::SmallButton( ICON_MDI_CLOSE ) )
+                closeRequests.push_back( subject );
+
+            ImGui::PopID();
+        }
+
+        ImGui::End();
+
+        // Requested after the loop: RequestDocumentClose only queues, but collecting first keeps the rule
+        // that nothing mutates a container while it is being walked.
+        for ( const Assets::AssetHandle& subject : closeRequests )
+            RequestDocumentClose( subject );
+    }
+
+    void EditorLayer::DrawDocuments()
+    {
+        namespace ImGui = ::ImGui;
+
+        std::vector<Assets::AssetHandle> closeRequests;
+        Assets::AssetHandle              focused = Common::UUID::Null();
+
+        for ( const auto& document : m_Documents )
+        {
+            const Assets::AssetHandle subject = document->Subject();
+
+            // A DOCKED DOCUMENT, not a floating one. Before this they opened as a cascade of floating
+            // windows stepped 32 px down-right from each other, which is what an application does when it
+            // has nowhere to put them; option B.1 gives them somewhere. FirstUseEver, so a document the user
+            // has since dragged out stays where they put it.
+            if ( m_DocumentDockId != 0 )
+                ImGui::SetNextWindowDockID( m_DocumentDockId, ImGuiCond_FirstUseEver );
+            if ( const ImVec2 defSize = document->GetDefaultSize(); defSize.x > 0.0f && defSize.y > 0.0f )
+                ImGui::SetNextWindowSize( defSize, ImGuiCond_FirstUseEver );
+
+            if ( !m_FocusPanel.empty() && document->GetName() == m_FocusPanel )
+            {
+                ImGui::SetNextWindowFocus();
+                m_FocusPanel.clear();
+            }
+
+            // THE CLOSE BOX WRITES TO A FRAME-LOCAL BOOL, NOT TO THE PANEL'S VISIBILITY.
+            //
+            // This one line is the defect, fixed. While documents lived in the panel list they were drawn
+            // with `&panel->GetVisibility()` like every tool, so one bool meant "hidden" for a tool and
+            // "destroy me" for a document — and the View menu, which wrote that same bool, could therefore
+            // destroy a document with a tick and had no way to bring it back. A document has no visibility:
+            // it is open, or it does not exist.
+            bool open = true;
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, document->GetWindowPadding() );
+            ImGui::Begin( DocumentDisplayTitle( *document ).c_str(), &open );
+            ImGui::PopStyleVar();
+            if ( ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows ) )
+                focused = subject;
+            {
+                DESERT_PROFILE_SCOPE_DYNAMIC( document->GetName().c_str() );
+                document->OnUIRender();
+            }
+            ImGui::End();
+
+            if ( !open )
+                closeRequests.push_back( subject );
+        }
+
+        // The focus is only MOVED by a document that actually has it. A frame in which the keyboard is on a
+        // tool leaves the last focused document standing, so Ctrl+Tab resumes from where the user was
+        // editing rather than from nothing.
+        if ( static_cast<uint64_t>( focused ) != 0 )
+        {
+            // CLICKING A DOCUMENT COMMITS THE RING, cycling to one does not. Both are "focus", so without
+            // this distinction one of the two rules would be wrong: either a mouse click would leave
+            // Ctrl+Tab walking an order the user has since abandoned, or the second Ctrl+Tab would return to
+            // where the first one started. The cycling flag is cleared when Ctrl comes up, and the ring is
+            // committed there — see the shortcut block in OnImGuiRender.
+            if ( focused != m_FocusedDocument && !m_CyclingDocuments )
+                m_Documents.Touch( focused );
+
+            m_FocusedDocument = focused;
+        }
+
+        for ( const Assets::AssetHandle& subject : closeRequests )
+            RequestDocumentClose( subject );
+    }
+
+    void EditorLayer::DrawOpenRefusedPopup()
+    {
+        namespace ImGui = ::ImGui;
+
+        constexpr const char* kTitle = "Cannot open this document";
+
+        if ( m_OpenRefusalPending )
+        {
+            ImGui::OpenPopup( kTitle );
+            m_OpenRefusalPending = false;
+        }
+
+        ImGui::SetNextWindowPos( ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
+                                 ImVec2( 0.5f, 0.5f ) );
+
+        if ( !ImGui::BeginPopupModal( kTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+            return;
+
+        if ( !m_OpenRefusal )
+        {
+            // Cannot normally happen; the modal is only ever opened with a refusal in hand. Closing rather
+            // than drawing an empty dialog, because an empty dialog with no way out is worse than none.
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            return;
+        }
+
+        ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetErrorColor() );
+        ImGui::TextUnformatted( ICON_MDI_ALERT_CIRCLE_OUTLINE );
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        ImGui::PushFont( EditorResources::GetBoldFont() );
+        ImGui::Text( "Cannot open %s", m_OpenRefusal->AssetName.c_str() );
+        ImGui::PopFont();
+
+        ImGui::TextDisabled( "All %u renderer slots are in use%s. Close one of these to free one:",
+                             EngineContext::kMaxRendererSlots,
+                             m_OpenRefusal->Pending > 0 ? " or already committed" : "" );
+        ImGui::Separator();
+
+        std::vector<Assets::AssetHandle> closeRequests;
+        for ( const RendererSlotConsumer& consumer : m_OpenRefusal->Census )
+        {
+            ImGui::TextUnformatted( consumer.Name.c_str() );
+
+            // A row the user can act on gets a button; the main viewport and the Details preview do not,
+            // because neither is a window a person closes to make room. Saying nothing on those rows is
+            // the honest version: they are named because they explain where the slots went.
+            if ( consumer.Document && m_Documents.Find( *consumer.Document ) )
+            {
+                ImGui::SameLine( ImGui::GetContentRegionMax().x - 64.0f );
+                ImGui::PushID( static_cast<int>( static_cast<uint64_t>( *consumer.Document ) & 0x7fffffff ) );
+                if ( ImGui::SmallButton( "Close" ) )
+                    closeRequests.push_back( *consumer.Document );
+                ImGui::PopID();
+            }
+
+            // The CPU-drawn documents say so, for the reason the log line already did: closing one frees
+            // nothing, and a census that let the user close four of them and still be refused would be a
+            // longer way of saying nothing.
+            if ( !consumer.HoldsSlot && !consumer.ClaimsSlot )
+            {
+                ImGui::Indent( 18.0f );
+                ImGui::TextDisabled( "drawn on the CPU \xe2\x80\x94 closing it frees nothing" );
+                ImGui::Unindent( 18.0f );
+            }
+        }
+
+        ImGui::Separator();
+        if ( ImGui::Button( "Close this message", ImVec2( 180.0f, 0.0f ) ) )
+        {
+            m_OpenRefusal.reset();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled( "The same census is in the log." );
+
+        ImGui::EndPopup();
+
+        for ( const Assets::AssetHandle& subject : closeRequests )
+            RequestDocumentClose( subject );
     }
 
     void EditorLayer::DrawRecoveryPopup()
@@ -1799,9 +2283,48 @@ namespace Desert::Editor
         if ( !ImGui::BeginMainMenuBar() )
             return;
 
+        // `--open-menu <name>`: hold one menu open so a capture can show what is in it. See
+        // StartupOptions::MenuToOpen for why a flag is the only way to photograph a menu on this platform.
+        //
+        // OpenPopup here and BeginMenu below derive the same id from the same label in the same window
+        // (BeginMenu: window->GetID(label); OpenPopup: CurrentWindow->GetID(str_id)), which is what makes
+        // this the menu's own opening rather than a second popup wearing its name. Re-issued every frame
+        // because a menu closes as soon as focus leaves it and a shot may land on any frame.
+        {
+            const std::string& wanted = Editor::StartupOptions::Get().MenuToOpen;
+            if ( !wanted.empty() )
+            {
+                static constexpr const char* kMenus[] = { "File",   "Edit",     "View", "Window",
+                                                          "Scenes", "Graphics", "About" };
+                bool                         known    = false;
+                for ( const char* menu : kMenus )
+                    if ( wanted == menu )
+                    {
+                        ImGui::OpenPopup( menu );
+                        known = true;
+                        break;
+                    }
+
+                if ( !known )
+                {
+                    // Named and fatal, the rule --open-panel and --select already follow: a menu that
+                    // silently failed to open is indistinguishable from a menu that failed to draw, and a
+                    // capture of the second presented as the first is the defect this family of flags
+                    // exists to prevent.
+                    std::string names;
+                    for ( const char* menu : kMenus )
+                        names += ( names.empty() ? "" : ", " ) + std::string( menu );
+                    LOG_ERROR( "[Editor] --open-menu '{}' names no menu. Known menus: {}", wanted, names );
+                    const_cast<Engine::Application*>( m_Application )->Close( 2 );
+                    Editor::StartupOptions::Get().MenuToOpen.clear(); // do not repeat it every frame
+                }
+            }
+        }
+
         DrawFileMenu();
         DrawEditMenu();
         DrawViewMenu();
+        DrawWindowMenu();
         DrawScenesMenu();
         DrawGraphicsMenu();
         DrawAboutMenu();
@@ -2236,6 +2759,34 @@ namespace Desert::Editor
             ImGui::TextDisabled( ICON_MDI_TRIANGLE_OUTLINE " %s tris", FormatThousands( tris ).c_str() );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Triangles in the VISIBLE meshes of this scene (LOD 0)." );
+        }
+
+        // HOW MANY DOCUMENTS, AND HOW MANY OF THE SIX SLOTS ARE GONE. Both numbers already existed in the
+        // code — GetLiveRendererCount and PendingRendererSlotDemand — and neither had anywhere to appear,
+        // so the first a user heard of the cap was a click that did nothing. A count of documents is not
+        // the number that matters; the slot census is, which is why they are shown together: three
+        // documents can be three slots or none, depending on which three.
+        ImGui::SameLine( 0.0f, 16.0f );
+        {
+            const uint32_t live    = Graphic::SceneRenderer::GetLiveRendererCount();
+            const uint32_t pending = PendingRendererSlotDemand( m_Documents.Documents() );
+
+            // ImGuiCol_TextDisabled, not ImGuiCol_Text: the line below is drawn with TextDisabled like the
+            // rest of the bar, and pushing the wrong colour would leave it grey with a colour nobody sees.
+            const bool tight = live + pending >= EngineContext::kMaxRendererSlots;
+            if ( tight )
+                ImGui::PushStyleColor( ImGuiCol_TextDisabled, ThemeManager::GetWarningColor() );
+            ImGui::TextDisabled( ICON_MDI_FILE_DOCUMENT_MULTIPLE_OUTLINE " %zu document%s \xc2\xb7 %u/%u slots",
+                                 m_Documents.Count(), m_Documents.Count() == 1 ? "" : "s", live,
+                                 EngineContext::kMaxRendererSlots );
+            if ( tight )
+                ImGui::PopStyleColor();
+
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "%zu open document(s). %u of the %u renderer slots are in use and %u more "
+                                   "are committed to documents that have not drawn yet; a document that "
+                                   "needs one is refused when they are all spoken for.",
+                                   m_Documents.Count(), live, EngineContext::kMaxRendererSlots, pending );
         }
 
         // Active snap state: off, or the step of the CURRENT transform tool — answers "why did it
@@ -2905,36 +3456,157 @@ namespace Desert::Editor
             return;
         }
 
-        // Two groups: the panels that are always yours to arrange, and the tools that come and go with
-        // the selection. Without the split the menu is twenty entries with no hint that half of them
-        // manage themselves — and ticking one of those means "keep it open even when it doesn't apply".
-        auto panelItem = [&]( const std::unique_ptr<Editor::IPanel>& panel )
+        // TWENTY-ONE TOOLS, TWELVE ENTRIES. A flat alphabet-of-whatever-was-constructed-first list is a
+        // list nobody reads; grouped by what the entry is FOR, the twelve that answer "where do I look at
+        // the level / the content / the output" stay at the top level and the nine that belong to a
+        // particular job move behind the job's own submenu. Nothing is deleted and nothing becomes
+        // unreachable — see the leftover section at the end, which is empty when every panel is placed.
+        //
+        // AND NO DOCUMENTS. Not because this loop skips them: because m_Panels is a PanelRegistry and
+        // cannot hold one. That is the whole task. Open documents are in Window -> Documents, where the
+        // control is a radio and the close is an x, neither of which can be mistaken for "hide".
+        // THE GROUPING IS DATA, NOT CONTROL FLOW, and that is a correction rather than a preference: a
+        // submenu's body only runs while it is OPEN, so marking a panel "placed" from inside one reported
+        // every panel behind a closed submenu as ungrouped. Measured — the first capture of this menu showed
+        // ten panels under "NOT YET GROUPED" that are grouped. The census has to be readable without opening
+        // anything, so it is stated once here and the drawing below refers to it.
+        static constexpr const char* kLevelGroup[]     = { "Scene Outliner", "Collections", "Details",
+                                                           "Scene Settings", "Scene Validation" };
+        static constexpr const char* kContentGroup[]   = { "Assets", "Asset References", "Shader Library" };
+        static constexpr const char* kOutputGroup[]    = { "Logs", "Lua Console", "History" };
+        static constexpr const char* kViewportGroup[]  = { "Scene###scene" };
+        static constexpr const char* kGraphGroup[]     = { "Node Graph", "Anim Graph", "Particle Editor",
+                                                           "UI Editor" };
+        static constexpr const char* kSequencerGroup[] = { "Sequencer", "Anim Layers" };
+        static constexpr const char* kToolGroup[]      = { "Modeling", "Model from Photos", "Build Settings" };
+
+        std::unordered_set<std::string> placed;
+        for ( const auto& group :
+              { std::span<const char* const>( kLevelGroup ), std::span<const char* const>( kContentGroup ),
+                std::span<const char* const>( kOutputGroup ), std::span<const char* const>( kViewportGroup ),
+                std::span<const char* const>( kGraphGroup ), std::span<const char* const>( kSequencerGroup ),
+                std::span<const char* const>( kToolGroup ) } )
+            for ( const char* name : group )
+                placed.insert( name );
+
+        auto panelItem = [&]( const char* name )
         {
-            // Same icon + stable ID as the panel title (the ###id keeps each menu entry unique/stable).
-            const bool wasVisible = panel->GetVisibility();
-            if ( ImGui::MenuItem( PanelDisplayTitle( panel->GetName() ).c_str(), "", &panel->GetVisibility(),
-                                  true ) )
+            for ( auto& panel : m_Panels )
             {
-                // Ticking a contextual panel pins it open; unticking releases it back to the context.
-                if ( panel->IsContextual() )
-                    panel->Pinned() = !wasVisible;
+                if ( panel->GetName() != name )
+                    continue;
+
+                // Same icon + stable ID as the panel title (the ###id keeps each menu entry unique/stable).
+                const bool wasVisible = panel->GetVisibility();
+                if ( ImGui::MenuItem( PanelDisplayTitle( panel->GetName() ).c_str(), "", &panel->GetVisibility(),
+                                      true ) )
+                {
+                    // Ticking a contextual panel pins it open; unticking releases it back to the context.
+                    if ( panel->IsContextual() )
+                        panel->Pinned() = !wasVisible;
+                }
+                if ( panel->IsContextual() && ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Opens itself when its context appears. Ticking it keeps it open "
+                                       "even when it does not apply." );
+                return;
             }
         };
 
-        for ( auto& panel : m_Panels )
-            if ( !panel->IsContextual() )
-                panelItem( panel );
+        auto group = [&]( std::span<const char* const> names )
+        {
+            for ( const char* name : names )
+                panelItem( name );
+        };
+
+        ImGui::TextDisabled( "THE LEVEL" );
+        group( kLevelGroup );
 
         ImGui::Separator();
-        ImGui::TextDisabled( "Tools (open with the selection)" );
-        for ( auto& panel : m_Panels )
-            if ( panel->IsContextual() )
-                panelItem( panel );
+        ImGui::TextDisabled( "CONTENT" );
+        group( kContentGroup );
 
         ImGui::Separator();
-        ImGui::MenuItem( "Profiler", "", &m_ShowProfiler, true );
-        if ( ImGui::MenuItem( "Perf HUD", "", &EditorPreferences::Get().ShowPerfHud, true ) )
-            EditorPreferences::Save(); // persist the toggle like the rest of the user prefs
+        ImGui::TextDisabled( "OUTPUT" );
+        group( kOutputGroup );
+        // The Profiler is a window this layer draws itself rather than an IPanel, so it is a bool and not a
+        // registry entry — it belongs in the group all the same, because the user is choosing between it and
+        // the Logs beside it, not between two implementations.
+        ImGui::MenuItem( ICON_MDI_CHART_BAR "  Profiler", "", &m_ShowProfiler, true );
+
+        ImGui::Separator();
+
+        // The nine that moved. Each is behind the job it belongs to rather than in a flat list beside
+        // "Details" — a viewport is not a panel you tick, and a timeline is somewhere you go to author a
+        // clip.
+        if ( ImGui::BeginMenu( ICON_MDI_MONITOR "  Viewports" ) )
+        {
+            group( kViewportGroup );
+            ImGui::Separator();
+            // Multi-scene editing: a second, independent scene in its own live viewport (own SceneRenderer)
+            // so a UI scene and the game scene can be worked on side by side. Focus a viewport to make its
+            // scene active — the Outliner / Details / gizmo follow it.
+            if ( ImGui::MenuItem( ICON_MDI_PLUS_BOX_MULTIPLE " New Scene View" ) )
+                m_AddSceneViewRequested = true; // deferred to OnUpdate (allocates GPU resources)
+            if ( !m_ExtraScenes.empty() )
+                ImGui::TextDisabled( "%d scene view(s) open + main", static_cast<int>( m_ExtraScenes.size() ) );
+            // Closing from here does exactly what the window's x does — clear the VIEWPORT PANEL's
+            // visibility — rather than tearing the scene down inside the ImGui pass. A scene view is a tool
+            // panel bound to a scene, so visibility genuinely is its close signal; a document is the case
+            // where that stopped being true, which is why documents have their own path.
+            for ( const auto& doc : m_ExtraScenes )
+            {
+                const std::string item = std::string( ICON_MDI_CLOSE " Close " ) + doc->Name;
+                if ( ImGui::MenuItem( item.c_str() ) && doc->Viewport )
+                    doc->Viewport->GetVisibility() = false;
+            }
+            ImGui::EndMenu();
+        }
+
+        if ( ImGui::BeginMenu( ICON_MDI_GRAPH "  Graph Editors" ) )
+        {
+            group( kGraphGroup );
+            ImGui::EndMenu();
+        }
+
+        if ( ImGui::BeginMenu( ICON_MDI_CHART_TIMELINE "  Sequencer" ) )
+        {
+            // Both together: a clip is authored in the timeline and its layers, and two independent ticks
+            // for one place you go was two decisions where there is one.
+            group( kSequencerGroup );
+            ImGui::EndMenu();
+        }
+
+        if ( ImGui::BeginMenu( ICON_MDI_HAMMER_WRENCH "  Tools" ) )
+        {
+            group( kToolGroup );
+            ImGui::EndMenu();
+        }
+
+        if ( ImGui::BeginMenu( ICON_MDI_EYE "  Show" ) )
+        {
+            if ( ImGui::MenuItem( "Perf HUD", "", &EditorPreferences::Get().ShowPerfHud, true ) )
+                EditorPreferences::Save(); // persist the toggle like the rest of the user prefs
+            ImGui::EndMenu();
+        }
+
+        // ANYTHING THE GROUPS ABOVE DID NOT NAME. This is empty today and is not a placeholder: a panel
+        // added later and forgotten here would otherwise have no menu entry at all, which is the same
+        // "you cannot get it back" the documents had. It is visible precisely so that it gets fixed.
+        {
+            bool anyLeftover = false;
+            for ( auto& panel : m_Panels )
+            {
+                if ( placed.count( panel->GetName() ) != 0 )
+                    continue;
+                if ( !anyLeftover )
+                {
+                    ImGui::Separator();
+                    ImGui::TextDisabled( "NOT YET GROUPED" );
+                    anyLeftover = true;
+                }
+                panelItem( panel->GetName().c_str() );
+            }
+        }
 
         ImGui::Separator();
         if ( ImGui::BeginMenu( "Layouts" ) )
@@ -3329,6 +4001,90 @@ namespace Desert::Editor
         const_cast<Engine::Application*>( m_Application )->Close( 2 );
     }
 
+    void EditorLayer::DrawWindowMenu()
+    {
+        namespace ImGui = ::ImGui;
+
+        if ( !ImGui::BeginMenu( "Window" ) )
+            return;
+
+        // A SECOND MENU, BECAUSE THESE ARE A SECOND KIND OF THING. The View menu ticks tools on and off;
+        // this one lists what is open and lets you go to it or close it. Putting documents back among the
+        // ticks is the defect, not the layout.
+        if ( m_Documents.Empty() )
+        {
+            ImGui::TextDisabled( "No document open" );
+            ImGui::TextDisabled( "Double-click an asset in the Content Browser." );
+        }
+        else
+        {
+            ImGui::TextDisabled( "OPEN DOCUMENTS \xe2\x80\x94 %zu", m_Documents.Count() );
+
+            // The x column is placed against the WIDEST row, measured, not against the popup's content
+            // region: a menu auto-sizes to its widest item, so asking the region where the right edge is
+            // gives an answer that depends on the answer. (Measured — the first capture of this menu had no
+            // x on any row, because every one of them was placed past the edge it was helping to define.)
+            float widestRow = 0.0f;
+            for ( const auto& document : m_Documents )
+            {
+                const std::string measured = std::string( ICON_MDI_RADIOBOX_MARKED ) + "  " +
+                                             DocumentIcon( document->SubjectType() ) + "  " +
+                                             DocumentDisplayName( document->GetName() );
+                widestRow = std::max( widestRow, ImGui::CalcTextSize( measured.c_str() ).x );
+            }
+
+            std::vector<Assets::AssetHandle> closeRequests;
+            for ( const Assets::AssetHandle& subject : m_Documents.MostRecentOrder() )
+            {
+                const IAssetEditorPanel* document = m_Documents.Find( subject );
+                if ( !document )
+                    continue;
+
+                ImGui::PushID( static_cast<int>( static_cast<uint64_t>( subject ) & 0x7fffffff ) );
+
+                // A RADIO, NOT A CHECKBOX, and the difference is the whole argument of this task written
+                // in one glyph. A tick says "shown / hidden" and invites the user to untick it — which is
+                // exactly what used to destroy the document. A radio says "this is the one you are in",
+                // which is true, is the only thing picking a row can mean, and offers no way to un-pick.
+                const bool        active = ( subject == m_FocusedDocument );
+                const std::string label =
+                     std::string( active ? ICON_MDI_RADIOBOX_MARKED : ICON_MDI_RADIOBOX_BLANK ) + "  " +
+                     DocumentIcon( document->SubjectType() ) + "  " + DocumentDisplayName( document->GetName() );
+
+                if ( ImGui::MenuItem( label.c_str() ) )
+                    FocusDocument( subject );
+
+                ImGui::SameLine( ImGui::GetCursorPosX() + widestRow + 24.0f );
+                if ( ImGui::SmallButton( ICON_MDI_CLOSE ) )
+                    closeRequests.push_back( subject );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Close this document. It is destroyed, and its renderer slot (if it "
+                                       "holds one) is returned." );
+
+                ImGui::PopID();
+            }
+
+            ImGui::Separator();
+            if ( ImGui::MenuItem( ICON_MDI_CLOSE_BOX_OUTLINE "  Close All Documents" ) )
+                for ( const auto& document : m_Documents )
+                    closeRequests.push_back( document->Subject() );
+
+            for ( const Assets::AssetHandle& subject : closeRequests )
+                RequestDocumentClose( subject );
+        }
+
+        // NO "SAVE ALL" HERE, AND ITS ABSENCE IS DELIBERATE.
+        //
+        // The mock draws one. It cannot be built honestly yet: IAssetEditorPanel declares no Save() and no
+        // IsDirty(), the editor's single dirty flag belongs to the SCENE (a CommandHistory revision), and a
+        // material document writes straight into the in-memory asset as a slider moves. "Save All" would
+        // therefore have to mean "rewrite every open document's file whether or not it changed", it could
+        // not report how many of them needed it, and it would touch mtimes the asset hot-reload watches.
+        // A per-document dirty flag with a working copy behind it is the next task; the item waits for it.
+
+        ImGui::EndMenu();
+    }
+
     void EditorLayer::DrawScenesMenu()
     {
         namespace ImGui = ::ImGui;
@@ -3344,26 +4100,9 @@ namespace Desert::Editor
             m_OpenScenePopup = true;
         }
 
-        ImGui::Separator();
-        // Multi-scene editing: open a second, independent scene in its own live viewport (own SceneRenderer)
-        // so a UI/main-menu scene and the game scene can be worked on side by side without switching. Focus a
-        // viewport to make its scene active — the Outliner/Details/gizmo follow it.
-        if ( ImGui::MenuItem( ICON_MDI_PLUS_BOX_MULTIPLE " New Scene View" ) )
-            m_AddSceneViewRequested = true; // deferred to OnUpdate (allocates GPU resources) — see there
-        if ( !m_ExtraScenes.empty() )
-        {
-            ImGui::TextDisabled( "%d scene view(s) open + main", static_cast<int>( m_ExtraScenes.size() ) );
-            // Closing from here does exactly what the window's X does — clear the panel's visibility — rather
-            // than tearing the document down inside the ImGui pass. One close path, one place that owns the
-            // ordering (CloseSceneView, from OnUpdate); a second mechanism here would be a second chance to
-            // get the destruction order wrong.
-            for ( const auto& doc : m_ExtraScenes )
-            {
-                const std::string item = std::string( ICON_MDI_CLOSE " Close " ) + doc->Name;
-                if ( ImGui::MenuItem( item.c_str() ) && doc->Viewport )
-                    doc->Viewport->GetVisibility() = false;
-            }
-        }
+        // Opening and closing scene VIEWS moved to View -> Viewports, next to the Scene panel's own toggle.
+        // This menu is about scene FILES; a viewport is not one, and two menus offering the same New Scene
+        // View was two places to keep in step for one action.
 
         if ( !m_RecentScenes.empty() )
         {
@@ -3874,6 +4613,12 @@ namespace Desert::Editor
                 break;
             panel->OnEvent( event );
         }
+        for ( auto& document : m_Documents )
+        {
+            if ( event.m_Handled )
+                break;
+            document->OnEvent( event );
+        }
 #endif
     }
 
@@ -3907,7 +4652,11 @@ namespace Desert::Editor
         ThumbnailCache::ReleaseAll();
 
 #ifdef EBABLE_IMGUI
-        m_Panels.clear();
+        // Documents BEFORE tools, and both before the ImGui layer: a document owns a PreviewViewport whose
+        // UIHelper holds descriptor sets, and the device has already been idled above. Explicit rather than
+        // left to ~EditorLayer, which runs after the layer stack has moved on.
+        (void)m_Documents.ReleaseAll();
+        m_Panels.Clear();
         m_ImGuiLayer->OnDetach();
         m_ImGuiLayer.reset();
 #endif

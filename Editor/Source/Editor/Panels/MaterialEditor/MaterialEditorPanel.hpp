@@ -44,7 +44,7 @@ namespace Desert::Editor
     // COST WHEN CLOSED IS ZERO, not "small". The PreviewViewport — and with it a Scene, a SceneRenderer and
     // one of the six renderer slots — is created on the first frame the window actually draws, and released
     // when the window is DISMISSED, which destroys this panel outright (EditorLayer::
-    // CloseDismissedAssetDocuments). That is the difference between a document and a tool panel: a tool is
+    // ServiceDocumentCloses). That is the difference between a document and a tool panel: a tool is
     // hidden and kept, so it has to be told to let go of its renderer; a document ceases to exist, so it
     // cannot forget to.
     class MaterialEditorPanel final : public IAssetEditorPanel

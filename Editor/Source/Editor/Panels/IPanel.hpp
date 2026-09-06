@@ -131,8 +131,17 @@ namespace Desert::Editor
     // name is a constant and hiding it is the whole of "closing" it. A document is created when the user
     // opens an asset and DESTROYED when the window is dismissed — that destruction is what returns the
     // Scene, the SceneRenderer and one of the six renderer slots, and there is no way to write it as a
-    // visibility flag. See EditorLayer::CloseDismissedAssetDocuments, which is the scene-view close path
-    // applied to the same problem.
+    // visibility flag.
+    //
+    // WHICH IS WHY THE TWO HAVE DIFFERENT OWNERS. A document is never in the tool registry
+    // (Editor/Core/PanelRegistry.hpp, which refuses one at compile time); it lives in
+    // Editor/Core/DocumentWell.hpp, and it is closed by EditorLayer::RequestDocumentClose rather than by
+    // anything writing GetVisibility(). While the two shared a container they shared that bool too, and
+    // "hide" for a tool therefore had to mean "destroy" for a document: unticking one in the View menu
+    // destroyed it, and re-ticking could not bring it back.
+    //
+    // GetVisibility() is inherited here and MEANS NOTHING for a document. Nothing reads it, nothing writes
+    // it, and nothing should: a document is open, or it does not exist.
     class IAssetEditorPanel : public IPanel
     {
     public:

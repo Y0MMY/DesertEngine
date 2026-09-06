@@ -60,6 +60,7 @@ namespace Desert::Editor
          { "--shot-sequence", true, "/tmp/seq" },
          { "--shot-every", true, "1" },
          { "--open-panel", true, "Details" },
+         { "--open-menu", true, "View" },
          { "--select", true, "Directional Light" },
          { "--preview-orbit", true, "160,15" },
          { "--gpu-profile", false, nullptr },
@@ -250,6 +251,8 @@ namespace Desert::Editor
                 options.Shot.Sequence = value;
             else if ( arg == "--open-panel" )
                 options.Startup.PanelsToOpen.emplace_back( value );
+            else if ( arg == "--open-menu" )
+                options.Startup.MenuToOpen = value;
             else if ( arg == "--select" )
                 options.Startup.SelectEntity = value;
             else if ( arg == "--preview-orbit" )

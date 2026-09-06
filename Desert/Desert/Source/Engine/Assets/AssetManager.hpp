@@ -81,6 +81,25 @@ namespace Desert::Assets
             return nullptr;
         }
 
+        // "WHICH FILE IS THIS HANDLE?" — asked without claiming to know what type the handle names.
+        //
+        // Every lookup above is TYPED, and rightly so: a typed question that cannot be answered must be
+        // refused rather than reinterpreted, which is what AsRequestedType is for. But that leaves one
+        // question with no answer at all — a caller holding only a handle, for instance the editor
+        // reporting that a document could NOT be opened, has no type to ask with and needs a name a person
+        // recognises rather than a decimal id.
+        //
+        // Returning METADATA and not an asset is what makes this safe to answer untyped: there is nothing
+        // here to cast, so the failure mode the typed lookups exist to prevent — a plausible pointer to an
+        // object of another class — cannot occur. The metadata's own AssetType says what the record is,
+        // and the caller may not assume anything else about it. Null for a handle that is not registered.
+        [[nodiscard]] const AssetMetadata* FindMetadataByHandle( const AssetHandle& handle ) const
+        {
+            if ( auto it = m_HandleLookup.find( handle ); it != m_HandleLookup.end() )
+                return &m_AssetsCache[it->second].first;
+            return nullptr;
+        }
+
         template <typename TypeAsset>
         Asset<TypeAsset> FindByPath( const Common::Filepath& path ) const
         {

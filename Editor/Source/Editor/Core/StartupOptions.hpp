@@ -68,5 +68,25 @@ namespace Desert::Editor
         bool  HasPreviewOrbit   = false;
         float PreviewOrbitYaw   = 0.0f; // radians
         float PreviewOrbitPitch = 0.0f; // radians
+
+        /// `--open-menu <View|Window|File|...>`: hold that menu bar entry OPEN for the whole run, so a
+        /// capture can show what is in it.
+        ///
+        /// WHY A FLAG, for the third time in this header and for exactly the reason SelectEntity gives:
+        /// a menu opens on a CLICK, macOS refuses synthetic input to this machine (measured — `osascript`
+        /// answers "not allowed to send keystrokes. (1002)"), and there is therefore no way at all to
+        /// photograph a menu. That is not a small gap: the View menu is where a whole class of decisions
+        /// lives — what the editor offers, how it is grouped, and, for the split between tools and
+        /// documents, WHAT IS ABSENT. "The View menu no longer lists your open documents" is a claim about
+        /// a picture nobody could take.
+        ///
+        /// Held open every frame rather than opened once, because a shot may be taken on any frame and a
+        /// menu closes the moment the mouse moves off it. That makes the menu unclosable for the run, which
+        /// is correct for a capture and is why this is a flag and not a setting.
+        ///
+        /// A name matching no menu is an ERROR that lists the known ones — same rule as --open-panel next
+        /// door, and for the same reason: a flag that quietly did nothing looks exactly like a menu that
+        /// failed to draw.
+        std::string MenuToOpen;
     };
 } // namespace Desert::Editor
