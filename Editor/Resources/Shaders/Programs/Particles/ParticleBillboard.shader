@@ -9,16 +9,9 @@ Shader "ParticleBillboard"
 
         #include <Common/CameraUB.glslh>
 
-        struct Particle
-        {
-            vec4 PosSize; // xyz = world position, w = size
-            vec4 Color;   // rgba (a <= 0 => invisible / dead)
-            vec4 VelLife; // xyz = velocity, w = lifetime
-            // x = age. yzw are the SIMULATION's local-space offset from the emitter (see
-            // ParticleSimulate.shader) — this pass must not read or repurpose them: the two shaders
-            // declare one buffer layout, and a lane that means two things is how the mirror drifts.
-            vec4 Age;
-        };
+        // The element layout, shared with ParticleSimulate.shader rather than restated here — the two
+        // used to declare it independently, and Д26 gave Age.yzw a meaning in only one of them.
+        #include <Common/ParticleState.glslh>
 
         ReadBuffer(1) Particles
         {
