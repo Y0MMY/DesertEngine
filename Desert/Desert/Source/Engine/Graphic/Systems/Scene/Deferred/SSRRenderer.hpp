@@ -131,10 +131,10 @@ namespace Desert::Graphic::System
                 auto pass            = RenderPass::Create( rp );
 
                 renderer.BeginRenderPass( pass.get() );
-                m_Material->Bind( gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
-                                  gbuffer->GetColorAttachmentImage( 2 ), sceneColor, viewProj, cameraPos,
-                                  maxSteps, maxDistance, intensity, thickness,
-                                  static_cast<float>( m_FrameIndex % 1024u ) );
+                m_Material->BindInputs(
+                     gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
+                     gbuffer->GetColorAttachmentImage( 2 ), sceneColor, viewProj, cameraPos, maxSteps, maxDistance,
+                     intensity, thickness, static_cast<float>( m_FrameIndex % 1024u ) );
                 renderer.SubmitFullscreenQuad( m_TracePipeline.get(), m_Material->GetMaterialExecutor() );
                 renderer.EndRenderPass();
             }
@@ -151,10 +151,9 @@ namespace Desert::Graphic::System
                 auto pass            = RenderPass::Create( rp );
 
                 renderer.BeginRenderPass( pass.get() );
-                m_ResolveMaterial->Bind( m_TraceBuffer->GetColorAttachmentImage( 0 ),
-                                         m_AccumFB[prv]->GetColorAttachmentImage( 0 ),
-                                         gbuffer->GetColorAttachmentImage( 2 ), m_PrevViewProj, texel,
-                                         m_HistoryValid ? 0.88f : 0.0f );
+                m_ResolveMaterial->BindInputs(
+                     m_TraceBuffer->GetColorAttachmentImage( 0 ), m_AccumFB[prv]->GetColorAttachmentImage( 0 ),
+                     gbuffer->GetColorAttachmentImage( 2 ), m_PrevViewProj, texel, m_HistoryValid ? 0.88f : 0.0f );
                 renderer.SubmitFullscreenQuad( m_ResolvePipeline.get(),
                                                m_ResolveMaterial->GetMaterialExecutor() );
                 renderer.EndRenderPass();
@@ -162,8 +161,8 @@ namespace Desert::Graphic::System
 
             // --- Pass 3: roughness-scaled blur of the RESOLVED buffer, blended over the scene. ---
             {
-                m_CompositeMaterial->Bind( m_AccumFB[cur]->GetColorAttachmentImage( 0 ),
-                                           gbuffer->GetColorAttachmentImage( 1 ), texel );
+                m_CompositeMaterial->BindInputs( m_AccumFB[cur]->GetColorAttachmentImage( 0 ),
+                                                 gbuffer->GetColorAttachmentImage( 1 ), texel );
 
                 RenderPassSpecification rp;
                 rp.TargetFramebuffer = target;

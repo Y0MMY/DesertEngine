@@ -30,7 +30,7 @@ namespace Desert::ECS
         }
 
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
-                     const Common::Timestep& ts ) override
+                     const Common::Timestep& /*ts*/ ) override
         {
             auto view = registry.view<TextComponent, TransformComponent>();
             view.each(

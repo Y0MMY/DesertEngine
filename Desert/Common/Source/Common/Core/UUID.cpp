@@ -20,10 +20,6 @@ namespace Common
         return UUID( value ? value : 1ull );
     }
 
-    UUID::UUID( const UUID& other ) : m_UUID( other.m_UUID )
-    {
-    }
-
     UUID::UUID( const std::string& uuidStr )
     {
         try

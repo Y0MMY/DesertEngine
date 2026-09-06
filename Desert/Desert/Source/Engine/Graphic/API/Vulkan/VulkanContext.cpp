@@ -41,7 +41,13 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanContext::VulkanContext( const std::shared_ptr<Window>& window ) : m_Window( window )
     {
-        CreateVKInstance();
+        // A constructor cannot return a result, and there is no partially-working VulkanContext: with no
+        // instance every device, surface and swapchain below dereferences null, so the process dies a few
+        // frames later somewhere that says nothing about the cause. DESERT_VERIFY names the cause and
+        // aborts in both configurations — the same instrument the line below already uses for the
+        // adjacent precondition, and the one this file's own `glfwVulkanSupported()` check picked.
+        const auto instance = CreateVKInstance();
+        DESERT_VERIFY( instance.IsSuccess(), "Vulkan instance could not be created: {}", instance.GetError() );
     }
 
     Common::ResultStr<VkResult> VulkanContext::CreateVKInstance()
@@ -97,17 +103,16 @@ namespace Desert::Graphic::API::Vulkan
 
             bool validationLayerPresent = false;
             LOG_INFO( "Vulkan Instance Layers:" );
+            // The inner loop that used to be here walked `availableLayers` a SECOND time and never touched
+            // its own loop variable: every iteration re-ran `strcmp( layer.layerName, validationLayers )`
+            // on the OUTER layer, so the whole thing was one comparison performed N times. That unused
+            // variable is what `-Wunused-variable` was pointing at. Behaviour is unchanged; the work is now
+            // O(N) instead of O(N^2).
             for ( const VkLayerProperties& layer : availableLayers )
             {
                 LOG_INFO( "  {0}", layer.layerName );
-                for ( const auto& layerProperties : availableLayers )
-                {
-                    if ( strcmp( layer.layerName, validationLayers ) == 0 )
-                    {
-                        validationLayerPresent = true;
-                        break;
-                    }
-                }
+                if ( strcmp( layer.layerName, validationLayers ) == 0 )
+                    validationLayerPresent = true;
             }
 
             if ( validationLayerPresent )

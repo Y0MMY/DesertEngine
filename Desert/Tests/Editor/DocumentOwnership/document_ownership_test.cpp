@@ -334,17 +334,22 @@ TEST( DocumentClose, TheRecentlyClosedListIsCappedAndCarriesNoDuplicates )
     DocumentWell well;
 
     // One asset, opened and closed three times, is one entry -- not three copies of the same row.
+    //
+    // The released document is dropped ON PURPOSE in both loops: what is under test is the
+    // RecentlyClosed bookkeeping, and letting the returned unique_ptr die at the semicolon is exactly
+    // what a caller that only wanted the window shut does. Written as `(void)` rather than left
+    // implicit, because a discarded owner and a forgotten one look identical without it.
     for ( int i = 0; i < 3; ++i )
     {
         well.Add( MakeDocument( AssetDocumentTitle( "M_Crate_Painted", Handle( 11 ) ), 11 ) );
-        well.Release( Handle( 11 ) );
+        (void)well.Release( Handle( 11 ) );
     }
     EXPECT_EQ( well.RecentlyClosed().size(), 1u );
 
     for ( uint64_t i = 100; i < 100 + DocumentWell::kRecentlyClosedLimit + 3; ++i )
     {
         well.Add( MakeDocument( AssetDocumentTitle( "M_" + std::to_string( i ), Handle( i ) ), i ) );
-        well.Release( Handle( i ) );
+        (void)well.Release( Handle( i ) );
     }
 
     EXPECT_EQ( well.RecentlyClosed().size(), DocumentWell::kRecentlyClosedLimit );

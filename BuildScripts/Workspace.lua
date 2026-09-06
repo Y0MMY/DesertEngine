@@ -17,9 +17,98 @@ workspace "Desert"
     targetdir ( _MAIN_SCRIPT_DIR .. "/build/Bin/%{cfg.buildcfg}" )
     objdir ( _MAIN_SCRIPT_DIR .. "/build/Intermediates/%{cfg.buildcfg}" )
 
-    externalanglebrackets "On"
+    -- `externalanglebrackets "On"` stood here and MUST NOT COME BACK. It is MSVC's
+    -- `/external:anglebrackets`, which calls EVERY `#include <...>` external regardless of where the
+    -- header was found — and this codebase includes its own headers in angle brackets 2168 times
+    -- against 260 quoted ones (`<Engine/...>`, `<Common/...>`, `<Editor/...>`). Paired with
+    -- `externalwarnings "Off"` below it, it would have handed Windows a `/W4` that inspects `.cpp`
+    -- bodies and is blind to every declaration — which is where `Bind` hides a virtual, where
+    -- `override` goes missing and where a by-value return is spelled `const`. It cost nothing while
+    -- `warnings "Off"` silenced everything anyway; the moment the level goes up it becomes a hole,
+    -- and a hole that reports success. External-ness belongs to PATHS, and that is the line below.
     externalwarnings "Off"
-    warnings "Off"
+
+    -- First-party code that happens to live under `ThirdParty/`. `desert-shared` is OUR submodule (the
+    -- shared project format, and `ResultStr.hpp` itself), so its path must stay an ordinary include
+    -- directory while everything else under `ThirdParty/` becomes external — otherwise the very header
+    -- whose `[[nodiscard]]` this commit is switching on would be the one place the compiler stops
+    -- looking. Workspace scope because it used to ride inside `Dependencies.Common.IncludeDir`, which
+    -- every project loops, and that loop now declares its entries external.
+    includedirs { _MAIN_SCRIPT_DIR .. "/ThirdParty/desert-shared/Include" }
+
+    -- `warnings "Off"` stood here until 2026-09-06, and it was not a neutral default: premake expands
+    -- it to `-w`, which reached **142 of the 144** generated makefiles in BOTH configurations. So every
+    -- `[[nodiscard]]`/`NO_DISCARD` in this repository — 382 of them across 99 files, counted the day this
+    -- was written; the Д31 census said 315 in 86 a week earlier — was decoration.
+    -- Task И3 had already found that the guard itself was MISSPELLED in four places and nothing said so,
+    -- which is the shape of the problem: with `-w` the compiler cannot even report that you asked it the
+    -- wrong question.
+    --
+    -- "Extra" and not "High"/"Everything": premake maps it to `-Wall -Wextra` for clang and gcc, which is
+    -- the level this commit brought to zero — 355 sites, measured in both configurations.
+    --
+    -- `-Werror` is NOT set, on purpose. The tree is silent under this flag as of this commit, and it has
+    -- to STAY silent for a while under both compilers before a hard failure is a service rather than a
+    -- hazard; the honest next step is `-Werror` on new files, not on all of them at once.
+    warnings "Extra"
+
+    -- WINDOWS GETS /W3 AND NOT /W4, AND THAT IS A MEASURED CHOICE RATHER THAN A SHRUG. `warnings "Extra"`
+    -- means `/W4` on MSVC, and shipping it here would put this commit in exactly the state it exists to
+    -- end: a flag switched on over a tree that is not quiet, on the half of CI nobody can see from a Mac.
+    --
+    -- The cost was estimated with the closest proxy available on this machine — the clang flags whose
+    -- diagnostics ARE the /W4-only MSVC ones: `-Wconversion` and `-Wshorten-64-to-32` for C4244/C4267,
+    -- `-Wsign-conversion` for C4245/C4389, `-Wshadow` for C4456-C4459. Over the same 672 translation
+    -- units: **459 further sites**, 419 of them sign conversions. That is not a tail to clean up in the
+    -- same change, and it is not something to leave screaming in a log.
+    --
+    -- /W3 is not a token level. Every diagnostic this task was actually about is at MSVC level 1 or 3:
+    -- **C4834** (discarding a `[[nodiscard]]` value) is LEVEL 1, as are C4715 (not all control paths
+    -- return a value) and C4700 (uninitialised local used); C4018 (signed/unsigned mismatch) and C4101
+    -- (unreferenced local variable) are level 3. Each has a clang counterpart inside `-Wall -Wextra`
+    -- — `-Wunused-result`, `-Wreturn-type`, `-Wsign-compare`, `-Wunused-variable` — and every one of
+    -- those is at zero here, which is the evidence that /W3 should arrive quiet on Windows too. It is
+    -- evidence and not proof: no Windows machine was available, so the first CI run is the measurement.
+    --
+    -- What /W4 would add on top is C4100 (unreferenced formal parameter) and C4189, both of which this
+    -- commit has already cleared on the clang side, plus the 459 conversions. Raising it is a task with
+    -- a number attached, not an oversight.
+    --
+    -- `warnings "Default"` is premake's spelling of `<WarningLevel>Level3</WarningLevel>` — verified by
+    -- generating a vs2022 project, not assumed from the name.
+    filter "system:windows"
+        warnings "Default"
+    filter {}
+
+    -- Vendored code is not ours to fix, and its warnings would drown ours the moment they appeared.
+    -- A path rule rather than `warnings "Off"` in each of the eleven ThirdParty project scripts,
+    -- because the eleven do not cover it: `vk_mem_alloc.cpp`, `stb_image.cpp`, `stb_truetype.cpp`,
+    -- `miniaudio.cpp` and `pl_mpeg.cpp` are vendored sources compiled INTO the Desert project, and a
+    -- per-project setting cannot reach a single file inside one of our own targets. One rule reaches
+    -- both, and a twelfth dependency is covered the day it is checked out rather than the day someone
+    -- remembers.
+    --
+    -- The leading `**/` is load-bearing, and both of the two spellings a reader would reach for first
+    -- match NOTHING from here: a bare `ThirdParty/**` is resolved against this script's own directory
+    -- (`BuildScripts/ThirdParty`, where no source lives), and an absolute
+    -- `_MAIN_SCRIPT_DIR .. "/ThirdParty/**"` does not match either, because premake compares the
+    -- pattern against the file path AS THE PROJECT SCRIPT WROTE IT. Measured, not reasoned: with
+    -- either of those two the generated makefiles carry zero per-file `-w`. If this rule ever stops
+    -- matching, the tree does not go quiet — it goes LOUD, because vendored code starts reporting,
+    -- and that is the direction this failure should point.
+    filter "files:**/ThirdParty/**"
+        warnings "Off"
+    filter {}
+
+    -- AND ONE VENDORED TREE THAT IS NOT UNDER `ThirdParty/`. LightweightVK (MIT, and it still carries its
+    -- upstream licence header) was copied into the engine's own Vulkan utilities as
+    -- `Graphic/API/Vulkan/VulkanUtils/lightweightvk`, so the rule above walks straight past it while it
+    -- reports ten diagnostics we have no standing to fix. Its headers are included only by its own four
+    -- sources, so a file rule reaches all ten. If it ever moves under `ThirdParty/` this block becomes
+    -- redundant rather than wrong.
+    filter "files:**/lightweightvk/**"
+        warnings "Off"
+    filter {}
 
     -- NO `MultiProcessorCompile` HERE, AND THE ABSENCE IS THE MEASUREMENT.
     --

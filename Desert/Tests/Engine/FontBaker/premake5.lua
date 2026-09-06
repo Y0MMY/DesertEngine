@@ -17,11 +17,13 @@ project(test_name)
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",       -- <Engine/Text/FontBaker.hpp>
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/stb/include",      -- <stb_truetype/stb_truetype.h>
     }
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

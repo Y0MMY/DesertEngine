@@ -29,7 +29,10 @@
 namespace Desert::Graphic
 {
     class SceneRenderer;
-    class Environment;
+    // `struct` and not `class`: the definition in Graphic/Environment/SceneEnvironment.hpp uses struct, and the
+    // Microsoft C++ ABI encodes the class-key into the decorated name, so the mismatch is a Windows-only link
+    // error waiting for the day this forward declaration is the one a caller sees first.
+    struct Environment;
 } // namespace Desert::Graphic
 
 namespace Common::Math
@@ -63,8 +66,6 @@ namespace Desert::Core
         [[nodiscard]] Common::BoolResultStr EndScene();
 
         [[nodiscard]] Common::BoolResultStr Init();
-
-        [[nodiscard]] const Graphic::Environment CreateEnvironment( const Common::Filepath& filepath );
 
         const std::shared_ptr<Graphic::Image2D>     GetFinalImage() const;
         const std::shared_ptr<Graphic::Framebuffer> GetTargetFramebuffer() const;

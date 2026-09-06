@@ -42,6 +42,7 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::CloudAuthoredRef
 {
@@ -66,18 +67,19 @@ namespace Desert::Tests::CloudAuthoredRef
         using glm::smoothstep;
         using glm::sqrt;
 
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/CloudNoise.glslh>
 #include <Common/CloudGeometry.glslh>
 
-        // ------------------------------------------------------------------------------------------
-        // Producer P's two callbacks, identical in construction to CloudFieldReference.hpp's
-        // ------------------------------------------------------------------------------------------
-        //
-        // They are here rather than shared with that header because the two suites are compiled as
-        // separate binaries and the dialect namespace is anonymous by construction; what is shared is the
-        // SOURCE they both drive, which is the shader text.
+             // ------------------------------------------------------------------------------------------
+             // Producer P's two callbacks, identical in construction to CloudFieldReference.hpp's
+             // ------------------------------------------------------------------------------------------
+             //
+             // They are here rather than shared with that header because the two suites are compiled as
+             // separate binaries and the dialect namespace is anonymous by construction; what is shared is the
+             // SOURCE they both drive, which is the shader text.
 
-        constexpr uint  kVolumeSeed     = 1337u;
+             constexpr uint kVolumeSeed     = 1337u;
         constexpr float kCurlStrength   = 0.33f;
         constexpr float kWispyPeriodLF  = 2.0f;
         constexpr float kWispyPeriodHF  = 4.0f;
@@ -419,6 +421,7 @@ namespace Desert::Tests::CloudAuthoredRef
         }
 
 #include <Common/CloudField.glslh>
+        DESERT_GLSL_AS_CPP_END
 
         // ------------------------------------------------------------------------------------------
         // Setting the scene

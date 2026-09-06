@@ -12,7 +12,7 @@ namespace Desert::Graphic
         m_Environment    = Graphic::EnvironmentManager::Create( baseAsset );
     }
 
-    void MaterialSkybox::Bind( const UpdateMaterialSkyboxInfo& data )
+    void MaterialSkybox::BindInputs( const UpdateMaterialSkyboxInfo& data )
     {
         if ( !m_Environment.RadianceMap.IsValid() ||
              m_Environment.RadianceMap.ImageType != Runtime::ImageHandle::Type::ImageCube )

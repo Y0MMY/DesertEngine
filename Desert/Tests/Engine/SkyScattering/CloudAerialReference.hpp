@@ -13,6 +13,7 @@
 // No LUT callbacks and no medium: the header takes radiance in and gives radiance back.
 
 #include <glm/glm.hpp>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::CloudAerialRef
 {
@@ -24,7 +25,9 @@ namespace Desert::Tests::CloudAerialRef
         using glm::max;
         using glm::mix;
 
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/CloudAerial.glslh>
+             DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::CloudAerialRef

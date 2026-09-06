@@ -29,11 +29,13 @@ project "CloudLayoutBaker"
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/stb/include",
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.Common.Defines) do

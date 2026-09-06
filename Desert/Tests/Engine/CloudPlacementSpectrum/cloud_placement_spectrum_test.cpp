@@ -2061,7 +2061,7 @@ TEST( CloudPlacementSpectrum, RaggednessSeesTheEdgeAndNotTheArea )
 {
     const int side = 64;
 
-    const auto blank = [side]() { return std::vector<float>( static_cast<size_t>( side ) * side, 0.0f ); };
+    const auto blank = []() { return std::vector<float>( static_cast<size_t>( side ) * side, 0.0f ); };
 
     // A solid 32 x 32 square in the middle: 1024 pixels of area and 128 of boundary.
     std::vector<float> square = blank();

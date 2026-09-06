@@ -7,7 +7,7 @@ namespace Desert::Graphic
         m_InputTexture = m_MaterialExecutor->GetTexture2DProperty( "u_InputTexture" ).get();
     }
 
-    void MaterialFXAA::Bind( const std::shared_ptr<Image2D>& inputImage )
+    void MaterialFXAA::BindInputs( const std::shared_ptr<Image2D>& inputImage )
     {
         if ( m_InputTexture && inputImage )
             m_InputTexture->SetImage( inputImage.get() );

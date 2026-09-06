@@ -12,7 +12,7 @@ namespace Desert::ShaderResources
     public:
         virtual ~UniformImageCube() = default;
 
-        virtual const uint32_t GetBinding() const = 0;
+        virtual uint32_t GetBinding() const = 0;
 
         virtual void SetImageCube( const Graphic::ImageCube* imageCube ) = 0;
 

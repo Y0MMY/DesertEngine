@@ -67,8 +67,8 @@ namespace Desert::Graphic::System
             auto& renderer = Renderer::GetInstance();
             renderer.BeginRenderPass( renderPass.get() ); // clear: AO is fully recomputed each frame
             // GBufferC(2) = world position, GBufferB(1) = normal.
-            m_Material->Bind( gbuffer->GetColorAttachmentImage( 2 ), gbuffer->GetColorAttachmentImage( 1 ),
-                              viewProj, cameraPos, radius, bias, power, sampleCount );
+            m_Material->BindInputs( gbuffer->GetColorAttachmentImage( 2 ), gbuffer->GetColorAttachmentImage( 1 ),
+                                    viewProj, cameraPos, radius, bias, power, sampleCount );
             renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_Material->GetMaterialExecutor() );
             renderer.EndRenderPass();
         }

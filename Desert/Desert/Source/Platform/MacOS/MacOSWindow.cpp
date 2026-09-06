@@ -127,7 +127,7 @@ namespace Desert::Platform::MacOS
                                    } );
 
         glfwSetKeyCallback( m_GLFWWindow,
-                            []( GLFWwindow* window, int key, int scancode, int action, int mods )
+                            []( GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/ )
                             {
                                 auto& data = *(WindowData*)glfwGetWindowUserPointer( window );
 
@@ -179,7 +179,7 @@ namespace Desert::Platform::MacOS
                              } );
 
         glfwSetMouseButtonCallback( m_GLFWWindow,
-                                    []( GLFWwindow* window, int button, int action, int mods )
+                                    []( GLFWwindow* window, int button, int action, int /*mods*/ )
                                     {
                                         auto& data = *( (WindowData*)glfwGetWindowUserPointer( window ) );
 

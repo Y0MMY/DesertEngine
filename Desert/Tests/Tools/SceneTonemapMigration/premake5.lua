@@ -31,16 +31,18 @@ project(test_name)
         -- scene load). This is what makes `#include <SceneMigration.hpp>` below resolve, and its
         -- own `#include "SceneMigration.hpp"` of itself.
         "%{wks.location}/Tools/SceneMigrator/Source",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/entt/include/",       -- Components.hpp is an entt registry away
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the scene tree is rfl::Generic
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

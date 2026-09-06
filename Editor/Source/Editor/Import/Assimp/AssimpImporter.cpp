@@ -496,8 +496,6 @@ namespace Desert::Editor
                         uint32_t vertexID = weight.mVertexId;
                         float    value    = weight.mWeight;
 
-                        auto& vertex = tempVertices[vertexID];
-
                         auto& v = tempVertices[vertexID];
 
                         int minIndex = 0;

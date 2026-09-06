@@ -32,16 +32,16 @@ project(test_name)
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     -- Vulkan headers (for the descriptor types), shaderc and spirv-cross.
     for name, path in pairs(deps.DesertSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

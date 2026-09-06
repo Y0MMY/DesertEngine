@@ -62,7 +62,7 @@ namespace Desert::Graphic
         // image (and any descriptor sets bound to its pointer) stays valid, so this is the safe, churn-free
         // way to stream changing content (video frames) every frame. `data` must match the image's format
         // and dimensions. Default: unsupported.
-        virtual Common::BoolResultStr SetData( const Core::Formats::ImagePixelData& data )
+        virtual Common::BoolResultStr SetData( const Core::Formats::ImagePixelData& /*data*/ )
         {
             return Common::MakeError<bool>( "Image2D::SetData not supported by this backend" );
         }

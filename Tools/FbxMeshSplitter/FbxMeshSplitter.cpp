@@ -141,8 +141,12 @@ namespace FbxSplit
         struct MaterialDef
         {
             std::string Stem;                                 // shared base name (also the material Name)
-            std::string Albedo, Opacity, Normal, Roughness, Metallic, AO; // project-relative paths
-            std::string AlbedoExt, OpacityExt, NormalExt, RoughnessExt, MetallicExt, AOExt; // for rank compare
+            // `= {}` and not merely "they default anyway": every slot below is OPTIONAL, and the
+            // aggregate initialisations of this struct name only the stem. Stating it at the declaration
+            // is what makes the empty ones a decision rather than a truncated initialiser list.
+            std::string Albedo = {}, Opacity = {}, Normal = {}, Roughness = {}, Metallic = {}, AO = {};
+            std::string AlbedoExt = {}, OpacityExt = {}, NormalExt = {}, RoughnessExt = {};
+            std::string MetallicExt = {}, AOExt = {};
         };
 
         // Scan the collection folder (+ a "textures" subdir) for PBR maps, group by material stem, pick the

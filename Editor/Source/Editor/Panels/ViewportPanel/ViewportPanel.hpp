@@ -67,7 +67,6 @@ namespace Desert::Editor
         }
 
     private:
-        bool OnWindowResize( Common::EventWindowResize& e );
         bool OnMousePressed( Common::MouseButtonPressedEvent& e );
         bool OnKeyPressedEvent( Common::KeyPressedEvent& e );
 

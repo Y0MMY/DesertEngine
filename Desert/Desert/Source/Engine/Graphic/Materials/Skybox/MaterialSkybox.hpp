@@ -39,7 +39,7 @@ namespace Desert::Graphic
             return false;
         }
 
-        void Bind( const UpdateMaterialSkyboxInfo& data );
+        void BindInputs( const UpdateMaterialSkyboxInfo& data );
 
     private:
         std::weak_ptr<Assets::SkyboxAsset> m_BaseMaterial;

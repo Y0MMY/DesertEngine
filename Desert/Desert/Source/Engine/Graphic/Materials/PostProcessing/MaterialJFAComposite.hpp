@@ -13,8 +13,8 @@ namespace Desert::Graphic
     public:
         MaterialJFAComposite();
 
-        void Bind( const Image2D* jfaSeed, const Image2D* sceneColor,
-                   const glm::vec4& outlineColor, float outlineWidth, float smoothness );
+        void BindInputs( const Image2D* jfaSeed, const Image2D* sceneColor, const glm::vec4& outlineColor,
+                         float outlineWidth, float smoothness );
 
         // Typed outline parameters — visible to editor via GetRegisteredProperties()
         MPROPERTY( glm::vec4, OutlineColor, "u_OutlineColor", (glm::vec4( 1.0f, 0.5f, 0.0f, 1.0f )) )

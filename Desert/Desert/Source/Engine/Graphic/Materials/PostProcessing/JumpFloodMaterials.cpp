@@ -7,7 +7,7 @@ namespace Desert::Graphic
         m_MaskTexture = m_MaterialExecutor->GetTexture2DProperty( "u_StencilTexture" ).get();
     }
 
-    void MaterialJFAInit::Bind( const Image2D* maskImage )
+    void MaterialJFAInit::BindInputs( const Image2D* maskImage )
     {
         if ( m_MaskTexture && maskImage )
         {
@@ -20,7 +20,7 @@ namespace Desert::Graphic
         m_InputTexture = m_MaterialExecutor->GetTexture2DProperty( "u_InputTexture" ).get();
     }
 
-    void MaterialJFAStep::Bind( const Image2D* inputSeed, int stepLength )
+    void MaterialJFAStep::BindInputs( const Image2D* inputSeed, int stepLength )
     {
         if ( m_InputTexture && inputSeed )
         {

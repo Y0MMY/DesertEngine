@@ -21,7 +21,7 @@ namespace Desert::Graphic
         // Both images are required and are always the same size. They are passed together rather than
         // through two calls because the shader indexes them with ONE set of coordinates: a frame in which
         // only one of them was refreshed would read this frame's radiance against last frame's edges.
-        void Bind( const Image2D* scatterImage, const Image2D* guideImage );
+        void BindInputs( const Image2D* scatterImage, const Image2D* guideImage );
 
     private:
         Texture2DProperty* m_ScatterTexture = nullptr;

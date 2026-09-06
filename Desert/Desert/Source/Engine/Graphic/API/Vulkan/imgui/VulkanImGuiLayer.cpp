@@ -144,12 +144,12 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
-    Common::BoolResultStr VulkanImGui::OnUpdate( const Common::Timestep& ts )
+    Common::BoolResultStr VulkanImGui::OnUpdate( const Common::Timestep& /*ts*/ )
     {
         return BOOLSUCCESS;
     }
 
-    void VulkanImGui::OnEvent( Common::Event& event )
+    void VulkanImGui::OnEvent( Common::Event& /*event*/ )
     {
     }
 
@@ -176,7 +176,13 @@ namespace Desert::Graphic::API::Vulkan
         
         ImGui_ImplVulkan_RenderDrawData( ::ImGui::GetDrawData(), swapChain->GetVulkanQueue()->GetDrawCommandBuffer() );
 
-        renderer.EndRenderPass();
+        // Reported rather than returned: this helper is void and its caller is ImGui's own render path.
+        // A pass that will not close leaves the command buffer inside a render pass, and everything
+        // recorded after it is rejected by the driver rather than by us — so the log entry naming this
+        // line is the only thing that points at the cause.
+        const auto passEnded = renderer.EndRenderPass();
+        if ( !passEnded.IsSuccess() )
+            LOG_ERROR( "[VulkanImGui] EndRenderPass failed: {}", passEnded.GetError() );
 
         if ( io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable )
         {

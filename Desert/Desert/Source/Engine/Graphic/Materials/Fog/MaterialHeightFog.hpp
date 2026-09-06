@@ -12,7 +12,7 @@ namespace Desert::Graphic
     public:
         MaterialHeightFog();
 
-        void Bind( const Image2D* fogImage );
+        void BindInputs( const Image2D* fogImage );
 
     private:
         Texture2DProperty* m_FogTexture = nullptr;

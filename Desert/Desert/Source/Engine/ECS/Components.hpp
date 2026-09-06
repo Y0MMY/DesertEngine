@@ -19,7 +19,6 @@
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 
 #include <Engine/Animation/Animator.hpp>
-#include <Engine/Animation/FSM/AnimationStateMachine.hpp>
 
 #include <Engine/Physics/PhysicsWorld.hpp>
 #include <Engine/Scripting/ScriptProperty.hpp>
@@ -334,9 +333,8 @@ namespace Desert::ECS
     {
         // active Animator (runtime instance)
         std::unique_ptr<Animation::Animator> Animator;
-        // std::unique_ptr<Animation::AnimationStateMachine> StateMachine;
 
-        // current name (debug / editor / FSM)
+        // current name (debug / editor)
         std::string CurrentClip;
 
         bool Playing = true;

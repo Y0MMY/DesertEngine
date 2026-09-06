@@ -27,17 +27,19 @@ project(test_name)
         "%{wks.location}/Desert/Desert/Source", -- <Engine/Assets/Serialization/Texture.hpp>
         "%{wks.location}/Editor/Source",        -- the importer's own "TextureImporter.hpp" / "CookPaths.hpp"
         "%{wks.location}/Editor/Source/Editor/Import",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/entt/include/", -- AssetManager.hpp, included by TextureAsset.hpp
         "%{wks.location}/ThirdParty/stb/include",
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the .tex payload is written with rfl::json
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

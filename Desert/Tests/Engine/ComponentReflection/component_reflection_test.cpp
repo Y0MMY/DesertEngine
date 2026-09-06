@@ -77,11 +77,6 @@ namespace
         return value;
     }
 
-    bool EndsWith( const std::string& s, const char* suffix )
-    {
-        const std::string suf( suffix );
-        return s.size() >= suf.size() && s.compare( s.size() - suf.size(), suf.size(), suf ) == 0;
-    }
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------
@@ -850,16 +845,86 @@ TEST( VolumetricCloudPayload, TheEnvelopeContainsEveryTypeItIsBuiltFrom )
         Desert::Graphic::CloudTypeShape Shape;
     };
 
+    // DESIGNATED, AND THE PREVIOUS SPELLING WAS A LIVE DEFECT. These four rows were flat lists of
+    // fourteen floats, written when `CloudTypeShape`'s fifth member was a single `TopTaper`. It is now
+    // `CloudVerticalProfile Profile` — a struct wrapping `std::array<float, 16>` — so brace elision
+    // swallowed the fifth float AND the nine after it into `Profile.HalfWidth[0..9]`, leaving every named
+    // field from `AnvilAltitudeKm` onward value-initialised to zero. Measured, not deduced: the row
+    // labelled "a storm with an anvil" produced `AnvilStrength = 0`, `AnvilAltitudeKm = 0`,
+    // `DetailFactor = 0`, and `HalfWidth[1] = 9.5`.
+    //
+    // The cost was not cosmetic. The assertion this fixture set exists for is guarded by
+    // `if ( set[slot].AnvilStrength > 0.0f )` a hundred lines below, so THE ANVIL CASE NEVER RAN — the
+    // one thing the comment above promises ("one whose second lobe sits far above its tower") was the
+    // one thing not being tested. `-Wmissing-braces` and `-Wmissing-field-initializers` both named these
+    // exact lines; `warnings "Off"` is why nobody heard it.
+    //
+    // Designators rather than repaired positional lists, so the next field inserted into the middle of
+    // `CloudTypeShape` is a compile error here instead of a silent re-mapping.
+    const Desert::Graphic::CloudVerticalProfile profile = Desert::Assets::CloudTypeDefaultShape().Profile;
+
     const Fixture fixtures[] = {
          { "a sheet on the ground",
-           { 0.15f, 0.55f, 0.88f, 0.12f, 0.35f, 0.0f, 0.0f, 0.0f, 0.05f, 0.5f, 0.70f, 0.75f, 1.0f, 1.0f } },
+           { .BaseAltitudeKm      = 0.15f,
+             .TopAltitudeKm       = 0.55f,
+             .EdgeTopFraction     = 0.88f,
+             .BaseRampFraction    = 0.12f,
+             .Profile             = profile,
+             .AnvilAltitudeKm     = 0.0f,
+             .AnvilThicknessKm    = 0.0f,
+             .AnvilStrength       = 0.0f,
+             .DetailCharacter     = 0.05f,
+             .DetailFactor        = 0.5f,
+             .DensityFactor       = 0.70f,
+             .ExtinctionFactor    = 0.75f,
+             .PlacementScale      = 1.0f,
+             .PlacementAnisotropy = 1.0f } },
          { "a fair-weather heap",
-           { 0.90f, 1.90f, 0.45f, 0.06f, 0.45f, 0.0f, 0.0f, 0.0f, 0.70f, 1.0f, 1.00f, 1.00f, 1.0f, 1.0f } },
+           { .BaseAltitudeKm      = 0.90f,
+             .TopAltitudeKm       = 1.90f,
+             .EdgeTopFraction     = 0.45f,
+             .BaseRampFraction    = 0.06f,
+             .Profile             = profile,
+             .AnvilAltitudeKm     = 0.0f,
+             .AnvilThicknessKm    = 0.0f,
+             .AnvilStrength       = 0.0f,
+             .DetailCharacter     = 0.70f,
+             .DetailFactor        = 1.0f,
+             .DensityFactor       = 1.00f,
+             .ExtinctionFactor    = 1.00f,
+             .PlacementScale      = 1.0f,
+             .PlacementAnisotropy = 1.0f } },
          { "the built-in default", Desert::Assets::CloudTypeDefaultShape() },
          { "a storm with an anvil",
-           { 0.90f, 9.00f, 0.12f, 0.04f, 0.40f, 9.5f, 1.8f, 0.85f, 0.85f, 1.0f, 1.35f, 1.30f, 1.0f, 1.0f } },
+           { .BaseAltitudeKm      = 0.90f,
+             .TopAltitudeKm       = 9.00f,
+             .EdgeTopFraction     = 0.12f,
+             .BaseRampFraction    = 0.04f,
+             .Profile             = profile,
+             .AnvilAltitudeKm     = 9.5f,
+             .AnvilThicknessKm    = 1.8f,
+             .AnvilStrength       = 0.85f,
+             .DetailCharacter     = 0.85f,
+             .DetailFactor        = 1.0f,
+             .DensityFactor       = 1.35f,
+             .ExtinctionFactor    = 1.30f,
+             .PlacementScale      = 1.0f,
+             .PlacementAnisotropy = 1.0f } },
          { "a wisp two hundred metres thick, high up",
-           { 8.00f, 8.20f, 0.90f, 0.25f, 0.55f, 0.0f, 0.0f, 0.0f, 0.00f, 2.5f, 0.35f, 0.25f, 1.0f, 1.0f } },
+           { .BaseAltitudeKm      = 8.00f,
+             .TopAltitudeKm       = 8.20f,
+             .EdgeTopFraction     = 0.90f,
+             .BaseRampFraction    = 0.25f,
+             .Profile             = profile,
+             .AnvilAltitudeKm     = 0.0f,
+             .AnvilThicknessKm    = 0.0f,
+             .AnvilStrength       = 0.0f,
+             .DetailCharacter     = 0.00f,
+             .DetailFactor        = 2.5f,
+             .DensityFactor       = 0.35f,
+             .ExtinctionFactor    = 0.25f,
+             .PlacementScale      = 1.0f,
+             .PlacementAnisotropy = 1.0f } },
     };
 
     // EVERY SUBSET OF THE FIXTURES UP TO THE CEILING, and not just each of them alone. The relation is

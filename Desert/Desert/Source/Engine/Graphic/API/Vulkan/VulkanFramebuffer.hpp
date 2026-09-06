@@ -29,12 +29,12 @@ namespace Desert::Graphic::API::Vulkan
             return m_Height;
         }
 
-        const auto GetVKFramebuffer() const
+        auto GetVKFramebuffer() const
         {
             return m_Framebuffer;
         }
 
-        const auto GetVKRenderPass() const
+        auto GetVKRenderPass() const
         {
             return m_RenderPass;
         }
@@ -42,7 +42,7 @@ namespace Desert::Graphic::API::Vulkan
         // Returns a render pass with LOAD_OP_LOAD for all attachments.
         // Used by render-graph passes that accumulate into the framebuffer
         // without clearing the previous pass's output.
-        const auto GetVKRenderPassLoad() const
+        auto GetVKRenderPassLoad() const
         {
             return m_RenderPassLoad;
         }
@@ -67,7 +67,7 @@ namespace Desert::Graphic::API::Vulkan
         {
         }
 
-        virtual Common::BoolResultStr Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) override;
+        Common::BoolResultStr Resize( uint32_t width, uint32_t height ) override;
 
         virtual const std::shared_ptr<Image2D>& GetColorAttachmentImage( uint32_t index = 0 ) const override
         {

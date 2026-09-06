@@ -13,19 +13,6 @@ float DistributionGGX(float cosLh, float roughness)
 	return alphaSq / (PI * denom * denom);
 }
 
-float gaSchlickG1(float cosTheta, float k)
-{
-	return cosTheta / (cosTheta * (1.0 - k) + k);
-}
-
-float CalculateAttenuation(float distance, float radius)
-{
-	float attenuation = 1.0 / (1.0 + 0.7 * distance + 1.8 * distance * distance);
-    float distanceFactor = distance / radius;
-    float smoothFactor = 1.0 - smoothstep(0.8, 1.0, distanceFactor);
-    return attenuation * smoothFactor;
-}
-
 // Distance attenuation with a selectable falloff model. Matches ECS::LightFalloff:
 //   0 = Linear, 1 = Quadratic (default), 2 = InverseSquare (physical 1/d^2, windowed).
 // Full intensity within minRadius; smoothly reaches exactly 0 at radius (no hard edge / no leak past it).
@@ -56,15 +43,16 @@ float LightFalloffFactor(float dist, float minRadius, float radius, int falloff)
     return clamp(curve, 0.0, 1.0);
 }
 
-float GeometrySchlickGGX(float cosLi, float cosLo, float roughness)
-{
-	float r = roughness + 1.0;
-	float k = (r * r) / 8.0; // Epic suggests using this roughness remapping for analytic lights.
-	return gaSchlickG1(cosLi, k) * gaSchlickG1(cosLo, k);
-}
-
 // Computes G/(4*NdotL*NdotV) analytically as 1/(4*(NdotL*(1-k)+k)*(NdotV*(1-k)+k)).
 // This form is always bounded — no divide-by-near-zero when cosLi or cosLo approach 0.
+//
+// IT REPLACED `GeometrySchlickGGX` (and that function's helper `gaSchlickG1`), which stayed in this
+// header, called by nothing, for as long as `-w` kept `-Wunused-function` quiet. The two are the same
+// Smith term with the same `k`; the difference is that the old one divided by `4*NdotL*NdotV`
+// afterwards and this one never forms that denominator. Anyone who reaches for the old name in a new
+// shader reintroduces the divide-by-near-zero the comment above is about. `BRDFLut.cpp` has its own
+// C++ `GeometrySchlickGGX` for the split-sum LUT and is untouched — different integral, no denominator
+// problem, and no relation to this text.
 float VisibilitySmith(float cosLi, float cosLo, float roughness)
 {
 	float r = roughness + 1.0;

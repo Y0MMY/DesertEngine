@@ -113,7 +113,6 @@ namespace Desert::Graphic
         MaterialPropertySet              m_Properties;
         std::weak_ptr<MaterialInstance>  m_ParentInstance;
         std::vector<MaterialInstancePtr> m_ChildInstances;
-        bool                             m_bNeedsApply    = true;
-        uint32_t                         m_LastApplyFrame = 0;
+        bool                             m_bNeedsApply = true;
     };
 } // namespace Desert::Graphic

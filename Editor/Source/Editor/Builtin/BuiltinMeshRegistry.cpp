@@ -34,7 +34,7 @@ namespace Desert::Editor
     }
 
     Assets::AssetHandle
-    BuiltinMeshRegistry::CreateDefaultMaterial( const std::shared_ptr<Assets::AssetManager>& assetManager )
+    BuiltinMeshRegistry::CreateDefaultMaterial( const std::shared_ptr<Assets::AssetManager>& /*assetManager*/ )
     {
         //auto material = std::make_shared<Graphic::Material>();
         //material->SetName( "Default Material" );
@@ -56,7 +56,7 @@ namespace Desert::Editor
     // =========================
     // CUBE
     // =========================
-    void BuiltinMeshRegistry::RegisterCube( const std::shared_ptr<Assets::AssetManager>& assetManager )
+    void BuiltinMeshRegistry::RegisterCube( const std::shared_ptr<Assets::AssetManager>& /*assetManager*/ )
     {
         auto cubeMesh = Geometry::PrimitiveMeshFactory::Create( Geometry::PrimitiveType::Cube );
 
@@ -68,7 +68,7 @@ namespace Desert::Editor
     // =========================
     // PLANE
     // =========================
-    void BuiltinMeshRegistry::RegisterPlane( const std::shared_ptr<Assets::AssetManager>& assetManager )
+    void BuiltinMeshRegistry::RegisterPlane( const std::shared_ptr<Assets::AssetManager>& /*assetManager*/ )
     {
        /* auto data = Geometry::PrimitiveMeshFactory::CreatePlane();
 
@@ -85,7 +85,7 @@ namespace Desert::Editor
     // =========================
     // SPHERE
     // =========================
-    void BuiltinMeshRegistry::RegisterSphere( const std::shared_ptr<Assets::AssetManager>& assetManager )
+    void BuiltinMeshRegistry::RegisterSphere( const std::shared_ptr<Assets::AssetManager>& /*assetManager*/ )
     {
         /*auto data = Geometry::PrimitiveMeshFactory::CreateSphere();
 

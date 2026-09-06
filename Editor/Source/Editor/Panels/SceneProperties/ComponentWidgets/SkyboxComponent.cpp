@@ -29,7 +29,7 @@ namespace Desert::Editor
     DESERT_REGISTER_CUSTOM_COMPONENT(
          ECS::SkyboxComponent, "Skybox", false,
          (
-              []( ECS::Entity& entity, ::Desert::Core::Scene* scene, const ComponentEditContext& ctx )
+              []( ECS::Entity& entity, ::Desert::Core::Scene* /*scene*/, const ComponentEditContext& ctx )
               {
                   auto* assetManager = ctx.AssetMgr();
                   if ( !assetManager )

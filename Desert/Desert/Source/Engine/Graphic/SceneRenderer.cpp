@@ -912,10 +912,13 @@ namespace Desert::Graphic
             UNIQUE_GET_AS( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Execute();
         }
 
-        {
-            DESERT_PROFILE_PASS( "CompositeRenderPass" );
-            CompositeRenderPass();
-        }
+        // NO COMPOSITE PASS HERE, AND THE ABSENCE IS DELIBERATE. `CompositeRenderPass()` used to be called
+        // at this point inside its own profiler scope, and its entire body had been commented out — so the
+        // frame graph reported a pass that did nothing, and the two locals it still declared are what
+        // `-Wunused-variable` finally pointed at. The editor composites through the ImGui layer's swapchain
+        // pass; a build that renders WITHOUT ImGui has no compositing step at all and shows a black screen,
+        // and that is a missing feature to be written where the passes above live, not an empty function
+        // kept as a reminder.
     }
 
     NO_DISCARD Common::BoolResultStr SceneRenderer::EndScene()
@@ -1108,18 +1111,6 @@ namespace Desert::Graphic
              ->SetLensFlareImage( flareSystem->GetFlareImage() );
     }
 
-    // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting
-    // CompositePass!
-    void SceneRenderer::CompositeRenderPass()
-    {
-        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-
-        auto& renderer = Renderer::GetInstance();
-
-        // renderer.BeginSwapChainRenderPass();
-        // renderer.EndRenderPass();
-    }
-
     void SceneRenderer::SubmitMesh( const Mesh* mesh, const std::vector<MaterialInstance*>& materialSlots,
                                     const glm::mat4& transform, const RenderSubmissionExtra& extra )
     {
@@ -1194,11 +1185,6 @@ namespace Desert::Graphic
              ->SubmitInstancedMesh( { .Mesh       = static_cast<Desert::StaticMesh*>( const_cast<Mesh*>( mesh ) ),
                                       .Material   = material,
                                       .Transforms = transforms } );
-    }
-
-    const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
-    {
-        return {}; // EnvironmentManager::Create( filepath );
     }
 
     void SceneRenderer::SetOutlineSettings( const glm::vec3& color, float width, float smoothness, bool enabled )

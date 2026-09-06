@@ -63,7 +63,16 @@ namespace Desert::Runtime
         // MeshFactory::Create, and the ECS primitive path Invalidates explicitly). Without this a builtin
         // procedural mesh (e.g. the Cube) has no buffers and renders nothing.
         if ( mesh )
-            mesh->Invalidate();
+        {
+            // Reported, not refused: the caller receives a handle either way and the registry is the
+            // only place this mesh can be found again. What must not happen is the previous behaviour —
+            // a mesh whose buffers never uploaded sitting in the registry, drawing nothing, with the
+            // handle looking exactly like a working one.
+            const auto uploaded = mesh->Invalidate();
+            if ( !uploaded.IsSuccess() )
+                LOG_ERROR( "[MeshService] procedural mesh {} has no GPU buffers: {}", (uint64_t)handle,
+                           uploaded.GetError() );
+        }
         m_Meshes[handle] = mesh;
         return handle;
     }

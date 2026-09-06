@@ -30,10 +30,10 @@ namespace Desert::Graphic::API::Vulkan
                       const std::string& passName = {} );
         ~VulkanShader();
 
-        virtual void Use( BindUsage use = BindUsage::Bind ) const override
+        virtual void Use( BindUsage /*use*/ = BindUsage::Bind ) const override
         {
         }
-        virtual void RT_Use( BindUsage use = BindUsage::Bind ) const override
+        virtual void RT_Use( BindUsage /*use*/ = BindUsage::Bind ) const override
         {
         }
         virtual Common::BoolResultStr Reload() override;
@@ -85,7 +85,7 @@ namespace Desert::Graphic::API::Vulkan
             return set < m_DescriptorSetLayouts.size() ? m_DescriptorSetLayouts[set] : nullptr;
         }
 
-        const auto GetDescriptorSetLayoutCount() const
+        auto GetDescriptorSetLayoutCount() const
         {
             return m_DescriptorSetLayouts.size();
         }

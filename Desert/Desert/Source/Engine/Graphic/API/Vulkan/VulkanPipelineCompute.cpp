@@ -380,16 +380,17 @@ namespace Desert::Graphic::API::Vulkan
         m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
     }
 
-    void VulkanPipelineCompute::BindDescriptorSets( VkDescriptorSet descriptorSet, uint32_t frameIndex )
+    void VulkanPipelineCompute::BindDescriptorSets( VkDescriptorSet /*descriptorSet*/, uint32_t frameIndex )
     {
         // This will be used by the executor
         m_VulkanMaterialBackend->BindDescriptorSets( m_ActiveComputeCommandBuffer, m_ComputePipelineLayout,
                                                      VK_PIPELINE_BIND_POINT_COMPUTE, frameIndex );
     }
 
-    void VulkanPipelineCompute::UpdateDescriptorSet( uint32_t                                 frameIndex,
+    void VulkanPipelineCompute::UpdateDescriptorSet( uint32_t /*frameIndex*/,
                                                      const std::vector<VkWriteDescriptorSet>& writes,
-                                                     VkDescriptorSet descriptorSet, uint32_t setIndex /*= 0 */ )
+                                                     VkDescriptorSet                          descriptorSet,
+                                                     uint32_t /*setIndex*/ /*= 0 */ )
     {
         std::vector<VkWriteDescriptorSet> modifiedWrites = writes;
         for ( auto& write : modifiedWrites )

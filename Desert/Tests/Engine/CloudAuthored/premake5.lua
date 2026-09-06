@@ -35,15 +35,17 @@ project(test_name)
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
         "%{wks.location}/Editor/Resources/Shaders",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the cloud type's file format is rfl::json
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

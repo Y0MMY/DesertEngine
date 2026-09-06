@@ -142,12 +142,12 @@ namespace Desert::Core
                                                       { return this->OnMouseMove( e ); } );
     }
 
-    bool EditorCamera::OnKeyPress( Common::KeyPressedEvent& e )
+    bool EditorCamera::OnKeyPress( Common::KeyPressedEvent& /*e*/ )
     {
         return false;
     }
 
-    bool EditorCamera::OnMouseMove( Common::MouseMovedEvent& e )
+    bool EditorCamera::OnMouseMove( Common::MouseMovedEvent& /*e*/ )
     {
         return false;
     }

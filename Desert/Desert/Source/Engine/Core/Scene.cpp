@@ -201,7 +201,9 @@ namespace Desert::Core
         return true;
     }
     Scene::Scene( std::string&& sceneName, Graphic::SceneRenderer* sceneRenderer )
-         : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( sceneRenderer )
+         // Declaration order: m_SceneRenderer is declared before m_SceneName, and members are constructed
+         // in declaration order no matter what this list says.
+         : m_SceneRenderer( sceneRenderer ), m_SceneName( std::move( sceneName ) )
     {
         SetupRegistryCallbacks();
     }
@@ -345,7 +347,7 @@ namespace Desert::Core
                  m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
 
             dirLightGroup.each(
-                 [&]( entt::entity entity, const auto& light, const auto& transform )
+                 [&]( entt::entity /*entity*/, const auto& light, const auto& transform )
                  {
                      const glm::vec3& rawDir = transform.Translation;
                      if ( glm::length( rawDir ) > 0.001f )
@@ -484,7 +486,11 @@ namespace Desert::Core
             const auto& system = m_Systems[index];
             // Per-system timing (named by the system's type) so every ECS system is individually
             // visible in the profiler — no per-system edits.
-            DESERT_PROFILE_SCOPE_DYNAMIC( typeid( *system ).name() );
+            // The dereference is bound to a reference first because `typeid` on an expression WITH SIDE
+            // EFFECTS evaluates it — `*system` is `unique_ptr::operator*`, a function call, so the operand
+            // is not the plain lvalue it looks like. Same dynamic type, and the intent is now stated.
+            const auto& systemRef = *system;
+            DESERT_PROFILE_SCOPE_DYNAMIC( typeid( systemRef ).name() );
             system->Update( m_Registry, *m_SystemCommandBuffers[index], gameplayTs );
         };
 
@@ -518,11 +524,6 @@ namespace Desert::Core
     NO_DISCARD Common::BoolResultStr Scene::EndScene()
     {
         return m_SceneRenderer->EndScene();
-    }
-
-    NO_DISCARD const Graphic::Environment Scene::CreateEnvironment( const Common::Filepath& filepath )
-    {
-        return m_SceneRenderer->CreateEnvironment( filepath );
     }
 
     std::optional<Graphic::Environment> Scene::GetEnvironment() const

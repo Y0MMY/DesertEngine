@@ -37,7 +37,17 @@ namespace Desert::Editor
 
         m_Renderer = std::make_unique<Graphic::SceneRenderer>();
         m_Scene    = std::make_shared<::Desert::Core::Scene>( "ThumbnailPreview", m_Renderer.get() );
-        m_Scene->Init();
+        const auto inited = m_Scene->Init();
+        if ( !inited.IsSuccess() )
+        {
+            // `m_Inited` stays false so the next call retries, which is the whole reason this is not a
+            // bare `(void)`: with the result dropped the flag was set anyway, the preview was marked
+            // ready, and every frame afterwards recorded into a scene that had never initialised.
+            LOG_ERROR( "[AssetThumbnailRenderer] preview scene failed to initialise: {}", inited.GetError() );
+            m_Scene.reset();
+            m_Renderer.reset();
+            return;
+        }
 
         // Clean preview: no editor ground grid / selection outline / shadows bleeding into the thumbnail.
         // Keep AA on (FXAA) for smoother edges; supersampling (render 2x, downscale) adds the rest.
@@ -172,9 +182,19 @@ namespace Desert::Editor
         // Records the scene render into the CURRENT editor frame's command buffer. It is NOT submitted yet
         // (that happens when the editor's frame ends), so the readback must wait until a later frame -
         // see Collect().
-        m_Scene->BeginScene();
+        const auto begun = m_Scene->BeginScene();
+        if ( !begun.IsSuccess() )
+        {
+            // RETURN, do not record. OnUpdate and EndScene below both assume the scene opened; running
+            // them against a scene that refused leaves the editor's frame command buffer holding half a
+            // pass, and the driver reports that, not us.
+            LOG_ERROR( "[AssetThumbnailRenderer] BeginScene failed, preview frame skipped: {}", begun.GetError() );
+            return;
+        }
         m_Scene->OnUpdate( Common::Timestep( 0.016f ) );
-        m_Scene->EndScene();
+        const auto ended = m_Scene->EndScene();
+        if ( !ended.IsSuccess() )
+            LOG_ERROR( "[AssetThumbnailRenderer] EndScene failed: {}", ended.GetError() );
     }
 
     void AssetThumbnailRenderer::RequestMaterial( const Assets::AssetHandle& materialHandle,

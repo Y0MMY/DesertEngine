@@ -5,67 +5,106 @@
 
 #include <sstream>
 
-namespace Common {
+namespace Common
+{
 
-	class MouseMovedEvent : public Event
-	{
-	public:
-		MouseMovedEvent(float x, float y)
-			: m_MouseX(x), m_MouseY(y) {}
+    class MouseMovedEvent : public Event
+    {
+    public:
+        MouseMovedEvent( float x, float y ) : m_MouseX( x ), m_MouseY( y )
+        {
+        }
 
-		inline float GetX() const { return m_MouseX; }
-		inline float GetY() const { return m_MouseY; }
+        inline float GetX() const
+        {
+            return m_MouseX;
+        }
+        inline float GetY() const
+        {
+            return m_MouseY;
+        }
 
-		virtual const EventType GetEventType() const { return GetStaticType(); }
-		static EventType GetStaticType() { return EventType::MouseMoved; }
+        virtual EventType GetEventType() const
+        {
+            return GetStaticType();
+        }
+        static EventType GetStaticType()
+        {
+            return EventType::MouseMoved;
+        }
 
-	private:
-		float m_MouseX, m_MouseY;
-	};
+    private:
+        float m_MouseX, m_MouseY;
+    };
 
-	class MouseScrolledEvent : public Event
-	{
-	public:
-		MouseScrolledEvent(float xOffset, float yOffset)
-			: m_XOffset(xOffset), m_YOffset(yOffset) {}
+    class MouseScrolledEvent : public Event
+    {
+    public:
+        MouseScrolledEvent( float xOffset, float yOffset ) : m_XOffset( xOffset ), m_YOffset( yOffset )
+        {
+        }
 
-		inline float GetXOffset() const { return m_XOffset; }
-		inline float GetYOffset() const { return m_YOffset; }
+        inline float GetXOffset() const
+        {
+            return m_XOffset;
+        }
+        inline float GetYOffset() const
+        {
+            return m_YOffset;
+        }
 
-		virtual const EventType GetEventType() const { return GetStaticType(); }
-		static EventType GetStaticType() { return EventType::MouseScroll; }
-	private:
-		float m_XOffset, m_YOffset;
-	};
+        virtual EventType GetEventType() const
+        {
+            return GetStaticType();
+        }
+        static EventType GetStaticType()
+        {
+            return EventType::MouseScroll;
+        }
 
-	class MouseButtonEvent : public Event
-	{
-	public:
-		inline MouseButton GetMouseButton() const { return m_Button; }
-	protected:
-		explicit MouseButtonEvent(MouseButton button)
-			: m_Button(button) {}
+    private:
+        float m_XOffset, m_YOffset;
+    };
 
-		MouseButton m_Button;
-	};
+    class MouseButtonEvent : public Event
+    {
+    public:
+        inline MouseButton GetMouseButton() const
+        {
+            return m_Button;
+        }
 
-	class MouseButtonPressedEvent : public MouseButtonEvent
-	{
-	public:
-		explicit MouseButtonPressedEvent(MouseButton button)
-			: MouseButtonEvent(button) {}
+    protected:
+        explicit MouseButtonEvent( MouseButton button ) : m_Button( button )
+        {
+        }
 
-		virtual const EventType GetEventType() const { return GetStaticType(); }
-		static EventType GetStaticType() { return EventType::MousePressed; }
+        MouseButton m_Button;
+    };
 
-	};
+    class MouseButtonPressedEvent : public MouseButtonEvent
+    {
+    public:
+        explicit MouseButtonPressedEvent( MouseButton button ) : MouseButtonEvent( button )
+        {
+        }
 
-	//class MouseButtonReleasedEvent : public MouseButtonEvent
-	//{
-	//public:
-	//	MouseButtonReleasedEvent(int button)
-	//		: MouseButtonEvent(button) {}
+        virtual EventType GetEventType() const
+        {
+            return GetStaticType();
+        }
+        static EventType GetStaticType()
+        {
+            return EventType::MousePressed;
+        }
+    };
 
-	//};
+    // class MouseButtonReleasedEvent : public MouseButtonEvent
+    //{
+    // public:
+    //	MouseButtonReleasedEvent(int button)
+    //		: MouseButtonEvent(button) {}
 
-}
+    //};
+
+} // namespace Common

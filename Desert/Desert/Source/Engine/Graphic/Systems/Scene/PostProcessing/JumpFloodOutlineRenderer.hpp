@@ -26,7 +26,7 @@ namespace Desert::Graphic::System
         virtual void                  Shutdown() override;
 
         // JFA is driven explicitly (see Execute), not through the render graph.
-        void RegisterPasses( RenderGraphBuilder& builder ) override
+        void RegisterPasses( RenderGraphBuilder& /*builder*/ ) override
         {
         }
 

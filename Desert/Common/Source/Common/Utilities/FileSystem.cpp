@@ -281,7 +281,7 @@ namespace Common::Utils
         return filepath.extension().string();
     }
 
-    const uint32_t FileSystem::GetFileSize( const std::filesystem::path& filepath )
+    uint32_t FileSystem::GetFileSize( const std::filesystem::path& filepath )
     {
         std::error_code ec;
         if ( fs::exists( filepath, ec ) )

@@ -20,10 +20,10 @@ namespace Desert::Graphic
             m_SceneColor = m_MaterialExecutor->GetTexture2DProperty( "u_SceneColor" ).get();
         }
 
-        void Bind( const std::shared_ptr<Image2D>& albedo, const std::shared_ptr<Image2D>& normal,
-                   const std::shared_ptr<Image2D>& worldPos, const std::shared_ptr<Image2D>& sceneColor,
-                   const glm::mat4& viewProj, const glm::vec4& cameraPos, int maxSteps, float maxDistance,
-                   float intensity, float thickness, float jitterSeed )
+        void BindInputs( const std::shared_ptr<Image2D>& albedo, const std::shared_ptr<Image2D>& normal,
+                         const std::shared_ptr<Image2D>& worldPos, const std::shared_ptr<Image2D>& sceneColor,
+                         const glm::mat4& viewProj, const glm::vec4& cameraPos, int maxSteps, float maxDistance,
+                         float intensity, float thickness, float jitterSeed )
         {
             if ( m_Albedo && albedo )
                 m_Albedo->SetImage( albedo.get() );
@@ -67,9 +67,9 @@ namespace Desert::Graphic
             m_WorldPos = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferWorldPos" ).get();
         }
 
-        void Bind( const std::shared_ptr<Image2D>& trace, const std::shared_ptr<Image2D>& history,
-                   const std::shared_ptr<Image2D>& worldPos, const glm::mat4& prevViewProj,
-                   const glm::vec2& texelSize, float historyBlend )
+        void BindInputs( const std::shared_ptr<Image2D>& trace, const std::shared_ptr<Image2D>& history,
+                         const std::shared_ptr<Image2D>& worldPos, const glm::mat4& prevViewProj,
+                         const glm::vec2& texelSize, float historyBlend )
         {
             if ( m_Trace && trace )
                 m_Trace->SetImage( trace.get() );
@@ -107,8 +107,8 @@ namespace Desert::Graphic
             m_Normal = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferNormal" ).get();
         }
 
-        void Bind( const std::shared_ptr<Image2D>& ssr, const std::shared_ptr<Image2D>& normal,
-                   const glm::vec2& texelSize )
+        void BindInputs( const std::shared_ptr<Image2D>& ssr, const std::shared_ptr<Image2D>& normal,
+                         const glm::vec2& texelSize )
         {
             if ( m_SSR && ssr )
                 m_SSR->SetImage( ssr.get() );

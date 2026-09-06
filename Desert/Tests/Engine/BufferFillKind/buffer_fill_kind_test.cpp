@@ -364,11 +364,11 @@ TEST( StorageBufferFields, HasNoneAndTheReferenceOutlivesTheCall )
         void UnmapMemory() override
         {
         }
-        const uint32_t GetBinding() const override
+        uint32_t GetBinding() const override
         {
             return 0;
         }
-        const uint32_t GetSize() const override
+        uint32_t GetSize() const override
         {
             return 0;
         }
