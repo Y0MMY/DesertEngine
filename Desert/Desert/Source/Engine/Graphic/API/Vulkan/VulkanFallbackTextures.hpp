@@ -11,11 +11,11 @@ namespace Desert::Graphic::API::Vulkan
     public:
         VulkanFallbackTextures();
 
-        [[NODISCARD]] virtual Common::BoolResultStr Invalidate() override
+        [[nodiscard]] virtual Common::BoolResultStr Invalidate() override
         {
             return BOOLSUCCESS;
         }
-        [[NODISCARD]] virtual Common::BoolResultStr Release() override;
+        [[nodiscard]] virtual Common::BoolResultStr Release() override;
 
         virtual const std::shared_ptr<Image2D>&
         GetFallbackTexture2D( Core::Formats::ImageFormat format ) const override;
