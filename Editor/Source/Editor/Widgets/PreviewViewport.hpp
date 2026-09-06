@@ -46,7 +46,12 @@ namespace Desert::Editor
     class PreviewViewport
     {
     public:
-        PreviewViewport() = default;
+        // OUT OF LINE, both of them, and the constructor for a reason that is not obvious: m_CubemapPass
+        // is a unique_ptr to a type this header only forward-declares, and a DEFAULTED-INLINE constructor
+        // instantiates that member's ~unique_ptr right here (the compiler needs it to unwind if the
+        // constructor throws). Every panel that says `make_unique<PreviewViewport>()` then needs the
+        // complete pass type, which is exactly the include this forward declaration exists to avoid.
+        PreviewViewport();
         // Waits for the GPU before releasing the scene: this owns pipelines, framebuffers and descriptor
         // pools that a submitted frame may still be executing against.
         ~PreviewViewport();

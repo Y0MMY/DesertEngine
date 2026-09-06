@@ -90,6 +90,10 @@ namespace Desert::Editor
         }
     } // namespace
 
+    // Defaulted HERE rather than in the header: see the declaration for why an inline default constructor
+    // would drag the complete EditorCubemapPreviewPass type into every panel that creates a preview.
+    PreviewViewport::PreviewViewport() = default;
+
     PreviewViewport::~PreviewViewport()
     {
         if ( !m_Inited )
