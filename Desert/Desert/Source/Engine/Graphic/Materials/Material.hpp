@@ -26,6 +26,13 @@ namespace Desert::Graphic
             return m_MaterialExecutor.get();
         }
 
+        // THE ONLY `Bind` IN THIS HIERARCHY, and it has to stay that way. Nineteen subclasses — every
+        // post-process, deferred and skybox material — used to declare their own `void Bind( image... )`
+        // to point themselves at their input attachments, which is a different operation with the same
+        // name: C++ then HIDES this one behind it, so `postMaterial->Bind( instance )` stops compiling
+        // through the derived type while still working through a `Material*`. Nothing dispatched wrongly,
+        // but the two meanings were one word and the compiler had been saying so 498 times into `-w`.
+        // Those methods are now `BindInputs`; a new material that binds attachments spells it that way.
         virtual void Bind( const MaterialInstance* instance );
 
         // Name the row of the shared `Materials[]` storage buffer that the NEXT recorded draw reads.
@@ -112,7 +119,7 @@ namespace Desert::Graphic
     protected:
         void RegisterProperty( IProperty* prop ) override;
 
-        virtual void OnBind( MaterialInstance* instance )
+        virtual void OnBind( MaterialInstance* /*instance*/ )
         {
         }
         void CachePropertyNames();

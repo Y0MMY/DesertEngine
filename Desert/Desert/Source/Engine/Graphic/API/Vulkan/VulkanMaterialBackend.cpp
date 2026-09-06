@@ -174,7 +174,8 @@ namespace Desert::Graphic::API::Vulkan
         return VK_NULL_HANDLE;
     }
 
-    void VulkanMaterialBackend::ApplyPushConstants( MaterialExecutor* material, GraphicsPipeline* pipeline )
+    void VulkanMaterialBackend::ApplyPushConstants( MaterialExecutor* /*material*/,
+                                                    GraphicsPipeline* /*pipeline*/ )
     {
     }
 
@@ -220,7 +221,11 @@ namespace Desert::Graphic::API::Vulkan
                    m_VulkanShader->GetName(), what, binding, written->second, handle );
     }
 
-    void VulkanMaterialBackend::UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes, bool force )
+    // NO `force` PARAMETER. It was `bool force = false` and this body never read it — there is no
+    // conditional path here for a caller to force past, only an unconditional `vkUpdateDescriptorSets`.
+    // One of the five call sites passed `true`, which is what a flag like this costs: a reader at that
+    // line believes something different happens there, and nothing does.
+    void VulkanMaterialBackend::UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes )
     {
         if ( writes.empty() ) return;
         
@@ -439,7 +444,7 @@ namespace Desert::Graphic::API::Vulkan
                                  setsToBind.data(), 0, nullptr );
     }
 
-    void VulkanMaterialBackend::ResetFrameUpdateState( uint32_t frameIndex )
+    void VulkanMaterialBackend::ResetFrameUpdateState( uint32_t /*frameIndex*/ )
     {
     }
 
@@ -591,8 +596,11 @@ namespace Desert::Graphic::API::Vulkan
                                 break;
                             }
                             default:
-                                // The workspace compiles with warnings off, so an unhandled kind would
-                                // otherwise leave the descriptor undefined in silence. Name it instead.
+                                // Named rather than left to fall off the end: the value arrives from
+                                // reflection rather than from a closed enum this switch could be made
+                                // exhaustive over, so `-Wswitch` cannot reach it and the log line is the
+                                // only thing that would. (This comment used to say "the workspace compiles
+                                // with warnings off"; it does not, as of the commit that turned them on.)
                                 LOG_ERROR( "InitializeWithFallbacks: image binding {} has no fallback for "
                                            "kind {}; its descriptor is left UNWRITTEN",
                                            binding, static_cast<int>( kind ) );
@@ -600,7 +608,7 @@ namespace Desert::Graphic::API::Vulkan
                         }
                     }
 
-                    UpdateDescriptorSets( writes, true );
+                    UpdateDescriptorSets( writes );
                 }
             }
         }

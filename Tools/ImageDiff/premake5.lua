@@ -11,7 +11,7 @@ project "ImageDiff"
         "Source/**.cpp",
     }
 
-    includedirs {
+    externalincludedirs {
         "%{wks.location}/ThirdParty/stb/include",
     }
 

@@ -16,15 +16,17 @@ project(test_name)
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",        -- <Engine/Geometry/MeshSimplifier.hpp>
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/meshoptimizer/src", -- <meshoptimizer.h>
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

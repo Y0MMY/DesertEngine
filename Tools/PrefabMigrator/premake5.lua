@@ -22,12 +22,14 @@ project "PrefabMigrator"
         "Source",
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/entt/include",         -- PrefabData reaches ECS headers
         "%{wks.location}/ThirdParty/reflect-cpp/include",  -- the prefab tree is rfl-serialized
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     -- Common: UUID/AssetHandle. Optick: Common's JobSystem registers its workers with the profiler.

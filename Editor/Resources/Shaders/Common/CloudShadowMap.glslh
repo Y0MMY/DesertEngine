@@ -158,9 +158,15 @@ float CloudShadowLightDistanceKm( float extentKm )
 // The depth the map's clip-space z spans, in kilometres — Unreal's `FarPlane = LightDistance * 2`. It is
 // the scale that turns a sampled z back into a distance along the light ray, so it is the ONE number the
 // consumer needs besides the matrix.
+//
+// EXPRESSED THROUGH THE NEAR PLANE RATHER THAN AS `4.0f * extentKm`, which is what it said until
+// `-Wunused-function` pointed out that `CloudShadowLightDistanceKm` above had no callers at all. The
+// comment already claimed the relation — far = 2 x light distance — while the code stated the product
+// independently, so the two could drift apart with nothing to notice: change the near plane's factor
+// and the far plane silently stops being twice it. Same number, and now the relation is the code.
 float CloudShadowFarDepthKm( float extentKm )
 {
-    return 4.0f * extentKm;
+    return 2.0f * CloudShadowLightDistanceKm( extentKm );
 }
 
 // One component of the map centre, snapped to the world grid. Unreal's

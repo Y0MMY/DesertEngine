@@ -12,7 +12,7 @@ namespace Desert::Graphic
     public:
         MaterialJFAInit();
 
-        void Bind( const Image2D* maskImage );
+        void BindInputs( const Image2D* maskImage );
 
     private:
         Texture2DProperty* m_MaskTexture = nullptr;
@@ -25,7 +25,7 @@ namespace Desert::Graphic
     public:
         MaterialJFAStep();
 
-        void Bind( const Image2D* inputSeed, int stepLength );
+        void BindInputs( const Image2D* inputSeed, int stepLength );
 
     private:
         Texture2DProperty* m_InputTexture = nullptr;

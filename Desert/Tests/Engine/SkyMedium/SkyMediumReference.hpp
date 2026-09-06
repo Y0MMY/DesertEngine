@@ -16,6 +16,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::SkyMediumRef
 {
@@ -34,7 +35,9 @@ namespace Desert::Tests::SkyMediumRef
         using glm::sin;
         using glm::sqrt;
 
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/SkyMedium.glslh>
+             DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::SkyMediumRef

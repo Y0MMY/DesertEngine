@@ -797,7 +797,7 @@ namespace Desert::Graphic::System
         if ( const auto& material = m_MaterialSkybox.lock() )
         {
             if ( m_ActiveCamera )
-                material->Bind( { m_ActiveCamera, m_SkyboxIntensity } );
+                material->BindInputs( { m_ActiveCamera, m_SkyboxIntensity } );
             renderer.SubmitFullscreenQuad( m_Pipeline.get(), material->GetMaterialExecutor() );
         }
     }

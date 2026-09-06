@@ -29,8 +29,18 @@ namespace Common
         }
 
         explicit UUID( uint64_t uuid );
-        UUID( const UUID& other );
         explicit UUID( const std::string& uuidStr );
+
+        // DEFAULTED, not hand-written. The copy constructor used to be a user-provided
+        // `UUID( const UUID& other ) : m_UUID( other.m_UUID ) {}` in the .cpp, which does precisely what
+        // the implicit one does — and having it made the implicitly-declared copy ASSIGNMENT deprecated
+        // (C++11 [depr.impldec], `-Wdeprecated-copy-with-user-provided-copy`). A type whose whole content
+        // is one `uint64_t` should declare all four or none; this declares them, so the deprecation is
+        // gone and nothing about copying a UUID has changed.
+        UUID( const UUID& )            = default;
+        UUID& operator=( const UUID& ) = default;
+        UUID( UUID&& )                 = default;
+        UUID& operator=( UUID&& )      = default;
 
         // A fresh random identity. The ONLY way to get one — see the class comment for why it is not the
         // default.

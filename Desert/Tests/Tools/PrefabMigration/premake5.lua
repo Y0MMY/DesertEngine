@@ -24,16 +24,18 @@ project(test_name)
         -- The migration lives in the TOOL (the engine loader only refuses; see PrefabFormat.hpp). This
         -- is what makes `#include <PrefabMigration.hpp>` resolve.
         "%{wks.location}/Tools/PrefabMigrator/Source",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/entt/include/",       -- PrefabData reaches ECS headers
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the prefab tree is rfl-serialized
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

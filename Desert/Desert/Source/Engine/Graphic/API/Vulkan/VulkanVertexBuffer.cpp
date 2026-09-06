@@ -38,11 +38,11 @@ namespace Desert::Graphic::API::Vulkan
         allocator->UnmapMemory( m_MemoryAllocation );
     }
 
-    void VulkanVertexBuffer::Use( BindUsage use /*= BindUsage::Bind */ ) const
+    void VulkanVertexBuffer::Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
     {
     }
 
-    void VulkanVertexBuffer::RT_Use( BindUsage use /*= BindUsage::Bind */ ) const
+    void VulkanVertexBuffer::RT_Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
     {
     }
 
@@ -53,8 +53,6 @@ namespace Desert::Graphic::API::Vulkan
 
     [[nodiscard]] Common::BoolResultStr VulkanVertexBuffer::RT_Invalidate()
     {
-        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
-                              ->GetVulkanLogicalDevice();
         auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
                               ->GetVulkanAllocator()
                               .get();
@@ -182,7 +180,12 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanVertexBuffer::~VulkanVertexBuffer()
     {
-        Release();
+        // A destructor has no channel, so the report is the log. Left silent, a vertex buffer whose
+        // VMA de-allocation refused leaked device memory with nothing anywhere to say a leak had begun —
+        // and the symptom of that arrives much later, as an allocation failure in unrelated code.
+        const auto released = Release();
+        if ( !released.IsSuccess() )
+            LOG_ERROR( "[VulkanVertexBuffer] Release failed during destruction: {}", released.GetError() );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -23,12 +23,14 @@ project "SceneMigrator"
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/entt/include",         -- PrefabData reaches ECS headers
         "%{wks.location}/ThirdParty/reflect-cpp/include",  -- the scene tree is rfl::Generic
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     -- Common: UUID/AssetHandle/the logger the rejection warnings go through.

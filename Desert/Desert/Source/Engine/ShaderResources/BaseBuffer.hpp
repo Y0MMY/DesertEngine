@@ -16,8 +16,8 @@ namespace Desert::ShaderResources
         virtual uint8_t* MapMemory()   = 0;
         virtual void     UnmapMemory() = 0;
 
-        virtual const uint32_t GetBinding() const = 0;
-        virtual const uint32_t GetSize() const    = 0;
+        virtual uint32_t GetBinding() const = 0;
+        virtual uint32_t GetSize() const    = 0;
 
         virtual const std::vector<ShaderLayout::ShaderFieldLayout>& GetFields() const = 0;
 

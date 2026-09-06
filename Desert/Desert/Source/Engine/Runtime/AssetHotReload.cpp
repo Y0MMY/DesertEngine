@@ -233,7 +233,11 @@ namespace Desert::Runtime
             }
             it->second = mtime;
 
-            const bool wasCustom = asset->Data().UsesCustomShader();
+            // Only the shader NAME is snapshotted before the re-parse. A `wasCustom` flag was taken here
+            // too and then never read: whether the asset crossed between PBR and data-driven is already
+            // answered below by `classMatches`, which compares the CURRENT `custom` flag against the C++
+            // class of each live runtime material — a stronger question, because it also catches a variant
+            // built as the wrong class for a reason other than an edit.
             const auto oldShader = asset->GetShaderName();
 
             if ( const auto res = asset->Load(); !res )

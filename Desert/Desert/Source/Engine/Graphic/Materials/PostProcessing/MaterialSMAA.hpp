@@ -12,7 +12,7 @@ namespace Desert::Graphic
     {
     public:
         MaterialSMAAEdges();
-        void Bind( const std::shared_ptr<Image2D>& color );
+        void BindInputs( const std::shared_ptr<Image2D>& color );
 
     private:
         Texture2DProperty* m_Color = nullptr;
@@ -23,7 +23,7 @@ namespace Desert::Graphic
     {
     public:
         MaterialSMAAWeights();
-        void Bind( Image2D* edges, Image2D* area, Image2D* search );
+        void BindInputs( Image2D* edges, Image2D* area, Image2D* search );
 
     private:
         Texture2DProperty* m_Edges  = nullptr;
@@ -36,7 +36,7 @@ namespace Desert::Graphic
     {
     public:
         MaterialSMAABlend();
-        void Bind( const std::shared_ptr<Image2D>& color, Image2D* weights, Image2D* edges, Image2D* area );
+        void BindInputs( const std::shared_ptr<Image2D>& color, Image2D* weights, Image2D* edges, Image2D* area );
 
     private:
         Texture2DProperty* m_Color = nullptr;

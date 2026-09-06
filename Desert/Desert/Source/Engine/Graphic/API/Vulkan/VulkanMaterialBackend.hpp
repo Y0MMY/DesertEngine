@@ -32,7 +32,7 @@ namespace Desert::Graphic::API::Vulkan
 
         VkDescriptorSet GetDescriptorSet( uint32_t frameIndex, uint32_t setIndex = 0 ) const;
 
-        void UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes, bool force = false );
+        void UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes );
 
         void BindDescriptorSets( VkCommandBuffer cmdBuffer, VkPipelineLayout layout, VkPipelineBindPoint bindPoint,
                                  uint32_t frameIndex );

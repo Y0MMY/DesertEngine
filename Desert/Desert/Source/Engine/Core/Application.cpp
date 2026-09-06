@@ -86,16 +86,43 @@ namespace Desert::Engine
         }
     }
 
+    void Application::ReportLayerFailure( const char* stage, Common::Layer* layer, const std::string& error )
+    {
+        // ONCE PER DISTINCT MESSAGE, and the deduplication is the point rather than tidiness. `OnUpdate`
+        // and `OnImGuiRender` run every frame, so a failure that persists — a scene that will not begin,
+        // a pipeline that will not build — is not one event but sixty a second. Logging each one makes
+        // the log unreadable, which is the same outcome as not logging at all; these four results were
+        // dropped on the floor before this commit and the cure must not be a flood.
+        const std::string key = std::string( stage ) + '|' + layer->GetName() + '|' + error;
+        if ( !m_ReportedLayerFailures.insert( key ).second )
+            return;
+
+        LOG_ERROR( "[Application] layer '{}' failed in {}: {}", layer->GetName(), stage, error );
+    }
+
     void Application::PushLayer( Common::Layer* layer )
     {
         m_LayerStack.PushLayer( layer );
-        layer->OnAttach();
+
+        const auto attached = layer->OnAttach();
+        if ( !attached.IsSuccess() )
+        {
+            // A layer that did not attach has no resources, and the loop below is about to call OnUpdate
+            // on it sixty times a second. Refusing to start is the only answer that does not turn a
+            // startup failure into a stream of consequences with a nonzero exit code nowhere in sight —
+            // Close's own comment already says why exit 0 on a failed run is the worse error.
+            LOG_ERROR( "[Application] layer '{}' failed to attach: {}", layer->GetName(), attached.GetError() );
+            Close( 1 );
+        }
     }
 
     void Application::PopLayer( Common::Layer* layer )
     {
         m_LayerStack.PopLayer( layer );
-        layer->OnDetach();
+
+        const auto detached = layer->OnDetach();
+        if ( !detached.IsSuccess() )
+            ReportLayerFailure( "OnDetach", layer, detached.GetError() );
     }
 
     void Application::Run()
@@ -128,17 +155,45 @@ namespace Desert::Engine
             }
 
             // 3. Start recording commands for this frame
-            Graphic::Renderer::GetInstance().BeginFrame();
+            const auto frameBegun = Graphic::Renderer::GetInstance().BeginFrame();
+            if ( !frameBegun.IsSuccess() )
+            {
+                // END THE RUN, and neither of the two cheaper answers is available here.
+                //
+                // Recording anyway is what this line did before: everything below writes into the command
+                // buffer BeginFrame was supposed to open, and with no open buffer PresentFinalImage still
+                // submits and presents — a stale or torn image with no error anywhere, which is the
+                // failure shape this project has paid for more than once.
+                //
+                // `continue` is worse still, and less obviously so: PrepareNextFrame has ALREADY acquired
+                // a swapchain image, and skipping the present never gives it back. A few iterations of
+                // that and the next acquire blocks forever, so a reported error becomes a hang.
+                //
+                // Both of BeginFrame's failures are terminal anyway — the window is gone, or
+                // vkBeginCommandBuffer refused, which means the device is lost. Exit code 1 so a script
+                // that ran the editor headless is told.
+                LOG_ERROR( "[Application] BeginFrame failed, ending the run: {}", frameBegun.GetError() );
+                Close( 1 );
+                break;
+            }
 
             // 4. Update layers (Scene rendering to offscreen buffers)
             for ( Common::Layer* layer : m_LayerStack )
-                layer->OnUpdate( Common::Timestep( timestep ) );
+            {
+                const auto updated = layer->OnUpdate( Common::Timestep( timestep ) );
+                if ( !updated.IsSuccess() )
+                    ReportLayerFailure( "OnUpdate", layer, updated.GetError() );
+            }
 
             // 5. UI Rendering
             {
                 DESERT_PROFILE_SCOPE( "ImGui Render" );
                 for ( Common::Layer* layer : m_LayerStack )
-                    layer->OnImGuiRender();
+                {
+                    const auto rendered = layer->OnImGuiRender();
+                    if ( !rendered.IsSuccess() )
+                        ReportLayerFailure( "OnImGuiRender", layer, rendered.GetError() );
+                }
             }
 
             // 6. Submit all recorded commands and Present — CPU blocks here on submit/present (GPU-bound/vsync).
@@ -153,7 +208,12 @@ namespace Desert::Engine
         // calls OnDetach (the LayerStack dtor is empty), so without this a normal quit looked like
         // an unclean exit and the recovery prompt reappeared on every launch.
         for ( auto it = m_LayerStack.end(); it != m_LayerStack.begin(); )
-            ( *--it )->OnDetach();
+        {
+            Common::Layer* layer    = *--it;
+            const auto     detached = layer->OnDetach();
+            if ( !detached.IsSuccess() )
+                ReportLayerFailure( "OnDetach", layer, detached.GetError() );
+        }
     }
 
     void Application::Init()

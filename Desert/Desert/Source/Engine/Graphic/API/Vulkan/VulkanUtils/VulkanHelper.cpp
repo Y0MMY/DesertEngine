@@ -149,7 +149,8 @@ namespace Desert::Graphic::API::Vulkan
         fpSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)( vkGetInstanceProcAddr(
              instance, "vkSetDebugUtilsObjectNameEXT" ) );
         if ( fpSetDebugUtilsObjectNameEXT == nullptr )
-            fpSetDebugUtilsObjectNameEXT = []( VkDevice device, const VkDebugUtilsObjectNameInfoEXT* pNameInfo )
+            fpSetDebugUtilsObjectNameEXT =
+                 []( VkDevice /*device*/, const VkDebugUtilsObjectNameInfoEXT* /*pNameInfo*/ )
             { return VK_SUCCESS; };
 
         fpCmdBeginDebugUtilsLabelEXT = (PFN_vkCmdBeginDebugUtilsLabelEXT)( vkGetInstanceProcAddr(

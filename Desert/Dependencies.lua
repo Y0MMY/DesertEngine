@@ -140,14 +140,15 @@ local function getGTestIncludeDir()
     return DesertPlatform.HomebrewPrefix and (DesertPlatform.HomebrewPrefix .. "/include") or "/usr/local/include"
 end
 
+-- EVERY PATH IN THESE `IncludeDir` TABLES IS THIRD-PARTY, AND THAT IS NOW LOAD-BEARING RATHER THAN
+-- INCIDENTAL. Each consumer declares them with `externalincludedirs`, which is `-isystem` on clang and
+-- `/external:I` on MSVC, so `externalwarnings "Off"` (BuildScripts/Workspace.lua) keeps vendored headers
+-- out of our diagnostics without a single `-Wno-` anywhere. Put a first-party path in here and you have
+-- silently switched the compiler off for it — `desert-shared` used to sit in `Common` and was moved to a
+-- plain `includedirs` in Workspace.lua for exactly that reason.
 Dependencies = {
     Common = {
         IncludeDir = {
-            -- First-party shared-format submodule (desert-shared): <DesertShared/ProjectFormat.hpp>
-            -- et al. In Common's own headers the redirects use relative includes instead, so only
-            -- code that names <DesertShared/...> directly needs this path — but it rides in the
-            -- Common group because every project that compiles such code already loops this table.
-            desert_shared = baseDir .. "/desert-shared/Include",
             spdlog = baseDir .. "/spdlog/include",
             yaml_cpp = baseDir .. "/yaml-cpp/include",
             glm = baseDir .. "/glm",

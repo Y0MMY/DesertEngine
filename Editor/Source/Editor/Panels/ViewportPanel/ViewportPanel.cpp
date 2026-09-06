@@ -1434,24 +1434,17 @@ namespace Desert::Editor
 
     void ViewportPanel::OnEvent( Common::Event& e )
     {
+        // NO EventWindowResize SUBSCRIPTION. There was one, and it called an `OnWindowResize` whose whole
+        // body was two commented-out lines naming members this class does not have (`m_ImGuiLayer`,
+        // `m_EditorCamera`) and a `return false`. A viewport takes its size from its ImGui window, not
+        // from the OS window; the handler and the subscription are both gone rather than left looking
+        // like the resize is being handled somewhere.
         Common::EventManager eventManager( e );
-        eventManager.Notify<Common::EventWindowResize>( [this]( Common::EventWindowResize& e )
-                                                        { return OnWindowResize( e ); } );
-
         eventManager.Notify<Common::MouseButtonPressedEvent>( [this]( Common::MouseButtonPressedEvent& e )
                                                               { return OnMousePressed( e ); } );
 
         eventManager.Notify<Common::KeyPressedEvent>( [this]( Common::KeyPressedEvent& e )
                                                       { return OnKeyPressedEvent( e ); } );
-    }
-
-    bool ViewportPanel::OnWindowResize( Common::EventWindowResize& e )
-
-    {
-        // m_ImGuiLayer->Resize( e.width, e.height );
-        // m_EditorCamera.UpdateProjectionMatrix( e.width, e.height );
-
-        return false;
     }
 
     bool ViewportPanel::OnMousePressed( Common::MouseButtonPressedEvent& e )
@@ -1564,6 +1557,12 @@ namespace Desert::Editor
                         if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
                             if ( auto ref = m_Scene->FindEntityByID( *sel ) )
                                 editorCam->Focus( glm::vec3( ref->get().GetWorldTransform()[3] ) );
+                break;
+            // A `default` and not 115 empty cases: this is a KEYBOARD, and the shortcuts it handles are a
+            // deliberately small set. Enumerating the rest would make every key an editing decision and
+            // would say nothing true — unlike the renderer-backend switches above, where a new enumerator
+            // is a new backend and must not compile until every factory has answered for it.
+            default:
                 break;
         }
         return false;

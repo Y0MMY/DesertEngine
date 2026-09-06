@@ -25,7 +25,7 @@ project "FbxMeshSplitter"
 
     -- Assimp: prebuilt MSVC binaries on Windows, Homebrew's libassimp on macOS.
     filter "system:windows"
-        includedirs { "%{wks.location}/Editor/ThirdParty/assimp/include" }
+        externalincludedirs { "%{wks.location}/Editor/ThirdParty/assimp/include" }
 
     filter { "system:windows", "configurations:Debug" }
         libdirs { "%{wks.location}/Editor/ThirdParty/assimp/bin/Debug" }
@@ -51,7 +51,7 @@ project "FbxMeshSplitter"
         }
 
     filter "system:macosx"
-        includedirs { (DesertPlatform.HomebrewPrefix or "/usr/local") .. "/include" }
+        externalincludedirs { (DesertPlatform.HomebrewPrefix or "/usr/local") .. "/include" }
         links { "assimp" }
 
     filter {}

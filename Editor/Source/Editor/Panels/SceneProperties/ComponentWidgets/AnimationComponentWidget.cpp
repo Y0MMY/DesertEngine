@@ -20,13 +20,12 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    AnimationComponentWidget::AnimationComponentWidget( const Assets::AssetManager*        assetManager,
-                                                        const Animation::AnimationLibrary* animationLibrary )
+    AnimationComponentWidget::AnimationComponentWidget( const Animation::AnimationLibrary* animationLibrary )
          : ComponentWidget( "Animation" ), m_AnimationLibrary( animationLibrary )
     {
     }
 
-    void AnimationComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
+    void AnimationComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* /*scene*/ )
     {
         auto& animation = entity.GetComponent<ECS::AnimationComponent>();
 
@@ -223,8 +222,8 @@ namespace Desert::Editor
         ImGui::Unindent( 6.0f );
     }
 
-    DESERT_REGISTER_CUSTOM_COMPONENT(
-         ECS::AnimationComponent, "Animation", false,
-         ( []( ECS::Entity& e, ::Desert::Core::Scene* s, const ComponentEditContext& ctx )
-           { AnimationComponentWidget( ctx.AssetMgr(), ctx.AnimationLibrary ).Render( e, s ); } ) )
+    DESERT_REGISTER_CUSTOM_COMPONENT( ECS::AnimationComponent, "Animation", false,
+                                      ( []( ECS::Entity& e, ::Desert::Core::Scene* s,
+                                            const ComponentEditContext& ctx )
+                                        { AnimationComponentWidget( ctx.AnimationLibrary ).Render( e, s ); } ) )
 } // namespace Desert::Editor

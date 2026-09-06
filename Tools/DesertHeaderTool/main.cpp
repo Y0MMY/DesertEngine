@@ -216,7 +216,7 @@ namespace
     std::string VectorElement( const std::string& typeRaw )
     {
         std::string t = TrimCopy( typeRaw );
-        for ( const std::string pre : { std::string( "std::vector<" ), std::string( "vector<" ) } )
+        for ( const std::string& pre : { std::string( "std::vector<" ), std::string( "vector<" ) } )
         {
             if ( t.rfind( pre, 0 ) == 0 && !t.empty() && t.back() == '>' )
                 return TrimCopy( t.substr( pre.size(), t.size() - pre.size() - 1 ) );
@@ -512,7 +512,8 @@ namespace
         int         depth;    // brace depth at which this scope opened
         bool        isStruct; // struct/class vs namespace
         bool        reflected = false;
-        std::vector<Field> fields;
+        std::vector<Field> fields =
+             {}; // the two `scopes.push_back( { name, depth, isStruct } )` below stop here on purpose
     };
 
     std::string JoinScopes( const std::vector<Scope>& scopes )

@@ -7,7 +7,7 @@ namespace Desert::Graphic
         m_Color = m_MaterialExecutor->GetTexture2DProperty( "u_ColorTex" ).get();
     }
 
-    void MaterialSMAAEdges::Bind( const std::shared_ptr<Image2D>& color )
+    void MaterialSMAAEdges::BindInputs( const std::shared_ptr<Image2D>& color )
     {
         if ( m_Color && color )
             m_Color->SetImage( color.get() );
@@ -20,7 +20,7 @@ namespace Desert::Graphic
         m_Search = m_MaterialExecutor->GetTexture2DProperty( "u_SearchTex" ).get();
     }
 
-    void MaterialSMAAWeights::Bind( Image2D* edges, Image2D* area, Image2D* search )
+    void MaterialSMAAWeights::BindInputs( Image2D* edges, Image2D* area, Image2D* search )
     {
         if ( m_Edges && edges )
             m_Edges->SetImage( edges );
@@ -38,8 +38,8 @@ namespace Desert::Graphic
         m_Area  = m_MaterialExecutor->GetTexture2DProperty( "u_AreaTex" ).get();
     }
 
-    void MaterialSMAABlend::Bind( const std::shared_ptr<Image2D>& color, Image2D* weights, Image2D* edges,
-                                  Image2D* area )
+    void MaterialSMAABlend::BindInputs( const std::shared_ptr<Image2D>& color, Image2D* weights, Image2D* edges,
+                                        Image2D* area )
     {
         if ( m_Color && color )
             m_Color->SetImage( color.get() );

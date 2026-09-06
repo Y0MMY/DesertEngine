@@ -321,7 +321,7 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
-    Common::BoolResultStr VulkanFramebuffer::Resize( uint32_t width, uint32_t height, bool forceRecreate )
+    Common::BoolResultStr VulkanFramebuffer::Resize( uint32_t width, uint32_t height )
     {
         m_FramebufferSpecification.Width = width;
         m_FramebufferSpecification.Height = height;

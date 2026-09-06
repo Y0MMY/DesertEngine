@@ -828,7 +828,7 @@ namespace Desert::Core::Serialize
             s.Key = "Material";
             s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::MaterialComponent>(); };
 
-            s.Serialize = []( ECS::Entity entity, const Assets::AssetManager& assetManager ) -> rfl::Generic
+            s.Serialize = []( ECS::Entity entity, const Assets::AssetManager& /*assetManager*/ ) -> rfl::Generic
             {
                 const auto&                  mc = entity.GetComponent<ECS::MaterialComponent>();
                 Assets::MaterialComponentSer ser;

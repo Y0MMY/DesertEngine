@@ -12,7 +12,7 @@ namespace Desert::ShaderResources
     public:
         virtual ~UniformImage2D() = default;
 
-        virtual const uint32_t GetBinding() const = 0;
+        virtual uint32_t GetBinding() const = 0;
 
         virtual void SetImage2D( const Graphic::Image2D* image2D ) = 0;
 

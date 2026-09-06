@@ -27,7 +27,7 @@ namespace Desert::Assets
         // because a flag has to be REMEMBERED at three call sites and this cannot be forgotten.
         [[nodiscard]] Common::ResultStr<std::string> Save() const;
 
-        bool IsReadyForUse() const
+        bool IsReadyForUse() const override
         {
             return m_ReadyForUse;
         }

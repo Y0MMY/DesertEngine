@@ -39,45 +39,9 @@ namespace Desert::Editor
             uintmax_t Bytes = 0;
         };
 
-        // Recursive copy with an optional per-file filter. Returns false (with error set) on failure.
-        bool CopyTree( const fs::path& from, const fs::path& to, bool skipRawMeshSources,
-                       CopyStats& stats, std::string& error )
-        {
-            std::error_code ec;
-            if ( !fs::exists( from, ec ) )
-                return true; // nothing to copy is fine (e.g. no Cooked/ yet)
-
-            for ( auto it = fs::recursive_directory_iterator( from, ec );
-                  it != fs::recursive_directory_iterator(); it.increment( ec ) )
-            {
-                if ( ec )
-                {
-                    error = "walk failed under " + from.string() + ": " + ec.message();
-                    return false;
-                }
-                const fs::path& src = it->path();
-                if ( !it->is_regular_file() )
-                    continue;
-                if ( skipRawMeshSources && IsRawMeshSource( src ) )
-                    continue;
-
-                const fs::path rel = fs::relative( src, from, ec );
-                const fs::path dst = to / rel;
-                fs::create_directories( dst.parent_path(), ec );
-                fs::copy_file( src, dst, fs::copy_options::overwrite_existing, ec );
-                if ( ec )
-                {
-                    error = "copy failed: " + src.string() + " -> " + dst.string() + ": " + ec.message();
-                    return false;
-                }
-                ++stats.Files;
-                stats.Bytes += fs::file_size( dst, ec );
-            }
-            return true;
-        }
-
-        // Streams every file under `from` into the pak as "<keyPrefix>/<relative>". Same filter
-        // semantics as CopyTree.
+        // Streams every file under `from` into the pak as "<keyPrefix>/<relative>", skipping raw mesh
+        // sources when asked. It replaced a loose-file `CopyTree` with the same filter semantics, and
+        // that function then sat here uncalled until `-Wunused-function` was allowed to say so.
         bool AddTreeToPak( Common::Utils::PakWriter& pak, const fs::path& from,
                            const std::string& keyPrefix, bool skipRawMeshSources, CopyStats& stats,
                            std::string& error )

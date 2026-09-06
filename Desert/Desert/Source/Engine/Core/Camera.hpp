@@ -55,7 +55,9 @@ namespace Desert::Core
         void SetProjectionType( ProjectionType type );
         void SetOrthoSize( float halfHeight ); // orthographic vertical half-extent in world units
 
-        virtual void OnUpdate( const Common::Timestep& timestep ) {}
+        virtual void OnUpdate( const Common::Timestep& /*timestep*/ )
+        {
+        }
 
         // Rebuild the projection (perspective or orthographic) for a new viewport aspect. Also caches the
         // viewport size so the live setters above can rebuild without the caller re-passing it.

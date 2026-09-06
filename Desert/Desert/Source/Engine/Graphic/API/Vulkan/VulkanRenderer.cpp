@@ -86,7 +86,14 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError( "Window is null" );
         auto swapChain = SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() );
 
-        EndFrame();
+        // REFUSE TO SUBMIT A BUFFER THAT DID NOT CLOSE. EndFrame is what calls vkEndCommandBuffer, and
+        // submitting a still-recording buffer is undefined behaviour that the validation layers report
+        // as a driver-side error with no line of ours in it. Returning the message here puts the cause
+        // in the frame's own result, which Application::Run now reads.
+        const auto ended = EndFrame();
+        if ( !ended.IsSuccess() )
+            return Common::MakeError( ended.GetError() );
+
         swapChain->GetVulkanQueue()->Submit();
         swapChain->Present();
 
@@ -695,7 +702,10 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdSetScissor( m_CurrentCommandBuffer, 0, 1, &scissor );
     }
 
-    void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
+    // Same shape as VulkanContext::OnResize: the RendererAPI interface requires it and the Vulkan backend
+    // has nothing to do here, because SceneRenderer::OnResize already drives the swapchain and every
+    // framebuffer directly a few lines after it calls this.
+    void VulkanRendererAPI::ResizeWindowEvent( uint32_t /*width*/, uint32_t /*height*/ )
     {
     }
 

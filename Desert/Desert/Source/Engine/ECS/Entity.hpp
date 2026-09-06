@@ -52,7 +52,7 @@ namespace Desert::ECS
             return m_Handle == other.m_Handle;
         }
 
-        const auto GetHandle() const
+        auto GetHandle() const
         {
             return m_Handle;
         }

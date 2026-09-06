@@ -40,15 +40,17 @@ project(test_name)
         "%{wks.location}/Desert/Desert/Source",
         "%{wks.location}/Editor/Source", -- <Editor/Panels/FileExplorer/NewCloudAsset.hpp>
         "%{wks.location}/Editor/Resources/Shaders",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- the `.decloudtype` is rfl::json
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

@@ -116,7 +116,17 @@ namespace Desert::Editor
 
         m_Renderer = std::make_unique<Graphic::SceneRenderer>();
         m_Scene    = std::make_shared<::Desert::Core::Scene>( "DetailsPreview", m_Renderer.get() );
-        m_Scene->Init();
+        const auto inited = m_Scene->Init();
+        if ( !inited.IsSuccess() )
+        {
+            // `m_Inited` stays false so the next call retries, which is the whole reason this is not a
+            // bare `(void)`: with the result dropped the flag was set anyway, the preview was marked
+            // ready, and every frame afterwards recorded into a scene that had never initialised.
+            LOG_ERROR( "[PreviewViewport] preview scene failed to initialise: {}", inited.GetError() );
+            m_Scene.reset();
+            m_Renderer.reset();
+            return;
+        }
 
         // Clean preview: no editor ground grid, no shadows or bloom to muddy a small image. FXAA keeps the
         // silhouette smooth at inspector sizes (there is no supersampling here — this renders live).
@@ -501,9 +511,19 @@ namespace Desert::Editor
 
         // Recorded into the editor's current frame command buffer, submitted when the frame ends. This is
         // why Update() must run from OnPreUpdate() and never from OnUIRender().
-        m_Scene->BeginScene();
+        const auto begun = m_Scene->BeginScene();
+        if ( !begun.IsSuccess() )
+        {
+            // RETURN, do not record. OnUpdate and EndScene below both assume the scene opened; running
+            // them against a scene that refused leaves the editor's frame command buffer holding half a
+            // pass, and the driver reports that, not us.
+            LOG_ERROR( "[PreviewViewport] BeginScene failed, preview frame skipped: {}", begun.GetError() );
+            return;
+        }
         m_Scene->OnUpdate( Common::Timestep( 0.016f ) );
-        m_Scene->EndScene();
+        const auto ended = m_Scene->EndScene();
+        if ( !ended.IsSuccess() )
+            LOG_ERROR( "[PreviewViewport] EndScene failed: {}", ended.GetError() );
     }
 
     bool PreviewViewport::Draw( UI::UIHelper& uiHelper, const ImVec2& size )

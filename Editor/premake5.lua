@@ -18,6 +18,8 @@ project "Editor"
         "%{wks.location}/Editor/Source/",
 
         "%{wks.location}/Desert/Common/Source/",
+    }
+    externalincludedirs {
 
         "%{wks.location}/ThirdParty/spdlog/include/",
         "%{wks.location}/ThirdParty/GLFW/include/",
@@ -30,7 +32,7 @@ project "Editor"
     }
 
     for name, path in pairs(deps.EditorSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     -- NOTE: no INCLUDE_HEADERS=#include<...> define here — nothing uses it, and
@@ -52,7 +54,7 @@ project "Editor"
     -- so CI and fresh checkouts build without it.
     if os.isdir( _MAIN_SCRIPT_DIR .. "/ThirdParty/dlib" ) then
         defines     { "DESERT_WITH_DLIB" }
-        includedirs { "%{wks.location}/ThirdParty/dlib/" }
+        externalincludedirs { "%{wks.location}/ThirdParty/dlib/" }
         links       { "Dlib" }
     end
 

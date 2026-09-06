@@ -93,7 +93,12 @@ namespace Desert::Graphic
         virtual const FramebufferSpecification GetSpecification() const                 = 0;
         virtual void                           Use( BindUsage = BindUsage::Bind ) const = 0;
 
-        virtual Common::BoolResultStr Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) = 0;
+        // NO `forceRecreate`. The parameter was here with a default of `false`, every one of the ten call
+        // sites but one took the default (the one that did not asked for `true`), and the only
+        // implementation ignored it and recreated unconditionally —
+        // so "force" named the sole behaviour there has ever been. `-Wunused-parameter` found it in
+        // VulkanFramebuffer::Resize.
+        virtual Common::BoolResultStr Resize( uint32_t width, uint32_t height ) = 0;
 
         virtual uint32_t GetFramebufferWidth() const  = 0;
         virtual uint32_t GetFramebufferHeight() const = 0;

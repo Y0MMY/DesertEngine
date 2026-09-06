@@ -53,10 +53,14 @@ namespace Desert::Editor
         void DrawCollectionContents( const LoadedCollection& coll );    // inside one collection: its meshes
         void DrawCard( const CollectionItem& item, float cardW, float imgH ); // preview + name + DnD source
 
+        // NO CATEGORY FILTER. `m_CategoryFilter` (the selected index) and `m_Categories` (the list it
+        // would have indexed) were both here, and neither had a reader: `Rescan` built the list from every
+        // item's `Category` and no draw call ever consulted it. `-Wunused-private-field` named the index —
+        // the list escaped, because filling a vector counts as using it. `CollectionItem::Category` is
+        // still parsed from `collection.json`, so a real filter can be written against the data whenever
+        // someone wants one; what is gone is the half of it that looked finished.
         std::vector<LoadedCollection> m_Collections;
-        std::vector<std::string>      m_Categories;     // [0] = "All", then unique item categories
         char                          m_Search[128]    = { 0 };
-        int                           m_CategoryFilter = 0;
         int                           m_OpenCollection = -1; // -1 = showing the collection list, else an index
 
         // Rendered mesh previews (mirrors the File Explorer): resolve+cook each mesh once, render offscreen to

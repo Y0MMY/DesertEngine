@@ -511,13 +511,18 @@ namespace Desert::Editor::Utils
         return updated;
     }
 
-    bool ImGuiUtilities::Property( const char* name, glm::vec3& value, bool exposeW, PropertyFlag flags )
-    {
-        return Property( name, value, -1.0f, 1.0f, exposeW, flags );
-    }
-
-    bool ImGuiUtilities::Property( const char* name, glm::vec3& value, float min, float max,
-                                   bool exposeW /*= false*/, PropertyFlag flags )
+    // NO `min`/`max`, AND NO `exposeW`. Both were parameters of this function and neither did anything:
+    // `min` and `max` were never passed to `DragFloat3` (the float overload above DOES pass them to
+    // `DragFloat`/`SliderFloat`, which is what makes the omission here a defect rather than a style), and
+    // the `exposeW` ternary below had IDENTICAL branches — a leftover of a vec4 widget, on a type with no
+    // w. `-Wunused-parameter` named `min` and `max`; `exposeW` escaped only because a ternary condition
+    // counts as a use.
+    //
+    // Removed rather than wired up: the whole overload set has exactly two call sites in the editor and
+    // both take the `std::string` one, so there is no caller whose range this would start honouring and
+    // no evidence of what range anyone wanted. A clamp added on a guess is a slider that moves the wrong
+    // amount, which is worse than one that does not clamp.
+    bool ImGuiUtilities::Property( const char* name, glm::vec3& value, PropertyFlag flags )
     {
         bool updated = false;
 
@@ -538,8 +543,7 @@ namespace Desert::Editor::Utils
                 if ( ImGui::ColorEdit3( std::format( "##{}", name ).c_str(), &value.x ) )
                     updated = true;
             }
-            else if ( ( exposeW ? ImGui::DragFloat3( std::format( "##{}", name ).c_str(), &value.x )
-                                : ImGui::DragFloat3( std::format( "##{}", name ).c_str(), &value.x ) ) )
+            else if ( ImGui::DragFloat3( std::format( "##{}", name ).c_str(), &value.x ) )
                 updated = true;
         }
         ImGui::PopItemWidth();

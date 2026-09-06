@@ -13,7 +13,7 @@ namespace Desert::ShaderResources::API::Vulkan
         VulkanUniformImage2D( const std::string_view debugName, uint32_t binding );
         virtual ~VulkanUniformImage2D();
 
-        virtual const uint32_t GetBinding() const override
+        virtual uint32_t GetBinding() const override
         {
             return m_Binding;
         }

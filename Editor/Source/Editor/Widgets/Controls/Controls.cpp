@@ -95,7 +95,6 @@ namespace Desert::Editor
 
         const float widgetSize    = 120.0f;
         const float markerRadius  = 8.0f;
-        const float widgetPadding = 8.0f;
 
         const float inputHeight = ImGui::GetFrameHeight();
         const float buttonWidth = 44.0f;

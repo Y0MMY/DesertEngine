@@ -18,6 +18,8 @@ project "Runtime"
         "%{wks.location}/Runtime/Source/",
 
         "%{wks.location}/Desert/Common/Source/",
+    }
+    externalincludedirs {
 
         "%{wks.location}/ThirdParty/spdlog/include/",
         "%{wks.location}/ThirdParty/GLFW/include/",
@@ -29,7 +31,7 @@ project "Runtime"
     }
 
     for name, path in pairs(deps.EditorSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     defines { "YAML_CPP_STATIC_DEFINE",

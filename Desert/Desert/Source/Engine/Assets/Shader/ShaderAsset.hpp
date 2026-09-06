@@ -12,7 +12,7 @@ namespace Desert::Assets
         Common::BoolResultStr Load() override;
         Common::BoolResultStr Unload() override;
 
-        bool IsReadyForUse() const
+        bool IsReadyForUse() const override
         {
             return m_ReadyForUse;
         }

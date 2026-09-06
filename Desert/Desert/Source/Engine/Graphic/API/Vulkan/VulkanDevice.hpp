@@ -95,7 +95,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_PhysicalDevice;
         }
-        const VkDevice GetVulkanLogicalDevice() const
+        VkDevice GetVulkanLogicalDevice() const
         {
             return m_LogicalDevice;
         }

@@ -30,11 +30,9 @@ namespace Desert::Editor::Utils
         static bool Property( const char* name, std::string& value, PropertyFlag flags = PropertyFlag::ReadOnly );
         static bool Property( const char* name, float& value, float min = -1.0f, float max = 1.0f,
                               float delta = 1.0f, PropertyFlag flags = PropertyFlag::None );
-        static bool Property( const char* name, glm::vec3& value, float min = -1.0f, float max = 1.0f,
-                              bool exposeW = false, PropertyFlag flags = PropertyFlag::None );
         static bool Property( const char* name, bool& value, PropertyFlag flags = PropertyFlag::None );
 
-        static bool Property( const char* name, glm::vec3& value, bool exposeW, PropertyFlag flags );
+        static bool Property( const char* name, glm::vec3& value, PropertyFlag flags = PropertyFlag::None );
 
         static bool Property( const char* name, uint32_t& value, PropertyFlag flags = PropertyFlag::None );
 

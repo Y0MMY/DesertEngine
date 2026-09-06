@@ -8,7 +8,10 @@ namespace Desert
     {
         m_VertexBuffer =
              Graphic::VertexBuffer::Create( (void*)m_Vertices.data(), m_Vertices.size() * sizeof( Vertex ) );
-        m_VertexBuffer->RT_Invalidate();
+        const auto vertices = m_VertexBuffer->RT_Invalidate();
+        if ( !vertices.IsSuccess() )
+            return Common::MakeErrorWithCodes<bool, MeshError>( { MeshError::GpuUploadFailed },
+                                                                vertices.GetError() );
 
         if ( !m_Indices.empty() )
         {
@@ -25,7 +28,10 @@ namespace Desert
                 m_IndexBuffer =
                      Graphic::IndexBuffer::Create( m_Indices.data(), m_Indices.size() * sizeof( Index ) );
             }
-            m_IndexBuffer->RT_Invalidate();
+            const auto uploaded = m_IndexBuffer->RT_Invalidate();
+            if ( !uploaded.IsSuccess() )
+                return Common::MakeErrorWithCodes<bool, MeshError>( { MeshError::GpuUploadFailed },
+                                                                    uploaded.GetError() );
         }
         else
         {
@@ -44,7 +50,16 @@ namespace Desert
         {
             m_VertexBuffer =
                  Graphic::VertexBuffer::Create( (void*)m_Vertices.data(), m_Vertices.size() * sizeof( Vertex ) );
-            m_VertexBuffer->RT_Invalidate();
+            // LOGGED HERE RATHER THAN RETURNED, and the asymmetry with Invalidate above is deliberate.
+            // Update is called once per mouse-move while a vertex is being dragged (PolyEditTool), and its
+            // single caller is inside an ImGui interaction that has nowhere to put a failure — it can
+            // neither undo the edit nor stop the drag meaningfully. What was missing was not a channel but
+            // a REPORT: before this, a reallocation that failed left the mesh drawing its previous
+            // contents and the edit simply did not appear.
+            const auto uploaded = m_VertexBuffer->RT_Invalidate();
+            if ( !uploaded.IsSuccess() )
+                LOG_ERROR( "[DynamicMesh] vertex buffer re-upload failed, the edit is not on the GPU: {}",
+                           uploaded.GetError() );
         }
         else
         {
@@ -56,7 +71,10 @@ namespace Desert
             if ( !m_IndexBuffer || m_Indices.size() * sizeof( Index ) > m_IndexBuffer->GetSize() )
             {
                 m_IndexBuffer = Graphic::IndexBuffer::Create( m_Indices.data(), m_Indices.size() * sizeof( Index ) );
-                m_IndexBuffer->RT_Invalidate();
+                const auto uploaded = m_IndexBuffer->RT_Invalidate(); // reported, not returned; see above
+                if ( !uploaded.IsSuccess() )
+                    LOG_ERROR( "[DynamicMesh] index buffer re-upload failed, the edit is not on the GPU: {}",
+                               uploaded.GetError() );
             }
             else
             {

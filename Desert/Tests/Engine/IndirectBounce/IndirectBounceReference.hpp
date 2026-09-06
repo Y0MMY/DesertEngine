@@ -20,6 +20,7 @@
 #include <glm/glm.hpp>
 
 #include <cmath>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::IndirectBounceRef
 {
@@ -50,7 +51,9 @@ namespace Desert::Tests::IndirectBounceRef
             return glm::max( a, static_cast<float>( b ) );
         }
 
-        float clamp( float x, double lo, double hi )
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
+             float
+             clamp( float x, double lo, double hi )
         {
             return glm::clamp( x, static_cast<float>( lo ), static_cast<float>( hi ) );
         }
@@ -73,6 +76,7 @@ namespace Desert::Tests::IndirectBounceRef
 #include <Mesh/PBRFunctions.glslh>
 #include <Mesh/DirectLighting.glslh>
 #include <Mesh/IndirectBounce.glslh>
+        DESERT_GLSL_AS_CPP_END
 
     } // namespace
 } // namespace Desert::Tests::IndirectBounceRef

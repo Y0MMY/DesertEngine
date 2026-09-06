@@ -27,7 +27,7 @@ namespace Desert::Graphic
         }
     } // namespace
 
-    std::shared_ptr<Image2D> ComputeImages::ProccessForImage2D( const std::shared_ptr<Image>& image )
+    std::shared_ptr<Image2D> ComputeImages::ProccessForImage2D( const std::shared_ptr<Image>& /*image*/ )
     {
         return nullptr;
     }

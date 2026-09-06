@@ -229,35 +229,36 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResultStr VulkanFallbackTextures::Release()
     {
-        for ( auto& texture2D : m_FallbackTextures2D )
+        // KEEP RELEASING AFTER THE FIRST FAILURE, and report the first message. This runs once at
+        // teardown over five independent caches; stopping at the first refusal would leak every image
+        // after it, and returning success unconditionally — which is what these five loops did by
+        // dropping every `Release()` result — makes the `[[nodiscard]]` on the caller's side a lie.
+        std::string firstError;
+        const auto  release = [&firstError]( auto& texture )
         {
-            texture2D.second->Release();
-            texture2D.second.reset();
-        }
+            const auto released = texture->Release();
+            if ( !released.IsSuccess() && firstError.empty() )
+                firstError = released.GetError();
+            texture.reset();
+        };
+
+        for ( auto& texture2D : m_FallbackTextures2D )
+            release( texture2D.second );
 
         for ( auto& textureCube : m_FallbackTexturesCube )
-        {
-            textureCube.second->Release();
-            textureCube.second.reset();
-        }
+            release( textureCube.second );
 
         for ( auto& storageImage : m_FallbackStorageImages2D )
-        {
-            storageImage.second->Release();
-            storageImage.second.reset();
-        }
+            release( storageImage.second );
 
         for ( auto& texture3D : m_FallbackTextures3D )
-        {
-            texture3D.second->Release();
-            texture3D.second.reset();
-        }
+            release( texture3D.second );
 
         for ( auto& storageImage : m_FallbackStorageImages3D )
-        {
-            storageImage.second->Release();
-            storageImage.second.reset();
-        }
+            release( storageImage.second );
+
+        if ( !firstError.empty() )
+            return Common::MakeError( firstError );
 
         return BOOLSUCCESS;
     }

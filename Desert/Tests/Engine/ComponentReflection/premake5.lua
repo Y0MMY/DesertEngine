@@ -28,16 +28,18 @@ project(test_name)
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/entt/include/", -- Components.hpp is an entt registry away
         "%{wks.location}/ThirdParty/reflect-cpp/include", -- ReflectionTypes.hpp -> <rflcpp/rfl/Generic.hpp>
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

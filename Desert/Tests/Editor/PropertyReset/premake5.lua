@@ -21,15 +21,17 @@ project(test_name)
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",                  -- <Engine/Reflection/ReflectionTypes.hpp>
         "%{wks.location}/Editor/Source",                         -- <Editor/Panels/PropertyEditor/PropertyReset.hpp>
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/reflect-cpp/include",        -- ReflectionTypes.hpp -> <rflcpp/rfl/Generic.hpp>
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

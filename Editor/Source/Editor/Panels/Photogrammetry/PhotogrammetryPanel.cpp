@@ -601,7 +601,15 @@ namespace Desert::Editor
 
         m_PreviewRenderer = std::make_unique<Graphic::SceneRenderer>();
         m_PreviewScene    = std::make_shared<::Desert::Core::Scene>( "ReconPreview", m_PreviewRenderer.get() );
-        m_PreviewScene->Init();
+        // `m_PreviewInit` stays false so the next call retries; with the result dropped the flag was set
+        // regardless and every frame afterwards recorded into a scene that had never initialised.
+        if ( const auto inited = m_PreviewScene->Init(); !inited.IsSuccess() )
+        {
+            LOG_ERROR( "[Photogrammetry] preview scene failed to initialise: {}", inited.GetError() );
+            m_PreviewScene.reset();
+            m_PreviewRenderer.reset();
+            return;
+        }
 
         auto& settings         = m_PreviewScene->GetSettings();
         settings.ShowGrid      = false;
@@ -740,9 +748,16 @@ namespace Desert::Editor
         m_Spin += 0.01f;
         m_PreviewTarget.GetComponent<ECS::TransformComponent>().Rotation = glm::vec3( 0.0f, m_Spin, 0.0f );
 
-        m_PreviewScene->BeginScene();
+        // Return rather than record: OnUpdate and EndScene both assume the scene opened, and running them
+        // against one that refused leaves the editor's frame command buffer holding half a pass.
+        if ( const auto begun = m_PreviewScene->BeginScene(); !begun.IsSuccess() )
+        {
+            LOG_ERROR( "[Photogrammetry] BeginScene failed, preview frame skipped: {}", begun.GetError() );
+            return;
+        }
         m_PreviewScene->OnUpdate( Common::Timestep( 0.016f ) );
-        m_PreviewScene->EndScene();
+        if ( const auto ended = m_PreviewScene->EndScene(); !ended.IsSuccess() )
+            LOG_ERROR( "[Photogrammetry] EndScene failed: {}", ended.GetError() );
     }
 
     // ---------------------------------------------------------------------------------------------------

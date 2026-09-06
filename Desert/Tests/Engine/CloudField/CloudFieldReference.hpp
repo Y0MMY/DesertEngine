@@ -50,6 +50,7 @@
 #include <cstring>
 #include <map>
 #include <vector>
+#include <Common/Core/GlslAsCpp.hpp>
 
 namespace Desert::Tests::CloudFieldRef
 {
@@ -74,19 +75,20 @@ namespace Desert::Tests::CloudFieldRef
         using glm::smoothstep;
         using glm::sqrt;
 
+        DESERT_GLSL_AS_CPP_BEGIN // see the header: GLSL has no `inline`, so these are statics
 #include <Common/CloudNoise.glslh>
 #include <Common/CloudGeometry.glslh>
 
-        // ONE call into the ONE function that writes the volume — Common/CloudNoise.glslh's
-        // CloudNoiseVolumeChannels — rather than four calls this file has to keep in step with the
-        // generator's. The four-line copy that used to be here mirrored the compute bake and was a second
-        // statement of the channel layout; it is exactly the shape of duplication that agrees with itself
-        // until the first tuning pass.
-        //
-        // The parameters are the defaults of Engine/Assets/CloudNoiseVolume.hpp's CloudNoiseVolumeParams,
-        // which is what the shipped CloudNoise_Default.dcnv was baked with. A different seed moves
-        // individual clouds and not one of the statistics measured here.
-        constexpr uint  kVolumeSeed     = 1337u;
+             // ONE call into the ONE function that writes the volume — Common/CloudNoise.glslh's
+             // CloudNoiseVolumeChannels — rather than four calls this file has to keep in step with the
+             // generator's. The four-line copy that used to be here mirrored the compute bake and was a second
+             // statement of the channel layout; it is exactly the shape of duplication that agrees with itself
+             // until the first tuning pass.
+             //
+             // The parameters are the defaults of Engine/Assets/CloudNoiseVolume.hpp's CloudNoiseVolumeParams,
+             // which is what the shipped CloudNoise_Default.dcnv was baked with. A different seed moves
+             // individual clouds and not one of the statistics measured here.
+             constexpr uint kVolumeSeed     = 1337u;
         constexpr float kCurlStrength   = 0.33f;
         constexpr float kWispyPeriodLF  = 2.0f;
         constexpr float kWispyPeriodHF  = 4.0f;
@@ -363,7 +365,13 @@ namespace Desert::Tests::CloudFieldRef
 #define CLOUD_AUTHORED_COUNT 0
 #define CLOUD_AUTHORED_SLAB_COUNT 0
 #define CLOUD_AUTHORED_INSTANCE( i ) CloudAuthoredNoInstance()
-#define CLOUD_SAMPLE_AUTHORED( uvw ) vec4( 0.0f, 0.0f, 0.0f, 0.0f )
+// The stub returns zero, but it EVALUATES its argument, and that is not cosmetic. Written as a bare
+// `vec4( 0, 0, 0, 0 )` it discarded the addressing expression entirely, so `CloudAuthoredAtlasUvw` and
+// the `slabCount` handed to it were never compiled into anything here — which is exactly what
+// `-Wunused-variable` was reporting about `CloudField.glslh:384`. This suite deliberately runs producer
+// A's loop zero times (CLOUD_AUTHORED_COUNT is 0, and Desert/Tests/Engine/CloudAuthored owns that
+// producer), so the value is still zero; what changes is that the atlas addressing type-checks here too.
+#define CLOUD_SAMPLE_AUTHORED( uvw ) ( (void)( uvw ), vec4( 0.0f, 0.0f, 0.0f, 0.0f ) )
 
 #include <Common/CloudAuthored.glslh>
 
@@ -382,6 +390,7 @@ namespace Desert::Tests::CloudFieldRef
         }
 
 #include <Common/CloudField.glslh>
+        DESERT_GLSL_AS_CPP_END
 
         // ------------------------------------------------------------------------------------------
         // The species arrays, filled the way Graphic::PackCloudParams fills them
@@ -425,22 +434,6 @@ namespace Desert::Tests::CloudFieldRef
 
             params.RegionOriginKm  = ModellingVolume().OriginKm;
             params.InvRegionSizeKm = 1.0f / ModellingVolume().Params.RegionSizeKm;
-        }
-
-        /// The altitude fraction in the layer the bound volume was baked over — what the march computes
-        /// with CloudHeightFraction and hands to the seam. Exposed so a test can ask about an ABSOLUTE
-        /// altitude, which is what every meteorological assertion in this suite is written in.
-        float CloudLayerHeightFraction( float altitudeKm )
-        {
-            const Desert::Assets::CloudProceduralFieldParams& p = ModellingVolume().Params;
-            return ( altitudeKm - p.LayerBottomKm ) / std::max( p.LayerThicknessKm, 1e-6f );
-        }
-
-        /// Bind one species into the table AND into the params, which is what every single-type test in
-        /// this suite wants and what a layer with one slot filled actually does.
-        void CloudBindSingleSpecies( CloudFieldParams& params, const Desert::Graphic::CloudTypeShape& shape )
-        {
-            CloudBindSpecies( params, &shape, 1u, vec3( 1.0f, 0.0f, 0.0f ) );
         }
 
         /**

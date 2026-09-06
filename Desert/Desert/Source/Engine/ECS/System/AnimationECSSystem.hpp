@@ -18,7 +18,7 @@ namespace Desert::ECS
         {
         }
 
-        void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
+        void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& /*renderCommandBuffer*/,
                      const Common::Timestep& ts ) override
         {
             // Editor PREVIEW: the gameplay timestep is 0 in Edit mode (gameplay frozen), but animation should

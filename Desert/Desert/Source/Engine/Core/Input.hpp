@@ -28,7 +28,7 @@ namespace Desert::Input
 
         void SetCursorMode( MouseState mode );
 
-        const MouseState GetVisibility() const
+        MouseState GetVisibility() const
         {
             return m_MouseMode;
         }

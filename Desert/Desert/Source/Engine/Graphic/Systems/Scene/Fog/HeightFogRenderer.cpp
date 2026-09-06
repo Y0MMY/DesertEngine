@@ -276,7 +276,7 @@ namespace Desert::Graphic::System
             if ( !m_HasFrameResult || !m_FogImage || !m_ApplyMaterial )
                 return;
 
-            m_ApplyMaterial->Bind( m_FogImage.get() );
+            m_ApplyMaterial->BindInputs( m_FogImage.get() );
             Renderer::GetInstance().SubmitFullscreenQuad( m_ApplyPipeline.get(),
                                                           m_ApplyMaterial->GetMaterialExecutor() );
         };

@@ -32,6 +32,8 @@ project(test_name)
     includedirs {
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/Desert/Desert/Source",
+    }
+    externalincludedirs {
         "%{wks.location}/ThirdParty/entt/include/",       -- the walk takes an entt registry
         "%{wks.location}/ThirdParty/reflect-cpp/include",  -- Components.hpp -> ReflectionTypes.hpp -> rfl
         "%{wks.location}/ThirdParty/stb/include",          -- Engine/Text -> stb_truetype
@@ -42,11 +44,11 @@ project(test_name)
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
-        includedirs { path }
+        externalincludedirs { path }
     end
 
     for _, define in ipairs(deps.TestSpecific.Defines) do

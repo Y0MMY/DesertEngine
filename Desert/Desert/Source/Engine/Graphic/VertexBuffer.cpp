@@ -15,6 +15,11 @@ namespace Desert::Graphic
             {
                 return std::make_shared<API::Vulkan::VulkanVertexBuffer>( data, size, usage );
             }
+            // NAMED RATHER THAN LEFT TO FALL THROUGH. `None` is the enum's zero, not a backend, and the
+            // verify below is what answers it — but with the case unwritten this switch also stayed silent
+            // the day a SECOND backend is added, which is the one moment a factory needs to complain.
+            case RendererAPIType::None:
+                break;
         }
 
         DESERT_VERIFY( false );
@@ -30,6 +35,11 @@ namespace Desert::Graphic
             {
                 return std::make_shared<API::Vulkan::VulkanVertexBuffer>( size, usage );
             }
+            // NAMED RATHER THAN LEFT TO FALL THROUGH. `None` is the enum's zero, not a backend, and the
+            // verify below is what answers it — but with the case unwritten this switch also stayed silent
+            // the day a SECOND backend is added, which is the one moment a factory needs to complain.
+            case RendererAPIType::None:
+                break;
         }
 
         DESERT_VERIFY( false );

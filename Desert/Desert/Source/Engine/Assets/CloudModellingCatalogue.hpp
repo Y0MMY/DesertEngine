@@ -25,8 +25,8 @@ namespace Desert::Assets
      * library of finished clouds. The two bodies the demo scenes need are baked and committed; the other
      * eight are one command away.
      *
-     * THE GENUS NAMES ARE THE ONES `Editor/Resources/Assets/Clouds/Types/*.decloudtype` ALREADY USES, and
-     * the two halves are deliberate counterparts: a cloud TYPE (phase T) says at what altitude and with
+     * THE GENUS NAMES ARE THE ONES THE `.decloudtype` FILES UNDER `Editor/Resources/Assets/Clouds/Types` ALREADY
+     * USE, and the two halves are deliberate counterparts: a cloud TYPE (phase T) says at what altitude and with
      * what vertical profile the PROCEDURAL producer lays a genus down; a catalogue entry says what one
      * body of that genus is SHAPED like. A scene that wants a cumulonimbus sky and a cumulonimbus hero
      * cloud names the two by the same word, which is the whole reason the vocabularies were kept in step.

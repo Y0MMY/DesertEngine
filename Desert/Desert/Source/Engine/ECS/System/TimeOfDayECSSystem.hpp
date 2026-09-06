@@ -34,7 +34,7 @@ namespace Desert::ECS
             return false;
         }
 
-        void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
+        void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& /*renderCommandBuffer*/,
                      const Common::Timestep& ts ) override
         {
             auto atmospheres = registry.view<ECS::SkyAtmosphereComponent>();
@@ -96,8 +96,11 @@ namespace Desert::ECS
             auto dirLights = registry.view<ECS::DirectionLightComponent, ECS::TransformComponent>();
             for ( const auto entity : dirLights )
             {
-                const auto& transform = dirLights.get<ECS::TransformComponent>( entity );
-                const auto& light     = dirLights.get<ECS::DirectionLightComponent>( entity );
+                // The TransformComponent is in the view because a sun must HAVE one to be driven, not
+                // because this loop reads it: `DirectionValid` is unconditionally true a few lines below,
+                // and the comment there says why a degenerate Translation is not a reason to skip a
+                // candidate. Fetching it and dropping it is what `-Wunused-variable` pointed at.
+                const auto& light = dirLights.get<ECS::DirectionLightComponent>( entity );
 
                 entities.push_back( entity );
                 candidates.push_back( Rules::SunCandidate{

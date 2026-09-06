@@ -22,7 +22,7 @@ namespace Desert::ECS
         }
 
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
-                     const Common::Timestep& ts ) override
+                     const Common::Timestep& /*ts*/ ) override
         {
             auto spotLightView = registry.view<SpotLightComponent, TransformComponent>();
 

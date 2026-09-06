@@ -13,7 +13,7 @@ namespace Desert::Graphic::API::Vulkan
     // RAW barrier the wrapper's layout tracking does not see — callers whose tracked layout would go
     // stale (the cube path, whose images the compute dispatcher later re-transitions from the TRACKED
     // layout) pass false and do both boundary transitions through the image's own TransitionLayout.
-    static void GenerateMipmapsTO( VkCommandBuffer commandBuffer, VkImage image, VkFormat imageFormat,
+    static void GenerateMipmapsTO( VkCommandBuffer commandBuffer, VkImage image, VkFormat /*imageFormat*/,
                                    uint32_t width, uint32_t height, uint32_t mipLevels,
                                    uint32_t baseArrayLayer = 0, uint32_t layerCount = 1,
                                    bool transitionToShaderRead = true )
@@ -80,13 +80,14 @@ namespace Desert::Graphic::API::Vulkan
                                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, finalRange );
     }
 
-    Common::BoolResultStr VulkanMipMap2DGeneratorCS::GenerateMips( const std::shared_ptr<Image2D>& image ) const
+    Common::BoolResultStr
+    VulkanMipMap2DGeneratorCS::GenerateMips( const std::shared_ptr<Image2D>& /*image*/ ) const
     {
         return Common::MakeError( "Not impl" );
     }
 
     Common::BoolResultStr
-    VulkanMipMapCubeGeneratorCS::GenerateMips( const std::shared_ptr<ImageCube>& imageCube ) const
+    VulkanMipMapCubeGeneratorCS::GenerateMips( const std::shared_ptr<ImageCube>& /*imageCube*/ ) const
     {
         return Common::MakeError( "Not impl" );
     }
