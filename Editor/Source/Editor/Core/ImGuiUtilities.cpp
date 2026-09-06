@@ -192,21 +192,6 @@ namespace Desert::Editor::Utils
         return clicked;
     }
 
-    std::string ImGuiUtilities::FormatThousands( uint64_t value )
-    {
-        std::string digits = std::to_string( value );
-        std::string out;
-        out.reserve( digits.size() + digits.size() / 3 );
-        const size_t lead = digits.size() % 3 == 0 ? 3 : digits.size() % 3;
-        for ( size_t i = 0; i < digits.size(); ++i )
-        {
-            if ( i > 0 && ( i - lead ) % 3 == 0 )
-                out += ' ';
-            out += digits[i];
-        }
-        return out;
-    }
-
     bool ImGuiUtilities::EmptyState( const char* icon, const char* title, const char* body, const char* action )
     {
         const ImVec2 avail = ImGui::GetContentRegionAvail();

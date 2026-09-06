@@ -61,12 +61,6 @@ namespace Desert::Editor::Utils
         // A full-width accent ("primary") button — for the one obvious action of a section (Convert, Create…).
         static bool AccentButton( const char* label, float height = 0.0f );
 
-        // 1234567 -> "1 234 567". Every large count the editor SHOWS a person goes through here: a raw run
-        // of digits is not read, it is estimated, and "148902" and "1489020" look the same at a glance.
-        // Shared rather than per-panel because the Mesh section and the status bar print the same triangle
-        // count, and two formatters would eventually group it two ways.
-        static std::string FormatThousands( uint64_t value );
-
         // What a panel draws when it has no subject: a large muted glyph, the panel's own name for the
         // state, one sentence saying how to leave it, and — optionally — the button that leaves it.
         //
