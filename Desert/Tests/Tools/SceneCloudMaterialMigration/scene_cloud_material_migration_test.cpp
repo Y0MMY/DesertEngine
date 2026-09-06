@@ -135,7 +135,11 @@ TEST( SceneCloudMaterialMigration, EveryStatedLookKeyMovesVerbatimAndTheRestStay
     EXPECT_EQ( report.Entities, 1 );
     EXPECT_EQ( report.ValuesMoved, 28 );
     // Five asset keys were present, ONE of them non-empty pairs: the authored type and the layout.
-    EXPECT_EQ( report.AssetsMoved, 2 );
+    // THREE, NOT TWO: the type slot, plus the ONE layout slot that O-4 splits into two inputs on the way
+    // out. The v11 file states `CloudLayout`; what lands in the material is `LayoutPattern` and
+    // `LayoutMask`, both naming that painting, because a file produced here naming a slot the shader no
+    // longer declares would be born needing a second pass.
+    EXPECT_EQ( report.AssetsMoved, 3 );
     EXPECT_EQ( report.Rejected, 0 );
     EXPECT_EQ( report.Defaulted, 0 ) << "every moved key was stated, so nothing may report as defaulted";
 
@@ -166,8 +170,13 @@ TEST( SceneCloudMaterialMigration, EveryStatedLookKeyMovesVerbatimAndTheRestStay
     // that keeps the material resolving to the artist's type on every machine.
     EXPECT_EQ( material.GetTexture( "CloudType1" ), static_cast<uint64_t>( Common::AssetHandle::FromKey(
                                                          "assets:Clouds/Types/Cumulus_Congestus.decloudtype" ) ) );
-    EXPECT_EQ( material.GetTexture( "CloudLayout" ), static_cast<uint64_t>( Common::AssetHandle::FromKey(
-                                                          "assets:Clouds/Layouts/Layout_Stripe.dclayout" ) ) );
+    const uint64_t painting =
+         static_cast<uint64_t>( Common::AssetHandle::FromKey( "assets:Clouds/Layouts/Layout_Stripe.dclayout" ) );
+    EXPECT_EQ( material.GetTexture( "LayoutPattern" ), painting );
+    EXPECT_EQ( material.GetTexture( "LayoutMask" ), painting );
+    EXPECT_EQ( material.GetTexture( "CloudLayout" ), 0u )
+         << "the pre-O-4 slot name survived into the material, so the shader will drop it and the sky "
+            "loses its painting";
     // Empty slots produced NO entry: absent and empty spell the same null handle.
     EXPECT_EQ( material.GetTexture( "CloudType2" ), 0u );
 }
@@ -283,7 +292,8 @@ TEST( SceneCloudMaterialMigration, AValueOfTheWrongShapeIsNamedRemovedAndNotGues
     const Desert::Assets::MaterialData material = MaterialOf( report );
     EXPECT_EQ( material.FindParam( "Coverage" ), nullptr );
     EXPECT_EQ( material.GetTexture( "CloudType1" ), 0u );
-    EXPECT_EQ( material.GetTexture( "CloudLayout" ), 0u );
+    EXPECT_EQ( material.GetTexture( "LayoutPattern" ), 0u );
+    EXPECT_EQ( material.GetTexture( "LayoutMask" ), 0u );
 
     // The good neighbours still moved.
     EXPECT_FLOAT_EQ( material.GetFloat( "CoverageContrast" ), 1.0f );

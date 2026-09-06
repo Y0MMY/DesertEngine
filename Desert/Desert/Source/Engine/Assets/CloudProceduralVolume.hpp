@@ -343,8 +343,10 @@ namespace Desert::Assets
         /// every field of it is compared by CloudProceduralParamsEqual.
         CloudLayoutPlacement LayoutPlacement{};
 
-        /// The painting itself, or null when the layer has no layout bound — which is what every scene in
-        /// this repository carries and what must keep rendering the frame it rendered before.
+        /// The painting the PATTERN is read from, or null when the layer has none bound — which is what
+        /// every scene in this repository carries and what must keep rendering the frame it rendered
+        /// before. Only its @c Pattern table is read here; a layout bound to this slot that carries only a
+        /// mask contributes nothing, and CloudCellCoverage's `HasPattern` is where that is decided.
         ///
         /// A SHARED POINTER AND NOT A COPY, because the tables are up to 5 MiB and these parameters are
         /// held by the renderer across frames and re-used at every region shift; a copy per rebuild would
@@ -355,7 +357,16 @@ namespace Desert::Assets
         /// same number stated once rather than twice. Comparing the pointer would call a re-bake every time
         /// the asset was reloaded into a different allocation with identical pixels; comparing the pixels
         /// would be a megabyte memcmp on a path that runs whenever a slider moves.
-        std::shared_ptr<const CloudLayoutData> Layout;
+        std::shared_ptr<const CloudLayoutData> PatternSource;
+
+        /// The painting the add/remove MASK is read from, or null. Only its @c Mask table is read.
+        ///
+        /// TWO SOURCES AND NOT ONE, which is decision O-4 and Unreal's own arrangement:
+        /// `Layout_CloudGlobalPattern` and `Layout_GlobalCloudMask` are separate texture parameters there,
+        /// so a sky can keep its placement and swap the region being cleared, or the reverse, without
+        /// re-authoring a single file. Pointing both at the same `.dclayout` is the ordinary case and
+        /// costs one extra pointer copy; the service hands back the same shared object for both.
+        std::shared_ptr<const CloudLayoutData> MaskSource;
 
         /// The finest chord the march can be relied on to FIND, kilometres — CloudFinestResolvableChordKm
         /// at the component's Max Steps, handed in rather than assumed.
@@ -388,8 +399,38 @@ namespace Desert::Assets
      * painting.
      *
      * ValidateCloudProceduralParams calls this, so there is one statement of the relations and not two.
+     *
+     * It is both slots at once. @ref ValidateCloudProceduralLayoutTable is the one the renderer wants,
+     * because with two independent sources a bad pattern must not cost the artist their mask.
      */
     Common::BoolResultStr ValidateCloudProceduralLayout( const CloudProceduralFieldParams& params );
+
+    /// Which of the two layout inputs a question is about. Named rather than a bool, because "true means
+    /// pattern" at a call site is a coin toss the reader has to resolve by opening this file.
+    enum class CloudLayoutTable : uint8_t
+    {
+        Pattern,
+        Mask
+    };
+
+    /// "pattern" / "mask", for a message an artist reads. One spelling, so the log and the panel cannot
+    /// name the same slot differently.
+    const char* CloudLayoutTableName( CloudLayoutTable table );
+
+    /**
+     * @brief The layout check for ONE of the two slots, ignoring the other entirely.
+     *
+     * WHY PER SLOT. The renderer drops what it cannot use and renders the rest, and since O-4 there are two
+     * things it could be handed. Checked together, a pattern too coarse for the lattice would take the
+     * mask down with it — an artist's region of cleared sky vanishing because a different file was wrong,
+     * with the message naming neither. Checked apart, exactly the offending painting is dropped and the
+     * log says which.
+     *
+     * An empty slot passes: nothing to be wrong. The PLACEMENT is not checked here — it belongs to both
+     * slots and is @ref ValidateCloudProceduralLayout's first act.
+     */
+    Common::BoolResultStr ValidateCloudProceduralLayoutTable( const CloudProceduralFieldParams& params,
+                                                              CloudLayoutTable                  table );
 
     /**
      * @brief The narrowest HORIZONTAL half-extent a lump may be given, kilometres.

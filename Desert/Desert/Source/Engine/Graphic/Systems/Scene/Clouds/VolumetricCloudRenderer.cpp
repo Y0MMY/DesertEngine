@@ -323,39 +323,55 @@ namespace Desert::Graphic::System
         params.LayoutPlacement.PatternStrength = std::clamp( m_Material.LayoutPatternStrength, 0.0f, 1.0f );
         params.LayoutPlacement.MaskStrength    = std::clamp( m_Material.LayoutMaskStrength, 0.0f, 1.0f );
 
-        // A NULL HERE IS THE SHIPPED STATE AND NOT A FAILURE — every scene in this repository carries an
-        // empty slot, and the bake reads null as "there is no painting" and places the sky exactly as it
-        // did before this field existed. A handle that names a layout nobody registered is logged by the
+        // TWO SLOTS, RESOLVED INDEPENDENTLY — Unreal's `Layout_CloudGlobalPattern` and
+        // `Layout_GlobalCloudMask` are two texture parameters and since O-4 so are ours. Pointing both at
+        // one `.dclayout` is the ordinary case and the service returns the same shared object twice.
+        //
+        // A NULL HERE IS THE SHIPPED STATE AND NOT A FAILURE — every scene in this repository carries empty
+        // slots, and the bake reads null as "there is no painting" and places the sky exactly as it did
+        // before these fields existed. A handle that names a layout nobody registered is logged by the
         // service, once, and also arrives here as null.
-        params.Layout = Runtime::ResourceRegistry::GetCloudLayoutService()->Get( m_Material.CloudLayout );
+        auto* layouts        = Runtime::ResourceRegistry::GetCloudLayoutService();
+        params.PatternSource = layouts->Get( m_Material.LayoutPattern );
+        params.MaskSource    = layouts->Get( m_Material.LayoutMask );
 
-        // WHEN THE PAINTING CANNOT BE HONOURED IT IS DROPPED, NOT THE SKY. The narrow validator is the one
-        // called here on purpose — handed the whole one, a mistyped patch tile would have dropped the
-        // artist's painting and blamed the painting for it (see ValidateCloudProceduralLayout).
+        // WHEN A PAINTING CANNOT BE HONOURED IT IS DROPPED, NOT THE SKY, AND NOT THE OTHER SLOT. The narrow
+        // per-table validator is the one called here on purpose, twice — handed the whole one, a mistyped
+        // patch tile would have dropped the artist's painting and blamed the painting for it, and a pattern
+        // too coarse for the lattice would have taken the mask down with it.
         //
         // Said out loud, because a painting that silently stopped applying is the least diagnosable thing
-        // this slot can do — and said ONCE per painting rather than once per frame, because this function
+        // these slots can do — and said ONCE per painting rather than once per frame, because this function
         // runs every frame and a message at sixty hertz is a log nobody reads.
-        if ( params.Layout )
-        {
-            if ( const auto usable = Assets::ValidateCloudProceduralLayout( params ); !usable )
-            {
-                if ( m_ReportedBadLayoutHash != params.Layout->ContentHash )
-                {
-                    m_ReportedBadLayoutHash = params.Layout->ContentHash;
-                    LOG_ERROR( "[Clouds] The bound cloud layout is not usable and the sky will be placed "
-                               "procedurally instead: {}",
-                               usable.GetError() );
-                }
-                params.Layout = nullptr;
-            }
-            else
-            {
-                m_ReportedBadLayoutHash = 0u;
-            }
-        }
+        DropUnusableLayout( params, Assets::CloudLayoutTable::Pattern, params.PatternSource,
+                            m_ReportedBadPatternHash );
+        DropUnusableLayout( params, Assets::CloudLayoutTable::Mask, params.MaskSource, m_ReportedBadMaskHash );
 
         return params;
+    }
+
+    void VolumetricCloudRenderer::DropUnusableLayout( Assets::CloudProceduralFieldParams&             params,
+                                                      Assets::CloudLayoutTable                        table,
+                                                      std::shared_ptr<const Assets::CloudLayoutData>& source,
+                                                      uint32_t& reportedHash )
+    {
+        if ( !source )
+            return;
+
+        if ( const auto usable = Assets::ValidateCloudProceduralLayoutTable( params, table ); !usable )
+        {
+            if ( reportedHash != source->ContentHash )
+            {
+                reportedHash = source->ContentHash;
+                LOG_ERROR( "[Clouds] The layout bound to the cloud {} input is not usable and that input "
+                           "will contribute nothing: {}",
+                           Assets::CloudLayoutTableName( table ), usable.GetError() );
+            }
+            source = nullptr;
+            return;
+        }
+
+        reportedHash = 0u;
     }
 
     bool VolumetricCloudRenderer::EnsureModellingVolume()
@@ -994,6 +1010,36 @@ namespace Desert::Graphic::System
                     LOG_WARN( "[Clouds] material handle {} does not resolve to a registered material — "
                               "the layer renders with the CloudRaymarch schema defaults.",
                               raw );
+                }
+            }
+            else if ( schema && !schema->Params.empty() )
+            {
+                // A NAME THE SHADER DOES NOT DECLARE IS DROPPED, AND UNTIL NOW SILENTLY. The surface path
+                // has warned about this since it was written (MaterialFactory::ApplyShaderAsset); the
+                // cloud path never did, because BuildCloudMaterialValues skips an unknown key by design —
+                // a `.demat` may be a shader revision ahead of this binary. That is right for a VALUE and
+                // wrong for an ASSET reference: a dropped number falls back to a default that still looks
+                // authored, but a dropped layout is a painting that stops applying with nothing anywhere
+                // to say so. O-4 renamed `CloudLayout` to `LayoutPattern` and `LayoutMask`, and this is
+                // what makes a material nobody ran the migrator over report itself instead of rendering a
+                // sky with the painting quietly missing.
+                //
+                // Once per material handle, on the same latch as the miss above: this runs every frame.
+                const uint64_t raw = static_cast<uint64_t>( m_Data.Material );
+                for ( const auto& texture : overrides.Textures )
+                {
+                    const bool declared = std::any_of( schema->Params.begin(), schema->Params.end(),
+                                                       [&texture]( const Core::Formats::ShaderParam& p )
+                                                       { return p.Name == texture.first; } );
+                    if ( declared )
+                        continue;
+
+                    if ( m_WarnedUnknownSlots.insert( raw ).second )
+                        LOG_WARN( "[Clouds] material handle {} carries a value for '{}', which the cloud "
+                                  "shader does not declare, so it is ignored. The slot was renamed or "
+                                  "removed since this material was authored — run Tools/SceneMigrator over "
+                                  "the .demat to bring it forward.",
+                                  raw, texture.first );
                 }
             }
         }

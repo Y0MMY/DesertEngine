@@ -113,11 +113,27 @@ namespace Desert::Editor
         m_HasLayout  = true;
         m_SourceName = m_SubjectPath.filename().string();
 
-        // FROM A FILE, so the channel-mapping controls are disabled and say why: the mapping an image was
-        // baked WITH is already in these pixels and there is no picture here to re-map. "Edit this painting"
-        // is what puts it back on the canvas.
-        m_LayoutFromFile = true;
-        m_PreviewDirty   = true;
+        // STRAIGHT ONTO THE CANVAS, and there is no button between the two any more. There used to be
+        // "Edit this painting", and it existed for one reason: the recovery could FAIL — a layout whose
+        // mask differed from its fourth pattern channel needed five planes and a canvas had four, so
+        // opening it was a thing that had to be asked for and could be refused. O-4 gave the mask its own
+        // plane and there is nothing left to refuse, so a document opened on a `.dclayout` is simply a
+        // document you can paint on and export from.
+        //
+        // A recovery that fails here is a layout that was never valid, and it is reported rather than
+        // leaving an empty canvas behind a panel that looks ready.
+        auto canvas = Assets::MakeCloudLayoutCanvasFromLayout( m_Layout );
+        if ( !canvas )
+        {
+            m_Status        = "This painting could not be opened: " + canvas.GetError();
+            m_StatusIsError = true;
+            LOG_ERROR( "[CloudLayout] {}", m_Status );
+            return;
+        }
+
+        m_Canvas           = canvas.ExtractValue();
+        m_CanvasImageDirty = true;
+        m_PreviewDirty     = true;
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -253,8 +269,6 @@ namespace Desert::Editor
         layer.Placement.PatternStrength = std::clamp( material.LayoutPatternStrength, 0.0f, 1.0f );
         layer.Placement.MaskStrength    = std::clamp( material.LayoutMaskStrength, 0.0f, 1.0f );
 
-        layer.BoundLayout = static_cast<uint64_t>( material.CloudLayout );
-
         return layer;
     }
 
@@ -334,7 +348,7 @@ namespace Desert::Editor
     // Source
     // -------------------------------------------------------------------------------------------------
 
-    void CloudLayoutPanel::LoadSourceImage( const std::filesystem::path& path )
+    void CloudLayoutPanel::LoadSourceImage( const std::filesystem::path& path, Table table )
     {
         int      width = 0, height = 0, sourceChannels = 0;
         stbi_uc* decoded = stbi_load( path.string().c_str(), &width, &height, &sourceChannels, 4 );
@@ -349,39 +363,97 @@ namespace Desert::Editor
             return;
         }
 
-        m_SourcePixels.assign( decoded, decoded + static_cast<size_t>( width ) * height * 4 );
+        const std::vector<unsigned char> pixels( decoded, decoded + static_cast<size_t>( width ) * height * 4 );
         stbi_image_free( decoded );
 
-        m_SourceWidth    = static_cast<uint32_t>( width );
-        m_SourceHeight   = static_cast<uint32_t>( height );
-        m_SourceName     = path.filename().string();
-        m_LayoutFromFile = false;
+        // THE ENGINE'S OWN FUNCTIONS, and this is the line that makes the panel not a second path: what a
+        // picture means is stated once, in Engine/Assets/CloudLayout.cpp, and Tools/CloudLayoutBaker calls
+        // the same ones. A panel with its own reading of a channel mapping would produce files that differ
+        // from the tool's for reasons nobody could see.
+        const auto brought =
+             table == Table::Pattern
+                  ? Assets::SetCloudLayoutCanvasPatternFromImage( m_Canvas, pixels, static_cast<uint32_t>( width ),
+                                                                  static_cast<uint32_t>( height ),
+                                                                  m_ChannelForSlot )
+                  : Assets::SetCloudLayoutCanvasMaskFromImage( m_Canvas, pixels, static_cast<uint32_t>( width ),
+                                                               static_cast<uint32_t>( height ),
+                                                               static_cast<uint32_t>( m_MaskSourceChannel ) );
+
+        if ( !brought )
+        {
+            m_Status        = "'" + path.filename().string() + "' was not taken: " + brought.GetError();
+            m_StatusIsError = true;
+            LOG_ERROR( "[CloudLayout] {}", m_Status );
+            return;
+        }
+
+        m_SourceName = path.filename().string();
 
         // A NEW SURFACE MEANS A NEW DEVICE IMAGE. Left alone, the canvas pane would go on showing the
         // previous picture's channel until something else happened to move, which reads as an import that
         // did nothing.
         m_CanvasImageDirty = true;
 
-        m_Status = "Read '" + m_SourceName + "': " + std::to_string( width ) + "x" + std::to_string( height ) +
-                   ", " + std::to_string( sourceChannels ) + " channels in the file.";
+        m_Status = std::string( "Read the " ) + ( table == Table::Pattern ? "pattern" : "mask" ) + " from '" +
+                   m_SourceName + "': " + std::to_string( width ) + "x" + std::to_string( height ) + ", " +
+                   std::to_string( sourceChannels ) + " channels in the file.";
         m_StatusIsError = false;
 
         RebuildLayout();
+    }
+
+    void CloudLayoutPanel::ExportImage( Table table )
+    {
+        // TAKEN FROM THE CANVAS AND NOT RE-READ FROM THE LAYOUT, so what comes out is exactly what the
+        // matching import would take back in rather than a second reading of a table.
+        const auto image = table == Table::Pattern ? Assets::EncodeCloudLayoutCanvasPatternToImage( m_Canvas )
+                                                   : Assets::EncodeCloudLayoutCanvasMaskToImage( m_Canvas );
+        if ( !image )
+        {
+            m_Status        = "Export failed: " + image.GetError();
+            m_StatusIsError = true;
+            return;
+        }
+
+        std::filesystem::path target = Common::Utils::FileSystem::SaveFileDialog( "PNG image\0*.png\0" );
+        if ( target.empty() )
+            return;
+
+        if ( target.extension() != ".png" )
+            target.replace_extension( ".png" );
+
+        const Assets::CloudLayoutImage& picture = image.GetValue();
+        const int written = stbi_write_png( target.string().c_str(), static_cast<int>( picture.Side ),
+                                            static_cast<int>( picture.Side ), 4, picture.Pixels.data(),
+                                            static_cast<int>( picture.Side ) * 4 );
+
+        const char* what = table == Table::Pattern ? "pattern" : "mask";
+
+        if ( written == 0 )
+        {
+            m_Status        = "Export failed: '" + target.string() + "' could not be written.";
+            m_StatusIsError = true;
+            LOG_ERROR( "[CloudLayout] {}", m_Status );
+            return;
+        }
+
+        m_Status = std::string( "Exported the " ) + what + ", " + std::to_string( picture.Side ) + "x" +
+                   std::to_string( picture.Side ) + ", to " + target.string();
+        m_StatusIsError = false;
+        LOG_INFO( "[CloudLayout] {} exported: '{}', {}x{}.", what, target.string(), picture.Side, picture.Side );
     }
 
     void CloudLayoutPanel::RebuildLayout()
     {
         m_HasLayout = false;
 
-        if ( m_SourcePixels.empty() )
+        // A CANVAS CARRYING EITHER TABLE IS A LAYOUT. Requiring a pattern here would leave an artist who
+        // imported only a mask unable to bake at all — the Bake buttons key on m_HasLayout — which is a
+        // dead end reached by doing exactly what the Global Cloud Mask input asks for.
+        if ( m_Canvas.Side == 0u || ( m_Canvas.Pattern.empty() && !m_Canvas.HasMask() ) )
             return;
 
-        // THE TOOL'S OWN FUNCTION, and this is the line that makes the panel not a second path: what a
-        // picture means is stated once, in Engine/Assets/CloudLayout.cpp, and Tools/CloudLayoutBaker calls
-        // the same one. A panel with its own reading of a channel mapping would produce files that differ
-        // from the tool's for reasons nobody could see.
-        auto made = Assets::MakeCloudLayoutFromImage( m_SourcePixels, m_SourceWidth, m_SourceHeight,
-                                                      m_ChannelForSlot, m_TakeMask );
+        auto made = Assets::MakeCloudLayoutFromCanvas( m_Canvas );
         if ( !made )
         {
             m_Status        = made.GetError();
@@ -407,9 +479,9 @@ namespace Desert::Editor
         if ( ImGui::Button( "New canvas", ImVec2( 120.0f, 0.0f ) ) )
             StartCanvas( static_cast<uint32_t>( m_NewCanvasSide ) );
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "A blank square to draw on. Nothing painted anywhere, and the alpha plane "
-                               "at the mask's NEUTRAL 128 - so ticking the mask box on an untouched canvas "
-                               "gives a mask that does nothing rather than one that fills the sky." );
+            ImGui::SetTooltip( "A blank square to draw on. Nothing painted anywhere and NO add/remove mask "
+                               "- a mask of uniform neutral changes nothing, so carrying one would be a "
+                               "table written to the file for no effect. Add one below when you want it." );
 
         ImGui::SameLine();
         ImGui::SetNextItemWidth( 140.0f );
@@ -428,13 +500,17 @@ namespace Desert::Editor
                                "texel at 94 m and 128 puts it at 375 m - and a texel coarser than a "
                                "placement cell cannot tell two clouds apart at all." );
 
+        // TWO IMPORTS AND NOT ONE — Unreal's two layout texture slots, as two buttons. The pattern says
+        // WHERE the clouds are, the mask says how much to ADD or REMOVE, and until O-4 they had to arrive
+        // in one RGBA picture with the mask living in its alpha. Bringing them separately is what lets a
+        // painting use all four species slots AND carry a mask, which one image cannot express.
         ImGui::SameLine();
-        if ( ImGui::Button( "Image...", ImVec2( 120.0f, 0.0f ) ) )
+        if ( ImGui::Button( "Pattern image...", ImVec2( 150.0f, 0.0f ) ) )
         {
             const std::filesystem::path picked =
                  Common::Utils::FileSystem::OpenFileDialog( "Image\0*.png;*.jpg;*.jpeg;*.tga;*.bmp\0" );
             if ( !picked.empty() )
-                LoadSourceImage( picked );
+                LoadSourceImage( picked, Table::Pattern );
         }
 
         // BOTH PAYLOADS, and accepting only the generic one was a live defect: the tooltip below invites the
@@ -459,18 +535,48 @@ namespace Desert::Editor
                 const std::string dropped( static_cast<const char*>( payload->Data ),
                                            payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
                 if ( !dropped.empty() && LooksLikeAnImage( dropped ) )
-                    LoadSourceImage( dropped );
+                    LoadSourceImage( dropped, Table::Pattern );
                 break;
             }
             ImGui::EndDragDropTarget();
         }
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "A SQUARE picture, 4 to 1024 a side. Non-square and oversized sources are "
-                               "refused by name rather than resampled - resampling would be an opinion "
-                               "about your painting, and one taken silently is the worst kind." );
+            ImGui::SetTooltip( "A SQUARE picture, 4 to 1024 a side, whose channels become the four species "
+                               "slots. Non-square and oversized sources are refused by name rather than "
+                               "resampled - resampling would be an opinion about your painting, and one "
+                               "taken silently is the worst kind. Or drag a .png here from the Content "
+                               "Browser." );
 
         ImGui::SameLine();
-        ImGui::TextDisabled( "or drag a .png here from the Content Browser" );
+        if ( ImGui::Button( "Mask image...", ImVec2( 150.0f, 0.0f ) ) )
+        {
+            const std::filesystem::path picked =
+                 Common::Utils::FileSystem::OpenFileDialog( "Image\0*.png;*.jpg;*.jpeg;*.tga;*.bmp\0" );
+            if ( !picked.empty() )
+                LoadSourceImage( picked, Table::Mask );
+        }
+        if ( ImGui::BeginDragDropTarget() )
+        {
+            for ( const char* accepted :
+                  { ::Desert::Editor::DragPayloads::TextureAsset, ::Desert::Editor::DragPayloads::AssetFile } )
+            {
+                const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( accepted );
+                if ( !payload )
+                    continue;
+
+                const std::string dropped( static_cast<const char*>( payload->Data ),
+                                           payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
+                if ( !dropped.empty() && LooksLikeAnImage( dropped ) )
+                    LoadSourceImage( dropped, Table::Mask );
+                break;
+            }
+            ImGui::EndDragDropTarget();
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "The ADD/REMOVE mask, as its own picture: mid-grey changes nothing, "
+                               "brighter adds cloud, darker removes it. Its bytes are taken unchanged, so "
+                               "what you flood-filled with 128 is exactly what does nothing. It must be "
+                               "the same side as the pattern already on the canvas, and says so if not." );
 
         // THE "OPEN A .dclayout" COMBO THAT WAS HERE IS GONE, and its absence is the feature. It was how
         // this window came to edit a different painting than the one it was opened on — which, now that the
@@ -490,51 +596,6 @@ namespace Desert::Editor
                                    "around the sky rather than adding it and Coverage keeps meaning the "
                                    "fraction of sky it delivers. A mean near 0 or near 1 leaves very "
                                    "little room to redistribute anything." );
-
-            // A FINISHED PAINTING CAN BE PICKED BACK UP, which is what makes this a tool rather than a
-            // one-way bake. It reconstructs the RGBA source the file could have been painted on, and
-            // REFUSES by name when it could not have been — a layout whose mask was drawn independently of
-            // its fourth pattern channel needs five planes and a canvas has four.
-            if ( m_LayoutFromFile )
-            {
-                if ( ImGui::Button( "Edit this painting", ImVec2( 180.0f, 0.0f ) ) )
-                {
-                    auto canvas = Assets::MakeCloudLayoutCanvasFromLayout( m_Layout );
-                    if ( !canvas )
-                    {
-                        m_Status        = canvas.GetError();
-                        m_StatusIsError = true;
-                    }
-                    else
-                    {
-                        const Assets::CloudLayoutCanvas& opened = canvas.GetValue();
-
-                        m_SourcePixels = opened.Pixels;
-                        m_SourceWidth  = opened.Side;
-                        m_SourceHeight = opened.Side;
-                        m_TakeMask     = opened.TakeMask;
-
-                        // STRAIGHT RGBA AND NOTHING ELSE. The canvas was rebuilt FROM the pattern planes,
-                        // so channel k already holds slot k; any other mapping would rearrange the
-                        // painting on the way back in and the artist would watch their species swap.
-                        for ( uint32_t slot = 0; slot < Assets::kCloudLayoutChannels; ++slot )
-                            m_ChannelForSlot[slot] = slot;
-
-                        m_LayoutFromFile   = false;
-                        m_CanvasImageDirty = true;
-                        m_Status           = "'" + m_SourceName +
-                                   "' is on the canvas. Baking will write a new file "
-                                   "unless you pick the same name.";
-                        m_StatusIsError = false;
-
-                        RebuildLayout();
-                    }
-                }
-                if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "Puts this .dclayout back on the canvas so the brush can change it. "
-                                       "The channel mapping is reset to straight RGBA, because the canvas "
-                                       "is rebuilt from the pattern planes themselves." );
-            }
         }
         else
         {
@@ -548,10 +609,31 @@ namespace Desert::Editor
 
     bool CloudLayoutPanel::CanPaint() const
     {
-        return !m_SourcePixels.empty() && m_SourceWidth == m_SourceHeight &&
-               m_SourceWidth >= Assets::kCloudLayoutMinResolution &&
-               m_SourceWidth <= Assets::kCloudLayoutMaxResolution &&
-               m_SourcePixels.size() == static_cast<size_t>( m_SourceWidth ) * m_SourceHeight * 4u;
+        return m_Canvas.Side >= Assets::kCloudLayoutMinResolution &&
+               m_Canvas.Side <= Assets::kCloudLayoutMaxResolution &&
+               m_Canvas.Pattern.size() == static_cast<size_t>( m_Canvas.Side ) * m_Canvas.Side * 4u &&
+               ( !m_Canvas.HasMask() ||
+                 m_Canvas.Mask.size() == static_cast<size_t>( m_Canvas.Side ) * m_Canvas.Side );
+    }
+
+    bool CloudLayoutPanel::PaintingMask() const
+    {
+        return m_PaintChannel == kMaskPaintChannel;
+    }
+
+    std::vector<unsigned char>& CloudLayoutPanel::PaintPlane()
+    {
+        return PaintingMask() ? m_Canvas.Mask : m_Canvas.Pattern;
+    }
+
+    uint32_t CloudLayoutPanel::PaintPlaneChannels() const
+    {
+        return PaintingMask() ? 1u : Assets::kCloudLayoutChannels;
+    }
+
+    uint32_t CloudLayoutPanel::PaintPlaneChannel() const
+    {
+        return PaintingMask() ? 0u : static_cast<uint32_t>( m_PaintChannel );
     }
 
     void CloudLayoutPanel::StartCanvas( uint32_t side )
@@ -565,17 +647,17 @@ namespace Desert::Editor
             return;
         }
 
-        const Assets::CloudLayoutCanvas& canvas = made.GetValue();
-
-        m_SourcePixels     = canvas.Pixels;
-        m_SourceWidth      = canvas.Side;
-        m_SourceHeight     = canvas.Side;
-        m_SourceName       = "a canvas " + std::to_string( canvas.Side ) + " a side";
-        m_TakeMask         = canvas.TakeMask;
-        m_LayoutFromFile   = false;
+        m_Canvas           = made.ExtractValue();
+        m_SourceName       = "a canvas " + std::to_string( m_Canvas.Side ) + " a side";
         m_Painting         = false;
         m_Stroke           = Assets::CloudLayoutStroke{};
         m_CanvasImageDirty = true;
+
+        // A BLANK CANVAS HAS NO MASK, so the brush cannot be left aimed at a plane that no longer exists.
+        // Silently painting into the pattern instead would be a stroke landing somewhere the artist did
+        // not point it, and the symptom is a species slot filling up for no reason.
+        if ( PaintingMask() )
+            m_PaintChannel = 0;
 
         m_Status        = "A blank canvas. Draw on it below, then bake.";
         m_StatusIsError = false;
@@ -600,13 +682,23 @@ namespace Desert::Editor
         if ( !CanPaint() )
             return;
 
-        const uint32_t side   = m_SourceWidth;
+        // A PLANE THAT IS NOT THERE HAS NO PICTURE. The mask can be removed while the brush is aimed at
+        // it, and reading an empty buffer at a texel index is the one way this function can be made to
+        // walk off the end of memory.
+        if ( PaintingMask() && !m_Canvas.HasMask() )
+            return;
+
+        const uint32_t side   = m_Canvas.Side;
         const size_t   texels = static_cast<size_t>( side ) * side;
+
+        const std::vector<unsigned char>& plane   = PaintingMask() ? m_Canvas.Mask : m_Canvas.Pattern;
+        const size_t                      stride  = PaintPlaneChannels();
+        const size_t                      channel = PaintPlaneChannel();
 
         std::vector<unsigned char> grey( texels * 4u, 255u );
         for ( size_t t = 0; t < texels; ++t )
         {
-            const unsigned char value = m_SourcePixels[t * 4u + static_cast<size_t>( m_PaintChannel )];
+            const unsigned char value = plane[t * stride + channel];
             grey[t * 4u + 0]          = value;
             grey[t * 4u + 1]          = value;
             grey[t * 4u + 2]          = value;
@@ -679,53 +771,61 @@ namespace Desert::Editor
             m_CanvasImageChannel = -1;
             m_Painting           = false;
 
-            if ( m_LayoutFromFile )
-                ImGui::TextDisabled( "This is a finished .dclayout. Press 'Edit this painting' above to put "
-                                     "it back on the canvas." );
-            else
-                ImGui::TextDisabled( "Start a canvas, or open a SQUARE picture, and the brush appears here." );
+            ImGui::TextDisabled( "Start a canvas, or open a SQUARE picture, and the brush appears here." );
             return;
         }
 
-        const float side = static_cast<float>( m_SourceWidth );
+        const float side = static_cast<float>( m_Canvas.Side );
 
         // ---- what the stroke lands in ------------------------------------------------------------
+        //
+        // FIVE ENTRIES, because a layout has five tables. Before O-4 there were four and the last of them
+        // meant either species slot 3 or the mask depending on a checkbox in another section, which is one
+        // control with two meanings and a paragraph of panel explaining which was in force.
 
-        ImGui::SetNextItemWidth( 220.0f );
+        ImGui::SetNextItemWidth( 240.0f );
         if ( ImGui::Combo( "Painting on", &m_PaintChannel,
                            "Channel 0 (red)\0"
                            "Channel 1 (green)\0"
                            "Channel 2 (blue)\0"
-                           "Channel 3 / the mask (alpha)\0" ) )
+                           "Channel 3 (alpha)\0"
+                           "The add/remove mask\0" ) )
             m_CanvasImageDirty = true;
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Which plane of the canvas the brush writes. Channels 0..2 are always "
-                               "pattern - a species' own field of 'is there cloud of this kind here'. "
-                               "Alpha is the ADD/REMOVE MASK when the box in Channels is ticked and species "
-                               "slot 3's pattern when it is not: one image has four planes and a layout has "
-                               "five tables, so those two share." );
+            ImGui::SetTooltip( "Which plane of the canvas the brush writes. Channels 0..3 are the four "
+                               "species slots of the PATTERN - each its own field of 'is there cloud of "
+                               "this kind here'. The mask is a fifth plane of its own and says how much "
+                               "cloud to add or take away." );
 
-        const bool paintingAlpha = m_PaintChannel == 3;
-        const bool paintingMask  = paintingAlpha && m_TakeMask;
+        const bool paintingMask = PaintingMask();
 
-        if ( paintingAlpha )
+        if ( paintingMask )
         {
-            if ( paintingMask )
-                ImGui::TextColored( kGoodColour, "Alpha is the add/remove mask: 128 is neutral, brighter "
-                                                 "ADDS cloud, darker REMOVES it." );
+            if ( m_Canvas.HasMask() )
+                ImGui::TextColored( kGoodColour, "The mask: 128 is neutral, brighter ADDS cloud, darker "
+                                                 "REMOVES it." );
             else
             {
-                ImGui::TextColored( kWarnColour, "Alpha is species slot 3's PATTERN here - this canvas "
-                                                 "carries no mask at all." );
-                if ( ImGui::Button( "Make alpha the add/remove mask" ) )
+                ImGui::TextColored( kWarnColour, "This painting carries no mask, so there is nothing here "
+                                                 "to draw on." );
+                if ( ImGui::Button( "Add an add/remove mask" ) )
                 {
-                    m_TakeMask = true;
-                    RebuildLayout();
+                    if ( const auto added = Assets::SetCloudLayoutCanvasMask( m_Canvas, true ); !added )
+                    {
+                        m_Status        = added.GetError();
+                        m_StatusIsError = true;
+                    }
+                    else
+                    {
+                        m_CanvasImageDirty = true;
+                        RebuildLayout();
+                    }
                 }
                 if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "Ticks the same box the Channels section has. Painting a mask that "
-                                       "the bake is not told to take would be a drawing that reaches "
-                                       "nothing." );
+                    ImGui::SetTooltip( "Gives this painting a mask plane, flooded with the neutral 128 - so "
+                                       "adding one changes nothing until you draw on it, rather than "
+                                       "filling the sky." );
+                return;
             }
         }
 
@@ -851,8 +951,8 @@ namespace Desert::Editor
         if ( started )
         {
             Assets::CloudLayoutStroke opened;
-            if ( const auto began = Assets::BeginCloudLayoutStroke( opened, m_SourcePixels, m_SourceWidth,
-                                                                    static_cast<uint32_t>( m_PaintChannel ) );
+            if ( const auto began = Assets::BeginCloudLayoutStroke( opened, PaintPlane(), m_Canvas.Side,
+                                                                    PaintPlaneChannel(), PaintPlaneChannels() );
                  !began )
             {
                 m_Status        = began.GetError();
@@ -877,8 +977,7 @@ namespace Desert::Editor
             if ( ImGui::IsMouseDown( ImGuiMouseButton_Right ) && !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
                 stroke.Ink = paintingMask ? static_cast<float>( Assets::kCloudLayoutMaskNeutral ) / 255.0f : 0.0f;
 
-            if ( Assets::ExtendCloudLayoutStroke( m_Stroke, m_SourcePixels, m_LastPaintTexel, texel, stroke ) >
-                 0u )
+            if ( Assets::ExtendCloudLayoutStroke( m_Stroke, PaintPlane(), m_LastPaintTexel, texel, stroke ) > 0u )
                 m_CanvasImageDirty = true;
 
             m_LastPaintTexel = texel;
@@ -948,7 +1047,7 @@ namespace Desert::Editor
         // hints at it — the symptom is a channel an artist swears they painted that does nothing.
         const LayerContext& layer = m_LastLayer;
 
-        ImGui::BeginDisabled( m_LayoutFromFile || m_SourcePixels.empty() );
+        ImGui::BeginDisabled( m_Canvas.Pattern.empty() );
 
         bool remap = false;
         for ( uint32_t slot = 0; slot < Assets::kCloudLayoutChannels; ++slot )
@@ -1016,18 +1115,41 @@ namespace Desert::Editor
             remap = true;
         }
 
-        if ( ImGui::Checkbox( "Take the alpha as the add/remove mask", &m_TakeMask ) )
-            remap = true;
+        // THE MASK'S OWN SOURCE CHANNEL, and it is a separate control because the mask is a separate
+        // picture. It used to be a checkbox saying "take the alpha as the mask", which existed only
+        // because one image had to carry both tables.
+        ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x * 0.33f );
+        ImGui::Combo( "-> the add/remove mask##masksource", &m_MaskSourceChannel, "Red\0Green\0Blue\0Alpha\0" );
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "OFF by default, and not because a mask is unusual: an opaque PNG has "
-                               "alpha 255 everywhere, and under the signed convention (mid-grey neutral, "
-                               "brighter adds, darker removes) that would be a mask adding cloud to the "
-                               "whole sky. Turn it on when your alpha means something." );
+            ImGui::SetTooltip( "Which channel of a MASK picture is read by 'Mask image...'. A greyscale PNG "
+                               "loads with red, green and blue equal, so Red is right for anything drawn as "
+                               "grey; the other three are for a mask somebody packed into a channel." );
 
         ImGui::EndDisabled();
 
-        if ( m_LayoutFromFile )
-            ImGui::TextDisabled( "Opened from a .dclayout - the mapping is already baked into its pixels." );
+        if ( m_Canvas.HasMask() )
+        {
+            if ( ImGui::Button( "Remove the add/remove mask" ) )
+            {
+                if ( const auto dropped = Assets::SetCloudLayoutCanvasMask( m_Canvas, false ); !dropped )
+                {
+                    m_Status        = dropped.GetError();
+                    m_StatusIsError = true;
+                }
+                else
+                {
+                    // The brush cannot stay pointed at a plane that is gone — see StartCanvas for the
+                    // same rule and the same reason.
+                    if ( PaintingMask() )
+                        m_PaintChannel = 0;
+                    m_CanvasImageDirty = true;
+                    remap              = true;
+                }
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Drops the mask plane, so the baked file carries no mask table at all "
+                                   "and the Global Cloud Mask input costs exactly zero." );
+        }
 
         if ( remap )
             RebuildLayout();
@@ -1107,8 +1229,16 @@ namespace Desert::Editor
         params.ResolvableChordKm = layer.ResolvableChordKm;
         params.LayoutPlacement   = layer.Placement;
 
+        // BOTH INPUTS, FROM THE ONE PAINTING ON THE CANVAS. The material's two slots can name two different
+        // files; this panel edits ONE, so the map it draws is what that painting produces when it feeds
+        // both — which is the ordinary way a `.dclayout` is bound and the only sky this window can honestly
+        // claim to be showing.
         if ( m_HasLayout )
-            params.Layout = std::make_shared<const Assets::CloudLayoutData>( m_Layout );
+        {
+            auto shared          = std::make_shared<const Assets::CloudLayoutData>( m_Layout );
+            params.PatternSource = shared;
+            params.MaskSource    = std::move( shared );
+        }
 
         // EACH SPECIES ON ITS OWN LATTICE, exactly as VolumetricCloudRenderer builds them: the layer's
         // lattice times the type's Placement Scale, stretched by its Placement Anisotropy. The first draft
@@ -1489,61 +1619,31 @@ namespace Desert::Editor
         ImGui::SameLine();
         ImGui::TextDisabled( "Paintings live in %s", Common::Constants::Path::CLOUD_LAYOUT_PATH.string().c_str() );
 
-        ImGui::TextDisabled( "Then drag it onto a cloud layer's Cloud Layout slot in Details." );
+        ImGui::TextDisabled( "Then drag it onto a cloud material's Global Pattern or Global Cloud Mask "
+                             "slot - they are separate inputs, and one file can feed both." );
 
-        // THE WAY BACK OUT. Importing a picture has been here since this panel was written; exporting one
-        // had not, so a `.dclayout` was a one-way door — an artist could bring a painting in but never get
-        // it back to touch up in the tool they drew it with. This is the other half of that trip and it
-        // reuses the panel's own canvas recovery, so what comes out is exactly what "Image..." would take
-        // back in, rather than a second reading of a layout.
-        ImGui::BeginDisabled( !m_HasLayout );
-        if ( ImGui::Button( "Export image...", ImVec2( 180.0f, 0.0f ) ) )
-        {
-            auto canvas = Assets::MakeCloudLayoutCanvasFromLayout( m_Layout );
-            if ( !canvas )
-            {
-                // REFUSES RATHER THAN DROPS A PLANE. A layout whose mask differs from its fourth pattern
-                // channel needs five planes and an RGBA image has four; the recovery says so by name, and
-                // silently discarding one would be a painting that changed for no reason the artist can see.
-                m_Status        = "Export failed: " + canvas.GetError();
-                m_StatusIsError = true;
-            }
-            else
-            {
-                std::filesystem::path target = Common::Utils::FileSystem::SaveFileDialog( "PNG image\0*.png\0" );
-                if ( !target.empty() )
-                {
-                    if ( target.extension() != ".png" )
-                        target.replace_extension( ".png" );
-
-                    const auto& surface = canvas.GetValue();
-                    const int written = stbi_write_png( target.string().c_str(), static_cast<int>( surface.Side ),
-                                                        static_cast<int>( surface.Side ), 4, surface.Pixels.data(),
-                                                        static_cast<int>( surface.Side ) * 4 );
-
-                    if ( written == 0 )
-                    {
-                        m_Status        = "Export failed: '" + target.string() + "' could not be written.";
-                        m_StatusIsError = true;
-                        LOG_ERROR( "[CloudLayout] {}", m_Status );
-                    }
-                    else
-                    {
-                        m_Status = "Exported " + std::to_string( surface.Side ) + "x" +
-                                   std::to_string( surface.Side ) + " to " + target.string() +
-                                   ( surface.TakeMask ? ". Alpha is the mask." : ". Alpha is the fourth slot." );
-                        m_StatusIsError = false;
-                        LOG_INFO( "[CloudLayout] Painting exported: '{}', {}x{}, alpha is the {}.",
-                                  target.string(), surface.Side, surface.Side,
-                                  surface.TakeMask ? "mask" : "fourth pattern channel" );
-                    }
-                }
-            }
-        }
+        // THE WAY BACK OUT, ONE BUTTON PER TABLE. A `.dclayout` used to be a one-way door and then a
+        // one-picture door; since O-4 the pattern and the mask leave separately, exactly as they arrive,
+        // so an artist can take the mask into their painting tool without also being handed four channels
+        // of placement they did not ask about.
+        ImGui::BeginDisabled( m_Canvas.Pattern.empty() );
+        if ( ImGui::Button( "Export pattern...", ImVec2( 170.0f, 0.0f ) ) )
+            ExportImage( Table::Pattern );
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Writes the painting back out as the same kind of RGBA picture 'Image...' "
-                               "reads. Lossless, so a painting that goes out and comes straight back in is "
-                               "the same table byte for byte." );
+            ImGui::SetTooltip( "Writes the four species-slot planes back out as the same kind of RGBA "
+                               "picture 'Pattern image...' reads. Lossless, so a pattern that goes out and "
+                               "comes straight back in is the same table byte for byte." );
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled( !m_Canvas.HasMask() );
+        if ( ImGui::Button( "Export mask...", ImVec2( 170.0f, 0.0f ) ) )
+            ExportImage( Table::Mask );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Writes the add/remove mask out as a grey picture - its byte in red, green "
+                               "and blue and an opaque alpha, so no tool reads the half of it that REMOVES "
+                               "cloud as transparency and composites it away." );
+        ImGui::EndDisabled();
 
         std::filesystem::path target;
         if ( bake )
@@ -1573,10 +1673,7 @@ namespace Desert::Editor
         }
 
         if ( !isCopy )
-        {
-            m_SourceName     = target.filename().string();
-            m_LayoutFromFile = true;
-        }
+            m_SourceName = target.filename().string();
         m_Status        = "Baked to " + target.string();
         m_StatusIsError = false;
 

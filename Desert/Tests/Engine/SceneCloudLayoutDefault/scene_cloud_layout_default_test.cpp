@@ -149,8 +149,11 @@ TEST( SceneCloudLayoutDefault, AV6PayloadWithNoLayoutKeysBindsNoPainting )
 {
     const rfl::Generic::Object payload = CloudPayloadV6();
 
-    for ( const char* key : { "CloudLayout", "LayoutPatternStrength", "LayoutMaskStrength", "LayoutRepeats",
-                              "LayoutRotation", "LayoutOffset" } )
+    // `CloudLayout` is the name the one slot had when this fixture's generation was current; the two
+    // beside it are what O-4 split it into. All three are listed because the claim is that a v6 file
+    // states NO layout input under any spelling it could have had.
+    for ( const char* key : { "CloudLayout", "LayoutPattern", "LayoutMask", "LayoutPatternStrength",
+                              "LayoutMaskStrength", "LayoutRepeats", "LayoutRotation", "LayoutOffset" } )
         ASSERT_FALSE( HasKey( payload, key ) )
              << "the fixture carries '" << key
              << "', so it is not the pre-phase file it claims to be and this suite is testing itself";
@@ -179,9 +182,15 @@ TEST( SceneCloudLayoutDefault, AV6PayloadWithNoLayoutKeysBindsNoPainting )
     // The one that decides everything is the first: an empty handle is what the renderer resolves to a
     // null painting, and a null painting is what makes the bake take the procedural branch it has always
     // taken.
-    EXPECT_EQ( look.CloudLayout, Desert::Assets::AssetHandle::Null() )
+    EXPECT_EQ( look.LayoutPattern, Desert::Assets::AssetHandle::Null() )
          << "a scene written before the painted layout existed came back with a painting bound, so every "
             "shipped scene changed the day this phase landed and nothing in the file says so";
+
+    // BOTH INPUTS, since O-4 split the one slot in two. Asserting only the pattern would pass on a
+    // build that defaulted the mask to something — and a mask is the one of the two that is NOT
+    // balanced about its own average, so a stray default there moves the sky's total cover.
+    EXPECT_EQ( look.LayoutMask, Desert::Assets::AssetHandle::Null() )
+         << "the Global Cloud Mask input came back non-empty from a file that states nothing about it";
 
     EXPECT_EQ( look.LayoutRepeats, 1 );
     EXPECT_EQ( look.LayoutRotation, 0 );
@@ -222,15 +231,16 @@ TEST( SceneCloudLayoutDefault, TheDefaultsFromAV6FileArePlacementNothingCanTellF
     fromFile.PlacementSizeVariety       = look.PlacementSizeVariety;
 
     // The layout numbers as the file's silence produced them, mapped the way
-    // VolumetricCloudRenderer::BuildProceduralParams maps them. `Layout` stays null because the handle is
-    // empty and the service answers null for an empty handle.
+    // VolumetricCloudRenderer::BuildProceduralParams maps them. Both sources stay null because both
+    // handles are empty and the service answers null for an empty handle.
     fromFile.LayoutPlacement.RepeatsPerRegion = static_cast<uint32_t>( look.LayoutRepeats );
     fromFile.LayoutPlacement.QuarterTurns     = static_cast<uint32_t>( look.LayoutRotation );
     fromFile.LayoutPlacement.OffsetKm         = glm::vec2( look.LayoutOffset.x, look.LayoutOffset.y );
     fromFile.LayoutPlacement.PatternStrength  = look.LayoutPatternStrength;
     fromFile.LayoutPlacement.MaskStrength     = look.LayoutMaskStrength;
 
-    ASSERT_EQ( fromFile.Layout, nullptr );
+    ASSERT_EQ( fromFile.PatternSource, nullptr );
+    ASSERT_EQ( fromFile.MaskSource, nullptr );
 
     // The same parameters with the layout block never touched at all — which is literally the struct as it
     // was before this phase, since the six fields did not exist.

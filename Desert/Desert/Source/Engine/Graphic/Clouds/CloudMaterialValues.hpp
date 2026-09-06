@@ -62,7 +62,13 @@ namespace Desert::Graphic
         float PatchStrength        = 0.60f;
 
         // ---- Layout (bake-time; the painted sky) ----------------------------------------------------
-        Assets::AssetHandle CloudLayout;
+        //
+        // TWO INPUTS AND NOT ONE, which is decision O-4 and Unreal's own arrangement: its cloud material
+        // takes `Layout_CloudGlobalPattern` and `Layout_GlobalCloudMask` as separate texture parameters, so
+        // the placement and the add/remove regions are authored, swapped and reused independently. Both
+        // normally name one `.dclayout` — the container holds both tables — and either may be empty.
+        Assets::AssetHandle LayoutPattern;
+        Assets::AssetHandle LayoutMask;
         float               LayoutPatternStrength = 1.0f;
         float               LayoutMaskStrength    = 1.0f;
         int32_t             LayoutRepeats         = 1;
@@ -174,8 +180,10 @@ namespace Desert::Graphic
                 v.CloudType3 = Assets::AssetHandle( handle );
             else if ( name == "CloudType4" )
                 v.CloudType4 = Assets::AssetHandle( handle );
-            else if ( name == "CloudLayout" )
-                v.CloudLayout = Assets::AssetHandle( handle );
+            else if ( name == "LayoutPattern" )
+                v.LayoutPattern = Assets::AssetHandle( handle );
+            else if ( name == "LayoutMask" )
+                v.LayoutMask = Assets::AssetHandle( handle );
         }
     } // namespace Detail
 

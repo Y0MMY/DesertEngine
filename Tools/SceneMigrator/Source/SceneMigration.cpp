@@ -1602,11 +1602,61 @@ namespace Desert::Migration
 
             kept["Material"] = rfl::Generic( relPath );
 
+            // RAISED THE REST OF THE WAY BEFORE IT IS WRITTEN. This step carries the v11 key `CloudLayout`
+            // verbatim, because that is what a v11 scene states; O-4 split that input in two, and a file
+            // produced here naming a slot the shader no longer declares would be born needing a second
+            // pass. One statement of the split, called from both entry points.
+            report.AssetsMoved += MigrateCloudMaterialLayoutInputs( material ).Split;
+
             report.Materials.push_back( { relPath, rfl::json::write( material ) } );
 
             entity.Components["VolumetricCloud"] = rfl::Generic( std::move( kept ) );
             report.Entities += 1;
             report.Defaulted += static_cast<int>( kMovedCount ) - movedHere;
+        }
+
+        return report;
+    }
+
+    CloudMaterialLayoutReport MigrateCloudMaterialLayoutInputs( Assets::MaterialData& material )
+    {
+        CloudMaterialLayoutReport report;
+
+        // THE NAMES, ONCE. `CloudLayout` is what every `.demat` written before O-4 states; the two below
+        // are what CloudRaymarch.shader declares now, and CloudMaterialSchema pins that census.
+        constexpr const char* kOld     = "CloudLayout";
+        constexpr const char* kPattern = "LayoutPattern";
+        constexpr const char* kMask    = "LayoutMask";
+
+        const auto names = [&material]( const char* wanted )
+        {
+            for ( const auto& texture : material.Textures )
+                if ( texture.Name == wanted )
+                    return true;
+            return false;
+        };
+
+        for ( size_t i = 0; i < material.Textures.size(); )
+        {
+            if ( material.Textures[i].Name != kOld )
+            {
+                ++i;
+                continue;
+            }
+
+            const uint64_t handle = material.Textures[i].TextureHandle;
+            material.Textures.erase( material.Textures.begin() + static_cast<ptrdiff_t>( i ) );
+
+            // BOTH SLOTS TAKE THE SAME FILE, and that is what makes the migration a rename rather than a
+            // change of sky. One `.dclayout` carries both tables and the bake read both out of it, so
+            // pointing the two new inputs at it reproduces the old frame exactly. Guarded against a
+            // material that somehow already states one of them, so a second run cannot duplicate a name.
+            if ( !names( kPattern ) )
+                material.Textures.push_back( { kPattern, handle } );
+            if ( !names( kMask ) )
+                material.Textures.push_back( { kMask, handle } );
+
+            report.Split += 1;
         }
 
         return report;

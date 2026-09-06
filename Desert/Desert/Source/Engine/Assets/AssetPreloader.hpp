@@ -13,7 +13,16 @@ namespace Desert::Assets
     public:
         explicit AssetPreloader( const std::shared_ptr<AssetManager>& assetManager );
 
-        void PreloadAllAssets();
+        // A `PreloadAllAssets()` USED TO SIT HERE and it is why the painted layout was dead for a
+        // month. It called all seven preloads in one line, so the class LOOKED like it had an entry
+        // point — and nothing had called it since 2023: both layers list the preloads themselves, in an
+        // order they need to control. PreloadCloudLayouts was added to that dead function and to nowhere
+        // else, so every `.dclayout` in the project went unregistered and every painted sky rendered
+        // procedurally with one error line nobody read. Deleted rather than fixed: a second way to start
+        // the asset layer, which nobody runs, is the thing that hid the omission.
+        //
+        // What replaced it as a guard is Desert/Tests/Editor/AssetPreloadCensus, which asserts that every
+        // Preload* declared below is called by both EditorLayer and RuntimeLayer.
 
         // Re-process + re-register cooked meshes/textures/materials (Rebuild Cooked Assets). Re-registering
         // reloads texture pixels from source and rebuilds runtime materials; callers must idle the GPU

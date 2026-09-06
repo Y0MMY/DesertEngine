@@ -84,6 +84,10 @@ namespace Desert::Player
         m_AssetPreloader->PreloadCloudTypes(); // MUST follow the volumes: a type binds the one it names
         m_AssetPreloader->PreloadCloudModellingVolumes(); // order-free: a body names nothing and is named
                                                           // by nothing but a scene
+        // Missing here too, and for the same reason it was missing from the editor: PreloadCloudLayouts
+        // was written, tested and never called, so a packaged game rendered every painted sky
+        // procedurally. Order-free like the line above.
+        m_AssetPreloader->PreloadCloudLayouts();
 
         // Same system set + order as the editor's Play mode.
         m_Scene->AddSystem<ECS::MeshECSSystem>();

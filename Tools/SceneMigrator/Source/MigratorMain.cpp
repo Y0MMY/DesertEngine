@@ -22,7 +22,12 @@
 // materials cannot be resolved on this machine still round-trips exactly, because nothing here resolves
 // them.
 //
-//   SceneMigrator <path>...        one or more .desce files, or directories searched recursively
+// AND IT RAISES `.demat` FILES TOO, since O-4. The cloud LOOK has lived in a material rather than in the
+// scene since v12, so a tool that migrated only scenes would leave every cloud material behind — carrying,
+// in that case, a layout slot the shader no longer declares. A `.demat` has no version field, so that step
+// is content-detected and idempotent rather than version-gated; see MigrateCloudMaterialLayoutInputs.
+//
+//   SceneMigrator <path>...        .desce and .demat files, or directories searched recursively
 //   SceneMigrator --check <path>...  report what would change and write nothing (exit 1 if any would)
 
 #include "MigratorMain.hpp"
@@ -43,17 +48,35 @@ namespace
 {
     constexpr const char* kSceneExtension = ".desce";
 
-    void Collect( const std::filesystem::path& root, std::vector<std::filesystem::path>& out )
+    // MATERIALS ARE COLLECTED TOO, since O-4. A `.demat` has no version field to gate on, so the
+    // material step is content-detected (see MigrateCloudMaterialLayoutInputs) — but it still has to be
+    // REACHED, and the cloud look has lived in `.demat` files rather than in scenes since v12. A tool
+    // that migrated only the scenes would leave every cloud material behind with a slot the shader no
+    // longer declares.
+    constexpr const char* kMaterialExtension = ".demat";
+
+    void Collect( const std::filesystem::path& root, std::vector<std::filesystem::path>& scenes,
+                  std::vector<std::filesystem::path>& materials )
     {
         std::error_code ec;
         if ( std::filesystem::is_directory( root, ec ) )
         {
             for ( const auto& entry : std::filesystem::recursive_directory_iterator( root, ec ) )
-                if ( entry.is_regular_file() && entry.path().extension() == kSceneExtension )
-                    out.push_back( entry.path() );
+            {
+                if ( !entry.is_regular_file() )
+                    continue;
+                if ( entry.path().extension() == kSceneExtension )
+                    scenes.push_back( entry.path() );
+                else if ( entry.path().extension() == kMaterialExtension )
+                    materials.push_back( entry.path() );
+            }
             return;
         }
-        out.push_back( root );
+
+        if ( root.extension() == kMaterialExtension )
+            materials.push_back( root );
+        else
+            scenes.push_back( root );
     }
 
     std::string ReadAll( const std::filesystem::path& path )
@@ -82,17 +105,18 @@ namespace Desert::Migration
 
         if ( roots.empty() )
         {
-            err << "usage: SceneMigrator [--check] <scene.desce | directory>...\n";
+            err << "usage: SceneMigrator [--check] <scene.desce | material.demat | directory>...\n";
             return 2;
         }
 
         std::vector<std::filesystem::path> scenes;
+        std::vector<std::filesystem::path> materials;
         for ( const auto& root : roots )
-            Collect( root, scenes );
+            Collect( root, scenes, materials );
 
-        if ( scenes.empty() )
+        if ( scenes.empty() && materials.empty() )
         {
-            err << "SceneMigrator: no " << kSceneExtension << " files found\n";
+            err << "SceneMigrator: no " << kSceneExtension << " or " << kMaterialExtension << " files found\n";
             return 2;
         }
 
@@ -385,11 +409,63 @@ namespace Desert::Migration
             ++changed;
         }
 
+        // THE MATERIALS, AFTER the scenes — a scene's v11 -> v12 raise WRITES `.demat` files, and those
+        // are already produced with the current slot names (MigrateCloudMaterialV11ToV12 calls the same
+        // step), so this pass finds nothing to do in them and says so. Running it first would depend on
+        // whether the file existed yet, which is an ordering nobody should have to know about.
+        int materialsChanged = 0;
+        for ( const auto& path : materials )
+        {
+            const std::string source = ReadAll( path );
+            if ( source.empty() )
+            {
+                err << "FAIL   " << path.string() << " — unreadable or empty\n";
+                ++failed;
+                continue;
+            }
+
+            auto parsed = rfl::json::read<Desert::Assets::MaterialData>( source );
+            if ( !parsed )
+            {
+                err << "FAIL   " << path.string() << " — " << parsed.error().what() << "\n";
+                ++failed;
+                continue;
+            }
+
+            const Desert::Migration::CloudMaterialLayoutReport report =
+                 Desert::Migration::MigrateCloudMaterialLayoutInputs( parsed.value() );
+            if ( !report.Changed() )
+            {
+                out << "ok     " << path.string() << " — no pre-O-4 layout slot\n";
+                continue;
+            }
+
+            out << ( check ? "WOULD  " : "raised " ) << path.string() << " — " << report.Split
+                << " CloudLayout binding(s) split into LayoutPattern + LayoutMask, both naming the same "
+                   "painting\n";
+
+            if ( check )
+            {
+                ++materialsChanged;
+                continue;
+            }
+
+            if ( !Common::Utils::FileSystem::WriteContentToFileAtomic( path, rfl::json::write( parsed.value() ) ) )
+            {
+                err << "FAIL   " << path.string() << " — the raise could not be written; the original file "
+                    << "is untouched\n";
+                ++failed;
+                continue;
+            }
+            ++materialsChanged;
+        }
+
         out << "SceneMigrator: " << scenes.size() << " scene(s), " << changed
-            << ( check ? " would change, " : " raised, " ) << failed << " failed\n";
+            << ( check ? " would change, " : " raised, " ) << materials.size() << " material(s), "
+            << materialsChanged << ( check ? " would change, " : " raised, " ) << failed << " failed\n";
 
         if ( failed > 0 )
             return 1;
-        return ( check && changed > 0 ) ? 1 : 0;
+        return ( check && ( changed > 0 || materialsChanged > 0 ) ) ? 1 : 0;
     }
 } // namespace Desert::Migration

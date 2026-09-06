@@ -22,6 +22,10 @@
 // needs the tree's type, and a second copy of that struct is a format that can silently fork.
 #include <Engine/Core/Serialize/SceneFormat.hpp>
 
+// The `.demat` payload, for the same reason: one step raises a MATERIAL rather than a scene, and its
+// input is the engine's own struct so the file this tool writes is the file the engine reads.
+#include <Engine/Assets/MaterialData.hpp>
+
 #include <Common/Core/Constants.hpp>
 
 #include <filesystem>
@@ -635,6 +639,33 @@ namespace Desert::Migration
     // SHELF LIFE: this raises v11 to v12 and nothing else. It is deleted once no v11 file remains.
     CloudMaterialMigrationReport MigrateCloudMaterialV11ToV12( std::vector<Assets::EntityData>& entities,
                                                                const std::string&               sceneName );
+
+    // What MigrateCloudMaterialLayoutInputs did to one `.demat`.
+    struct CloudMaterialLayoutReport
+    {
+        int Split = 0; // `CloudLayout` bindings found and turned into the two new inputs
+
+        bool Changed() const
+        {
+            return Split > 0;
+        }
+    };
+
+    // O-4: the cloud material's ONE layout input becomes TWO — `CloudLayout` splits into
+    // `LayoutPattern` and `LayoutMask`, both naming the same `.dclayout`, which is exactly the sky the
+    // single slot rendered (the container carries both tables and the bake read both from it).
+    //
+    // PURE - a MaterialData in, the same struct raised, no filesystem and no global state.
+    //
+    // WHY IT IS CONTENT-DETECTED AND NOT VERSION-GATED, unlike every step above. A `.demat` carries no
+    // version field: it is a bag of names, and a name the shader does not declare is already dropped
+    // with a warning (VolumetricCloudRenderer::ResolveMaterial). So the trigger is the presence of the
+    // OLD name, which is exact, and the step is idempotent by construction: after it runs there is no
+    // `CloudLayout` binding left to find, and a material that never had one is untouched.
+    //
+    // SHELF LIFE: this raises materials authored before O-4 and nothing else. It is deleted once no
+    // `.demat` naming `CloudLayout` remains anywhere it could be run.
+    CloudMaterialLayoutReport MigrateCloudMaterialLayoutInputs( Assets::MaterialData& material );
 
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
