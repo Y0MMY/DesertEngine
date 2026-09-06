@@ -135,14 +135,16 @@ int main( int argc, char** argv )
             continue;
         }
 
-        ++changed;
         std::cout << ( check ? "WOULD  " : "raised " ) << path.string() << " — unversioned (v"
                   << outcome.FoundSceneVersion << "/v" << outcome.FoundUnitVersion << ") stamped to scene v"
                   << Desert::Core::kSceneVersion << " / units v" << Desert::Core::kUnitVersion
                   << " (stamp only; entities untouched)\n";
 
         if ( check )
+        {
+            ++changed;
             continue;
+        }
 
         // Serialized through the engine's own stamping writer, so the bytes written are the bytes the
         // saver would produce — one statement of the format, not two.
@@ -154,6 +156,11 @@ int main( int argc, char** argv )
             ++failed;
             continue;
         }
+
+        // Counted only once the bytes are actually on disk, exactly as SceneMigrator does it: a file that
+        // printed "raised" and then failed its write is a FAILED file, not a raised one, and a summary
+        // that counted it as both would report "1 raised, 1 failed" over a single untouched prefab.
+        ++changed;
     }
 
     std::cout << "PrefabMigrator: " << prefabs.size() << " prefab(s), " << changed

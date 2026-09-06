@@ -75,31 +75,59 @@ namespace
         return {};
     }
 
-    // EVERY .deprefab under the repository root — the WHOLE tree and not one blessed assets directory,
-    // deliberately: prefabs are saved wherever the user typed a path, an autosaved or untracked one is
-    // exactly the file most likely to have been written by an older build, and a sweep with a blind spot
-    // is a corpus test reporting green about the files it happened to look at. Build output and vendored
-    // trees are skipped as the only exclusions, because nothing authors assets there.
+    // The PROJECT'S ASSET ROOTS, swept to their full depth — including files git does not track.
+    //
+    // TWO DECISIONS, AND THE SECOND IS NOT AN OVERSIGHT — do not "complete" this by walking the
+    // repository root again:
+    //
+    // 1. DEPTH IS TOTAL, AND UNTRACKED FILES COUNT. A prefab is saved wherever the user typed a path
+    //    under the assets tree, and an editor autosave or a file that never reached git is EXACTLY the
+    //    one most likely to have been written by an older build. Listing git's index instead, or
+    //    blessing one Prefabs/ subdirectory, is a corpus test reporting green about the files it
+    //    happened to look at.
+    //
+    // 2. BREADTH STOPS AT THE PROJECT. This sweep began at the repository root and was narrowed on
+    //    2026-09-06, because the root is not only this project: `.claude/worktrees/` holds a full
+    //    checkout of ELEVEN other branches, so a prefab saved by another developer in unrelated work
+    //    would turn this suite red and name THIS branch as the cause. A test that fails for a file
+    //    outside what it is testing does not report on what it claims to; it reports plausibly on
+    //    something else, which is worse than not running. SceneVersionGate scopes itself to the scene
+    //    directory for the same reason, and this is the prefab twin of that decision.
+    //
+    // Adding a second project (a Runtime or sample assets tree) means adding its root to kAssetRoots,
+    // not widening the walk back to the repository.
     std::vector<std::filesystem::path> RepositoryPrefabs()
     {
+        // Relative to the repository root. Every place this engine writes a .deprefab lives under an
+        // assets root — Common::Constants::Path::PREFAB_PATH is `<assets>/Prefabs/`, and the editor's
+        // save dialog is rooted in the same tree.
+        static constexpr const char* kAssetRoots[] = { "Editor/Resources/Assets" };
+
         std::vector<std::filesystem::path> prefabs;
-        std::error_code                    ec;
         const std::filesystem::path        root = RepoRoot();
 
-        for ( auto it = std::filesystem::recursive_directory_iterator( root, ec );
-              it != std::filesystem::recursive_directory_iterator(); it.increment( ec ) )
+        for ( const char* assetRoot : kAssetRoots )
         {
-            if ( it->is_directory() )
+            std::error_code ec;
+            for ( auto it = std::filesystem::recursive_directory_iterator( root / assetRoot, ec );
+                  it != std::filesystem::recursive_directory_iterator(); it.increment( ec ) )
             {
-                const std::string name = it->path().filename().string();
-                if ( name == "ThirdParty" || name == "build" || name == ".git" )
-                    it.disable_recursion_pending();
-                continue;
+                if ( it->is_regular_file() && it->path().extension() == ".deprefab" )
+                    prefabs.push_back( it->path() );
             }
-            if ( it->is_regular_file() && it->path().extension() == ".deprefab" )
-                prefabs.push_back( it->path() );
         }
         return prefabs;
+    }
+
+    // The asset roots the sweep above claims to cover must actually be there. Without this, renaming or
+    // moving the assets tree turns the corpus tests into a silent pass over zero files — the same
+    // vacuous green SceneVersionGate guards with its `>= 40` scene count, which a repository shipping
+    // zero prefabs cannot borrow.
+    bool AssetRootsExist()
+    {
+        const std::filesystem::path root = RepoRoot();
+        std::error_code             ec;
+        return std::filesystem::is_directory( root / "Editor/Resources/Assets", ec );
     }
 
     std::string ReadAll( const std::filesystem::path& path )
@@ -278,20 +306,25 @@ TEST( PrefabVersionGate, TheSaverOverwritesAStaleStampWithTheCurrentOne )
 }
 
 // ---------------------------------------------------------------------------------------------------
-// 5. THE CORPUS — every .deprefab on disk, tracked or not, is one this engine will load
+// 5. THE CORPUS — every .deprefab in the project's assets, tracked or not, is one this engine will load
 // ---------------------------------------------------------------------------------------------------
 
-// 5a. The sweep is real: the repository root was found from wherever the runner started. Without this, a
-// wrong working directory turns 5b/5c into a vacuous pass over zero files.
+// 5a. The sweep is real: the repository root was found from wherever the runner started, AND the asset
+// roots it walks are on disk. Either half missing turns 5b/5c into a vacuous pass over zero files, and a
+// corpus test that passes because it looked at nothing is the failure mode this pair exists to catch.
 //
 // THERE IS DELIBERATELY NO MINIMUM COUNT, unlike the scene corpus's >= 40: the repository ships ZERO
 // .deprefab files today (measured when this suite was written), and inventing a fixture prefab just to
-// have a corpus would test the fixture. The suite is armed for the first prefab that appears — the day
-// one is committed (or autosaved, or left untracked in a working tree), 5b and 5c hold it to the gate
-// with no edit here.
-TEST( PrefabVersionGateCorpus, TheSweepRunsFromTheRepositoryRoot )
+// have a corpus would test the fixture. That is exactly why the two checks below carry the weight — with
+// no count to fall back on, "the directory is there" is the only thing standing between a real sweep and
+// a green report about nothing. The suite is armed for the first prefab that appears: the day one is
+// saved under the assets tree (committed, autosaved, or never tracked at all), 5b and 5c hold it to the
+// gate with no edit here.
+TEST( PrefabVersionGateCorpus, TheSweepRunsFromTheRepositoryRootOverAssetRootsThatExist )
 {
-    EXPECT_FALSE( RepoRoot().empty() ) << "repository root not found - run from the workspace root or build/Bin";
+    ASSERT_FALSE( RepoRoot().empty() ) << "repository root not found - run from the workspace root or build/Bin";
+    EXPECT_TRUE( AssetRootsExist() ) << "the assets tree this sweep walks is not there - 5b and 5c would "
+                                        "pass over zero files while claiming to have checked the corpus";
 }
 
 // 5b. Every prefab on disk passes the exact gate the loader applies. A failure here is not a broken test:
