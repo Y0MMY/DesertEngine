@@ -17,6 +17,7 @@
 // exactly the reason Editor/Core/SceneViewIdentity.hpp does — see Tests/Engine/RendererSlots.
 
 #include <Editor/Core/AssetEditorRegistry.hpp>
+#include <Editor/Core/DocumentWell.hpp>
 #include <Editor/Panels/IPanel.hpp>
 
 #include <gtest/gtest.h>
@@ -28,7 +29,7 @@
 using Desert::Assets::AssetHandle;
 using Desert::Assets::AssetTypeID;
 using Desert::Editor::AssetDocumentTitle;
-using Desert::Editor::FindOpenAssetDocument;
+using Desert::Editor::DocumentWell;
 using Desert::Editor::IAssetEditorPanel;
 using Desert::Editor::IPanel;
 using Desert::Editor::PendingRendererSlotDemand;
@@ -171,12 +172,14 @@ TEST( AssetDocumentIdentity, TheDocumentsIdIsTheLastMarkerInItsName )
 
 TEST( AssetDocumentIdentity, AnOpenDocumentIsFoundByItsSubject )
 {
-    std::vector<std::unique_ptr<IPanel>> panels;
-    panels.push_back( std::make_unique<FakeTool>( "Details" ) );
-    panels.push_back( std::make_unique<FakeDocument>( "MP_GreenTint", AssetHandle( 111u ) ) );
-    panels.push_back( std::make_unique<FakeDocument>( "CB_Orange", AssetHandle( 222u ) ) );
+    // Asked of DocumentWell, which is the ONE owner of open documents. It used to be asked of the panel
+    // list with a dynamic_cast, back when documents lived among the tools; that lookup is gone with the
+    // mixing, and this assertion moved onto its replacement rather than out of the suite.
+    DocumentWell well;
+    well.Add( std::make_unique<FakeDocument>( "MP_GreenTint", AssetHandle( 111u ) ) );
+    well.Add( std::make_unique<FakeDocument>( "CB_Orange", AssetHandle( 222u ) ) );
 
-    auto* found = FindOpenAssetDocument( panels, AssetHandle( 222u ) );
+    auto* found = well.Find( AssetHandle( 222u ) );
     ASSERT_NE( found, nullptr ) << "A material that is already open was not found, so the editor would open a "
                                    "SECOND window on it -- two parameter tables editing one asset.";
     EXPECT_EQ( found->Subject(), AssetHandle( 222u ) );
@@ -184,21 +187,26 @@ TEST( AssetDocumentIdentity, AnOpenDocumentIsFoundByItsSubject )
 
 TEST( AssetDocumentIdentity, AMaterialThatIsNotOpenIsNotFound )
 {
-    std::vector<std::unique_ptr<IPanel>> panels;
-    panels.push_back( std::make_unique<FakeDocument>( "MP_GreenTint", AssetHandle( 111u ) ) );
+    DocumentWell well;
+    well.Add( std::make_unique<FakeDocument>( "MP_GreenTint", AssetHandle( 111u ) ) );
 
-    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 999u ) ), nullptr );
+    EXPECT_EQ( well.Find( AssetHandle( 999u ) ), nullptr );
 }
 
 TEST( AssetDocumentIdentity, ToolPanelsAreNeverMistakenForDocuments )
 {
-    // The panel list holds both kinds. A lookup that matched on anything but "is an asset document with this
-    // subject" would focus the Logs panel and never open the material.
-    std::vector<std::unique_ptr<IPanel>> panels;
-    panels.push_back( std::make_unique<FakeTool>( "Logs" ) );
-    panels.push_back( std::make_unique<FakeTool>( "Assets" ) );
+    // This used to hold a MIXED list -- tools and documents in one vector -- and assert that a lookup over
+    // it did not return the Logs panel for a material's handle. The mixing is what the split removed, so
+    // the assertion is now about the container rather than about the search: a tool cannot be in the well
+    // to be mistaken for anything, because the well only ever holds IAssetEditorPanel. The other half, that
+    // a DOCUMENT cannot reach the tool registry, is asserted in Tests/Editor/DocumentOwnership.
+    static_assert( std::is_convertible_v<FakeDocument*, IAssetEditorPanel*>,
+                   "a document must be admissible to the document well" );
+    static_assert( !std::is_convertible_v<FakeTool*, IAssetEditorPanel*>,
+                   "a tool must NOT be admissible to the document well" );
 
-    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 111u ) ), nullptr );
+    DocumentWell well;
+    EXPECT_EQ( well.Find( AssetHandle( 111u ) ), nullptr );
 }
 
 TEST( AssetDocumentIdentity, TheNullHandleMatchesNothing )
@@ -206,10 +214,10 @@ TEST( AssetDocumentIdentity, TheNullHandleMatchesNothing )
     // "No asset" is not a document to focus. Without this a failed path-to-handle resolution -- which yields
     // the null handle -- would focus whichever document happened to have been constructed from one, instead
     // of reporting that nothing could be opened.
-    std::vector<std::unique_ptr<IPanel>> panels;
-    panels.push_back( std::make_unique<FakeDocument>( "Broken", AssetHandle( static_cast<uint64_t>( 0 ) ) ) );
+    DocumentWell well;
+    well.Add( std::make_unique<FakeDocument>( "Broken", AssetHandle( static_cast<uint64_t>( 0 ) ) ) );
 
-    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( static_cast<uint64_t>( 0 ) ) ), nullptr );
+    EXPECT_EQ( well.Find( AssetHandle( static_cast<uint64_t>( 0 ) ) ), nullptr );
 }
 
 TEST( AssetDocumentIdentity, ADocumentsSubjectIsFixedForItsLife )
@@ -240,26 +248,21 @@ TEST( AssetDocumentIdentity, TwoCloudTypesGiveTwoDifferentWindowIds )
 
 TEST( AssetDocumentIdentity, EveryCloudFormatIsFoundByItsOwnSubject )
 {
-    // Four formats, four open documents, one panel list. Open-or-focus is keyed on the SUBJECT and never on
-    // the type, so a `.dcnv` and a `.decloudtype` open at once must not find each other -- which is what a
+    // Four formats, four open documents, one owner. Open-or-focus is keyed on the SUBJECT and never on the
+    // type, so a `.dcnv` and a `.decloudtype` open at once must not find each other -- which is what a
     // lookup that had fallen back to matching on SubjectType would do.
-    std::vector<std::unique_ptr<IPanel>> panels;
-    panels.push_back( std::make_unique<FakeTool>( "Assets" ) );
-    panels.push_back(
-         std::make_unique<FakeCpuDocument>( "N.dcnv", AssetHandle( 601u ), AssetTypeID::CloudNoiseVolume ) );
-    panels.push_back(
-         std::make_unique<FakeCpuDocument>( "T.decloudtype", AssetHandle( 602u ), AssetTypeID::CloudType ) );
-    panels.push_back(
+    DocumentWell well;
+    well.Add( std::make_unique<FakeCpuDocument>( "N.dcnv", AssetHandle( 601u ), AssetTypeID::CloudNoiseVolume ) );
+    well.Add( std::make_unique<FakeCpuDocument>( "T.decloudtype", AssetHandle( 602u ), AssetTypeID::CloudType ) );
+    well.Add(
          std::make_unique<FakeCpuDocument>( "B.dcmv", AssetHandle( 603u ), AssetTypeID::CloudModellingVolume ) );
-    panels.push_back(
-         std::make_unique<FakeCpuDocument>( "L.dclayout", AssetHandle( 604u ), AssetTypeID::CloudLayout ) );
+    well.Add( std::make_unique<FakeCpuDocument>( "L.dclayout", AssetHandle( 604u ), AssetTypeID::CloudLayout ) );
 
-    ASSERT_NE( FindOpenAssetDocument( panels, AssetHandle( 601u ) ), nullptr );
-    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 602u ) )->SubjectType(), AssetTypeID::CloudType );
-    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 603u ) )->SubjectType(),
-               AssetTypeID::CloudModellingVolume );
-    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 604u ) )->SubjectType(), AssetTypeID::CloudLayout );
-    EXPECT_EQ( FindOpenAssetDocument( panels, AssetHandle( 605u ) ), nullptr );
+    ASSERT_NE( well.Find( AssetHandle( 601u ) ), nullptr );
+    EXPECT_EQ( well.Find( AssetHandle( 602u ) )->SubjectType(), AssetTypeID::CloudType );
+    EXPECT_EQ( well.Find( AssetHandle( 603u ) )->SubjectType(), AssetTypeID::CloudModellingVolume );
+    EXPECT_EQ( well.Find( AssetHandle( 604u ) )->SubjectType(), AssetTypeID::CloudLayout );
+    EXPECT_EQ( well.Find( AssetHandle( 605u ) ), nullptr );
 }
 
 // --- What is spoken for, and what is not ---------------------------------------------------------------

@@ -20,13 +20,15 @@ namespace Desert::Editor
     // registered by EditorLayer at startup and the next kind is a second registration, not a second branch
     // in the asset browser.
     //
-    // The registry deliberately does NOT own the documents it makes. EditorLayer owns every panel, and an
-    // asset document is a panel — that is what makes it dockable, focusable and torn down by the existing
-    // shutdown path with no new code. A second container of open documents here would be a second answer to
-    // "which documents exist", and the two would disagree the first frame a close was handled halfway; the
-    // editor already paid for that shape once (Editor/Core/SceneViewIdentity.hpp). So open-or-focus is
-    // answered by looking at the PANEL LIST — see FindOpenAssetDocument below, which is the same range +
-    // projection form IndexOfSceneView uses and for the same reason.
+    // The registry deliberately does NOT own the documents it makes: it holds factories, and the documents
+    // they build belong to Editor/Core/DocumentWell.hpp. There is EXACTLY ONE owner of open documents and
+    // therefore exactly one answer to "which documents exist" — a second container here would be a second
+    // answer, and the two would disagree the first frame a close was handled halfway; the editor already
+    // paid for that shape once (Editor/Core/SceneViewIdentity.hpp). Open-or-focus is DocumentWell::Find.
+    //
+    // The well is a separate owner from the TOOL panels for a different reason again, and that one is about
+    // lifetime rather than bookkeeping: a tool's visibility is a setting the user keeps and a document's
+    // existence is not, so one flag cannot serve both. See Editor/Core/PanelRegistry.hpp.
     class AssetEditorRegistry
     {
     public:
@@ -51,26 +53,14 @@ namespace Desert::Editor
         std::unordered_map<Assets::AssetTypeID, Factory> m_Factories;
     };
 
-    // The already-open document for @p subject in @p panels, or nullptr.
+    // FindOpenAssetDocument USED TO LIVE HERE, and its removal is the point of the change that took it out.
     //
-    // A range over the panels the editor already owns, rather than a map kept beside them: the subject lives
-    // in the document and nowhere else, so there is no second copy to fall out of step when a window is
-    // closed. Templated on the range so a test can drive it with a plain vector and no editor anywhere near.
-    template <typename Range>
-    [[nodiscard]] IAssetEditorPanel* FindOpenAssetDocument( const Range&               panels,
-                                                            const Assets::AssetHandle& subject )
-    {
-        if ( static_cast<uint64_t>( subject ) == 0 )
-            return nullptr; // the null handle is "no asset", never a document to focus
-
-        for ( const auto& panel : panels )
-        {
-            auto* document = dynamic_cast<IAssetEditorPanel*>( &*panel );
-            if ( document && document->Subject() == subject )
-                return document;
-        }
-        return nullptr;
-    }
+    // It searched a PANEL LIST for a document, by dynamic_cast, because documents were mixed in among the
+    // tools and had to be sifted back out at every site that wanted one. That cast is gone from every such
+    // site now: documents have their own owner, so "the already-open document for this subject" is
+    // DocumentWell::Find and there is nothing to sift. Keeping this function beside it would have left two
+    // functions answering one question — the very thing the note above says the editor has already paid for
+    // once — and the survivor would have been the one that could still be pointed at the wrong container.
 
     // How many renderer slots the open documents have SPOKEN FOR but not yet taken.
     //

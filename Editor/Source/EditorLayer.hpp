@@ -8,6 +8,8 @@
 #include "Editor/Core/CommandPalette.hpp"
 #include "Editor/Core/SceneViewIdentity.hpp"
 #include "Editor/Core/AssetEditorRegistry.hpp"
+#include "Editor/Core/DocumentWell.hpp"
+#include "Editor/Core/PanelRegistry.hpp"
 #include "Editor/RenderSystems/RenderRigistry.hpp"
 
 #include <filesystem>
@@ -37,6 +39,10 @@ namespace Desert::Editor
         void DrawFileMenu();
         void DrawEditMenu();
         void DrawViewMenu();
+        // Window ▸ Documents: the open documents, focused with a RADIO and closed with an x. A radio and
+        // not a checkbox on purpose — a tick reads as "shown / hidden", which is the very thing a document
+        // cannot be. See DocumentWell.
+        void DrawWindowMenu();
         void DrawScenesMenu();
         void DrawGraphicsMenu();
         void DrawAboutMenu();
@@ -151,13 +157,39 @@ namespace Desert::Editor
         // ===== Asset documents (one window per asset, opened from the browser) =====
         // Drains Core::AssetOpenRequests and, per request, focuses the document already open on that subject
         // or builds a new one through m_AssetEditors. Runs from OnUpdate (between frames) because it adds to
-        // m_Panels, and REFUSES past the six renderer slots with the census printed by name — a seventh
+        // m_Documents, and REFUSES past the six renderer slots with the census printed by name — a seventh
         // consumer would otherwise be handed slot 0 to share, which fails silently and days later.
         void ServiceAssetOpenRequests();
-        // Destroys every asset document whose window the user dismissed, behind a device-idle wait. This is
-        // what returns the document's Scene, SceneRenderer and renderer slot: unlike a tool panel, a
-        // document cannot be "closed" by a visibility flag, because a hidden panel still owns its renderer.
-        void CloseDismissedAssetDocuments();
+        // Destroys every document the user asked to close, behind ONE device-idle wait. This is what returns
+        // the document's Scene, SceneRenderer and renderer slot.
+        //
+        // The request comes from m_DocumentsToClose, filled by the x on the window, the x in the Documents
+        // menu or Close All — never from a visibility flag. That is the point of the split: a tool's
+        // visibility is a setting the user keeps, and while documents shared the panel list they shared that
+        // bool too, so unticking one in the View menu DESTROYED it and re-ticking could not bring it back.
+        void ServiceDocumentCloses();
+        // Asks for a document to be closed. Queued, never immediate: closing destroys GPU resources, which
+        // is not legal from inside the ImGui pass that is drawing them.
+        void RequestDocumentClose( const Assets::AssetHandle& subject );
+        // Brings @p subject's window to the front and makes it the most recently used document.
+        void FocusDocument( const Assets::AssetHandle& subject );
+        // Ctrl+Tab: move to the next document in most-recently-used order. See DocumentWell::NextMostRecent.
+        void CycleDocuments();
+
+        // ===== The document well (layout option B.1) =====
+        // The permanent "Documents" window: the tab the documents dock beside, the index of what is open,
+        // and — when nothing is open — the empty state that says what the area is for plus the list of
+        // recently closed documents. It does not collapse when it empties: a layout that moves on its own is
+        // what users report as "the editor lost my panel".
+        void DrawDocumentWell();
+        // Every open document, drawn into the well's dock node. Separate from the tool loop because the two
+        // have separate owners and separate close semantics — a tool passes &GetVisibility() to Begin, a
+        // document passes a frame-local bool whose false is a CLOSE REQUEST, not a hidden window.
+        void DrawDocuments();
+        // The refusal, on screen. A seventh renderer consumer is refused; before this the refusal was a
+        // line in the log and the click simply looked dead. The census text already existed — it had
+        // nowhere to be shown.
+        void DrawOpenRefusedPopup();
 
         // Who is holding a renderer slot right now, by name. Printed when an open is refused — "no free
         // slot" without the list leaves the user with nothing to close. The main viewport and every extra
@@ -172,6 +204,12 @@ namespace Desert::Editor
             // now, but will claim one when it draws" would name it as something to close to free a slot it
             // was never going to take. See IAssetEditorPanel::ClaimsRendererSlot.
             bool ClaimsSlot = true;
+            // Set for a consumer the user can close FROM THE REFUSAL ITSELF: an open document. A census that
+            // names five things and offers no way to act on any of them is a longer version of "no free
+            // slot". The main viewport and the Details preview carry no handle — neither is a window a
+            // person closes to make room. Last in the struct so the two- and three-field aggregate
+            // initialisations below keep meaning what they say.
+            std::optional<Assets::AssetHandle> Document;
         };
         [[nodiscard]] std::vector<RendererSlotConsumer> RendererSlotCensus() const;
         // Rebinds the editor to a focused document: m_MainScene (and thus every play/save/gizmo call site)
@@ -257,14 +295,50 @@ namespace Desert::Editor
         SceneViewIdSource                           m_SceneViewIds;
         uint64_t m_ActiveSceneId = kPrimarySceneViewId; // which document the editor is bound to
 
-        // AssetTypeID -> the editor that opens it. Holds factories only; the documents it builds live in
-        // m_Panels like every other panel, which is what makes them dockable and torn down by OnDetach with
-        // no extra code. See Editor/Core/AssetEditorRegistry.hpp for why there is no second container.
+        // AssetTypeID -> the editor that opens it. Holds factories only; the documents it builds are owned by
+        // m_Documents below.
         AssetEditorRegistry m_AssetEditors;
 
+        // THE OPEN DOCUMENTS, owned separately from the tools. See Editor/Core/DocumentWell.hpp for the
+        // whole argument; the short version is that a tool's visibility is a setting and a document's
+        // existence is not, so one bool cannot serve both — and while they shared m_Panels it had to.
+        DocumentWell m_Documents;
+        // Close requests, drained between frames by ServiceDocumentCloses. Filled by the x on a document
+        // window, the x in Window ▸ Documents, Close All, and the refusal dialog's own Close buttons.
+        std::vector<Assets::AssetHandle> m_DocumentsToClose;
+        // Which document window has the keyboard focus, as of the last frame. Drives the radio in
+        // Window ▸ Documents and is where Ctrl+Tab starts from.
+        Assets::AssetHandle m_FocusedDocument = Common::UUID::Null();
+        // Ctrl+Tab holds the ring still. Landing on a document by cycling must NOT reorder the ring, or the
+        // second press would come straight back to where the first started; the order is committed once Ctrl
+        // is released, which is the behaviour every alt-tab ring has.
+        bool m_CyclingDocuments = false;
+        // The dock node the documents live in (layout option B.1): the centre column is split, the level
+        // keeps the left node, documents get the right one. Read back from the well window's own dock id
+        // every frame rather than remembered from the one frame the layout was built — a value captured at
+        // build time is 0 for the whole of every later session.
+        ImGuiID m_DocumentDockId = 0;
+
+        // A refused open, waiting to be shown (see DrawOpenRefusedPopup). Holds the census by value: the
+        // documents it names may be closed while the dialog is up, and a row pointing at a destroyed panel
+        // is the dangling reference this split exists to avoid.
+        struct OpenRefusal
+        {
+            std::string                       AssetName;
+            std::string                       TypeName;
+            uint32_t                          Live    = 0;
+            uint32_t                          Pending = 0;
+            std::vector<RendererSlotConsumer> Census;
+        };
+        std::optional<OpenRefusal> m_OpenRefusal;
+        bool                       m_OpenRefusalPending = false; // raise the modal on the next ImGui frame
+
 #ifdef EBABLE_IMGUI
-        std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;
-        std::vector<std::unique_ptr<Editor::IPanel>> m_Panels;
+        std::shared_ptr<ImGui::ImGuiLayer> m_ImGuiLayer;
+        // THE TOOLS. A container that cannot hold a document — see Editor/Core/PanelRegistry.hpp. That is
+        // what makes "the View menu lists exactly the tools" true by construction rather than by a predicate
+        // the menu, the command palette and --open-panel would each have had to remember.
+        PanelRegistry m_Panels;
 
         // Contextual panels (IPanel::IsContextual): which ones WE opened, so a panel the user opened by
         // hand is never auto-closed, and the one to bring to the front of its dock this frame.

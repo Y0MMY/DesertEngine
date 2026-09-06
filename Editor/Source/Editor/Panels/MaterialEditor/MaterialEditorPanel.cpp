@@ -366,7 +366,7 @@ namespace Desert::Editor
         //
         // The predecessor of this panel also RELEASED here, on the frame it stopped being visible. That
         // branch is gone rather than carried over: an asset document is not hidden when it is closed, it is
-        // DESTROYED (EditorLayer::CloseDismissedAssetDocuments, which runs before this loop and so before
+        // DESTROYED (EditorLayer::ServiceDocumentCloses, which runs before this loop and so before
         // any such branch could fire), and one mechanism that runs is worth more than a second that cannot.
         if ( !m_DrewThisFrame )
             return;
