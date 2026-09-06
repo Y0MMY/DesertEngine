@@ -28,17 +28,10 @@ namespace Desert::Editor::NewCloudAsset
                                                                         kNewLayoutSide, kNewLayoutSide,
                                                                         canvas.GetError() );
 
-        const Assets::CloudLayoutCanvas& blank = canvas.GetValue();
-
-        // STRAIGHT RGBA AND NO MASK — CloudLayoutPanel's own defaults, and the only mapping that means
-        // anything for a canvas nobody has painted on. `TakeMask` is carried from the canvas rather than
-        // written as `false` here, because the canvas is what knows whether its alpha plane is a mask: a
-        // blank one says no, since its alpha is the mask's NEUTRAL and a uniformly neutral mask is a table
-        // carried for no reason.
-        const uint32_t channelForSlot[Assets::kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
-
-        return Assets::MakeCloudLayoutFromImage( blank.Pixels, blank.Side, blank.Side, channelForSlot,
-                                                 blank.TakeMask );
+        // NO MASK, WHICH IS WHAT A BLANK CANVAS IS. A uniformly neutral mask changes nothing, so writing
+        // one into every new file would be a table carried for no reason — and the layer would pay a
+        // wrap-sampled fetch per cell to add zero. The Cloud Layout panel is where one is asked for.
+        return Assets::MakeCloudLayoutFromCanvas( canvas.GetValue() );
     }
 
     Assets::CloudNoiseVolumeParams DefaultNoiseParams()

@@ -369,10 +369,11 @@ namespace Desert::Assets
         {
             const float base = std::clamp( params.Coverage, 0.0f, 1.0f );
 
-            const CloudLayoutData* layout = params.Layout.get();
+            const CloudLayoutData* patternSource = params.PatternSource.get();
+            const CloudLayoutData* maskSource    = params.MaskSource.get();
 
-            const bool paintedPattern =
-                 layout != nullptr && layout->HasPattern() && params.LayoutPlacement.PatternStrength > 1e-4f;
+            const bool paintedPattern = patternSource != nullptr && patternSource->HasPattern() &&
+                                        params.LayoutPlacement.PatternStrength > 1e-4f;
 
             float modulated = base;
 
@@ -383,8 +384,9 @@ namespace Desert::Assets
                 // The channel is the SLOT and not a genus. Unreal fixes R/G/B/A to four named types for
                 // ever; ours is whichever kind of cloud the artist dropped into that slot, which is the
                 // more general arrangement and costs nothing.
-                const float painted = SampleCloudLayoutPattern( *layout, slot, uv );
-                const float centred = painted - layout->PatternMean[std::min( slot, kCloudLayoutChannels - 1u )];
+                const float painted = SampleCloudLayoutPattern( *patternSource, slot, uv );
+                const float centred =
+                     painted - patternSource->PatternMean[std::min( slot, kCloudLayoutChannels - 1u )];
 
                 // The same shape the patch field's own expression has, so the two sources push the slider
                 // by comparable amounts and swapping one for the other is not also a change of scale. The
@@ -406,11 +408,15 @@ namespace Desert::Assets
                 }
             }
 
-            if ( layout != nullptr && layout->HasMask() && params.LayoutPlacement.MaskStrength > 1e-4f )
+            // THE MASK COMES FROM ITS OWN SLOT, and it is read whether or not a pattern was. That is
+            // Unreal's arrangement exactly (RESEARCH_LAYOUT_TEXTURES §3: the mask sits OUTSIDE and AFTER
+            // everything, and is the one term that adds rather than multiplies), and it is what lets a
+            // layer place its clouds procedurally and still have a painted region of cleared sky.
+            if ( maskSource != nullptr && maskSource->HasMask() && params.LayoutPlacement.MaskStrength > 1e-4f )
             {
                 const glm::vec2 uv = CloudLayoutUv( params.LayoutPlacement, params.RegionSizeKm, centreKm );
                 const float     maskStrength = std::clamp( params.LayoutPlacement.MaskStrength, 0.0f, 1.0f );
-                modulated += maskStrength * SampleCloudLayoutMask( *layout, uv );
+                modulated += maskStrength * SampleCloudLayoutMask( *maskSource, uv );
             }
 
             return std::clamp( modulated, 0.0f, 1.0f );
@@ -581,9 +587,18 @@ namespace Desert::Assets
         //
         // Null on either side reads as 0, which is the same 0 an unpainted layer carries: binding no layout
         // and binding none again is not a change, and an unpainted sky is never re-baked by this line.
-        const uint32_t hashA = a.Layout ? a.Layout->ContentHash : 0u;
-        const uint32_t hashB = b.Layout ? b.Layout->ContentHash : 0u;
-        if ( hashA != hashB )
+        // BOTH SLOTS, SEPARATELY. Combining the two hashes into one number would make swapping the pattern
+        // for the mask's painting and the mask for the pattern's look like no change at all — the same
+        // "two orderings, one checksum" trap task O-3 measured on the noise sheet, where reversing the tile
+        // order in both codecs at once left the round trip perfect and the layout agreement unstated.
+        const uint32_t patternHashA = a.PatternSource ? a.PatternSource->ContentHash : 0u;
+        const uint32_t patternHashB = b.PatternSource ? b.PatternSource->ContentHash : 0u;
+        if ( patternHashA != patternHashB )
+            return false;
+
+        const uint32_t maskHashA = a.MaskSource ? a.MaskSource->ContentHash : 0u;
+        const uint32_t maskHashB = b.MaskSource ? b.MaskSource->ContentHash : 0u;
+        if ( maskHashA != maskHashB )
             return false;
 
         // AND THE PLACEMENT ONLY WHEN THERE IS SOMETHING TO PLACE. With no painting bound, none of those
@@ -594,7 +609,8 @@ namespace Desert::Assets
         //
         // The test that walks every field asserts these five on a base that HAS a painting, which is the
         // only state in which they mean anything.
-        if ( hashA != 0u && !CloudLayoutPlacementEqual( a.LayoutPlacement, b.LayoutPlacement ) )
+        if ( ( patternHashA != 0u || maskHashA != 0u ) &&
+             !CloudLayoutPlacementEqual( a.LayoutPlacement, b.LayoutPlacement ) )
             return false;
 
         if ( a.Species.size() != b.Species.size() )
@@ -755,14 +771,45 @@ namespace Desert::Assets
         if ( auto placement = ValidateCloudLayoutPlacement( params.LayoutPlacement ); !placement )
             return placement;
 
-        if ( !params.Layout )
+        for ( const CloudLayoutTable table : { CloudLayoutTable::Pattern, CloudLayoutTable::Mask } )
+            if ( auto one = ValidateCloudProceduralLayoutTable( params, table ); !one )
+                return one;
+
+        return Common::MakeSuccess( true );
+    }
+
+    const char* CloudLayoutTableName( CloudLayoutTable table )
+    {
+        return table == CloudLayoutTable::Pattern ? "pattern" : "mask";
+    }
+
+    Common::BoolResultStr ValidateCloudProceduralLayoutTable( const CloudProceduralFieldParams& params,
+                                                              CloudLayoutTable                  table )
+    {
+        const CloudLayoutData* layout =
+             table == CloudLayoutTable::Pattern ? params.PatternSource.get() : params.MaskSource.get();
+
+        if ( layout == nullptr )
             return Common::MakeSuccess( true );
 
         // The PAINTING is checked when there is one. A layout that reached here unusable would place its
         // clouds from whatever bytes happened to be in the vectors, and the symptom would be a sky that is
         // merely not the one that was painted.
-        if ( auto layout = ValidateCloudLayoutData( *params.Layout ); !layout )
-            return Common::MakeFormattedError<bool>( "the bound cloud layout is unusable: {}", layout.GetError() );
+        if ( auto valid = ValidateCloudLayoutData( *layout ); !valid )
+            return Common::MakeFormattedError<bool>( "the layout bound to the {} input is unusable: {}",
+                                                     CloudLayoutTableName( table ), valid.GetError() );
+
+        // THE SLOT MUST BE FED THE TABLE IT READS. A `.dclayout` carrying only a mask, dropped on the
+        // pattern input, is a slot an artist fills and never sees anything from — the exact dead-setting
+        // shape the contract's §1.3 names. It is said here, once, rather than discovered as a sky that did
+        // not change.
+        const bool hasTable = table == CloudLayoutTable::Pattern ? layout->HasPattern() : layout->HasMask();
+        if ( !hasTable )
+            return Common::MakeFormattedError<bool>(
+                 "the layout bound to the {} input carries no {} table, so that slot decides nothing. It has "
+                 "{} and {}",
+                 CloudLayoutTableName( table ), CloudLayoutTableName( table ),
+                 layout->HasPattern() ? "a pattern" : "no pattern", layout->HasMask() ? "a mask" : "no mask" );
 
         // THE PAINTING MUST BE ABLE TO DESCRIBE A CELL, and this is the relation that says so. One texel of
         // the painting spans `RegionSize / (Repeats * Resolution)` kilometres; if that is coarser than the
@@ -771,7 +818,7 @@ namespace Desert::Assets
         // against the FINEST species, because it is the one that loses most.
         const float texelKm = params.RegionSizeKm /
                               ( static_cast<float>( std::max( params.LayoutPlacement.RepeatsPerRegion, 1u ) ) *
-                                static_cast<float>( std::max( params.Layout->Resolution, 1u ) ) );
+                                static_cast<float>( std::max( layout->Resolution, 1u ) ) );
 
         for ( const CloudProceduralSpecies& species : params.Species )
         {
@@ -779,10 +826,10 @@ namespace Desert::Assets
             const float     shorter = std::min( extent.x, extent.y );
             if ( texelKm > shorter )
                 return Common::MakeFormattedError<bool>(
-                     "one layout texel is {:.2f} km against a cell of {:.2f} km, so the painting cannot tell "
+                     "one {} texel is {:.2f} km against a cell of {:.2f} km, so the painting cannot tell "
                      "two neighbouring cells apart and every shape in it would be rounded to the lattice. "
                      "Either the layout gains resolution, Layout Repeats rises, or the region shrinks",
-                     texelKm, shorter );
+                     CloudLayoutTableName( table ), texelKm, shorter );
         }
 
         return Common::MakeSuccess( true );

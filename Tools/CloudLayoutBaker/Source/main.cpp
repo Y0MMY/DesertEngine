@@ -1,6 +1,7 @@
 // CloudLayoutBaker — turns a picture into a `.dclayout`, the painted sky of Docs/Clouds §PT.
 //
 //   CloudLayoutBaker --out <path.dclayout> [--image <path.png>] [--figure <name>]
+//                    [--mask-image <path.png>] [--mask-channel 0..3]
 //                    [--size <n>] [--channels r,g,b,a] [--mask]
 //
 // WHY THE FIGURES ARE BUILT IN. The acceptance criterion of this phase is a frame in which the sky follows
@@ -20,11 +21,17 @@
 //                drives. `--brush-radius` sets the stroke's width, which is what decides whether the glyph
 //                survives to the sky at all: wider than the placement cell it reads, narrower it does not.
 //
-// `--image` is the path an artist takes, and it is the same path the editor takes: the PNG is read to
-// RGBA8 and handed to exactly the function the Cloud Layout panel calls,
-// Assets::MakeCloudLayoutFromImage. The tool and the panel cannot disagree about what a picture means
-// because there is one function and both call it — which CALIBRATION.md §PTP checks by baking one picture
-// both ways and comparing the files byte for byte.
+// `--image` and `--mask-image` are the path an artist takes, and it is the same path the editor takes: the
+// PNG is read to RGBA8 and handed to exactly the functions the Cloud Layout panel calls,
+// Assets::SetCloudLayoutCanvasPatternFromImage and ...MaskFromImage. The tool and the panel cannot disagree
+// about what a picture means because there is one function per table and both call it — which
+// CALIBRATION.md §PTP checks by baking one picture both ways and comparing the files byte for byte.
+//
+// TWO PICTURES AND NOT ONE, since O-4: the pattern says WHERE the clouds are and the mask says how much to
+// ADD or REMOVE, and they are separate texture inputs of the cloud material exactly as
+// `Layout_CloudGlobalPattern` and `Layout_GlobalCloudMask` are in Unreal's. One image cannot carry both —
+// four species slots plus a mask is five planes — which is why the mask used to have to BE the pattern's
+// alpha.
 //
 // GPU-FREE, ASSET-LAYER-FREE, filesystem only through <fstream>. See the premake file for why that is
 // checked rather than hoped for.
@@ -46,19 +53,24 @@ namespace
     {
         std::fprintf( stderr,
                       "usage: CloudLayoutBaker --out <path.dclayout> [--image <path.png>] [--figure <name>]\n"
+                      "                        [--mask-image <path.png>] [--mask-channel 0..3]\n"
                       "                        [--size <n>] [--channels r,g,b,a] [--mask]\n"
                       "                        [--brush-radius <texels>] [--brush-hardness <0..1>]\n"
                       "  --out       where to write the layout\n"
-                      "  --image     a square PNG/JPG/TGA to paint with; RGBA8 after decode\n"
+                      "  --image     the PATTERN picture: a square PNG/JPG/TGA, RGBA8 after decode\n"
+                      "  --mask-image  the ADD/REMOVE MASK, as its own square picture - 128 neutral,\n"
+                      "              brighter adds cloud, darker removes it. Same side as the pattern\n"
+                      "  --mask-channel  which channel of --mask-image carries it (default 0; a grey PNG\n"
+                      "              decodes with red, green and blue equal)\n"
                       "  --figure    generate instead of reading: 'stripe', 'letter-d' or 'brush-d'\n"
                       "  --size      side of a generated figure in texels, %u..%u (default 512)\n"
                       "  --brush-radius    'brush-d' only: half the stroke's width in texels (default 26)\n"
                       "  --brush-hardness  'brush-d' only: 0 feathered, 1 crisp (default 1)\n"
                       "  --channels  which SOURCE channel feeds each of the four species slots,\n"
                       "              e.g. 0,0,0,0 to put one greyscale painting on every slot (default 0,1,2,3)\n"
-                      "  --mask      take the source's alpha as the add/remove mask; without it the layout\n"
-                      "              carries no mask at all, because an opaque image's alpha is 255 everywhere\n"
-                      "              and that would silently add cloud to the whole sky\n",
+                      "  --mask      FIGURES ONLY: make the generated glyph lay a mask that follows it.\n"
+                      "              A picture's mask comes in through --mask-image, which is its own\n"
+                      "              texture exactly as it is in the material\n",
                       Desert::Assets::kCloudLayoutMinResolution, Desert::Assets::kCloudLayoutMaxResolution );
         return 2;
     }
@@ -156,27 +168,22 @@ namespace
     std::vector<unsigned char> BrushLetterD( uint32_t side, bool maskFollowsFigure, float radiusTexels,
                                              float hardness )
     {
-        auto made = Desert::Assets::MakeCloudLayoutCanvas( side );
-        if ( !made )
-        {
-            std::fprintf( stderr, "%s\n", made.GetError().c_str() );
-            return {};
-        }
-
-        Desert::Assets::CloudLayoutCanvas canvas = made.ExtractValue();
+        // A PLAIN RGBA SOURCE PICTURE, like the other two figures, rather than a canvas — the alpha plane
+        // is the FIGURE'S own, and the mask is taken from it below by the same import the artist's `--mask`
+        // uses. That keeps one statement of what an alpha means and, incidentally, keeps this figure's
+        // bytes identical to the ones §PT measured.
+        std::vector<unsigned char> pixels( static_cast<size_t>( side ) * side * 4u, 0u );
 
         // THE MASK'S GROUND IS 0 AND NOT NEUTRAL when the mask follows the figure, exactly as `letter-d`
         // has it: the mask is signed about 128, so a ground of 0 clears the sky everywhere the letter is
         // not and the glyph is what is left. A neutral ground would leave the background sky untouched and
         // the letter would have to fight the coverage slider to be seen.
-        if ( maskFollowsFigure )
+        const auto ground = Desert::Assets::FillCloudLayoutPlaneChannel(
+             pixels, side, 3u, 4u, maskFollowsFigure ? 0u : Desert::Assets::kCloudLayoutMaskNeutral );
+        if ( !ground )
         {
-            const auto cleared = Desert::Assets::FillCloudLayoutCanvasChannel( canvas.Pixels, side, 3u, 0u );
-            if ( !cleared )
-            {
-                std::fprintf( stderr, "%s\n", cleared.GetError().c_str() );
-                return {};
-            }
+            std::fprintf( stderr, "%s\n", ground.GetError().c_str() );
+            return {};
         }
 
         const float            s = static_cast<float>( side );
@@ -206,7 +213,7 @@ namespace
         for ( uint32_t channel = 0; channel < last; ++channel )
         {
             const auto painted =
-                 Desert::Assets::PaintCloudLayoutPolyline( canvas.Pixels, side, channel, path, brush );
+                 Desert::Assets::PaintCloudLayoutPolyline( pixels, side, channel, 4u, path, brush );
             if ( !painted )
             {
                 std::fprintf( stderr, "%s\n", painted.GetError().c_str() );
@@ -217,7 +224,7 @@ namespace
         std::printf( "painted the brush letter: radius %.1f texels, hardness %.2f, stroke %.1f texels wide\n",
                      radiusTexels, hardness, Desert::Assets::CloudLayoutBrushWidthTexels( brush ) );
 
-        return canvas.Pixels;
+        return pixels;
     }
 
     bool ParseChannels( const char* text, uint32_t out[Desert::Assets::kCloudLayoutChannels] )
@@ -241,9 +248,11 @@ int main( int argc, char** argv )
 {
     std::string out;
     std::string image;
+    std::string maskImage;
     std::string figure;
-    uint32_t    side     = 512u;
-    bool        takeMask = false;
+    uint32_t    side        = 512u;
+    uint32_t    maskChannel = 0u;
+    bool        takeMask    = false;
 
     // The brush figure's defaults: 26 texels of radius at 512 over a 48 km region is a 4.9 km stroke, which
     // clears the 3.0 km placement cell. Crisp by default, because a letter is a letter.
@@ -281,6 +290,26 @@ int main( int argc, char** argv )
             if ( !value )
                 return Usage();
             image = value;
+        }
+        else if ( std::strcmp( argv[i], "--mask-image" ) == 0 )
+        {
+            const char* value = next( "--mask-image" );
+            if ( !value )
+                return Usage();
+            maskImage = value;
+        }
+        else if ( std::strcmp( argv[i], "--mask-channel" ) == 0 )
+        {
+            const char* value = next( "--mask-channel" );
+            if ( !value )
+                return Usage();
+            const int parsed = std::atoi( value );
+            if ( parsed < 0 || parsed > 3 )
+            {
+                std::fprintf( stderr, "--mask-channel %d must lie in [0, 3]\n", parsed );
+                return Usage();
+            }
+            maskChannel = static_cast<uint32_t>( parsed );
         }
         else if ( std::strcmp( argv[i], "--figure" ) == 0 )
         {
@@ -340,6 +369,30 @@ int main( int argc, char** argv )
     if ( image.empty() == figure.empty() )
     {
         std::fprintf( stderr, "give exactly one of --image and --figure\n" );
+        return Usage();
+    }
+
+    // TWO SOURCES FOR THE MASK IS A SOURCE TOO MANY, and a tool that silently preferred one would write a
+    // table whose provenance is a guess. `--mask` is the FIGURES' own switch — it makes the generated glyph
+    // lay a mask that follows it — and `--mask-image` is the artist's separate picture.
+    if ( takeMask && !maskImage.empty() )
+    {
+        std::fprintf( stderr, "--mask takes the source's own alpha and --mask-image reads a second "
+                              "picture; give one\n" );
+        return Usage();
+    }
+
+    if ( takeMask && !image.empty() )
+    {
+        std::fprintf( stderr, "--mask is for the generated figures; a picture's mask comes in through "
+                              "--mask-image, which is its own texture\n" );
+        return Usage();
+    }
+
+    if ( maskChannel != 0u && maskImage.empty() )
+    {
+        std::fprintf( stderr, "--mask-channel only means anything with --mask-image; refused rather than "
+                              "ignored\n" );
         return Usage();
     }
 
@@ -410,7 +463,56 @@ int main( int argc, char** argv )
         std::printf( "read '%s': %dx%d, %d source channels\n", image.c_str(), w, h, comp );
     }
 
-    auto made = Desert::Assets::MakeCloudLayoutFromImage( pixels, width, height, channels, takeMask );
+    // THE PATTERN AND THE MASK ARE TWO IMPORTS, which is decision O-4 and Unreal's two layout texture
+    // parameters. The figures still lay their mask into the source's own alpha and it is read back out of
+    // there by the same function `--mask-image` uses, so there is one statement of what a picture means and
+    // the shipped fixtures come out byte for byte as §PT measured them.
+    Desert::Assets::CloudLayoutCanvas canvas;
+
+    if ( const auto brought =
+              Desert::Assets::SetCloudLayoutCanvasPatternFromImage( canvas, pixels, width, height, channels );
+         !brought )
+    {
+        std::fprintf( stderr, "%s\n", brought.GetError().c_str() );
+        return 1;
+    }
+
+    if ( takeMask )
+    {
+        if ( const auto brought =
+                  Desert::Assets::SetCloudLayoutCanvasMaskFromImage( canvas, pixels, width, height, 3u );
+             !brought )
+        {
+            std::fprintf( stderr, "%s\n", brought.GetError().c_str() );
+            return 1;
+        }
+    }
+    else if ( !maskImage.empty() )
+    {
+        int      w = 0, h = 0, comp = 0;
+        stbi_uc* decoded = stbi_load( maskImage.c_str(), &w, &h, &comp, 4 );
+        if ( !decoded )
+        {
+            std::fprintf( stderr, "'%s' could not be read as an image: %s\n", maskImage.c_str(),
+                          stbi_failure_reason() ? stbi_failure_reason() : "unknown" );
+            return 1;
+        }
+
+        const std::vector<unsigned char> maskPixels( decoded, decoded + static_cast<size_t>( w ) * h * 4 );
+        stbi_image_free( decoded );
+
+        std::printf( "read the mask '%s': %dx%d, %d source channels\n", maskImage.c_str(), w, h, comp );
+
+        if ( const auto brought = Desert::Assets::SetCloudLayoutCanvasMaskFromImage(
+                  canvas, maskPixels, static_cast<uint32_t>( w ), static_cast<uint32_t>( h ), maskChannel );
+             !brought )
+        {
+            std::fprintf( stderr, "%s\n", brought.GetError().c_str() );
+            return 1;
+        }
+    }
+
+    auto made = Desert::Assets::MakeCloudLayoutFromCanvas( canvas );
     if ( !made )
     {
         std::fprintf( stderr, "%s\n", made.GetError().c_str() );

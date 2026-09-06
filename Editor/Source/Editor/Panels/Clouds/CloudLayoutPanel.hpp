@@ -35,17 +35,25 @@ namespace Desert::Editor
      *
      * AND THE BRUSH IS THE SECOND HALF OF THAT ANSWER. Importing a picture presumes somebody drew it
      * somewhere else; the owner asked for a panel where the designer CREATES the texture rather than
-     * brings one. The canvas below is that panel, and it is the same buffer an import produces — an RGBA8
-     * square — so the two ways in converge one line later, at `Assets::MakeCloudLayoutFromImage`, and
-     * neither can come to mean something different by a channel, a mask or a mean. Importing is not
-     * removed and is not second class: an artist brings a picture and then paints on it, which is what a
-     * canvas that is literally the decoded image buys for nothing.
+     * brings one. The canvas below is that panel, and it is the same surface an import fills, so the two
+     * ways in converge at `Assets::MakeCloudLayoutFromCanvas` and neither can come to mean something
+     * different by a channel, a mask or a mean. Importing is not removed and is not second class: an
+     * artist brings a picture and then paints on it, which is what a canvas that is literally the decoded
+     * image buys for nothing.
+     *
+     * AND SINCE O-4 THERE ARE TWO PICTURES, NOT ONE — Unreal's `Layout_CloudGlobalPattern` and
+     * `Layout_GlobalCloudMask`, which are separate texture parameters there and separate material inputs
+     * here. The pattern imports and exports as an RGBA picture, the mask as its own grey one. That is not
+     * a convenience: a layout needs FIVE planes and an image has four, so while there was one picture the
+     * mask had to BE the pattern's alpha, a layout using all five could not be opened for painting at all,
+     * and the panel had to keep telling the artist which of two things the alpha plane currently meant.
+     * All three of those are gone with the second file.
      *
      * IT IS BUILT AFTER THE CLOUD NOISE VOLUME PANEL NEXT DOOR, deliberately and down to the section
      * order — source, preview, save — because that panel already does work of this shape and a second
      * layout for the same job is a second thing to learn.
      *
-     * THE BAKE CALLS THE SAME FUNCTION THE COMMAND-LINE TOOL CALLS. `Assets::MakeCloudLayoutFromImage`
+     * THE BAKE CALLS THE SAME FUNCTION THE COMMAND-LINE TOOL CALLS. `Assets::MakeCloudLayoutFromCanvas`
      * then `Assets::CloudLayoutAsset::Save`, which is `Tools/CloudLayoutBaker/Source/main.cpp` with a file
      * dialog in front of it. A panel whose output differed from the tool's would be the second path §1.3
      * and §4.2 of the contract forbid, and the difference would show up as a sky rather than as an error.
@@ -190,9 +198,11 @@ namespace Desert::Editor
 
             Assets::CloudLayoutPlacement Placement;
 
-            /// The painting the layer has bound, or a null handle. It is what the panel adopts when it
-            /// opens with nothing loaded: the tool starts on the sky you are looking at.
-            uint64_t BoundLayout = 0u;
+            // A `BoundLayout` handle used to be read out of the material here, described as "what the panel
+            // adopts when it opens with nothing loaded". Nothing read it — not Matches, not the preview,
+            // not the source section — and the panel has been keyed on its SUBJECT since Р3, so adopting
+            // the layer's painting is not a thing it may do at all. Removed rather than left as a field
+            // one reader would eventually be written against (contract §1.3).
 
             /// Field by field, because these numbers live on a component the Details panel edits and there
             /// is no notification — comparing is what makes moving Layout Repeats in Details redraw the
@@ -216,18 +226,42 @@ namespace Desert::Editor
         /// subject cannot change, so neither can the answer.
         void LoadSubject();
 
-        /// Reads an image off disk into the source. Named so the file dialog and the drag-and-drop target
-        /// are one operation and cannot decode a picture two different ways.
-        void LoadSourceImage( const std::filesystem::path& path );
+        /// Which table an import, an export or a stroke is about. One enum for all three, so a button and
+        /// the plane it acts on cannot come to disagree.
+        enum class Table
+        {
+            Pattern,
+            Mask
+        };
 
-        /// Rebuilds m_Layout from the source through Assets::MakeCloudLayoutFromImage — the tool's
+        /// Reads a picture off disk into one of the canvas's two tables. Named so the file dialog and the
+        /// drag-and-drop target are one operation and cannot decode a picture two different ways.
+        void LoadSourceImage( const std::filesystem::path& path, Table table );
+
+        /// Writes one of the canvas's two tables out as a PNG, asking for the name. The other half of the
+        /// door LoadSourceImage opens, and the reason a `.dclayout` is not a one-way trip.
+        void ExportImage( Table table );
+
+        /// Rebuilds m_Layout from the canvas through Assets::MakeCloudLayoutFromCanvas — the tool's
         /// function, not a second reading of what a picture means.
         void RebuildLayout();
 
-        /// True when m_SourcePixels is a surface the brush can paint on: square, and inside the layout's
-        /// own resolution bounds. It is the SAME condition MakeCloudLayoutFromImage accepts, asked before
-        /// the fact rather than after, so the canvas cannot exist in a state the bake would refuse.
+        /// True when the canvas is a surface the brush can paint on: square, and inside the layout's own
+        /// resolution bounds. It is the SAME condition the import accepts, asked before the fact rather
+        /// than after, so the canvas cannot exist in a state the bake would refuse.
         bool CanPaint() const;
+
+        /// True when the brush is currently aimed at the mask rather than at a species slot. One
+        /// derivation of it, because "channel 4 means the mask" restated at each of its five call sites is
+        /// how one of them comes to say 3.
+        bool PaintingMask() const;
+
+        /// The buffer the brush writes into, and how many channels it interleaves — the pattern's four or
+        /// the mask's one. Returned together because they are one fact about one plane; handing them out
+        /// separately is how a stride and a buffer come to disagree.
+        std::vector<unsigned char>& PaintPlane();
+        uint32_t                    PaintPlaneChannels() const;
+        uint32_t                    PaintPlaneChannel() const;
 
         /// Replaces the source with a blank canvas of @p side. Named rather than inlined because the
         /// button and a future caller must clear exactly the same six pieces of state — a canvas that kept
@@ -262,10 +296,12 @@ namespace Desert::Editor
 
         // ---- source -----------------------------------------------------------------------------------
 
-        std::vector<unsigned char> m_SourcePixels; // RGBA8, x fastest, exactly as stbi_load returns it
-        uint32_t                   m_SourceWidth  = 0u;
-        uint32_t                   m_SourceHeight = 0u;
-        std::string                m_SourceName; // the picture's file name, or the .dclayout's
+        /// The surface being authored: the pattern's four planes and the mask's one, at one side. It is
+        /// the engine's own struct rather than a pair of buffers the panel keeps in step by hand, so
+        /// "these two tables share a resolution" is stated where the import enforces it.
+        Assets::CloudLayoutCanvas m_Canvas;
+
+        std::string m_SourceName; // the picture's file name, or the .dclayout's
 
         /// Which SOURCE channel feeds each species slot. THE CONVENTION IS A CONTROL AND NOT AN
         /// ASSUMPTION: a painting is usually greyscale, and without this an artist wanting one drawing on
@@ -273,10 +309,10 @@ namespace Desert::Editor
         /// default.
         uint32_t m_ChannelForSlot[Assets::kCloudLayoutChannels] = { 0u, 1u, 2u, 3u };
 
-        /// Take the source's alpha as the add/remove mask. OFF by default and not "alpha is always the
-        /// mask", because an opaque PNG has alpha 255 everywhere, which under the signed convention is a
-        /// mask that adds cloud to the whole sky — a silent, uniform, wrong answer.
-        bool m_TakeMask = false;
+        /// Which channel of a MASK picture carries the mask. A greyscale PNG loads with R == G == B, so 0
+        /// is right for everything an artist is likely to draw; it exists so a mask somebody packed into
+        /// an alpha is not a re-export.
+        int m_MaskSourceChannel = 0;
 
         // ---- the brush --------------------------------------------------------------------------------
 
@@ -285,12 +321,18 @@ namespace Desert::Editor
         /// tomorrow is painted with whatever the artist has the sliders on then.
         Assets::CloudLayoutBrush m_Brush;
 
-        /// Which plane of the canvas the stroke lands in, 0..3 = R, G, B, A. Alpha is the add/remove mask
-        /// when `m_TakeMask` is on and species slot 3's own pattern when it is not — one plane, two
-        /// meanings, inherited from the fact that MakeCloudLayoutFromImage takes ONE image and a layout
-        /// carries five tables. The panel says which it currently is rather than leaving it to be
-        /// discovered in a rendered sky.
+        /// Which plane of the canvas the stroke lands in: 0..3 are the pattern's four species slots and
+        /// @ref kMaskPaintChannel is the add/remove mask.
+        ///
+        /// FIVE AND NOT FOUR IS THE WHOLE OF O-4 SEEN FROM THE BRUSH. The mask used to share the alpha
+        /// plane with species slot 3, so this control had four entries, one of which meant two different
+        /// things depending on a checkbox somewhere else, and the panel had a paragraph explaining which.
+        /// A layout has five tables; the canvas now has five planes; the combo has five entries.
         int m_PaintChannel = 0;
+
+        /// The entry in that combo which is the mask. Named, because "4" spelled at each comparison is how
+        /// one of them comes to be 3.
+        static constexpr int kMaskPaintChannel = static_cast<int>( Assets::kCloudLayoutChannels );
 
         /// The side a "New canvas" would be. 512 is the shipped paintings' own resolution and, at the
         /// shipped 48 km region, puts one texel at 94 m — a thirtieth of a placement cell, so a stroke has

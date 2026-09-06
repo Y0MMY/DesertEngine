@@ -455,7 +455,19 @@ namespace Desert::Graphic::System
         // state it owns is the memory of what it has already said out loud. Zero means "nothing to
         // complain about", which is also the state a usable painting restores it to, so re-fixing a
         // painting and breaking it again reports the second break.
-        mutable uint32_t m_ReportedBadLayoutHash = 0u;
+        //
+        // ONE PER SLOT, because since O-4 the pattern and the mask are separate inputs that can hold
+        // different files. A single latch would let a bad pattern silence the complaint about a bad mask,
+        // and the artist would fix one and see nothing about the other.
+        mutable uint32_t m_ReportedBadPatternHash = 0u;
+        mutable uint32_t m_ReportedBadMaskHash    = 0u;
+
+        /// Drops @p source from @p params, and says so once, when this layer cannot honour it. Static
+        /// because it owns nothing: the latch it updates is handed in, so the pattern's memory and the
+        /// mask's cannot be confused for one another by a copy-paste.
+        static void DropUnusableLayout( Assets::CloudProceduralFieldParams& params, Assets::CloudLayoutTable table,
+                                        std::shared_ptr<const Assets::CloudLayoutData>& source,
+                                        uint32_t&                                       reportedHash );
 
         // The region the bake IN FLIGHT is for, so that the frame it lands the payload can be pointed at
         // the region that was actually baked rather than at wherever the camera is by then.
@@ -508,6 +520,11 @@ namespace Desert::Graphic::System
         /// Material handles already reported as unresolvable, so the warning in ResolveMaterial is said
         /// once per handle and not once per frame.
         std::unordered_set<uint64_t> m_WarnedMissingMaterials;
+
+        /// Material handles already reported as carrying a slot the cloud shader does not declare, on the
+        /// same once-per-handle discipline and for the same reason.
+        std::unordered_set<uint64_t> m_WarnedUnknownSlots;
+
         bool                     m_Present = false;
 
         // This view's quality tier and the numbers it derives. The scale is held rather than re-derived at

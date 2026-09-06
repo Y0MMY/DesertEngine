@@ -395,63 +395,6 @@ namespace Desert::Assets
         return Common::MakeSuccess( std::move( data ) );
     }
 
-    Common::ResultStr<CloudLayoutData>
-    MakeCloudLayoutFromImage( const std::vector<unsigned char>& pixels, uint32_t width, uint32_t height,
-                              const uint32_t channelForSlot[kCloudLayoutChannels], bool takeMask )
-    {
-        if ( width != height )
-            return Common::MakeFormattedError<CloudLayoutData>(
-                 "layout source is {}x{}; it must be square, because the painting tiles the world on a "
-                 "square period and resampling it would be an opinion about the artist's image",
-                 width, height );
-
-        if ( width < kCloudLayoutMinResolution || width > kCloudLayoutMaxResolution )
-            return Common::MakeFormattedError<CloudLayoutData>( "layout source is {}x{}; the side must lie in "
-                                                                "[{}, {}]",
-                                                                width, height, kCloudLayoutMinResolution,
-                                                                kCloudLayoutMaxResolution );
-
-        const uint64_t texels = static_cast<uint64_t>( width ) * height;
-        if ( pixels.size() != texels * kPatternBytesPerTexel )
-            return Common::MakeFormattedError<CloudLayoutData>( "layout source is {} bytes, expected {} for "
-                                                                "{}x{} RGBA8",
-                                                                pixels.size(), texels * kPatternBytesPerTexel,
-                                                                width, height );
-
-        for ( uint32_t slot = 0; slot < kCloudLayoutChannels; ++slot )
-            if ( channelForSlot[slot] >= kPatternBytesPerTexel )
-                return Common::MakeFormattedError<CloudLayoutData>(
-                     "slot {} is mapped to source channel {}, and an RGBA image has four", slot,
-                     channelForSlot[slot] );
-
-        CloudLayoutData data;
-        data.Resolution = width;
-
-        data.Pattern.resize( static_cast<size_t>( texels ) * kPatternBytesPerTexel );
-        for ( uint64_t t = 0; t < texels; ++t )
-            for ( uint32_t slot = 0; slot < kCloudLayoutChannels; ++slot )
-                data.Pattern[static_cast<size_t>( t ) * kPatternBytesPerTexel + slot] =
-                     pixels[static_cast<size_t>( t ) * kPatternBytesPerTexel + channelForSlot[slot]];
-
-        if ( takeMask )
-        {
-            data.Mask.resize( static_cast<size_t>( texels ) );
-            for ( uint64_t t = 0; t < texels; ++t )
-                data.Mask[static_cast<size_t>( t )] =
-                     pixels[static_cast<size_t>( t ) * kPatternBytesPerTexel + 3u];
-        }
-
-        // Round-tripped rather than returned raw, so that the means and the content hash a caller receives
-        // are the ones the FILE will carry. Two paths to a CloudLayoutData — one through the encoder and
-        // one around it — is how the mean in memory comes to differ from the mean on disk.
-        auto encoded = EncodeCloudLayout( data );
-        if ( !encoded )
-            return Common::MakeFormattedError<CloudLayoutData>( "layout built from the image is unusable: {}",
-                                                                encoded.GetError() );
-
-        return DecodeCloudLayout( encoded.GetValue() );
-    }
-
     CloudLayoutStrokeStats MeasureCloudLayoutStrokes( const CloudLayoutData& data, uint32_t slot,
                                                       float limitTexels )
     {
@@ -641,21 +584,51 @@ namespace Desert::Assets
             return std::sqrt( dx * dx + dy * dy );
         }
 
-        Common::BoolResultStr CheckCanvas( const std::vector<unsigned char>& canvas, uint32_t side,
-                                           uint32_t channel )
+        Common::BoolResultStr CheckPlane( const std::vector<unsigned char>& plane, uint32_t side, uint32_t channel,
+                                          uint32_t channelCount )
         {
             if ( side < kCloudLayoutMinResolution || side > kCloudLayoutMaxResolution )
                 return Common::MakeFormattedError<bool>( "canvas side {} lies outside [{}, {}]", side,
                                                          kCloudLayoutMinResolution, kCloudLayoutMaxResolution );
 
-            const size_t wanted = static_cast<size_t>( side ) * side * kPatternBytesPerTexel;
-            if ( canvas.size() != wanted )
-                return Common::MakeFormattedError<bool>( "canvas is {} bytes, expected {} for {}x{} RGBA8",
-                                                         canvas.size(), wanted, side, side );
+            if ( channelCount == 0u )
+                return Common::MakeError<bool>( "a plane with no channels cannot be painted" );
 
-            if ( channel >= kPatternBytesPerTexel )
-                return Common::MakeFormattedError<bool>( "channel {} does not exist; an RGBA canvas has four",
-                                                         channel );
+            const size_t wanted = static_cast<size_t>( side ) * side * channelCount;
+            if ( plane.size() != wanted )
+                return Common::MakeFormattedError<bool>(
+                     "plane is {} bytes, expected {} for {}x{} with {} channels", plane.size(), wanted, side, side,
+                     channelCount );
+
+            if ( channel >= channelCount )
+                return Common::MakeFormattedError<bool>( "channel {} does not exist; this plane has {}", channel,
+                                                         channelCount );
+
+            return Common::MakeSuccess( true );
+        }
+
+        /// The side and shape checks every picture arriving from outside has to pass, whichever table it is
+        /// destined for. One statement of them, so a pattern and a mask cannot come to be judged by
+        /// different rules and an artist cannot be told two different things about the same file.
+        Common::BoolResultStr CheckSourceImage( const std::vector<unsigned char>& pixels, uint32_t width,
+                                                uint32_t height )
+        {
+            if ( width != height )
+                return Common::MakeFormattedError<bool>(
+                     "layout source is {}x{}; it must be square, because the painting tiles the world on a "
+                     "square period and resampling it would be an opinion about the artist's image",
+                     width, height );
+
+            if ( width < kCloudLayoutMinResolution || width > kCloudLayoutMaxResolution )
+                return Common::MakeFormattedError<bool>( "layout source is {}x{}; the side must lie in [{}, {}]",
+                                                         width, height, kCloudLayoutMinResolution,
+                                                         kCloudLayoutMaxResolution );
+
+            const uint64_t texels = static_cast<uint64_t>( width ) * height;
+            if ( pixels.size() != texels * kPatternBytesPerTexel )
+                return Common::MakeFormattedError<bool>( "layout source is {} bytes, expected {} for {}x{} RGBA8",
+                                                         pixels.size(), texels * kPatternBytesPerTexel, width,
+                                                         height );
 
             return Common::MakeSuccess( true );
         }
@@ -669,12 +642,8 @@ namespace Desert::Assets
                                                                   kCloudLayoutMaxResolution );
 
         CloudLayoutCanvas canvas;
-        canvas.Side     = side;
-        canvas.TakeMask = false;
-        canvas.Pixels.assign( static_cast<size_t>( side ) * side * kPatternBytesPerTexel, 0u );
-
-        for ( size_t t = 3u; t < canvas.Pixels.size(); t += kPatternBytesPerTexel )
-            canvas.Pixels[t] = kCloudLayoutMaskNeutral;
+        canvas.Side = side;
+        canvas.Pattern.assign( static_cast<size_t>( side ) * side * kPatternBytesPerTexel, 0u );
 
         return Common::MakeSuccess( std::move( canvas ) );
     }
@@ -686,51 +655,199 @@ namespace Desert::Assets
                                                                   "painting: {}",
                                                                   valid.GetError() );
 
-        const uint32_t side   = data.Resolution;
-        const size_t   texels = static_cast<size_t>( side ) * side;
-
-        auto made = MakeCloudLayoutCanvas( side );
+        auto made = MakeCloudLayoutCanvas( data.Resolution );
         if ( !made )
             return made;
 
         CloudLayoutCanvas canvas = made.ExtractValue();
 
+        // BOTH TABLES SURVIVE THE TRIP, which they did not before O-4. The mask has its own plane now, so a
+        // painting that uses all four species slots AND adds and removes cloud opens exactly as it was
+        // saved. There is nothing left for this function to refuse beyond a layout that was never valid.
         if ( data.HasPattern() )
-            for ( size_t t = 0; t < texels; ++t )
-                for ( uint32_t channel = 0; channel < kPatternBytesPerTexel; ++channel )
-                    canvas.Pixels[t * kPatternBytesPerTexel + channel] =
-                         data.Pattern[t * kPatternBytesPerTexel + channel];
+            canvas.Pattern = data.Pattern;
 
         if ( data.HasMask() )
-        {
-            // FIVE PLANES DO NOT FIT IN FOUR, and the refusal names the two that collided. A layout whose
-            // mask happens to EQUAL its fourth pattern channel is the ordinary case — that is what
-            // `--mask` and the panel's checkbox produce, both of which copy the source's alpha into both —
-            // so it opens. One that carries a mask drawn independently of channel 3 cannot be expressed as
-            // one RGBA source at all, and quietly keeping whichever plane the code happened to write last
-            // would change somebody's sky for a reason nothing on screen could explain.
-            bool masksAgree = data.HasPattern();
-            if ( masksAgree )
-                for ( size_t t = 0; t < texels; ++t )
-                    if ( data.Mask[t] != data.Pattern[t * kPatternBytesPerTexel + 3u] )
-                    {
-                        masksAgree = false;
-                        break;
-                    }
-
-            if ( !masksAgree && data.HasPattern() )
-                return Common::MakeError<CloudLayoutCanvas>(
-                     "this painting's add/remove mask differs from its fourth pattern channel, and one RGBA "
-                     "canvas has a single alpha plane to hold both. It can be previewed and bound, but "
-                     "painting on it would have to discard one of the two tables" );
-
-            for ( size_t t = 0; t < texels; ++t )
-                canvas.Pixels[t * kPatternBytesPerTexel + 3u] = data.Mask[t];
-
-            canvas.TakeMask = true;
-        }
+            canvas.Mask = data.Mask;
 
         return Common::MakeSuccess( std::move( canvas ) );
+    }
+
+    Common::ResultStr<CloudLayoutData> MakeCloudLayoutFromCanvas( const CloudLayoutCanvas& canvas )
+    {
+        const size_t texels = static_cast<size_t>( canvas.Side ) * canvas.Side;
+
+        if ( canvas.Side < kCloudLayoutMinResolution || canvas.Side > kCloudLayoutMaxResolution )
+            return Common::MakeFormattedError<CloudLayoutData>( "canvas side {} lies outside [{}, {}]",
+                                                                canvas.Side, kCloudLayoutMinResolution,
+                                                                kCloudLayoutMaxResolution );
+
+        if ( canvas.Pattern.size() != texels * kPatternBytesPerTexel )
+            return Common::MakeFormattedError<CloudLayoutData>(
+                 "canvas pattern is {} bytes, expected {} for {}x{} RGBA8", canvas.Pattern.size(),
+                 texels * kPatternBytesPerTexel, canvas.Side, canvas.Side );
+
+        if ( canvas.HasMask() && canvas.Mask.size() != texels )
+            return Common::MakeFormattedError<CloudLayoutData>( "canvas mask is {} bytes, expected {} for {}x{}",
+                                                                canvas.Mask.size(), texels, canvas.Side,
+                                                                canvas.Side );
+
+        CloudLayoutData data;
+        data.Resolution = canvas.Side;
+        data.Pattern    = canvas.Pattern;
+        data.Mask       = canvas.Mask;
+
+        // Round-tripped rather than returned raw, so that the means and the content hash a caller receives
+        // are the ones the FILE will carry. Two paths to a CloudLayoutData — one through the encoder and
+        // one around it — is how the mean in memory comes to differ from the mean on disk.
+        auto encoded = EncodeCloudLayout( data );
+        if ( !encoded )
+            return Common::MakeFormattedError<CloudLayoutData>( "layout built from the canvas is unusable: {}",
+                                                                encoded.GetError() );
+
+        return DecodeCloudLayout( encoded.GetValue() );
+    }
+
+    Common::BoolResultStr SetCloudLayoutCanvasMask( CloudLayoutCanvas& canvas, bool present )
+    {
+        if ( !present )
+        {
+            canvas.Mask.clear();
+            return Common::MakeSuccess( true );
+        }
+
+        if ( canvas.Side < kCloudLayoutMinResolution || canvas.Side > kCloudLayoutMaxResolution )
+            return Common::MakeFormattedError<bool>( "canvas side {} lies outside [{}, {}]", canvas.Side,
+                                                     kCloudLayoutMinResolution, kCloudLayoutMaxResolution );
+
+        const size_t texels = static_cast<size_t>( canvas.Side ) * canvas.Side;
+
+        // ALREADY PRESENT MEANS KEEP WHAT IS PAINTED. Re-ticking a box that was already ticked must not be
+        // an erase, and a `resize` on a mask of the right length is a no-op — which is exactly the
+        // behaviour wanted, with no branch to get the wrong way round.
+        canvas.Mask.resize( texels, kCloudLayoutMaskNeutral );
+        return Common::MakeSuccess( true );
+    }
+
+    Common::BoolResultStr
+    SetCloudLayoutCanvasPatternFromImage( CloudLayoutCanvas& canvas, const std::vector<unsigned char>& pixels,
+                                          uint32_t width, uint32_t height,
+                                          const uint32_t channelForSlot[kCloudLayoutChannels] )
+    {
+        if ( auto valid = CheckSourceImage( pixels, width, height ); !valid )
+            return valid;
+
+        for ( uint32_t slot = 0; slot < kCloudLayoutChannels; ++slot )
+            if ( channelForSlot[slot] >= kPatternBytesPerTexel )
+                return Common::MakeFormattedError<bool>(
+                     "slot {} is mapped to source channel {}, and an RGBA image has four", slot,
+                     channelForSlot[slot] );
+
+        // THE TWO TABLES OF ONE LAYOUT SHARE A RESOLUTION, and this is where that relation is kept. The
+        // file format states it once (CloudLayoutData::Resolution, one number for both), so a pattern
+        // arriving at a different side than the mask already on the canvas has to be refused rather than
+        // resized: resizing either is an opinion about somebody's painting, and the sky it produced would
+        // not be the sky either picture describes.
+        if ( canvas.HasMask() && width != canvas.Side )
+            return Common::MakeFormattedError<bool>(
+                 "this pattern is {}x{} and the mask already on this canvas is {}x{}; both tables of one "
+                 "layout share a resolution. Import a {}x{} pattern, or remove the mask first",
+                 width, height, canvas.Side, canvas.Side, canvas.Side, canvas.Side );
+
+        const size_t texels = static_cast<size_t>( width ) * height;
+
+        canvas.Side = width;
+        canvas.Pattern.resize( texels * kPatternBytesPerTexel );
+        for ( size_t t = 0; t < texels; ++t )
+            for ( uint32_t slot = 0; slot < kCloudLayoutChannels; ++slot )
+                canvas.Pattern[t * kPatternBytesPerTexel + slot] =
+                     pixels[t * kPatternBytesPerTexel + channelForSlot[slot]];
+
+        return Common::MakeSuccess( true );
+    }
+
+    Common::BoolResultStr SetCloudLayoutCanvasMaskFromImage( CloudLayoutCanvas&                canvas,
+                                                             const std::vector<unsigned char>& pixels,
+                                                             uint32_t width, uint32_t height,
+                                                             uint32_t sourceChannel )
+    {
+        if ( auto valid = CheckSourceImage( pixels, width, height ); !valid )
+            return valid;
+
+        if ( sourceChannel >= kPatternBytesPerTexel )
+            return Common::MakeFormattedError<bool>(
+                 "the mask is read from source channel {}, and an RGBA image has four", sourceChannel );
+
+        // The same relation as above, from the other side. A canvas with no pattern yet — the state a mask
+        // imported first leaves — takes the mask's own side, so neither order of the two imports is
+        // privileged.
+        const bool hasPattern = canvas.Side > 0u && !canvas.Pattern.empty();
+        if ( hasPattern && width != canvas.Side )
+            return Common::MakeFormattedError<bool>(
+                 "this mask is {}x{} and the pattern already on this canvas is {}x{}; both tables of one "
+                 "layout share a resolution. Import a {}x{} mask, or replace the pattern first",
+                 width, height, canvas.Side, canvas.Side, canvas.Side, canvas.Side );
+
+        const size_t texels = static_cast<size_t>( width ) * height;
+
+        if ( !hasPattern )
+        {
+            canvas.Side = width;
+            canvas.Pattern.assign( texels * kPatternBytesPerTexel, 0u );
+        }
+
+        canvas.Mask.resize( texels );
+        for ( size_t t = 0; t < texels; ++t )
+            canvas.Mask[t] = pixels[t * kPatternBytesPerTexel + sourceChannel];
+
+        return Common::MakeSuccess( true );
+    }
+
+    Common::ResultStr<CloudLayoutImage> EncodeCloudLayoutCanvasPatternToImage( const CloudLayoutCanvas& canvas )
+    {
+        const size_t texels = static_cast<size_t>( canvas.Side ) * canvas.Side;
+
+        if ( canvas.Side == 0u || canvas.Pattern.size() != texels * kPatternBytesPerTexel )
+            return Common::MakeFormattedError<CloudLayoutImage>(
+                 "canvas pattern is {} bytes at side {}, which is not a picture", canvas.Pattern.size(),
+                 canvas.Side );
+
+        CloudLayoutImage image;
+        image.Side   = canvas.Side;
+        image.Pixels = canvas.Pattern;
+        return Common::MakeSuccess( std::move( image ) );
+    }
+
+    Common::ResultStr<CloudLayoutImage> EncodeCloudLayoutCanvasMaskToImage( const CloudLayoutCanvas& canvas )
+    {
+        const size_t texels = static_cast<size_t>( canvas.Side ) * canvas.Side;
+
+        if ( canvas.Side == 0u || !canvas.HasMask() )
+            return Common::MakeError<CloudLayoutImage>(
+                 "this painting carries no add/remove mask, and writing a neutral one would claim a table it "
+                 "does not have" );
+
+        if ( canvas.Mask.size() != texels )
+            return Common::MakeFormattedError<CloudLayoutImage>( "canvas mask is {} bytes at side {}, expected {}",
+                                                                 canvas.Mask.size(), canvas.Side, texels );
+
+        CloudLayoutImage image;
+        image.Side = canvas.Side;
+        image.Pixels.resize( texels * kPatternBytesPerTexel );
+
+        // GREY IN R, G AND B AND AN OPAQUE ALPHA. The mask is one plane, but it leaves as an RGBA picture
+        // so that it opens as the grey it was painted in rather than as a red channel, and so that no tool
+        // reads the part of it that REMOVES cloud — the dark half — as transparency and composites it away.
+        for ( size_t t = 0; t < texels; ++t )
+        {
+            const unsigned char value                   = canvas.Mask[t];
+            image.Pixels[t * kPatternBytesPerTexel + 0] = value;
+            image.Pixels[t * kPatternBytesPerTexel + 1] = value;
+            image.Pixels[t * kPatternBytesPerTexel + 2] = value;
+            image.Pixels[t * kPatternBytesPerTexel + 3] = 255u;
+        }
+
+        return Common::MakeSuccess( std::move( image ) );
     }
 
     float CloudLayoutBrushWidthTexels( const CloudLayoutBrush& brush )
@@ -741,26 +858,27 @@ namespace Desert::Assets
     }
 
     Common::BoolResultStr BeginCloudLayoutStroke( CloudLayoutStroke&                stroke,
-                                                  const std::vector<unsigned char>& canvas, uint32_t side,
-                                                  uint32_t channel )
+                                                  const std::vector<unsigned char>& plane, uint32_t side,
+                                                  uint32_t channel, uint32_t channelCount )
     {
-        if ( auto valid = CheckCanvas( canvas, side, channel ); !valid )
+        if ( auto valid = CheckPlane( plane, side, channel, channelCount ); !valid )
             return valid;
 
         const size_t texels = static_cast<size_t>( side ) * side;
 
-        stroke.Side    = side;
-        stroke.Channel = channel;
+        stroke.Side         = side;
+        stroke.Channel      = channel;
+        stroke.ChannelCount = channelCount;
         stroke.Base.resize( texels );
         stroke.Coverage.assign( texels, 0u );
 
         for ( size_t t = 0; t < texels; ++t )
-            stroke.Base[t] = canvas[t * kPatternBytesPerTexel + channel];
+            stroke.Base[t] = plane[t * channelCount + channel];
 
         return Common::MakeSuccess( true );
     }
 
-    uint64_t ExtendCloudLayoutStroke( CloudLayoutStroke& stroke, std::vector<unsigned char>& canvas,
+    uint64_t ExtendCloudLayoutStroke( CloudLayoutStroke& stroke, std::vector<unsigned char>& plane,
                                       const glm::vec2& fromTexels, const glm::vec2& toTexels,
                                       const CloudLayoutBrush& brush )
     {
@@ -768,8 +886,9 @@ namespace Desert::Assets
             return 0u;
 
         const uint32_t side   = stroke.Side;
+        const uint32_t stride = stroke.ChannelCount;
         const size_t   texels = static_cast<size_t>( side ) * side;
-        if ( canvas.size() != texels * kPatternBytesPerTexel || stroke.Coverage.size() != texels )
+        if ( plane.size() != texels * stride || stroke.Coverage.size() != texels )
             return 0u;
 
         const float radius = std::max( brush.RadiusTexels, 0.0f );
@@ -836,7 +955,7 @@ namespace Desert::Assets
                 const unsigned char value = static_cast<unsigned char>(
                      std::lround( base + ( inkByte - base ) * ( static_cast<float>( coverage ) / 255.0f ) ) );
 
-                unsigned char& target = canvas[texel * kPatternBytesPerTexel + stroke.Channel];
+                unsigned char& target = plane[texel * stride + stroke.Channel];
                 if ( target != value )
                 {
                     target = value;
@@ -848,32 +967,34 @@ namespace Desert::Assets
         return changed;
     }
 
-    Common::BoolResultStr PaintCloudLayoutPolyline( std::vector<unsigned char>& canvas, uint32_t side,
-                                                    uint32_t channel, const std::vector<glm::vec2>& pointsTexels,
-                                                    const CloudLayoutBrush& brush )
+    Common::BoolResultStr PaintCloudLayoutPolyline( std::vector<unsigned char>& plane, uint32_t side,
+                                                    uint32_t channel, uint32_t channelCount,
+                                                    const std::vector<glm::vec2>& pointsTexels,
+                                                    const CloudLayoutBrush&       brush )
     {
         if ( pointsTexels.size() < 2u )
             return Common::MakeFormattedError<bool>( "a stroke needs at least two points, got {}",
                                                      pointsTexels.size() );
 
         CloudLayoutStroke stroke;
-        if ( auto opened = BeginCloudLayoutStroke( stroke, canvas, side, channel ); !opened )
+        if ( auto opened = BeginCloudLayoutStroke( stroke, plane, side, channel, channelCount ); !opened )
             return opened;
 
         for ( size_t i = 1; i < pointsTexels.size(); ++i )
-            ExtendCloudLayoutStroke( stroke, canvas, pointsTexels[i - 1u], pointsTexels[i], brush );
+            ExtendCloudLayoutStroke( stroke, plane, pointsTexels[i - 1u], pointsTexels[i], brush );
 
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResultStr FillCloudLayoutCanvasChannel( std::vector<unsigned char>& canvas, uint32_t side,
-                                                        uint32_t channel, unsigned char value )
+    Common::BoolResultStr FillCloudLayoutPlaneChannel( std::vector<unsigned char>& plane, uint32_t side,
+                                                       uint32_t channel, uint32_t channelCount,
+                                                       unsigned char value )
     {
-        if ( auto valid = CheckCanvas( canvas, side, channel ); !valid )
+        if ( auto valid = CheckPlane( plane, side, channel, channelCount ); !valid )
             return valid;
 
-        for ( size_t t = channel; t < canvas.size(); t += kPatternBytesPerTexel )
-            canvas[t] = value;
+        for ( size_t t = channel; t < plane.size(); t += channelCount )
+            plane[t] = value;
 
         return Common::MakeSuccess( true );
     }

@@ -32,6 +32,15 @@ namespace Desert::Assets
      *   2. `Layout_GlobalCloudMask` — regional ADD and REMOVE, and it is ADDITIVE: it is summed into the
      *      assembled shape ("Add additive mask" is the author's own node comment) and subtracts only by
      *      carrying a negative weight. There is no multiply and no remap anywhere on that path.
+     *
+     *      AND THE TWO ARE SEPARATE TEXTURE PARAMETERS AT EPIC, which is what decision O-4 brought over.
+     *      They were one RGBA picture here until then: the pattern's four channels plus the mask needed
+     *      five planes and an image has four, so the mask had to BE the fourth pattern channel — a plane
+     *      with two meanings, and a layout that used all five was refused at the door
+     *      (MakeCloudLayoutCanvasFromLayout used to say so). Below, the pattern and the mask are two
+     *      tables with two pictures, imported and exported one at a time, and the FILE is unchanged: it
+     *      always held both and always allowed either to be absent. The Cloud Raymarch material takes
+     *      them as two inputs, so one painting can supply the pattern and a different one the mask.
      *   3. `Layout_CloudHeightProfile` is NOT here, and its absence is a decision with a bearing input.
      *      Unreal needs a `f(altitude, pattern value)` table because its placement field is two-dimensional
      *      and the table is the only vertical structure it has. Ours is geometry: a lump has three radii and
@@ -266,26 +275,6 @@ namespace Desert::Assets
     Common::ResultStr<CloudLayoutData> DecodeCloudLayout( const std::vector<unsigned char>& bytes );
 
     /**
-     * @brief Builds a layout from an 8-bit RGBA image, which is what "load a texture" means for the owner.
-     *
-     * @param pixels  RGBA8, `4 * width * height`, x fastest — the layout every image loader in this tree
-     *                already produces.
-     * @param channelForSlot  which SOURCE channel feeds each species slot, 0..3 each. It exists because a
-     *                        painting is usually greyscale: an artist draws one shape and wants it on slot
-     *                        1, and without this they would have to author an RGBA image to say so.
-     * @param takeMask  when true the source's alpha becomes the mask table; when false the layout carries
-     *                  no mask at all. NOT "alpha is always the mask", because an opaque PNG has alpha 255
-     *                  everywhere, which under the signed convention would be a mask that adds cloud to the
-     *                  whole sky — a silent, uniform, wrong answer.
-     *
-     * Non-square and oversized sources are REFUSED by name rather than resampled: resampling is an opinion
-     * about the artist's painting, and one taken silently is the worst kind.
-     */
-    Common::ResultStr<CloudLayoutData>
-    MakeCloudLayoutFromImage( const std::vector<unsigned char>& pixels, uint32_t width, uint32_t height,
-                              const uint32_t channelForSlot[kCloudLayoutChannels], bool takeMask );
-
-    /**
      * @brief How wide the THINNEST parts of one painted channel are, in texels.
      *
      * WHY THIS EXISTS, AND IT IS A HOLE A VALIDATOR STRUCTURALLY CANNOT COVER.
@@ -349,15 +338,13 @@ namespace Desert::Assets
                                                       float limitTexels );
 
     // ---------------------------------------------------------------------------------------------------
-    // THE BRUSH — the second way a painting comes into existence, and the reason it is HERE
+    // THE CANVAS — the authoring surface both ways in converge on, and the reason it is HERE
     // ---------------------------------------------------------------------------------------------------
     //
-    // WHAT THE BRUSH PRODUCES IS A PICTURE, not a layout. Everything below fills an RGBA8 buffer of exactly
-    // the shape `MakeCloudLayoutFromImage` already takes, and the panel and the tool then hand that buffer
-    // to that one function. So there is still ONE statement in this tree of what a picture means, and
-    // painting and importing cannot come to differ about a channel mapping, a mask or a mean. It is the
-    // same discipline `Tools/CloudLayoutBaker`'s own header claims for the import path, extended to the
-    // path the artist actually draws on.
+    // WHAT THE BRUSH PRODUCES IS PIXELS, not a layout. Everything below fills the canvas's two planes, and
+    // the panel and the tool then hand that canvas to `MakeCloudLayoutFromCanvas`. So there is exactly ONE
+    // statement in this tree of what a picture means, and painting and importing cannot come to differ
+    // about a channel mapping, a mask or a mean.
     //
     // AND IT LIVES IN THE ENGINE RATHER THAN IN THE PANEL because a brush the editor owns is a brush no
     // test can run and no command can reproduce. The panel drives it from a mouse; the command-line baker
@@ -366,50 +353,131 @@ namespace Desert::Assets
     // "somebody clicked" is what §PT already refused once.
 
     /**
-     * @brief One RGBA8 painting surface, plus the one bit about it that is not a pixel.
+     * @brief One painting surface: the pattern's four planes and the mask's one, as two buffers.
      *
-     * THE ALPHA PLANE DOES DOUBLE DUTY AND THAT IS INHERITED, NOT INVENTED. `MakeCloudLayoutFromImage`
-     * takes four source channels and takes the MASK from alpha, so a single canvas can carry four painted
-     * pattern channels OR three plus a mask — never four plus a mask. The layout FILE can hold both; a
-     * one-image source cannot express it. @ref TakeMask records which of the two the surface means, so the
-     * question is answered by the canvas rather than by whoever is looking at it.
+     * TWO BUFFERS AND NOT ONE RGBA IMAGE, and this is decision O-4. The pattern needs four planes and the
+     * mask a fifth; an RGBA image has four, so the mask used to BE the pattern's alpha and a flag said
+     * which of the two that plane meant. That cost three things and all three are gone with it: a layout
+     * using all five planes could not be opened for painting at all, alpha had two meanings the artist had
+     * to keep straight, and the two tables could not be brought in or taken out separately — which is how
+     * Unreal has had them all along, as two texture parameters.
+     *
+     * THE MASK IS ABSENT AS AN EMPTY VECTOR, exactly as in CloudLayoutData, rather than as a flag beside a
+     * buffer of neutral bytes. One representation of "there is no mask", so no reader has to decide which
+     * of two fields to believe.
      */
     struct CloudLayoutCanvas
     {
-        /// Side in texels. Square, for the reason CloudLayoutData::Resolution is square.
+        /// Side in texels, shared by both planes. Square, for the reason CloudLayoutData::Resolution is.
         uint32_t Side = 0u;
 
-        /// RGBA8, `4 * Side * Side`, x fastest — the exact layout stbi_load returns and
-        /// MakeCloudLayoutFromImage expects.
-        std::vector<unsigned char> Pixels;
+        /// RGBA8, `4 * Side * Side`, x fastest — channel k is species slot k. This is the exact buffer
+        /// stbi_load returns and stbi_write_png takes, so the pattern needs no conversion in either
+        /// direction.
+        std::vector<unsigned char> Pattern;
 
-        /// Whether the alpha plane is the add/remove mask. A blank canvas says NO: alpha starts at the
-        /// mask's neutral 128, and a mask of uniform neutral is a mask that does nothing, so claiming one
-        /// would be a table carried for no reason.
-        bool TakeMask = false;
+        /// R8, `Side * Side`. 128 is neutral, above adds cloud and below removes it. EMPTY when this
+        /// painting carries no mask, which is the state a blank canvas starts in.
+        std::vector<unsigned char> Mask;
+
+        bool HasMask() const
+        {
+            return !Mask.empty();
+        }
     };
 
     /**
-     * @brief A blank canvas: no cloud painted anywhere, and an alpha at the mask's NEUTRAL rather than at
-     *        opaque white.
+     * @brief A blank canvas: no cloud painted anywhere, and NO MASK.
      *
-     * WHY ALPHA STARTS AT 128 AND NOT AT 255. The mask is signed about 128 — above adds cloud, below
-     * removes it — so a canvas flooded with opaque white would, the moment somebody ticked the mask box,
-     * be a mask that adds cloud to the entire sky. That is the exact silent-uniform-wrong-answer
-     * `MakeCloudLayoutFromImage`'s own `takeMask` parameter exists to refuse, and a fresh canvas must not
-     * walk into it from the other side.
+     * WHY NO MASK RATHER THAN A NEUTRAL ONE. A mask of uniform neutral changes nothing, so carrying one
+     * would be a table written to every file for no effect — and the layer would pay a wrap-sampled fetch
+     * per cell to add zero. Absent is the honest state, and @ref SetCloudLayoutCanvasMask is how an artist
+     * asks for one; it starts at neutral, so ticking the box never fills the sky by itself.
      */
     Common::ResultStr<CloudLayoutCanvas> MakeCloudLayoutCanvas( uint32_t side );
 
     /**
-     * @brief Recovers the canvas a layout could have been painted on, or says why this one could not.
+     * @brief Recovers the canvas a layout was painted on.
      *
-     * REFUSES RATHER THAN DROPS SOMETHING. A layout whose mask differs from its fourth pattern channel
-     * needs five planes and a canvas has four; opening it for painting would have to discard one of them,
-     * and a table silently discarded is a sky that changes for no reason the artist can see. The check is
-     * a byte comparison, so the answer is exact rather than a guess about provenance.
+     * IT CANNOT REFUSE FOR THE OLD REASON ANY MORE, and that is the point of O-4. This function used to
+     * reject any layout whose mask differed from its fourth pattern channel — five planes will not fit in
+     * an RGBA image — so a `.dclayout` with a pattern on all four slots AND a mask could be bound and
+     * rendered but never opened. With the mask on its own plane there is nothing left to collide, and the
+     * only failure is a layout that was not valid to begin with.
      */
     Common::ResultStr<CloudLayoutCanvas> MakeCloudLayoutCanvasFromLayout( const CloudLayoutData& data );
+
+    /**
+     * @brief The canvas as a layout: the file's tables, its means and its content hash.
+     *
+     * ROUND-TRIPPED THROUGH THE CONTAINER rather than assembled by hand, so the means and the hash a
+     * caller receives are the ones the FILE will carry. Two paths to a CloudLayoutData — one through the
+     * encoder and one around it — is how the mean in memory comes to differ from the mean on disk, and the
+     * symptom is a sky whose cover drifts from its slider with nothing anywhere to say why.
+     *
+     * A canvas with a flat pattern and no mask is still a layout; a canvas of side 0 is not, and says so.
+     */
+    Common::ResultStr<CloudLayoutData> MakeCloudLayoutFromCanvas( const CloudLayoutCanvas& canvas );
+
+    /**
+     * @brief Gives the canvas a mask, at neutral, or takes its mask away.
+     *
+     * Adding one twice keeps what is painted — it is not a clear — because the artist ticking a box they
+     * had already ticked must not lose a drawing. Removing it drops the plane, which is what makes the
+     * saved file carry no mask table at all.
+     */
+    Common::BoolResultStr SetCloudLayoutCanvasMask( CloudLayoutCanvas& canvas, bool present );
+
+    /// One square 8-bit picture: what a table looks like outside this engine, and the only shape either
+    /// direction of the import/export door deals in. RGBA8 because that is what `stbi_load(..., 4)` returns
+    /// and `stbi_write_png` takes, so neither end needs a conversion pass.
+    struct CloudLayoutImage
+    {
+        uint32_t                   Side = 0u;
+        std::vector<unsigned char> Pixels; ///< `4 * Side * Side`, x fastest
+    };
+
+    /**
+     * @brief Brings a PATTERN picture in — Unreal's `Layout_CloudGlobalPattern` slot, as a file.
+     *
+     * @param channelForSlot which SOURCE channel feeds each species slot, 0..3 each. It exists because a
+     *                       painting is usually greyscale: an artist draws one shape and wants it on slot
+     *                       1, and without this they would have to author an RGBA image to say so.
+     *
+     * Non-square and out-of-range sources are REFUSED by name rather than resampled: resampling is an
+     * opinion about the artist's painting, and one taken silently is the worst kind. A picture whose side
+     * disagrees with a mask ALREADY on this canvas is refused too, with both numbers — the two tables of
+     * one layout share a resolution, and quietly resizing either would change a sky nobody asked to change.
+     */
+    Common::BoolResultStr
+    SetCloudLayoutCanvasPatternFromImage( CloudLayoutCanvas& canvas, const std::vector<unsigned char>& pixels,
+                                          uint32_t width, uint32_t height,
+                                          const uint32_t channelForSlot[kCloudLayoutChannels] );
+
+    /**
+     * @brief Brings a MASK picture in — Unreal's `Layout_GlobalCloudMask` slot, as a file.
+     *
+     * @param sourceChannel which channel of the picture carries the mask, 0..3. A greyscale PNG loads with
+     *                      R == G == B, so 0 is right for everything an artist is likely to draw; the
+     *                      parameter exists so a mask packed into somebody's alpha is not a re-export.
+     *
+     * THE PICTURE'S BYTES ARE THE MASK'S BYTES, 128 neutral, unchanged. There is no remap and no inversion
+     * here, so what an artist flood-fills with mid-grey is exactly the value that does nothing.
+     */
+    Common::BoolResultStr SetCloudLayoutCanvasMaskFromImage( CloudLayoutCanvas&                canvas,
+                                                             const std::vector<unsigned char>& pixels,
+                                                             uint32_t width, uint32_t height,
+                                                             uint32_t sourceChannel );
+
+    /// The pattern's four planes as an RGBA picture, ready for `stbi_write_png`. Slot k is channel k, so
+    /// what comes out is what @ref SetCloudLayoutCanvasPatternFromImage takes back in under the identity
+    /// mapping — the round trip a test can assert rather than a resemblance.
+    Common::ResultStr<CloudLayoutImage> EncodeCloudLayoutCanvasPatternToImage( const CloudLayoutCanvas& canvas );
+
+    /// The mask as an RGBA picture: its byte in R, G and B so it opens as the grey an artist painted, and
+    /// an opaque alpha so no tool treats the dark half of it as transparency. Refuses a canvas with no
+    /// mask, because writing a neutral file would claim a table this painting does not have.
+    Common::ResultStr<CloudLayoutImage> EncodeCloudLayoutCanvasMaskToImage( const CloudLayoutCanvas& canvas );
 
     /**
      * @brief The brush itself: three numbers, each of which changes the pixels.
@@ -471,6 +539,12 @@ namespace Desert::Assets
         uint32_t Side    = 0u;
         uint32_t Channel = 0u;
 
+        /// How many channels the buffer being painted interleaves — 4 for the canvas's pattern, 1 for its
+        /// mask. Carried on the stroke so that the per-segment call, which runs on every mouse move, takes
+        /// the same stride the opening call validated. A stride passed twice is a stride that can be
+        /// passed differently the second time, and the symptom would be a brush writing every fourth texel.
+        uint32_t ChannelCount = 0u;
+
         /// `Side * Side`, the channel's value before this drag.
         std::vector<unsigned char> Base;
 
@@ -479,22 +553,26 @@ namespace Desert::Assets
 
         bool IsOpen() const
         {
-            return Side > 0u && Base.size() == static_cast<size_t>( Side ) * Side;
+            return Side > 0u && ChannelCount > 0u && Base.size() == static_cast<size_t>( Side ) * Side;
         }
     };
 
     /**
-     * @brief Opens a stroke on one channel of @p canvas, snapshotting it.
+     * @brief Opens a stroke on one channel of an interleaved plane buffer, snapshotting it.
      *
-     * @param channel 0..3 — R, G, B, A of the canvas. The mask is alpha, per CloudLayoutCanvas::TakeMask.
+     * @param plane        the canvas's Pattern (4 channels) or its Mask (1). Passed as bytes rather than as
+     *                     the canvas so that a test — and the stroke measure beside it — can paint a buffer
+     *                     without building an asset around it.
+     * @param channel      which channel of @p plane, `0 .. channelCount - 1`.
+     * @param channelCount how many channels @p plane interleaves.
      *
-     * Refuses a canvas whose length disagrees with its side, a side outside the layout's bounds and a
-     * channel an RGBA image does not have — each by name, because the alternative is a brush that paints
+     * Refuses a buffer whose length disagrees with its side and stride, a side outside the layout's bounds
+     * and a channel the stride does not have — each by name, because the alternative is a brush that paints
      * into the wrong plane and an artist who cannot see why.
      */
     Common::BoolResultStr BeginCloudLayoutStroke( CloudLayoutStroke&                stroke,
-                                                  const std::vector<unsigned char>& canvas, uint32_t side,
-                                                  uint32_t channel );
+                                                  const std::vector<unsigned char>& plane, uint32_t side,
+                                                  uint32_t channel, uint32_t channelCount );
 
     /**
      * @brief Extends an open stroke by one straight segment and writes the result into @p canvas.
@@ -511,7 +589,7 @@ namespace Desert::Assets
      * @return how many texels changed value. Zero means there is nothing to re-upload, which is what keeps
      *         a stationary cursor from restaging a megabyte every frame.
      */
-    uint64_t ExtendCloudLayoutStroke( CloudLayoutStroke& stroke, std::vector<unsigned char>& canvas,
+    uint64_t ExtendCloudLayoutStroke( CloudLayoutStroke& stroke, std::vector<unsigned char>& plane,
                                       const glm::vec2& fromTexels, const glm::vec2& toTexels,
                                       const CloudLayoutBrush& brush );
 
@@ -522,16 +600,18 @@ namespace Desert::Assets
      * showing "a letter painted with the brush" is showing THIS brush rather than a second one that
      * resembles it. Fewer than two points paint nothing and say so.
      */
-    Common::BoolResultStr PaintCloudLayoutPolyline( std::vector<unsigned char>& canvas, uint32_t side,
-                                                    uint32_t channel, const std::vector<glm::vec2>& pointsTexels,
-                                                    const CloudLayoutBrush& brush );
+    Common::BoolResultStr PaintCloudLayoutPolyline( std::vector<unsigned char>& plane, uint32_t side,
+                                                    uint32_t channel, uint32_t channelCount,
+                                                    const std::vector<glm::vec2>& pointsTexels,
+                                                    const CloudLayoutBrush&       brush );
 
     /**
-     * @brief Floods one channel of a canvas — the "start again" of the panel and the ground a figure is
+     * @brief Floods one channel of a plane — the "start again" of the panel and the ground a figure is
      *        drawn on.
      */
-    Common::BoolResultStr FillCloudLayoutCanvasChannel( std::vector<unsigned char>& canvas, uint32_t side,
-                                                        uint32_t channel, unsigned char value );
+    Common::BoolResultStr FillCloudLayoutPlaneChannel( std::vector<unsigned char>& plane, uint32_t side,
+                                                       uint32_t channel, uint32_t channelCount,
+                                                       unsigned char value );
 
     /// The mask's neutral byte, exposed because the panel has to offer it as an eraser's ink and the tool
     /// has to lay it down as a background. One constant, so "neutral" cannot be spelt 127 in one place and
