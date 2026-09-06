@@ -6,6 +6,7 @@
 #include <Common/Core/Constants.hpp>
 
 #include "../IPanel.hpp"
+#include "EntityTypeCensus.hpp"
 
 #include <unordered_set>
 
@@ -26,8 +27,11 @@ namespace Desert::Editor
         }
 
     private:
-        static const char* GetEntityTypeName( const ECS::Entity& entity );
-        void               DrawEntityNode( ECS::Entity& entity );
+        // What the outliner calls this entity — one lookup, so the Type column's text, the row icon's
+        // colour and the column's own width all come from the same census (EntityTypeCensus.hpp).
+        static EntityTypeKind ClassifyEntity( const ECS::Entity& entity );
+        static const char*    GetEntityTypeName( const ECS::Entity& entity );
+        void                  DrawEntityNode( ECS::Entity& entity );
         void               DrawInstantiatePrefabPopup();
         void               DrawSavePrefabPopup();
         void               SelectRangeTo( const Common::UUID& target ); // Shift+click

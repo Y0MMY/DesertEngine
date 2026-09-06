@@ -34,6 +34,10 @@
 #include "Editor/Core/EditorResources.hpp"
 #include "Editor/Core/ThemeManager.hpp"
 #include "Editor/Core/GizmoState.hpp"
+#include "Editor/Core/NumberFormat.hpp"
+#include "Editor/Core/MeshResolve.hpp"            // the toolbar/status triangle census
+#include "Editor/Core/Selection/ViewportMode.hpp" // the editor-mode rail
+#include <Engine/Geometry/MeshStats.hpp>
 #include "Editor/Core/CommandHistory.hpp"
 #include "Editor/Core/Commands/SceneCommands.hpp"
 #include "Editor/Core/EditorPreferences.hpp"
@@ -2070,6 +2074,45 @@ namespace Desert::Editor
                                                  : "Collapse the bottom drawer (Assets / Logs)" );
     }
 
+    uint64_t EditorLayer::SceneTriangleCount()
+    {
+        const uint64_t revision    = CommandHistory::Get().Revision();
+        const size_t   entityCount = m_MainScene->GetAllEntities().size();
+
+        // Recompute on an edit, on the population changing, or every ~120 frames — the last one because an
+        // async mesh load completes without touching either of the other two, and a status bar stuck on
+        // "0 tris" while the scene is visibly full would be worse than showing no number at all.
+        constexpr int kMaxCacheAgeFrames = 120;
+        if ( revision == m_TriangleCacheRev && entityCount == m_TriangleCacheCount &&
+             ++m_TriangleCacheAge < kMaxCacheAgeFrames )
+        {
+            return m_TriangleCache;
+        }
+
+        uint64_t total = 0;
+        for ( const ECS::Entity& entity : m_MainScene->GetAllEntities() )
+        {
+            // HIDDEN entities are excluded: the number sits beside the entity count in a bar that answers
+            // "what is on screen", and a hidden mesh is not.
+            if ( entity.HasComponent<ECS::VisibilityComponent>() &&
+                 !entity.GetComponent<ECS::VisibilityComponent>().Visible )
+            {
+                continue;
+            }
+            // ResolveDrawnMesh, not the mesh handle: a primitive draws the process-wide shared mesh and has
+            // no handle at all, and counting only handles reports zero for a scene of cubes (the exact trap
+            // that helper documents).
+            if ( const ::Desert::Mesh* mesh = ResolveDrawnMesh( entity ) )
+                total += Geometry::ComputeMeshStats( mesh->GetSubmeshes() ).Triangles;
+        }
+
+        m_TriangleCache      = total;
+        m_TriangleCacheRev   = revision;
+        m_TriangleCacheCount = entityCount;
+        m_TriangleCacheAge   = 0;
+        return total;
+    }
+
     void EditorLayer::DrawStatusBar()
     {
         namespace ImGui  = ::ImGui;
@@ -2136,7 +2179,18 @@ namespace Desert::Editor
         }
 
         ImGui::SameLine( 0.0f, 16.0f );
-        ImGui::TextDisabled( ICON_MDI_CUBE_OUTLINE " %zu entities", m_MainScene->GetAllEntities().size() );
+        ImGui::TextDisabled( ICON_MDI_SHAPE " %zu entities", m_MainScene->GetAllEntities().size() );
+
+        // What the scene costs to draw, beside what it contains. Two numbers that belong together: an
+        // entity count says how much there is to manage, a triangle count says how much there is to
+        // render, and only the second one explains a frame time.
+        ImGui::SameLine( 0.0f, 16.0f );
+        {
+            const uint64_t tris = SceneTriangleCount();
+            ImGui::TextDisabled( ICON_MDI_TRIANGLE_OUTLINE " %s tris", FormatThousands( tris ).c_str() );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Triangles in the VISIBLE meshes of this scene (LOD 0)." );
+        }
 
         // Active snap state: off, or the step of the CURRENT transform tool — answers "why did it
         // jump?" without opening the snap popup.
@@ -2162,20 +2216,54 @@ namespace Desert::Editor
                 ImGui::SetTooltip( "Snap (toggle in the viewport toolbar; Ctrl inverts while dragging)" );
         }
 
-        // Right: build configuration + frame rate + frame time.
+        // Right: how much the log is complaining, then which build this is.
 #ifdef DESERT_CONFIG_DEBUG
         constexpr const char* kBuildConfig = "Debug";
 #else
         constexpr const char* kBuildConfig = "Release";
 #endif
         const float fps = ImGui::GetIO().Framerate;
-        char        stats[160];
-        std::snprintf( stats, sizeof( stats ), "%s  %s   " ICON_MDI_SPEEDOMETER " %.0f FPS   %.2f ms",
-                       Common::Version::Full(), kBuildConfig, fps, fps > 0.0f ? 1000.0f / fps : 0.0f );
-        const bool  dirty  = CommandHistory::Get().Revision() != s_SavedRevision;
-        const float starW  = dirty ? ImGui::CalcTextSize( "* " ).x : 0.0f;
-        const float statsW = ImGui::CalcTextSize( stats ).x;
-        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - statsW - starW );
+        // The BRANCH beside the version: this project runs eight worktrees at once, and "which of these
+        // windows is my build" was previously answerable only from the commit hash. It comes from the same
+        // build-time git identity the version does, so it cannot disagree with the hash beside it.
+        char stats[220];
+        std::snprintf( stats, sizeof( stats ),
+                       ICON_MDI_SOURCE_BRANCH " %s   %s  %s   " ICON_MDI_SPEEDOMETER " %.0f FPS   %.2f ms",
+                       Common::Version::Branch(), Common::Version::Full(), kBuildConfig, fps,
+                       fps > 0.0f ? 1000.0f / fps : 0.0f );
+
+        // "Are there warnings?" answered where you are already looking, without opening the log. The count
+        // comes from the Logs panel's parse of the file — the one place that has read it — so the chip in
+        // that panel and this number cannot disagree.
+        const std::size_t warnings   = LogsPanel::WarningCount();
+        const std::size_t errors     = LogsPanel::ErrorCount();
+        char              alerts[96] = {};
+        if ( errors > 0 )
+            std::snprintf( alerts, sizeof( alerts ), ICON_MDI_CLOSE_CIRCLE_OUTLINE " %zu   " ICON_MDI_ALERT " %zu",
+                           errors, warnings );
+        else if ( warnings > 0 )
+            std::snprintf( alerts, sizeof( alerts ), ICON_MDI_ALERT " %zu warnings", warnings );
+
+        const bool  dirty   = CommandHistory::Get().Revision() != s_SavedRevision;
+        const float starW   = dirty ? ImGui::CalcTextSize( "* " ).x : 0.0f;
+        const float statsW  = ImGui::CalcTextSize( stats ).x;
+        const float alertsW = alerts[0] ? ImGui::CalcTextSize( alerts ).x + 16.0f : 0.0f;
+        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - statsW - starW - alertsW );
+
+        if ( alerts[0] )
+        {
+            // Errors outrank warnings in the colour as well as in the text: one red count is the whole
+            // signal, and painting it amber because warnings are also present would bury it.
+            ImGui::TextColored( errors > 0 ? ThemeManager::GetErrorColor() : ThemeManager::GetWarningColor(), "%s",
+                                alerts );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "%zu error(s), %zu warning(s) in this session's log — click to open it.",
+                                   errors, warnings );
+            if ( ImGui::IsItemClicked() )
+                Core::PanelRequests::Open( "Logs" );
+            ImGui::SameLine( 0.0f, 16.0f );
+        }
+
         if ( dirty )
         {
             // Amber star next to the version/config block = unsaved scene changes.
@@ -2191,38 +2279,272 @@ namespace Desert::Editor
         ImGui::PopStyleColor();
     }
 
+    // One toolbar button: an icon, an optional label, and an "armed" state that is drawn as a tinted fill
+    // plus a 2px underline. The underline matters — a tint alone is ambiguous against a hover, and the
+    // question "which mode am I in" has to be answerable from across the room.
+    bool EditorLayer::ToolbarButton( const char* icon, const char* label, bool active, const char* tooltip,
+                                     bool enabled )
+    {
+        namespace ImGui = ::ImGui;
+
+        char text[192];
+        if ( label && *label )
+            std::snprintf( text, sizeof( text ), "%s  %s", icon, label );
+        else
+            std::snprintf( text, sizeof( text ), "%s", icon );
+
+        const ImVec4 accent = ThemeManager::GetSelectedColor();
+        ImGui::PushStyleColor( ImGuiCol_Button, active ? ImVec4( accent.x, accent.y, accent.z, 0.30f )
+                                                       : ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 1.0f, 1.0f, 1.0f, 0.09f ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonActive, ImVec4( 1.0f, 1.0f, 1.0f, 0.16f ) );
+        ImGui::PushStyleColor( ImGuiCol_Text,
+                               active ? ImGui::GetStyleColorVec4( ImGuiCol_Text ) : ThemeManager::GetIconColor() );
+        if ( !enabled )
+            ImGui::BeginDisabled();
+
+        const bool clicked = ImGui::Button( text );
+
+        if ( active )
+        {
+            const ImVec2 mn = ImGui::GetItemRectMin();
+            const ImVec2 mx = ImGui::GetItemRectMax();
+            ImGui::GetWindowDrawList()->AddRectFilled( ImVec2( mn.x, mx.y - 2.0f ), mx,
+                                                       ImGui::GetColorU32( accent ) );
+        }
+        if ( !enabled )
+            ImGui::EndDisabled();
+        ImGui::PopStyleColor( 4 );
+
+        if ( tooltip && ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+            ImGui::SetTooltip( "%s", tooltip );
+        return clicked;
+    }
+
+    void EditorLayer::ToolbarSeparator()
+    {
+        namespace ImGui = ::ImGui;
+        ImGui::SameLine( 0.0f, 8.0f );
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const float  h = ImGui::GetFrameHeight();
+        ImGui::GetWindowDrawList()->AddLine( ImVec2( p.x, p.y + 3.0f ), ImVec2( p.x, p.y + h - 3.0f ),
+                                             IM_COL32( 70, 70, 70, 255 ) );
+        ImGui::SameLine( 0.0f, 9.0f );
+    }
+
     void EditorLayer::DrawToolbar()
     {
         namespace ImGui = ::ImGui;
-        using Op        = ::Desert::Editor::Core::GizmoState;
+        using Gz        = ::Desert::Editor::Core::GizmoState;
+        using Mode      = ::Desert::Editor::Core::ViewportMode;
+        using EMode     = ::Desert::Editor::Core::EditorMode;
 
-        // A comfortably tall strip so its buttons read as a real toolbar, not menu-bar afterthoughts.
-        const float barHeight = ImGui::GetFrameHeight() * 1.33f;
+        // THE STRIP HAS WORK NOW.
+        //
+        // It used to hold two playback buttons hard against the right edge and about 900px of nothing, and
+        // the comment here argued that a second row of commands was "more chrome between the menu and the
+        // picture". That was true of a DUPLICATE row. What the owner approved instead is the row UE
+        // actually ships: the four things that are true of the whole editor rather than of one panel —
+        // what you can undo, what mode you are in, how the gizmo behaves, and whether the world is
+        // running — none of which had a home. Editor MODES in particular could only be reached from a
+        // combo inside the viewport's own strip, which is the one place you cannot see while looking at
+        // another panel.
+        //
+        // Everything here drives state that already exists and already has exactly one owner: CommandHistory,
+        // ViewportMode, GizmoState, Scene::GetState. No control on this bar holds a value of its own.
+        const float barHeight = ImGui::GetFrameHeight() + 12.0f;
 
         ImGui::PushStyleColor( ImGuiCol_ChildBg, ImVec4( 0.086f, 0.086f, 0.086f, 1.0f ) ); // #161616 strip
         ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 8.0f, 4.0f ) );
-        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 5.0f, 0.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 2.0f, 0.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 8.0f, 5.0f ) );
         ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 4.0f );
         ImGui::BeginChild( "##Toolbar", ImVec2( 0.0f, barHeight ), false,
                            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
-        // Buttons fill the FULL height of the toolbar (minus the child's vertical padding).
-        const float  btnH = ImGui::GetContentRegionAvail().y;
-        const ImVec2 btnSize( btnH * 1.4f, btnH );
+        const bool editMode = m_MainScene->GetState() == ::Desert::Core::Scene::SceneState::Edit;
 
-        // Nothing on the left. Save lives on Ctrl+S and in the File menu, the content browser and the log
-        // are drawers in the STATUS bar, and edit modes belong to the viewport's own strip — a second row
-        // of the same commands up here was just more chrome between the menu and the picture.
-        const float spacing   = ImGui::GetStyle().ItemSpacing.x;
-        const float playbackW = btnSize.x * 2.0f + spacing; // Play/Stop + Pause
-        ImGui::SetCursorPosX( ImGui::GetWindowContentRegionMax().x - playbackW - 4.0f );
-        DrawPlayButton( btnSize );
+        // ---- Left: the file/history group -------------------------------------------------------
+        const bool dirty = CommandHistory::Get().Revision() != s_SavedRevision;
+        if ( ToolbarButton( ICON_MDI_CONTENT_SAVE, "Save", false,
+                            dirty ? "Save the scene (Ctrl+S) — there are unsaved changes"
+                                  : "Save the scene (Ctrl+S)" ) )
+        {
+            // The SAME deferred flag the File menu sets, not a second call to Serialize: saving mid-frame
+            // from a toolbar and saving from a menu must be one code path, or one of them will grow a
+            // step (the revision marker, a toast) the other forgets.
+            m_SaveSceneRequested = true;
+        }
         ImGui::SameLine();
-        DrawPauseButton( btnSize );
+
+        const auto& undoStack = CommandHistory::Get().UndoStack();
+        const auto& redoStack = CommandHistory::Get().RedoStack();
+        // The tooltip NAMES the edit, which is the difference between an undo button and a dare.
+        const std::string undoTip =
+             undoStack.empty() ? "Nothing to undo" : "Undo " + undoStack.back()->GetLabel() + " (Ctrl+Z)";
+        const std::string redoTip =
+             redoStack.empty() ? "Nothing to redo" : "Redo " + redoStack.back()->GetLabel() + " (Ctrl+Shift+Z)";
+        if ( ToolbarButton( ICON_MDI_UNDO, "", false, undoTip.c_str(), editMode && !undoStack.empty() ) )
+            CommandHistory::Get().Undo();
+        ImGui::SameLine();
+        if ( ToolbarButton( ICON_MDI_REDO, "", false, redoTip.c_str(), editMode && !redoStack.empty() ) )
+            CommandHistory::Get().Redo();
+        ToolbarSeparator();
+
+        // ---- Editor modes -----------------------------------------------------------------------
+        // Exactly the three EditorMode values the engine HAS. The mock also drew Landscape and Paint;
+        // those modes do not exist, and a button that switches to nothing is a dead setting whichever
+        // picture it came from.
+        const EMode mode = Mode::Get();
+        if ( ToolbarButton( ICON_MDI_CURSOR_DEFAULT_OUTLINE, "Select", mode == EMode::Select,
+                            "Selection and transform tools" ) )
+            Mode::Set( EMode::Select );
+        ImGui::SameLine();
+        if ( ToolbarButton( ICON_MDI_CUBE_OUTLINE, "Modeling", mode == EMode::Modeling,
+                            "Geometry tools (CubeGrid blockout)" ) )
+            Mode::Set( EMode::Modeling );
+        ImGui::SameLine();
+        if ( ToolbarButton( ICON_MDI_GRASS, "Foliage", mode == EMode::Foliage, "Paint instanced vegetation" ) )
+            Mode::Set( EMode::Foliage );
+        ToolbarSeparator();
+
+        // ---- Transform tools --------------------------------------------------------------------
+        const Gz::Operation op = Gz::Get();
+        if ( ToolbarButton( ICON_MDI_CURSOR_MOVE, "", op == Gz::Operation::Translate, "Translate (W)" ) )
+            Gz::Set( Gz::Operation::Translate );
+        ImGui::SameLine();
+        if ( ToolbarButton( ICON_MDI_ROTATE_ORBIT, "", op == Gz::Operation::Rotate, "Rotate (E)" ) )
+            Gz::Set( Gz::Operation::Rotate );
+        ImGui::SameLine();
+        if ( ToolbarButton( ICON_MDI_ARROW_EXPAND_ALL, "", op == Gz::Operation::Scale, "Scale (R)" ) )
+            Gz::Set( Gz::Operation::Scale );
+        ToolbarSeparator();
+
+        // ---- The two snap values ----------------------------------------------------------------
+        // Each button both REPORTS its step and opens the list that changes it, and the shared magnet
+        // toggle sits at the top of both lists rather than becoming a third button: snapping is one state,
+        // and two buttons for it would be two places to read a single yes/no.
+        DrawSnapControl( /*rotation=*/false );
+        ImGui::SameLine();
+        DrawSnapControl( /*rotation=*/true );
+
+        // ---- Centre: playback -------------------------------------------------------------------
+        // Centred, deliberately. Playback is the only control here that says what the WORLD is doing
+        // rather than what the editor is doing, and in the right-hand corner it read as one more tool.
+        // Clamped so it never lands on the mode rail on a narrow window — it slides right instead of
+        // overlapping, because a Play button under another button is worse than an off-centre one.
+        {
+            const float  leftEnd = ImGui::GetItemRectMax().x;
+            const float  btnH    = ImGui::GetFrameHeight();
+            const ImVec2 btnSize( btnH * 1.6f, btnH );
+            const float  playW     = 84.0f;
+            const float  groupW    = playW + ( btnSize.x + 2.0f ) * 2.0f;
+            const float  windowMid = ImGui::GetWindowPos().x + ImGui::GetWindowSize().x * 0.5f;
+            const float  startX    = std::max( windowMid - groupW * 0.5f, leftEnd + 24.0f );
+
+            ImGui::SameLine();
+            ImGui::SetCursorScreenPos( ImVec2( startX, ImGui::GetCursorScreenPos().y ) );
+
+            // Play is the bar's PRIMARY action and gets the accent; Pause is a modifier of a state that
+            // is already running and stays neutral. Undifferentiated, the pair reads as two equal
+            // buttons and the eye has to read the glyphs to find the one it wants.
+            const ImVec4 accent = ThemeManager::GetSelectedColor();
+            ImGui::PushStyleColor( ImGuiCol_Button, accent );
+            ImGui::PushStyleColor( ImGuiCol_ButtonHovered,
+                                   ImVec4( accent.x + 0.10f, accent.y + 0.08f, accent.z + 0.06f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonActive,
+                                   ImVec4( accent.x * 0.8f, accent.y * 0.8f, accent.z * 0.8f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 1.0f ) );
+            DrawPlayButton( ImVec2( playW, btnH ) );
+            ImGui::PopStyleColor( 4 );
+
+            ImGui::SameLine();
+            DrawPauseButton( btnSize );
+        }
+
+        // ---- Right: the things you leave the editor through --------------------------------------
+        {
+            ImGui::SameLine();
+            const float rightGroupW = 330.0f;
+            const float x           = std::max( ImGui::GetItemRectMax().x + 24.0f,
+                                                ImGui::GetWindowPos().x + ImGui::GetWindowSize().x - rightGroupW );
+            ImGui::SetCursorScreenPos( ImVec2( x, ImGui::GetCursorScreenPos().y ) );
+
+            if ( ToolbarButton( ICON_MDI_PACKAGE_VARIANT_CLOSED, "Package", false,
+                                "Build and package the project" ) )
+                Core::PanelRequests::Open( "Build Settings" );
+            ImGui::SameLine();
+            if ( ToolbarButton( ICON_MDI_MONITOR_DASHBOARD, "Profiler", m_ShowProfiler,
+                                "Per-pass CPU and GPU timings" ) )
+                m_ShowProfiler = !m_ShowProfiler;
+            ImGui::SameLine();
+            if ( ToolbarButton( ICON_MDI_COG, "Settings", s_ShowPreferences, "Editor preferences" ) )
+                s_ShowPreferences = !s_ShowPreferences;
+        }
 
         ImGui::EndChild();
-        ImGui::PopStyleVar( 3 );
+        ImGui::PopStyleVar( 4 );
         ImGui::PopStyleColor();
+    }
+
+    void EditorLayer::DrawSnapControl( bool rotation )
+    {
+        namespace ImGui = ::ImGui;
+        using Gz        = ::Desert::Editor::Core::GizmoState;
+
+        // Steps a person actually uses. Translation in centimetres because 1 world unit IS 1 cm here, so
+        // the label and the value are the same number and nothing has to be converted in anyone's head.
+        static constexpr float kGridSteps[]  = { 1.0f, 5.0f, 10.0f, 25.0f, 50.0f, 100.0f, 500.0f };
+        static constexpr float kAngleSteps[] = { 1.0f, 5.0f, 10.0f, 15.0f, 30.0f, 45.0f, 90.0f };
+
+        char label[64];
+        if ( rotation )
+            std::snprintf( label, sizeof( label ), "%.0f\xC2\xB0", Gz::RotateSnapDegrees() );
+        else if ( Gz::TranslateSnap() >= 100.0f )
+            std::snprintf( label, sizeof( label ), "%.0f m", Gz::TranslateSnap() / 100.0f );
+        else
+            std::snprintf( label, sizeof( label ), "%.0f cm", Gz::TranslateSnap() );
+
+        const char* icon = Gz::PersistentSnap() ? ICON_MDI_MAGNET_ON : ICON_MDI_MAGNET;
+        const char* tip  = rotation ? "Angle snap — click to change the step or toggle snapping"
+                                    : "Grid snap — click to change the step or toggle snapping";
+        if ( ToolbarButton( rotation ? ICON_MDI_ANGLE_ACUTE : icon, label, Gz::PersistentSnap(), tip ) )
+            ImGui::OpenPopup( rotation ? "##AngleSnapPopup" : "##GridSnapPopup" );
+
+        if ( ImGui::BeginPopup( rotation ? "##AngleSnapPopup" : "##GridSnapPopup" ) )
+        {
+            bool snapping = Gz::PersistentSnap();
+            if ( ImGui::Checkbox( "Snapping", &snapping ) )
+                Gz::SetPersistentSnap( snapping );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Holding Ctrl while dragging inverts this." );
+            ImGui::Separator();
+
+            if ( rotation )
+            {
+                for ( const float step : kAngleSteps )
+                {
+                    char item[32];
+                    std::snprintf( item, sizeof( item ), "%.0f\xC2\xB0", step );
+                    if ( ImGui::Selectable( item, Gz::RotateSnapDegrees() == step ) )
+                        Gz::SetRotateSnapDegrees( step );
+                }
+            }
+            else
+            {
+                for ( const float step : kGridSteps )
+                {
+                    char item[32];
+                    if ( step >= 100.0f )
+                        std::snprintf( item, sizeof( item ), "%.0f m", step / 100.0f );
+                    else
+                        std::snprintf( item, sizeof( item ), "%.0f cm", step );
+                    if ( ImGui::Selectable( item, Gz::TranslateSnap() == step ) )
+                        Gz::SetTranslateSnap( step );
+                }
+            }
+            ImGui::EndPopup();
+        }
     }
 
     // The profiler table as text. Used by the panel's button AND by --gpu-profile, because a headless shot
@@ -2485,7 +2807,11 @@ namespace Desert::Editor
             ImGui::Separator();
             bool snapChanged = false;
             snapChanged |= ImGui::Checkbox( "Snap always on (Ctrl inverts)", &prefs.PersistentSnap );
-            snapChanged |= ImGui::DragFloat( "Move (m)", &prefs.TranslateSnap, 0.05f, 0.01f, 100.0f, "%.2f" );
+            // CENTIMETRES, which is what the value has always been fed into: this control said "(m)" and
+            // clamped to 0.01..100 while writing a field GizmoState reads as world units, and a world
+            // unit is 1 cm. A slider whose unit disagrees with its consumer is how the shipped grid snap
+            // ended up at half a centimetre (see EditorPreferences::TranslateSnap).
+            snapChanged |= ImGui::DragFloat( "Move (cm)", &prefs.TranslateSnap, 1.0f, 1.0f, 10000.0f, "%.0f" );
             snapChanged |= ImGui::DragFloat( "Rotate (deg)", &prefs.RotateSnapDeg, 0.5f, 0.1f, 180.0f, "%.1f" );
             snapChanged |= ImGui::DragFloat( "Scale", &prefs.ScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f" );
             if ( snapChanged )

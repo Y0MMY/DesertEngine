@@ -69,6 +69,26 @@ namespace Desert::Editor
             else
                 LOG_WARN( "[Prefs] editor.json is corrupt, using defaults: {}", parsed.error().what() );
         }
+
+        // METRE-ERA TranslateSnap -> centimetres, once, at load, written back below.
+        //
+        // The field's default was 0.5 with the comment "world units" from when a unit was a metre. A
+        // world unit is a CENTIMETRE now, so every stored value is a hundredth of what its author meant,
+        // and the Preferences slider that wrote it was labelled "Move (m)" while feeding a centimetre
+        // system. Sub-centimetre snapping is meaningless at this scale — the smallest step the editor
+        // offers is 1 cm — so a stored value below 1 can only be a metre-era number.
+        //
+        // EXPIRY: this raises pre-2026-09 preference files and nothing else. Delete it once no one is
+        // carrying a config written before У5; it cannot fire on a value this build can produce.
+        if ( Get().TranslateSnap > 0.0f && Get().TranslateSnap < 1.0f )
+        {
+            const float old = Get().TranslateSnap;
+            Get().TranslateSnap *= 100.0f;
+            LOG_INFO( "[Prefs] Grid snap {} was a metre-era value; migrated to {} cm (1 unit = 1 cm).", old,
+                      Get().TranslateSnap );
+            Save(); // written back in the new form: the migration runs once, not every launch
+        }
+
         ApplyToGizmoState( Get() );
     }
 

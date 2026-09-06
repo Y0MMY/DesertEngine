@@ -3,6 +3,8 @@
 
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Editor/Core/Commands/SceneCommands.hpp>
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/EditorResources.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
@@ -225,15 +227,47 @@ namespace Desert::Editor
         ImGui::Spacing();
     }
 
+    void ScenePropertiesPanel::DrawNoSelectionState()
+    {
+        // Details with nothing selected used to return immediately, leaving the dock as a bare grey
+        // rectangle — the single worst square of the default editor layout, because it is also the
+        // largest, and it says neither what the panel is nor how to make it show something.
+        //
+        // The action creates an entity and SELECTS it, which means the button leaves the state it is
+        // offered from: an empty state whose button leaves you in the empty state is a decoration.
+        const bool add = Utils::ImGuiUtilities::EmptyState(
+             ICON_MDI_CURSOR_DEFAULT_OUTLINE, "Nothing selected",
+             "Pick an entity in the Outliner, or click one in the viewport.", ICON_MDI_PLUS "  Add an entity" );
+
+        if ( add && m_Scene )
+        {
+            auto       entity = m_Scene->CreateNewEntity( "Entity" );
+            const auto uuid   = entity.GetComponent<ECS::UUIDComponent>().UUID;
+            // Through the same command notification the Outliner's spawn menu uses, so the new entity is
+            // one Ctrl+Z away and the unsaved-changes marker moves.
+            Commands::NotifyCreated( { uuid } );
+            Core::SelectionManager::SetSelected( uuid );
+        }
+    }
+
     void ScenePropertiesPanel::OnUIRender()
     {
         auto selectedOpt = Core::SelectionManager::GetSelected();
         if ( !selectedOpt.has_value() )
+        {
+            DrawNoSelectionState();
             return;
+        }
 
         const auto& selectedEntityOpt = m_Scene->FindEntityByID( selectedOpt.value() );
         if ( !selectedEntityOpt )
+        {
+            // Selected, but the entity is gone (deleted while the panel was hidden, or a stale UUID from a
+            // reloaded scene). Same shape, different sentence: the reason matters to whoever is reading it.
+            Utils::ImGuiUtilities::EmptyState( ICON_MDI_CUBE_OUTLINE, "Entity not found",
+                                               "The selected entity is no longer in this scene." );
             return;
+        }
 
         const auto& selectedEntity = selectedEntityOpt.value().get();
 

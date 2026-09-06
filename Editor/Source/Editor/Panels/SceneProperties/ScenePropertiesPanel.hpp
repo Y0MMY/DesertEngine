@@ -44,6 +44,10 @@ namespace Desert::Editor
         // UE-style property search, drawn above the scrolling component list.
         void DrawSearchBox();
 
+        // What the panel draws instead of its body when nothing is selected: names itself and offers the
+        // one action that ends the state (create an entity and select it).
+        void DrawNoSelectionState();
+
         void EnsurePreview();  // create the viewport (its renderer, and the slot, come on first Update)
         void ReleasePreview(); // destroy it, which is what returns the slot
 

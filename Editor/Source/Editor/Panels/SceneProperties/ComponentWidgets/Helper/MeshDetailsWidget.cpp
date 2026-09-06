@@ -2,6 +2,7 @@
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
+#include <Editor/Core/NumberFormat.hpp>
 #include <ImGui/imgui.h>
 
 #include <Engine/Core/Scene.hpp>
@@ -19,21 +20,13 @@ namespace Desert::Editor
 
     namespace
     {
-        // 1234567 -> "1 234 567". Big triangle counts are unreadable as a raw run of digits, and that
-        // readout is the whole point of the section.
-        std::string FormatCount( uint64_t value )
+        // "1 234 567" via the shared, pure formatter (Editor/Core/NumberFormat.hpp). Kept as a local
+        // alias so the call sites below read as they always did; the grouping rule itself is tested in
+        // Desert/Tests/Editor/NumberFormat, where the wrap bug that used to split "12" into "1 2" is
+        // pinned.
+        inline std::string FormatCount( uint64_t value )
         {
-            std::string digits = std::to_string( value );
-            std::string out;
-            out.reserve( digits.size() + digits.size() / 3 );
-            const size_t lead = digits.size() % 3 == 0 ? 3 : digits.size() % 3;
-            for ( size_t i = 0; i < digits.size(); ++i )
-            {
-                if ( i > 0 && ( i - lead ) % 3 == 0 )
-                    out += ' ';
-                out += digits[i];
-            }
-            return out;
+            return ::Desert::Editor::FormatThousands( value );
         }
 
         // One read-only fact, on the panel's shared property row: same label column, same rules, same

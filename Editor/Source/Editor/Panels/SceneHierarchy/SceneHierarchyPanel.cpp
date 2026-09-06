@@ -200,27 +200,39 @@ namespace Desert::Editor
         }
     } // namespace
 
+    EntityTypeKind SceneHierarchyPanel::ClassifyEntity( const ECS::Entity& entity )
+    {
+        // Order is precedence, not taste: an entity carrying both a SkyAtmosphere and a Skybox is a
+        // procedural sky that keeps an HDR fallback, and the atmosphere is what it is named for (the
+        // same precedence ScenePropertiesPanel::GetPrimaryComponentName uses).
+        if ( entity.HasComponent<ECS::FolderComponent>() )
+            return EntityTypeKind::Folder;
+        if ( entity.HasComponent<ECS::CameraComponent>() )
+            return EntityTypeKind::Camera;
+        if ( entity.HasComponent<ECS::DirectionLightComponent>() )
+            return EntityTypeKind::DirectionalLight;
+        if ( entity.HasComponent<ECS::PointLightComponent>() )
+            return EntityTypeKind::PointLight;
+        if ( entity.HasComponent<ECS::SpotLightComponent>() )
+            return EntityTypeKind::SpotLight;
+        if ( entity.HasComponent<ECS::SkyAtmosphereComponent>() )
+            return EntityTypeKind::SkyAtmosphere;
+        if ( entity.HasComponent<ECS::SkyboxComponent>() )
+            return EntityTypeKind::Skybox;
+        if ( entity.HasComponent<ECS::TerrainComponent>() )
+            return EntityTypeKind::Terrain;
+        if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
+            return EntityTypeKind::SkinnedMesh;
+        if ( entity.HasComponent<ECS::StaticMeshComponent>() )
+            return EntityTypeKind::StaticMesh;
+        if ( entity.HasComponent<ECS::TextComponent>() )
+            return EntityTypeKind::Text;
+        return EntityTypeKind::Actor;
+    }
+
     const char* SceneHierarchyPanel::GetEntityTypeName( const ECS::Entity& entity )
     {
-        if ( entity.HasComponent<ECS::CameraComponent>() )
-            return "CameraActor";
-        if ( entity.HasComponent<ECS::DirectionLightComponent>() )
-            return "DirectionalLight";
-        if ( entity.HasComponent<ECS::PointLightComponent>() )
-            return "PointLight";
-        if ( entity.HasComponent<ECS::SpotLightComponent>() )
-            return "SpotLight";
-        if ( entity.HasComponent<ECS::SkyAtmosphereComponent>() )
-            return "SkyAtmosphereActor";
-        if ( entity.HasComponent<ECS::SkyboxComponent>() )
-            return "SkyboxActor";
-        if ( entity.HasComponent<ECS::TerrainComponent>() )
-            return "TerrainActor";
-        if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
-            return "SkinnedMeshActor";
-        if ( entity.HasComponent<ECS::StaticMeshComponent>() )
-            return "StaticMeshActor";
-        return "Actor";
+        return EntityTypeOf( ClassifyEntity( entity ) ).Name;
     }
 
     void SceneHierarchyPanel::DrawEntityNode( ECS::Entity& entity )
@@ -274,12 +286,21 @@ namespace Desert::Editor
         else if ( isPrefab )
             icon = ICON_MDI_PACKAGE_VARIANT;
 
+        // What the outliner calls this row, looked up ONCE: the icon's colour, the Type column's text and
+        // the column's own width are then three readings of one census rather than three opinions.
+        const EntityTypeKind  typeKind  = ClassifyEntity( entity );
+        const EntityTypeInfo& typeInfo  = EntityTypeOf( typeKind );
+        const ImVec4          typeColor = ImVec4( typeInfo.R, typeInfo.G, typeInfo.B, 1.0f );
+
         // Column 0: icon tree node + name
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex( 0 );
 
-        // Prefab root entities get a distinctive teal tint
-        const ImVec4 iconColor = isPrefab ? ImVec4( 0.3f, 0.9f, 0.8f, 1.0f ) : ThemeManager::GetIconColor();
+        // The icon takes the TYPE's colour, which is the whole point of having one: a list of thirty rows
+        // is sorted into meshes / lights / environment / gameplay before a single name is read. A prefab
+        // root still overrides it — "this is an instance of something" outranks "this is a mesh", and it
+        // is the fact you can act on.
+        const ImVec4 iconColor = isPrefab ? ImVec4( 0.3f, 0.9f, 0.8f, 1.0f ) : typeColor;
 
         // Reveal-on-select: open this node once if it's an ancestor of the newly-selected entity, and scroll
         // the selected row into view. Applied a single frame so the user can still collapse afterwards.
@@ -460,8 +481,17 @@ namespace Desert::Editor
             ImGui::EndPopup();
         }
 
-        // Column 1: inline visibility eye (UE5-style) + type label.
+        // Column 1: the type, in its family colour and in a column wide enough for it. Dimmed rather than
+        // recoloured when the entity is hidden — a hidden row should read as one thing, not as a coloured
+        // label attached to grey text.
         ImGui::TableSetColumnIndex( 1 );
+        ImGui::PushStyleColor( ImGuiCol_Text,
+                               visible ? typeColor : ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+        ImGui::TextUnformatted( typeInfo.Name );
+        ImGui::PopStyleColor();
+
+        // Column 2: the visibility eye, in its own fixed gutter so it can never push the type out.
+        ImGui::TableSetColumnIndex( 2 );
         ImGui::PushStyleColor( ImGuiCol_Text, visible ? ThemeManager::GetIconColor()
                                                       : ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
         ImGui::TextUnformatted( visible ? ICON_MDI_EYE_OUTLINE : ICON_MDI_EYE_OFF_OUTLINE );
@@ -470,8 +500,6 @@ namespace Desert::Editor
             m_Scene->SetVisibleRecursive( entity, !visible ); // toggles the entity + its subtree
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( visible ? "Hide" : "Show" );
-        ImGui::SameLine();
-        ImGui::TextDisabled( "%s", GetEntityTypeName( entity ) );
 
         if ( nodeOpen )
         {
@@ -757,16 +785,32 @@ namespace Desert::Editor
 
         // Entity table
         {
-            // Resizable: the Name|Type divider is draggable (long component-type names were unreadable
-            // behind the old fixed 110px column).
+            // FOUR columns, because the old two made the Type column carry the visibility eye as well —
+            // and an eye plus "StaticMeshActor" never fit in 110px, so the type was clipped on every row
+            // of the Starter scene. The eye now has its own fixed gutter and the type column is sized off
+            // the census, so it fits the widest name it can ever print (EntityTypeCensus.hpp).
+            //
+            // Resizable stays: the user can still widen Name at the Type column's expense. What changed is
+            // the DEFAULT, which is what every fresh layout gets.
             constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
                                                    ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable;
 
+            // The eye gutter: one glyph plus the cell padding it is drawn inside.
+            const float gutterWidth = ImGui::CalcTextSize( ICON_MDI_EYE_OUTLINE ).x + 8.0f;
+            const float typeWidth =
+                 TypeColumnWidth( []( const char* s ) { return ImGui::CalcTextSize( s ).x; }, 12.0f );
+
             ImGui::PushStyleVar( ImGuiStyleVar_CellPadding, ImVec2( 4.0f, 2.0f ) );
-            if ( ImGui::BeginTable( "##outliner", 2, tableFlags ) )
+            if ( ImGui::BeginTable( "##outliner", 3, tableFlags ) )
             {
                 ImGui::TableSetupColumn( "Name", ImGuiTableColumnFlags_WidthStretch );
-                ImGui::TableSetupColumn( "Type", ImGuiTableColumnFlags_WidthFixed, 110.0f );
+                ImGui::TableSetupColumn( "Type", ImGuiTableColumnFlags_WidthFixed, typeWidth );
+                // NoResize on the gutter: it holds one glyph, and a user who drags it to nothing loses the
+                // only visibility control the outliner has.
+                ImGui::TableSetupColumn( "##visible",
+                                         ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize |
+                                              ImGuiTableColumnFlags_NoHeaderLabel,
+                                         gutterWidth );
                 ImGui::TableHeadersRow();
 
                 auto& registry = m_Scene->GetRegistry();
