@@ -173,7 +173,7 @@ TEST( PackagedContent, BuildContentPakPacksWhatTheScannersFind )
     ASSERT_EQ( fonts.size(), 1u ) << "the packed font tree is invisible to the font scan";
     EXPECT_EQ( fonts[0].filename(), "fake.ttf" );
     // ...and the path the scan produced actually READS, which is what FontService::Get does next.
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( fonts[0] ), "font-body" );
+    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( fonts[0] ).GetValue(), "font-body" );
 
     const auto icons = findByExt( Desert::Runtime::IconScanRoots(), ".svg" );
     ASSERT_EQ( icons.size(), 1u ) << "the packed icon tree is invisible to the icon scan";
@@ -183,7 +183,7 @@ TEST( PackagedContent, BuildContentPakPacksWhatTheScannersFind )
     const auto assets = Common::Utils::FileSystem::ListFilesRecursive( Common::Constants::Path::ASSETS_PATH );
     ASSERT_EQ( assets.size(), 1u );
     EXPECT_EQ( assets[0].filename(), "level.desce" );
-    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( assets[0] ), "scene-body" );
+    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( assets[0] ).GetValue(), "scene-body" );
 }
 
 int main( int argc, char** argv )

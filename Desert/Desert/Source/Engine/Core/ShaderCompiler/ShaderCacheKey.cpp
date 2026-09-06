@@ -64,7 +64,8 @@ namespace Desert::Core
                     continue;
 
                 out.push_back( full );
-                WalkIncludes( Common::Utils::FileSystem::ReadFileContent( full ), full, visited, out, depth + 1 );
+                if ( const auto text = Common::Utils::FileSystem::ReadFileContent( full ); text )
+                    WalkIncludes( text.GetValue(), full, visited, out, depth + 1 );
             }
         }
     } // namespace
@@ -95,7 +96,10 @@ namespace Desert::Core
         for ( const auto& include : CollectShaderIncludes( source, requestingFile ) )
         {
             FnvMix( key, include.generic_string() );
-            FnvMix( key, Common::Utils::FileSystem::ReadFileContent( include ) );
+            // A read that fails mixes nothing — byte-identical to the empty string the old untyped
+            // read produced here, so existing cache keys stay valid.
+            if ( const auto text = Common::Utils::FileSystem::ReadFileContent( include ); text )
+                FnvMix( key, text.GetValue() );
         }
 
         return key;

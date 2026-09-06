@@ -304,8 +304,8 @@ namespace Desert::Editor
     {
         // Cook the source -> Cooked/Textures/<name>.tex (metadata names the source by its root-tagged key).
         // A failed cook (the importer logged why) returns the null handle and writes NO .tex, so stop here:
-        // CreateAsset on the missing cooked file would reach ReadFileContent, whose miss path is a
-        // DESERT_VERIFY — an abort in Debug where a missing texture should be a reported miss.
+        // CreateAsset on the missing cooked file would only fail later, inside TextureAsset::Load, with a
+        // read error about a .tex this function already knows was never written.
         if ( static_cast<uint64_t>( m_TextureImporter->Import( source ) ) == 0 )
         {
             return Common::UUID::Null();

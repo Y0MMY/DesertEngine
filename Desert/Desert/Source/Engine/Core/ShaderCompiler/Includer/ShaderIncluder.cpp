@@ -39,11 +39,18 @@ namespace Desert::Core
             return CreateErrorIncludeResult( std::format( "Cannot open include file: {}", fullPath.string() ) );
         }
 
+        // Exists() passed but the read can still fail (racing delete, truncated pak): that used to
+        // inline an EMPTY header silently — now it is the same named refusal as an unknown include.
+        auto rawInclude = Common::Utils::FileSystem::ReadFileContent( fullPath );
+        if ( !rawInclude )
+        {
+            return CreateErrorIncludeResult( rawInclude.GetError() );
+        }
+
         // Translate the Desert layout sugar so shared `.glslh` headers can use the SAME vocabulary as the
         // stage blocks (the compiler inlines includes AFTER stage assembly, so headers must be translated
         // here). Line-preserving, so #line-based include error mapping stays exact.
-        std::string content =
-             Preprocess::DShaderParser::TranslateSugar( Common::Utils::FileSystem::ReadFileContent( fullPath ) );
+        std::string content = Preprocess::DShaderParser::TranslateSugar( rawInclude.ExtractValue() );
 
         auto result = new shaderc_include_result;
 

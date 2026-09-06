@@ -143,7 +143,7 @@ namespace Common::Utils
         return filepath.parent_path().string();
     }
 
-    const std::string FileSystem::ReadFileContent( const std::filesystem::path& filepath )
+    Common::ResultStr<std::string> FileSystem::ReadFileContent( const std::filesystem::path& filepath )
     {
         std::ifstream in( filepath, std::ios::in | std::ios::binary );
         if ( !in )
@@ -151,15 +151,16 @@ namespace Common::Utils
             // Not on disk: a packaged game serves content from the mounted .dpak (disk first so loose
             // files can still override archive entries while debugging a package).
             if ( auto packed = VFS::ReadFile( filepath ) )
-                return std::move( *packed );
+                return Common::MakeSuccess( std::move( *packed ) );
 
-            // Soft by contract (see the header): the caller owns the policy for a missing file. This
-            // used to DESERT_VERIFY, i.e. abort in every configuration — which made every "file is
-            // empty or missing" branch in the loaders dead code and turned one missing asset into a
-            // crash of a packaged game.
+            // Soft by contract (see the header): the caller owns the policy for a missing file, and
+            // the error VALUE is what forces the caller to have one. This used to DESERT_VERIFY,
+            // i.e. abort in every configuration — which made every "file is empty or missing" branch
+            // in the loaders dead code and turned one missing asset into a crash of a packaged game.
             LOG_ERROR( "[FileSystem] Could not read file (not on disk, not in a mounted pak): {}",
                        filepath.string() );
-            return {};
+            return Common::MakeFormattedError<std::string>(
+                 "Could not read file (not on disk, not in a mounted pak): {}", filepath.string() );
         }
 
         std::string fileContent;
@@ -170,21 +171,24 @@ namespace Common::Utils
         in.read( &fileContent[0], fileContent.size() );
         in.close();
 
-        return fileContent;
+        // A zero-byte file lands here as a SUCCESS holding "" — distinct from the miss above.
+        return Common::MakeSuccess( std::move( fileContent ) );
     }
 
-    std::vector<uint8_t> FileSystem::ReadByteFileContent( const std::filesystem::path& filepath )
+    Common::ResultStr<std::vector<uint8_t>>
+    FileSystem::ReadByteFileContent( const std::filesystem::path& filepath )
     {
         std::ifstream file( filepath, std::ios::in | std::ios::binary );
         if ( !file )
         {
             if ( auto packed = VFS::ReadFile( filepath ) )
-                return std::vector<uint8_t>( packed->begin(), packed->end() );
+                return Common::MakeSuccess( std::vector<uint8_t>( packed->begin(), packed->end() ) );
 
             // Soft by contract (see the header) — same reasoning as ReadFileContent above.
             LOG_ERROR( "[FileSystem] Could not open file (not on disk, not in a mounted pak): {}",
                        filepath.string() );
-            return {};
+            return Common::MakeFormattedError<std::vector<uint8_t>>(
+                 "Could not open file (not on disk, not in a mounted pak): {}", filepath.string() );
         }
 
         file.seekg( 0, std::ios::end );
@@ -195,9 +199,10 @@ namespace Common::Utils
         if ( !file.read( reinterpret_cast<char*>( binaryData.data() ), fileSize ) )
         {
             LOG_ERROR( "[FileSystem] Could not read {} bytes of file: {}", fileSize, filepath.string() );
-            return {};
+            return Common::MakeFormattedError<std::vector<uint8_t>>( "Could not read {} bytes of file: {}",
+                                                                     fileSize, filepath.string() );
         }
-        return std::move( binaryData );
+        return Common::MakeSuccess( std::move( binaryData ) );
     }
 
     std::vector<std::filesystem::path> FileSystem::ListFilesRecursive( const std::filesystem::path& root )

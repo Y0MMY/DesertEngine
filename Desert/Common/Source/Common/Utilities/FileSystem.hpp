@@ -21,6 +21,8 @@
 #include <functional>
 #include <filesystem>
 
+#include <Common/Core/ResultStr.hpp>
+
 namespace Common::Utils
 {
     class FileSystem
@@ -34,17 +36,22 @@ namespace Common::Utils
         GetFileNameWithoutExtension_PATH( const std::filesystem::path& filepath );
 
     public:
-        // THE READ PRIMITIVES ARE SOFT ON PURPOSE. A path that resolves neither on disk nor in a
-        // mounted .dpak logs the path (LOG_ERROR) and returns EMPTY — it never terminates the
-        // process. A primitive cannot know whether the missing file is fatal to its caller, so the
-        // policy lives at the call site: every loader in this engine answers an empty read through
-        // its own error channel (Common::MakeError / LOG_ERROR / a defaults branch), and in a
-        // packaged game an abort down here is a guaranteed crash on the player's machine over a
-        // single missing asset. A caller for which the file IS load-bearing must check the result
-        // (or Exists()) and refuse through its own channel — see RuntimeLayer's boot-scene load.
-        // NOTE an empty return is also what a genuinely zero-byte file produces; callers that must
-        // tell the two apart ask Exists() first.
-        [[nodiscard]] static const std::string ReadFileContent( const std::filesystem::path& filepath );
+        // THE READ PRIMITIVES ARE SOFT ON PURPOSE, AND THE SOFTNESS IS GUARDED BY THE TYPE. A path
+        // that resolves neither on disk nor in a mounted .dpak logs the path (LOG_ERROR) and returns
+        // a NAMED error carrying that path — it never terminates the process. A primitive cannot
+        // know whether the missing file is fatal to its caller, so the policy lives at the call
+        // site: every loader answers a failed read through its own error channel (Common::MakeError
+        // / LOG_ERROR / a defaults branch), and in a packaged game an abort down here is a
+        // guaranteed crash on the player's machine over a single missing asset.
+        //
+        // The Result return is what enforces that contract: a caller cannot use the content without
+        // unwrapping it, so "forgot to decide about the miss" is a compile error, not the silent
+        // substitution §1.4 forbids. It also ends the old ambiguity that this comment used to have
+        // to explain away — a genuinely zero-byte file is a SUCCESS holding an empty value, a
+        // missing file is an error, and the two are different values instead of one emptiness that
+        // only an up-front Exists() could tell apart.
+        [[nodiscard]] static Common::ResultStr<std::string>
+                          ReadFileContent( const std::filesystem::path& filepath );
         static const void WriteContentToFile( const std::filesystem::path& filepath, const std::string& content );
 
         // WRITE-THEN-RENAME, for files whose PREVIOUS contents must survive a failed write. The plain
@@ -64,7 +71,8 @@ namespace Common::Utils
         [[nodiscard]] static bool WriteContentToFileAtomic( const std::filesystem::path& filepath,
                                                             const std::string&           content );
 
-        [[nodiscard]] static std::vector<uint8_t> ReadByteFileContent( const std::filesystem::path& filepath );
+        [[nodiscard]] static Common::ResultStr<std::vector<uint8_t>>
+        ReadByteFileContent( const std::filesystem::path& filepath );
 
         // Every regular file under `root`, from BOTH halves of the content world: the loose files on
         // disk and everything a mounted .dpak holds under that root, deduplicated by absolute

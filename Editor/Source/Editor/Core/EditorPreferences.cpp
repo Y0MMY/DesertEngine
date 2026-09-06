@@ -58,12 +58,12 @@ namespace Desert::Editor
             return;
         }
 
-        const std::string raw = Common::Utils::FileSystem::ReadFileContent( PrefsFile() );
-        if ( !raw.empty() )
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( PrefsFile() );
+        if ( raw && !raw.GetValue().empty() )
         {
             // DefaultIfMissing: prefs written by older builds (fewer fields) keep loading — new
             // fields just take their in-struct defaults instead of failing the whole file.
-            if ( auto parsed = rfl::json::read<EditorPreferences, rfl::DefaultIfMissing>( raw );
+            if ( auto parsed = rfl::json::read<EditorPreferences, rfl::DefaultIfMissing>( raw.GetValue() );
                  parsed.has_value() )
                 Get() = parsed.value();
             else

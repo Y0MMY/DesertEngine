@@ -53,14 +53,15 @@ namespace Desert::Project
         }
         const bool onDisk = std::filesystem::exists( deprojPath );
 
-        const std::string raw = Common::Utils::FileSystem::ReadFileContent( deprojPath );
-        if ( raw.empty() )
+        // An empty .deproj is as unusable as an unreadable one — both refuse here, before the parse.
+        const auto rawRead = Common::Utils::FileSystem::ReadFileContent( deprojPath );
+        if ( !rawRead || rawRead.GetValue().empty() )
         {
             LOG_ERROR( "[Project] Cannot read {}", deprojPath );
             return false;
         }
 
-        auto parsed = rfl::json::read<ProjectFile>( raw );
+        auto parsed = rfl::json::read<ProjectFile>( rawRead.GetValue() );
         if ( !parsed.has_value() )
         {
             LOG_ERROR( "[Project] Corrupt .deproj {}: {}", deprojPath, parsed.error().what() );
@@ -152,10 +153,10 @@ namespace Desert::Project
         if ( !std::filesystem::exists( RegistryFile() ) )
             return {};
 
-        const std::string raw = Common::Utils::FileSystem::ReadFileContent( RegistryFile() );
-        if ( raw.empty() )
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( RegistryFile() );
+        if ( !raw || raw.GetValue().empty() )
             return {};
-        auto parsed = rfl::json::read<ProjectsRegistry>( raw );
+        auto parsed = rfl::json::read<ProjectsRegistry>( raw.GetValue() );
         return parsed.has_value() ? parsed.value().Projects : std::vector<std::string>{};
     }
 

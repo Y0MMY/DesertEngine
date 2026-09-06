@@ -12,13 +12,17 @@ namespace Desert::Assets
 {
     Common::BoolResultStr PrefabAsset::Load()
     {
-        auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
-        if ( raw.empty() )
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
+        if ( !raw )
         {
-            return Common::MakeError<bool>( "Prefab file is empty or missing: " + m_Metadata.Filepath.string() );
+            return Common::MakeError<bool>( raw.GetError() );
+        }
+        if ( raw.GetValue().empty() )
+        {
+            return Common::MakeError<bool>( "Prefab file is empty: " + m_Metadata.Filepath.string() );
         }
 
-        const auto dataReflected = rfl::json::read<PrefabData>( raw );
+        const auto dataReflected = rfl::json::read<PrefabData>( raw.GetValue() );
 
         if ( !dataReflected.has_value() )
         {

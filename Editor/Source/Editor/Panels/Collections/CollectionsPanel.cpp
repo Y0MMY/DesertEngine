@@ -189,8 +189,13 @@ namespace Desert::Editor
             if ( !std::filesystem::exists( manifestPath, ec ) )
                 continue;
 
-            const auto raw     = Common::Utils::FileSystem::ReadFileContent( manifestPath );
-            const auto parsed  = rfl::json::read<Manifest>( raw );
+            const auto raw = Common::Utils::FileSystem::ReadFileContent( manifestPath );
+            if ( !raw )
+            {
+                LOG_WARN( "[Collections] {}", raw.GetError() );
+                continue;
+            }
+            const auto parsed = rfl::json::read<Manifest>( raw.GetValue() );
             if ( !parsed.has_value() )
             {
                 LOG_WARN( "[Collections] Failed to parse {}: {}", manifestPath.string(),

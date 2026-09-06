@@ -83,12 +83,14 @@ namespace Desert::Runtime
         if ( auto it = m_Fonts.find( key ); it != m_Fonts.end() )
             return it->second.get();
 
-        const auto ttf = Common::Utils::FileSystem::ReadByteFileContent( ttfPath );
-        if ( ttf.empty() )
+        // A zero-byte .ttf is as unusable as a missing one, so both land in the same refusal.
+        const auto ttfRead = Common::Utils::FileSystem::ReadByteFileContent( ttfPath );
+        if ( !ttfRead || ttfRead.GetValue().empty() )
         {
             LOG_ERROR( "[FontService] Cannot read font '{}'", ttfPath );
             return nullptr;
         }
+        const auto& ttf = ttfRead.GetValue();
 
         // Disk cache: skip the (CPU-bound) SDF bake if a matching atlas was cooked on a previous run.
         // Glyphs beyond ASCII this font was asked for. Sorted+unique, so the same set always yields the

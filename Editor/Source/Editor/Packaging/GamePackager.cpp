@@ -224,7 +224,10 @@ namespace Desert::Editor
                 fs::copy_file( fs::canonical( mvkSrc, ec ), fwDir / "libMoltenVK.dylib",
                                fs::copy_options::overwrite_existing, ec );
 
-                std::string icd = Common::Utils::FileSystem::ReadFileContent( icdSrc );
+                // Guarded by fs::exists(icdSrc) above; an unreadable file degrades to the same
+                // "library_path key not found" no-op patch the old empty read produced.
+                auto        icdRead = Common::Utils::FileSystem::ReadFileContent( icdSrc );
+                std::string icd     = icdRead ? icdRead.ExtractValue() : std::string{};
                 const auto  keyPos = icd.find( "\"library_path\"" );
                 if ( keyPos != std::string::npos )
                 {

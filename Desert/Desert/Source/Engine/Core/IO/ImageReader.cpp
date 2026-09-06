@@ -14,7 +14,10 @@ namespace Desert::Core::IO
     {
         if ( !Common::Utils::FileSystem::Exists( filepath ) )
             return false;
-        const auto bytes = Common::Utils::FileSystem::ReadByteFileContent( filepath );
+        const auto read = Common::Utils::FileSystem::ReadByteFileContent( filepath );
+        if ( !read )
+            return false;
+        const auto& bytes = read.GetValue();
         return stbi_is_hdr_from_memory( bytes.data(), static_cast<int>( bytes.size() ) );
     }
 
@@ -22,7 +25,10 @@ namespace Desert::Core::IO
     {
         ImageReaderHDRInfo returnData;
 
-        const auto bytes = Common::Utils::FileSystem::ReadByteFileContent( filepath );
+        const auto read = Common::Utils::FileSystem::ReadByteFileContent( filepath );
+        if ( !read )
+            return returnData; // Width/Height stay 0 -> caller-visible failure
+        const auto& bytes = read.GetValue();
 
         int    width, height, nrChannels;
         float* data = stbi_loadf_from_memory( bytes.data(), static_cast<int>( bytes.size() ), &width,
@@ -47,7 +53,10 @@ namespace Desert::Core::IO
     {
         ImageReaderInfo returnData;
 
-        const auto bytes = Common::Utils::FileSystem::ReadByteFileContent( filepath );
+        const auto read = Common::Utils::FileSystem::ReadByteFileContent( filepath );
+        if ( !read )
+            return returnData; // Width/Height stay 0 -> caller-visible failure
+        const auto& bytes = read.GetValue();
 
         int            width, height, nrChannels;
         unsigned char* data = stbi_load_from_memory( bytes.data(), static_cast<int>( bytes.size() ), &width,
@@ -71,7 +80,10 @@ namespace Desert::Core::IO
     {
         ImageReaderGifInfo returnData;
 
-        const auto bytes = Common::Utils::FileSystem::ReadByteFileContent( filepath );
+        const auto read = Common::Utils::FileSystem::ReadByteFileContent( filepath );
+        if ( !read )
+            return returnData; // FrameCount stays 0 -> caller-visible failure
+        const auto& bytes = read.GetValue();
 
         // stb decodes every frame at once: `data` is `frames` stacked RGBA8 images and `delays` is a
         // per-frame duration array (already milliseconds — stb stores 10 * the GIF's 1/100s value).
