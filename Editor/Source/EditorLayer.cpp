@@ -456,7 +456,8 @@ namespace Desert::Editor
 #ifdef EBABLE_IMGUI
         // 3. Initialize Engine ImGui Layer (Initializes backend and uploads fonts)
         m_ImGuiLayer = ImGui::ImGuiLayer::Create();
-        m_ImGuiLayer->OnAttach();
+        if ( const auto attached = m_ImGuiLayer->OnAttach(); !attached.IsSuccess() )
+            return Common::MakeFormattedError( "ImGui layer failed to attach: {}", attached.GetError() );
 #endif // EBABLE_IMGUI
 
         ImGuiIO& io = ::ImGui::GetIO();
@@ -499,7 +500,10 @@ namespace Desert::Editor
         // just invokes the engine helper (the locomotion knowledge lives in the engine, not here).
         Animation::ProceduralCharacterAnimations::RegisterClips( *m_AssetManager, *m_AnimationLibrary );
 
-        m_MainScene->Init();
+        // Propagated rather than reported: OnAttach owns a channel and Application::PushLayer now reads
+        // it, and an editor whose main scene never initialised has no viewport to show anything in.
+        if ( const auto inited = m_MainScene->Init(); !inited.IsSuccess() )
+            return Common::MakeFormattedError( "main scene failed to initialise: {}", inited.GetError() );
 
 #ifdef EBABLE_IMGUI
         // EVERY TOOL ENTERS THROUGH PanelRegistry::Add / Adopt, and that is the whole of the guarantee that
@@ -1130,7 +1134,12 @@ namespace Desert::Editor
         doc->Renderer = std::make_unique<Graphic::SceneRenderer>();
         doc->Scene    = std::make_shared<Desert::Core::Scene>( std::string( doc->Name ), doc->Renderer.get() );
         BuildSceneSystems( *doc->Scene );
-        doc->Scene->Init();
+        // Reported: AddSceneView is void and the document is already in the well by the time this runs, so
+        // there is nothing to hand a failure to. What matters is that the log names the view — a scene that
+        // did not initialise renders an empty viewport, which reads as a content problem, not an engine one.
+        if ( const auto inited = doc->Scene->Init(); !inited.IsSuccess() )
+            LOG_ERROR( "[EditorLayer] scene view '{}' failed to initialise: {}", doc->Name,
+                       inited.GetError() );
         doc->Registry = std::make_unique<Render::RenderRegistry>( doc->Scene );
 
         // Unique ImGui id per viewport — two windows sharing an id would merge into a single dockable window.
@@ -3866,7 +3875,8 @@ namespace Desert::Editor
         Core::SelectionManager::ClearSelection();
         m_MainScene->Clear();
         m_MainScene->SetSceneName( "New Scene" );
-        m_MainScene->Init();
+        if ( const auto inited = m_MainScene->Init(); !inited.IsSuccess() )
+            LOG_ERROR( "[EditorLayer] new scene failed to initialise: {}", inited.GetError() );
 
         // Rebuild the render registry against the fresh registry (its dtor unregisters editor passes by name).
         m_RenderRegistry.reset();
@@ -3926,7 +3936,12 @@ namespace Desert::Editor
             Editor::ToastManager::Push( "Scene failed to load — see the log", Editor::ToastLevel::Error );
         }
 
-        m_MainScene->Init();
+        if ( const auto inited = m_MainScene->Init(); !inited.IsSuccess() )
+        {
+            LOG_ERROR( "[EditorLayer] loaded scene failed to initialise: {}", inited.GetError() );
+            Editor::ToastManager::Push( "Scene could not be initialised — see the log",
+                                        Editor::ToastLevel::Error );
+        }
 
         // Destroy the old registry FIRST: its destructor unregisters the editor passes by name, and
         // assignment would run it after the new registry already re-registered them.
@@ -4371,7 +4386,12 @@ namespace Desert::Editor
             Editor::ToastManager::Push( "Play snapshot could not be restored — see the log",
                                         Editor::ToastLevel::Error );
         }
-        m_MainScene->Init();
+        if ( const auto inited = m_MainScene->Init(); !inited.IsSuccess() )
+        {
+            LOG_ERROR( "[EditorLayer] scene failed to initialise after Play: {}", inited.GetError() );
+            Editor::ToastManager::Push( "Scene could not be initialised after Play — see the log",
+                                        Editor::ToastLevel::Error );
+        }
 
         // Destroy the old registry FIRST: its destructor unregisters the editor passes by name, and
         // assignment would run it after the new registry already re-registered them.
@@ -4657,7 +4677,10 @@ namespace Desert::Editor
         // left to ~EditorLayer, which runs after the layer stack has moved on.
         (void)m_Documents.ReleaseAll();
         m_Panels.Clear();
-        m_ImGuiLayer->OnDetach();
+        // Reported and not returned even though OnDetach has a channel: everything below this line still
+        // has to run, and an early return would leave the extra documents and their render slots alive.
+        if ( const auto detached = m_ImGuiLayer->OnDetach(); !detached.IsSuccess() )
+            LOG_ERROR( "[EditorLayer] ImGui layer failed to detach: {}", detached.GetError() );
         m_ImGuiLayer.reset();
 #endif
 

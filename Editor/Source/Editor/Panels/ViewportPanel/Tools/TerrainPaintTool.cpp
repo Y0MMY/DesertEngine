@@ -209,7 +209,16 @@ namespace Desert::Editor::Tools
             else
             {
                 c.SplatMap->GetImageSpecification().Data = c.SplatPixels;
-                c.SplatMap->Invalidate();
+                // `SplatDirty` is only cleared on success, which is the point of reading this result: the
+                // flag used to be cleared regardless, so a re-upload that failed made the brush stroke
+                // disappear permanently — the CPU pixels were correct, the GPU image was stale, and
+                // nothing would ever try again.
+                const auto uploaded = c.SplatMap->Invalidate();
+                if ( !uploaded.IsSuccess() )
+                {
+                    LOG_ERROR( "[TerrainPaintTool] splat map re-upload failed: {}", uploaded.GetError() );
+                    continue;
+                }
             }
             c.SplatDirty = false;
         }
