@@ -57,71 +57,27 @@ namespace
     constexpr uint64_t kProbeHandle = 5355760296319878840ull;
     constexpr uint64_t kOtherHandle = 5355760296319878841ull;
 
-    // Restores every content root SetProjectRoot rewrites. They are process-wide mutable globals, so a
-    // test that opens a project and walks away leaves every test after it measuring that project.
+    // Restores the project root SetProjectRoot rewrites — the content directories are process-wide
+    // state, so a test that opens a project and walks away leaves every test after it measuring that
+    // project. This used to save and restore seventeen path copies one assignment at a time; the paths
+    // are all derived from the ONE root pair now, so the pair is the whole state worth saving.
     class ProjectRootGuard
     {
     public:
-        ProjectRootGuard()
-             : m_Assets( Common::Constants::Path::ASSETS_PATH ), m_Mesh( Common::Constants::Path::MESH_PATH ),
-               m_Material( Common::Constants::Path::MATERIAL_PATH ),
-               m_TextureDir( Common::Constants::Path::TEXTUREDIR_PATH ),
-               m_TextureDirEnv( Common::Constants::Path::TEXTUREDIRENV_PATH ),
-               m_Skybox( Common::Constants::Path::SKYBOX_PATH ), m_Scene( Common::Constants::Path::SCENE_PATH ),
-               m_Prefab( Common::Constants::Path::PREFAB_PATH ), m_Script( Common::Constants::Path::SCRIPT_PATH ),
-               m_Collections( Common::Constants::Path::COLLECTIONS_PATH ),
-               m_CloudNoise( Common::Constants::Path::CLOUD_NOISE_PATH ),
-               m_CloudType( Common::Constants::Path::CLOUD_TYPE_PATH ),
-               m_CloudVolume( Common::Constants::Path::CLOUD_VOLUME_PATH ),
-               m_CloudLayout( Common::Constants::Path::CLOUD_LAYOUT_PATH ),
-               m_Cooked( Common::Constants::Path::COOKED_PATH ),
-               m_MeshCooked( Common::Constants::Path::MESH_PATH_COOKED ),
-               m_TextureCooked( Common::Constants::Path::TEXTURE_PATH_COOKED )
+        ProjectRootGuard() : m_Saved( Common::Constants::Path::CurrentProjectRoot() )
         {
         }
 
         ~ProjectRootGuard()
         {
-            Common::Constants::Path::ASSETS_PATH         = m_Assets;
-            Common::Constants::Path::MESH_PATH           = m_Mesh;
-            Common::Constants::Path::MATERIAL_PATH       = m_Material;
-            Common::Constants::Path::TEXTUREDIR_PATH     = m_TextureDir;
-            Common::Constants::Path::TEXTUREDIRENV_PATH  = m_TextureDirEnv;
-            Common::Constants::Path::SKYBOX_PATH         = m_Skybox;
-            Common::Constants::Path::SCENE_PATH          = m_Scene;
-            Common::Constants::Path::PREFAB_PATH         = m_Prefab;
-            Common::Constants::Path::SCRIPT_PATH         = m_Script;
-            Common::Constants::Path::COLLECTIONS_PATH    = m_Collections;
-            Common::Constants::Path::CLOUD_NOISE_PATH    = m_CloudNoise;
-            Common::Constants::Path::CLOUD_TYPE_PATH     = m_CloudType;
-            Common::Constants::Path::CLOUD_VOLUME_PATH   = m_CloudVolume;
-            Common::Constants::Path::CLOUD_LAYOUT_PATH   = m_CloudLayout;
-            Common::Constants::Path::COOKED_PATH         = m_Cooked;
-            Common::Constants::Path::MESH_PATH_COOKED    = m_MeshCooked;
-            Common::Constants::Path::TEXTURE_PATH_COOKED = m_TextureCooked;
+            Common::Constants::Path::SetProjectRoot( m_Saved.ProjectDir, m_Saved.AssetsRoot );
         }
 
         ProjectRootGuard( const ProjectRootGuard& )            = delete;
         ProjectRootGuard& operator=( const ProjectRootGuard& ) = delete;
 
     private:
-        std::filesystem::path m_Assets;
-        std::filesystem::path m_Mesh;
-        std::filesystem::path m_Material;
-        std::filesystem::path m_TextureDir;
-        std::filesystem::path m_TextureDirEnv;
-        std::filesystem::path m_Skybox;
-        std::filesystem::path m_Scene;
-        std::filesystem::path m_Prefab;
-        std::filesystem::path m_Script;
-        std::filesystem::path m_Collections;
-        std::filesystem::path m_CloudNoise;
-        std::filesystem::path m_CloudType;
-        std::filesystem::path m_CloudVolume;
-        std::filesystem::path m_CloudLayout;
-        std::filesystem::path m_Cooked;
-        std::filesystem::path m_MeshCooked;
-        std::filesystem::path m_TextureCooked;
+        Common::Constants::Path::ProjectRootState m_Saved;
     };
 
     // A REAL cooked `.tex`, because the claim is about what the loader does with the file's own Handle

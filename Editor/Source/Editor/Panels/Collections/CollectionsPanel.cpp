@@ -128,7 +128,8 @@ namespace Desert::Editor
                 const Assets::AssetHandle opacity   = resolveTex( mat.Opacity );
 
                 const std::filesystem::path dematPath =
-                     meshDir / ( SanitizeName( mat.Name ) + Common::Constants::Extensions::MATERIAL_EXTENSION );
+                     meshDir / ( SanitizeName( mat.Name ) +
+                                 std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) );
                 if ( std::filesystem::exists( dematPath, ec ) )
                     continue; // keep the existing (possibly user-edited) .demat; its handles already match
 

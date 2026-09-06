@@ -456,7 +456,7 @@ namespace Desert::Editor
     {
         if ( !m_CurrentDir )
             return;
-        const std::string ext  = Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::string ext( Common::Constants::Extensions::MATERIAL_EXTENSION );
         const std::string name = AssetFileOps::UniqueName(
              "NewMaterial", ext,
              [&]( const std::string& n )
