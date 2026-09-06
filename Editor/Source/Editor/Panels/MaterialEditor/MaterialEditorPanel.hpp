@@ -2,10 +2,13 @@
 
 #include "../IPanel.hpp"
 
+#include "MaterialEditStates.hpp"
+
 #include <Editor/Widgets/PreviewViewport.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 
 #include <Engine/Assets/Common.hpp>
+#include <Engine/Assets/MaterialData.hpp>
 #include <Engine/Core/Formats/ShaderProgramMeta.hpp>
 
 #include <memory>
@@ -16,7 +19,6 @@ namespace Desert::Assets
 {
     class AssetManager;
     class SurfaceMaterialAsset;
-    struct MaterialData;
 }
 
 namespace Desert::Graphic
@@ -93,10 +95,46 @@ namespace Desert::Editor
 
         void SetPreviewViewpoint( const PreviewViewpoint& viewpoint ) override;
 
+        // ── The three states (IAssetEditorPanel) ───────────────────────────────────────────────────────
+        //
+        // This document STAGES. An edit lands in a working copy that only the pane beside it draws; the
+        // scene keeps rendering the state somebody accepted, until Apply. See PublishToRuntime for the
+        // mechanism and EnsureWorkingCopy for why the copy has to be a second material asset.
+        [[nodiscard]] EditModel GetEditModel() const override
+        {
+            return EditModel::Staged;
+        }
+
+        [[nodiscard]] bool      HasUnappliedEdits() const override;
+        bool                    ApplyEdits() override;
+        bool                    DiscardEdits() override;
+        [[nodiscard]] DiskState GetDiskState() const override;
+
+        // SAVE IMPLIES APPLY, and the order is not a convenience. Saving publishes the working copy first
+        // and writes second, so the file and the running editor can never disagree — a Save that wrote the
+        // working values while the scene kept rendering the older ones would put the third state ahead of
+        // the second, and the next person to look at the level would see a material that does not match
+        // its own file. Returns whether the file was written.
+        bool SaveDocument() override;
+
+        // ── The properties, for the control channel (IAssetEditorPanel) ────────────────────────────────
+        //
+        // DERIVED FROM THE SHADER'S SCHEMA, through MaterialEdit::DescribeProperties — the same walk of
+        // the same `Properties` block that DrawParameters builds its rows from. There is no list of
+        // parameter names anywhere in this window, and that is deliberate: a third one beside the schema
+        // and the table would drift, and what a client could set would stop being what an artist can
+        // edit.
+        [[nodiscard]] std::vector<EditableProperty> EditableProperties() const override;
+
+        // Reaches the material through WriteParam, which is the same function the slider calls.
+        [[nodiscard]] Common::BoolResultStr SetEditableProperty( const std::string&        name,
+                                                                 const std::vector<float>& value ) override;
+
     private:
-        // @p asset is null while the material is not loaded — the toolbar still draws its view controls,
-        // but the actions that write the asset are not offered rather than offered and doing nothing.
-        void DrawToolbar( Assets::SurfaceMaterialAsset* asset, bool isInstance );
+        // @p working is the document's working copy, or null while there is none — the material is not
+        // loaded, or the copy was refused. The view controls still draw; the actions that would change or
+        // write a material are not offered rather than offered and doing nothing.
+        void DrawToolbar( Assets::SurfaceMaterialAsset* working, bool isInstance );
 
         // Unity-style shader picker inside the material. Base assets only: an instance always renders with
         // its parent chain's shader, so a picker on one would be a control with nothing behind it.
@@ -133,13 +171,67 @@ namespace Desert::Editor
         [[nodiscard]] std::shared_ptr<Assets::SurfaceMaterialAsset>
         ResolveParent( const Assets::SurfaceMaterialAsset& asset ) const;
 
-        // Push an edit of the subject at everything already rendering it — this window's preview AND every
-        // mesh in every open scene — without either side knowing about the other. See the implementation
-        // for why both halves are needed.
-        void PropagateEdit( Assets::SurfaceMaterialAsset& asset, bool isInstance );
+        // Push @p asset's current values at every runtime material already built from it, so that whatever
+        // is rendering that asset shows them on the next frame.
+        //
+        // IT IS CALLED WITH TWO DIFFERENT ASSETS AND THAT IS THE WHOLE DESIGN. Called with the WORKING
+        // COPY it moves the ball in this window and nothing else; called with the SUBJECT (from ApplyEdits)
+        // it moves every mesh in every open scene. One mechanism, two audiences, and which audience is
+        // reached is decided by which asset is handed in rather than by a flag inside it.
+        //
+        // It used to be `PropagateEdit`, called with the subject from the edit sites themselves — one wire
+        // to both audiences, which is why an accidental drag changed the level.
+        void PublishToRuntime( Assets::SurfaceMaterialAsset& asset, bool isInstance );
 
         // Write the subject back to its `.demat` and drop the thumbnail rendered from the old values.
-        void SaveSubject( Assets::SurfaceMaterialAsset& asset );
+        // Returns whether the file was written: the on-disk snapshot must not move when it was not.
+        bool SaveSubject( Assets::SurfaceMaterialAsset& asset );
+
+        // The subject material, or null when it is no longer loaded (deleted on disk, project reloaded).
+        [[nodiscard]] std::shared_ptr<Assets::SurfaceMaterialAsset> ResolveSubject() const;
+
+        // The document's WORKING COPY, created on the first frame the subject resolves, or null while
+        // there is none — the subject is not loaded yet, or making the copy was refused (which is logged
+        // once and written into m_WorkingCopyRefusal for the window to say out loud).
+        //
+        // A SECOND MATERIAL ASSET, registered beside the subject. SurfaceMaterialAsset::CreateWorkingCopy
+        // carries the argument for why it cannot be anything smaller; the short form is that a material
+        // reaches the screen as one runtime object cached under the asset's handle, so two audiences
+        // seeing two different states needs two assets.
+        [[nodiscard]] Assets::SurfaceMaterialAsset* EnsureWorkingCopy( Assets::SurfaceMaterialAsset& subject );
+
+        // The material this window DRAWS AND EDITS: the working copy once there is one, and the subject
+        // before the first frame that could make it (and after a refusal, where the window is read-only
+        // and says so). Every per-domain decision — the schema the parameter table walks, which draw fills
+        // the pane, what the preview's pushed identity is — reads THIS, so the pane and the table cannot
+        // answer from two different materials within one frame.
+        [[nodiscard]] std::shared_ptr<Assets::SurfaceMaterialAsset> DrawnMaterial() const;
+
+        // The two "dirty"s, derived from the three states. See MaterialEditStates.hpp for why they are two
+        // and why neither is a remembered flag.
+        [[nodiscard]] MaterialEdit::DirtyState Dirty() const;
+
+        // THE SCHEMA THIS WINDOW EDITS AGAINST, or null while its shader is not loaded. One resolution,
+        // read by the parameter table, by the property census and by a `set` from the control channel —
+        // so the rows a person sees, the list a client is offered and the names a write is checked
+        // against are one walk of one declaration. Three resolutions would be three lists.
+        //
+        // An INSTANCE resolves through its parent, because EffectiveShaderName() does.
+        [[nodiscard]] const ::Desert::Core::Formats::ShaderProgramMeta* Schema() const;
+
+        // THE ONE WRITE. Every value that reaches this material's working copy goes through here: the
+        // slider in DrawParameters and a `set` arriving on the control channel alike.
+        //
+        // Not two functions doing the same thing to the same field. The rule the control channel is built
+        // on is that there is no second EXECUTION path — a channel that wrote the value itself would be
+        // correct on the day it was written and wrong on the day somebody adds a step here (the publish is
+        // already one; an undo entry will be the next), and the failure would be a scripted capture that
+        // proves a route nobody uses.
+        //
+        // Returns false only when there is nothing to write into (no working copy, no schema); the caller
+        // that came from the channel turns that into a refusal with a reason, and the widget cannot reach
+        // it at all because it is disabled in exactly that state.
+        bool WriteParam( const ::Desert::Core::Formats::ShaderParam& p, const glm::vec4& value );
 
         void EnsurePreview();  // create the viewport + scene + renderer (claims a slot)
         void ReleasePreview(); // destroy them (returns the slot)
@@ -197,6 +289,30 @@ namespace Desert::Editor
         [[nodiscard]] std::string EffectiveShaderName() const;
 
         std::shared_ptr<Assets::AssetManager> m_AssetManager;
+
+        // ── The three states ───────────────────────────────────────────────────────────────────────────
+        //
+        // WORKING lives in m_WorkingCopy->Data(). APPLIED lives in the subject asset's own Data(), which
+        // is what the runtime materials of every open scene were built from. ON DISK is the snapshot
+        // below. Only the third is stored here, and deliberately: the first two are already objects the
+        // renderer reads, and a second copy of either would be the editor holding its own opinion of a
+        // value something else owns — one source of truth per value, and the shape of defect this engine
+        // has paid for repeatedly.
+        std::shared_ptr<Assets::SurfaceMaterialAsset> m_WorkingCopy;
+
+        // What the `.demat` held when this document opened, refreshed by every successful Save. The third
+        // state, and the only one nothing else in the process is holding.
+        //
+        // Snapshotted rather than re-read from disk on demand: the question "does this differ from the
+        // file" is asked every frame (it decides the document's dirty mark), and answering it with a file
+        // read would put the disk in the frame loop.
+        Assets::MaterialData m_OnDisk;
+
+        // Why this document could not make its working copy, or empty while it could. Written once, shown
+        // in the window, and while it is set the parameter table is READ-ONLY — editing the subject
+        // directly instead would be the silent restoration of exactly the behaviour this document exists
+        // to prevent, and the artist would have no way to know which of the two modes they were in.
+        std::string m_WorkingCopyRefusal;
 
         // Null whenever the window is not drawing — this IS the zero-cost mechanism, not an optimisation on
         // top of one. unique_ptr rather than a value member for exactly that reason.

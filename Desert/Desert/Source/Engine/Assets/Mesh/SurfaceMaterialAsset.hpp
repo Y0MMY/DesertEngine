@@ -32,6 +32,30 @@ namespace Desert::Assets
             return m_ReadyForUse;
         }
 
+        // A DETACHED IN-MEMORY COPY of this material, for an editor that must hold an edit back from the
+        // scene until somebody accepts it.
+        //
+        // WHY A SECOND ASSET AND NOT A SECOND MaterialData. A material reaches the screen as a runtime
+        // Graphic::Material built from an asset and cached by MaterialService under that asset's HANDLE,
+        // and every surface drawing it — a mesh in the level and the ball in the Material Editor alike —
+        // resolves to that one object. "The preview shows the edit while the scene does not" is therefore
+        // not expressible by keeping a spare copy of the values somewhere: it needs a second runtime
+        // material for the second audience, and a second runtime material needs an asset of its own to be
+        // built from. This is that asset.
+        //
+        // THE IDENTITY IS FRESH, and that is the whole risk this function carries. The material UUID is the
+        // EXTERNAL id every mesh submesh names its material by (MaterialService's external -> internal
+        // map), so a copy that kept the source's id would take that mapping over the moment it registered
+        // and every mesh in the level would start resolving to the working copy — the defect this exists to
+        // remove, inverted and worse. ParentMaterialId is copied unchanged for the opposite reason: it
+        // names somebody else, and an instance's working copy has to resolve through the same parent chain
+        // the subject does.
+        //
+        // The copy is NEVER WRITTEN. It carries the source's filepath so a log line about it names
+        // something a person recognises; the document saves the subject, not this.
+        [[nodiscard]] static std::shared_ptr<SurfaceMaterialAsset>
+        CreateWorkingCopy( const SurfaceMaterialAsset& source );
+
         // Canonical data — single source of truth for the editor UI, serialization and the
         // runtime material build.
         MaterialData&       Data()       { return m_Data; }

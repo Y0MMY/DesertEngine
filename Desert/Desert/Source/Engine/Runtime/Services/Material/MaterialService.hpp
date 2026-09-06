@@ -143,6 +143,20 @@ namespace Desert::Runtime
         // CollectGarbage() runs at a safe point.
         void Invalidate( const Assets::AssetHandle& handle );
 
+        // FORGET a material asset entirely — its runtime materials, its shell, and its entry in the
+        // external -> internal map.
+        //
+        // Invalidate() above drops the built materials and KEEPS the shell, because the asset is still
+        // there and the next draw has to rebuild from it. This is the other case: the asset itself stops
+        // existing. The Material Editor's working copy is the asset that does — it is registered beside
+        // its subject while a document is open and must leave nothing behind when the window closes, or
+        // the service accumulates one dead material per material ever opened and GetAssetHandleByExternal
+        // keeps answering for an id nothing holds.
+        //
+        // The built materials go through the graveyard exactly as Invalidate sends them, and for the same
+        // reason: a frame in flight may still be executing against their descriptor pools.
+        void Release( const Assets::AssetHandle& handle );
+
         // Destroys invalidated materials. Call at the START of a frame (before any command
         // recording); waits for the device to go idle first, so no in-flight frame can still
         // reference the dying descriptor pools. No-op (and free) when the graveyard is empty.

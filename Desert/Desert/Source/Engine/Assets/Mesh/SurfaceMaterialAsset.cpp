@@ -18,6 +18,34 @@ namespace Desert::Assets
     {
     }
 
+    std::shared_ptr<SurfaceMaterialAsset>
+    SurfaceMaterialAsset::CreateWorkingCopy( const SurfaceMaterialAsset& source )
+    {
+        auto copy =
+             std::make_shared<SurfaceMaterialAsset>( source.m_Metadata.Priority, source.m_Metadata.Filepath );
+
+        copy->m_Data = source.m_Data;
+        // Carried over so a working copy of a material that is running on substituted defaults refuses to
+        // save for the same reason its source does. Nothing saves the copy today, and this is what keeps
+        // that true if something ever tries.
+        copy->m_RunningOnSubstitutedDefaults = source.m_RunningOnSubstitutedDefaults;
+
+        // Generated, and named as generated. A random id here is the one thing that keeps this copy out of
+        // every map the subject is in — see the header for what a shared one would do to the mesh ->
+        // material link. All three are written from ONE value because Load() maintains exactly that
+        // equality (m_MaterialUUID = m_Metadata.Handle, adopted from Data().MaterialId), and a copy that
+        // broke it would resolve differently depending on which of the three a caller happened to ask.
+        const Common::UUID identity = Common::UUID::Generate();
+        copy->m_Metadata.Handle     = identity;
+        copy->m_MaterialUUID        = identity;
+        copy->m_Data.MaterialId     = identity;
+
+        // Never Load()ed, so nothing else would set this — and an asset that is not ready for use is
+        // skipped by everything that would draw it.
+        copy->m_ReadyForUse = true;
+        return copy;
+    }
+
     const char* SurfaceMaterialAsset::SamplerNameForType( TextureAsset::Type type )
     {
         switch ( type )

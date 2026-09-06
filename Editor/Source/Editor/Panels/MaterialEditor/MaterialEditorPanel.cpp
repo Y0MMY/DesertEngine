@@ -155,14 +155,194 @@ namespace Desert::Editor
     // paid for in Vulkan lifetimes more than once.
     MaterialEditorPanel::~MaterialEditorPanel()
     {
+        // CLOSING WITH EDITS NOBODY ACCEPTED IS A LOSS, AND STAGING IS WHAT MADE IT POSSIBLE. Before this
+        // window held three states, an unaccepted edit was already in the scene and could still be saved
+        // later; now it dies here with the working copy. The right answer is a question on close, and that
+        // lives in EditorLayer's document-close path rather than in a destructor, which cannot refuse.
+        // Until it exists this is what stops the loss being SILENT — the values are in the message, so a
+        // person who closed the wrong window can put them back by hand.
+        if ( const MaterialEdit::DirtyState dirty = Dirty(); dirty.Unapplied || dirty.Unsaved )
+        {
+            const auto        subject = ResolveSubject();
+            const std::string name =
+                 subject ? subject->GetMetadata().Filepath.generic_string() : std::string( "<unloaded>" );
+
+            if ( dirty.Unapplied )
+            {
+                // The values themselves, so somebody who closed the wrong window can put them back by hand.
+                // Through the copy's own Save() rather than a serializer of this file's choosing: one
+                // material is written one way, and that way already refuses a material running on
+                // substituted defaults.
+                std::string values = "<could not be serialized>";
+                if ( m_WorkingCopy )
+                {
+                    if ( const auto serialized = m_WorkingCopy->Save(); serialized )
+                        values = serialized.GetValue();
+                }
+                LOG_WARN( "[MaterialEditor] '{}' closed with edits that were never applied — they are GONE. "
+                          "What this window was showing: {}",
+                          name, values );
+            }
+            else
+            {
+                LOG_WARN( "[MaterialEditor] '{}' closed with applied edits that were never saved. The scene "
+                          "still has them; the file does not, so they end with this session.",
+                          name );
+            }
+        }
+
+        // The preview FIRST. It owns the entity whose slot resolved to the working copy's runtime
+        // material, and ~PreviewViewport idles the device before releasing it — so by the time the copy is
+        // released there is nothing left holding an instance of a material about to be graveyarded.
         ReleasePreview();
+
+        if ( m_WorkingCopy )
+        {
+            if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
+                materialService->Release( m_WorkingCopy->GetMetadata().Handle );
+            m_WorkingCopy.reset();
+        }
+    }
+
+    std::shared_ptr<Assets::SurfaceMaterialAsset> MaterialEditorPanel::ResolveSubject() const
+    {
+        if ( !m_AssetManager )
+            return nullptr;
+        return m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() );
+    }
+
+    std::shared_ptr<Assets::SurfaceMaterialAsset> MaterialEditorPanel::DrawnMaterial() const
+    {
+        if ( m_WorkingCopy )
+            return m_WorkingCopy;
+        return ResolveSubject();
+    }
+
+    Assets::SurfaceMaterialAsset* MaterialEditorPanel::EnsureWorkingCopy( Assets::SurfaceMaterialAsset& subject )
+    {
+        if ( m_WorkingCopy )
+            return m_WorkingCopy.get();
+        if ( !m_WorkingCopyRefusal.empty() )
+            return nullptr; // refused once; retrying every frame would log the same line forever
+
+        auto* materialService = Runtime::ResourceRegistry::GetMaterialService();
+        if ( !materialService )
+        {
+            // Not written to m_WorkingCopyRefusal: the service is a startup-order fact, not a property of
+            // this material, and a frame this early has no window on screen to read a message anyway.
+            return nullptr;
+        }
+
+        auto copy = Assets::SurfaceMaterialAsset::CreateWorkingCopy( subject );
+
+        // Lazily: the runtime material is built by the first draw that asks for it, which for a document
+        // whose domain has no preview shape is never. RegisterAsset can only refuse on an identity
+        // collision, and the copy's identity was just generated — so a refusal here means the generator
+        // handed out a live id, which is worth saying rather than swallowing.
+        if ( const auto registered = materialService->RegisterAsset( copy ); !registered )
+        {
+            m_WorkingCopyRefusal =
+                 "This material cannot be edited in this session: its working copy was refused by the "
+                 "material service (" +
+                 registered.GetError() +
+                 "). The parameters below are shown as they are and cannot be changed — editing the "
+                 "material directly would put the change in every open scene with no way to undo it.";
+            LOG_ERROR( "[MaterialEditor] '{}': {}", subject.GetMetadata().Filepath.generic_string(),
+                       m_WorkingCopyRefusal );
+            return nullptr;
+        }
+
+        m_WorkingCopy = std::move( copy );
+
+        // The third state, taken at the moment the document opens. The subject in memory IS what the file
+        // held — nothing has edited it yet — so this is a snapshot of the file without reading it.
+        MaterialEdit::CopyAuthoredValues( m_OnDisk, subject.Data() );
+
+        LOG_INFO( "[MaterialEditor] '{}' opened with a working copy (handle {}); edits stay in this window "
+                  "until Apply.",
+                  subject.GetMetadata().Filepath.generic_string(),
+                  static_cast<uint64_t>( m_WorkingCopy->GetMetadata().Handle ) );
+        return m_WorkingCopy.get();
+    }
+
+    MaterialEdit::DirtyState MaterialEditorPanel::Dirty() const
+    {
+        const auto subject = ResolveSubject();
+        if ( !m_WorkingCopy || !subject )
+            return {};
+        return MaterialEdit::EvaluateDirty( m_WorkingCopy->Data(), subject->Data(), m_OnDisk );
+    }
+
+    bool MaterialEditorPanel::HasUnappliedEdits() const
+    {
+        return Dirty().Unapplied;
+    }
+
+    IAssetEditorPanel::DiskState MaterialEditorPanel::GetDiskState() const
+    {
+        // UNTRACKED, not Clean, while there is no working copy: without one no snapshot was ever taken, so
+        // this document has no evidence about its file and must not claim it is up to date.
+        if ( !m_WorkingCopy || !ResolveSubject() )
+            return DiskState::Untracked;
+        return Dirty().Unsaved ? DiskState::Dirty : DiskState::Clean;
+    }
+
+    bool MaterialEditorPanel::ApplyEdits()
+    {
+        const auto subject = ResolveSubject();
+        if ( !m_WorkingCopy || !subject )
+            return false;
+        if ( !MaterialEdit::EvaluateDirty( m_WorkingCopy->Data(), subject->Data(), m_OnDisk ).Unapplied )
+            return false;
+
+        // A SHADER change is not a re-valuing. The runtime material's CLASS follows the shader, so the
+        // cached one cannot be handed the new values — it has to be dropped and rebuilt from the asset.
+        // Read BEFORE the copy, because afterwards the two names agree by construction.
+        const bool shaderChanged =
+             subject->Data().EffectiveShaderName() != m_WorkingCopy->Data().EffectiveShaderName();
+
+        MaterialEdit::CopyAuthoredValues( subject->Data(), m_WorkingCopy->Data() );
+
+        if ( shaderChanged )
+        {
+            if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
+                materialService->Invalidate( subject->GetMetadata().Handle );
+        }
+        else
+        {
+            PublishToRuntime( *subject, subject->Data().IsInstance() );
+        }
+        return true;
+    }
+
+    bool MaterialEditorPanel::DiscardEdits()
+    {
+        const auto subject = ResolveSubject();
+        if ( !m_WorkingCopy || !subject )
+            return false;
+
+        const bool shaderChanged =
+             subject->Data().EffectiveShaderName() != m_WorkingCopy->Data().EffectiveShaderName();
+
+        MaterialEdit::CopyAuthoredValues( m_WorkingCopy->Data(), subject->Data() );
+
+        // The same distinction Apply makes, one audience over: the preview's own runtime material is the
+        // one that has to be dropped when the shader moved back, and merely re-valued when it did not.
+        if ( shaderChanged )
+        {
+            if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
+                materialService->Invalidate( m_WorkingCopy->GetMetadata().Handle );
+        }
+        else
+        {
+            PublishToRuntime( *m_WorkingCopy, m_WorkingCopy->Data().IsInstance() );
+        }
+        return true;
     }
 
     std::string MaterialEditorPanel::EffectiveShaderName() const
     {
-        if ( !m_AssetManager )
-            return {};
-        auto asset = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() );
+        auto asset = DrawnMaterial();
         if ( !asset )
             return {};
 
@@ -210,9 +390,10 @@ namespace Desert::Editor
                        "this pane could wrap onto the preview ball. Declare one in the shader's "
                        "Properties block.";
 
-            const auto asset = m_AssetManager
-                                    ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() )
-                                    : nullptr;
+            // The WORKING COPY, like everything else this pane answers from: the message beside an empty
+            // ball has to describe the material the ball would be showing, or "nothing is bound" appears
+            // over a preview that is drawing the cubemap the artist just dropped.
+            const auto asset = DrawnMaterial();
             // Kept alive for the whole read: an instance's textures come from its parent (v1 rule).
             const auto     parent = asset ? ResolveParent( *asset ) : nullptr;
             const uint64_t bound =
@@ -254,7 +435,9 @@ namespace Desert::Editor
     {
         if ( !m_AssetManager )
             return nullptr;
-        const auto asset = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() );
+        // The working copy: this closure is what the ball resolves through every frame, so it is the
+        // window's live edit that must reach it, not the state the scene is still rendering.
+        const auto asset = DrawnMaterial();
         if ( !asset )
             return nullptr;
 
@@ -396,12 +579,23 @@ namespace Desert::Editor
         // resolved through a closure so the pane tracks the material's slot with no copy to invalidate.
         // A future Volume domain slots in here with a march, not with a new Shape. The domain term of
         // the identity is the ShaderName term: one names the other.
-        if ( const PushedIdentity wanted{ Subject(), m_Shape, EffectiveShaderName() }; !( wanted == m_Pushed ) )
+        // THE HANDLE PUSHED IS THE WORKING COPY'S, NOT THE SUBJECT'S, and that one substitution is the
+        // whole of "the ball shows the edit and the level does not". PreviewViewport fills an ordinary
+        // StaticMeshComponent slot with it, so this pane still takes the exact route a scene mesh takes —
+        // it simply takes it to a different material asset. The preview is therefore no more flattering
+        // than it was (Desert/Tests/Editor/MaterialPreviewRoute still holds): it is the same route to the
+        // material the subject is ABOUT to become.
+        const auto drawn = DrawnMaterial();
+        if ( !drawn )
+            return;
+
+        if ( const PushedIdentity wanted{ drawn->GetMetadata().Handle, m_Shape, EffectiveShaderName() };
+             !( wanted == m_Pushed ) )
         {
             if ( EffectiveDomain() == ::Desert::Core::Formats::ShaderDomain::Skybox )
                 m_Preview->SetCubemapMaterial( [this] { return ResolveSubjectCubemap(); } );
             else
-                m_Preview->SetMaterial( Subject(), m_Shape );
+                m_Preview->SetMaterial( drawn->GetMetadata().Handle, m_Shape );
             m_Pushed = wanted;
         }
 
@@ -437,7 +631,7 @@ namespace Desert::Editor
         m_Preview->SetOrbit( glm::radians( viewpoint.YawDegrees ), glm::radians( viewpoint.PitchDegrees ) );
     }
 
-    void MaterialEditorPanel::DrawToolbar( Assets::SurfaceMaterialAsset* asset, bool isInstance )
+    void MaterialEditorPanel::DrawToolbar( Assets::SurfaceMaterialAsset* working, bool isInstance )
     {
         // No material combo: this window IS one material. Picking a different one is opening a different
         // document, which is the whole point of the change that deleted the combo.
@@ -472,8 +666,36 @@ namespace Desert::Editor
         if ( ImGui::Button( "Reset View" ) && m_Preview )
             m_Preview->ResetView();
 
-        if ( !asset )
+        if ( !working )
             return;
+
+        // APPLY, DISCARD, SAVE — the three states in the order an artist moves through them, and the two
+        // that did not exist before are the point of this window.
+        //
+        // The scene changes on APPLY and nowhere else. Before this row, it changed while the slider was
+        // still moving: the edit went into the asset every scene renders from, so an accidental drag
+        // reached every mesh in the level immediately, nothing could put it back, and the next deliberate
+        // Save wrote the accident to disk. That is what DISCARD is for, and Discard is not optional — a
+        // window that marks itself unsaved while offering no way back tells the artist an edit is
+        // reversible and then is not.
+        const MaterialEdit::DirtyState dirty = Dirty();
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled( !dirty.Unapplied );
+        if ( ImGui::Button( "Apply" ) )
+            ApplyEdits();
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Put these values into every scene that draws this material.\nUntil you do, "
+                               "they exist only in this window's preview." );
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled( !dirty.Unapplied );
+        if ( ImGui::Button( "Discard" ) )
+            DiscardEdits();
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Throw these edits away and go back to what the scene is showing." );
 
         // Save came here with the parameters it persists. It used to sit on the Details slot row, where it
         // was the only way to write a `.demat` at all — but Details no longer edits a material, so a save
@@ -481,20 +703,40 @@ namespace Desert::Editor
         // edits die with the session.
         ImGui::SameLine();
         if ( ImGui::Button( "Save" ) )
-            SaveSubject( *asset );
+            SaveDocument();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Write the file. Applies first, so the file and the running editor cannot "
+                               "disagree." );
 
         if ( isInstance )
         {
             ImGui::SameLine();
             if ( ImGui::Button( "Reset Overrides" ) )
             {
-                asset->Data().Params.clear();
-                asset->Data().Textures.clear();
-                PropagateEdit( *asset, /*isInstance=*/true );
+                // The WORKING copy, like every other edit in this window: dropping every override is a
+                // large edit, which makes it the one most worth being able to take back.
+                working->Data().Params.clear();
+                working->Data().Textures.clear();
+                PublishToRuntime( *working, /*isInstance=*/true );
             }
             if ( ImGui::IsItemHovered() )
                 // ASCII: an em dash here draws as '?' — measured, see WhatTheDomainDrawsInstead.
                 ImGui::SetTooltip( "Drop every override, back to the parent's values" );
+        }
+
+        // WHICH OF THE THREE STATES THIS WINDOW IS IN, said out loud. Two different "dirty"s, so two
+        // different sentences: one is about the scene and one is about the file, and collapsing them into
+        // a single "modified" would leave the artist unable to tell whether pressing Save is about to
+        // publish something they have not looked at.
+        if ( dirty.Unapplied )
+        {
+            ImGui::SameLine();
+            ImGui::TextColored( ImVec4( 1.0f, 0.72f, 0.35f, 1.0f ), "not applied" );
+        }
+        else if ( dirty.Unsaved )
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled( "applied, not saved" );
         }
     }
 
@@ -634,17 +876,16 @@ namespace Desert::Editor
     bool MaterialEditorPanel::DrawParameters( Assets::SurfaceMaterialAsset& asset,
                                               const Assets::MaterialData* parentData, bool isInstance )
     {
-        auto*             shaderService = Runtime::ResourceRegistry::GetShaderService();
-        const std::string shaderName =
-             parentData ? parentData->EffectiveShaderName() : asset.Data().EffectiveShaderName();
-        auto shader = shaderService ? shaderService->GetByName( shaderName ) : nullptr;
-        if ( !shader )
+        // ONE RESOLUTION OF THE SCHEMA, shared with the property census and with a `set` arriving on the
+        // control channel — see Schema(). Three resolutions would be three lists of parameter names.
+        const ::Desert::Core::Formats::ShaderProgramMeta* meta = Schema();
+        if ( !meta )
         {
-            ImGui::TextDisabled( "Shader '%s' is not loaded", shaderName.c_str() );
+            ImGui::TextDisabled( "Shader '%s' is not loaded", EffectiveShaderName().c_str() );
             return false;
         }
 
-        const auto& schema = shader->GetProgramMeta();
+        const auto& schema = *meta;
         if ( schema.Params.empty() )
         {
             ImGui::TextDisabled( "This shader exposes no parameters" );
@@ -843,9 +1084,10 @@ namespace Desert::Editor
             }
 
             // Seed with: child override -> parent's effective value (instance mode) -> schema default.
-            const glm::vec4 fallback = parentData ? parentData->GetParam( p.Name, p.Default ) : p.Default;
-            glm::vec4       value    = data.GetParam( p.Name, fallback );
-            bool            edited   = false;
+            // Through MaterialEdit::EffectiveParamValue, which is also what the property census reads, so a
+            // client that asks what this document is showing gets the number that is on the screen.
+            glm::vec4 value  = MaterialEdit::EffectiveParamValue( data, parentData, p );
+            bool      edited = false;
 
             if ( p.Widget == W::Color )
             {
@@ -894,8 +1136,11 @@ namespace Desert::Editor
 
             if ( edited )
             {
-                data.SetParam( p.Name, value );
-                changed = true;
+                // THROUGH WriteParam, the one write — the same function a `set` on the control channel
+                // reaches. `changed` is deliberately NOT raised here: WriteParam has already published, and
+                // the caller's publish exists for the texture and asset-reference rows above, which write
+                // MaterialData::Textures directly and have no schema-checked setter to go through.
+                WriteParam( p, value );
             }
             ImGui::PopItemWidth();
         }
@@ -1039,52 +1284,93 @@ namespace Desert::Editor
         return changed;
     }
 
-    void MaterialEditorPanel::PropagateEdit( Assets::SurfaceMaterialAsset& asset, bool isInstance )
+    void MaterialEditorPanel::PublishToRuntime( Assets::SurfaceMaterialAsset& asset, bool isInstance )
     {
         auto* materialService = Runtime::ResourceRegistry::GetMaterialService();
         if ( !materialService )
             return;
 
-        // ONE propagation path for both audiences. This window's preview target is an ordinary
-        // StaticMeshComponent holding this material in a SLOT, exactly like a mesh in the level, so
-        // whatever reaches the scene reaches the preview by the same wire — which is the only way the two
-        // can be guaranteed to agree (Docs/MaterialEditor/STAGE1_END_TO_END.md).
-        if ( isInstance )
+        // ONE MECHANISM, TWO AUDIENCES, CHOSEN BY THE ASSET HANDED IN. This window's preview target is an
+        // ordinary StaticMeshComponent holding a material in a SLOT, exactly like a mesh in the level, so
+        // the two are reached by the same wire and cannot diverge in HOW an edit lands — which is what the
+        // preview-route test guards.
+        //
+        // What they no longer share is WHICH material. Called with the working copy this moves the ball
+        // and nothing else; called with the subject (only from ApplyEdits) it moves the level. The
+        // previous version of this function was called with the subject from the edit sites themselves,
+        // and the note here argued that one wire to both audiences was the only way the preview and the
+        // scene could be guaranteed to agree. It conflated two questions: whether the preview shows what
+        // the material WILL be, and whether the scene shows edits nobody has accepted. Agreement is a
+        // property of the shared working copy — identity of the two audiences is stronger than agreement,
+        // and it cost the artist every way back.
+        // WHO CACHES THESE VALUES decides whether the SCENE has to be told, and the answer is a rule with
+        // a name: MaterialEdit::PublishOwesTheGlobalStamp. It is a rule and not an `if` here because the
+        // decision is the whole of this fix and nothing in this file can be reached by a test.
+        const bool owesTheStamp = MaterialEdit::PublishOwesTheGlobalStamp(
+             isInstance, /*isSubject=*/asset.GetMetadata().Handle == Subject() );
+
+        // A BASE material's values live in the runtime Material, re-valued here. The runtime Material is
+        // built ONCE and cached by the service; rebuilding an instance of it would faithfully reproduce the
+        // old values, so Apply* is what pushes the new ones in — and it is also what re-binds textures,
+        // which is why binding a texture shows on the mesh without a reload.
+        //
+        // EVERY built variant, one per vertex path. A `.demat` is a surface and the renderer builds one
+        // material per path from it, so an edit that reached only the static one would show on the crate
+        // and not on the character wearing the same material — the exact divergence the per-path material
+        // classes used to make unavoidable.
+        //
+        // An INSTANCE has no runtime Material of its own to re-value; its overrides are baked into cached
+        // MaterialInstances, and dropping those is the stamp's job below.
+        if ( !isInstance )
         {
-            // An instance has no runtime Material of its own — its overrides are re-applied when a cached
-            // instance set is rebuilt, so the stamp is the whole mechanism here.
+            for ( auto* runtime : materialService->GetBuiltVariants( asset.GetMetadata().Handle ) )
+            {
+                if ( auto* pbr = dynamic_cast<Graphic::MaterialPBR*>( runtime ) )
+                    Graphic::MaterialFactory::ApplyPBRAsset( *pbr, asset );
+                else if ( auto* ddm = dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) )
+                    Graphic::MaterialFactory::ApplyShaderAsset( *ddm, asset );
+            }
+        }
+
+        // ONE BUMP SITE IN THE WHOLE WINDOW, and it is behind the rule. A second one would be a second
+        // opinion about who has to be told, and the two would differ on the day one of them is updated.
+        if ( owesTheStamp )
             materialService->BumpInvalidationVersion();
-            return;
-        }
-
-        // The runtime Material is built ONCE and cached by the service; rebuilding an instance of it would
-        // faithfully reproduce the old values. Apply* is what pushes the new ones in — and it is also what
-        // re-binds textures, which is why binding a texture here shows on the mesh without a reload.
-        // EVERY built variant of it, one per vertex path. A `.demat` is a surface and the renderer builds
-        // one material per path from it, so an edit that reached only the static one would show on the
-        // crate and not on the character wearing the same material — the exact divergence the per-path
-        // material classes used to make unavoidable.
-        for ( auto* runtime : materialService->GetBuiltVariants( asset.GetMetadata().Handle ) )
-        {
-            if ( auto* pbr = dynamic_cast<Graphic::MaterialPBR*>( runtime ) )
-                Graphic::MaterialFactory::ApplyPBRAsset( *pbr, asset );
-            else if ( auto* ddm = dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) )
-                Graphic::MaterialFactory::ApplyShaderAsset( *ddm, asset );
-        }
-
-        // ...and the stamp, because entities rendering through CHILD instances of this material cache
-        // their own override sets and would otherwise keep the values from before.
-        materialService->BumpInvalidationVersion();
     }
 
-    void MaterialEditorPanel::SaveSubject( Assets::SurfaceMaterialAsset& asset )
+    bool MaterialEditorPanel::SaveDocument()
+    {
+        const auto subject = ResolveSubject();
+        if ( !subject )
+        {
+            LOG_ERROR( "[MaterialEditor] nothing was saved: the material this window edits is no longer "
+                       "loaded, so there is no asset to write." );
+            return false;
+        }
+
+        // APPLY FIRST — see the header. The file must never hold values the running editor is not already
+        // rendering.
+        ApplyEdits();
+
+        if ( !SaveSubject( *subject ) )
+            return false;
+
+        // The on-disk snapshot moves ONLY on a write that happened. Moving it beside the attempt would
+        // make a document whose file could not be written report itself clean, and the artist would close
+        // it without a question and lose the edit — which is the same class of silent loss as the missing
+        // Discard, one state further along.
+        MaterialEdit::CopyAuthoredValues( m_OnDisk, subject->Data() );
+        return true;
+    }
+
+    bool MaterialEditorPanel::SaveSubject( Assets::SurfaceMaterialAsset& asset )
     {
         const auto path       = asset.GetMetadata().Filepath;
         const auto serialized = asset.Save();
         if ( !serialized )
         {
             LOG_ERROR( "[MaterialEditor] {}", serialized.GetError() );
-            return;
+            return false;
         }
         const std::string& text = serialized.GetValue();
 
@@ -1097,7 +1383,7 @@ namespace Desert::Editor
             LOG_ERROR( "[MaterialEditor] '{}' was not written: {} — this material's edits are still only "
                        "in memory.",
                        path.generic_string(), written.GetError() );
-            return;
+            return false;
         }
 
         // Drop ONLY this material's rendered thumbnail so every panel showing it re-renders with the new
@@ -1109,6 +1395,147 @@ namespace Desert::Editor
         const std::string png = ThumbnailCache::DiskPath( path.generic_string() );
         std::filesystem::remove( png, ec );
         ThumbnailService::Get().Invalidate( path.generic_string() );
+        return true;
+    }
+
+    const ::Desert::Core::Formats::ShaderProgramMeta* MaterialEditorPanel::Schema() const
+    {
+        auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
+        auto  shader        = shaderService ? shaderService->GetByName( EffectiveShaderName() ) : nullptr;
+        if ( !shader )
+            return nullptr;
+        return &shader->GetProgramMeta();
+    }
+
+    bool MaterialEditorPanel::WriteParam( const ::Desert::Core::Formats::ShaderParam& p, const glm::vec4& value )
+    {
+        // THE DRAWN material, which is the working copy once there is one. Not the subject: the whole point
+        // of this document is that a value lands where only the pane beside it can see it, and the scene
+        // waits for Apply. Resolved here rather than passed in, so no caller can hand in the other one.
+        const auto drawn = DrawnMaterial();
+        if ( !drawn || !m_WorkingCopy )
+            return false;
+
+        drawn->Data().SetParam( p.Name, value );
+        PublishToRuntime( *drawn, drawn->Data().IsInstance() );
+        return true;
+    }
+
+    std::vector<EditableProperty> MaterialEditorPanel::EditableProperties() const
+    {
+        const ::Desert::Core::Formats::ShaderProgramMeta* schema = Schema();
+        const auto                                        drawn  = DrawnMaterial();
+        if ( !schema || !drawn )
+            return {};
+
+        // The same three inputs DrawParameters draws its rows from, so the census and the table are one
+        // walk of one declaration seeded by one rule.
+        const auto parent = ResolveParent( *drawn );
+        return MaterialEdit::DescribeProperties( *schema, drawn->Data(), parent ? &parent->Data() : nullptr,
+                                                 drawn->Data().IsInstance() );
+    }
+
+    Common::BoolResultStr MaterialEditorPanel::SetEditableProperty( const std::string&        name,
+                                                                    const std::vector<float>& value )
+    {
+        // EVERY REFUSAL BELOW WAS A SILENT NO-OP IN THE FLAG THIS REPLACES. `--material-step` logged one of
+        // them and swallowed the rest; a value written into a material nothing reads renders as "the
+        // preview did not move", which is indistinguishable from the feature being broken.
+        const auto drawn = DrawnMaterial();
+        if ( !drawn )
+        {
+            return Common::MakeError<bool>(
+                 "the material this window edits is no longer loaded, so there is nothing to write into." );
+        }
+
+        if ( !m_WorkingCopy )
+        {
+            // The read-only mode the window itself is in, said in the same words it prints. Writing the
+            // subject instead would put the value in every open scene with no way back, which is the one
+            // thing this document exists to prevent.
+            return Common::MakeError<bool>(
+                 m_WorkingCopyRefusal.empty()
+                      ? std::string( "this document has no working copy yet; it is made on the first frame the "
+                                     "window draws. Ask 'state' and retry once it is open." )
+                      : m_WorkingCopyRefusal );
+        }
+
+        const ::Desert::Core::Formats::ShaderProgramMeta* schema = Schema();
+        if ( !schema )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "shader '{}' is not loaded, so this document has no declaration to check '{}' against. A "
+                 "name checked against nothing is a name written and never read.",
+                 EffectiveShaderName(), name );
+        }
+
+        std::string                                 refusal;
+        const ::Desert::Core::Formats::ShaderParam* p =
+             MaterialEdit::FindSettableParam( *schema, name, drawn->Data().IsInstance(), refusal );
+        if ( !p )
+            return Common::MakeError<bool>( refusal );
+
+        // THE COMPONENT COUNT IS PART OF THE PROPERTY'S IDENTITY. Three numbers for a float is a caller who
+        // meant a different property, and padding them into a vec4 would write a value that looks accepted.
+        const int wanted = MaterialEdit::ComponentsOf( p->Type );
+        if ( static_cast<int>( value.size() ) != wanted )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "'{}' is a {} and takes {} number(s); {} were sent. Ask 'properties' for the shape of each "
+                 "one.",
+                 name, MaterialEdit::TypeNameOf( *p ), wanted, value.size() );
+        }
+
+        // THE SCHEMA'S OWN CLAMP, REFUSED RATHER THAN APPLIED. The widget cannot leave the range at all, so
+        // a channel that clamped silently would accept a request the mouse cannot make and answer with a
+        // number the caller did not send -- and the caller would read its own value back out of its own
+        // request, not out of the editor.
+        if ( p->Min.has_value() && p->Max.has_value() )
+        {
+            for ( const float component : value )
+            {
+                if ( component < *p->Min || component > *p->Max )
+                {
+                    return Common::MakeFormattedError<bool>(
+                         "'{}' is declared range({}, {}) and {} is outside it. The window's own control "
+                         "cannot leave that range either.",
+                         name, *p->Min, *p->Max, component );
+                }
+            }
+        }
+
+        glm::vec4 written( 0.0f );
+        for ( int i = 0; i < wanted; ++i )
+            written[i] = value[static_cast<std::size_t>( i )];
+
+        // WHAT THE SCENE WAS TOLD, READ ACROSS THE WRITE. MaterialService's stamp is what every mesh
+        // component in every open scene watches; a write into the working copy must not move it (see
+        // PublishToRuntime). Sampled here rather than asserted, because the honest form of "this costs the
+        // level nothing" is a number a reader can check against the next line of the log.
+        auto*          materialService = Runtime::ResourceRegistry::GetMaterialService();
+        const uint32_t stampBefore     = materialService ? materialService->GetInvalidationVersion() : 0u;
+
+        // THE SAME WRITE THE SLIDER MAKES. Not a copy of it: a capture taken down a route nobody uses
+        // proves nothing about the route they do.
+        if ( !WriteParam( *p, written ) )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "'{}' was accepted by the schema but the write found no working copy to land in; that is a "
+                 "defect in this document, not in the request.",
+                 name );
+        }
+
+        const uint32_t stampAfter = materialService ? materialService->GetInvalidationVersion() : 0u;
+
+        LOG_INFO( "[MaterialEditor] control channel set '{}' = ({}, {}, {}, {}) in the working copy of '{}'. "
+                  "The scene still shows the applied state; Apply is what moves it. Scene material stamp "
+                  "{} -> {} ({}).",
+                  name, written.x, written.y, written.z, written.w, drawn->GetMetadata().Filepath.generic_string(),
+                  stampBefore, stampAfter,
+                  stampBefore == stampAfter
+                       ? "unmoved, so no entity in any scene rebuilds its cached material instances"
+                       : "moved: every mesh in every open scene will rebuild its cached material instances" );
+        return Common::MakeSuccess( true );
     }
 
     void MaterialEditorPanel::OnUIRender()
@@ -1117,18 +1544,28 @@ namespace Desert::Editor
         // the asset can go away under an open window (deleted on disk, project reloaded); every part of the
         // window then has to agree about that, and re-looking it up per section is how two halves of one
         // window come to disagree.
-        auto asset =
-             m_AssetManager ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() ) : nullptr;
-        auto       parent     = asset ? ResolveParent( *asset ) : nullptr;
-        const bool isInstance = asset && asset->Data().IsInstance();
+        const auto subject = ResolveSubject();
+
+        // THE WORKING COPY IS MADE HERE, on the first frame the window really draws, and not in the
+        // constructor: the document is created while asset open requests are serviced, where the subject
+        // may not have finished loading and where a window nobody has seen would already be holding a
+        // second registered material.
+        Assets::SurfaceMaterialAsset* working = subject ? EnsureWorkingCopy( *subject ) : nullptr;
+
+        // EVERYTHING BELOW READS THE WORKING COPY. The parameter table edits it, the pane draws it, and
+        // the domain decisions follow it — so this window is a picture of what the material will be, while
+        // the scene stays a picture of what it is.
+        const auto drawn      = DrawnMaterial();
+        auto       parent     = drawn ? ResolveParent( *drawn ) : nullptr;
+        const bool isInstance = drawn && drawn->Data().IsInstance();
 
         // Decided HERE, once, for both the pane below and next frame's OnPreUpdate — which is the only
         // place allowed to build or destroy the renderer. Resolving it twice is how the window would come
         // to hold a slot while telling the artist it has no preview, or the reverse.
-        m_PreviewUnavailable = asset ? PreviewUnavailableReason( EffectiveShaderName() )
+        m_PreviewUnavailable = drawn ? PreviewUnavailableReason( EffectiveShaderName() )
                                      : std::string( "No preview: this material is no longer loaded." );
 
-        DrawToolbar( asset.get(), isInstance );
+        DrawToolbar( working, isInstance );
         ImGui::Separator();
 
         const float  kParamColumnW = 300.0f;
@@ -1154,12 +1591,26 @@ namespace Desert::Editor
 
         ImGui::SameLine();
         ImGui::BeginGroup();
-        if ( !asset )
+        if ( !drawn )
         {
             ImGui::TextDisabled( "This material is no longer loaded" );
         }
         else
         {
+            // A window with no working copy is READ-ONLY, and says why. Editing the subject directly
+            // instead would silently restore the behaviour this document exists to prevent — every mesh in
+            // the level changing under a drag, with no way back — and the artist would have no way to tell
+            // which of the two modes they were in.
+            const bool readOnly = ( working == nullptr );
+            if ( readOnly && !m_WorkingCopyRefusal.empty() )
+            {
+                ImGui::PushTextWrapPos( 0.0f );
+                ImGui::TextColored( ImVec4( 1.0f, 0.72f, 0.35f, 1.0f ), "%s", m_WorkingCopyRefusal.c_str() );
+                ImGui::PopTextWrapPos();
+                ImGui::Separator();
+            }
+            ImGui::BeginDisabled( readOnly );
+
             // Instance parenting is stated where the overrides are edited, and only here: a starred row in
             // the table below means "this child overrides the parent", which is unreadable without knowing
             // there is a parent at all.
@@ -1176,21 +1627,27 @@ namespace Desert::Editor
                 // The shader lives INSIDE the material (Unity's model, and ours). An instance never gets a
                 // picker: it always renders with its parent chain's shader. The caption is the picker's
                 // own, because it names the domain the list is filtered to and that is not knowable here.
-                if ( DrawShaderPicker( *asset ) )
+                if ( DrawShaderPicker( *drawn ) )
                 {
                     // A different shader means a different runtime material CLASS — the cached one cannot be
                     // re-valued, it has to be dropped so the next Get rebuilds it from the asset. Invalidate
                     // bumps the stamp itself, so every mesh rebuilds its instances with it.
+                    //
+                    // The DRAWN material's handle: while the shader is only chosen and not yet applied, the
+                    // material that has to be rebuilt is the working copy. The subject's own rebuild is
+                    // ApplyEdits's business, and it does the same thing there for the same reason.
                     if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
-                        materialService->Invalidate( asset->GetMetadata().Handle );
+                        materialService->Invalidate( drawn->GetMetadata().Handle );
                 }
                 ImGui::Separator();
             }
 
             ImGui::TextDisabled( "Parameters" );
             ImGui::Separator();
-            if ( DrawParameters( *asset, parent ? &parent->Data() : nullptr, isInstance ) )
-                PropagateEdit( *asset, isInstance );
+            if ( DrawParameters( *drawn, parent ? &parent->Data() : nullptr, isInstance ) )
+                PublishToRuntime( *drawn, isInstance );
+
+            ImGui::EndDisabled();
         }
         ImGui::EndGroup();
 

@@ -13,6 +13,14 @@ editor's own COMMAND PALETTE offers this instant, and `list_commands` is how an 
 is. So a capability added to the editor for a person appears here with nobody touching this file, which is
 the same property that made the channel worth building in the first place.
 
+THE SAME IS TRUE OF THE PROPERTIES, and for the same reason. `list_properties` is not a table of material
+parameters kept here — it is whatever the focused document derives from its own declaration, which for a
+material is its shader's `Properties` block. A shader author who adds a parameter gets it in this list
+without anybody editing this file, an editor panel, or the channel. That is the half of "everything a
+person can do" that has no name: a slider cannot be a palette entry, so it is a second CATEGORY of request
+rather than a second way of executing one. `set_property` lands in the same setter the window's own control
+calls.
+
 WHY THE SHOTS ARE TWO TOOLS AND NOT ONE WITH A FLAG. `capture_window` reads the presented frame and contains
 the panels, the menus and the dialogs; `capture_viewport` reads the scene's own image and contains none of
 them. Before this channel existed only the second was possible at all, which is why no picture this engine
@@ -117,6 +125,42 @@ TOOLS = [
         },
     },
     {
+        "name": "list_properties",
+        "description": (
+            "The properties the FOCUSED document exposes, with the value each one is showing right now, "
+            "its type, how many numbers it takes and any declared range. This is the other half of what a "
+            "person can do: run_command covers everything with a name, this covers everything a mouse "
+            "does by DRAGGING. The list is derived from the document's own declaration — for a material, "
+            "its shader's Properties block — so it is never out of date with the window. Rows that cannot "
+            "be written (texture slots, asset references) are listed with a reason rather than omitted."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_property",
+        "description": (
+            "Write one property of the focused document — the drag a mouse would do. The value goes "
+            "through the same setter the window's own control calls, so this and a person's drag are one "
+            "code path. Send exactly as many numbers as list_properties says the property takes; a wrong "
+            "count, an unknown name, a value outside the declared range and a texture slot are all "
+            "refused with a reason rather than half-written. For a STAGED document (a material) the write "
+            "lands in the working copy and the scene does not change until you run its Apply command. "
+            "Returns once a rendered frame already reflects the write."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "the property name exactly as list_properties reports it"},
+                "value": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "one to four numbers; the count must match the property's own shape",
+                },
+            },
+            "required": ["name", "value"],
+        },
+    },
+    {
         "name": "get_state",
         "description": (
             "The editor's state as JSON. Sections: scene, selection, documents (open in most-recently-"
@@ -167,6 +211,21 @@ def dispatch(channel: Channel, name: str, arguments: dict) -> dict:
         if not group or not label:
             raise ValueError("run_command needs both a group and a label; ask list_commands for the pairs.")
         return channel.call("run", group, label)
+    if name == "list_properties":
+        return channel.call("properties", wait=120)
+    if name == "set_property":
+        prop = arguments.get("name", "")
+        value = arguments.get("value", [])
+        if not prop:
+            raise ValueError("set_property needs a name; ask list_properties for the ones on offer.")
+        if not isinstance(value, list) or not value:
+            raise ValueError(
+                "set_property needs a value as a list of numbers, even for a single component ([0.2]) — "
+                "the COUNT is part of the property's identity and the editor checks it."
+            )
+        # Formatted here rather than passed as a list, because the transport is one desertctl argument.
+        # No padding and no truncation: a wrong count must reach the editor as a wrong count.
+        return channel.call("set", prop, ",".join(repr(float(v)) for v in value))
     if name == "get_state":
         return channel.call("state", *arguments.get("sections", []), wait=120)
     if name == "capture_window":

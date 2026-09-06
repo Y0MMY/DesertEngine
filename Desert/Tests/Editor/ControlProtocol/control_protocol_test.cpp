@@ -40,6 +40,7 @@ using Desert::Editor::Control::kStateSections;
 using Desert::Editor::Control::Op;
 using Desert::Editor::Control::ParseRequest;
 using Desert::Editor::Control::PendingWork;
+using Desert::Editor::Control::PropertiesToJson;
 using Desert::Editor::Control::Request;
 using Desert::Editor::Control::Response;
 using Desert::Editor::Control::ToJson;
@@ -108,6 +109,8 @@ TEST( ControlProtocol, EveryKnownOperationParses )
         std::string line = std::string( R"({"id":1,"op":")" ) + spec.Name + R"(")";
         if ( spec.Operation == Op::Run )
             line += R"(,"group":"Panel","label":"Open Details")";
+        if ( spec.Operation == Op::Set )
+            line += R"(,"property":"RoughnessFactor","value":[0.25])";
         if ( IsShot( spec.Operation ) )
             line += R"(,"path":"/tmp/shot.png")";
         line += "}";
@@ -153,6 +156,56 @@ TEST( ControlProtocol, RunNeedsBothHalvesOfTheAddress )
     EXPECT_EQ( request.Id, 7 );
     EXPECT_EQ( request.Group, "Panel" );
     EXPECT_EQ( request.Label, "Open Details" );
+}
+
+// THE SECOND CATEGORY OF REQUEST. `set` is the drag a mouse would do -- direct manipulation, which has no
+// name and therefore cannot be a palette command. Its parse is total for the same reason `run`'s is: every
+// mistake below was a silent no-op in `--material-step`, the flag this replaces, and a value that quietly
+// failed to land renders as "the preview did not move" -- indistinguishable, in the very capture taken to
+// prove the feature works, from the feature being broken.
+TEST( ControlProtocol, SetNeedsAPropertyAndAValueAndSaysWhichIsMissing )
+{
+    const Request request =
+         ParseOk( R"({"id":3,"op":"set","property":"AlbedoColor","value":[0.05,0.35,0.95,1]})" );
+    EXPECT_EQ( request.Id, 3 );
+    EXPECT_EQ( request.Property, "AlbedoColor" );
+    ASSERT_EQ( request.Value.size(), 4u );
+    EXPECT_FLOAT_EQ( request.Value[0], 0.05f );
+    EXPECT_FLOAT_EQ( request.Value[3], 1.0f );
+
+    EXPECT_FALSE( ParseError( R"({"id":1,"op":"set","value":[0.5]})" ).empty() ) << "no property named";
+    EXPECT_FALSE( ParseError( R"({"id":1,"op":"set","property":"","value":[0.5]})" ).empty() );
+    EXPECT_FALSE( ParseError( R"({"id":1,"op":"set","property":"X"})" ).empty() )
+         << "a write with nothing to write would come back successful and change nothing";
+    EXPECT_FALSE( ParseError( R"({"id":1,"op":"set","property":"X","value":[]})" ).empty() )
+         << "no property takes nothing";
+    EXPECT_FALSE( ParseError( R"({"id":1,"op":"set","property":"X","value":0.5})" ).empty() )
+         << "a bare number carries no COUNT, and the count is part of the property's identity";
+    EXPECT_FALSE( ParseError( R"({"id":1,"op":"set","property":"X","value":[0.1,0.2,0.3,0.4,0.5]})" ).empty() )
+         << "nothing this channel writes is wider than four";
+}
+
+// BOTH SPELLINGS OF EVERY NUMBER, and it is not defensive coding. reflect-cpp keeps a JSON number in the
+// variant arm its TEXT implies, so `[1, 0.5]` arrives as one int64 and one double. Reading only doubles
+// made `[1,1,1]` -- the commonest colour anybody types -- parse as no value at all, which the request
+// above would then refuse as empty. The same defect ReadInt was written for, one field along.
+TEST( ControlProtocol, AValueReadsWholeNumbersAndFractionsAlike )
+{
+    const Request request = ParseOk( R"({"id":1,"op":"set","property":"AlbedoColor","value":[1,0.5,0,1]})" );
+    ASSERT_EQ( request.Value.size(), 4u );
+    EXPECT_FLOAT_EQ( request.Value[0], 1.0f );
+    EXPECT_FLOAT_EQ( request.Value[1], 0.5f );
+    EXPECT_FLOAT_EQ( request.Value[2], 0.0f );
+}
+
+// A NON-NUMBER FAILS THE WHOLE FIELD rather than being skipped. Dropping one element of [1,"x",0] would
+// silently turn a three-component write into a two-component one, and the document would then refuse it
+// with a count the client never sent -- a refusal about a request that was never made.
+TEST( ControlProtocol, AValueWithSomethingThatIsNotANumberIsRefusedWhole )
+{
+    EXPECT_FALSE( ParseError( R"({"id":1,"op":"set","property":"X","value":[1,"x",0]})" ).empty() );
+    EXPECT_FALSE( ParseError( R"({"id":1,"op":"set","property":"X","value":["0.5"]})" ).empty() )
+         << "a number in quotes is a client that has not decided what it is sending";
 }
 
 // A capture with nowhere to go would report success and leave no evidence -- which is the failure the whole
@@ -354,6 +407,134 @@ TEST( ControlProtocol, TheDocumentsSectionCarriesBothTheOpenOnesAndTheClosedOnes
     const auto onlyClosed = closedArray.value()[0].to_object();
     ASSERT_TRUE( onlyClosed );
     EXPECT_EQ( StringField( onlyClosed.value(), "name" ), "M_Barrel" );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 5. The picture and the number have to say the same thing.
+// ---------------------------------------------------------------------------------------------------
+
+// A CAPTURE ALONE CANNOT PROVE "THE PREVIEW MOVED AND THE SCENE DID NOT". It cannot distinguish that from
+// a scene which happens to be out of frame, or from an editor that did nothing at all. The three fields
+// below are what turn the sequence of pictures into evidence: a client reads them beside each shot and the
+// two agree or the claim fails.
+TEST( ControlProtocol, EachOpenDocumentReportsWhereItsEditsHaveReached )
+{
+    EditorSnapshot snapshot;
+    snapshot.Documents.push_back( { .Name              = "M_Crate",
+                                    .Type              = "SurfaceMaterial",
+                                    .Subject           = "1111",
+                                    .Focused           = true,
+                                    .EditModel         = "staged",
+                                    .HasUnappliedEdits = true,
+                                    .DiskState         = "dirty" } );
+
+    const auto documents = ToJson( snapshot, { "documents" } ).get( "documents" );
+    ASSERT_TRUE( documents );
+    const auto open = documents.value().to_object().value().get( "open" );
+    ASSERT_TRUE( open );
+    const auto first = open.value().to_array().value()[0].to_object();
+    ASSERT_TRUE( first );
+
+    EXPECT_EQ( StringField( first.value(), "editModel" ), "staged" );
+    EXPECT_TRUE( BoolField( first.value(), "unapplied", false ) );
+    EXPECT_EQ( StringField( first.value(), "disk" ), "dirty" );
+}
+
+// UNTRACKED IS THE DEFAULT AND IT IS NOT "CLEAN". A document that took no snapshot of its file has no
+// evidence about it, and a client that read the two as one would report an unsaved edit as saved.
+TEST( ControlProtocol, ADocumentThatSaysNothingIsNotReportedAsSavedAndUpToDate )
+{
+    EditorSnapshot snapshot;
+    snapshot.Documents.push_back( { .Name = "Untitled", .Type = "SurfaceMaterial", .Subject = "3333" } );
+
+    const auto open =
+         ToJson( snapshot, { "documents" } ).get( "documents" ).value().to_object().value().get( "open" );
+    ASSERT_TRUE( open );
+    const auto first = open.value().to_array().value()[0].to_object();
+    ASSERT_TRUE( first );
+
+    EXPECT_EQ( StringField( first.value(), "disk" ), "untracked" );
+    EXPECT_EQ( StringField( first.value(), "editModel" ), "write-through" )
+         << "a document that does not say it stages must not be offered Apply and Discard";
+    EXPECT_FALSE( BoolField( first.value(), "unapplied", true ) );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 6. The property census on the wire.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( ControlProtocol, ThePropertyCensusCarriesTheShapeOfEveryPropertyAndNamesItsDocument )
+{
+    Desert::Editor::EditableProperty roughness;
+    roughness.Name       = "RoughnessFactor";
+    roughness.Label      = "Roughness";
+    roughness.Type       = "float";
+    roughness.Components = 1;
+    roughness.Min        = 0.0f;
+    roughness.Max        = 1.0f;
+    roughness.Value[0]   = 0.25f;
+
+    Desert::Editor::EditableProperty albedoMap;
+    albedoMap.Name              = "AlbedoMap";
+    albedoMap.Type              = "texture";
+    albedoMap.Components        = 0;
+    albedoMap.Settable          = false;
+    albedoMap.NotSettableReason = "'AlbedoMap' is a texture slot.";
+
+    const auto payload = PropertiesToJson( "M_Crate", { roughness, albedoMap } );
+
+    // THE DOCUMENT IS NAMED, because "the focused document" moves. A client that asked for properties and
+    // then set one has to be able to see WHICH document answered, or a focus change between the two
+    // requests is invisible in both replies.
+    EXPECT_EQ( StringField( payload, "document" ), "M_Crate" );
+
+    const auto entries = payload.get( "properties" );
+    ASSERT_TRUE( entries );
+    const auto array = entries.value().to_array();
+    ASSERT_TRUE( array );
+    ASSERT_EQ( array.value().size(), 2u );
+
+    const auto first = array.value()[0].to_object();
+    ASSERT_TRUE( first );
+    EXPECT_EQ( StringField( first.value(), "name" ), "RoughnessFactor" );
+    EXPECT_EQ( StringField( first.value(), "type" ), "float" );
+    EXPECT_TRUE( BoolField( first.value(), "settable", false ) );
+    EXPECT_TRUE( first.value().get( "min" ) );
+    EXPECT_TRUE( first.value().get( "max" ) );
+
+    // Exactly as many numbers as the property takes -- the count is what the editor checks a write
+    // against, so a census that padded it to four would be describing a property nobody can set.
+    const auto value = first.value().get( "value" );
+    ASSERT_TRUE( value );
+    ASSERT_TRUE( value.value().to_array() );
+    EXPECT_EQ( value.value().to_array().value().size(), 1u );
+
+    // A row that cannot be written is LISTED, saying no and saying why. Omitting it would read as a
+    // property the shader does not declare, and that is a different problem with a different fix.
+    const auto second = array.value()[1].to_object();
+    ASSERT_TRUE( second );
+    EXPECT_FALSE( BoolField( second.value(), "settable", true ) );
+    EXPECT_FALSE( StringField( second.value(), "why" ).empty() );
+    EXPECT_EQ( second.value().get( "value" ).value().to_array().value().size(), 0u );
+}
+
+// A property with no declared range has NO min/max field, rather than a null or a made-up bound. A client
+// that read `min` as a number cannot be handed a null, and inventing 0 would tell it the editor refuses
+// negatives when the editor does not.
+TEST( ControlProtocol, APropertyWithNoDeclaredRangeCarriesNoBounds )
+{
+    Desert::Editor::EditableProperty unbounded;
+    unbounded.Name       = "Tiling";
+    unbounded.Type       = "float2";
+    unbounded.Components = 2;
+
+    const auto payload = PropertiesToJson( "M_Crate", { unbounded } );
+    const auto first   = payload.get( "properties" ).value().to_array().value()[0].to_object();
+    ASSERT_TRUE( first );
+
+    EXPECT_FALSE( first.value().get( "min" ) );
+    EXPECT_FALSE( first.value().get( "max" ) );
+    EXPECT_EQ( first.value().get( "value" ).value().to_array().value().size(), 2u );
 }
 
 // The quiescence section speaks the SAME vocabulary a settle timeout does, so a client that read

@@ -2,11 +2,14 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <ImGui/imgui.h>
 
 #include <Common/Core/Events/Event.hpp>
+#include <Common/Core/ResultStr.hpp>
 
+#include <Editor/Core/EditableProperty.hpp>
 #include <Editor/Core/PreviewViewpoints.hpp>
 
 #include <Engine/Assets/Common.hpp>
@@ -211,6 +214,131 @@ namespace Desert::Editor
         // because a document without a preview is never asked.
         virtual void SetPreviewViewpoint( const PreviewViewpoint& /*viewpoint*/ )
         {
+        }
+
+        // ── WHAT AN EDIT HAS REACHED: three states, not one ────────────────────────────────────────────
+        //
+        //   WORKING   what this window shows and the artist is changing
+        //   APPLIED   what every open scene is rendering
+        //   ON DISK   what the file holds
+        //
+        // Before this interface existed there was ONE state. A document wrote its edit into the asset in
+        // memory and pushed it at the runtime in the same statement, so moving a slider changed every mesh
+        // in the level immediately and there was no way back at all — not a reload, not a snapshot. That
+        // was defended as the only way the preview and the scene could be guaranteed to agree, and the
+        // defence confuses two questions: whether the preview shows what the material WILL be (it must)
+        // and whether the scene shows edits nobody has accepted (it must not). Agreement comes from one
+        // shared working copy, not from the two audiences being literally one object; identity is stronger
+        // than agreement, and its price was that an accidental drag was permanent and the next deliberate
+        // Save wrote the accident to disk.
+        //
+        // Declared HERE and not privately in the Material Editor because it is not one window's problem.
+        // The dirty dot on a document tab, the question on close, "Save All", one question at exit, the
+        // modified badge on a browser tile — every one of them needs exactly these answers from every
+        // document type, and there are five.
+        enum class EditModel
+        {
+            WriteThrough, // an edit is in the scene the moment it is made; there is no way back
+            Staged        // an edit waits in a working copy until ApplyEdits()
+        };
+
+        [[nodiscard]] virtual EditModel GetEditModel() const
+        {
+            return EditModel::WriteThrough;
+        }
+
+        // WORKING differs from APPLIED.
+        //
+        // FALSE for a write-through document is a fact and not a default standing in for one: its edit
+        // reached the scene as it was made, so nothing is outstanding.
+        [[nodiscard]] virtual bool HasUnappliedEdits() const
+        {
+            return false;
+        }
+
+        // Publish WORKING into APPLIED — the scene changes HERE and nowhere else.
+        //
+        // Returns whether the published state actually moved, so a caller cannot read "there was nothing
+        // to publish" as "it was published". False for a write-through document (already published) and
+        // for a staged one with no outstanding edit.
+        virtual bool ApplyEdits()
+        {
+            return false;
+        }
+
+        // WORKING <- APPLIED: the way back.
+        //
+        // IT RETURNS A BOOL BECAUSE "THIS DOCUMENT HAS NO WAY BACK" MUST BE SAYABLE. A Discard that
+        // quietly did nothing would rebuild the exact trap this interface removes — a person believing an
+        // edit is reversible because the editor showed them something that says so. A caller offers the
+        // action only for EditModel::Staged, and a false return from one of those is a defect in the
+        // document, not a state to swallow.
+        virtual bool DiscardEdits()
+        {
+            return false;
+        }
+
+        // Does what this document holds differ from its file?
+        //
+        // UNTRACKED IS NOT CLEAN. A document that takes no snapshot when it opens cannot answer, and a
+        // caller that drew "no dot" for it would be asserting the file is up to date — a claim it has no
+        // evidence for. The dot belongs on Dirty alone. Untracked is what a document answers until it
+        // takes a snapshot of its own.
+        enum class DiskState
+        {
+            Clean,
+            Dirty,
+            Untracked
+        };
+
+        [[nodiscard]] virtual DiskState GetDiskState() const
+        {
+            return DiskState::Untracked;
+        }
+
+        // Write WORKING to the file. Returns whether the file was actually written, for the same reason
+        // ApplyEdits returns whether anything moved: a caller must not report a save that did not happen.
+        //
+        // Declared here so "Save the focused document" can be a command like any other. A document type
+        // that has no file of its own leaves this false and is simply not offered the entry.
+        virtual bool SaveDocument()
+        {
+            return false;
+        }
+
+        // ── DIRECT MANIPULATION: the properties this document exposes, and the one way to write them ────
+        //
+        // The other half of what a person can do. The command palette covers everything with a NAME —
+        // open, close, apply, save; this covers everything with a VALUE, which is the half a mouse does by
+        // dragging and which no dictionary of actions can express (see Editor/Core/EditableProperty.hpp
+        // for the whole argument, and for why this is a second CATEGORY and not a second execution path).
+        //
+        // A document that offers no properties answers with an empty census and refuses every write,
+        // saying so. That is the honest default: a silent no-op here would tell a client that a value it
+        // sent had been accepted.
+
+        /// Everything this document can be asked to change, DERIVED from whatever declares it — for a
+        /// material, the shader's own schema. Never a list maintained by hand; see EditableProperty.hpp.
+        [[nodiscard]] virtual std::vector<EditableProperty> EditableProperties() const
+        {
+            return {};
+        }
+
+        /// Set one of them. @p value carries as many components as the caller sent, and the document is
+        /// what checks that against its own declaration — the count is part of the property's identity,
+        /// so three numbers for a float is a caller who meant a different property.
+        ///
+        /// THE WRITE MUST GO THROUGH THE SAME SETTER THE WIDGET CALLS. An implementation that reached the
+        /// value by its own route would be a second execution path, and the two would drift on the day
+        /// somebody adds a step to the widget's — the publish, the undo entry, the dirty derivation. What
+        /// this method is allowed to do is CALL that path.
+        [[nodiscard]] virtual Common::BoolResultStr SetEditableProperty( const std::string& name,
+                                                                         const std::vector<float>& /*value*/ )
+        {
+            return Common::MakeFormattedError<bool>(
+                 "this document exposes no editable properties, so '{}' cannot be set on it. Ask "
+                 "'properties' for the ones the focused document offers.",
+                 name );
         }
 
     private:

@@ -38,12 +38,32 @@ namespace Desert::Editor::Control
      * written there is a rule nothing can show going red.
      */
 
-    /// What a request asks for. Deliberately a closed set: the channel's job is to reach the COMMAND
-    /// PALETTE, not to grow an instruction set of its own — see ControlDispatch.hpp.
+    /**
+     * @brief TWO CATEGORIES OF REQUEST, AND WHY THERE HAD TO BE A SECOND ONE.
+     *
+     * `commands`/`run` reach the COMMAND PALETTE: a dictionary of ACTIONS, each with a name. That is
+     * everything a person does by choosing something.
+     *
+     * `properties`/`set` reach the FOCUSED DOCUMENT's own values. That is everything a person does by
+     * DRAGGING something, and it does not fit in a dictionary of actions: a slider has no name, and giving
+     * it one would mean a palette entry per value — "Set Albedo to 0.3", a hundred and seventy of them for
+     * one material — which is an argument list pretending to be a vocabulary.
+     *
+     * THIS IS A SECOND CATEGORY, NOT A SECOND EXECUTION PATH, and the difference is the whole of the rule.
+     * A `set` lands in the same setter the widget calls (MaterialEditorPanel::WriteParam), so there is one
+     * route into the value and two ways to reach it — a mouse and a socket. What stays forbidden is a
+     * second DISPATCH for palette commands: two lists of actions that must agree, one of which falls
+     * behind. Nothing here is one; `properties` is derived from the document's own declaration, and for a
+     * material that declaration is the shader's schema.
+     */
+
+    /// What a request asks for. Deliberately a closed set.
     enum class Op
     {
         Commands,     ///< list every command the palette offers this instant
         Run,          ///< run one of them, addressed by group + label
+        Properties,   ///< list the properties the FOCUSED document exposes, with their current values
+        Set,          ///< write one of them, addressed by name
         State,        ///< read the editor's state as JSON
         ShotWindow,   ///< capture the WHOLE editor, interface included (swapchain readback)
         ShotViewport, ///< capture the 3D viewport only, no interface (the scene's final image)
@@ -61,6 +81,8 @@ namespace Desert::Editor::Control
     inline constexpr OpSpec kOps[] = {
          { "commands", Op::Commands },
          { "run", Op::Run },
+         { "properties", Op::Properties },
+         { "set", Op::Set },
          { "state", Op::State },
          { "shot.window", Op::ShotWindow },
          { "shot.viewport", Op::ShotViewport },
@@ -93,6 +115,15 @@ namespace Desert::Editor::Control
         /// Op::Run — the palette entry, addressed exactly as the palette shows it.
         std::string Group;
         std::string Label;
+
+        /// Op::Set — the property of the focused document, addressed by the name its declaration gives it
+        /// (not by its label: two properties may display the same words).
+        std::string Property;
+
+        /// Op::Set — the value, with as many components as the property takes. The COUNT is carried rather
+        /// than padded to four: a float given three numbers is a client that meant a different property,
+        /// and the document refuses it instead of writing something that looks accepted.
+        std::vector<float> Value;
 
         /// Op::ShotWindow / Op::ShotViewport — where the PNG goes.
         std::string Path;
@@ -175,6 +206,55 @@ namespace Desert::Editor::Control
             }
             return values;
         }
+
+        /// What a `value` field turned out to be. THREE outcomes and not two, because "absent" and
+        /// "present but not numbers" are different mistakes and a client told the wrong one looks for the
+        /// fault in the wrong place.
+        enum class NumberArray
+        {
+            Absent,     ///< no `value` field at all
+            NotNumbers, ///< there is one, but it is not an array of numbers
+            Read        ///< read, into the out parameter (possibly empty)
+        };
+
+        /// An array-of-numbers field. BOTH SPELLINGS OF EVERY ELEMENT, for the reason ReadInt states at
+        /// length: reflect-cpp keeps a number in the variant arm its text implies, so `[1, 0.5]` arrives
+        /// as one int64 and one double. Reading only doubles made `[1,1,1]` — the commonest colour a
+        /// person types — parse as nothing at all.
+        ///
+        /// A non-number ANYWHERE in the array fails the whole field rather than being skipped: dropping
+        /// one element of `[1,"x",0]` would silently turn a three-component write into a two-component
+        /// one, and the document would refuse it with a count the client never sent.
+        [[nodiscard]] inline NumberArray ReadFloatArray( const rfl::Generic::Object& object, const char* key,
+                                                         std::vector<float>& out )
+        {
+            const auto field = object.get( key );
+            if ( !field )
+                return NumberArray::Absent;
+
+            const auto array = field.value().to_array();
+            if ( !array )
+                return NumberArray::NotNumbers;
+
+            out.clear();
+            out.reserve( array.value().size() );
+            for ( const auto& element : array.value() )
+            {
+                if ( const auto whole = element.to_int64() )
+                {
+                    out.push_back( static_cast<float>( whole.value() ) );
+                    continue;
+                }
+                if ( const auto real = element.to_double() )
+                {
+                    out.push_back( static_cast<float>( real.value() ) );
+                    continue;
+                }
+                out.clear();
+                return NumberArray::NotNumbers;
+            }
+            return NumberArray::Read;
+        }
     } // namespace ProtocolDetail
 
     /**
@@ -251,6 +331,53 @@ namespace Desert::Editor::Control
                 }
                 break;
             }
+            case Op::Set:
+            {
+                request.Property = ReadString( fields, "property" );
+                if ( request.Property.empty() )
+                {
+                    return Common::MakeError<Request>(
+                         "'set' addresses a property of the focused document by name, and none was given. "
+                         "Ask 'properties' for the ones it offers right now." );
+                }
+
+                switch ( ReadFloatArray( fields, "value", request.Value ) )
+                {
+                    case NumberArray::Absent:
+                        return Common::MakeFormattedError<Request>(
+                             "'set' needs a 'value' for '{}'. A write with nothing to write would come back "
+                             "successful and change nothing.",
+                             request.Property );
+                    case NumberArray::NotNumbers:
+                        return Common::MakeFormattedError<Request>(
+                             "the 'value' for '{}' is not an array of numbers. Write it as one even for a "
+                             "single component — [0.2] — so the COUNT is always part of the request; the "
+                             "document checks it against the property's own shape.",
+                             request.Property );
+                    case NumberArray::Read:
+                        break;
+                }
+
+                if ( request.Value.empty() )
+                {
+                    return Common::MakeFormattedError<Request>(
+                         "the 'value' for '{}' is an empty array. No property takes nothing.", request.Property );
+                }
+
+                // The count is not checked against the property here and cannot be: this parser has never
+                // heard of a shader schema. The DOCUMENT owns that check, because the document is what owns
+                // the declaration — see IAssetEditorPanel::SetEditableProperty. What is refused here is
+                // only what makes no sense for any property at all.
+                if ( request.Value.size() > 4 )
+                {
+                    return Common::MakeFormattedError<Request>(
+                         "the 'value' for '{}' carries {} numbers. Nothing this channel can write is wider "
+                         "than four.",
+                         request.Property, request.Value.size() );
+                }
+                break;
+            }
+
             case Op::ShotWindow:
             case Op::ShotViewport:
             {
@@ -270,6 +397,7 @@ namespace Desert::Editor::Control
                 request.ExitCode = static_cast<int32_t>( ReadInt( fields, "code", 0 ) );
                 break;
             case Op::Commands:
+            case Op::Properties:
                 break;
         }
 

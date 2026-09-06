@@ -3,6 +3,7 @@
 #include <Common/Core/ResultStr.hpp>
 
 #include <Editor/Core/Control/ControlPipeline.hpp>
+#include <Editor/Core/EditableProperty.hpp>
 
 #include <rflcpp/rfl/Generic.hpp>
 
@@ -37,6 +38,19 @@ namespace Desert::Editor::Control
         bool        HoldsRendererSlot  = false;
         bool        ClaimsRendererSlot = false;
         bool        Focused            = false;
+
+        // ── WHERE THIS DOCUMENT'S EDITS HAVE REACHED ───────────────────────────────────────────────────
+        //
+        // Reported because a PICTURE OF THE EDITOR AND A NUMBER BESIDE IT MUST SAY THE SAME THING. The
+        // claim this channel is most often asked to photograph is "the preview moved and the scene did
+        // not", and a capture alone cannot distinguish that from a scene that happens to be out of frame.
+        // These three fields are what turn the picture into evidence.
+        //
+        // Strings and not the enums themselves: this struct is the wire's vocabulary, and a client reading
+        // "staged" needs no header of ours to know what it got. See IAssetEditorPanel for the states.
+        std::string EditModel         = "write-through"; ///< "write-through" | "staged"
+        bool        HasUnappliedEdits = false;           ///< working differs from what the scenes are rendering
+        std::string DiskState         = "untracked";     ///< "clean" | "dirty" | "untracked"
     };
 
     struct ClosedDocumentSnapshot
@@ -203,6 +217,10 @@ namespace Desert::Editor::Control
                 item["holdsSlot"]  = rfl::Generic( document.HoldsRendererSlot );
                 item["claimsSlot"] = rfl::Generic( document.ClaimsRendererSlot );
                 item["focused"]    = rfl::Generic( document.Focused );
+                // The three states, so a client can say in numbers what a capture shows in pixels.
+                item["editModel"] = Str( document.EditModel );
+                item["unapplied"] = rfl::Generic( document.HasUnappliedEdits );
+                item["disk"]      = Str( document.DiskState );
                 open.push_back( rfl::Generic( item ) );
             }
 
@@ -274,5 +292,62 @@ namespace Desert::Editor::Control
         }
 
         return root;
+    }
+
+    /**
+     * @brief The focused document's property census as JSON — the answer to `properties`.
+     *
+     * Lives beside the state writer and not beside the census itself for the reason that whole file was
+     * split this way: MaterialEditorPanel derives the values (it is the only thing that can read a loaded
+     * shader), and everything after that is pure and assertable. Nothing here knows what a material is.
+     *
+     * EVERY FIELD OF EditableProperty IS WRITTEN, including the ones that say a property CANNOT be set. A
+     * census that quietly listed only the writable rows would tell a client that a texture slot is not
+     * declared by the shader, which is a different fact with a different fix.
+     */
+    [[nodiscard]] inline rfl::Generic::Object PropertiesToJson( const std::string&                   document,
+                                                                const std::vector<EditableProperty>& properties )
+    {
+        using namespace StateDetail;
+
+        rfl::Generic::Array entries;
+        entries.reserve( properties.size() );
+
+        for ( const EditableProperty& property : properties )
+        {
+            rfl::Generic::Object item;
+            item["name"]       = Str( property.Name );
+            item["label"]      = Str( property.Label );
+            item["type"]       = Str( property.Type );
+            item["components"] = Num( static_cast<double>( property.Components ) );
+
+            // ABSENT rather than null when the declaration states no clamp: a client that reads `min` as a
+            // number cannot be handed a null, and "no range" is exactly the absence of the field.
+            if ( property.Min.has_value() )
+                item["min"] = Num( *property.Min );
+            if ( property.Max.has_value() )
+                item["max"] = Num( *property.Max );
+
+            rfl::Generic::Array value;
+            for ( int i = 0; i < property.Components; ++i )
+                value.push_back( Num( property.Value[static_cast<std::size_t>( i )] ) );
+            item["value"] = rfl::Generic( value );
+
+            item["settable"] = rfl::Generic( property.Settable );
+            if ( !property.Settable )
+                item["why"] = Str( property.NotSettableReason );
+            if ( property.OverridesParent )
+                item["overridesParent"] = rfl::Generic( true );
+
+            entries.push_back( rfl::Generic( item ) );
+        }
+
+        rfl::Generic::Object payload;
+        // Named, because "the focused document" moves. A client that asked for properties and then set one
+        // has to be able to see WHICH document answered, or a focus change between the two requests is
+        // invisible in both replies.
+        payload["document"]   = Str( document );
+        payload["properties"] = rfl::Generic( entries );
+        return payload;
     }
 } // namespace Desert::Editor::Control

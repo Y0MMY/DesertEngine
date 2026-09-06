@@ -284,6 +284,27 @@ namespace Desert::Runtime
         ++m_InvalidationVersion; // cached instance sets rebuild on their next system tick
     }
 
+    void MaterialService::Release( const Assets::AssetHandle& handle )
+    {
+        // The built materials first, through the graveyard — Invalidate already writes that correctly
+        // (reverse index dropped now, destruction deferred to a safe point) and it bumps the stamp, which
+        // is what makes every cached runtime instance of the dying material rebuild instead of holding a
+        // pointer into it.
+        Invalidate( handle );
+
+        const auto it = m_MaterialAssets.find( handle );
+        if ( it == m_MaterialAssets.end() )
+            return;
+
+        // The external id comes off the ASSET rather than being assumed equal to the handle. For a file
+        // material the two are the same value by construction (SurfaceMaterialAsset::Load adopts the
+        // in-file MaterialId as both), but an imported material's ids genuinely diverge, and an entry left
+        // behind would keep resolving a material that no longer exists for as long as the editor runs.
+        if ( it->second )
+            m_ExternalToInternal.erase( it->second->GetMaterialUUID() );
+        m_MaterialAssets.erase( it );
+    }
+
     void MaterialService::CollectGarbage()
     {
         if ( m_Graveyard.empty() )

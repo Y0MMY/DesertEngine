@@ -1089,12 +1089,17 @@ namespace Desert::Editor
 
         // READS ANSWER NOW; ANYTHING THAT CAN CHANGE THE PICTURE WAITS FOR ONE.
         //
-        // `commands` and `state` observe and change nothing, so making them wait would buy latency and no
-        // guarantee at all. `run` and the two shots are the ones the promise is about — and a shot does
-        // not merely wait for the settled frame, it IS taken on it, which is why its response is finished
-        // in OnFramePresented rather than here.
+        // `commands`, `properties` and `state` observe and change nothing, so making them wait would buy
+        // latency and no guarantee at all. `run`, `set` and the two shots are the ones the promise is
+        // about — and a shot does not merely wait for the settled frame, it IS taken on it, which is why
+        // its response is finished in OnFramePresented rather than here.
+        //
+        // `set` is in the list for exactly the reason `run` is: it moves the preview, and a client that
+        // set a value and captured immediately would photograph the frame BEFORE it. That failure is the
+        // whole subject of the sequence this document exists to prove.
         const bool waitsForAFrame =
-             response.Ok() && ( request.Operation == Control::Op::Run || Control::IsShot( request.Operation ) );
+             response.Ok() && ( request.Operation == Control::Op::Run || request.Operation == Control::Op::Set ||
+                                Control::IsShot( request.Operation ) );
 
         if ( !waitsForAFrame )
         {
@@ -1238,6 +1243,44 @@ namespace Desert::Editor
                 return Control::Response::Success( request.Id );
             }
 
+            case Control::Op::Properties:
+            {
+                IAssetEditorPanel* focused = m_Documents.Find( m_FocusedDocument );
+                if ( !focused )
+                {
+                    return Control::Response::Failure(
+                         request.Id,
+                         "no document has the focus, so there is nothing whose properties could be listed. "
+                         "Open one — 'commands' offers an entry per openable asset under the group 'Open'." );
+                }
+                return Control::Response::Success(
+                     request.Id, Control::PropertiesToJson( DocumentDisplayName( focused->GetName() ),
+                                                            focused->EditableProperties() ) );
+            }
+
+            case Control::Op::Set:
+            {
+                // THE FOCUSED DOCUMENT AND NO OTHER. A property named without a document would have to be
+                // searched for across every open window, and the first match would win — which is a
+                // different document from the one the person or the capture is looking at, on any frame
+                // where two materials declare the same parameter. They almost all do.
+                IAssetEditorPanel* focused = m_Documents.Find( m_FocusedDocument );
+                if ( !focused )
+                {
+                    return Control::Response::Failure(
+                         request.Id, "no document has the focus, so '" + request.Property +
+                                          "' belongs to nothing. Open the document first; 'state' names the "
+                                          "one that has the focus." );
+                }
+
+                if ( const auto written = focused->SetEditableProperty( request.Property, request.Value );
+                     !written )
+                {
+                    return Control::Response::Failure( request.Id, written.GetError() );
+                }
+                return Control::Response::Success( request.Id );
+            }
+
             case Control::Op::State:
             {
                 if ( const auto valid = Control::ValidateSections( request.Sections ); !valid )
@@ -1310,6 +1353,27 @@ namespace Desert::Editor
             entry.HoldsRendererSlot  = document->HoldsRendererSlot();
             entry.ClaimsRendererSlot = document->ClaimsRendererSlot();
             entry.Focused            = ( subject == m_FocusedDocument );
+
+            // The three states, asked of the document itself. Written out as words here rather than
+            // exported as enums, because the wire is read by clients that have none of our headers.
+            entry.EditModel =
+                 ( document->GetEditModel() == IAssetEditorPanel::EditModel::Staged ) ? "staged" : "write-through";
+            entry.HasUnappliedEdits = document->HasUnappliedEdits();
+            switch ( document->GetDiskState() )
+            {
+                case IAssetEditorPanel::DiskState::Clean:
+                    entry.DiskState = "clean";
+                    break;
+                case IAssetEditorPanel::DiskState::Dirty:
+                    entry.DiskState = "dirty";
+                    break;
+                case IAssetEditorPanel::DiskState::Untracked:
+                    // NOT "clean". A document that took no snapshot has no evidence about its file, and a
+                    // client that read the two as one would report an unsaved edit as saved.
+                    entry.DiskState = "untracked";
+                    break;
+            }
+
             snapshot.Documents.push_back( std::move( entry ) );
         }
 
@@ -2401,6 +2465,45 @@ namespace Desert::Editor
                                           }
                                       } } );
             }
+        }
+
+        // THE THREE STATES OF THE FOCUSED DOCUMENT, as ordinary commands.
+        //
+        // Apply, Discard and Save are ACTIONS with names — they belong in the palette by the same rule
+        // that put "Save Scene" there, and putting them here rather than inventing channel operations for
+        // them is what keeps the channel's vocabulary the palette's vocabulary. The artist gets them on
+        // the keyboard as a side effect, which is the argument for the palette in the first place.
+        //
+        // APPLY AND DISCARD ARE OFFERED ONLY WHILE THERE IS SOMETHING TO APPLY. The palette lists what is
+        // available THIS INSTANT, exactly as the toolbar disables the two buttons in the same state; an
+        // entry that ran and did nothing would be a silent no-op reported as a success, and a client
+        // would read it as "the scene now has my edit".
+        if ( IAssetEditorPanel* focused = m_Documents.Find( m_FocusedDocument ) )
+        {
+            const Assets::AssetHandle subject = m_FocusedDocument;
+
+            if ( focused->GetEditModel() == IAssetEditorPanel::EditModel::Staged && focused->HasUnappliedEdits() )
+            {
+                // Re-resolved inside, not captured: the focus can move and the document can be destroyed
+                // between this list being built and the entry being run — the same rule the Preview
+                // viewpoints above follow, for the same reason.
+                commands.push_back( { "Document", "Apply this document's edits to the scene", [this, subject]
+                                      {
+                                          if ( IAssetEditorPanel* target = m_Documents.Find( subject ) )
+                                              (void)target->ApplyEdits();
+                                      } } );
+                commands.push_back( { "Document", "Discard this document's unapplied edits", [this, subject]
+                                      {
+                                          if ( IAssetEditorPanel* target = m_Documents.Find( subject ) )
+                                              (void)target->DiscardEdits();
+                                      } } );
+            }
+
+            commands.push_back( { "Document", "Save this document", [this, subject]
+                                  {
+                                      if ( IAssetEditorPanel* target = m_Documents.Find( subject ) )
+                                          (void)target->SaveDocument();
+                                  } } );
         }
 
         // Actions.

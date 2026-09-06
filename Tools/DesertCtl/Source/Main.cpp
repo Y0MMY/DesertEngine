@@ -23,13 +23,12 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
-#if defined( DESERT_PLATFORM_WINDOWS )
-#include <cstdlib>
-#else
+#if !defined( DESERT_PLATFORM_WINDOWS )
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -50,6 +49,8 @@ namespace
                       "\n"
                       "  commands                      list every command the editor offers right now\n"
                       "  run <group> <label>           run one of them, addressed as the palette shows it\n"
+                      "  properties                    list the focused document's properties and values\n"
+                      "  set <name> <v1[,v2,v3,v4]>    write one of them (the drag a mouse would do)\n"
                       "  state [section ...]           read the editor's state as JSON (default: all)\n"
                       "  shot-window <file.png>        capture the WHOLE editor, interface included\n"
                       "  shot-viewport <file.png>      capture the 3D viewport only, no interface\n"
@@ -103,6 +104,47 @@ namespace
             }
         }
         return out;
+    }
+
+    /// "0.05,0.35,0.95" -> "[0.05,0.35,0.95]", or false having said what was wrong.
+    ///
+    /// THE COUNT IS PRESERVED, never padded. One number for a float and three for a colour is what the
+    /// editor checks against the property's own declaration, and a client that quietly widened "0.2" to
+    /// four components would turn a refusal a person can read into a write they did not ask for.
+    bool NumberArray( const std::string& text, std::string& out )
+    {
+        out               = "[";
+        std::size_t start = 0;
+        for ( ;; )
+        {
+            const std::size_t comma = text.find( ',', start );
+            const std::string piece =
+                 ( comma == std::string::npos ) ? text.substr( start ) : text.substr( start, comma - start );
+
+            // Parsed here rather than passed through, so a typo is caught at the client with the text in
+            // hand instead of arriving as a JSON error one round trip later. strtod's end pointer is what
+            // turns "0.5abc" from a partial read into the mistake it is.
+            char*        end   = nullptr;
+            const double value = std::strtod( piece.c_str(), &end );
+            if ( piece.empty() || end != piece.c_str() + piece.size() )
+            {
+                std::fprintf( stderr, "desertctl: '%s' is not a number. Write the value as v1[,v2,v3,v4].\n",
+                              piece.c_str() );
+                return false;
+            }
+
+            char buffer[64];
+            std::snprintf( buffer, sizeof( buffer ), "%.9g", value );
+            if ( out.size() > 1 )
+                out += ',';
+            out += buffer;
+
+            if ( comma == std::string::npos )
+                break;
+            start = comma + 1;
+        }
+        out += ']';
+        return true;
     }
 } // namespace
 
@@ -279,6 +321,24 @@ int main( int argc, char** argv )
         }
         request = R"({"id":1,"op":"run","group":")" + Escape( rest[1] ) + R"(","label":")" + Escape( rest[2] ) +
                   R"("})";
+    }
+    else if ( operation == "properties" )
+    {
+        request = R"({"id":1,"op":"properties"})";
+    }
+    else if ( operation == "set" )
+    {
+        if ( rest.size() < 3 )
+        {
+            std::fprintf( stderr,
+                          "desertctl: set needs a property and a value. Ask 'properties' for the names and "
+                          "how many numbers each one takes.\n" );
+            return kNoEditor;
+        }
+        std::string value;
+        if ( !NumberArray( rest[2], value ) )
+            return kNoEditor;
+        request = R"({"id":1,"op":"set","property":")" + Escape( rest[1] ) + R"(","value":)" + value + "}";
     }
     else if ( operation == "state" )
     {
