@@ -31,6 +31,14 @@ namespace Desert::Editor
     public:
         // Draws every visible field of `type` for the object at `object`, grouped by Category.
         // Returns true if any field value changed this frame.
+        //
+        // WHAT THE RETURN IS FOR — and what it is not. Undo entries and the revision bump behind
+        // "unsaved changes" / autosave are recorded IN HERE, for widget commits and for the per-field
+        // reset button alike (Editor/Panels/PropertyEditor/PropertyReset.cpp), so a caller that only
+        // needs the edit to be durable may ignore the return. Consume it when something must REACT to
+        // the value having moved this frame — re-deriving dependent state (the sky preset name), or
+        // broadcasting to a multi-selection (DrawMulti's own field loop does).
+        //
         // `uiHelper` is optional; when provided, texture slots show a thumbnail tooltip on hover.
         static bool Draw( void* object, const Reflection::TypeInfo& type,
                           const Assets::AssetManager* assetMgr = nullptr, UI::UIHelper* uiHelper = nullptr,
