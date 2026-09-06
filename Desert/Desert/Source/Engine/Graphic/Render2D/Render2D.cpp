@@ -120,19 +120,32 @@ namespace Desert::Graphic::Render2D
 
     void Render2D::EnsureCapacity( uint32_t vertexCount, uint32_t indexCount )
     {
+        // THE CAPACITY IS RECORDED ONLY ON SUCCESS, and that is a fix rather than tidying. Both
+        // `Invalidate()` results were dropped here while `m_*Capacity = cap` ran unconditionally, so a
+        // failed GPU allocation left the renderer believing it owned a buffer of the new size: this
+        // function then never retried, and every later draw wrote through the failed buffer. Leaving the
+        // old capacity means the next call attempts the growth again.
         if ( vertexCount > m_VertexCapacity )
         {
             const uint32_t cap = std::max( vertexCount, m_VertexCapacity ? m_VertexCapacity * 2 : 4096u );
             m_VertexBuffer     = VertexBuffer::Create( cap * (uint32_t)sizeof( Vertex2D ), BufferUsage::Dynamic );
-            m_VertexBuffer->Invalidate(); // Create() only constructs; Invalidate() allocates GPU memory
-            m_VertexCapacity = cap;
+            const auto allocated = m_VertexBuffer->Invalidate(); // Create() only constructs; this allocates
+            if ( allocated.IsSuccess() )
+                m_VertexCapacity = cap;
+            else
+                LOG_ERROR( "[Render2D] vertex buffer growth to {} verts failed: {}", cap,
+                           allocated.GetError() );
         }
         if ( indexCount > m_IndexCapacity )
         {
             const uint32_t cap = std::max( indexCount, m_IndexCapacity ? m_IndexCapacity * 2 : 8192u );
             m_IndexBuffer      = IndexBuffer::Create( cap * (uint32_t)sizeof( uint32_t ), BufferUsage::Dynamic );
-            m_IndexBuffer->Invalidate();
-            m_IndexCapacity = cap;
+            const auto allocated = m_IndexBuffer->Invalidate();
+            if ( allocated.IsSuccess() )
+                m_IndexCapacity = cap;
+            else
+                LOG_ERROR( "[Render2D] index buffer growth to {} indices failed: {}", cap,
+                           allocated.GetError() );
         }
     }
 

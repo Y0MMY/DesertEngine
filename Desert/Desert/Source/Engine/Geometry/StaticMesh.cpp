@@ -23,8 +23,15 @@ namespace Desert
 
     Common::BoolResultWithCodes<Desert::MeshError> StaticMesh::Invalidate()
     {
-        m_VertexBuffer->RT_Invalidate();
-        m_IndexBuffer->RT_Invalidate();
+        const auto vertices = m_VertexBuffer->RT_Invalidate();
+        if ( !vertices.IsSuccess() )
+            return Common::MakeErrorWithCodes<bool, MeshError>( { MeshError::GpuUploadFailed },
+                                                                vertices.GetError() );
+
+        const auto indices = m_IndexBuffer->RT_Invalidate();
+        if ( !indices.IsSuccess() )
+            return Common::MakeErrorWithCodes<bool, MeshError>( { MeshError::GpuUploadFailed },
+                                                                indices.GetError() );
 
         return Common::MakeSuccessWithCodes<bool, MeshError>( true );
     }

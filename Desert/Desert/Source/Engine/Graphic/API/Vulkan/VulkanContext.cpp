@@ -41,7 +41,13 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanContext::VulkanContext( const std::shared_ptr<Window>& window ) : m_Window( window )
     {
-        CreateVKInstance();
+        // A constructor cannot return a result, and there is no partially-working VulkanContext: with no
+        // instance every device, surface and swapchain below dereferences null, so the process dies a few
+        // frames later somewhere that says nothing about the cause. DESERT_VERIFY names the cause and
+        // aborts in both configurations — the same instrument the line below already uses for the
+        // adjacent precondition, and the one this file's own `glfwVulkanSupported()` check picked.
+        const auto instance = CreateVKInstance();
+        DESERT_VERIFY( instance.IsSuccess(), "Vulkan instance could not be created: {}", instance.GetError() );
     }
 
     Common::ResultStr<VkResult> VulkanContext::CreateVKInstance()

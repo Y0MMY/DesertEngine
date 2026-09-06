@@ -182,7 +182,12 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanVertexBuffer::~VulkanVertexBuffer()
     {
-        Release();
+        // A destructor has no channel, so the report is the log. Left silent, a vertex buffer whose
+        // VMA de-allocation refused leaked device memory with nothing anywhere to say a leak had begun —
+        // and the symptom of that arrives much later, as an allocation failure in unrelated code.
+        const auto released = Release();
+        if ( !released.IsSuccess() )
+            LOG_ERROR( "[VulkanVertexBuffer] Release failed during destruction: {}", released.GetError() );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

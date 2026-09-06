@@ -168,7 +168,12 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanIndexBuffer::~VulkanIndexBuffer()
     {
-        Release();
+        // A destructor has no channel, so the report is the log. Left silent, a index buffer whose
+        // VMA de-allocation refused leaked device memory with nothing anywhere to say a leak had begun —
+        // and the symptom of that arrives much later, as an allocation failure in unrelated code.
+        const auto released = Release();
+        if ( !released.IsSuccess() )
+            LOG_ERROR( "[VulkanIndexBuffer] Release failed during destruction: {}", released.GetError() );
     }
 
     Common::BoolResultStr VulkanIndexBuffer::Release()
