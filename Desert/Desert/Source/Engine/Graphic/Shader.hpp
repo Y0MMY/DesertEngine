@@ -43,7 +43,26 @@ namespace Desert::Graphic
         // ask this and skip, and the pipeline builder refuses as the last line of defence.
         [[nodiscard]] virtual bool IsCompiled() const = 0;
 
-        static std::string             GetStringShaderStage( const Core::Formats::ShaderStage stage );
+        // Inline ON PURPOSE: ShaderCompiler (a device-free TU that offline cooks and tests link)
+        // needs only this name mapping — defined in Shader.cpp it dragged Shader::Create and with it
+        // the whole Vulkan backend into every such link.
+        static std::string GetStringShaderStage( const Core::Formats::ShaderStage stage )
+        {
+            switch ( stage )
+            {
+                case Core::Formats::ShaderStage::Fragment:
+                    return "Fragment";
+                case Core::Formats::ShaderStage::Vertex:
+                    return "Vertex";
+                case Core::Formats::ShaderStage::Compute:
+                    return "Compute";
+                case Core::Formats::ShaderStage::TessControl:
+                    return "TessControl";
+                case Core::Formats::ShaderStage::TessEvaluation:
+                    return "TessEvaluation";
+            }
+            return "Unknown";
+        }
         // passName selects a `Pass "Name"` block of a DSL multi-pass shader; empty = the default
         // program. Pass shaders are named "<Shader>/<Pass>".
         static std::shared_ptr<Shader> Create( const Assets::Asset<Assets::ShaderAsset>& asset,

@@ -1,6 +1,7 @@
 #include "IconService.hpp"
 
 #include <Engine/Runtime/Services/ServiceScanRoots.hpp>
+#include <Engine/Vector/IconBake.hpp>
 #include <Engine/Vector/VectorImage.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
@@ -15,13 +16,9 @@ namespace Desert::Runtime
 {
     namespace
     {
-        // Bake resolution of the inner box, plus the gutter the distance field spreads over. 64 is the
-        // same ballpark as the font atlas (48) — an icon is drawn far larger than a glyph, and the SDF
-        // reconstructs the edge analytically, so this is about gradient quality, not pixel resolution.
-        constexpr uint32_t kIconSize    = 64;
-        constexpr int      kIconPadding = 6;
-        constexpr uint32_t kCellDim     = kIconSize + 2u * static_cast<uint32_t>( kIconPadding );
-
+        // Bake resolution/padding live in Engine/Vector/IconBake (Vector::kIconSize et al.) — the
+        // bake is shared with the game packager's cook, so its parameters cannot be private here.
+        // What stays local is the ATLAS page: a property of the running icon set, not of one file.
         constexpr uint32_t kAtlasStart = 256;  // grows by doubling as icons are imported
         constexpr uint32_t kAtlasMax   = 2048; // 16 MB RGBA8 — hundreds of icons; refuse rather than crawl
         constexpr uint32_t kSpacing    = 1;    // gutter so bilinear sampling never pulls in a neighbour
@@ -71,46 +68,38 @@ namespace Desert::Runtime
             return raw;
         }
 
-        const Vector::VectorImage image =
-             Vector::ParseSvg( reinterpret_cast<const char*>( svgFile.data() ), svgFile.size() );
-        if ( !image.Valid() )
+        // Disk cache first: the parse + per-layer SDF rasterization is the expensive half of an icon
+        // import, and a packaged game ships it pre-baked in Cooked/IconCache (read VFS-aware, so the
+        // archive serves it when no loose file exists). A miss bakes and stores, same as fonts.
+        const std::filesystem::path cachePath = Vector::IconCachePath( Vector::IconCacheKey( svgFile ) );
+        Vector::BakedIcon           baked;
+        const bool                  fromCache = Vector::TryLoadBakedIcon( cachePath, baked );
+        if ( !fromCache )
         {
-            LOG_ERROR( "[IconService] '{}' has no shapes this importer understands", path );
-            return raw;
-        }
-        raw->Aspect = image.Height > 0.0f ? image.Width / image.Height : 1.0f;
-
-        // Bake one layer per COLOUR RUN. Consecutive shapes sharing a fill collapse into a single layer
-        // (fewer quads); a new colour starts a new one, and document order is preserved so overlapping
-        // paths still paint back-to-front exactly as the .svg says.
-        const size_t firstBitmap = m_Bitmaps.size();
-        size_t       runStart    = 0;
-        for ( size_t i = 1; i <= image.Shapes.size(); ++i )
-        {
-            const bool endOfRun =
-                 ( i == image.Shapes.size() ) || ( image.Shapes[i].FillRGBA != image.Shapes[runStart].FillRGBA );
-            if ( !endOfRun )
-                continue;
-
-            std::vector<uint8_t> sdf = Vector::RasterizeSdf( image, kIconSize, kIconPadding, runStart, i );
-            if ( !sdf.empty() )
+            baked = Vector::BakeIconSdf( svgFile.data(), svgFile.size() );
+            if ( !baked.Valid() )
             {
-                LayerBitmap lb;
-                lb.Sdf   = std::move( sdf );
-                lb.Dim   = kCellDim;
-                lb.RGBA  = image.Shapes[runStart].FillRGBA;
-                lb.Owner = path;
-                m_Bitmaps.push_back( std::move( lb ) );
-                raw->Layers.push_back( IconLayer{ 0.0f, 0.0f, 1.0f, 1.0f, image.Shapes[runStart].FillRGBA } );
+                LOG_ERROR( "[IconService] '{}' has no filled shapes this importer understands", path );
+                return raw;
             }
-            runStart = i;
+            Vector::StoreBakedIcon( cachePath, baked );
+        }
+        raw->Aspect = baked.Aspect;
+
+        const size_t firstBitmap = m_Bitmaps.size();
+        for ( Vector::BakedIconLayer& layer : baked.Layers )
+        {
+            const uint32_t rgba = layer.RGBA;
+
+            LayerBitmap lb;
+            lb.Sdf   = std::move( layer.Sdf );
+            lb.Dim   = Vector::kIconCellDim;
+            lb.RGBA  = rgba;
+            lb.Owner = path;
+            m_Bitmaps.push_back( std::move( lb ) );
+            raw->Layers.push_back( IconLayer{ 0.0f, 0.0f, 1.0f, 1.0f, rgba } );
         }
 
-        if ( raw->Layers.empty() )
-        {
-            LOG_ERROR( "[IconService] '{}' has no filled shapes", path );
-            return raw;
-        }
         if ( !RepackAtlas() )
         {
             m_Bitmaps.resize( firstBitmap ); // roll the new runs back out so the atlas stays consistent
@@ -118,8 +107,8 @@ namespace Desert::Runtime
             RepackAtlas();
             return raw;
         }
-        LOG_INFO( "[IconService] Imported '{}' ({} layer(s)) into the {}x{} icon atlas", path, raw->Layers.size(),
-                  m_AtlasSize, m_AtlasSize );
+        LOG_INFO( "[IconService] {} '{}' ({} layer(s)) into the {}x{} icon atlas",
+                  fromCache ? "Loaded cached" : "Imported", path, raw->Layers.size(), m_AtlasSize, m_AtlasSize );
         return raw;
     }
 
@@ -134,7 +123,7 @@ namespace Desert::Runtime
 
         // Every cell is the same size, so the shelf packer degenerates into a grid: find the smallest
         // power-of-two page that holds them all, growing by doubling.
-        const uint32_t stride = kCellDim + kSpacing;
+        const uint32_t stride = Vector::kIconCellDim + kSpacing;
         uint32_t       dim    = std::max( kAtlasStart, m_AtlasSize );
         uint32_t       perRow = 0;
         while ( true )
@@ -157,7 +146,7 @@ namespace Desert::Runtime
         // Details preview — then shows the icon's real silhouette rather than a soft grey blob.
         std::vector<unsigned char> rgba( static_cast<size_t>( dim ) * dim * 4, 0 );
         const float                edge     = static_cast<float>( Vector::kSdfOnEdgeValue );
-        const float                perTexel = edge / static_cast<float>( kIconPadding );
+        const float                perTexel = edge / static_cast<float>( Vector::kIconPadding );
 
         for ( size_t i = 0; i < m_Bitmaps.size(); ++i )
         {
@@ -213,8 +202,8 @@ namespace Desert::Runtime
                 const uint32_t oy = static_cast<uint32_t>( cell / perRow ) * stride;
                 layer.U0          = static_cast<float>( ox ) * inv;
                 layer.V0          = static_cast<float>( oy ) * inv;
-                layer.U1          = static_cast<float>( ox + kCellDim ) * inv;
-                layer.V1          = static_cast<float>( oy + kCellDim ) * inv;
+                layer.U1          = static_cast<float>( ox + Vector::kIconCellDim ) * inv;
+                layer.V1          = static_cast<float>( oy + Vector::kIconCellDim ) * inv;
                 ++cell;
             }
         }

@@ -1,6 +1,8 @@
 #include "GamePackager.hpp"
+#include "PackageCook.hpp"
 #include "PackagedContentTrees.hpp"
 
+#include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 
 #include <Common/Core/Constants.hpp>
@@ -171,7 +173,14 @@ namespace Desert::Editor
         makeExecutable( binDir / binName );
         ++stats.Files;
 
-        // 3) ALL content goes into ONE Content.dpak (UE .pak model), tree by tree out of the shared
+        // 3) Cook BEFORE packing: every deterministic startup cost — shader SPIR-V, font atlases,
+        // icon SDFs — is paid here, once, into the project's Cooked/ tree, so the census below ships
+        // the artifacts and the player's first launch reads instead of rebuilding. Cooked for the
+        // TARGET runtime's profile (options.Config), not this editor's: a Debug editor packaging a
+        // Release game must produce Release cache keys or the shipped cache never hits.
+        CookContentCaches( Core::SpirvDebugInfoForConfigName( options.Config ) );
+
+        // ALL content goes into ONE Content.dpak (UE .pak model), tree by tree out of the shared
         // census (PackagedContentTrees.hpp) — assets, cooked cache, shaders, fonts, icons. The Runtime
         // mounts the archive at startup; every content read resolves through the VFS.
         {
@@ -322,6 +331,12 @@ namespace Desert::Editor
         Common::Utils::PakWriter pak( pakPath );
         if ( !pak.IsOpen() )
             return { false, "Cannot create " + pakPath.string(), "" };
+
+        // Same cook as PackageGame, for THIS build's profile: the dev pak serves the runtime the
+        // developer launches next to this editor, which is built in the same configuration. (A
+        // cross-config dev runtime misses and self-heals into loose Cooked/ — dev machines are
+        // writable; only the shipped package must never rely on that.)
+        CookContentCaches( Core::SpirvDebugInfoThisBuild() );
 
         // The same census PackageGame packs — one list, two entry points (see PackagedContentTrees.hpp).
         for ( const PackagedTree& tree : PackagedContentTrees() )

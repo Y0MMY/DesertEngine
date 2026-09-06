@@ -1228,6 +1228,50 @@ TEST_F( ShaderRootFixture, TheTerrainKeepsPerDrawDataOutOfItsSharedUniformBlock 
     EXPECT_TRUE( HasBinding( bindings, 8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // TerrainInstances[]
 }
 
+// ---- The debug-info PROFILE, asserted as a relation --------------------------------------------------
+//
+// The key fingerprints whether SPIR-V debug info is generated, because the binaries differ. That used
+// to be an #ifdef buried in the hash — invisible to the game packager, which cooks on ONE machine for
+// a runtime built in a possibly DIFFERENT configuration. The packager now names the target profile
+// explicitly (SpirvDebugInfoForConfigName), and these three pins are what keep that name honest.
+
+// A Debug artifact under a Release key (or vice versa) would be served across configs with different
+// binaries — the profiles must key apart.
+TEST( ShaderCacheKeyProfile, TheTwoProfilesKeyApart )
+{
+    const std::string src = "#version 450\nvoid main() {}\n";
+    EXPECT_NE( Desert::Core::ComputeShaderCacheKeyForProfile( ShaderStage::Vertex, src, "probe", true ),
+               Desert::Core::ComputeShaderCacheKeyForProfile( ShaderStage::Vertex, src, "probe", false ) );
+}
+
+// The 3-argument overload IS the profile overload at this build's own policy — the runtime asks with
+// it, the cook answers with the explicit one, and this equality is why a same-config cook always hits.
+TEST( ShaderCacheKeyProfile, TheRuntimeDefaultIsThisBuildsProfile )
+{
+    const std::string src = "#version 450\nvoid main() {}\n";
+    EXPECT_EQ( ComputeShaderCacheKey( ShaderStage::Vertex, src, "probe" ),
+               Desert::Core::ComputeShaderCacheKeyForProfile( ShaderStage::Vertex, src, "probe",
+                                                              Desert::Core::SpirvDebugInfoThisBuild() ) );
+}
+
+// The packager maps its target-config STRING through SpirvDebugInfoForConfigName; the engine compiles
+// under DESERT_CONFIG_DEBUG. Both spellings of "which configuration is this" must agree — this test
+// runs in both configurations in CI, so each side of the mapping is pinned by a real build of the
+// other. (This suite defines DESERT_CONFIG_DEBUG for Debug exactly as the engine's own premake does.)
+TEST( ShaderCacheKeyProfile, TheConfigNameMappingMatchesTheBuildThatCarriesIt )
+{
+#ifdef DESERT_CONFIG_DEBUG
+    const char* thisConfig = "Debug";
+#else
+    const char* thisConfig = "Release";
+#endif
+    EXPECT_EQ( Desert::Core::SpirvDebugInfoForConfigName( thisConfig ), Desert::Core::SpirvDebugInfoThisBuild() );
+
+    // And the mapping is a real function of its argument, not a constant.
+    EXPECT_TRUE( Desert::Core::SpirvDebugInfoForConfigName( "Debug" ) );
+    EXPECT_FALSE( Desert::Core::SpirvDebugInfoForConfigName( "Release" ) );
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );

@@ -78,14 +78,39 @@ namespace Desert::Core
         return includes;
     }
 
+    bool SpirvDebugInfoThisBuild()
+    {
+        // The one home of the policy. ShaderCompiler generates debug info exactly when this is true,
+        // and the key fingerprints it below — if the two ever came from different places they could
+        // disagree, and a same-key artifact would be served across configs with different binaries.
+#ifdef DESERT_CONFIG_DEBUG
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    bool SpirvDebugInfoForConfigName( std::string_view configName )
+    {
+        // Mirrors the #ifdef above: DESERT_CONFIG_DEBUG is defined for the "Debug" premake
+        // configuration and nothing else. Tests/Engine/ShaderCacheKey pins this mirror to
+        // SpirvDebugInfoThisBuild() in both configs.
+        return configName == "Debug";
+    }
+
     uint64_t ComputeShaderCacheKey( Formats::ShaderStage stage, const std::string& source,
                                     const std::filesystem::path& requestingFile )
     {
+        return ComputeShaderCacheKeyForProfile( stage, source, requestingFile, SpirvDebugInfoThisBuild() );
+    }
+
+    uint64_t ComputeShaderCacheKeyForProfile( Formats::ShaderStage stage, const std::string& source,
+                                              const std::filesystem::path& requestingFile, bool spirvDebugInfo )
+    {
         uint64_t key = kFnvOffset;
         FnvMix( key, kOptionsFingerprint );
-#ifdef DESERT_CONFIG_DEBUG
-        FnvMix( key, "|debuginfo" ); // debug info changes the binary — keep configs apart
-#endif
+        if ( spirvDebugInfo )
+            FnvMix( key, "|debuginfo" ); // debug info changes the binary — keep configs apart
         key ^= static_cast<uint64_t>( stage );
         key *= kFnvPrime;
         FnvMix( key, source );

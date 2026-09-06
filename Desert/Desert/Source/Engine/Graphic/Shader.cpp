@@ -22,23 +22,4 @@ namespace Desert::Graphic
         return shader;
     }
 
-    std::string Shader::GetStringShaderStage( const Core::Formats::ShaderStage stage )
-    {
-        switch ( stage )
-        {
-            case Core::Formats::ShaderStage::Fragment:
-                return "Fragment";
-            case Core::Formats::ShaderStage::Vertex:
-                return "Vertex";
-            case Core::Formats::ShaderStage::Compute:
-                return "Compute";
-            case Core::Formats::ShaderStage::TessControl:
-                return "TessControl";
-            case Core::Formats::ShaderStage::TessEvaluation:
-                return "TessEvaluation";
-        }
-
-        return "Unknown";
-    }
-
 } // namespace Desert::Graphic

@@ -3,6 +3,12 @@
 #include <Engine/Core/Formats/Shader.hpp>
 #include <Engine/Core/Formats/ShaderProgramMeta.hpp>
 
+// This header leaned on the engine PCH for these — which broke every PCH-less consumer (the offline
+// cook and the packaging tests compile this TU directly).
+#include <filesystem>
+#include <string>
+#include <unordered_map>
+
 namespace Desert::Core::Preprocess
 {
     class ShaderPreprocess
