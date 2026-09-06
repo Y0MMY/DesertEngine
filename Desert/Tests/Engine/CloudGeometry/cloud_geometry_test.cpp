@@ -760,11 +760,11 @@ TEST( CloudGeometryVertical, TheLocalZenithTiltsOverTheLayersOwnReach )
 
     // At the layer's own far reach it is not, and by more than a degree — which is the whole reason a
     // per-sample sun angle is taken from the SAMPLE. atan(150 / 6360) = 1.351 degrees.
-    const vec3  far     = CloudLocalUp( PointAtArc( kBottomKm, kFarReachKm ) );
-    const float tiltDeg = std::acos( std::clamp( far.y, -1.0f, 1.0f ) ) * 180.0f / 3.14159265358979f;
+    const vec3  farPoint = CloudLocalUp( PointAtArc( kBottomKm, kFarReachKm ) );
+    const float tiltDeg  = std::acos( std::clamp( farPoint.y, -1.0f, 1.0f ) ) * 180.0f / 3.14159265358979f;
 
     EXPECT_GT( tiltDeg, 1.0f ) << "the local zenith at " << kFarReachKm
-                               << " km is within a degree of the world's up, so the far deck would be "
+                               << " km is within a degree of the world's up, so the farPoint deck would be "
                                   "given the near deck's sun angle";
     EXPECT_NEAR( tiltDeg, 1.351f, 0.01f );
 
@@ -783,11 +783,11 @@ TEST( CloudGeometryVertical, TheAltitudeFollowsTheCurvatureAndTheWorldYDoesNot )
     EXPECT_NEAR( CloudAltitudeKm( layer, overhead ), kBottomKm - kPlanetKm, 1e-3f );
     EXPECT_NEAR( overhead.y - kPlanetKm, kBottomKm - kPlanetKm, 1e-3f );
 
-    // At the far reach they do not. The altitude is still the layer's base — the point was placed on that
+    // At the farPoint reach they do not. The altitude is still the layer's base — the point was placed on that
     // sphere — while the world Y has fallen by the sagitta, 1.77 km of a 5 km base.
-    const vec3  far      = PointAtArc( kBottomKm, kFarReachKm );
-    const float altitude = CloudAltitudeKm( layer, far );
-    const float naive    = far.y - kPlanetKm;
+    const vec3  farPoint = PointAtArc( kBottomKm, kFarReachKm );
+    const float altitude = CloudAltitudeKm( layer, farPoint );
+    const float naive    = farPoint.y - kPlanetKm;
 
     EXPECT_NEAR( altitude, kBottomKm - kPlanetKm, 1e-2f );
     EXPECT_LT( naive, altitude - 1.5f ) << "the world-Y reading at " << kFarReachKm

@@ -14,8 +14,13 @@ namespace Common::Units
     //  is no "which unit is this number in?" question.
     //
     //  Write sizes with the helpers so the intent is readable in code:
-    //      float far   = Units::Metres( 1000.0f );  // 100000 units
+    //      float reach = Units::Metres( 1000.0f );  // 100000 units
     //      float step  = Units::Cm( 25.0f );        // 25 units
+    //
+    //  Not `far` — windef.h still #defines `far` and `near` away for 16-bit compatibility, so a
+    //  variable by either name compiles here and is eaten by MSVC. This example taught the trap; two
+    //  suites had already copied it, and both were invisible until Windows CI, 35 minutes downstream.
+    //  Desert/Tests/Common/ReservedIdentifiers now fails locally instead.
     //
     //  Scenes saved before the switch were authored in metres; SceneSerializer migrates them on load
     //  (see kUnitVersion there).

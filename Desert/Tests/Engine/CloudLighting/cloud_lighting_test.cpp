@@ -629,9 +629,9 @@ TEST( CloudSkyOcclusion, TheAddressingIsTheModellingVolumesOwnFrameAndItsTopSlic
     EXPECT_NEAR( corner.x, 0.0f, 1e-5f );
     EXPECT_NEAR( corner.z, 0.0f, 1e-5f );
 
-    const vec3 far = CloudSkyOcclusionUvw( originKm, invSideKm, 0.5f, vec3( 24.0f, 1.0f, 55.0f ) );
-    EXPECT_NEAR( far.x, 1.0f, 1e-5f );
-    EXPECT_NEAR( far.z, 1.0f, 1e-5f );
+    const vec3 farUvw = CloudSkyOcclusionUvw( originKm, invSideKm, 0.5f, vec3( 24.0f, 1.0f, 55.0f ) );
+    EXPECT_NEAR( farUvw.x, 1.0f, 1e-5f );
+    EXPECT_NEAR( farUvw.z, 1.0f, 1e-5f );
 
     // HORIZONTALLY UNCLAMPED AND IT MUST STAY SO: the modelling volume is exactly periodic over the
     // region, so REPEAT past the footprint is the same sky again — which is what makes this term reach the

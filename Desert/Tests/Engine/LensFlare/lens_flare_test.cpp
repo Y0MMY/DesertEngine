@@ -144,18 +144,18 @@ TEST( LensFlareGhosts, ContinuePastTheCentreOnceSpacingExceedsTheAxis )
     // that starts at ghost 2 (3 x 0.35 > 1), and the sign of (centre - screenCentre) must flip.
     const glm::vec2 sun( 0.8f, 0.2f );
 
-    const glm::vec2 near = LensFlareGhostCenter( sun, 1.0f, 0.35f ); // 0.70 of the way
-    const glm::vec2 far  = LensFlareGhostCenter( sun, 2.0f, 0.35f ); // 1.05 of the way
+    const glm::vec2 nearGhost = LensFlareGhostCenter( sun, 1.0f, 0.35f ); // 0.70 of the way
+    const glm::vec2 farGhost  = LensFlareGhostCenter( sun, 2.0f, 0.35f ); // 1.05 of the way
 
-    EXPECT_GT( near.x, kCentre.x ); // still on the sun's side
-    EXPECT_LT( far.x, kCentre.x );  // past it
+    EXPECT_GT( nearGhost.x, kCentre.x ); // still on the sun's side
+    EXPECT_LT( farGhost.x, kCentre.x );  // past it
 }
 
 TEST( LensFlareGhosts, SizeAndTintRampTogetherAcrossTheTrain )
 {
     // Size and tint share LensFlareGhostRamp precisely so they cannot disagree about which end of the
     // train a ghost is on — the "two implementations of one quantity" defect this project keeps paying
-    // for. Ghost 0 is exactly the near end, the last exactly the far end, and both are monotone.
+    // for. Ghost 0 is exactly the nearGhost end, the last exactly the farGhost end, and both are monotone.
     const float count = 5.0f;
     const vec3  inner( 1.0f, 0.86f, 0.62f );
     const vec3  outer( 0.45f, 0.68f, 1.0f );
