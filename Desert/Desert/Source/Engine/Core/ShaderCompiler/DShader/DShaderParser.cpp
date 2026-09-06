@@ -248,8 +248,9 @@ namespace Desert::Core::Preprocess
             }
             else if ( s == "texturecube" )
             {
-                param.IsTexture = true;
-                param.Type      = VT::Unknown;
+                param.IsTexture     = true;
+                param.IsCubeTexture = true;
+                param.Type          = VT::Unknown;
             }
             else
                 return false;
@@ -297,19 +298,14 @@ namespace Desert::Core::Preprocess
             }
         }
 
-        // Distinguishes 2D from cube for auto-generated samplers (Type is Unknown for both).
-        struct PropertyExtra
-        {
-            bool IsCube = false;
-        };
-
         // ─── Section parsers ────────────────────────────────────────────────────────
 
+        // 2D-vs-cube for the auto-generated samplers comes from ShaderParam::IsCubeTexture itself; the
+        // parallel "Extras" array this struct used to carry is gone with it.
         struct PropertiesInfo
         {
-            std::optional<uint32_t>    UBBinding;      // Binding(n)
-            std::optional<uint32_t>    TextureBinding; // TextureBinding(n)
-            std::vector<PropertyExtra> Extras;         // parallel to Meta.Params
+            std::optional<uint32_t> UBBinding;      // Binding(n)
+            std::optional<uint32_t> TextureBinding; // TextureBinding(n)
         };
 
         bool ParsePropertyAttributes( Cursor& c, ShaderParam& param, ParseError& err )
@@ -481,7 +477,6 @@ namespace Desert::Core::Preprocess
                 if ( !ParsePropertyDefault( c, param, err ) )
                     return false;
 
-                info.Extras.push_back( { Lower( typeKw ) == "texturecube" } );
                 meta.Params.push_back( std::move( param ) );
             }
         }
@@ -792,14 +787,12 @@ namespace Desert::Core::Preprocess
             if ( info.TextureBinding )
             {
                 uint32_t binding = *info.TextureBinding;
-                for ( size_t i = 0; i < meta.Params.size(); ++i )
+                for ( const auto& p : meta.Params )
                 {
-                    const auto& p = meta.Params[i];
                     if ( !p.IsTexture )
                         continue;
-                    const bool cube = i < info.Extras.size() && info.Extras[i].IsCube;
                     out << "layout( binding = " << binding++ << " ) uniform "
-                        << ( cube ? "samplerCube" : "sampler2D" ) << " " << p.Name << ";\n";
+                        << ( p.IsCubeTexture ? "samplerCube" : "sampler2D" ) << " " << p.Name << ";\n";
                 }
             }
 

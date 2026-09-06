@@ -57,6 +57,13 @@ project(test_name)
         defines { "DESERT_PLATFORM_LINUX" }
     filter {}
 
+    -- The engine defines this for its own Debug TUs; the ShaderCacheKey.cpp compiled INTO this test
+    -- must see the same value or SpirvDebugInfoThisBuild() here disagrees with the engine's — and
+    -- the profile-relation tests below would pin the wrong mapping.
+    filter "configurations:Debug"
+        defines { "DESERT_CONFIG_DEBUG" }
+    filter {}
+
     links { "Common", "Optick" } -- Common's JobSystem registers worker threads with Optick
 
     -- Common contains Objective-C (MacOSFileSystem's file dialog) and the include walk goes through

@@ -292,8 +292,9 @@ namespace Desert::Editor
         // own DefaultScene generates next.
         if ( ProjectContext::HasProject() && ProjectContext::Current().Name == "Desert Sandbox" )
         {
-            const auto demoPath = Common::Constants::Path::SCENE_PATH /
-                                  ( "CornellDemo" + Common::Constants::Extensions::SCENE_EXTENSION );
+            const auto demoPath =
+                 Common::Constants::Path::SCENE_PATH /
+                 ( "CornellDemo" + std::string( Common::Constants::Extensions::SCENE_EXTENSION ) );
             std::error_code ec;
             if ( !std::filesystem::exists( demoPath, ec ) )
             {
@@ -728,8 +729,8 @@ namespace Desert::Editor
                         const auto      dir = Common::Constants::Path::SCENE_PATH / "Autosave";
                         std::error_code ec;
                         std::filesystem::create_directories( dir, ec );
-                        const auto path =
-                             dir / ( name + "_autosave" + Common::Constants::Extensions::SCENE_EXTENSION );
+                        const auto path = dir / ( name + "_autosave" +
+                                                  std::string( Common::Constants::Extensions::SCENE_EXTENSION ) );
                         Common::Utils::FileSystem::WriteContentToFile( path, serializer.SerializeToJson() );
                         LOG_INFO( "[Autosave] {}", path.string() );
                     }
@@ -2804,7 +2805,15 @@ namespace Desert::Editor
         // refuse - an old autosave, a scene saved by an older build - would then have cost the user the
         // scene they had and given them nothing. So an unloadable file leaves the editor exactly as it is
         // and says why, with the command that fixes the file.
-        const std::string content = Common::Utils::FileSystem::ReadFileContent( path );
+        const auto contentRead = Common::Utils::FileSystem::ReadFileContent( path );
+        if ( !contentRead )
+        {
+            LOG_ERROR( "{0}", contentRead.GetError() );
+            Editor::ToastManager::Push( "Scene not loaded — the file could not be read (see the log)",
+                                        Editor::ToastLevel::Error );
+            return;
+        }
+        const std::string& content = contentRead.GetValue();
         if ( const auto loadable = Desert::Core::ParseLoadableScene( path.string(), content ); !loadable )
         {
             LOG_ERROR( "{0}", loadable.GetError() );

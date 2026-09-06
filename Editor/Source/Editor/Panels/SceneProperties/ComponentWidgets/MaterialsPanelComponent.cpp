@@ -106,11 +106,24 @@ namespace Desert::Editor
             }
         }
 
-        // Level of Detail + Rendering flags live on the STATIC mesh component only (a skinned mesh has no
-        // LOD chain and no per-submesh visibility mask), so a skinned entity stops here — with its material
-        // slots drawn, which is the part it was missing entirely.
+        // Level of Detail + the static-only rendering flags (outline, per-submesh visibility) live on the
+        // STATIC mesh component; a skinned entity gets the one rendering control its component carries —
+        // Cast Shadows, in the same section and wording as the static twin, so the toggle is found in the
+        // same place on both kinds of mesh.
         if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
+        {
+            if ( entity.HasComponent<ECS::SkinnedMeshComponent>() &&
+                 Utils::ImGuiUtilities::SectionHeader( ICON_MDI_EYE "  Rendering", false ) )
+            {
+                auto& skinnedComp = entity.GetComponent<ECS::SkinnedMeshComponent>();
+                Utils::ImGuiUtilities::ResetPropertyRows();
+                Utils::ImGuiUtilities::BeginPropertyRow( "Cast Shadows",
+                                                         "Skip this mesh in the shadow (depth) passes" );
+                ImGui::Checkbox( "##castshadows", &skinnedComp.CastShadows );
+                Utils::ImGuiUtilities::EndPropertyRow();
+            }
             return;
+        }
 
         auto&           materialComp = entity.GetComponent<ECS::StaticMeshComponent>();
         ::Desert::Mesh* lodMesh      = host.Mesh;
@@ -260,7 +273,7 @@ namespace Desert::Editor
         if ( base.empty() )
             base = "Material";
 
-        const std::string         ext = Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::string           ext( Common::Constants::Extensions::MATERIAL_EXTENSION );
         const std::filesystem::path dir = Common::Constants::Path::MATERIAL_PATH;
         std::error_code             ec;
         std::filesystem::create_directories( dir, ec );
@@ -295,7 +308,7 @@ namespace Desert::Editor
         if ( !m_AssetManager )
             return Common::UUID::Null();
 
-        const std::string           ext = Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::string           ext( Common::Constants::Extensions::MATERIAL_EXTENSION );
         const std::filesystem::path dir = Common::Constants::Path::MATERIAL_PATH;
         std::error_code             ec;
         std::filesystem::create_directories( dir, ec );

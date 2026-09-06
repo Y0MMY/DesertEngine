@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Desert::Core
@@ -43,7 +44,29 @@ namespace Desert::Core
      *
      * Content-addressed on purpose — no mtimes, so a checkout that restores an older file is a
      * different key rather than a same-key-newer-timestamp, and two machines with the same tree agree.
+     *
+     * The options fingerprint includes whether SPIR-V debug info is generated, and THIS overload asks
+     * with the current build's own policy — what the engine does at runtime.
      */
     uint64_t ComputeShaderCacheKey( Formats::ShaderStage stage, const std::string& source,
                                     const std::filesystem::path& requestingFile );
+
+    /**
+     * The same key for an EXPLICIT debug-info profile — what the game packager asks with, because it
+     * cooks for the runtime the player will launch, not for the editor doing the cooking: a Debug
+     * editor packaging a Release runtime must produce Release keys or the shipped cache is dead on
+     * arrival.
+     */
+    uint64_t ComputeShaderCacheKeyForProfile( Formats::ShaderStage stage, const std::string& source,
+                                              const std::filesystem::path& requestingFile, bool spirvDebugInfo );
+
+    /** The debug-info policy of THIS build — the profile the 3-argument overloads resolve to. */
+    bool SpirvDebugInfoThisBuild();
+
+    /**
+     * The policy of the build a configuration NAME ("Debug" / "Release") produces. The packager maps
+     * its target-config choice through this so the cook and the shipped runtime cannot disagree; it
+     * must therefore mirror the #ifdef the engine compiles under, and a test pins the two together.
+     */
+    bool SpirvDebugInfoForConfigName( std::string_view configName );
 } // namespace Desert::Core

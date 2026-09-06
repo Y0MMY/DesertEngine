@@ -21,7 +21,15 @@ namespace Desert::Editor
     // v5: studio-gradient backdrop in the preview scene (was the dull default sky).
     int ThumbnailCache::CacheVersion()
     {
-        return 6; // v6: daylight sky backdrop + 180° mesh-facing fix
+        // v7 exists for a WRONG PICTURE, not for a nicer one, which is why it is worth a forced
+        // re-render of everybody's cache. FitTarget framed subjects against a hardcoded camera pose and
+        // an assumed one-unit size; the centimetre migration made the preview sphere 100 units and moved
+        // EditorCamera to eye height, so every thumbnail regenerated since then captured the flank of a
+        // 400-unit ball the camera was resting on — mesh previews as well as materials (Д30).
+        //
+        // Without the bump the bad PNGs survive until each asset happens to be saved, and 'correct only
+        // after a save' is exactly the half-state that made the defect hard to find in the first place.
+        return 7; // v7: framing derived from the camera's own matrices and the mesh's measured extent
     }
 
     std::string ThumbnailCache::DiskPath( const std::string& assetPath )

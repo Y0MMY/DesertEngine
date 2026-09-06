@@ -6,8 +6,10 @@
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 
 #include <Engine/Assets/Common.hpp>
+#include <Engine/Core/Formats/ShaderProgramMeta.hpp>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace Desert::Assets
@@ -15,6 +17,11 @@ namespace Desert::Assets
     class AssetManager;
     class SurfaceMaterialAsset;
     struct MaterialData;
+}
+
+namespace Desert::Graphic
+{
+    class ImageCube;
 }
 
 namespace Desert::Editor
@@ -121,11 +128,16 @@ namespace Desert::Editor
         void EnsurePreview();  // create the viewport + scene + renderer (claims a slot)
         void ReleasePreview(); // destroy them (returns the slot)
 
-        // Why this material cannot be shown on a preview primitive, or empty while it can.
+        // Why this material cannot fill the preview pane, or empty while it can.
         //
-        // The pane draws a sphere, a cube or a plane through the ordinary mesh path, so a material only
-        // appears in it if its shader draws MESH GEOMETRY. Both of the engine's Terrain-domain shaders
-        // synthesize their geometry from `gl_VertexIndex` instead — Terrain.shader as a control-point
+        // Two domains fill it today, each with its own draw (the pane's extension point is "what fills
+        // the pane", not the Shape list — see PreviewViewport::SetCubemapMaterial): Surface rides a
+        // sphere/cube/plane through the ordinary mesh path, and the cubemap domain (Skybox) wraps its
+        // cube onto a ray-traced ball, with its own refusals about the cube rather than the domain (no
+        // TextureCube in the schema / nothing bound / a dangling skybox).
+        //
+        // A SURFACE material only appears if its shader draws MESH GEOMETRY. Both of the engine's Terrain-domain
+        // shaders synthesize their geometry from `gl_VertexIndex` instead — Terrain.shader as a control-point
         // patch grid for the tessellator, Grass.shader as indirect blade instances — and neither has
         // anything that could be fed by a primitive's vertex buffer. Nothing errors and nothing crashes:
         // the pane simply renders an empty scene, and a grey rectangle that explains nothing is the
@@ -143,6 +155,19 @@ namespace Desert::Editor
         // it. Inside, not underneath — the message has to be where the picture would have been, or it is
         // one more line in a column of labels.
         void DrawPreviewPlaceholder( float side, const std::string& reason ) const;
+
+        // The subject's domain, or nullopt while its shader is not loaded. The panel's per-domain
+        // decisions — which draw fills the pane (see OnPreUpdate), whether the Shape combo means
+        // anything (Surface only), which shaders the picker lists — all read THIS, so they cannot
+        // each resolve the shader and answer differently within one frame.
+        [[nodiscard]] std::optional<::Desert::Core::Formats::ShaderDomain> EffectiveDomain() const;
+
+        // The cube the subject material's cubemap slot currently resolves to, or null (no slot in the
+        // schema, nothing bound, or a dangling handle — PreviewUnavailableReason tells those apart, this
+        // only answers "what would the ball show"). Called from the preview pass EVERY frame via the
+        // closure SetCubemapMaterial carries, which is what makes a texture drop show without any
+        // invalidation call; see EditorCubemapPreviewPass.hpp for why the pass holds no copy.
+        [[nodiscard]] const Graphic::ImageCube* ResolveSubjectCubemap() const;
 
         // The name of the shader this document's material actually draws with, or empty if the material is
         // gone. Recomputed rather than cached: the shader a material names is editable (this window's own
@@ -201,6 +226,11 @@ namespace Desert::Editor
         // Set in OnUIRender, consumed in OnPreUpdate: the render is only paid for while the window really
         // drew last frame, so a hidden dock tab costs nothing even before the window is closed outright.
         bool m_DrewThisFrame = false;
+
+        // `--preview-orbit` has been applied to this window's preview. Applied AFTER the first push —
+        // every Set* on the viewport ends in ResetView(), which would silently eat an angle applied at
+        // construction — and only once, so the person who then drags the ball is not fighting the flag.
+        bool m_StartupOrbitApplied = false;
 
         // PreviewUnavailableReason for the material as it stood on the last drawn frame; empty means the
         // pane shows a real render. Computed in OnUIRender and read by OnPreUpdate on the next frame —

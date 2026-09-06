@@ -41,6 +41,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -502,10 +503,9 @@ namespace
          { "MeshLOD", kSceneRenderer },
 
          { "Gravity", kPhysicsSystem },
-         // DEAD. Nothing anywhere reads it - see kKnownDeadSettings.
-         { "PauseSimulation", nullptr, nullptr,
-           "no reader anywhere; the editor's own pause is a separate "
-           "editor-side state and never consults this field" },
+         // "PauseSimulation" had a DEAD row here. Д26 deleted the field rather than wiring it: the
+         // editor's transport owns pausing (runtime state, not scene data), and sixteen probe scenes had
+         // authored `true` and got nothing — the misleading-knob defect itself.
 
          { "WindDirection", kSceneRenderer },
          { "WindStrength", kSceneRenderer },
@@ -596,9 +596,11 @@ namespace
          { "MaxParticles", kParticles },
          { "SpawnRate", kParticles },
          { "Looping", kParticles },
-         // DEAD. Nothing reads it, in C++ or in any shader - see kKnownDeadSettings.
-         { "WorldSpace", nullptr, nullptr,
-           "no reader in C++ or in any particle shader; the simulation is unconditionally world-space" },
+         // WIRED BY Д26, after a lifetime as a dead row: the renderer folds it into the sim push
+         // (Counts.w), and the compute pass keeps a local-mode particle's offset from the emitter and
+         // rebases it on the current emitter position — so "Simulate In World" off makes the system RIDE
+         // a moving emitter instead of trailing behind it, which is what the tooltip promised all along.
+         { "WorldSpace", kParticles },
          { "Lifetime", kParticles },
          { "LifetimeVariance", kParticles },
          { "StartSpeed", kParticles },
@@ -666,10 +668,9 @@ namespace
          { "OffsetMin", kCanvasLayout },
          { "OffsetMax", kCanvasLayout },
          { "CustomMinimumSize", kCanvasLayout },
-         // DEAD. Reflected, serialized, drawn in Details, and read by nothing - see kKnownDeadSettings.
-         { "Pivot", nullptr, nullptr,
-           "no reader; the rect is resolved from anchors and offsets alone, and nothing rotates or scales "
-           "an element about a pivot" },
+         // "Pivot" had a DEAD row here. Д26 deleted the field: the rect is resolved from anchors and
+         // offsets alone, and nothing in this UI rotates or scales an element about a point — the field
+         // returns with its consumer the day rotation does.
          { "ClipContents", kCanvasRenderer },
          { "Visibility", kCanvasLayout },
          { "HitTest", kCanvasRenderer },
@@ -881,9 +882,14 @@ namespace
     //
     // The contract (section 1.3) forbids these outright, so this list is a defect register and not a
     // permission: it exists because the census that FINDS them is worth more than the census that would
-    // have to be weakened to stay green. Each of the three is a separate piece of work owned elsewhere;
-    // repairing one means deleting its line here and pointing its row at the reader, and the equality
-    // below makes both directions - a new dead setting, and a repaired one - a reviewable edit.
+    // have to be weakened to stay green. Repairing one means deleting its line here and pointing its row
+    // at the reader (or deleting the field outright), and the equality below makes both directions - a
+    // new dead setting, and a repaired one - a reviewable edit.
+    //
+    // THE REGISTER IS EMPTY, and that is a measurement rather than an aspiration: Д23 found three
+    // (PauseSimulation, the emitter's WorldSpace, the UI Pivot) and Д26 retired all three - one wired,
+    // two deleted with their fields. The machinery stays, because the register's value was never the
+    // three lines; it is that the NEXT dead setting cannot join a component without a row here saying so.
     // ------------------------------------------------------------------------------------------------
 
     struct DeadSetting
@@ -892,17 +898,7 @@ namespace
         const char* Field;
     };
 
-    constexpr DeadSetting kKnownDeadSettings[] = {
-         // Reflected under Category( "Physics" ) beside Gravity, which IS read. Nothing consults it.
-         { "SceneSettings", "PauseSimulation" },
-         // "World Space" on the emitter. The word appears in the renderer's header only as prose about
-         // the canvas's WorldSpace render mode, which is a different component's enum entirely - the
-         // shared-name trap this suite's row shape exists to defeat.
-         { "ParticleEmitterData", "WorldSpace" },
-         // The UI element's pivot. UICanvasLayout resolves a rect from anchors and offsets and never
-         // consults a pivot; nothing else in the UI reads it either.
-         { "UILayoutData", "Pivot" },
-    };
+    constexpr std::array<DeadSetting, 0> kKnownDeadSettings{};
 
     // The repository root, found by walking up from wherever the test binary was started - the same
     // approach the font-baker test uses, so neither has to be run from one exact directory.
@@ -1093,9 +1089,9 @@ TEST( SettingConsumers, TheKnownDeadSettingsAreExactlyThese )
          << "a row marked DEAD is not in the known-debt register, or the register names a setting that is "
             "no longer dead. Both are edits somebody has to see.";
 
-    // Three, and each of them is a defect that belongs to a task of its own. This number going UP is a
-    // new dead setting; going DOWN is a repair. Neither may happen silently.
-    EXPECT_EQ( registered.size(), 3u );
+    // Zero, since Д26 retired the last three. This number going UP is a new dead setting - a §1.3
+    // violation somebody has to own by name. It may not happen silently.
+    EXPECT_EQ( registered.size(), 0u );
 }
 
 // A field name shared by four components makes a name-only row vacuous, and this is the case that proved

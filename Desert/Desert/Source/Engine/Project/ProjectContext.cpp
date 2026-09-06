@@ -45,14 +45,15 @@ namespace Desert::Project
         }
         const bool onDisk = std::filesystem::exists( deprojPath );
 
-        const std::string raw = Common::Utils::FileSystem::ReadFileContent( deprojPath );
-        if ( raw.empty() )
+        // An empty .deproj is as unusable as an unreadable one — both refuse here, before the parse.
+        const auto rawRead = Common::Utils::FileSystem::ReadFileContent( deprojPath );
+        if ( !rawRead || rawRead.GetValue().empty() )
         {
             LOG_ERROR( "[Project] Cannot read {}", deprojPath );
             return false;
         }
 
-        auto parsed = Common::Project::ReadProjectFile( raw );
+        auto parsed = Common::Project::ReadProjectFile( rawRead.GetValue() );
         if ( !parsed.IsSuccess() )
         {
             LOG_ERROR( "[Project] {}: {}", deprojPath, parsed.GetError() );
@@ -146,10 +147,10 @@ namespace Desert::Project
         if ( !std::filesystem::exists( RegistryFile() ) )
             return {};
 
-        const std::string raw = Common::Utils::FileSystem::ReadFileContent( RegistryFile() );
-        if ( raw.empty() )
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( RegistryFile() );
+        if ( !raw || raw.GetValue().empty() )
             return {};
-        auto parsed = Common::Project::ReadProjectsRegistry( raw );
+        auto parsed = Common::Project::ReadProjectsRegistry( raw.GetValue() );
         if ( !parsed.IsSuccess() )
         {
             // Refusing quietly here looked like "my projects vanished" — name the file and the reason.

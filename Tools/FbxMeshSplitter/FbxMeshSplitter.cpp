@@ -4,6 +4,11 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
+// Header-only: the shared source-format priority list. This tool still links no engine code; the list
+// lives with the editor's import pipeline because AssimpImporter reads the SAME order, and two copies
+// of one priority had already drifted apart once (this file preferred TGA, the importer preferred JPG).
+#include <Editor/Import/TextureSourceFormats.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -123,17 +128,14 @@ namespace FbxSplit
             return MapType::None;
         }
 
-        // Lower rank = preferred when the same map exists in several formats (engine reads PNG/JPG/TGA
-        // natively; EXR/HDR are a last resort and need decoding).
-        int FormatRank( const std::string& extLower )
+        // Lower rank = preferred when the same map exists in several formats. The order (and its
+        // rationale) is the shared list in Editor/Import/TextureSourceFormats.hpp — lossless first,
+        // lossy after, extended-range last; kNotAnImage means "not an image source we use".
+        constexpr std::size_t kNotAnImage = Desert::Editor::kTextureSourceExtensionCount;
+
+        std::size_t FormatRank( const std::string& extLower )
         {
-            if ( extLower == ".png" ) return 0;
-            if ( extLower == ".tga" ) return 1;
-            if ( extLower == ".jpg" || extLower == ".jpeg" ) return 2;
-            if ( extLower == ".bmp" ) return 3;
-            if ( extLower == ".exr" ) return 4;
-            if ( extLower == ".hdr" ) return 5;
-            return 6;
+            return Desert::Editor::TextureSourceFormatRank( extLower );
         }
 
         struct MaterialDef
@@ -161,7 +163,7 @@ namespace FbxSplit
                     if ( !entry.is_regular_file( ec ) )
                         continue;
                     const std::string extLower      = ToLower( entry.path().extension().string() );
-                    if ( FormatRank( extLower ) == 6 ) // not an image we use
+                    if ( FormatRank( extLower ) == kNotAnImage )
                         continue;
 
                     std::string materialStem;

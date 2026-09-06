@@ -52,11 +52,11 @@ namespace Desert::Runtime
         VideoPlayback& vp = m_Videos[path];
         vp.Last           = std::chrono::steady_clock::now();
 
-        const auto raw = Common::Utils::FileSystem::ReadByteFileContent( path );
-        if ( raw.empty() )
+        auto raw = Common::Utils::FileSystem::ReadByteFileContent( path );
+        if ( !raw || raw.GetValue().empty() )
             return &vp; // Valid stays false -> negative cache
 
-        vp.Bytes.assign( raw.begin(), raw.end() );
+        vp.Bytes   = raw.ExtractValue();
         plm_t* plm = plm_create_with_memory( vp.Bytes.data(), vp.Bytes.size(), 0 /*don't free our buffer*/ );
         if ( !plm )
             return &vp;

@@ -378,6 +378,29 @@ never reproduced — five later runs of the same shader were byte-identical to t
 first run after any shader edit, exactly as for a fresh worktree, and take the second. A knockout that
 rests on one post-edit frame is not a knockout.
 
+### Regenerate the makefiles after ANY merge that added a file
+
+The generated `*.make` files list sources EXPLICITLY, so a merge that brings in a new `.cpp` produces
+a tree where that file is simply not compiled. It does not fail at compile time — it fails at LINK
+time, in another target, with an undefined symbol that names a function you can see in the source
+right in front of you.
+
+Caught 2026-09-06 on the lead, integrating И2: `MigratorMain.cpp` arrived with the merge, the
+makefiles were not regenerated, and `SceneMigrator` failed to link on `RunSceneMigrator` — a symbol
+whose definition was sitting in the working tree. Ninety seconds of confusion for a one-line fix.
+
+```bash
+CI=true premake5 gmake     # after every merge; free when nothing changed
+```
+
+The `CI=true` matters: without it the test projects are not generated at all, and the sweep silently
+covers less than it claims to (§3).
+
+And distinguish the two failures before diagnosing either. `Terminated: 15` is SIGTERM — something
+killed the build, usually a harness timeout under load — and says NOTHING about the code. An
+`Undefined symbols` link error after a merge is almost always this missing regeneration, not a defect
+in what was merged.
+
 ## 8. Who runs what, when several agents share one machine
 
 **Added 2026-09-06, from a measured jam.** Eight agents each running the full sweep in their own

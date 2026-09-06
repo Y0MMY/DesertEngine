@@ -1,3 +1,5 @@
+local deps = dofile(_MAIN_SCRIPT_DIR .. '/Desert/Dependencies.lua')
+
 local test_name = path.getname(_SCRIPT_DIR)
 local test_files = os.matchfiles("*.cpp")
 
@@ -9,12 +11,26 @@ project(test_name)
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
     -- The REAL packer and the real project context, not mirrors: the suite calls BuildContentPak()
-    -- over a temp project and then plays the packaged game's side of the mount. Both files are
-    -- CPU + filesystem only — nothing from the renderer.
+    -- over a temp project and then plays the packaged game's side of the mount. The packer now COOKS
+    -- before it packs (PackageCook), so the real cook comes too: the shader compiler (shaderc, no
+    -- VkDevice — the same recipe as Tests/Engine/PBRSceneFrame), the font baker (stb_truetype) and
+    -- the icon baker, each with its cache seam. Still nothing from the renderer.
     files {
         test_files,
         "%{wks.location}/Editor/Source/Editor/Packaging/GamePackager.cpp",
+        "%{wks.location}/Editor/Source/Editor/Packaging/PackageCook.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Project/ProjectContext.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Core/ShaderCompiler/ShaderCompiler.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Core/ShaderCompiler/ShaderCacheKey.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Core/ShaderCompiler/ShaderSpirvCache.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Core/ShaderCompiler/Includer/ShaderIncluder.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Core/ShaderCompiler/DShader/DShaderParser.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Text/FontBaker.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Text/FontCache.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Vector/VectorImage.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Vector/IconBake.cpp",
+        "%{wks.location}/ThirdParty/stb/stb_truetype.cpp",
     }
 
     includedirs {
@@ -22,11 +38,34 @@ project(test_name)
         "%{wks.location}/Desert/Desert/Source",
         "%{wks.location}/Editor/Source",
         "%{wks.location}/ThirdParty/reflect-cpp/include",
+        "%{wks.location}/ThirdParty",
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
         includedirs { path }
     end
+
+    -- Vulkan headers + shaderc, exactly as Tests/Engine/PBRSceneFrame pulls them.
+    for name, path in pairs(deps.DesertSpecific.IncludeDir) do
+        includedirs { path }
+    end
+
+    -- DESERT_DEBUG_BREAK needs the platform macro; any engine header reaching DESERT_VERIFY fails to
+    -- compile without it (same three lines every engine-linking test carries).
+    filter "system:windows"
+        defines { "DESERT_PLATFORM_WINDOWS" }
+    filter "system:macosx"
+        defines { "DESERT_PLATFORM_MACOS" }
+    filter "system:linux"
+        defines { "DESERT_PLATFORM_LINUX" }
+    filter {}
+
+    -- The engine defines this for its own Debug TUs; the shader-compiler TUs compiled INTO this test
+    -- must see the same value or the cook here would key artifacts differently from the engine built
+    -- in the same configuration.
+    filter "configurations:Debug"
+        defines { "DESERT_CONFIG_DEBUG" }
+    filter {}
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
         includedirs { path }
@@ -51,9 +90,15 @@ project(test_name)
         for name, path in pairs(deps.TestSpecific.Libraries.Debug) do
             links { path }
         end
+        for name, path in pairs(deps.DesertSpecific.Libraries.Debug) do
+            links { path }
+        end
 
     filter "configurations:Release"
         for name, path in pairs(deps.TestSpecific.Libraries.Release) do
+            links { path }
+        end
+        for name, path in pairs(deps.DesertSpecific.Libraries.Release) do
             links { path }
         end
 

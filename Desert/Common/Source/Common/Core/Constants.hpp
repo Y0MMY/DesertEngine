@@ -1,7 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <filesystem>
-#include <string>
 #include <string_view>
 
 namespace Common::Constants
@@ -11,94 +12,266 @@ namespace Common::Constants
         // Layout (UE-like): engine/editor resources (Shaders, Fonts) live under the shared Resources/
         // tree next to the binary's working directory; all USER CONTENT lives under the PROJECT's assets
         // root. By default (no project) the content paths point at Resources/Assets/ — the built-in
-        // sandbox; opening a .deproj calls SetProjectRoot() and REMAPS every content path (and the Cooked/
-        // intermediate tree) into the project folder. Engine resources are never remapped.
+        // sandbox; opening a .deproj calls SetProjectRoot() and REMAPS every content path (and the
+        // Cooked/ intermediate tree) into the project folder. Engine resources are never remapped.
+        //
+        // This file used to hold each content path as its own mutable global, all seventeen rewritten
+        // one assignment at a time by SetProjectRoot — seventeen chances to forget one, and nothing but
+        // the order of calls keeping them consistent. Now the only stored state is the PROJECT ROOT
+        // PAIR, and every directory is DERIVED from it through one census below: the relation
+        // "path = root / relative part" holds for all of them at once, by construction, and a new
+        // directory cannot exist outside the census because the census row is what brings it into being.
+        //
+        // What is deliberately NOT here: a configuration file. The owner asked whether these belong in
+        // one, and the answer after counting is that there is nothing to put in it — the single real
+        // per-project setting, the assets root name, already lives in the .deproj (ProjectFile
+        // AssetsRoot), and the folder names below that root are the engine's layout, not a user's
+        // choice. Turning them into fourteen .deproj fields nobody asked for would be dead settings.
+        // REVISIT CONDITION: the day a project genuinely needs to rename or relocate one of these
+        // folders, that folder's census row grows a .deproj override — not before.
 
         // --- Engine / editor resources (SHARED, never remapped) ---
-        inline const std::filesystem::path RESOURCE_PATH         = "Resources/";
-        inline const std::filesystem::path SHADERDIR_PATH        = "Resources/Shaders/";
-        inline const std::filesystem::path RESOURCE_SPIRV_BINARY = "Resources/Shaders/SPIRV/Bin/";
-        inline const std::filesystem::path FONTS_PATH            = "Resources/Fonts/";
+        inline const std::filesystem::path RESOURCE_PATH  = "Resources/";
+        inline const std::filesystem::path SHADERDIR_PATH = "Resources/Shaders/";
+        inline const std::filesystem::path FONTS_PATH     = "Resources/Fonts/";
         // Built-in vector icons (.svg, imported into SDF at first use — see Runtime::IconService).
         inline const std::filesystem::path ICONS_PATH = "Resources/Icons/";
 
-        // --- User content (PROJECT-owned; defaults = built-in sandbox) ---
-        inline std::filesystem::path ASSETS_PATH        = "Resources/Assets/";
-        inline std::filesystem::path MESH_PATH          = "Resources/Assets/Meshes/";
-        inline std::filesystem::path MATERIAL_PATH      = "Resources/Assets/Materials/";
-        inline std::filesystem::path TEXTUREDIR_PATH    = "Resources/Assets/Textures/";
-        inline std::filesystem::path TEXTUREDIRENV_PATH = "Resources/Assets/Textures/Cubes/";
-        inline std::filesystem::path SKYBOX_PATH        = "Resources/Assets/Textures/HDR/";
-        inline std::filesystem::path SCENE_PATH         = "Resources/Assets/Scenes/";
-        inline std::filesystem::path PREFAB_PATH        = "Resources/Assets/Prefabs/";
-        inline std::filesystem::path SCRIPT_PATH        = "Resources/Assets/Scripts/";
-        inline std::filesystem::path COLLECTIONS_PATH   = "Resources/Assets/Collections/";
-        // Cloud noise volumes (`.dcnv`) the artist bakes in the Cloud Noise Volume panel. Its own folder
-        // rather than Textures/ because a volume is not a texture to this engine: it has no importer, no
-        // cooked twin and no 2D preview, and mixing it into the texture scan would offer it in every
-        // texture slot in the editor.
-        inline std::filesystem::path CLOUD_NOISE_PATH = "Resources/Assets/Clouds/";
-        // Cloud types (`.decloudtype`) — the named kinds of cloud an artist authors in the Cloud Type
-        // panel and drops into a layer's slot. A SUBFOLDER of the volumes' directory rather than a
-        // directory of its own, because the two are one body of content: a type names a volume, and an
-        // artist who opens Clouds/ should see both halves of what makes a sky. Scanned separately all the
-        // same, so a `.dcnv` can never be offered in a type slot.
-        inline std::filesystem::path CLOUD_TYPE_PATH = "Resources/Assets/Clouds/Types/";
-        // Sculpted cloud bodies (`.dcmv`) — the hero clouds an artist places in the sky by hand. A second
-        // subfolder of Clouds/ for exactly the reason Types/ is the first: one body of content, scanned
-        // separately so a `.dcmv` can never be offered in a noise slot and a `.dcnv` can never be offered
-        // in a hero cloud's.
-        inline std::filesystem::path CLOUD_VOLUME_PATH = "Resources/Assets/Clouds/Volumes/";
-        // Painted cloud layouts (`.dclayout`) — where the artist says the weather is. A third subfolder of
-        // Clouds/ for the same reason as the other two: one body of content, scanned separately so a
-        // painting can never be offered in a noise slot, a type slot or a hero cloud's.
-        inline std::filesystem::path CLOUD_LAYOUT_PATH = "Resources/Assets/Clouds/Layouts/";
+        // --- The census of project-derived directories ---
 
-        // --- Cooked / intermediate (generated; PROJECT-owned) ---
-        inline std::filesystem::path COOKED_PATH         = "Cooked/";
-        inline std::filesystem::path MESH_PATH_COOKED    = "Cooked/Meshes/";
-        inline std::filesystem::path TEXTURE_PATH_COOKED = "Cooked/Textures/";
+        // Every directory that moves with the project, by name. A path that is not a row here cannot be
+        // project content: Dir() takes this enum, the storage is sized by it, and the spec table below
+        // is index-matched to it — adding a directory WITHOUT extending all three does not compile,
+        // which is the point. (The old shape allowed an eighteenth variable that SetProjectRoot did not
+        // know about; this shape cannot express one.)
+        enum class ContentDir : std::size_t
+        {
+            Assets,
+            Mesh,
+            Material,
+            Texture,
+            Skybox,
+            Scene,
+            Prefab,
+            Script,
+            Collections,
+            CloudNoise,
+            CloudType,
+            CloudVolume,
+            CloudLayout,
+            Cooked,
+            MeshCooked,
+            TextureCooked,
+            COUNT
+        };
+
+        inline constexpr std::size_t CONTENT_DIR_COUNT = static_cast<std::size_t>( ContentDir::COUNT );
+
+        // The two roots a project-derived directory can hang off. Assets = <projectDir>/<assetsRoot from
+        // the .deproj>; Cooked = <projectDir>/Cooked — generated intermediates, deliberately OUTSIDE the
+        // assets tree so a content scan never offers a cooked twin as authorable content.
+        enum class DirRoot : unsigned char
+        {
+            Assets,
+            Cooked,
+        };
+
+        // The Cooked tree's own name under the project directory. One spelling, used by the derivation
+        // and by the relation test; not a setting (see the refusal above).
+        inline constexpr std::string_view COOKED_DIR_NAME = "Cooked";
+
+        struct ContentDirSpec
+        {
+            std::string_view Rel;  // relative part under the root; "" names the root itself
+            DirRoot          Root; // which root the relative part is joined to
+        };
+
+        // Index-matched to ContentDir. The relative parts here are the ONE spelling of the project
+        // layout — the engine reads through Dir()/the named views, and anything that scaffolds these
+        // folders on disk must take its names from these rows rather than carry its own list.
+        //
+        // Clouds/ commentary, kept from the seventeen-variable era because the layout it explains is
+        // unchanged: cloud noise volumes (`.dcnv`) get their own folder rather than Textures/ because a
+        // volume is not a texture to this engine (no importer, no cooked twin, no 2D preview), and
+        // mixing it into the texture scan would offer it in every texture slot. Types (`.decloudtype`),
+        // sculpted volumes (`.dcmv`) and painted layouts (`.dclayout`) are SUBFOLDERS of Clouds/ because
+        // the four are one body of content — an artist who opens Clouds/ should see every half of what
+        // makes a sky — while each is scanned separately so no kind can be offered in another's slot.
+        inline constexpr std::array<ContentDirSpec, CONTENT_DIR_COUNT> CONTENT_DIRS = { {
+             /* Assets        */ { "", DirRoot::Assets },
+             /* Mesh          */ { "Meshes/", DirRoot::Assets },
+             /* Material      */ { "Materials/", DirRoot::Assets },
+             /* Texture       */ { "Textures/", DirRoot::Assets },
+             /* Skybox        */ { "Textures/HDR/", DirRoot::Assets },
+             /* Scene         */ { "Scenes/", DirRoot::Assets },
+             /* Prefab        */ { "Prefabs/", DirRoot::Assets },
+             /* Script        */ { "Scripts/", DirRoot::Assets },
+             /* Collections   */ { "Collections/", DirRoot::Assets },
+             /* CloudNoise    */ { "Clouds/", DirRoot::Assets },
+             /* CloudType     */ { "Clouds/Types/", DirRoot::Assets },
+             /* CloudVolume   */ { "Clouds/Volumes/", DirRoot::Assets },
+             /* CloudLayout   */ { "Clouds/Layouts/", DirRoot::Assets },
+             /* Cooked        */ { "", DirRoot::Cooked },
+             /* MeshCooked    */ { "Meshes/", DirRoot::Cooked },
+             /* TextureCooked */ { "Textures/", DirRoot::Cooked },
+        } };
+
+        // --- Compile-time guards over the census (relations, not values — the Д27 pattern) ---
+
+        namespace Detail
+        {
+            constexpr const ContentDirSpec& Spec( ContentDir d ) noexcept
+            {
+                return CONTENT_DIRS[static_cast<std::size_t>( d )];
+            }
+
+            constexpr bool EveryRelIsRelativeAndSlashTerminated() noexcept
+            {
+                for ( const auto& spec : CONTENT_DIRS )
+                {
+                    if ( !spec.Rel.empty() && ( spec.Rel.front() == '/' || spec.Rel.back() != '/' ) )
+                        return false;
+                }
+                return true;
+            }
+
+            constexpr bool EachRootIsNamedExactlyOnce() noexcept
+            {
+                std::size_t assetsRoots = 0, cookedRoots = 0;
+                for ( const auto& spec : CONTENT_DIRS )
+                {
+                    if ( spec.Rel.empty() )
+                        ( spec.Root == DirRoot::Assets ? assetsRoots : cookedRoots ) += 1;
+                }
+                return assetsRoots == 1 && cookedRoots == 1;
+            }
+        } // namespace Detail
+
+        static_assert( Detail::EveryRelIsRelativeAndSlashTerminated(),
+                       "a census row must be a relative part ending in '/' (or \"\" for the root row) — an "
+                       "absolute or unterminated part would silently change what root / rel concatenates to" );
+        static_assert( Detail::EachRootIsNamedExactlyOnce(),
+                       "exactly one census row must name each root itself (Rel == \"\"), or the roots have "
+                       "no path of their own to read" );
+
+        // The Clouds/ containment is a RELATION the comments used to merely describe: the three cloud
+        // kinds live inside the noise volumes' folder so an artist sees one body of content. Moving one
+        // out (or renaming Clouds/ in one row and not the others) keeps every line individually
+        // plausible and stops compiling here.
+        static_assert(
+             Detail::Spec( ContentDir::CloudType ).Rel.starts_with( Detail::Spec( ContentDir::CloudNoise ).Rel ) &&
+                  Detail::Spec( ContentDir::CloudVolume )
+                       .Rel.starts_with( Detail::Spec( ContentDir::CloudNoise ).Rel ) &&
+                  Detail::Spec( ContentDir::CloudLayout )
+                       .Rel.starts_with( Detail::Spec( ContentDir::CloudNoise ).Rel ),
+             "cloud types, sculpted volumes and painted layouts are one body of content and must "
+             "stay inside the cloud noise volumes' folder" );
+        static_assert( Detail::Spec( ContentDir::MeshCooked ).Root == DirRoot::Cooked &&
+                            Detail::Spec( ContentDir::TextureCooked ).Root == DirRoot::Cooked,
+                       "cooked twins are generated intermediates and must stay under the Cooked root, or a "
+                       "content scan will offer them as authorable assets" );
+
+        // --- The stored state and the derivation ---
+
+        // The ONLY mutable state: where the project is, and what its assets root is called. Everything
+        // else in this namespace is a pure function of these two.
+        struct ProjectRootState
+        {
+            std::filesystem::path ProjectDir; // "" = no project (the built-in sandbox)
+            std::filesystem::path AssetsRoot; // from the .deproj; the sandbox uses SANDBOX_ASSETS_ROOT
+        };
+
+        // The built-in sandbox's assets root, chosen so the no-project layout stays byte-identical to
+        // the historical `Resources/Assets/` tree.
+        inline constexpr std::string_view SANDBOX_ASSETS_ROOT = "Resources/Assets";
+
+        namespace Detail
+        {
+            // Derives every census row from the root pair. THE only writer of the storage below —
+            // per-row assignment (the old shape, and the old defect surface) is not expressible.
+            inline std::array<std::filesystem::path, CONTENT_DIR_COUNT> Derive( const ProjectRootState& state )
+            {
+                const std::filesystem::path assets = ( state.ProjectDir / state.AssetsRoot ).lexically_normal();
+                const std::filesystem::path cooked = ( state.ProjectDir / COOKED_DIR_NAME ).lexically_normal();
+
+                std::array<std::filesystem::path, CONTENT_DIR_COUNT> dirs;
+                for ( std::size_t i = 0; i < CONTENT_DIR_COUNT; ++i )
+                {
+                    const ContentDirSpec& spec = CONTENT_DIRS[i];
+                    const auto&           root = spec.Root == DirRoot::Assets ? assets : cooked;
+                    dirs[i]                    = root / spec.Rel; // Rel "" yields the root with a trailing '/'
+                }
+                return dirs;
+            }
+
+            inline ProjectRootState s_ProjectRoot{ "", std::filesystem::path( SANDBOX_ASSETS_ROOT ) };
+            inline std::array<std::filesystem::path, CONTENT_DIR_COUNT> s_Dirs = Derive( s_ProjectRoot );
+        } // namespace Detail
+
+        // Where a project-derived directory currently is. The reference stays valid across remaps (the
+        // storage is stable; SetProjectRoot assigns into it), which is what lets long-lived tables hold
+        // `const std::filesystem::path*` and follow a project switch for free.
+        inline const std::filesystem::path& Dir( ContentDir d ) noexcept
+        {
+            return Detail::s_Dirs[static_cast<std::size_t>( d )];
+        }
+
+        inline const ProjectRootState& CurrentProjectRoot() noexcept
+        {
+            return Detail::s_ProjectRoot;
+        }
 
         // Points every content path at <projectDir>/<assetsRoot>/... and the cooked tree at
         // <projectDir>/Cooked/. Must be called BEFORE any subsystem reads the paths (the editor does it
-        // while parsing --project, before the engine spins up). assetsRoot comes from the .deproj — the
-        // built-in sandbox project uses "Resources/Assets" so the historical layout stays byte-identical.
+        // while parsing --project, before the engine spins up). assetsRoot comes from the .deproj.
         inline void SetProjectRoot( const std::filesystem::path& projectDir,
                                     const std::filesystem::path& assetsRoot )
         {
-            const std::filesystem::path assets = ( projectDir / assetsRoot ).lexically_normal();
-
-            ASSETS_PATH        = assets / "";
-            MESH_PATH          = assets / "Meshes/";
-            MATERIAL_PATH      = assets / "Materials/";
-            TEXTUREDIR_PATH    = assets / "Textures/";
-            TEXTUREDIRENV_PATH = assets / "Textures/Cubes/";
-            SKYBOX_PATH        = assets / "Textures/HDR/";
-            SCENE_PATH         = assets / "Scenes/";
-            PREFAB_PATH        = assets / "Prefabs/";
-            SCRIPT_PATH        = assets / "Scripts/";
-            COLLECTIONS_PATH   = assets / "Collections/";
-            CLOUD_NOISE_PATH   = assets / "Clouds/";
-            CLOUD_TYPE_PATH    = assets / "Clouds/Types/";
-            CLOUD_VOLUME_PATH  = assets / "Clouds/Volumes/";
-            CLOUD_LAYOUT_PATH  = assets / "Clouds/Layouts/";
-
-            const std::filesystem::path cooked = ( projectDir / "Cooked" ).lexically_normal();
-            COOKED_PATH                        = cooked / "";
-            MESH_PATH_COOKED                   = cooked / "Meshes/";
-            TEXTURE_PATH_COOKED                = cooked / "Textures/";
+            Detail::s_ProjectRoot = ProjectRootState{ projectDir, assetsRoot };
+            Detail::s_Dirs        = Detail::Derive( Detail::s_ProjectRoot );
         }
+
+        // Back to the no-project sandbox. Exists for tests, which used to restore the globals one
+        // assignment at a time — the one write path this file no longer offers.
+        inline void ResetToSandbox()
+        {
+            SetProjectRoot( "", std::filesystem::path( SANDBOX_ASSETS_ROOT ) );
+        }
+
+        // --- Named views (the spellings the codebase reads) ---
+        //
+        // References into the derived storage, const so the census cannot be bypassed: the only way to
+        // move one of these is to move the project root they are all derived from. Taking the ADDRESS of
+        // a view is supported and survives remaps — AssetHandle's root table, the runtime scan roots and
+        // the packager's tree census all do exactly that.
+        inline const std::filesystem::path& ASSETS_PATH         = Dir( ContentDir::Assets );
+        inline const std::filesystem::path& MESH_PATH           = Dir( ContentDir::Mesh );
+        inline const std::filesystem::path& MATERIAL_PATH       = Dir( ContentDir::Material );
+        inline const std::filesystem::path& TEXTUREDIR_PATH     = Dir( ContentDir::Texture );
+        inline const std::filesystem::path& SKYBOX_PATH         = Dir( ContentDir::Skybox );
+        inline const std::filesystem::path& SCENE_PATH          = Dir( ContentDir::Scene );
+        inline const std::filesystem::path& PREFAB_PATH         = Dir( ContentDir::Prefab );
+        inline const std::filesystem::path& SCRIPT_PATH         = Dir( ContentDir::Script );
+        inline const std::filesystem::path& COLLECTIONS_PATH    = Dir( ContentDir::Collections );
+        inline const std::filesystem::path& CLOUD_NOISE_PATH    = Dir( ContentDir::CloudNoise );
+        inline const std::filesystem::path& CLOUD_TYPE_PATH     = Dir( ContentDir::CloudType );
+        inline const std::filesystem::path& CLOUD_VOLUME_PATH   = Dir( ContentDir::CloudVolume );
+        inline const std::filesystem::path& CLOUD_LAYOUT_PATH   = Dir( ContentDir::CloudLayout );
+        inline const std::filesystem::path& COOKED_PATH         = Dir( ContentDir::Cooked );
+        inline const std::filesystem::path& MESH_PATH_COOKED    = Dir( ContentDir::MeshCooked );
+        inline const std::filesystem::path& TEXTURE_PATH_COOKED = Dir( ContentDir::TextureCooked );
     } // namespace Path
 
     namespace Extensions
     {
-        const std::string SPIRV_BINARY_EXTENSION_VERT = ".spvbin_vert";
-        const std::string SPIRV_BINARY_EXTENSION_FRAG = ".spvbin_frag";
-        const std::string SPIRV_BINARY_EXTENSION_COMP = ".spvbin_comp";
-        const std::string SCENE_EXTENSION             = ".desce";
-        const std::string MESH_SERIALIZBLE_EXTENSION  = ".demesh";
-        const std::string MATERIAL_EXTENSION          = ".demat";
-        const std::string PREFAB_EXTENSION            = ".deprefab";
+        // `constexpr string_view` across the board, for the reason the two mesh extensions below state
+        // at length: the compiler can then assert the relations. Extensions that had NO reader anywhere
+        // (the three SPIRV_BINARY_EXTENSION_* spellings and MESH_SERIALIZBLE_EXTENSION — a name whose
+        // own typo went unnoticed for years precisely because nothing read it) were deleted rather than
+        // migrated; a constant without a reader is a trap, not documentation.
+        constexpr std::string_view SCENE_EXTENSION    = ".desce";
+        constexpr std::string_view MATERIAL_EXTENSION = ".demat";
+        constexpr std::string_view PREFAB_EXTENSION   = ".deprefab";
         // st = STatic, sk = SKinned. These two were SWAPPED from the day they were written, and nothing
         // caught it because nothing read them: AssetPreloader carried its own literal arrays and was
         // right, so the cooker, the loaders and the tests all agreed with each other and disagreed with
@@ -119,5 +292,14 @@ namespace Common::Constants
         static_assert( STATIC_MESH.starts_with( ".st" ), "STATIC_MESH must be the .st* spelling" );
         static_assert( SKINNED_MESH.starts_with( ".sk" ), "SKINNED_MESH must be the .sk* spelling" );
         static_assert( STATIC_MESH != SKINNED_MESH, "the two mesh extensions must stay distinct" );
+
+        // Every extension names a distinct format and reads as one to std::filesystem::path::extension().
+        static_assert( SCENE_EXTENSION.starts_with( '.' ) && MATERIAL_EXTENSION.starts_with( '.' ) &&
+                            PREFAB_EXTENSION.starts_with( '.' ) && STATIC_MESH.starts_with( '.' ) &&
+                            SKINNED_MESH.starts_with( '.' ),
+                       "an extension without its leading dot never matches path::extension()" );
+        static_assert( SCENE_EXTENSION != MATERIAL_EXTENSION && SCENE_EXTENSION != PREFAB_EXTENSION &&
+                            MATERIAL_EXTENSION != PREFAB_EXTENSION,
+                       "two formats sharing one extension would make every by-extension scan ambiguous" );
     } // namespace Extensions
 } // namespace Common::Constants

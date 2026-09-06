@@ -2,6 +2,8 @@
 #include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
+#include <chrono>
+
 #include "Shader/ShaderAsset.hpp"
 #include "Mesh/StaticMeshAsset.hpp"
 #include "Mesh/SkinnedMeshAsset.hpp"
@@ -292,16 +294,28 @@ namespace Desert::Assets
 
     void AssetPreloader::PreloadShaders()
     {
+        // Timed as a phase: Register() compiles every stage of every pass, so this line is the whole
+        // "shader startup cost" in one number — against it, the per-miss lines ShaderCompiler prints
+        // say how much was real compilation rather than cache reads.
+        const auto start = std::chrono::steady_clock::now();
+
         ProcessAssetFiles<ShaderAsset>( Common::Constants::Path::SHADERDIR_PATH,
                                         SUPPORTED_SHADERS_EXTENSIONS, m_AssetManager, AssetPriority::Medium );
 
+        size_t count = 0;
         if ( auto manager = m_AssetManager.lock() )
         {
             for ( const auto& [handle, shaderAsset] : manager->FindAllByType<Assets::ShaderAsset>() )
             {
                 Runtime::ResourceRegistry::GetShaderService()->Register( shaderAsset );
+                ++count;
             }
         }
+
+        const auto ms =
+             std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - start )
+                  .count();
+        LOG_INFO( "[AssetPreloader] {} shader program(s) ready in {} ms", count, ms );
     }
 
 } // namespace Desert::Assets

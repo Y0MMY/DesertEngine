@@ -66,8 +66,10 @@ namespace Desert::Editor
         const auto path = LayoutsDir() / ( Sanitize( name ) + ".ini" );
         if ( !std::filesystem::exists( path ) )
             return false;
-        const std::string ini = Common::Utils::FileSystem::ReadFileContent( path.string() );
-        ::ImGui::LoadIniSettingsFromMemory( ini.c_str(), ini.size() );
+        const auto ini = Common::Utils::FileSystem::ReadFileContent( path.string() );
+        if ( !ini )
+            return false; // an unreadable layout used to "load" as a no-op empty ini
+        ::ImGui::LoadIniSettingsFromMemory( ini.GetValue().c_str(), ini.GetValue().size() );
         return true;
     }
 

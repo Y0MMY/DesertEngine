@@ -282,8 +282,9 @@ namespace Desert::Editor
         // materials are never written and it inherits the first mesh's instead.
         static const std::regex illegal( R"([<>:"/\\|?*\s])" );
         const std::string       safeName = std::regex_replace( material.Name, illegal, "_" );
-        const std::filesystem::path path     = CookPaths::MaterialFolder( sourcePath ) /
-                                           ( safeName + Common::Constants::Extensions::MATERIAL_EXTENSION );
+        const std::filesystem::path path =
+             CookPaths::MaterialFolder( sourcePath ) /
+             ( safeName + std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) );
 
         // Only write if MISSING: re-importing a mesh must NOT clobber the user's edits to its material (UE
         // behaviour — re-import updates geometry, keeps the material asset). Delete the .demat to regenerate.
@@ -304,8 +305,8 @@ namespace Desert::Editor
     {
         // Cook the source -> Cooked/Textures/<name>.tex (metadata names the source by its root-tagged key).
         // A failed cook (the importer logged why) returns the null handle and writes NO .tex, so stop here:
-        // CreateAsset on the missing cooked file would reach ReadFileContent, whose miss path is a
-        // DESERT_VERIFY — an abort in Debug where a missing texture should be a reported miss.
+        // CreateAsset on the missing cooked file would only fail later, inside TextureAsset::Load, with a
+        // read error about a .tex this function already knows was never written.
         if ( static_cast<uint64_t>( m_TextureImporter->Import( source ) ) == 0 )
         {
             return Common::UUID::Null();

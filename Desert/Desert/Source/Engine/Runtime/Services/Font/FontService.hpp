@@ -27,7 +27,7 @@ namespace Desert::Runtime
     {
     public:
         // nullptr if the TTF can't be read or parsed (logged once).
-        Font* Get( const std::string& ttfPath, float pixelHeight = 48.0f );
+        Font* Get( const std::string& ttfPath, float pixelHeight = Text::kDefaultBakePixelHeight );
         void  Clear();
 
         // --- Fonts as ASSETS (handle-referenced) --------------------------------------------------------
@@ -44,7 +44,7 @@ namespace Desert::Runtime
         std::string PathForHandle( uint64_t handle );
 
         // Resolve a font handle to its baked atlas (handle -> path -> Get(path,size)). nullptr if unregistered.
-        Font* Get( uint64_t handle, float pixelHeight = 48.0f );
+        Font* Get( uint64_t handle, float pixelHeight = Text::kDefaultBakePixelHeight );
 
         // The built-in Roboto-Regular, registered on demand — the fallback when a component has no font set.
         uint64_t DefaultFontHandle();
