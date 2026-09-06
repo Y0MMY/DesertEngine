@@ -24,6 +24,14 @@
 // CloudPlacementSpectrum.WithNoPaintingBoundTheLayoutKnobsCannotReachOneCloud. This is the cheapest of the
 // three and the one that localises a regression, because a frame that moved says only that something did.
 //
+// AND WHAT O1 CHANGED, because the paragraphs above are about a v6->v7 that was never written and are
+// still true of it. The six keys DO migrate now — not at v6->v7 but at v11->v12, out of the component
+// and into a cloud material, along with twenty-seven others. That does not retire this suite: the
+// question it asks is still "what does an absent key mean", and the answer simply moved from a member
+// initializer on the component to the CloudRaymarch schema, which is where the assertions below now read
+// it. MigrateCloudMaterialV11ToV12 does not invent a value for a key the file never stated, so a v6 file
+// arrives at v12 with those six still unstated, and this suite is still what says that is the old sky.
+//
 // Everything below runs on the parsed tree and on pure functions. No GPU, no scene graph, no asset
 // manager.
 
