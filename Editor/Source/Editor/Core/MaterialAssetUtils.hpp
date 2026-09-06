@@ -57,8 +57,17 @@ namespace Desert::Editor::MaterialAssetUtils
             data.MaterialId = Common::UUID::Generate(); // a brand-new material's stable, file-borne GUID
             for ( const auto& [pname, value] : params )
                 data.SetParam( pname, value );
-            Common::Utils::FileSystem::WriteContentToFile( path.generic_string(),
-                                                           rfl::json::write( data ) );
+            // REFUSED rather than carried on: the CreateAsset below would load the file that was not
+            // written, get canonical defaults, and hand back a handle for a material that has none of
+            // the authored parameters and no file behind it. The caller (a startup scene builder) would
+            // then put that handle into a mesh slot and save it into a .desce.
+            if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
+                      path.generic_string(), rfl::json::write( data ) );
+                 !written )
+            {
+                LOG_ERROR( "[Material] '{}' was not created: {}", path.generic_string(), written.GetError() );
+                return Common::UUID::Null();
+            }
         }
 
         auto asset = const_cast<Assets::AssetManager&>( *am ).CreateAsset<Assets::SurfaceMaterialAsset>(

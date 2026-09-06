@@ -848,8 +848,20 @@ namespace Desert::Editor::Commands
         // ofstream silently writes NOTHING when the directory is missing — make sure it exists.
         std::error_code ec;
         std::filesystem::create_directories( asset->GetMetadata().Filepath.parent_path(), ec );
-        Common::Utils::FileSystem::WriteContentToFile( asset->GetMetadata().Filepath,
-                                                       asset->Serialize() );
+
+        // The `bool` this function returns used to answer only the LOOKUPS above; the write itself was
+        // unreportable, so "Applied" was logged and `true` returned for a .deprefab that had not been
+        // touched. Every other instance of that prefab would then be re-instantiated from the OLD file
+        // while the editor said the changes had been applied.
+        if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
+                  asset->GetMetadata().Filepath, asset->Serialize() );
+             !written )
+        {
+            LOG_ERROR( "[Prefab] Apply failed: {} was not written: {}", asset->GetMetadata().Filepath.string(),
+                       written.GetError() );
+            return false;
+        }
+
         LOG_INFO( "[Prefab] Applied instance changes -> {}", asset->GetMetadata().Filepath.string() );
         return true;
     }
