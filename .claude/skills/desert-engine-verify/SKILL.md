@@ -52,10 +52,29 @@ cd Editor && ../build/Bin/Debug/Editor --project Desert.deproj \
 - Interactive: `./scripts/MacOS/RunEditor.sh Debug` (sets the ICD, layer path, `DYLD_FALLBACK_LIBRARY_PATH`
   and `cd`s to `Editor/`, which is what makes `Resources/...` resolve).
 
-To capture a **running** editor's window instead, get its id from `CGWindowListCopyWindowInfo` and
-`screencapture -x -o -l<id>` — that works even when the window is behind others. Synthetic input
-does *not* work (`osascript`/System Events has no assistive access), so the GUI cannot be driven;
-drive the render through the flags above.
+### `--shot` CANNOT PHOTOGRAPH THE INTERFACE, and for a whole programme nobody knew
+
+`--shot` reads `Scene::GetFinalImage()` — the scene's offscreen image. ImGui is drawn in the
+**swapchain** pass. So **no frame in this engine's history has ever contained a pixel of UI**, and
+the `--open-menu` flag promised in its own comment that a shot would show the open menu — a promise
+its own path could never keep. One task shipped two items with no frame because of it.
+
+**Use the control channel** (`--control-socket <path>`, client `Tools/DesertCtl`). It runs the
+command palette's own commands — so anything a human can do, it can do — and it takes **two
+distinct shots that never substitute for one another**: `shot.window` (the whole editor, interface
+included) and `shot.viewport` (the scene, no UI). It also reads state back — selection, open
+documents, renderer slots in use, log tail with severity counts — so a picture and a number can be
+put side by side and made to agree.
+
+Ordering is a property of the protocol, not a coincidence: the reply is released only after a frame
+that was *presented* and on whose entry no deferred work from that command remained. "Run the
+command, then screenshot" cannot photograph the state before the command.
+
+Synthetic input still does *not* work (`osascript`/System Events has no assistive access) — the
+channel is what replaces it, not `screencapture`. Capturing the window from outside
+(`CGWindowListCopyWindowInfo` + `screencapture -x -o -l<id>`) still works and is still the fallback
+when the channel is not up; if you use it, match on `kCGWindowOwnerPID` — other editors run on this
+machine, and a naive capture already cost one developer an hour spent reading someone else's window.
 
 **Take at least two frames: what the change fixed, and what it could have broken.** These fail in
 opposite directions and one alone is not evidence.
