@@ -8,12 +8,23 @@
 
 #include <ImGui/imgui.h>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
 namespace Desert::Editor::UI
 {
     class UIHelper;
+}
+
+namespace Desert::Editor::Render
+{
+    class EditorCubemapPreviewPass;
+}
+
+namespace Desert::Graphic
+{
+    class ImageCube;
 }
 
 namespace Desert::Editor
@@ -57,6 +68,22 @@ namespace Desert::Editor
         // Show a material on a primitive.
         void SetMaterial( const Assets::AssetHandle& material, Shape shape = Shape::Sphere );
 
+        // Show a CUBEMAP as an orbitable ball — the pane's content for a Skybox-domain material.
+        //
+        // THE EXTENSION POINT OF THIS WIDGET IS "WHAT FILLS THE PANE", NOT THE SHAPE LIST ABOVE. The
+        // Sphere/Cube/Plane choice is a particularity of the surface domain (whose materials ride real
+        // mesh geometry through the slot route); a domain the mesh path cannot draw brings its own
+        // draw and reuses only what is genuinely domain-agnostic here — the scene, the orbit camera,
+        // the framing and the renderer slot. This entry is the cubemap domain's draw (an external pass
+        // ray-tracing the ball, EditorCubemapPreviewPass); a future Volume domain plugs in the same
+        // way with a march, not by growing the Shape enum.
+        //
+        // @p resolveCube is called EVERY frame — the widget keeps no copy of the subject material's
+        // state, so a cubemap dropped onto the material shows next frame with no invalidation call.
+        // Resolving to null draws an empty pane; the REFUSAL prose for that state belongs to the
+        // panel, which knows why (no slot in the schema vs nothing bound vs a dangling handle).
+        void SetCubemapMaterial( std::function<const Graphic::ImageCube*()> resolveCube );
+
         void Clear();
 
         // True once something has been set (and so there is anything to draw).
@@ -76,6 +103,11 @@ namespace Desert::Editor
 
         // Re-frame on the current content's bounds (what double-click does).
         void ResetView();
+
+        // Point the orbit somewhere specific (radians; pitch clamped to the same limit the mouse has).
+        // Exists for unattended evidence: macOS refuses synthetic input (StartupOptions.hpp measured
+        // it), so "the same preview from the other side" must be a flag, and the flag needs a setter.
+        void SetOrbit( float yawRadians, float pitchRadians );
 
         // Drop the pipelines THIS preview cached from @p shader, so the next frame rebuilds them against
         // the shader's new modules.
@@ -97,6 +129,9 @@ namespace Desert::Editor
         bool TryFrameMesh();
 
         std::unique_ptr<Graphic::SceneRenderer> m_Renderer;
+        // The cubemap domain's draw (see SetCubemapMaterial). Created on first use, source-cleared by
+        // every other Set*/Clear so exactly one kind of content fills the pane at a time.
+        std::unique_ptr<Render::EditorCubemapPreviewPass> m_CubemapPass;
         // Fully qualified: a Desert::Editor::Core namespace also exists, so an unqualified Core::Scene
         // would resolve there in TUs that see it.
         std::shared_ptr<::Desert::Core::Scene> m_Scene;

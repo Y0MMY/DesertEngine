@@ -224,6 +224,29 @@ TEST( CommandLine, RepeatedOpenPanelAccumulatesAndSelectIsCaptured )
     EXPECT_EQ( options.Startup.SelectEntity, "Directional Light" );
 }
 
+// `--preview-orbit` is degrees on the wire (a person types 160, not 2.79) and radians in the options
+// (every consumer is trigonometry) — the conversion is the flag's whole parse, so it is what is pinned.
+TEST( CommandLine, PreviewOrbitIsDegreesInRadiansOut )
+{
+    const CommandLineOptions options = ParseOk( { "--preview-orbit", "180,-90" } );
+    ASSERT_TRUE( options.Startup.HasPreviewOrbit );
+    EXPECT_FLOAT_EQ( options.Startup.PreviewOrbitYaw, glm::radians( 180.0f ) );
+    EXPECT_FLOAT_EQ( options.Startup.PreviewOrbitPitch, glm::radians( -90.0f ) );
+
+    EXPECT_FALSE( ParseOk( {} ).Startup.HasPreviewOrbit );
+}
+
+TEST( CommandLine, APreviewOrbitThatIsNotTwoNumbersIsRejected )
+{
+    // One number, three numbers, and a partial parse — each of these used to be the silent-no-op shape
+    // this parser exists to forbid.
+    for ( const char* bad : { "160", "160,15,0", "160,abc", "" } )
+    {
+        const auto result = ParseCommandLine( { "--preview-orbit", bad } );
+        EXPECT_FALSE( result.IsSuccess() ) << "accepted '" << bad << "'";
+    }
+}
+
 TEST( CommandLine, TheValuelessFlagsSetTheirOwnField )
 {
     EXPECT_TRUE( ParseOk( { "--play" } ).Shot.Play );

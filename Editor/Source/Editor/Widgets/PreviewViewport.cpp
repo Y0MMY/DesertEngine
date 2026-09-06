@@ -1,5 +1,7 @@
 #include "PreviewViewport.hpp"
 
+#include <Editor/RenderSystems/Passes/EditorCubemapPreviewPass.hpp>
+
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 
 #include "UIHelper/ImGuiUI.hpp"
@@ -94,9 +96,11 @@ namespace Desert::Editor
             return;
 
         // Closing a scene view (or quitting) can destroy this while the last submitted frame is still
-        // executing against our pipelines and descriptor pools. Idle, then release the scene before the
-        // renderer that owns its passes.
+        // executing against our pipelines and descriptor pools. Idle, then release the cubemap pass
+        // while the scene it registered with is still alive (its dtor unregisters by name), then the
+        // scene before the renderer that owns its passes.
         Graphic::Renderer::GetInstance().WaitDeviceIdle();
+        m_CubemapPass.reset();
         m_Scene.reset();
         m_Renderer.reset();
     }
@@ -188,6 +192,10 @@ namespace Desert::Editor
         // Upright, like the material preview sets it: the target entity is reused across previews, so a
         // rotation left by an earlier one would tilt this mesh for no reason.
         m_Target.GetComponent<ECS::TransformComponent>().Rotation = glm::vec3( 0.0f );
+
+        // One kind of content at a time (same line as in SetMaterial).
+        if ( m_CubemapPass )
+            m_CubemapPass->ClearSource();
 
         m_MeshHandle  = mesh;
         m_HasContent  = true;
@@ -313,6 +321,53 @@ namespace Desert::Editor
         m_FrameRadius     = RadiusOfPrimitive( shape );
         m_FrameIsRound    = ( shape == Shape::Sphere );
         m_HasContent  = true;
+
+        // One kind of content at a time: a window whose material moved from the cubemap domain to the
+        // surface one must not keep the ball behind its new primitive.
+        if ( m_CubemapPass )
+            m_CubemapPass->ClearSource();
+
+        ResetView();
+    }
+
+    void PreviewViewport::SetCubemapMaterial( std::function<const Graphic::ImageCube*()> resolveCube )
+    {
+        EnsureInit();
+
+        // Nothing rides the mesh path in this mode — the ball is the external pass's draw (see the
+        // header for why it is not a primitive with a scratch material).
+        auto& smc      = m_Target.GetComponent<ECS::StaticMeshComponent>();
+        smc.MeshHandle = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+        smc.Primitive.reset();
+        smc.MaterialSlots.clear();
+        smc.RuntimeMaterialInstances.clear();
+        smc.RuntimeMesh.reset();
+
+        if ( !m_CubemapPass )
+        {
+            auto pass = std::make_unique<Render::EditorCubemapPreviewPass>();
+            if ( const auto result = pass->Install( m_Scene ); !result )
+            {
+                // Named, once: an empty pane with no message is the silent fallback the contract
+                // forbids, and the panel above will keep showing "Starting the preview...".
+                LOG_ERROR( "[Preview] cubemap pass unavailable: {}", result.GetError() );
+                return;
+            }
+            m_CubemapPass = std::move( pass );
+        }
+
+        // Same size as the sphere primitive, so the two domains' balls frame identically and the
+        // orbit/zoom muscle memory carries over.
+        constexpr float kBallRadius = 50.0f;
+        m_CubemapPass->SetSource( std::move( resolveCube ), kBallRadius );
+
+        m_MeshHandle      = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+        m_Framed          = true;
+        m_Focus           = glm::vec3( 0.0f );
+        m_FrameHalfExtent = glm::vec3( kBallRadius );
+        m_FrameRadius     = kBallRadius;
+        m_FrameIsRound    = true;
+        m_HasContent      = true;
         ResetView();
     }
 
@@ -341,6 +396,15 @@ namespace Desert::Editor
         smc.MaterialSlots.clear();
         smc.RuntimeMaterialInstances.clear();
         smc.RuntimeMesh.reset();
+
+        if ( m_CubemapPass )
+            m_CubemapPass->ClearSource();
+    }
+
+    void PreviewViewport::SetOrbit( float yawRadians, float pitchRadians )
+    {
+        m_Yaw   = yawRadians;
+        m_Pitch = std::clamp( pitchRadians, -kPitchLimit, kPitchLimit );
     }
 
     void PreviewViewport::ResetView()
