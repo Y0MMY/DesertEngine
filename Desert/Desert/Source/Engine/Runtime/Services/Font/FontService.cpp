@@ -8,6 +8,7 @@
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 
 namespace Desert::Runtime
@@ -36,6 +37,12 @@ namespace Desert::Runtime
         if ( const auto it = m_ExtraGlyphs.find( ttfPath ); it != m_ExtraGlyphs.end() )
             extra = it->second;
 
+        // Timed across the cache lookup AND the fallback bake, so the reported number is the same
+        // quantity on a hit and on a miss: what this atlas cost the startup. Reading a cooked atlas
+        // out of the mounted archive and rasterizing one from the .ttf differ by an order of
+        // magnitude, and the difference is only visible if both are measured the same way.
+        const auto atlasStart = std::chrono::steady_clock::now();
+
         const std::filesystem::path cachePath =
              Text::FontCachePath( Text::FontCacheKey( ttf, pixelHeight, extra ) );
         Text::BakedFont baked;
@@ -50,6 +57,10 @@ namespace Desert::Runtime
             }
             Text::StoreBakedFont( cachePath, baked );
         }
+
+        const auto atlasMs =
+             std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - atlasStart )
+                  .count();
 
         // The engine's attachment/sampler formats are RGBA8 (no R8) — expand the single-channel SDF
         // into all four channels so the shader can read .r and a debug view still shows the atlas.
@@ -85,8 +96,9 @@ namespace Desert::Runtime
         font->Baked = std::move( baked );
         Font* raw   = font.get();
         m_Fonts[key] = std::move( font );
-        LOG_INFO( "[FontService] {} '{}' @ {}px -> {}x{} atlas", fromCache ? "Loaded cached" : "Baked", ttfPath,
-                  static_cast<int>( pixelHeight ), raw->Baked.AtlasWidth, raw->Baked.AtlasHeight );
+        LOG_INFO( "[FontService] {} '{}' @ {}px -> {}x{} atlas in {} ms", fromCache ? "Loaded cached" : "Baked",
+                  ttfPath, static_cast<int>( pixelHeight ), raw->Baked.AtlasWidth, raw->Baked.AtlasHeight,
+                  atlasMs );
         return raw;
     }
 

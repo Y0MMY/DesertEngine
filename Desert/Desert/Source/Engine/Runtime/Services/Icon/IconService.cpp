@@ -10,6 +10,7 @@
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 
 namespace Desert::Runtime
@@ -71,6 +72,10 @@ namespace Desert::Runtime
         // Disk cache first: the parse + per-layer SDF rasterization is the expensive half of an icon
         // import, and a packaged game ships it pre-baked in Cooked/IconCache (read VFS-aware, so the
         // archive serves it when no loose file exists). A miss bakes and stores, same as fonts.
+        // Timed across the lookup AND the fallback bake, so a hit and a miss report the same
+        // quantity: what this icon cost the startup (see FontService::Get for the same pattern).
+        const auto bakeStart = std::chrono::steady_clock::now();
+
         const std::filesystem::path cachePath = Vector::IconCachePath( Vector::IconCacheKey( svgFile ) );
         Vector::BakedIcon           baked;
         const bool                  fromCache = Vector::TryLoadBakedIcon( cachePath, baked );
@@ -84,6 +89,10 @@ namespace Desert::Runtime
             }
             Vector::StoreBakedIcon( cachePath, baked );
         }
+
+        const auto bakeMs =
+             std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - bakeStart )
+                  .count();
         raw->Aspect = baked.Aspect;
 
         const size_t firstBitmap = m_Bitmaps.size();
@@ -107,8 +116,9 @@ namespace Desert::Runtime
             RepackAtlas();
             return raw;
         }
-        LOG_INFO( "[IconService] {} '{}' ({} layer(s)) into the {}x{} icon atlas",
-                  fromCache ? "Loaded cached" : "Imported", path, raw->Layers.size(), m_AtlasSize, m_AtlasSize );
+        LOG_INFO( "[IconService] {} '{}' ({} layer(s)) into the {}x{} icon atlas in {} ms",
+                  fromCache ? "Loaded cached" : "Imported", path, raw->Layers.size(), m_AtlasSize, m_AtlasSize,
+                  bakeMs );
         return raw;
     }
 

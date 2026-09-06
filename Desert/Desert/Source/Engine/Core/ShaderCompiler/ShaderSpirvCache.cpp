@@ -1,6 +1,7 @@
 #include "ShaderSpirvCache.hpp"
 
 #include <Common/Core/Constants.hpp>
+#include <Common/Utilities/FileSystem.hpp>
 #include <Common/Utilities/VFS.hpp>
 
 #include <cstring>
@@ -54,15 +55,18 @@ namespace Desert::Core
         return std::nullopt;
     }
 
-    void StoreCachedSpirv( uint64_t key, const std::vector<uint32_t>& spirv )
+    bool StoreCachedSpirv( uint64_t key, const std::vector<uint32_t>& spirv )
     {
         const auto      path = SpirvCachePathForKey( key );
         std::error_code ec;
         std::filesystem::create_directories( path.parent_path(), ec );
-        std::ofstream out( path, std::ios::binary | std::ios::trunc );
-        if ( !out ) // read-only install (e.g. inside an .app bundle) — cache is best-effort
-            return;
-        out.write( reinterpret_cast<const char*>( spirv.data() ),
-                   static_cast<std::streamsize>( spirv.size() * sizeof( uint32_t ) ) );
+
+        // Write-then-rename (И2): a cache entry is either the whole artifact or absent. A truncating
+        // write killed halfway leaves a torn .spv under a key that says it is valid, and the next run
+        // loads it — the word-count check catches a wrong LENGTH but not a whole number of wrong
+        // words. Returns false on any failure, having logged which step failed and where.
+        const std::string bytes( reinterpret_cast<const char*>( spirv.data() ),
+                                 spirv.size() * sizeof( uint32_t ) );
+        return Common::Utils::FileSystem::WriteContentToFileAtomic( path, bytes );
     }
 } // namespace Desert::Core

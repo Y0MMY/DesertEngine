@@ -87,12 +87,26 @@ namespace Desert::Editor
                             continue;
                         }
                         // Compiles under the SAME key (same inputs, same profile) and stores it.
-                        if ( Core::ShaderCompiler::CompileGLSLToSPIRVForProfile( stage, source, file.string(),
-                                                                                 spirvDebugInfo )
-                                  .IsSuccess() )
-                            ++stats.ShadersCompiled;
-                        else
+                        if ( !Core::ShaderCompiler::CompileGLSLToSPIRVForProfile( stage, source, file.string(),
+                                                                                  spirvDebugInfo )
+                                   .IsSuccess() )
+                        {
                             ++stats.Failures; // the compiler logged file/stage/diagnostic
+                            continue;
+                        }
+                        // A compile whose artifact did not reach the disk is not a cooked artifact:
+                        // the pak would ship nothing under this key and the player would pay the
+                        // compile. The store is best-effort for the runtime and mandatory here.
+                        if ( !Core::TryLoadCachedSpirv( key ) )
+                        {
+                            LOG_ERROR( "[PackageCook] {} [{}] compiled but its artifact did not reach {} — "
+                                       "the package would ship a shader the runtime must recompile",
+                                       file.string(), static_cast<int>( stage ),
+                                       Core::SpirvCachePathForKey( key ).string() );
+                            ++stats.StoreFailures;
+                            continue;
+                        }
+                        ++stats.ShadersCompiled;
                     }
                 }
             }
@@ -133,7 +147,14 @@ namespace Desert::Editor
                         ++stats.Failures;
                         continue;
                     }
-                    Text::StoreBakedFont( Text::FontCachePath( key ), baked );
+                    if ( !Text::StoreBakedFont( Text::FontCachePath( key ), baked ) )
+                    {
+                        LOG_ERROR( "[PackageCook] {} baked but its atlas did not reach {} — the package "
+                                   "would ship a font the runtime must rebake",
+                                   p.string(), Text::FontCachePath( key ).string() );
+                        ++stats.StoreFailures;
+                        continue;
+                    }
                     ++stats.FontsBaked;
                 }
             }
@@ -171,7 +192,14 @@ namespace Desert::Editor
                         ++stats.Failures;
                         continue;
                     }
-                    Vector::StoreBakedIcon( Vector::IconCachePath( key ), baked );
+                    if ( !Vector::StoreBakedIcon( Vector::IconCachePath( key ), baked ) )
+                    {
+                        LOG_ERROR( "[PackageCook] {} baked but its SDF did not reach {} — the package "
+                                   "would ship an icon the runtime must rebake",
+                                   p.string(), Vector::IconCachePath( key ).string() );
+                        ++stats.StoreFailures;
+                        continue;
+                    }
                     ++stats.IconsBaked;
                 }
             }
@@ -186,9 +214,17 @@ namespace Desert::Editor
         CookIcons( stats );
 
         LOG_INFO( "[PackageCook] shaders {} compiled / {} cached, fonts {} baked / {} cached, icons {} "
-                  "baked / {} cached, {} failure(s)",
+                  "baked / {} cached, {} failure(s), {} unwritten",
                   stats.ShadersCompiled, stats.ShadersCached, stats.FontsBaked, stats.FontsCached,
-                  stats.IconsBaked, stats.IconsCached, stats.Failures );
+                  stats.IconsBaked, stats.IconsCached, stats.Failures, stats.StoreFailures );
+        if ( stats.StoreFailures > 0 )
+        {
+            // Loud on its own line: this one is never normal, and a package built over it ships a
+            // cache with holes in it that only a player's slow startup would ever reveal.
+            LOG_ERROR( "[PackageCook] {} cooked artifact(s) could not be written — the package will ship "
+                       "an incomplete cache and the game will rebuild them at every start",
+                       stats.StoreFailures );
+        }
         return stats;
     }
 } // namespace Desert::Editor

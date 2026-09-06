@@ -347,6 +347,56 @@ TEST( PackagedContent, TheCookCompilesWhatTheRuntimeWillAskFor )
     EXPECT_EQ( again.ShadersCached, 2u );
 }
 
+// A cook that could not WRITE what it produced must not report it as cooked. Without this the
+// packager's own summary is the defect in miniature: it says the shader was compiled, the pak packs
+// the directory that does not contain it, and the first place anyone learns otherwise is a player's
+// slow startup — which is exactly the failure П2 is about, arriving one artifact at a time.
+//
+// The store is made to fail the way a read-only install makes it fail: the directory the artifact
+// must go in cannot be created, because a FILE already occupies that name.
+TEST( PackagedContent, ACookThatCannotWriteDoesNotReportTheArtifactAsCooked )
+{
+    EnvironmentGuard guard;
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_unwritable";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+
+    WriteFile( proj / "Resources" / "Shaders" / "CookProbe.shader",
+               "Shader \"CookProbe\"\n"
+               "{\n"
+               "    Domain Surface\n"
+               "    Vertex\n"
+               "    {\n"
+               "        In(0) vec3 a_Position;\n"
+               "        void main() { gl_Position = vec4( a_Position, 1.0 ); }\n"
+               "    }\n"
+               "    Fragment\n"
+               "    {\n"
+               "        Out(0) vec4 o_Color;\n"
+               "        void main() { o_Color = vec4( 1.0 ); }\n"
+               "    }\n"
+               "}\n" );
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+    SetEnv( "HOME", base.string() );
+    fs::create_directories( proj / "GameAssets" );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    // Occupy Cooked/ShaderCache with a regular file, so create_directories cannot make the folder
+    // and every store into it fails.
+    const fs::path cacheDir = Desert::Core::SpirvCachePathForKey( 0 ).parent_path();
+    fs::create_directories( cacheDir.parent_path() );
+    WriteFile( cacheDir, "not a directory" );
+    ASSERT_TRUE( fs::is_regular_file( cacheDir ) );
+
+    const auto stats = Desert::Editor::CookContentCaches( Desert::Core::SpirvDebugInfoThisBuild() );
+
+    EXPECT_EQ( stats.ShadersCompiled, 0u ) << "an artifact that never reached the disk was counted as cooked";
+    EXPECT_EQ( stats.StoreFailures, 2u ) << "vertex + fragment, each produced and each unwritten";
+    EXPECT_EQ( stats.Failures, 0u ) << "the shader compiles fine — this is a WRITE failure, not a bad shader";
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

@@ -178,7 +178,7 @@ namespace Desert::Editor
         // the artifacts and the player's first launch reads instead of rebuilding. Cooked for the
         // TARGET runtime's profile (options.Config), not this editor's: a Debug editor packaging a
         // Release game must produce Release cache keys or the shipped cache never hits.
-        CookContentCaches( Core::SpirvDebugInfoForConfigName( options.Config ) );
+        const CookStats cook = CookContentCaches( Core::SpirvDebugInfoForConfigName( options.Config ) );
 
         // ALL content goes into ONE Content.dpak (UE .pak model), tree by tree out of the shared
         // census (PackagedContentTrees.hpp) — assets, cooked cache, shaders, fonts, icons. The Runtime
@@ -313,6 +313,14 @@ namespace Desert::Editor
             << stats.Files << " files, " << ( stats.Bytes / ( 1024 * 1024 ) ) << " MB, " << options.Config
             << " runtime" << ( bundle ? ( bundledVulkan ? ", Vulkan bundled" : ", Vulkan NOT bundled" ) : "" )
             << ")";
+        // An artifact the cook could not write is a hole in the shipped cache that nothing downstream
+        // can notice — the pak packs whatever is there and the game starts, just slowly, on the
+        // player's machine. So it is said HERE, in the result the packaging UI shows, and not left to
+        // a log line nobody reads. (Compile/bake failures are NOT raised this way: a project may ship
+        // a deliberately broken shader, and the runtime reports that one for itself.)
+        if ( cook.StoreFailures > 0 )
+            msg << "  WARNING: " << cook.StoreFailures
+                << " cooked artifact(s) could not be written; the game will rebuild them at every start";
         LOG_INFO( "[Package] {}", msg.str() );
         return { true, msg.str(), fs::absolute( root, ec ).string() };
     }
@@ -336,7 +344,7 @@ namespace Desert::Editor
         // developer launches next to this editor, which is built in the same configuration. (A
         // cross-config dev runtime misses and self-heals into loose Cooked/ — dev machines are
         // writable; only the shipped package must never rely on that.)
-        CookContentCaches( Core::SpirvDebugInfoThisBuild() );
+        const CookStats cook = CookContentCaches( Core::SpirvDebugInfoThisBuild() );
 
         // The same census PackageGame packs — one list, two entry points (see PackagedContentTrees.hpp).
         for ( const PackagedTree& tree : PackagedContentTrees() )
@@ -349,6 +357,9 @@ namespace Desert::Editor
         std::ostringstream msg;
         msg << "Content.dpak rebuilt: " << stats.Files << " file(s), " << ( stats.Bytes / ( 1024 * 1024 ) )
             << " MB -> " << fs::absolute( pakPath, ec ).string();
+        if ( cook.StoreFailures > 0 )
+            msg << "  WARNING: " << cook.StoreFailures
+                << " cooked artifact(s) could not be written; the game will rebuild them at every start";
         LOG_INFO( "[Package] {}", msg.str() );
         return { true, msg.str(), fs::absolute( pakPath, ec ).string() };
     }

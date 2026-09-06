@@ -27,6 +27,10 @@ namespace Desert::Core
     // (size not a whole number of SPIR-V words) — a corrupt cache entry is simply recompiled.
     std::optional<std::vector<uint32_t>> TryLoadCachedSpirv( uint64_t key );
 
-    // Best-effort: silently does nothing on a read-only install (e.g. inside an .app bundle).
-    void StoreCachedSpirv( uint64_t key, const std::vector<uint32_t>& spirv );
+    // Whether the artifact actually landed on disk. The RUNTIME may ignore this — a read-only
+    // install (inside an .app bundle) simply keeps no cache, which is the documented contract. The
+    // PACKAGER may not: a cook that could not write is a cook that ships nothing under that key, and
+    // every player then pays the compile it was supposed to have been spared. Silence there would
+    // reintroduce П2 one artifact at a time, so the return value exists to be checked.
+    bool StoreCachedSpirv( uint64_t key, const std::vector<uint32_t>& spirv );
 } // namespace Desert::Core

@@ -1,6 +1,7 @@
 #include "FontCache.hpp"
 
 #include <Common/Core/Constants.hpp>
+#include <Common/Utilities/FileSystem.hpp>
 #include <Common/Utilities/VFS.hpp>
 
 #include <format>
@@ -73,14 +74,15 @@ namespace Desert::Text
         return false;
     }
 
-    void StoreBakedFont( const std::filesystem::path& path, const BakedFont& font )
+    bool StoreBakedFont( const std::filesystem::path& path, const BakedFont& font )
     {
         std::error_code ec;
         std::filesystem::create_directories( path.parent_path(), ec );
-        std::ofstream out( path, std::ios::binary | std::ios::trunc );
-        if ( !out ) // read-only install (e.g. inside an .app bundle) — cache is best-effort
-            return;
+
+        // Write-then-rename (И2) — see ShaderSpirvCache::StoreCachedSpirv: a half-written atlas under
+        // a key that claims to be valid is worse than no atlas at all.
         const std::vector<uint8_t> bytes = SerializeBakedFont( font );
-        out.write( reinterpret_cast<const char*>( bytes.data() ), static_cast<std::streamsize>( bytes.size() ) );
+        return Common::Utils::FileSystem::WriteContentToFileAtomic(
+             path, std::string( reinterpret_cast<const char*>( bytes.data() ), bytes.size() ) );
     }
 } // namespace Desert::Text
