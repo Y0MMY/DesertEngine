@@ -1,7 +1,7 @@
 -- "Two asset documents are two windows; the same asset is one."
 --
 -- The units under test are header-only and free of the renderer: Editor/Panels/IPanel.hpp carries the
--- document's naming rule and Editor/Core/AssetEditorRegistry.hpp the open-or-focus lookup. They sit in
+-- document's naming rule and Editor/Core/DocumentWell.hpp the open-or-focus lookup. They sit in
 -- headers for the same reason Editor/Core/SceneViewIdentity.hpp does -- EditorLayer.cpp is compiled by no
 -- suite, so anything assertable has to be lifted out of it. Nothing to link from the engine or the editor;
 -- the ImGui and glm include paths are here because IPanel.hpp declares ImVec2 members, not because any

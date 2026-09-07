@@ -34,9 +34,20 @@ namespace Desert::Editor
     //   LIFE       a way to know the data is still there
     //
     // This header carries the IDENTITY. REACH is the factory registered for the subject's type
-    // (SubjectEditorRegistry) — it is typed, so it cannot live in a common struct. LIFE is
-    // ISubjectDocument::IsSubjectAlive, asked of the document because the document is what holds the
-    // scene or the asset manager the answer needs.
+    // (SubjectEditorRegistry::Registration::Make) — it is typed, so it cannot live in a common struct.
+    //
+    // LIFE IS ASKED TWICE, of two different things, and that is not a duplication:
+    //
+    //   ISubjectDocument::IsSubjectAlive   "is what THIS WINDOW is bound to still there?" — asked of the
+    //                                      document, because the document holds the context it was opened
+    //                                      in. An anim graph opened over the second scene view is alive or
+    //                                      dead according to THAT scene, not the active one.
+    //   Registration::Exists               "is there anything under this subject to open?" — asked of the
+    //                                      registry, about subjects that are NOT open, in the CURRENT
+    //                                      context. This is what the command palette enumerates with, and
+    //                                      no document can answer it because none exists yet.
+    //
+    // Neither can stand in for the other; the two comment blocks at those declarations say why at length.
     //
     // Identity decomposes into three fields and not one, and none of the three is spare:
     //

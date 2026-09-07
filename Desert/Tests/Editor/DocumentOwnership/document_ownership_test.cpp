@@ -314,7 +314,7 @@ TEST( DocumentSlotLease, ClosingEveryDocumentLeavesOnlyTheViewport )
 TEST( DocumentSlotLease, ACpuDrawnDocumentIsNotPendingDemand )
 {
     // The four cloud documents bake on the CPU: they hold no slot and never will, so counting them as
-    // claims would refuse a window that costs nothing. The rule lives in AssetEditorRegistry.hpp and is
+    // claims would refuse a window that costs nothing. The rule lives in SubjectEditorRegistry.hpp and is
     // asserted here against the OWNER the editor now asks, rather than against the panel list it used to.
     DocumentWell well;
     auto&        cpu = static_cast<FakeDocument&>(
@@ -590,8 +590,7 @@ namespace
     SubjectEditorRegistry::Registration FakeEditor( std::string name )
     {
         return SubjectEditorRegistry::Registration{
-             std::move( name ), "*",
-             []( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+             std::move( name ), "*", []( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
              { return std::make_unique<FakeDocument>( DocumentTitle( "doc", subject ), subject ); },
              // The presence test the palette enumerates with. Always true here: what these tests are
              // about is the registry's bookkeeping, not what a scene happens to contain.
@@ -832,7 +831,7 @@ using PathOpenOutcome = SubjectEditorRegistry::PathOpenOutcome;
 
 TEST( PathOpening, TheFirstOpenerThatClaimsThePathWins )
 {
-    SubjectEditorRegistry registry;
+    SubjectEditorRegistry    registry;
     std::vector<std::string> asked;
 
     registry.RegisterPathOpener(
@@ -862,9 +861,9 @@ TEST( PathOpening, APathNothingClaimsIsNotAnError )
     // Most double-clicks in the browser land on files nothing opens — a `.png`, a folder, a `.fbx`. That
     // is a normal answer and not a failure, which is why the browser logs nothing for it.
     SubjectEditorRegistry registry;
-    registry.RegisterPathOpener( []( const std::string& path )
-                                 { return path.ends_with( ".demat" ) ? PathOpenOutcome::Requested
-                                                                     : PathOpenOutcome::NotMine; } );
+    registry.RegisterPathOpener(
+         []( const std::string& path )
+         { return path.ends_with( ".demat" ) ? PathOpenOutcome::Requested : PathOpenOutcome::NotMine; } );
 
     EXPECT_EQ( registry.OpenPath( "Rock_Albedo.png" ), PathOpenOutcome::NotMine );
     EXPECT_EQ( registry.OpenPath( "" ), PathOpenOutcome::NotMine );

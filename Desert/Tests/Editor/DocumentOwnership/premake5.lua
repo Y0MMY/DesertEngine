@@ -3,7 +3,7 @@
 -- The units under test are header-only and free of the renderer: Editor/Core/PanelRegistry.hpp carries the
 -- container that refuses a document, Editor/Core/DocumentWell.hpp the owner that holds one, and
 -- Engine/Core/RendererSlotPool.hpp the lease a closed document has to give back. They sit in headers for the
--- reason Editor/Core/SceneViewIdentity.hpp and Editor/Core/AssetEditorRegistry.hpp do -- EditorLayer.cpp is
+-- reason Editor/Core/SceneViewIdentity.hpp and Editor/Core/SubjectEditorRegistry.hpp do -- EditorLayer.cpp is
 -- compiled by no suite (scripts/CI/UnreachedSources.sh), so anything assertable has to be lifted out of it.
 -- Nothing to link from the engine or the editor; the ImGui and glm include paths are here because IPanel.hpp
 -- declares ImVec2 members, not because any ImGui function is called.

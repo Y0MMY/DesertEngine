@@ -122,7 +122,7 @@ namespace Desert::Editor
         }
 
         // The window's display name is the material's file stem, taken ONCE — the title carries the ImGui
-        // window id (see AssetDocumentTitle) and a title that changed under a live window would orphan its
+        // window id (see DocumentTitle) and a title that changed under a live window would orphan its
         // saved dock entry. The id half is the handle, so the label is free to be a human name without being
         // load-bearing.
         std::string MaterialDocumentName( const Assets::AssetHandle&                   material,
