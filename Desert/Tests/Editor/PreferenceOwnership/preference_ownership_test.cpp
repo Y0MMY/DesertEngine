@@ -51,6 +51,7 @@
 
 #include <Editor/Core/EditorPreferences.hpp>
 #include <Editor/Core/GizmoState.hpp>
+#include <Editor/Core/ViewportModes.hpp>
 
 // glm::vec3 <-> JSON reflector (OutlineColor). Must be visible before rfl::json, exactly as it must be
 // in EditorPreferences.cpp — without it the whole struct is "Unsupported type" at the first vec3.
@@ -77,6 +78,8 @@
 #include <vector>
 
 using Desert::Editor::EditorPreferences;
+using Desert::Editor::Core::ApplyViewportModes;
+using Desert::Editor::Core::ViewportModes;
 using Gizmo = Desert::Editor::Core::GizmoState;
 
 namespace
@@ -815,6 +818,441 @@ TEST( PreferenceOwnershipWindow, EveryControlIsBoundToARealPreferenceField )
                               << " — ImGui::" << Text::IdentAt( body, at )
                               << " edits nothing in the preference store";
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 7. К10 — A VIEWPORT MODE IS NOT A PREFERENCE
+// ---------------------------------------------------------------------------------------------------
+//
+// THE SENTENCE: no save of the settings ever writes a debug-view flag different from the one the user
+// chose. It is deliberately stated over the whole of DebugViewState rather than over `ShowGrid`, because
+// the defect was a shape and the grid was only the field that happened to have a mode attached to it.
+//
+// In the exact form it shipped, and it is the third instance of the family К6 and К8 are the other two:
+//
+//   К6: one VALUE had two owners.   К8: one DECISION had two takers.
+//   К10: one FIELD had two MEANINGS — `EditorPreferences::DebugView.ShowGrid` was read as "the user
+//        wants a grid" by everything that persists it, and written as "this viewport is in 2D UI mode"
+//        by ViewportPanel. Entering 2D mode assigned `false` into the struct that goes to disk and parked
+//        the user's real answer in `ViewportPanel::m_SavedShowGrid`.
+//
+// The two meanings have different owners and different lifetimes, and that is the whole argument: the
+// user's answer outlives the session, the mode dies with a toggle. К2 saw the collision and fenced it by
+// restoring the true value around the two `EditorPreferences::Save()` calls that existed in that file;
+// by the time К8 finished there were twenty-five call sites and twenty-three of them had no fence. Any
+// of those, fired while 2D mode was on — the View menu's Perf HUD item, an MSAA pick, a star in Details,
+// a Build Settings path — wrote "ShowGrid: false" into ~/.desertengine/editor.json, permanently and for
+// every scene, because nothing on the next launch can tell a mode from a choice.
+//
+// THE FIX IS NOT A TWENTY-SIXTH FENCE. The mode no longer has a field in the saved struct at all: the
+// suppression is applied to a COPY on the view's way to the renderer (Editor/Core/ViewportModes.hpp,
+// ViewportPanel::EffectiveDebugView), exactly as the corner orientation triad — the OTHER thing 2D mode
+// hides — has always worked. This is К6's move again: the second store is deleted rather than
+// synchronised, so a call site added tomorrow cannot forget something that no longer exists.
+//
+// FIVE ASSERTIONS, and they cover different halves. The first three link the real seam and the real store
+// and ask them the user's question. The last two read source text, because "nobody stashes a preference
+// in a panel" and "no save is fenced" are statements about code that no store can be asked about — the
+// same reason §6 reads DrawPreferencesWindow, and the reader is the shared one Д33 rebuilt.
+
+namespace
+{
+    // The names of DebugViewState's fields, DERIVED from the serialization that writes editor.json rather
+    // than from a list or from parsing the header. `rfl::json::write` is the exact call Save() makes, so
+    // a flag added to DebugViewState tomorrow is covered by everything below without anybody editing this
+    // file — and a flag that somehow stopped being serialized would drop out of the census loudly (every
+    // user asserts the list is non-empty) instead of quietly.
+    std::vector<std::string> DebugViewFields()
+    {
+        std::vector<std::string> names;
+        const auto               whole = rfl::json::read<rfl::Generic>( rfl::json::write( EditorPreferences{} ) );
+        if ( !whole.has_value() )
+            return names;
+        const auto root = whole.value().to_object();
+        if ( !root.has_value() )
+            return names;
+        const auto view = root.value().get( "DebugView" );
+        if ( !view.has_value() )
+            return names;
+        const auto fields = view.value().to_object();
+        if ( !fields.has_value() )
+            return names;
+        for ( const auto& entry : fields.value() )
+            names.push_back( entry.first );
+        return names;
+    }
+
+    // Which DEBUG-VIEW flags differ between two serializations of a DebugViewState. The sibling of
+    // FieldsThatDiffer above and derived the same way; it is a separate function only because the two
+    // enumerate different structs, and using the wrong one would compare a list of key names against a
+    // document that has none of them and report everything as missing.
+    std::vector<std::string> ViewFieldsThatDiffer( const std::string& before, const std::string& after )
+    {
+        const auto lhs = rfl::json::read<rfl::Generic>( before );
+        const auto rhs = rfl::json::read<rfl::Generic>( after );
+        EXPECT_TRUE( lhs.has_value() ) << "the 'before' view is not readable JSON";
+        EXPECT_TRUE( rhs.has_value() ) << "the 'after' view is not readable JSON";
+        if ( !lhs.has_value() || !rhs.has_value() )
+            return { "<unreadable>" };
+
+        const auto lhsObject = lhs.value().to_object();
+        const auto rhsObject = rhs.value().to_object();
+        if ( !lhsObject.has_value() || !rhsObject.has_value() )
+            return { "<not-an-object>" };
+
+        std::vector<std::string> differing;
+        for ( const std::string& key : DebugViewFields() )
+        {
+            const auto a = lhsObject.value().get( key );
+            const auto b = rhsObject.value().get( key );
+            if ( !a.has_value() || !b.has_value() )
+            {
+                differing.push_back( key + " <missing>" );
+                continue;
+            }
+            if ( rfl::json::write( a.value() ) != rfl::json::write( b.value() ) )
+                differing.push_back( key );
+        }
+        return differing;
+    }
+} // namespace
+
+// The seam itself: a mode SUBTRACTS from the user's answer and changes nothing else.
+//
+// Stated over every field rather than over ShowGrid, and in both directions — a user who already has the
+// grid off must not be handed it back when the mode ends, and a mode must never turn a flag ON. A mode
+// that could add an overlay would be a viewport deciding what the user wanted to see, which is the same
+// authority confusion in the opposite direction.
+TEST( PreferenceOwnership, AViewportModeOnlyEverSubtractsFromTheUsersAnswer )
+{
+    ASSERT_FALSE( DebugViewFields().empty() )
+         << "DebugViewState serializes no fields; this census would certify nothing";
+
+    Desert::Graphic::DebugViewState user;
+    user.ShowGrid          = true;
+    user.ShowColliders     = true;
+    user.ShowBoundingBoxes = true;
+    user.WireframeMode     = true;
+
+    // No mode on: the renderer is handed exactly what the user chose, field for field.
+    EXPECT_EQ( rfl::json::write( ApplyViewportModes( user, ViewportModes{} ) ), rfl::json::write( user ) )
+         << "a viewport with no mode active altered the user's view";
+
+    // 2D UI mode on: the grid is gone and NOTHING ELSE MOVED. Asserted as "exactly one field differs, and
+    // it is ShowGrid" rather than as "ShowGrid is false", so a mode that quietly took a second overlay
+    // away with it is caught by the same line.
+    ViewportModes ui2d;
+    ui2d.UI2D = true;
+
+    const Desert::Graphic::DebugViewState hidden = ApplyViewportModes( user, ui2d );
+    EXPECT_FALSE( hidden.ShowGrid ) << "2D UI mode did not hide the grid";
+
+    const std::vector<std::string> expected = { "ShowGrid" };
+    EXPECT_EQ( ViewFieldsThatDiffer( rfl::json::write( user ), rfl::json::write( hidden ) ), expected )
+         << "2D UI mode changed a flag other than the grid on the way to the renderer";
+
+    // A user with the grid already off keeps it off, and the mode adds nothing.
+    const Desert::Graphic::DebugViewState allOff;
+    EXPECT_EQ( rfl::json::write( ApplyViewportModes( allOff, ui2d ) ), rfl::json::write( allOff ) );
+}
+
+// THE HEADLINE, ASKED OF THE FILE. The user's own sentence, walked end to end through the real store: the
+// grid is on, a viewport enters 2D UI mode, somebody does something unrelated that saves, the editor is
+// closed without leaving 2D mode and started again — and the grid is still on.
+//
+// The unrelated action is the View menu's Perf HUD item, copied verbatim from EditorLayer::DrawViewMenu
+// for the same reason §2 uses it: it is the cheapest real trigger and nothing about it mentions the
+// viewport. On the tree that shipped the defect this fails at the last line, because entering 2D mode had
+// already written `false` into the field the save then carried to disk.
+TEST( PreferenceOwnership, NoSaveWritesAGridDifferentFromTheOneTheUserChose )
+{
+    FreshInstall();
+
+    // The user ticks Grid in the viewport's Show popup. One click, one save — that is how that popup works.
+    EditorPreferences::Get().DebugView.ShowGrid = true;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    // They open a UI canvas and press "2D". The suppression exists ONLY in what the renderer is handed.
+    ViewportModes ui2d;
+    ui2d.UI2D = true;
+    EXPECT_FALSE( ApplyViewportModes( EditorPreferences::Get().DebugView, ui2d ).ShowGrid )
+         << "2D UI mode did not hide the grid at all";
+    EXPECT_TRUE( EditorPreferences::Get().DebugView.ShowGrid )
+         << "entering a viewport mode changed the value the settings file holds";
+
+    // ...and now anything at all saves. This is the step that made the defect permanent.
+    EditorPreferences::Get().ShowPerfHud = !EditorPreferences::Get().ShowPerfHud;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    // The editor is closed WITHOUT leaving 2D mode, and started again.
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+    EXPECT_TRUE( EditorPreferences::Get().DebugView.ShowGrid )
+         << "the grid the user turned on was off after a restart: a viewport mode reached editor.json";
+}
+
+// The same statement over the FILE and over every debug flag, so that a mode attached to a different flag
+// tomorrow is covered without this file changing: a save carries the fields the saving action touched and
+// no others, whatever a viewport happens to be doing at the time.
+TEST( PreferenceOwnership, AViewportModeAddsNothingToWhatASaveCarries )
+{
+    FreshInstall();
+
+    auto& view             = EditorPreferences::Get().DebugView;
+    view.ShowGrid          = true;
+    view.ShowColliders     = true;
+    view.ShowBoundingBoxes = true;
+    ASSERT_TRUE( EditorPreferences::Save() );
+    const std::string before = ReadWholeFile( PrefsPath() );
+
+    // A viewport is in 2D mode for the whole of the next action. Modes are computed and never stored, so
+    // there is nothing here that could interfere with a save — which is exactly what is being asserted.
+    ViewportModes ui2d;
+    ui2d.UI2D = true;
+    EXPECT_FALSE( ApplyViewportModes( view, ui2d ).ShowGrid );
+
+    EditorPreferences::Get().CameraSpeed = 3.5f;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    const std::vector<std::string> expected = { "CameraSpeed" };
+    EXPECT_EQ( FieldsThatDiffer( before, ReadWholeFile( PrefsPath() ) ), expected );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 7b. THE TWO SHAPES THAT MADE IT POSSIBLE, REFUSED IN THE SOURCE
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // Every .cpp under Editor/Source, comments and literals blanked. The shared reader preserves length
+    // and line breaks, so an offset still names a line of the original file.
+    struct EditorSource
+    {
+        std::string Path;
+        std::string Text;
+
+        std::size_t LineOf( std::size_t at ) const
+        {
+            return 1 + static_cast<std::size_t>( std::count( Text.begin(), Text.begin() + at, '\n' ) );
+        }
+    };
+
+    const std::vector<EditorSource>& EditorSources()
+    {
+        static const std::vector<EditorSource> sources = []
+        {
+            std::vector<EditorSource> out;
+            const std::string         root = RepoRoot();
+            if ( root.empty() )
+                return out;
+
+            for ( const auto& entry : std::filesystem::recursive_directory_iterator( root + "Editor/Source" ) )
+            {
+                if ( !entry.is_regular_file() || entry.path().extension() != ".cpp" )
+                    continue;
+                EditorSource file;
+                file.Path = entry.path().filename().string();
+                file.Text = Text::StripCommentsAndLiterals( ReadWholeFile( entry.path() ) );
+                out.push_back( std::move( file ) );
+            }
+            std::sort( out.begin(), out.end(),
+                       []( const EditorSource& a, const EditorSource& b ) { return a.Path < b.Path; } );
+            return out;
+        }();
+        return sources;
+    }
+
+    // The identifier that owns the member access ending at `at`, i.e. the `x` of `x.Field`. Empty when
+    // `Field` is not reached through a dot at all.
+    std::string ReceiverBefore( const std::string& s, std::size_t at )
+    {
+        if ( at == 0 || s[at - 1] != '.' )
+            return {};
+        std::size_t end = at - 1;
+        while ( end > 0 && std::isspace( static_cast<unsigned char>( s[end - 1] ) ) != 0 )
+            --end;
+        std::size_t start = end;
+        while ( start > 0 && Text::IsIdentChar( s[start - 1] ) )
+            --start;
+        return s.substr( start, end - start );
+    }
+
+    // `<receiver>.<member>` immediately followed by a plain `=`, i.e. an assignment TARGET rather than a
+    // read. Returns "receiver.member", or an empty string when what is at `at` is anything else.
+    std::string AssignmentTargetAt( const std::string& s, std::size_t at )
+    {
+        const std::string receiver = Text::IdentAt( s, at );
+        if ( receiver.empty() )
+            return {};
+        std::size_t i = Text::SkipSpace( s, at + receiver.size() );
+        if ( i >= s.size() || s[i] != '.' )
+            return {};
+        i                      = Text::SkipSpace( s, i + 1 );
+        const std::string name = Text::IdentAt( s, i );
+        if ( name.empty() )
+            return {};
+        i = Text::SkipSpace( s, i + name.size() );
+        if ( i >= s.size() || s[i] != '=' )
+            return {};
+        if ( i + 1 < s.size() && s[i + 1] == '=' )
+            return {}; // a comparison
+        return receiver + "." + name;
+    }
+
+    // WHICH NAMES IN THIS FILE ARE THE PREFERENCE STORE'S DEBUG VIEW, derived rather than spelled. A file
+    // binds it as `auto& view = EditorPreferences::Get().DebugView;` (the viewport) or reaches it as
+    // `prefs.DebugView` (the layer), and the local's name is an honest thing to rename — so the binding is
+    // read out of the same file instead of being hard-coded, exactly as SettingConsumers derives its
+    // receivers.
+    //
+    // THIS IS WHAT KEEPS THE CENSUS OFF INNOCENT CODE. `PreviewViewport.cpp` legitimately writes
+    // `debugView.ShowGrid = m_Setup.ShowGrid` — a preview's own authored setup pushed into a
+    // DebugViewState it owns outright, with no preference anywhere near it. Without the binding step that
+    // line is indistinguishable from the defect, and a census that reddens on correct code gets disabled.
+    std::vector<std::string> DebugViewReceivers( const std::string& text )
+    {
+        std::vector<std::string> out{ "DebugView" }; // the direct form, EditorPreferences::Get().DebugView.X
+        for ( const std::size_t at : Text::WordPositions( text, "DebugView" ) )
+        {
+            const std::size_t after = Text::SkipSpace( text, at + 9 );
+            if ( after >= text.size() || text[after] != ';' )
+                continue; // not the end of an initializer, so nothing is being bound to it here
+            const std::string statement = Text::StatementBefore( text, at );
+            if ( statement.find( "EditorPreferences" ) == std::string::npos )
+                continue;
+            const std::string name = Text::DeclaredNameBeforeAssignment( statement );
+            if ( !name.empty() && std::find( out.begin(), out.end(), name ) == out.end() )
+                out.push_back( name );
+        }
+        return out;
+    }
+} // namespace
+
+// SHAPE ONE: A PREFERENCE FIELD PARKED IN A PANEL'S OWN STATE.
+//
+// `m_SavedShowGrid = view.ShowGrid` on the way into 2D mode, `view.ShowGrid = m_SavedShowGrid` on the way
+// out and inside both save fences. That copy is what made the store stop being the authority — the same
+// second-store shape as К6's GizmoState statics, arriving through a different door.
+//
+// The rule: A DEBUG-VIEW FLAG OF THE PREFERENCE STORE IS NEVER COPIED TO OR FROM A MEMBER VARIABLE. Every
+// side of it is derived — the field names from the serialization, the receiver from each file's own
+// binding, the member prefix from this codebase's `m_` / `s_` convention — so no list here can go stale.
+// A control writing `view.ShowGrid = grid` from a local is untouched, which is right: that local IS the
+// user's click, made one statement earlier by an ImGui checkbox.
+TEST( PreferenceOwnershipSource, NoPanelKeepsItsOwnCopyOfADebugViewFlag )
+{
+    const std::vector<std::string> fields = DebugViewFields();
+    ASSERT_FALSE( fields.empty() ) << "no debug-view field names were derived; this census would pass on air";
+    ASSERT_FALSE( EditorSources().empty() ) << "no Editor sources were read";
+
+    int inspected = 0;
+    for ( const EditorSource& file : EditorSources() )
+    {
+        const std::vector<std::string> receivers = DebugViewReceivers( file.Text );
+        for ( const std::string& field : fields )
+            for ( const std::size_t at : Text::WordPositions( file.Text, field ) )
+            {
+                const std::string receiver = ReceiverBefore( file.Text, at );
+                if ( receiver.empty() ||
+                     std::find( receivers.begin(), receivers.end(), receiver ) == receivers.end() )
+                    continue; // some other struct's flag of the same name, not the preference store's
+                ++inspected;
+
+                // Restored FROM a member: `view.ShowGrid = m_SavedShowGrid;`
+                const std::size_t eq = Text::SkipSpace( file.Text, at + field.size() );
+                if ( eq < file.Text.size() && file.Text[eq] == '=' &&
+                     ( eq + 1 >= file.Text.size() || file.Text[eq + 1] != '=' ) )
+                {
+                    const std::string from = Text::IdentAt( file.Text, Text::SkipSpace( file.Text, eq + 1 ) );
+                    EXPECT_TRUE( from.rfind( "m_", 0 ) != 0 && from.rfind( "s_", 0 ) != 0 )
+                         << file.Path << ":" << file.LineOf( at ) << " — " << receiver << "." << field
+                         << " is being restored from `" << from
+                         << "`. A panel that holds a copy of the user's answer has made the store stop being "
+                            "the authority; that is К10's defect and К6's before it. Suppress in the view "
+                            "handed to the renderer instead (Editor/Core/ViewportModes.hpp).";
+                }
+
+                // Stashed INTO a member: `m_SavedShowGrid = view.ShowGrid;`
+                const std::string stashed =
+                     Text::DeclaredNameBeforeAssignment( Text::StatementBefore( file.Text, at ) );
+                EXPECT_TRUE( stashed.rfind( "m_", 0 ) != 0 && stashed.rfind( "s_", 0 ) != 0 )
+                     << file.Path << ":" << file.LineOf( at ) << " — " << receiver << "." << field
+                     << " is being stashed into `" << stashed
+                     << "`. Reading it to render is fine; keeping a copy of it is the second store К10 removed.";
+            }
+    }
+
+    // A census that resolved no receiver at all would pass in silence, which is the failure mode every
+    // other census in this repository has had at least once.
+    EXPECT_GT( inspected, 0 ) << "no access to a preference debug-view flag was found anywhere in "
+                                 "Editor/Source; the receiver derivation has stopped working";
+}
+
+// SHAPE TWO: A FENCE AROUND A SAVE.
+//
+// `const bool live = view.ShowGrid; if (uiMode) view.ShowGrid = saved; Save(); view.ShowGrid = live;` —
+// К2's answer, and it worked, at exactly two of the twenty-five call sites that exist today. A fence is
+// per-call-site by construction, so the rule it enforces lives in whoever remembers it; this census is
+// that rule living in the build instead.
+//
+// Stated as an INTERLEAVING, which is what makes it a relation and not a keyword ban: what is refused is
+// a preference save with an assignment to `x.y` immediately after it that an earlier statement of the
+// same block also assigned. That is precisely "put it back the way the user had it, write, take it away
+// again", and it says nothing about a save followed by ordinary unrelated work.
+TEST( PreferenceOwnershipSource, NoSaveOfThePreferencesIsFencedByARestoredField )
+{
+    ASSERT_FALSE( EditorSources().empty() ) << "no Editor sources were read";
+
+    int saves = 0;
+    for ( const EditorSource& file : EditorSources() )
+        for ( const std::size_t at : Text::WordPositions( file.Text, "Save" ) )
+        {
+            // A CALL, `EditorPreferences::Save();`, and not the definition of one or a Save on some other
+            // object. The definition is `bool EditorPreferences::Save()` followed by a brace, so requiring
+            // the terminating semicolon is what tells the two apart.
+            if ( at < 19 || file.Text.compare( at - 19, 19, "EditorPreferences::" ) != 0 )
+                continue;
+            if ( at + 5 >= file.Text.size() || file.Text[at + 4] != '(' || file.Text[at + 5] != ')' )
+                continue;
+            const std::size_t semi = Text::SkipSpace( file.Text, at + 6 );
+            if ( semi >= file.Text.size() || file.Text[semi] != ';' )
+                continue;
+            ++saves;
+
+            // The statement straight after the save. A fence's tell is that it assigns to a member.
+            const std::size_t nextEnd = file.Text.find( ';', semi + 1 );
+            if ( nextEnd == std::string::npos )
+                continue;
+            const std::string next   = file.Text.substr( semi + 1, nextEnd - semi - 1 );
+            const std::string target = AssignmentTargetAt( next, Text::SkipSpace( next, 0 ) );
+            if ( target.empty() )
+                continue;
+
+            // ...and that the same target was assigned before the save, inside the same block.
+            const std::size_t brace  = file.Text.rfind( '{', at );
+            const std::size_t from   = brace == std::string::npos ? 0 : brace;
+            const std::string before = file.Text.substr( from, at - from );
+            const std::string owner  = target.substr( 0, target.find( '.' ) );
+
+            bool fenced = false;
+            for ( const std::size_t use : Text::WordPositions( before, owner ) )
+                fenced = fenced || AssignmentTargetAt( before, use ) == target;
+
+            EXPECT_FALSE( fenced )
+                 << file.Path << ":" << file.LineOf( at ) << " — this EditorPreferences save is FENCED: `"
+                 << target
+                 << "` is set before it and set again straight after, so what is written is not what the "
+                    "struct is carrying. A fence protects one call site out of twenty-five and the next one "
+                    "arrives without it. Take the transient meaning out of the saved field instead — "
+                    "Editor/Core/ViewportModes.hpp.";
+        }
+
+    // A census that walked nothing would pass. The editor really does save its preferences from a couple
+    // of dozen places, and that number is the whole reason this is a rule about the FIELD rather than a
+    // fence at each site.
+    EXPECT_GE( saves, 20 ) << "only " << saves
+                           << " EditorPreferences::Save() call sites were found in Editor/Source; the reader "
+                              "is not seeing the code it is meant to be judging";
 }
 
 int main( int argc, char** argv )
