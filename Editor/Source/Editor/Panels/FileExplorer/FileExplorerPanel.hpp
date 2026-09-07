@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../IPanel.hpp"
+
+#include <Editor/Core/SubjectEditorRegistry.hpp>
 #include <Common/Core/ResultStr.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <ImGui/imgui.h>
@@ -91,8 +93,12 @@ namespace Desert::Editor
     class FileExplorerPanel : public IPanel
     {
     public:
-        explicit FileExplorerPanel( const std::filesystem::path& rootPath,
-                                    Assets::AssetManager*        assetManager  = nullptr,
+        // @p subjectEditors is what a double-click asks "does anything open this file?". Required, and
+        // not defaulted to null: without it every double-click on a document would silently do nothing,
+        // which is the exact symptom this panel's own comments say is impossible to diagnose.
+        explicit FileExplorerPanel( const std::filesystem::path&  rootPath,
+                                    const SubjectEditorRegistry*  subjectEditors,
+                                    Assets::AssetManager*         assetManager  = nullptr,
                                     std::weak_ptr<::Desert::Core::Scene> viewportScene = {} );
         ~FileExplorerPanel() override;
         void OnUIRender() override;
@@ -281,6 +287,10 @@ namespace Desert::Editor
         std::vector<std::string> m_Favorites;                 // pinned folder paths (persisted)
 
         Assets::AssetManager*           m_AssetManager = nullptr;
+        // WHICH FILES ARE DOCUMENTS, and how each becomes a subject. Non-owning; the registry is a member
+        // of EditorLayer and outlives every panel. See Editor/Core/SubjectEditorRegistry.hpp — the chain of
+        // `else if` per format that used to live in this file is registered there now, beside the editors.
+        const SubjectEditorRegistry*    m_SubjectEditors = nullptr;
         std::unique_ptr<UI::UIHelper>   m_UIHelper;
         std::unique_ptr<ThumbnailCache>          m_Thumbnails;
         std::weak_ptr<::Desert::Core::Scene>     m_ViewportScene; // for "Capture Thumbnail from viewport"

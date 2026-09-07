@@ -7,6 +7,12 @@
 -- compiled by no suite (scripts/CI/UnreachedSources.sh), so anything assertable has to be lifted out of it.
 -- Nothing to link from the engine or the editor; the ImGui and glm include paths are here because IPanel.hpp
 -- declares ImVec2 members, not because any ImGui function is called.
+--
+-- ONE EDITOR .cpp IS COMPILED IN: SubjectEditorRegistry.cpp. The registry is the seam this suite is about
+-- ("the set of open documents is the set of registered editors"), and its Register/Create carry the refusals
+-- that make the rule hold -- an empty factory, a missing icon, a digest collision under one key. Those are
+-- statements, not templates, so they cannot live in the header; compiling the one file is what makes them
+-- assertable rather than merely written down. It pulls in Common's logger and nothing else.
 local deps = dofile(_MAIN_SCRIPT_DIR .. '/Desert/Dependencies.lua')
 
 local test_name = path.getname(_SCRIPT_DIR)
@@ -19,7 +25,7 @@ project(test_name)
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
-    files { test_files }
+    files { test_files, "%{wks.location}/Editor/Source/Editor/Core/SubjectEditorRegistry.cpp" }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",

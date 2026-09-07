@@ -49,7 +49,7 @@ namespace Desert::Editor
     // ServiceDocumentCloses). That is the difference between a document and a tool panel: a tool is
     // hidden and kept, so it has to be told to let go of its renderer; a document ceases to exist, so it
     // cannot forget to.
-    class MaterialEditorPanel final : public IAssetEditorPanel
+    class MaterialEditorPanel final : public ISubjectDocument
     {
     public:
         MaterialEditorPanel( const Assets::AssetHandle&                   material,
@@ -69,12 +69,28 @@ namespace Desert::Editor
             return m_Preview != nullptr;
         }
 
+        // The `.demat` this window is about, gone from the manager — deleted in the browser, or the project
+        // closed under it. Read through the same resolution the pane draws from, so "the document says its
+        // subject is alive" and "the pane found something to draw" cannot disagree.
+        [[nodiscard]] bool IsSubjectAlive() const override
+        {
+            return ResolveSubject() != nullptr;
+        }
+
+        // The preview — a Scene, a SceneRenderer and one of the six slots — while this window is not on
+        // screen. ReleasePreview is what a close already does; this is the same teardown reached because
+        // nobody is looking, and OnPreUpdate builds it back on the first frame the window is drawn again.
+        void ReleaseRendererSlot() override
+        {
+            ReleasePreview();
+        }
+
         // NOT ALWAYS — and that is the point. A material whose shader draws no mesh geometry (a
         // Terrain-domain one; see PreviewUnavailableReason) never builds a PreviewViewport at all, so it
         // is not demand for a renderer slot that has yet to land. Answering the base class's `true` here
         // would make such a window count against the six for ever, and the census would tell the user to
         // close a window that holds nothing and never will — the exact failure the four cloud documents
-        // caused before IAssetEditorPanel::ClaimsRendererSlot existed.
+        // caused before ISubjectDocument::ClaimsRendererSlot existed.
         //
         // Read from the same string the pane prints, so the census and what the artist is looking at
         // cannot disagree. Empty before the first draw, which is the conservative answer: a window that
@@ -95,7 +111,7 @@ namespace Desert::Editor
 
         void SetPreviewViewpoint( const PreviewViewpoint& viewpoint ) override;
 
-        // ── The three states (IAssetEditorPanel) ───────────────────────────────────────────────────────
+        // ── The three states (ISubjectDocument) ───────────────────────────────────────────────────────
         //
         // This document STAGES. An edit lands in a working copy that only the pane beside it draws; the
         // scene keeps rendering the state somebody accepted, until Apply. See PublishToRuntime for the
@@ -117,7 +133,7 @@ namespace Desert::Editor
         // its own file. Returns whether the file was written.
         bool SaveDocument() override;
 
-        // ── The properties, for the control channel (IAssetEditorPanel) ────────────────────────────────
+        // ── The properties, for the control channel (ISubjectDocument) ────────────────────────────────
         //
         // DERIVED FROM THE SHADER'S SCHEMA, through MaterialEdit::DescribeProperties — the same walk of
         // the same `Properties` block that DrawParameters builds its rows from. There is no list of

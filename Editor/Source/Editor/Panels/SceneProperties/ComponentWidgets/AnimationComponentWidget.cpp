@@ -14,7 +14,9 @@
 
 #include <Editor/Panels/Animation/AnimGraphPanel.hpp>
 #include <Editor/Core/PanelRequests.hpp>
-#include <Editor/Panels/Stubs/SequencerPanel.hpp>
+#include <Editor/Core/SubjectOpenRequest.hpp>
+#include <Editor/Panels/PanelContext.hpp>
+#include <Editor/Panels/Sequencer/SequencerPanel.hpp>
 
 namespace Desert::Editor
 {
@@ -144,7 +146,7 @@ namespace Desert::Editor
             Core::PanelRequests::Open( "Anim Layers" );
         Utils::ImGuiUtilities::Tooltip( "Additive layers on top of the base clip" );
 
-        RenderAnimGraph( animation, cached );
+        RenderAnimGraph( entity, animation, cached );
 
         Utils::ImGuiUtilities::PopID();
     }
@@ -153,7 +155,7 @@ namespace Desert::Editor
     // Full authoring (states / transitions / parameters) lives in the visual Anim Graph node panel — no triple
     // UI.
     void
-    AnimationComponentWidget::RenderAnimGraph( ECS::AnimationComponent&                                  animation,
+    AnimationComponentWidget::RenderAnimGraph( ECS::Entity& entity, ECS::AnimationComponent& animation,
                                                const std::vector<Assets::Asset<Assets::AnimationAsset>>& clips )
     {
         namespace G = Animation::Graph;
@@ -183,7 +185,9 @@ namespace Desert::Editor
                 graph->Entry    = "Idle";
                 animation.Graph = graph;
                 animation.GraphRevision++;
-                AnimGraphPanel::RequestOpen(); // jump straight into the visual editor
+                // Straight into the visual editor, ON THIS ENTITY. The subject is what the request
+                // carries, so the window that opens is this graph's and not "whatever is selected".
+                Core::SubjectOpenRequests::Request( AnimGraphPanel::SubjectFor( EntityId( entity ) ) );
             }
             ImGui::Unindent( 6.0f );
             return;
@@ -206,8 +210,12 @@ namespace Desert::Editor
                              animation.Graph->Parameters.size() );
 
         ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+        // THE BUTTON THE OWNER ASKED FOR, and the one that could not be built before U7: it opens a
+        // document FROM the component in front of the user. Open-or-focus falls out of the subject — a
+        // second press brings the window that is already on this entity forward instead of making a
+        // second one (EditorLayer::ServiceSubjectOpenRequests).
         if ( Utils::ImGuiUtilities::AccentButton( ICON_MDI_STATE_MACHINE "  Open in Anim Graph", 28.0f ) )
-            AnimGraphPanel::RequestOpen();
+            Core::SubjectOpenRequests::Request( AnimGraphPanel::SubjectFor( EntityId( entity ) ) );
 
         ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.46f, 0.19f, 0.19f, 1.0f ) );
         ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.62f, 0.24f, 0.24f, 1.0f ) );

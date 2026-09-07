@@ -53,7 +53,7 @@ namespace Desert::Editor
         }
 
         // The document's VISIBLE title: the subject's file name. Computed before the base class is
-        // constructed — IAssetEditorPanel bakes the title in its own constructor and holds it for the
+        // constructed — ISubjectDocument bakes the title in its own constructor and holds it for the
         // window's life — so it is a free function rather than a member.
         std::string SubjectTitle( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
         {
@@ -68,8 +68,10 @@ namespace Desert::Editor
 
     CloudModellingVolumePanel::CloudModellingVolumePanel( const Assets::AssetHandle& subject,
                                                           Assets::AssetManager*      assets )
-         : IAssetEditorPanel( SubjectTitle( subject, assets ), subject,
-                              Assets::AssetTypeID::CloudModellingVolume ),
+         : ISubjectDocument( SubjectTitle( subject, assets ),
+                                 AssetSubject( subject,
+                                               static_cast<uint32_t>(
+                                                    Assets::AssetTypeID::CloudModellingVolume ) ) ),
            m_Assets( assets )
     {
         // STARTING FROM THE SHIPPED EXAMPLE RATHER THAN FROM AN EMPTY BOX. An empty recipe is refused by
@@ -90,7 +92,7 @@ namespace Desert::Editor
         if ( !assets )
             return;
 
-        const auto asset = assets->FindByHandle<Assets::CloudModellingVolumeAsset>( Subject() );
+        const auto asset = assets->FindByHandle<Assets::CloudModellingVolumeAsset>( Assets::AssetHandle( Subject().Owner ) );
         if ( !asset )
         {
             m_Status        = "This body is not registered - the log says why. Save would create it anew.";
@@ -786,5 +788,14 @@ namespace Desert::Editor
 
         ImGui::SameLine();
         ImGui::TextDisabled( "Bodies live in %s", Common::Constants::Path::CLOUD_VOLUME_PATH.string().c_str() );
+    }
+
+    bool CloudModellingVolumePanel::IsSubjectAlive() const
+    {
+        // ASKED OF THE METADATA rather than of a typed lookup: the question is whether the asset is still
+        // THERE, and a typed lookup answers a different one (whether it is still that type) — a subject
+        // that failed to reload as its own class would read as deleted and the window would close on a
+        // load error instead of reporting it.
+        return m_Assets && m_Assets->FindMetadataByHandle( Assets::AssetHandle( Subject().Owner ) ) != nullptr;
     }
 } // namespace Desert::Editor

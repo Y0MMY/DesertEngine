@@ -1,11 +1,11 @@
 #pragma once
 
-// DELIBERATELY NOT <Editor/Core/AssetOpenRequest.hpp>, even though queueing one is the whole point of this
+// DELIBERATELY NOT <Editor/Core/SubjectOpenRequest.hpp>, even though queueing one is the whole point of this
 // header. That header opens `namespace Desert::Editor::Core`, and this one is included by the four cloud
 // panels — which spell Desert::Core::Formats as an unqualified `Core::Formats` from inside Desert::Editor.
 // Make Desert::Editor::Core visible before those uses and every one of them silently rebinds to the wrong
-// namespace; it does not silently compile, but the error names a namespace nobody wrote. AssetEditorRegistry
-// .hpp carries the same note and escapes the same way. So the queueing is declared here and DEFINED in
+// namespace; it does not silently compile, but the error names a namespace nobody wrote.
+// SubjectEditorRegistry.hpp carries the same note and escapes the same way. So the queueing is declared here and DEFINED in
 // CloudDocumentOpen.cpp, and nothing in this header drags that namespace along.
 
 #include <Engine/Assets/AssetManager.hpp>
@@ -27,10 +27,10 @@
 
 namespace Desert::Editor
 {
-    // Hands a resolved subject to Core::AssetOpenRequests. Declared here and defined in the matching .cpp
-    // for the namespace reason at the top of this file — the two fields of a request rather than the
-    // request, exactly as AssetEditorRegistry::Create takes them.
-    void QueueAssetOpenRequest( const Assets::AssetHandle& subject, Assets::AssetTypeID type );
+    // Hands a resolved subject to Core::SubjectOpenRequests. Declared here and defined in the matching .cpp
+    // for the namespace reason at the top of this file — the handle and the type rather than the request
+    // itself, so this header never sees Desert::Editor::Core.
+    void QueueCloudSubjectOpen( const Assets::AssetHandle& subject, Assets::AssetTypeID type );
 
     // "Open the cloud asset at this PATH in whatever edits it."
     //
@@ -47,7 +47,7 @@ namespace Desert::Editor
     //
     // The request carries a HANDLE and not the path, because the handle is the document's identity: it is
     // what open-or-focus is keyed on and what the window's ImGui id is built from. So the resolution has to
-    // happen on this side of the wire — see Editor/Core/AssetOpenRequest.hpp.
+    // happen on this side of the wire — see Editor/Core/SubjectOpenRequest.hpp.
     enum class CloudDocumentRequest
     {
         NotACloudPath, // the string names no cloud asset on disk; nothing was logged, nothing was wrong
@@ -108,7 +108,7 @@ namespace Desert::Editor
             return CloudDocumentRequest::Failed;
         }
 
-        QueueAssetOpenRequest( asset->GetMetadata().Handle, AssetT::GetTypeID() );
+        QueueCloudSubjectOpen( asset->GetMetadata().Handle, AssetT::GetTypeID() );
         return CloudDocumentRequest::Requested;
     }
 

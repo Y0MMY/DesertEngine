@@ -45,9 +45,9 @@ namespace Desert::Editor
      * in Р3. It was a SINGLETON with an "Open" combo in it: one window, whichever volume was last picked in
      * it, reached from the View menu. The combo is gone with the singleton — the subject is fixed at
      * construction, two volumes are two windows, and the browser is where a volume is chosen. See
-     * Editor/Core/AssetEditorRegistry.hpp for the seam and Clouds/CloudDocumentOpen.hpp for the resolution.
+     * Editor/Core/SubjectEditorRegistry.hpp for the seam and Clouds/CloudDocumentOpen.hpp for the resolution.
      */
-    class CloudNoiseVolumePanel final : public IAssetEditorPanel
+    class CloudNoiseVolumePanel final : public ISubjectDocument
     {
     public:
         CloudNoiseVolumePanel( const Assets::AssetHandle& subject, Assets::AssetManager* assets );
@@ -65,6 +65,15 @@ namespace Desert::Editor
         // is a device image and not a renderer. So the six-slot census (EditorLayer::RendererSlotCensus)
         // counts this document at zero for its whole life, and closing it returns nothing because it took
         // nothing. The same is true of the other three cloud documents.
+
+        // The `CloudNoiseVolume` this window is about, gone from the manager — deleted in the browser, or the project
+        // closed under it. Asked of the metadata rather than of a typed lookup: the question is whether the
+        // asset is still THERE, and a typed lookup answers a different one (whether it is still that type).
+        // DEFINED IN THE .cpp: this header only forward-declares AssetManager, and pulling the whole of
+        // it in for one metadata lookup would put the asset system into every translation unit that draws
+        // a cloud panel.
+        [[nodiscard]] bool IsSubjectAlive() const override;
+
         [[nodiscard]] bool HoldsRendererSlot() const override
         {
             return false;

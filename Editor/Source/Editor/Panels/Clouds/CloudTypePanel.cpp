@@ -57,7 +57,7 @@ namespace Desert::Editor
         }
 
         // The document's VISIBLE title: the subject's file name. Computed before the base class is
-        // constructed — IAssetEditorPanel bakes the title in its own constructor and holds it for the
+        // constructed — ISubjectDocument bakes the title in its own constructor and holds it for the
         // window's life — so it is a free function rather than a member.
         std::string SubjectTitle( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
         {
@@ -71,7 +71,8 @@ namespace Desert::Editor
     } // namespace
 
     CloudTypePanel::CloudTypePanel( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
-         : IAssetEditorPanel( SubjectTitle( subject, assets ), subject, Assets::AssetTypeID::CloudType ),
+         : ISubjectDocument( SubjectTitle( subject, assets ),
+                                 AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudType ) ) ),
            m_Assets( assets )
     {
         // The subject is read through the SAME OpenType the library combo used to call, so a document opened
@@ -624,5 +625,14 @@ namespace Desert::Editor
 
         m_Status        = "Saved to " + target.string();
         m_StatusIsError = false;
+    }
+
+    bool CloudTypePanel::IsSubjectAlive() const
+    {
+        // ASKED OF THE METADATA rather than of a typed lookup: the question is whether the asset is still
+        // THERE, and a typed lookup answers a different one (whether it is still that type) — a subject
+        // that failed to reload as its own class would read as deleted and the window would close on a
+        // load error instead of reporting it.
+        return m_Assets && m_Assets->FindMetadataByHandle( Assets::AssetHandle( Subject().Owner ) ) != nullptr;
     }
 } // namespace Desert::Editor

@@ -366,7 +366,7 @@ namespace Desert::Editor::Control
 
                 // The count is not checked against the property here and cannot be: this parser has never
                 // heard of a shader schema. The DOCUMENT owns that check, because the document is what owns
-                // the declaration — see IAssetEditorPanel::SetEditableProperty. What is refused here is
+                // the declaration — see ISubjectDocument::SetEditableProperty. What is refused here is
                 // only what makes no sense for any property at all.
                 if ( request.Value.size() > 4 )
                 {

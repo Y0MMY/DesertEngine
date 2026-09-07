@@ -11,12 +11,13 @@
 #include "Editor/Core/Control/ControlSocket.hpp"
 #include "Editor/Core/Control/ControlState.hpp"
 #include "Editor/Core/SceneViewIdentity.hpp"
-#include "Editor/Core/AssetEditorRegistry.hpp"
+#include "Editor/Core/SubjectEditorRegistry.hpp"
 #include "Editor/Core/DocumentWell.hpp"
 #include "Editor/Core/PanelRegistry.hpp"
 #include "Editor/RenderSystems/RenderRigistry.hpp"
 
 #include <filesystem>
+#include <unordered_map>
 
 namespace Desert::Editor
 {
@@ -195,11 +196,11 @@ namespace Desert::Editor
         void CloseDismissedSceneViews();
 
         // ===== Asset documents (one window per asset, opened from the browser) =====
-        // Drains Core::AssetOpenRequests and, per request, focuses the document already open on that subject
+        // Drains Core::SubjectOpenRequests and, per request, focuses the document already open on that subject
         // or builds a new one through m_AssetEditors. Runs from OnUpdate (between frames) because it adds to
         // m_Documents, and REFUSES past the six renderer slots with the census printed by name — a seventh
         // consumer would otherwise be handed slot 0 to share, which fails silently and days later.
-        void ServiceAssetOpenRequests();
+        void ServiceSubjectOpenRequests();
         // Destroys every document the user asked to close, behind ONE device-idle wait. This is what returns
         // the document's Scene, SceneRenderer and renderer slot.
         //
@@ -210,13 +211,42 @@ namespace Desert::Editor
         void ServiceDocumentCloses();
         // Asks for a document to be closed. Queued, never immediate: closing destroys GPU resources, which
         // is not legal from inside the ImGui pass that is drawing them.
-        void RequestDocumentClose( const Assets::AssetHandle& subject );
+        // @p reason is why, in the user's words, and it is REQUIRED. A document now closes for three
+        // different causes — the user dismissed it, Close All, or its subject stopped existing — and a log
+        // line that could not tell them apart would make "my window vanished" unanswerable.
+        void RequestDocumentClose( const SubjectId& subject, std::string reason );
         // Every open document, queued for closing. One implementation behind Window ▸ Close All Documents
         // and behind the palette entry of the same name — the menu item used to carry the loop itself, and
         // a second copy of it in the palette would be two answers to "what does Close All close".
         void RequestCloseAllDocuments();
+
+        // ── A DOCUMENT CLOSES WITH ITS SUBJECT ────────────────────────────────────────────────────────
+        //
+        // Queues a close for every open document whose IsSubjectAlive() has gone false — the entity was
+        // deleted, the component removed, the asset dropped from the manager, the scene closed. The owner
+        // ruled out closing on focus loss (a layout that moves itself reads as a lost panel) and ruled IN
+        // closing with the subject, because the alternative is a window editing nothing.
+        //
+        // A SWEEP AND NOT A SUBSCRIPTION: there is no single event that covers all four ways a subject can
+        // die, and a subscription to one of them would make the other three look handled.
+        void CloseDocumentsWhoseSubjectIsGone();
+
+        // Hands the renderer slot back for every document whose window has been undrawn for
+        // kFramesHiddenBeforeSlotRelease frames. Called from ServiceDocumentCloses so it shares that
+        // function's device-idle wait — see ISubjectDocument::ReleaseRendererSlot.
+        void ReleaseSlotsOfHiddenDocuments();
+
+        // The label a component-subject document is named with: the entity's tag plus what the window is
+        // about ("Hero · Anim Graph"). Resolved ONCE, when the document is built — a document must not
+        // need a scene to know its own name, and renaming the entity must not open a second window.
+        [[nodiscard]] std::string SubjectEntityName( const SubjectId& subject, const char* what ) const;
+
+        // The name to put in a REFUSAL dialog for a subject no document was built for: the asset's file
+        // stem, or the entity's tag. "this subject" when neither resolves — the refusal happens before any
+        // editor is consulted, so this is all that is knowable about it.
+        [[nodiscard]] std::string RefusedSubjectName( const SubjectId& subject ) const;
         // Brings @p subject's window to the front and makes it the most recently used document.
-        void FocusDocument( const Assets::AssetHandle& subject );
+        void FocusDocument( const SubjectId& subject );
         // Ctrl+Tab: move to the next document in most-recently-used order. See DocumentWell::NextMostRecent.
         void CycleDocuments();
 
@@ -225,6 +255,11 @@ namespace Desert::Editor
         // and — when nothing is open — the empty state that says what the area is for plus the list of
         // recently closed documents. It does not collapse when it empties: a layout that moves on its own is
         // what users report as "the editor lost my panel".
+        // The window title one document is drawn with — its type's icon (from the registration), its
+        // subject's name, and the identity DocumentTitle baked into GetName(). A member rather than a free
+        // function because the icon comes from m_SubjectEditors.
+        [[nodiscard]] std::string DocumentDisplayTitle( const ISubjectDocument& document ) const;
+
         void DrawDocumentWell();
         // Every open document, drawn into the well's dock node. Separate from the tool loop because the two
         // have separate owners and separate close semantics — a tool passes &GetVisibility() to Begin, a
@@ -246,14 +281,14 @@ namespace Desert::Editor
             // Whether this consumer will ever want a slot. A CPU-only asset document (the four cloud
             // editors) holds none and is not waiting for one, and the census has to say so — "no slot right
             // now, but will claim one when it draws" would name it as something to close to free a slot it
-            // was never going to take. See IAssetEditorPanel::ClaimsRendererSlot.
+            // was never going to take. See ISubjectDocument::ClaimsRendererSlot.
             bool ClaimsSlot = true;
             // Set for a consumer the user can close FROM THE REFUSAL ITSELF: an open document. A census that
             // names five things and offers no way to act on any of them is a longer version of "no free
             // slot". The main viewport and the Details preview carry no handle — neither is a window a
             // person closes to make room. Last in the struct so the two- and three-field aggregate
             // initialisations below keep meaning what they say.
-            std::optional<Assets::AssetHandle> Document = {};
+            std::optional<SubjectId> Document = {};
         };
         [[nodiscard]] std::vector<RendererSlotConsumer> RendererSlotCensus() const;
         // Rebinds the editor to a focused document: m_MainScene (and thus every play/save/gizmo call site)
@@ -361,7 +396,7 @@ namespace Desert::Editor
 
         // AssetTypeID -> the editor that opens it. Holds factories only; the documents it builds are owned by
         // m_Documents below.
-        AssetEditorRegistry m_AssetEditors;
+        SubjectEditorRegistry m_SubjectEditors;
 
         // THE OPEN DOCUMENTS, owned separately from the tools. See Editor/Core/DocumentWell.hpp for the
         // whole argument; the short version is that a tool's visibility is a setting and a document's
@@ -369,10 +404,27 @@ namespace Desert::Editor
         DocumentWell m_Documents;
         // Close requests, drained between frames by ServiceDocumentCloses. Filled by the x on a document
         // window, the x in Window ▸ Documents, Close All, and the refusal dialog's own Close buttons.
-        std::vector<Assets::AssetHandle> m_DocumentsToClose;
+        struct PendingDocumentClose
+        {
+            SubjectId   Subject;
+            std::string Reason;
+        };
+        std::vector<PendingDocumentClose> m_DocumentsToClose;
+
+        // Documents whose window has not been DRAWN for kFramesHiddenBeforeSlotRelease frames, counted per
+        // subject. A document behind another one's tab is open and invisible, and it was holding one of the
+        // six renderer slots for as long as the user left it there — see ISubjectDocument::ReleaseRendererSlot.
+        //
+        // COUNTED RATHER THAN ACTED ON AT ONCE. Dragging a dock tab, collapsing a node and switching layouts
+        // all hide a window for a frame or two, and tearing a Scene and a SceneRenderer down and building
+        // them back for that would turn a flick of the mouse into a hitch. The threshold is the smallest
+        // number of frames that is unambiguously "the user left it there" rather than "the layout moved".
+        static constexpr uint32_t kFramesHiddenBeforeSlotRelease = 30;
+
+        std::unordered_map<SubjectId, uint32_t> m_DocumentHiddenFrames;
         // Which document window has the keyboard focus, as of the last frame. Drives the radio in
         // Window ▸ Documents and is where Ctrl+Tab starts from.
-        Assets::AssetHandle m_FocusedDocument = Common::UUID::Null();
+        SubjectId m_FocusedDocument;
         // Ctrl+Tab holds the ring still. Landing on a document by cycling must NOT reorder the ring, or the
         // second press would come straight back to where the first started; the order is committed once Ctrl
         // is released, which is the behaviour every alt-tab ring has.

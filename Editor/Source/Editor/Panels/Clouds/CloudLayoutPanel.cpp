@@ -72,7 +72,7 @@ namespace Desert::Editor
         const ImVec4 kGoodColour( 0.55f, 0.85f, 0.55f, 1.0f );
 
         // The document's VISIBLE title: the subject's file name. Computed before the base class is
-        // constructed — IAssetEditorPanel bakes the title in its own constructor and holds it for the
+        // constructed — ISubjectDocument bakes the title in its own constructor and holds it for the
         // window's life — so it is a free function rather than a member.
         std::string SubjectTitle( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
         {
@@ -88,7 +88,8 @@ namespace Desert::Editor
     CloudLayoutPanel::CloudLayoutPanel( const Assets::AssetHandle&             subject,
                                         std::shared_ptr<::Desert::Core::Scene> scene,
                                         Assets::AssetManager*                  assets )
-         : IAssetEditorPanel( SubjectTitle( subject, assets ), subject, Assets::AssetTypeID::CloudLayout ),
+         : ISubjectDocument( SubjectTitle( subject, assets ),
+                                 AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudLayout ) ) ),
            m_Scene( std::move( scene ) ), m_Assets( assets )
     {
         LoadSubject();
@@ -99,7 +100,7 @@ namespace Desert::Editor
         if ( !m_Assets )
             return;
 
-        const auto painting = m_Assets->FindByHandle<Assets::CloudLayoutAsset>( Subject() );
+        const auto painting = m_Assets->FindByHandle<Assets::CloudLayoutAsset>( Assets::AssetHandle( Subject().Owner ) );
         if ( !painting || !painting->IsReadyForUse() )
         {
             m_Status        = "This painting is not loaded - the log says why.";
@@ -1708,5 +1709,14 @@ namespace Desert::Editor
             m_Status        = "Baked a copy to " + target.string() + " - it has opened in its own window.";
             m_StatusIsError = false;
         }
+    }
+
+    bool CloudLayoutPanel::IsSubjectAlive() const
+    {
+        // ASKED OF THE METADATA rather than of a typed lookup: the question is whether the asset is still
+        // THERE, and a typed lookup answers a different one (whether it is still that type) — a subject
+        // that failed to reload as its own class would read as deleted and the window would close on a
+        // load error instead of reporting it.
+        return m_Assets && m_Assets->FindMetadataByHandle( Assets::AssetHandle( Subject().Owner ) ) != nullptr;
     }
 } // namespace Desert::Editor

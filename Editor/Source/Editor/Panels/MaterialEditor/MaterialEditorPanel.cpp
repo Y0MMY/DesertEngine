@@ -144,8 +144,8 @@ namespace Desert::Editor
 
     MaterialEditorPanel::MaterialEditorPanel( const Assets::AssetHandle&                   material,
                                               const std::shared_ptr<Assets::AssetManager>& assetManager )
-         : IAssetEditorPanel( MaterialDocumentName( material, assetManager ), material,
-                              Assets::AssetTypeID::Material ),
+         : ISubjectDocument( MaterialDocumentName( material, assetManager ),
+                             AssetSubject( material, static_cast<uint32_t>( Assets::AssetTypeID::Material ) ) ),
            m_AssetManager( assetManager )
     {
         // Start level with the world: a rebuild that happened before this window existed left nothing here to
@@ -212,7 +212,7 @@ namespace Desert::Editor
     {
         if ( !m_AssetManager )
             return nullptr;
-        return m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Subject() );
+        return m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Assets::AssetHandle( Subject().Owner ) );
     }
 
     std::shared_ptr<Assets::SurfaceMaterialAsset> MaterialEditorPanel::DrawnMaterial() const
@@ -282,7 +282,7 @@ namespace Desert::Editor
         return Dirty().Unapplied;
     }
 
-    IAssetEditorPanel::DiskState MaterialEditorPanel::GetDiskState() const
+    ISubjectDocument::DiskState MaterialEditorPanel::GetDiskState() const
     {
         // UNTRACKED, not Clean, while there is no working copy: without one no snapshot was ever taken, so
         // this document has no evidence about its file and must not claim it is up to date.
@@ -568,14 +568,17 @@ namespace Desert::Editor
     void MaterialEditorPanel::OnPreUpdate()
     {
         // THE SLOT IS NOT CLAIMED UNTIL THE WINDOW HAS ACTUALLY BEEN DRAWN. The document is created in
-        // EditorLayer::ServiceAssetOpenRequests, which runs earlier in this same OnUpdate — so on the frame a
+        // EditorLayer::ServiceSubjectOpenRequests, which runs earlier in this same OnUpdate — so on the frame a
         // material is opened there is a panel but no window on screen yet, and building a Scene and a
         // SceneRenderer for it then would spend one of the six on something nobody has seen.
         //
-        // The predecessor of this panel also RELEASED here, on the frame it stopped being visible. That
-        // branch is gone rather than carried over: an asset document is not hidden when it is closed, it is
-        // DESTROYED (EditorLayer::ServiceDocumentCloses, which runs before this loop and so before
-        // any such branch could fire), and one mechanism that runs is worth more than a second that cannot.
+        // THE RELEASE-WHEN-HIDDEN BRANCH IS BACK, AND IT IS NOT HERE. It used to live in this function and
+        // was removed on the grounds that a document is destroyed rather than hidden — which was true while
+        // a document could only be closed. It is not true of a document docked as a tab behind another one,
+        // which is open, invisible, and was holding one of the six for as long as the user left it there.
+        // The editor drives it now: EditorLayer asks the document to ReleaseRendererSlot() when its window
+        // has not been drawn for a while, behind the same device-idle wait a close uses. Written there
+        // rather than here because "not drawn" is ImGui's answer and this function runs before the frame.
         if ( !m_DrewThisFrame )
             return;
         m_DrewThisFrame = false;
@@ -1508,7 +1511,7 @@ namespace Desert::Editor
         // a name: MaterialEdit::PublishOwesTheGlobalStamp. It is a rule and not an `if` here because the
         // decision is the whole of this fix and nothing in this file can be reached by a test.
         const bool owesTheStamp = MaterialEdit::PublishOwesTheGlobalStamp(
-             isInstance, /*isSubject=*/asset.GetMetadata().Handle == Subject() );
+             isInstance, /*isSubject=*/asset.GetMetadata().Handle == Assets::AssetHandle( Subject().Owner ) );
 
         // A BASE material's values live in the runtime Material, re-valued here. The runtime Material is
         // built ONCE and cached by the service; rebuilding an instance of it would faithfully reproduce the

@@ -10,7 +10,7 @@ namespace Desert::Editor
 {
     // THE TOOLS, AND ONLY THE TOOLS.
     //
-    // A tool panel and an asset document have opposite lifetimes. A tool is constructed once at startup and
+    // A tool panel and a document have opposite lifetimes. A tool is constructed once at startup and
     // lives until the editor exits; its visibility is a SETTING the user keeps, and "hide" is the whole of
     // "close". A document is constructed for a subject, dies with it, and its existence is not a setting at
     // all — destroying it is what returns the Scene, the SceneRenderer and one of the six renderer slots.
@@ -37,7 +37,7 @@ namespace Desert::Editor
         // can show going red.
         template <typename Panel>
         static constexpr bool Accepts =
-             std::is_base_of_v<IPanel, Panel> && !std::is_base_of_v<IAssetEditorPanel, Panel> &&
+             std::is_base_of_v<IPanel, Panel> && !std::is_base_of_v<ISubjectDocument, Panel> &&
              !std::is_same_v<Panel, IPanel>;
 
         // Constructs a tool panel in place and returns it. The concrete type is a template parameter and not
@@ -46,7 +46,7 @@ namespace Desert::Editor
         Panel& Add( Args&&... args )
         {
             static_assert( Accepts<Panel>,
-                           "A document is not a tool. An IAssetEditorPanel belongs to DocumentWell: putting "
+                           "A document is not a tool. An ISubjectDocument belongs to DocumentWell: putting "
                            "one here would put it back in the View menu, the command palette and "
                            "--open-panel, where unticking it destroys it." );
 
@@ -60,7 +60,7 @@ namespace Desert::Editor
         // asset browser are configured by their creator first).
         //
         // The CONCRETE type is required, and `IPanel` is rejected by name: a unique_ptr<IPanel> would
-        // deduce Panel = IPanel, and IPanel is not derived from IAssetEditorPanel, so the check above would
+        // deduce Panel = IPanel, and IPanel is not derived from ISubjectDocument, so the check above would
         // pass while the pointer underneath was a document. That is the exact hole a runtime predicate
         // would leave open, so it is closed here instead of asserted about later.
         template <typename Panel>

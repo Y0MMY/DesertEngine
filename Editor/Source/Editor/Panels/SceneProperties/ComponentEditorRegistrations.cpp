@@ -5,6 +5,9 @@
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Editor/Panels/UI/UIAnchorControls.hpp>
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Core/SubjectOpenRequest.hpp>
+#include <Editor/Panels/PanelContext.hpp>
+#include <Editor/Panels/Particles/ParticleEditorPanel.hpp>
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Components.hpp>
@@ -578,6 +581,20 @@ namespace Desert::Editor
                     c.RequestRestart = true;
                 ::Desert::Editor::Utils::ImGuiUtilities::Tooltip(
                      "Kill every live particle and start emitting from scratch" );
+
+                // OPEN THE EMITTER'S OWN EDITOR, ON THIS ENTITY. The Particle Editor used to be a window
+                // in the View menu that drew whatever was selected, and its own RequestOpen inbox had no
+                // callers at all — there was no button here because a button could only have said "reveal
+                // that window", never "edit THIS emitter". A document is asked for by subject, so now it
+                // can. Open-or-focus falls out of the subject: pressing it twice brings the window that is
+                // already on this emitter forward rather than making a second one.
+                if ( ImGui::Button( ICON_MDI_CREATION "  Open in Particle Editor", ImVec2( -1.0f, 0.0f ) ) )
+                {
+                    ::Desert::Editor::Core::SubjectOpenRequests::Request(
+                         ::Desert::Editor::ParticleEditorPanel::SubjectFor( ::Desert::Editor::EntityId( en ) ) );
+                }
+                ::Desert::Editor::Utils::ImGuiUtilities::Tooltip(
+                     "Presets, the colour-over-life gradient and the size curve, in a window of their own" );
                 ImGui::Spacing();
             }
 

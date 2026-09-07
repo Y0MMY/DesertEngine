@@ -1,13 +1,11 @@
 #pragma once
 
-// DELIBERATELY NOT AssetOpenRequest.hpp, for the reason AssetEditorRegistry.hpp gives at its own top: that
+// DELIBERATELY NOT SubjectOpenRequest.hpp, for the reason SubjectEditorRegistry.hpp gives at its own top: that
 // header opens `namespace Desert::Editor::Core`, and this one is included by EditorLayer.hpp ahead of the
 // render-system headers, which spell Desert::Core::Scene as an unqualified `Core::Scene` from inside
 // Desert::Editor. Make Desert::Editor::Core visible before them and every one of those names silently
 // rebinds to the wrong namespace.
 #include <Editor/Panels/IPanel.hpp>
-
-#include <Engine/Assets/Common.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -39,10 +37,10 @@ namespace Desert::Editor
     // stub document — which is the only way a rule in this editor gets asserted at all (EditorLayer.cpp is
     // compiled by no suite, scripts/CI/UnreachedSources.sh).
 
-    // The visible half of a document's name. A document's panel name is "<display>###assetdoc<handle>"
+    // The visible half of a document's name. A document's panel name is "<display>###doc<subject>"
     // (AssetDocumentTitle), and every place that shows one to a person wants the part before the "###":
     // a user closes a window titled "M_Crate_Painted", not one titled
-    // "M_Crate_Painted###assetdoc3333333333333333333". One function rather than the three separate
+    // "M_Crate_Painted###docasset:2:3333333333333333333". One function rather than the three separate
     // find-and-erase copies this rule used to have.
     [[nodiscard]] inline std::string DocumentDisplayName( const std::string& panelName )
     {
@@ -57,8 +55,7 @@ namespace Desert::Editor
     struct ClosedDocument
     {
         std::string         DisplayName;
-        Assets::AssetHandle Subject;
-        Assets::AssetTypeID Type = Assets::AssetTypeID::Unknown;
+        SubjectId   Subject;
     };
 
     class DocumentWell
@@ -78,7 +75,7 @@ namespace Desert::Editor
             return m_Documents.empty();
         }
 
-        [[nodiscard]] const std::vector<std::unique_ptr<IAssetEditorPanel>>& Documents() const noexcept
+        [[nodiscard]] const std::vector<std::unique_ptr<ISubjectDocument>>& Documents() const noexcept
         {
             return m_Documents;
         }
@@ -101,9 +98,9 @@ namespace Desert::Editor
         }
 
         // The open document for @p subject, or nullptr. The null handle is "no asset" and never a document.
-        [[nodiscard]] IAssetEditorPanel* Find( const Assets::AssetHandle& subject ) const
+        [[nodiscard]] ISubjectDocument* Find( const SubjectId& subject ) const
         {
-            if ( static_cast<uint64_t>( subject ) == 0 )
+            if ( subject.IsNull() )
                 return nullptr;
 
             for ( const auto& document : m_Documents )
@@ -113,9 +110,9 @@ namespace Desert::Editor
         }
 
         // Takes ownership of a freshly-built document and makes it the most recently used one.
-        IAssetEditorPanel& Add( std::unique_ptr<IAssetEditorPanel> document )
+        ISubjectDocument& Add( std::unique_ptr<ISubjectDocument> document )
         {
-            IAssetEditorPanel& ref = *document;
+            ISubjectDocument& ref = *document;
             m_Documents.emplace_back( std::move( document ) );
             Touch( ref.Subject() );
             return ref;
@@ -124,7 +121,7 @@ namespace Desert::Editor
         // Marks @p subject as the most recently used document. Focusing one is the only thing that reorders
         // the Ctrl+Tab ring; drawing one does not, or the ring would reorder itself every frame and Ctrl+Tab
         // would never leave the front two.
-        void Touch( const Assets::AssetHandle& subject )
+        void Touch( const SubjectId& subject )
         {
             if ( !Find( subject ) )
                 return;
@@ -135,35 +132,33 @@ namespace Desert::Editor
         // HANDS THE DOCUMENT BACK rather than destroying it: see the note above. Removes it from the well
         // and from the ring, and records it under RecentlyClosed. Returns nullptr for a subject that is not
         // open — a second close of one window in one frame, which is not an error.
-        [[nodiscard]] std::unique_ptr<IAssetEditorPanel> Release( const Assets::AssetHandle& subject )
+        [[nodiscard]] std::unique_ptr<ISubjectDocument> Release( const SubjectId& subject )
         {
             const auto it = std::find_if( m_Documents.begin(), m_Documents.end(),
-                                          [&subject]( const std::unique_ptr<IAssetEditorPanel>& document )
+                                          [&subject]( const std::unique_ptr<ISubjectDocument>& document )
                                           { return document->Subject() == subject; } );
             if ( it == m_Documents.end() )
                 return nullptr;
 
-            std::unique_ptr<IAssetEditorPanel> released = std::move( *it );
+            std::unique_ptr<ISubjectDocument> released = std::move( *it );
             m_Documents.erase( it );
             std::erase( m_MostRecent, subject );
 
-            RememberClosed( ClosedDocument{ DocumentDisplayName( released->GetName() ), released->Subject(),
-                                            released->SubjectType() } );
+            RememberClosed( ClosedDocument{ DocumentDisplayName( released->GetName() ), released->Subject() } );
             return released;
         }
 
         // Every open document, in one call, for "Close All". Same contract as Release: the caller destroys
         // them, once, behind one device-idle wait rather than one per window.
-        [[nodiscard]] std::vector<std::unique_ptr<IAssetEditorPanel>> ReleaseAll()
+        [[nodiscard]] std::vector<std::unique_ptr<ISubjectDocument>> ReleaseAll()
         {
-            std::vector<std::unique_ptr<IAssetEditorPanel>> released;
+            std::vector<std::unique_ptr<ISubjectDocument>> released;
             released.reserve( m_Documents.size() );
             // Front to back, so the recently-closed list ends up newest-first in the order they were opened
             // rather than in the order the vector happened to hold them.
             for ( auto& document : m_Documents )
             {
-                RememberClosed( ClosedDocument{ DocumentDisplayName( document->GetName() ), document->Subject(),
-                                                document->SubjectType() } );
+                RememberClosed( ClosedDocument{ DocumentDisplayName( document->GetName() ), document->Subject() } );
                 released.emplace_back( std::move( document ) );
             }
             m_Documents.clear();
@@ -178,7 +173,7 @@ namespace Desert::Editor
         // nullopt when there is nothing to switch to (fewer than two open). A @p current that is not open —
         // the focus is on a tool, or on nothing — answers with the most recently used document, which is
         // where "back to what I was editing" should land.
-        [[nodiscard]] std::optional<Assets::AssetHandle> NextMostRecent( const Assets::AssetHandle& current ) const
+        [[nodiscard]] std::optional<SubjectId> NextMostRecent( const SubjectId& current ) const
         {
             if ( m_MostRecent.empty() )
                 return std::nullopt;
@@ -195,7 +190,7 @@ namespace Desert::Editor
         }
 
         // Most recently used first. The Documents menu and the Ctrl+Tab ring read the same order.
-        [[nodiscard]] const std::vector<Assets::AssetHandle>& MostRecentOrder() const noexcept
+        [[nodiscard]] const std::vector<SubjectId>& MostRecentOrder() const noexcept
         {
             return m_MostRecent;
         }
@@ -217,16 +212,16 @@ namespace Desert::Editor
                 m_RecentlyClosed.resize( kRecentlyClosedLimit );
         }
 
-        std::vector<std::unique_ptr<IAssetEditorPanel>> m_Documents;
-        // Subjects, most recent first. Subjects and not pointers: a handle cannot dangle, and the whole
+        std::vector<std::unique_ptr<ISubjectDocument>> m_Documents;
+        // Subjects, most recent first. Subjects and not pointers: an identity cannot dangle, and the whole
         // point of the split is that a document's lifetime is short.
-        std::vector<Assets::AssetHandle> m_MostRecent;
+        std::vector<SubjectId> m_MostRecent;
         std::vector<ClosedDocument>      m_RecentlyClosed;
     };
 
     // How many of the six renderer slots the OPEN DOCUMENTS are holding right now.
     //
-    // Beside PendingRendererSlotDemand (AssetEditorRegistry.hpp), which answers the other half: that one
+    // Beside PendingRendererSlotDemand (SubjectEditorRegistry.hpp), which answers the other half: that one
     // counts claims that have not landed, this one counts the ones that have. Together they are what the
     // status bar shows and what a refusal has to be able to explain, and both are free functions over a
     // range for the same reason — EditorLayer.cpp is compiled by no suite, so a rule written there is a rule
@@ -262,7 +257,7 @@ namespace Desert::Editor
         {
             ++census.Tools;
             ++census.Total;
-            if ( dynamic_cast<const IAssetEditorPanel*>( &*tool ) )
+            if ( dynamic_cast<const ISubjectDocument*>( &*tool ) )
                 census.ToolsHoldNoDocument = false;
         }
         for ( const auto& document : documents )
