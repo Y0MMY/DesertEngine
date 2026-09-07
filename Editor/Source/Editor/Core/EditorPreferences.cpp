@@ -7,7 +7,6 @@
 #include <Common/Core/Logger.hpp>
 
 #include <rflcpp/rfl/Generic.hpp>
-#include <rflcpp/rfl/fields.hpp>
 #include <rflcpp/rfl/json.hpp>
 
 // glm::vec3 <-> JSON reflector (OutlineColor). Must be visible before the rfl::json read/write below.
@@ -16,6 +15,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <iterator>
 
 namespace Desert::Editor
 {
@@ -74,9 +74,13 @@ namespace Desert::Editor
 
     // Which top-level keys of editor.json differ between two of its serializations, by name.
     //
-    // The key list comes from rfl::fields<EditorPreferences>() — the same call rfl::json::write makes
-    // below — so a preference added tomorrow is named by the log line without anybody editing this
-    // function, which is the property a hand-written list cannot have.
+    // THE KEY LIST IS THE UNION OF WHAT THE TWO TEXTS ACTUALLY CONTAIN, and it used to be
+    // rfl::fields<EditorPreferences>(). Both derive the list rather than typing it, so both were
+    // field-count-proof; the difference is that the struct's field list stopped being the whole of the
+    // file's key list when UnknownKeys arrived. A key held by another build is a key of this file, and
+    // this is the function that has to be able to say a migration dropped one — asking rfl::fields<>
+    // about it would name nothing, which is the "container derived from the same source as the question"
+    // shape the contract's §1.4 warns about, in miniature.
     static std::vector<std::string> ChangedFields( const std::string& before, const std::string& after )
     {
         const auto lhs = rfl::json::read<rfl::Generic>( before );
@@ -89,12 +93,18 @@ namespace Desert::Editor
         if ( !lhsObject.has_value() || !rhsObject.has_value() )
             return {};
 
+        std::vector<std::string> keys;
+        for ( const auto& [name, value] : lhsObject.value() )
+            keys.push_back( name );
+        for ( const auto& [name, value] : rhsObject.value() )
+            if ( std::find( keys.begin(), keys.end(), name ) == keys.end() )
+                keys.push_back( name );
+
         std::vector<std::string> differing;
-        for ( const auto& meta : rfl::fields<EditorPreferences>() )
+        for ( const std::string& key : keys )
         {
-            const std::string key = meta.name();
-            const auto        a   = lhsObject.value().get( key );
-            const auto        b   = rhsObject.value().get( key );
+            const auto a = lhsObject.value().get( key );
+            const auto b = rhsObject.value().get( key );
             if ( !a.has_value() || !b.has_value() )
             {
                 differing.push_back( key );
@@ -180,9 +190,46 @@ namespace Desert::Editor
         return true;
     }
 
+    // KEYS THIS PROJECT DELETED ON PURPOSE, WHICH IS A DIFFERENT THING FROM A KEY IT DOES NOT KNOW.
+    //
+    // Before К9 a removed field needed no entry here: the struct stopped naming it, so the next save
+    // rewrote the file without it and the key was gone. UnknownKeys ended that — every key survives now,
+    // including the ones somebody meant to destroy — so the deletion has to be stated somewhere, and this
+    // is that somewhere. The invariant it protects is contract §4's: a retirement finishes.
+    //
+    // Both entries are К1's. `PhotogrammetryCaptureCommand` documented a `{photos}` substitution that was
+    // never implemented and `PhotogrammetryMode` an Object/Face preset switch that does not exist; they
+    // were serialized into every editor.json and read by nothing.
+    //
+    // EXPIRY: a row leaves this list when no config in circulation can still carry the key. It costs one
+    // string compare per unknown key per launch, and a launch has neither in the ordinary case.
+    static bool IsRetiredKey( const std::string& key )
+    {
+        static const std::vector<std::string> retired = { "PhotogrammetryCaptureCommand", "PhotogrammetryMode" };
+        return std::find( retired.begin(), retired.end(), key ) != retired.end();
+    }
+
     std::vector<std::string> EditorPreferences::MigrateLoaded( EditorPreferences& p )
     {
         std::vector<std::string> raised;
+
+        // The retired keys, dropped by name. Rebuilt rather than erased in place because rfl::Object is
+        // an ordered vector of pairs with no erase() — and rebuilding preserves the order of what is
+        // kept, which matters because the memo in PersistCurrent compares the serialized TEXT.
+        if ( !p.UnknownKeys.empty() )
+        {
+            rfl::ExtraFields<rfl::Generic> kept;
+            for ( const auto& [key, value] : p.UnknownKeys )
+            {
+                if ( !IsRetiredKey( key ) )
+                {
+                    kept.insert( key, value );
+                    continue;
+                }
+                raised.push_back( "retired key '" + key + "' dropped (deleted by К1; it was read by nothing)" );
+            }
+            p.UnknownKeys = std::move( kept );
+        }
 
         // METRE-ERA TranslateSnap -> centimetres.
         //
@@ -261,6 +308,22 @@ namespace Desert::Editor
             // SaveMigrated rather than Save, so the log names the migration instead of reporting a
             // settings change the user did not make.
             SaveMigrated( "migration write-back (" + std::to_string( raised.size() ) + " field(s) raised)" );
+        }
+
+        // CARRYING A KEY WE DO NOT UNDERSTAND IS AN EVENT, NOT A DETAIL. It means another build — an
+        // agent's worktree, an older install, a branch that has since landed — owns settings this binary
+        // cannot show or edit, and the only symptom otherwise available is the one К9 came from: nobody
+        // noticing until the values were already gone. Named rather than counted, because "3 unknown
+        // keys" tells a reader nothing about whether to go and look for the build that wrote them.
+        if ( !Get().UnknownKeys.empty() )
+        {
+            std::string names = Get().UnknownKeys.begin()->first;
+            for ( auto it = std::next( Get().UnknownKeys.begin() ); it != Get().UnknownKeys.end(); ++it )
+                names += ", " + it->first;
+
+            LOG_INFO( "[Prefs] {} holds {} key(s) this build does not know ({}); they belong to another "
+                      "build and are preserved on save, not dropped.",
+                      PrefsFile(), Get().UnknownKeys.size(), names );
         }
 
         PushToRenderConfig( Get() );

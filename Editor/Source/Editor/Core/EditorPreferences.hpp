@@ -5,6 +5,11 @@
 
 #include <glm/glm.hpp>
 
+// The unknown-key carrier below. rfl is in this header and not only in the .cpp because the carrier is a
+// FIELD of the struct — the same reason Assets::EntityData declares its own rfl::ExtraFields inline.
+#include <rflcpp/rfl/ExtraFields.hpp>
+#include <rflcpp/rfl/Generic.hpp>
+
 // The viewport's debug/show state. An ENGINE type, because the engine's renderer is what consumes it —
 // this header only says where the editor's persisted copy lives.
 #include <Engine/Graphic/DebugViewState.hpp>
@@ -35,6 +40,8 @@ namespace Desert::Editor
     // questions, and the census that goes red when a field lands in the wrong file are all in
     // Desert/Tests/Engine/ConfigOwnership. That suite enumerates this struct through rfl::fields<> — the
     // same call Save() writes it with — so a field added here without a decision fails it immediately.
+    // (It skips the ONE member that is not a key of the file, UnknownKeys; PreferenceOwnership asserts
+    // that the skip and what rfl::json::write actually emits still agree, so the exemption cannot widen.)
     //
     // AND THIS IS THE ONLY PER-USER SETTINGS STORE. `~/.desertengine` holds four neighbours and not one of
     // them is an alternative to this struct: `projects.json` and `engines.json` are cross-process
@@ -99,8 +106,12 @@ namespace Desert::Editor
         // documented was never implemented (the panel writes frames itself), and the Object/Face preset
         // switch the second one documented does not exist. They were §1.3 dead settings, invisible because
         // this file had no readership census at all; Desert/Tests/Engine/ConfigOwnership is now that census.
-        // Old preference files still carrying the two keys load unchanged — reflect-cpp ignores keys the
-        // struct no longer has, so no migration is owed.
+        //
+        // THEY ARE ALSO WHY THE RETIRED-KEY LIST EXISTS. Until К9 they needed no migration, because a key
+        // the struct had lost was dropped by the next save on its own. UnknownKeys below stops that
+        // happening to anybody's keys, so it would have preserved these two for ever as well — a deletion
+        // that never finishes. They are named in MigrateLoaded()'s retired list instead, which drops them
+        // once, says so, and writes the file back without them.
         std::string PhotogrammetryCommand    = "meshroom_batch --input {input} --output {outdir}";
         std::string PhotogrammetryPhotosDir  = "";
         std::string PhotogrammetryOutputMesh = "Cooked/Photogrammetry/model.obj";
@@ -137,6 +148,32 @@ namespace Desert::Editor
         // expanded, so a fresh install behaves exactly like before this was persisted.
         std::vector<std::string> CollapsedComponents;
 
+        // --- EVERY OTHER KEY THE FILE HAPPENS TO CONTAIN ------------------------------------------
+        // NOT A SETTING, AND NOT A KEY OF ITS OWN. rfl::ExtraFields is spread flat at this struct's own
+        // level on write and captures every top-level key the fields above did not claim on read, so
+        // `editor.json` gains nothing called "UnknownKeys" — this member is the file's leftovers, held
+        // between a read and the next write.
+        //
+        // WHY IT HAS TO EXIST (К9). Every save is `rfl::json::write( Get() )`, which rewrites the whole
+        // file from the struct THIS binary was compiled with. A key the binary has never heard of was
+        // therefore deleted by the act of saving anything at all — honestly, silently, and with no way
+        // for either side to notice. That is not a hypothetical: two agents' builds ran against the one
+        // owner's `~/.desertengine/editor.json` within an hour, and the build that predated the
+        // packaging fields erased `PackageAppBundle`, `PackageConfig` and `PackageOutputDir` the first
+        // time somebody toggled anything. The file had to be restored by hand from a backup.
+        //
+        // The shape is general and this is the second time the project has paid for it: a container
+        // rewritten in full by a writer that knows only PART of what it contains. (The first was П3, and
+        // Desert/Tests/Editor/PreferenceOwnership §7 states the relation this member enforces:
+        // "saving does not delete a key the writer does not know".)
+        //
+        // IT IS NOT A COMPATIBILITY SHIM AND DOES NOT KEEP LEGACY ALIVE (contract §4). A key this
+        // project DELETED on purpose is not unknown, it is retired: MigrateLoaded() drops it by name,
+        // says so in the log and writes the file back without it. Preservation is for keys another
+        // BUILD owns, and it is the deletion path that decides a key is dead — never the accident of
+        // which binary saved last.
+        rfl::ExtraFields<rfl::Generic> UnknownKeys;
+
         static EditorPreferences& Get();
 
         // Membership helpers for the two lists above. Toggling SAVES immediately: these are single
@@ -160,11 +197,17 @@ namespace Desert::Editor
         // line then claims a save the user never made. Nothing else in Load() touches the file.
         static void Load();
 
-        // THE ONE MIGRATION THIS FILE CARRIES, AS A PURE FUNCTION. In: a preference set as it was read
-        // from disk. Out: the same set in this build's form, plus one line per field it raised (empty =
+        // THE MIGRATIONS THIS FILE CARRIES, AS ONE PURE FUNCTION. In: a preference set as it was read
+        // from disk. Out: the same set in this build's form, plus one line per thing it changed (empty =
         // there was nothing to do, which is what Load() tests before it writes anything). No file, no
         // globals, no logging — contract §4.4 asks a migration to be pure and tested, and
         // Desert/Tests/Editor/PreferenceOwnership calls this directly rather than through the file.
+        //
+        // TWO KINDS, and they are opposite halves of one rule about who may delete a key. It RAISES a
+        // stored value this build's units no longer match, and it DROPS the keys this project retired by
+        // name. Everything else the file happens to hold is somebody else's and survives untouched — see
+        // UnknownKeys above. A deletion is a decision, so it is spelled out here; it is never the
+        // side effect of one binary saving before another.
         static std::vector<std::string> MigrateLoaded( EditorPreferences& p );
 
         // THE USER JUST CHANGED SOMETHING. Called by every control that edits this struct, at the moment

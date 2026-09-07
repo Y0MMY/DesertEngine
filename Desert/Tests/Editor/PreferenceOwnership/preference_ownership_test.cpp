@@ -116,38 +116,68 @@ namespace
         EditorPreferences::Load();
     }
 
-    // Which fields of editor.json differ between two snapshots of it.
-    //
-    // The key list comes from rfl::fields<EditorPreferences>() — the same call rfl::json::write makes
-    // in Save() — so this is field-count-proof by construction: a preference added tomorrow is compared
-    // without anybody editing this file, which is the property a hand-written list cannot have and the
-    // reason ConfigOwnership enumerates the same way.
-    std::vector<std::string> FieldsThatDiffer( const std::string& before, const std::string& after )
+    // Every top-level key of one editor.json snapshot, in the order the file states them.
+    std::vector<std::string> KeysOf( const std::string& json )
     {
-        const auto lhs = rfl::json::read<rfl::Generic>( before );
-        const auto rhs = rfl::json::read<rfl::Generic>( after );
-        EXPECT_TRUE( lhs.has_value() ) << "the 'before' snapshot is not readable JSON";
-        EXPECT_TRUE( rhs.has_value() ) << "the 'after' snapshot is not readable JSON";
-        if ( !lhs.has_value() || !rhs.has_value() )
+        const auto parsed = rfl::json::read<rfl::Generic>( json );
+        EXPECT_TRUE( parsed.has_value() ) << "not readable JSON: " << json;
+        if ( !parsed.has_value() )
             return { "<unreadable>" };
 
-        const auto lhsObject = lhs.value().to_object();
-        const auto rhsObject = rhs.value().to_object();
-        if ( !lhsObject.has_value() || !rhsObject.has_value() )
+        const auto object = parsed.value().to_object();
+        EXPECT_TRUE( object.has_value() ) << "not a JSON object: " << json;
+        if ( !object.has_value() )
             return { "<not-an-object>" };
 
+        std::vector<std::string> keys;
+        for ( const auto& [name, value] : object.value() )
+            keys.push_back( name );
+        return keys;
+    }
+
+    // The value of one key, as text, or "<missing>". Compared as text on purpose: it is the only form in
+    // which "unchanged" is checkable for a key whose TYPE this build has no idea about.
+    std::string ValueOf( const std::string& json, const std::string& key )
+    {
+        const auto parsed = rfl::json::read<rfl::Generic>( json );
+        if ( !parsed.has_value() )
+            return "<unreadable>";
+        const auto object = parsed.value().to_object();
+        if ( !object.has_value() )
+            return "<not-an-object>";
+        const auto value = object.value().get( key );
+        if ( !value.has_value() )
+            return "<missing>";
+        return rfl::json::write( value.value() );
+    }
+
+    // Which keys of editor.json differ between two snapshots of it.
+    //
+    // THE KEY LIST IS THE UNION OF WHAT THE TWO TEXTS CONTAIN, and it used to be
+    // rfl::fields<EditorPreferences>(). Both are derived rather than typed, so both are field-count-proof;
+    // what changed with К9 is that the struct's fields stopped being the whole of the file's keys. A key
+    // another build owns is a key of this file, and a helper that asked rfl::fields<> about it would be
+    // structurally unable to see the very thing these tests are about — the same "the container is derived
+    // from the same source as the question" trap the contract's §1.4 names. EditorPreferences::ChangedFields
+    // was moved to the union for the same reason, and its log line depends on it.
+    std::vector<std::string> FieldsThatDiffer( const std::string& before, const std::string& after )
+    {
+        std::vector<std::string> keys = KeysOf( before );
+        for ( const std::string& key : KeysOf( after ) )
+            if ( std::find( keys.begin(), keys.end(), key ) == keys.end() )
+                keys.push_back( key );
+
         std::vector<std::string> differing;
-        for ( const auto& meta : rfl::fields<EditorPreferences>() )
+        for ( const std::string& key : keys )
         {
-            const std::string key = meta.name();
-            const auto        a   = lhsObject.value().get( key );
-            const auto        b   = rhsObject.value().get( key );
-            if ( !a.has_value() || !b.has_value() )
+            const std::string a = ValueOf( before, key );
+            const std::string b = ValueOf( after, key );
+            if ( a == "<missing>" || b == "<missing>" )
             {
                 differing.push_back( key + " <missing>" );
                 continue;
             }
-            if ( rfl::json::write( a.value() ) != rfl::json::write( b.value() ) )
+            if ( a != b )
                 differing.push_back( key );
         }
         return differing;
@@ -815,6 +845,284 @@ TEST( PreferenceOwnershipWindow, EveryControlIsBoundToARealPreferenceField )
                               << " — ImGui::" << Text::IdentAt( body, at )
                               << " edits nothing in the preference store";
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 7. К9 — SAVING DOES NOT DELETE A KEY THE WRITER DOES NOT KNOW
+// ---------------------------------------------------------------------------------------------------
+//
+// THE DEFECT, MEASURED ON THE OWNER'S OWN FILE. Every save is `rfl::json::write( Get() )`: the whole of
+// editor.json, rewritten from the struct the running binary was compiled with. Several agents run
+// several builds against the one `~/.desertengine/editor.json`, so the build that had not yet grown the
+// packaging fields erased `PackageAppBundle`, `PackageConfig` and `PackageOutputDir` — written minutes
+// earlier by another build — the first time anybody toggled anything at all. Nothing was wrong with
+// either binary: each wrote itself out honestly. The file had to be restored by hand.
+//
+// IT IS A SHAPE, NOT AN INCIDENT: a container rewritten IN FULL by a writer that knows only PART of what
+// it contains. The project has now paid for it twice (П3 was the other, in the opposite direction — a
+// rewrite built from what the source still offered, so the file a deletion was about could never be in
+// it). The relation these tests assert is the general one, because the specific keys will be different
+// next time:
+//
+//     LOADING AND SAVING editor.json PRESERVES EVERY KEY, INCLUDING THE ONES THIS BUILD CANNOT NAME.
+//
+// They cannot be written with the historical keys — `PackageAppBundle` is a field of this build, so this
+// build is exactly the wrong witness for it. The keys below are invented for that reason, and the shapes
+// are chosen to be the ones a hand-rolled "copy the leftovers" implementation gets wrong: a nested
+// object, an array, a null, a fraction.
+//
+// RED ON THE TREE THIS TASK STARTED FROM, and by construction: delete `EditorPreferences::UnknownKeys`
+// and reflect-cpp goes back to discarding what it cannot match, which is what the tree did.
+
+namespace
+{
+    // The canonical editor.json this build writes, with `extra` — a fragment of `"key":value` pairs —
+    // spliced in at the top level.
+    //
+    // Built from the real writer instead of typed out, so it stays a valid preference file as fields come
+    // and go, and so a test cannot accidentally assert against a file shape nothing produces.
+    std::string PrefsFileWith( const std::string& extra )
+    {
+        const std::string canonical = rfl::json::write( EditorPreferences{} );
+        const std::size_t close     = canonical.rfind( '}' );
+        EXPECT_NE( close, std::string::npos ) << "the preference writer did not produce a JSON object";
+        if ( close == std::string::npos )
+            return canonical;
+        return canonical.substr( 0, close ) + "," + extra + "}";
+    }
+
+    // A JSON literal in the form rfl writes it, so a test compares values and not spelling.
+    std::string Canonical( const std::string& jsonLiteral )
+    {
+        const auto parsed = rfl::json::read<rfl::Generic>( jsonLiteral );
+        EXPECT_TRUE( parsed.has_value() ) << "test data is not valid JSON: " << jsonLiteral;
+        if ( !parsed.has_value() )
+            return "<unreadable>";
+        return rfl::json::write( parsed.value() );
+    }
+} // namespace
+
+// THE HEADLINE. A file arrives holding a key this build has never heard of; the user does something
+// entirely unrelated; the key is still there afterwards and its value has not been touched.
+TEST( PreferenceOwnershipUnknownKeys, ASaveDoesNotDeleteAKeyThisBuildDoesNotKnow )
+{
+    struct Case
+    {
+        const char* Key;
+        const char* Value;
+        const char* Shape;
+    };
+
+    const Case cases[] = {
+         { "ANewerBuildsBoolSetting", "true", "a bool — the shape PackageAppBundle had" },
+         { "ANewerBuildsStringSetting", "\"Release\"", "a string — the shape PackageConfig had" },
+         { "ANewerBuildsPathSetting", "\"Build/Output\"", "a string with a separator in it" },
+         { "ANewerBuildsIntSetting", "17", "a whole number" },
+         { "ANewerBuildsFloatSetting", "0.25", "a fraction, which a naive int round-trip flattens" },
+         { "ANewerBuildsListSetting", "[\"a\",\"b\",\"c\"]", "an array" },
+         { "ANewerBuildsBlockSetting", "{\"Nested\":{\"Deep\":[1,2,3]},\"Flag\":false}", "a nested object" },
+         { "ANewerBuildsAbsentSetting", "null", "a null — distinct from the key being gone" },
+    };
+
+    for ( const Case& probe : cases )
+    {
+        SCOPED_TRACE( std::string( probe.Key ) + " = " + probe.Value + "  (" + probe.Shape + ")" );
+
+        FreshInstall();
+        WriteWholeFile( PrefsPath(), PrefsFileWith( std::string( "\"" ) + probe.Key + "\":" + probe.Value ) );
+
+        // The next launch of an editor that has never heard of this key.
+        EditorPreferences::Get() = EditorPreferences{};
+        EditorPreferences::Load();
+
+        // ...in which somebody toggles the Perf HUD from the View menu. One bool, one save, and nothing
+        // about it mentions anybody else's settings.
+        EditorPreferences::Get().ShowPerfHud = !EditorPreferences::Get().ShowPerfHud;
+        ASSERT_TRUE( EditorPreferences::Save() );
+
+        const std::string after = ReadWholeFile( PrefsPath() );
+        EXPECT_EQ( ValueOf( after, probe.Key ), Canonical( probe.Value ) )
+             << "saving editor.json deleted or altered a key this build does not know. This is the defect "
+                "К9 exists for: several builds share one owner's file, and each of them rewrites the whole "
+                "of it from its own struct.";
+
+        // And the save still did what it was for.
+        EXPECT_EQ( ValueOf( after, "ShowPerfHud" ),
+                   Canonical( EditorPreferences::Get().ShowPerfHud ? "true" : "false" ) );
+    }
+}
+
+// The same statement over a RESTART, which is where the loss was actually noticed: the value has to come
+// back out of the file, not merely be re-written from a copy this process is still holding.
+TEST( PreferenceOwnershipUnknownKeys, AnUnknownKeySurvivesAnyNumberOfLaunchesAndSaves )
+{
+    FreshInstall();
+    WriteWholeFile( PrefsPath(), PrefsFileWith( "\"ANewerBuildsSetting\":{\"Mode\":\"Face\",\"Passes\":3}" ) );
+
+    const std::string expected = Canonical( "{\"Mode\":\"Face\",\"Passes\":3}" );
+
+    for ( int launch = 0; launch < 3; ++launch )
+    {
+        SCOPED_TRACE( "launch " + std::to_string( launch ) );
+
+        EditorPreferences::Get() = EditorPreferences{};
+        EditorPreferences::Load();
+
+        EditorPreferences::Get().CameraSpeed = 1.0f + static_cast<float>( launch );
+        ASSERT_TRUE( EditorPreferences::Save() );
+
+        EXPECT_EQ( ValueOf( ReadWholeFile( PrefsPath() ), "ANewerBuildsSetting" ), expected );
+    }
+}
+
+// The other direction, and the one that makes future migrations non-destructive rather than merely
+// survivable: a key that IS a field of this build belongs to the field, not to the carrier. That is what
+// happens when the build which owns a key finally lands — yesterday's unknown key is read into the field
+// it was always meant for, and the file states it exactly once afterwards.
+TEST( PreferenceOwnershipUnknownKeys, AKeyThisBuildDoesKnowGoesToItsFieldAndNotToTheCarrier )
+{
+    FreshInstall();
+    WriteWholeFile( PrefsPath(), PrefsFileWith( "\"ANewerBuildsSetting\":1" ) );
+
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+
+    // CameraSpeed is written by the canonical half of the file above, so it exercises the matched path.
+    EXPECT_EQ( EditorPreferences::Get().UnknownKeys.size(), 1u )
+         << "a key the struct declares was captured as an unknown one, which would then be written twice";
+    EXPECT_TRUE( EditorPreferences::Get().UnknownKeys.get( "ANewerBuildsSetting" ).has_value() );
+
+    EditorPreferences::Get().CameraSpeed = 9.5f;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    const std::vector<std::string> keys = KeysOf( ReadWholeFile( PrefsPath() ) );
+    EXPECT_EQ( std::count( keys.begin(), keys.end(), std::string( "CameraSpeed" ) ), 1 )
+         << "editor.json states CameraSpeed more than once";
+
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+    EXPECT_FLOAT_EQ( EditorPreferences::Get().CameraSpeed, 9.5f );
+}
+
+// A file this build wrote itself carries nothing extra. Without this, "every key survives" could be
+// satisfied by a carrier that quietly accumulates duplicates of the struct's own fields.
+TEST( PreferenceOwnershipUnknownKeys, AFileThisBuildWroteHasNoUnknownKeysInIt )
+{
+    FreshInstall();
+
+    EditorPreferences::Get().CameraSpeed = 3.5f;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+
+    EXPECT_TRUE( EditorPreferences::Get().UnknownKeys.empty() )
+         << "the store captured keys from a file it wrote itself";
+}
+
+// THE EXEMPTION, PINNED. Desert/Tests/Engine/ConfigOwnership censuses editor.json from
+// rfl::fields<EditorPreferences>() minus the ExtraFields member — a field list, read without writing
+// anything. This asserts the same claim against the BYTES: the file's keys are exactly the struct's
+// fields, less the carrier, plus whatever the carrier is holding. If the two ever disagree, the census
+// is certifying a file shape that does not exist.
+TEST( PreferenceOwnershipUnknownKeys, TheKeysWrittenAreExactlyTheStructsFieldsPlusThePreservedOnes )
+{
+    FreshInstall();
+    WriteWholeFile( PrefsPath(), PrefsFileWith( "\"ANewerBuildsSetting\":1,\"AndAnother\":\"two\"" ) );
+
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+    EditorPreferences::Get().ShowPerfHud = !EditorPreferences::Get().ShowPerfHud;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    std::vector<std::string> expected;
+    int                      carriers = 0;
+    for ( const auto& meta : rfl::fields<EditorPreferences>() )
+    {
+        // The one member that is not a key of the file. Named here and nowhere else in this suite,
+        // because this test IS the statement that it is the only one.
+        if ( std::string( meta.name() ) == "UnknownKeys" )
+        {
+            ++carriers;
+            continue;
+        }
+        expected.push_back( std::string( meta.name() ) );
+    }
+    EXPECT_EQ( carriers, 1 ) << "EditorPreferences::UnknownKeys was renamed or removed";
+
+    expected.push_back( "ANewerBuildsSetting" );
+    expected.push_back( "AndAnother" );
+
+    std::vector<std::string> written = KeysOf( ReadWholeFile( PrefsPath() ) );
+
+    std::sort( expected.begin(), expected.end() );
+    std::sort( written.begin(), written.end() );
+
+    EXPECT_EQ( written, expected )
+         << "what editor.json actually contains and what ConfigOwnership censuses have come apart";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 7a. THE OTHER HALF OF THE RULE: A DELETION STILL FINISHES
+// ---------------------------------------------------------------------------------------------------
+//
+// Preserving unknown keys is one edit away from "this file never loses anything", which is contract §4's
+// legacy-forever failure wearing a safety feature's clothes. The line between them is WHO decided: a key
+// another build owns is preserved, a key this project retired is dropped BY NAME, once, with a log line.
+// К1 deleted `PhotogrammetryCaptureCommand` and `PhotogrammetryMode` — both dead settings read by nothing
+// — and until К9 they needed no migration because the next save dropped them for free. It no longer does.
+
+TEST( PreferenceOwnershipUnknownKeys, ARetiredKeyIsDroppedAndAnotherBuildsKeyIsNot )
+{
+    EditorPreferences carrying;
+    // std::string, not a literal: rfl::Object overloads insert() for both std::string and
+    // std::string_view, so a bare const char* is ambiguous.
+    carrying.UnknownKeys.insert( std::string( "PhotogrammetryMode" ),
+                                 rfl::json::read<rfl::Generic>( "\"Object\"" ).value() );
+    carrying.UnknownKeys.insert( std::string( "ANewerBuildsSetting" ),
+                                 rfl::json::read<rfl::Generic>( "true" ).value() );
+    carrying.UnknownKeys.insert( std::string( "PhotogrammetryCaptureCommand" ),
+                                 rfl::json::read<rfl::Generic>( "\"capture {photos}\"" ).value() );
+
+    const auto raised = EditorPreferences::MigrateLoaded( carrying );
+
+    ASSERT_EQ( raised.size(), 2u ) << "the migration did not report exactly the two keys it retired";
+    EXPECT_NE( raised[0].find( "PhotogrammetryMode" ), std::string::npos ) << raised[0];
+    EXPECT_NE( raised[1].find( "PhotogrammetryCaptureCommand" ), std::string::npos ) << raised[1];
+
+    ASSERT_EQ( carrying.UnknownKeys.size(), 1u );
+    EXPECT_TRUE( carrying.UnknownKeys.get( "ANewerBuildsSetting" ).has_value() )
+         << "the retirement took a key that belongs to somebody else with it";
+
+    // Idempotent, like the unit migration beside it: run on its own output there is nothing left to do,
+    // so a second launch neither writes nor logs.
+    EXPECT_TRUE( EditorPreferences::MigrateLoaded( carrying ).empty() );
+}
+
+// The same thing through the file, because "dropped from the struct" and "gone from disk" are two claims
+// and only the second is what a retirement means. Load() writes back exactly when the migration raised
+// something, which is the mechanism that makes it fire once.
+TEST( PreferenceOwnershipUnknownKeys, LoadingWritesTheFileBackWithoutTheRetiredKeys )
+{
+    FreshInstall();
+    WriteWholeFile( PrefsPath(), PrefsFileWith( "\"PhotogrammetryMode\":\"Object\",\"ANewerBuildsSetting\":42" ) );
+
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+
+    const std::string afterLoad = ReadWholeFile( PrefsPath() );
+    EXPECT_EQ( ValueOf( afterLoad, "PhotogrammetryMode" ), "<missing>" )
+         << "a key this project retired is still on disk after a load that was supposed to drop it";
+    EXPECT_EQ( ValueOf( afterLoad, "ANewerBuildsSetting" ), "42" );
+
+    // And it does not fire again: the second launch has nothing to raise, so nothing is written and the
+    // bytes are exactly what the first launch left. A marker appended to the file survives iff no write
+    // happened, which is the probe the К8 tests above use for the same question.
+    const std::string marked = afterLoad + "\n";
+    WriteWholeFile( PrefsPath(), marked );
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+    EXPECT_EQ( ReadWholeFile( PrefsPath() ), marked ) << "the retirement fires on every launch";
 }
 
 int main( int argc, char** argv )
