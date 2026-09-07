@@ -225,13 +225,30 @@ CI=true premake5 gmake
 # (§7), once it fell four tools behind and every sweep built them to report NO-BINARY. `ls Tools`
 # cannot drift, because adding a tool is what creates the directory.
 TOOLS="|$(ls Tools | tr '\n' '|')"
+make -j8 Editor config=debug   # the four libraries, and the third-party archives the suites link
+ran=0
 for f in *.make; do t="${f%.make}"
   case "$t" in Desert|Common|Editor|Runtime|GLFW|ImGui*|imgui-node-editor|yaml-cpp|Jolt|Lua|Optick|MeshOptimizer|Dlib|ReflectCpp|BuildAllTests|RunAllTests) continue;; esac
   case "$TOOLS" in *"|$t|"*) continue;; esac
-  make -f "$f" config=debug -j8 >/dev/null 2>&1
-  [ -x "build/Bin/Tests/Debug/$t" ] && ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"
+  if ! make -f "$f" config=debug -j8 >/dev/null 2>&1; then echo "BUILD-FAIL $t"; continue; fi
+  if [ ! -x "build/Bin/Tests/Debug/$t" ]; then echo "NO-BINARY $t"; continue; fi
+  ran=$((ran+1))
+  ./build/Bin/Tests/Debug/$t 2>/dev/null | grep -q FAILED && echo "FAIL $t"
 done
+echo "$ran suites ran"
 ```
+
+**Read all four outcomes, and quote the count.** `BUILD-FAIL` and `NO-BINARY` are the two ways a suite
+disappears while the sweep still looks green, and the previous version of this block had neither — it
+threw the build's exit status away and then guarded the run with `[ -x … ]`, which is the exact shape
+the paragraph above condemns. It stayed that way for a whole session **inside the document that names
+the defect**, because prose was corrected and the copy-pasted line beneath it was not. The count is
+what makes a silent shrinkage visible: 138 one day and 121 the next is a finding, and no per-line
+output ever says it.
+
+`NO-BINARY` means the loop built a name that is not a test suite. With the tool half of the list
+derived, it should be **empty**; every line in it is either a new tool that lives outside `Tools/` or a
+suite whose binary the makefile no longer produces, and both need reading rather than tolerating.
 
 **A Release sweep needs the libraries built first.** `Common`, `Optick`, `ReflectCpp` and
 `MeshOptimizer` are skipped by the loop above but linked by the suites, and in a fresh tree Release has
@@ -376,10 +393,21 @@ binaries into `build/Bin/Tests/Debug` and were listed here as libraries. Every s
 ran for a whole programme skipped them — 35 tests that never once executed. They passed when finally
 run, so nothing was lost, but a failure in them would have been invisible for weeks.
 
-The check that catches this class costs one line, and it is worth running whenever the list changes:
+**That direction is now closed by construction, and the check that used to guard it was unrunnable.**
+It read `case "$b" in <your skip list>)` — a placeholder, so anybody who reached for it got a shell
+syntax error rather than an answer, and a check nobody can run is worth exactly what an absent one is.
+The list no longer names tools by hand (§3 derives that half from `ls Tools`), so a real suite cannot be
+called a library any more: being a suite means having a directory under `Desert/Tests`, not under
+`Tools`. What is left of the hazard lives in the other direction and the sweep now prints it —
+`NO-BINARY`, one line per name the loop believed was a suite and could not run.
+
+The one entry still typed by hand is the four engine projects and the two aggregates, and it is small
+enough to audit by eye:
 
 ```bash
-for b in $(ls build/Bin/Tests/Debug); do case "$b" in <your skip list>) echo "SKIPPED BUT IS A TEST: $b";; esac; done
+for b in $(ls build/Bin/Tests/Debug); do
+  case "$b" in Desert|Common|Editor|Runtime|BuildAllTests|RunAllTests) echo "SKIPPED BUT IS A TEST: $b";; esac
+done
 ```
 
 **A moved or renamed source file leaves a stale `.d` behind, and `make` then demands the deleted
