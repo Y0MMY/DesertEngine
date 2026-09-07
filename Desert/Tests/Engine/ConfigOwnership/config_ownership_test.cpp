@@ -212,6 +212,7 @@ namespace
     constexpr const char* kGizmoState     = "Editor/Source/Editor/Core/GizmoState.cpp";
     constexpr const char* kViewportPanel  = "Editor/Source/Editor/Panels/ViewportPanel/ViewportPanel.cpp";
     constexpr const char* kPhotogrammetry = "Editor/Source/Editor/Panels/Photogrammetry/PhotogrammetryPanel.cpp";
+    constexpr const char* kBuildPanel     = "Editor/Source/Editor/Panels/Build/BuildSettingsPanel.cpp";
 
     constexpr Row kEditorPrefsRows[] = {
          // Applied to the editor camera once a camera exists.
@@ -271,6 +272,25 @@ namespace
          // Details-panel personalisation, saved on the click.
          { "FavouriteFields", Owner::Machine, kPrefsImpl },
          { "CollapsedComponents", Owner::Machine, kPrefsImpl },
+
+         // The three packaging answers, moved out of the Build Settings panel's own memory by П6 — they
+         // were held nowhere, so every session started over. All three are Machine by question 1: an
+         // output path is a place on ONE person's disk, and whether the Runtime bundled is Debug or
+         // Release depends on whether that person is debugging or cutting a playtest build, which two
+         // people on this project want to differ on at the same moment. Question 3's "otherwise ->
+         // .deproj" never gets asked, and that is the order doing its job: an output folder does look
+         // like a project-wide fact until the conflict question is asked first.
+         //
+         // The shipped-Runtime test the header names is also satisfied: the packaged game never reads
+         // these — they are consumed by the editor BEFORE the game exists.
+         //
+         // The consumer named is the panel rather than GamePackager.cpp because the panel is where the
+         // preference is READ (the packager is handed a PackageOptions copy). The seam beyond it —
+         // preference -> PackageOptions -> packager — is Desert/Tests/Editor/BuildSettingsConsumers,
+         // which asserts the relation in both directions.
+         { "PackageOutputDir", Owner::Machine, kBuildPanel },
+         { "PackageConfig", Owner::Machine, kBuildPanel },
+         { "PackageAppBundle", Owner::Machine, kBuildPanel },
     };
 
     // ------------------------------------------------------------------------------------------------

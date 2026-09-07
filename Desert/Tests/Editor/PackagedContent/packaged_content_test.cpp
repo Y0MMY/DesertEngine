@@ -15,6 +15,7 @@
 
 #include <Editor/Packaging/GamePackager.hpp>
 #include <Editor/Packaging/PackageCook.hpp>
+#include <Editor/Packaging/PackageTarget.hpp>
 #include <Editor/Packaging/PackagedContentTrees.hpp>
 
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
@@ -403,6 +404,104 @@ TEST( PackagedContent, ACookThatCannotWriteDoesNotReportTheArtifactAsCooked )
     EXPECT_EQ( stats.ShadersCompiled, 0u ) << "an artifact that never reached the disk was counted as cooked";
     EXPECT_EQ( stats.StoreFailures, 2u ) << "vertex + fragment, each produced and each unwritten";
     EXPECT_EQ( stats.Failures, 0u ) << "the shader compiles fine — this is a WRITE failure, not a bad shader";
+}
+
+// ---- The HOST-TARGET relation -----------------------------------------------------------------------
+//
+// П6's other half. `PackageGame` used to state macOS in four independent places — the Runtime binary's
+// name, the .app layout, the bash launcher and the build script named in its "not found" error — so on a
+// Windows host it looked for a file that host can never produce (`Runtime`, not `Runtime.exe`) and told
+// the reader to run a macOS shell script. All four now come out of one description
+// (Editor/Packaging/PackageTarget.hpp), which is the same description the Build Settings panel shows.
+//
+// These two tests are what makes that a fact rather than an intention, and they check the produced
+// ARTEFACTS rather than the constants: Desert/Tests/Editor/BuildSettingsConsumers already pins the
+// table's own relations, and a table that is right while the packager ignores it is precisely the state
+// this repair was opened from. PackageGame had no test of any kind before them.
+
+TEST( PackagedContent, PackageGameProducesTheLauncherAndBinaryTheHostDescriptionNames )
+{
+    EnvironmentGuard guard;
+
+    const Desert::Editor::TargetPlatformInfo& host = Desert::Editor::HostPlatformInfo();
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_hosttarget";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+
+    WriteFile( proj / "GameAssets" / "Scenes" / "level.desce", "scene-body" );
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+
+    // The Runtime the packager copies. It looks one directory ABOVE the editor's cwd, which is why the
+    // project sits inside `base` rather than being `base`.
+    WriteFile( base / "build" / "Bin" / "Release" / host.RuntimeBinary, "not really a binary" );
+
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    // The PLAIN layout, because it is the one every host has — the .app branch is macOS-only by
+    // construction and asking for it elsewhere is refused (with a log line) rather than obeyed.
+    Desert::Editor::PackageOptions options;
+    options.OutputDir    = ( base / "out" ).string();
+    options.Config       = "Release";
+    options.MacAppBundle = false;
+
+    const auto result = Desert::Editor::PackageGame( options );
+    ASSERT_TRUE( result.Success ) << result.Message;
+
+    const fs::path root = fs::path( result.PackageDir );
+    EXPECT_TRUE( fs::exists( root / host.RuntimeBinary ) )
+         << "the packaged player binary is not named what this host names it; a package whose executable "
+            "has the wrong name cannot be started on the machine it was made for";
+    EXPECT_TRUE( fs::exists( root / host.LauncherName ) )
+         << "the package has no " << host.LauncherName
+         << " — the launcher was written for a different host's shell";
+
+    // ...and it is that host's shell, not merely that host's file name. The two can disagree, and a
+    // `run.bat` full of bash is the failure the file name alone would not catch.
+    const std::string launcher = Common::Utils::FileSystem::ReadFileContent( root / host.LauncherName ).GetValue();
+    ASSERT_FALSE( launcher.empty() );
+    if ( host.Platform == Desert::Editor::TargetPlatform::Windows )
+        EXPECT_NE( launcher.find( "@echo off" ), std::string::npos ) << launcher;
+    else
+        EXPECT_NE( launcher.find( "#!/usr/bin/env bash" ), std::string::npos ) << launcher;
+
+    // The launcher has to actually name the binary beside it, or the package starts nothing.
+    EXPECT_NE( launcher.find( host.RuntimeBinary ), std::string::npos ) << launcher;
+}
+
+// The refusal, and it is a refusal this suite can produce on any host: no Runtime was built.
+//
+// What is asserted is that the message names something the reader can RUN. It used to name
+// scripts/MacOS/BuildMacOS.sh unconditionally, so on Windows it answered a question about a file that
+// could never exist with an instruction that could never help.
+TEST( PackagedContent, AMissingRuntimeIsRefusedByNamingThisHostsOwnBuildScript )
+{
+    EnvironmentGuard guard;
+
+    const Desert::Editor::TargetPlatformInfo& host = Desert::Editor::HostPlatformInfo();
+
+    const fs::path base = fs::temp_directory_path() / "desert_pkg_noruntime";
+    fs::remove_all( base );
+    const fs::path proj = base / "proj";
+
+    WriteFile( proj / "T.deproj", "{\"Name\":\"T\",\"AssetsRoot\":\"GameAssets\",\"DefaultScene\":\"\"}" );
+    fs::create_directories( proj / "GameAssets" );
+    SetEnv( "HOME", base.string() );
+    fs::current_path( proj );
+    ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( proj / "T.deproj" ).string() ) );
+
+    Desert::Editor::PackageOptions options;
+    options.OutputDir = ( base / "out" ).string();
+    options.Config    = "Release"; // nothing was built into base/build/Bin/Release
+
+    const auto result = Desert::Editor::PackageGame( options );
+    ASSERT_FALSE( result.Success ) << "a package was produced with no Runtime binary to put in it";
+    EXPECT_NE( result.Message.find( host.BuildScript ), std::string::npos )
+         << "the refusal does not name a script this host can run: " << result.Message;
+    EXPECT_NE( result.Message.find( host.RuntimeBinary ), std::string::npos )
+         << "the refusal does not say which file was missing: " << result.Message;
 }
 
 int main( int argc, char** argv )
