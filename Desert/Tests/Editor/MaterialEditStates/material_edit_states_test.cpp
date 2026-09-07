@@ -679,12 +679,24 @@ TEST( MaterialEditStates, RemovingIsNotWritingTheDefaultIn )
 
 TEST( MaterialEditStates, RowsThatCannotBeResetAreRefusedByKindAndNotByValue )
 {
-    // TEXTURE AND ASSET-REFERENCE ROWS GET NO ARROW, and the two reasons are different. A cloud type or
+    // TEXTURE AND ASSET-REFERENCE ROWS GET NO ARROW, and the two reasons WERE different. A cloud type or
     // layout slot already carries its own empty entry in its combo, so an arrow would be a second control
-    // for one action. A 2D texture slot cannot be UNBOUND at all: Graphic::DataDrivenMaterial::SetTexture
-    // refuses a null image and MaterialFactory::ApplyShaderAsset skips handle 0, so erasing the entry would
-    // clear the file and leave the ball still sampling the old texture — a control that changes the
-    // document and not the picture (DC §1.3).
+    // for one action.
+    //
+    // THE SECOND REASON HAS EXPIRED, AND THIS ASSERTION IS NOW PINNING A DECISION RATHER THAN A LIMIT.
+    // It used to read: a 2D texture slot cannot be UNBOUND at all, because
+    // Graphic::DataDrivenMaterial::SetTexture refused a null image and MaterialFactory::ApplyShaderAsset
+    // skipped handle 0 — so erasing the entry would clear the file and leave the ball still sampling the
+    // old texture, a control that changes the document and not the picture (DC §1.3). М9 removed that
+    // limit: a null image now binds the shader's own `Properties … = "white"` default
+    // (Material::BindSchemaDefaultTexture), measured on a live editor as 100 % of the floor pixels moving
+    // where dev's behaviour moved 0.4 %.
+    //
+    // So "reset this texture to the shader default" is a real, executable operation today, and whether the
+    // arrow should be OFFERED for a texture row is a MaterialEditor decision — that panel is not М9's, and
+    // an assertion changed without the behaviour it describes would be a test written to pass. Left as is,
+    // deliberately, with the reason spelled out so the next reader is not told a defect exists that does
+    // not.
     const auto schema = SchemaOf( { Texture( "AlbedoMap" ), AssetRef( "CloudType1", "CloudTypeAsset" ) } );
 
     MaterialData bound;
