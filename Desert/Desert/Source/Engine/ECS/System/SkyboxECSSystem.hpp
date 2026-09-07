@@ -110,8 +110,8 @@ namespace Desert::ECS
                 for ( const auto skyboxEntity : skyboxes )
                 {
                     const auto& skybox = registry.get<ECS::SkyboxComponent>( skyboxEntity );
-                    cubemap          = Runtime::ResourceRegistry::GetSkyboxService()->Get( skybox.SkyboxHandle );
-                    cubemapIntensity = skybox.Intensity;
+                    cubemap            = Runtime::ResourceRegistry::GetSkyboxService()->Get( skybox.SkyboxHandle );
+                    cubemapIntensity   = skybox.Intensity;
                     break;
                 }
             }

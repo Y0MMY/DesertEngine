@@ -2747,6 +2747,12 @@ namespace Desert::Editor
         return BOOLSUCCESS;
     }
 
+    // Defined with the Open Scene popup's other helpers, further down this file; declared here because the
+    // command palette names its scene entries the same way that popup does, and one naming rule is the
+    // point — a level offered as "Arena.desce" in one list and "Levels/Arena.desce" in the other is two
+    // names for one thing, and the channel would then have a name the UI never shows.
+    static std::string SceneLabel( const Common::Filepath& path );
+
     std::vector<PaletteCommand> EditorLayer::BuildPaletteCommands()
     {
         std::vector<PaletteCommand> commands;
@@ -2944,6 +2950,22 @@ namespace Desert::Editor
                 commands.push_back( { "Open", metadata.Filepath.filename().generic_string(),
                                       [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
             }
+        }
+
+        // THE LEVELS, which every other kind of document could already be opened by name from here and a
+        // level could not — the one thing an editor exists to open was the one thing the palette had no
+        // entry for, and therefore the one thing the control channel could not ask for either (the
+        // channel's vocabulary IS this list). A separate group from "Open" above because these are not
+        // documents: opening one REPLACES the world rather than adding a tab.
+        //
+        // Routed through SceneOpenRequest, not through LoadScene, on purpose: that is the path that runs
+        // the unsaved-changes gate, and a palette entry is at least as easy to hit by accident as the
+        // drag-and-drop it was written for.
+        for ( const Common::Filepath& scene : CollectAvailableScenes() )
+        {
+            const std::string path = scene.string();
+            commands.push_back( { "Scene", "Open Scene " + SceneLabel( scene ),
+                                  [path] { Editor::Core::SceneOpenRequest::Request( path ); } } );
         }
 
         // NAMED VIEWPOINTS for the focused document's preview — the replacement for `--preview-orbit
@@ -3601,9 +3623,9 @@ namespace Desert::Editor
         return rel;
     }
 
-    void EditorLayer::PrepareScenePopup()
+    std::vector<Common::Filepath> EditorLayer::CollectAvailableScenes()
     {
-        m_AvailableScenes.clear();
+        std::vector<Common::Filepath> scenes;
 
         const auto scenePath = Common::Constants::Path::SCENE_PATH;
 
@@ -3621,15 +3643,19 @@ namespace Desert::Editor
 
             std::error_code fileEc; // separate: a failed stat must not end the whole walk
             if ( std::filesystem::is_regular_file( it->path(), fileEc ) )
-                m_AvailableScenes.push_back( it->path() );
+                scenes.push_back( it->path() );
         }
 
         // Sorted by the label the list shows, which keeps every folder's scenes contiguous (they share the
         // "Folder/" prefix) — that is what the folder headers in the popup rely on.
-        std::sort( m_AvailableScenes.begin(), m_AvailableScenes.end(),
-                   []( const Common::Filepath& a, const Common::Filepath& b )
+        std::sort( scenes.begin(), scenes.end(), []( const Common::Filepath& a, const Common::Filepath& b )
                    { return SceneLabel( a ) < SceneLabel( b ); } );
+        return scenes;
+    }
 
+    void EditorLayer::PrepareScenePopup()
+    {
+        m_AvailableScenes    = CollectAvailableScenes();
         m_SelectedSceneIndex = -1;
         m_SceneFilter[0]     = '\0';
     }

@@ -50,17 +50,22 @@ namespace Desert::Graphic
         const auto ms = []( auto from, auto to )
         { return std::chrono::duration<float, std::milli>( to - from ).count(); };
 
+        // The pipeline number is the SHARED CACHE's size and not this renderer's pipeline count — most
+        // systems still build their own with GraphicsPipeline::Create rather than asking the cache, so the
+        // total is several times larger. Printed anyway, and named accurately, because it is the one
+        // pipeline number that can be read without a graphics debugger and it moves when the cache is
+        // wrongly dropped.
         if ( built )
         {
-            LOG_INFO( "[SceneRenderer] Renderer slot {} built in {:.1f} ms ({} systems, {} pipelines) and "
-                      "bound its first scene in {:.1f} ms.",
+            LOG_INFO( "[SceneRenderer] Renderer slot {} built in {:.1f} ms ({} systems, {} cached pipelines) "
+                      "and bound its first scene in {:.1f} ms.",
                       m_SlotLease.RecordingSlot(), ms( started, resourcesDone ), m_RenderSystemOrder.size(),
                       m_PipelineCache.Size(), ms( resourcesDone, done ) );
         }
         else
         {
             LOG_INFO( "[SceneRenderer] Renderer slot {} rebound to a new scene in {:.1f} ms ({} systems and "
-                      "{} pipelines kept).",
+                      "{} cached pipelines kept).",
                       m_SlotLease.RecordingSlot(), ms( started, done ), m_RenderSystemOrder.size(),
                       m_PipelineCache.Size() );
         }

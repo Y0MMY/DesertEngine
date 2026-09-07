@@ -647,8 +647,8 @@ namespace Desert::Graphic::System
 
         // THE SKY'S OWN INPUTS, as the bake will read them. Formed from the same PackSky the parameter
         // buffer is filled from, so the number cannot describe a sky the dispatch will not see.
-        const uint64_t skyFingerprint = SkyBakeFingerprint(
-             PackSky( m_SunDir, m_Sky ), static_cast<uint32_t>( m_Sky.EnvironmentResolution ) );
+        const uint64_t skyFingerprint = SkyBakeFingerprint( PackSky( m_SunDir, m_Sky ),
+                                                            static_cast<uint32_t>( m_Sky.EnvironmentResolution ) );
 
         if ( !ShouldRebakeSkyEnvironment( m_BakedSunDir, m_SunDir, m_Sky.RebakeSunAngleThreshold,
                                           m_Sky.AutoRebakeEnvironment, static_cast<bool>( m_ProceduralEnv ),

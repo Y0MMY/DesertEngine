@@ -138,6 +138,15 @@ namespace
     // is written for the general case, so most of the tests below hold the cloud half still.
     constexpr uint64_t kNoClouds = 0ull;
 
+    // ...and the same for the THIRD key, the sky's own parameters (Graphic::SkyBakeFingerprint). Held
+    // still by every test in this section, which is about the sun and the clouds; the sky key has its own
+    // tests in Desert/Tests/Engine/RendererSceneLifetime, where the defect that motivated it lives.
+    //
+    // Passed EXPLICITLY rather than defaulted in the rule's signature, and that is deliberate: a defaulted
+    // staleness key reads as "no change" to every caller that forgets it, which is the failure the key was
+    // added to fix wearing a compiler's approval.
+    constexpr uint64_t kSameSky = 0ull;
+
     // A toward-sun direction @p degrees away from straight up, in the XY plane.
     glm::vec3 SunAt( float degrees )
     {
@@ -151,7 +160,8 @@ TEST( Rebake, ExplicitRequestAlwaysBakes )
     for ( const bool autoRebake : { true, false } )
         for ( const bool hasEnv : { true, false } )
             EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, autoRebake, hasEnv,
-                                                     /*explicitRequest=*/true, kNoClouds, kNoClouds ) );
+                                                     /*explicitRequest=*/true, kNoClouds, kNoClouds, kSameSky,
+                                                     kSameSky ) );
 }
 
 TEST( Rebake, FirstBakeHappensEvenWithAutoRebakeOff )
@@ -159,7 +169,8 @@ TEST( Rebake, FirstBakeHappensEvenWithAutoRebakeOff )
     // Without this the scene has no ambient light at all. "Auto Rebake off" is a request to stop
     // RE-baking, not a request to render an unlit world.
     EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, /*autoRebake=*/false,
-                                             /*hasEnvironment=*/false, false, kNoClouds, kNoClouds ) );
+                                             /*hasEnvironment=*/false, false, kNoClouds, kNoClouds, kSameSky,
+                                             kSameSky ) );
 }
 
 TEST( RebakeDebounce, ADragCollapsesIntoOneBakeWhenItEnds )
@@ -209,16 +220,17 @@ TEST( RebakeDebounce, EitherConditionIsEnoughAndNeitherGoesBackwards )
 TEST( Rebake, ThresholdIsHonouredOnBothSides )
 {
     EXPECT_FALSE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 4.9f ), 5.0f, true, true, false, kNoClouds,
-                                              kNoClouds ) );
+                                              kNoClouds, kSameSky, kSameSky ) );
     EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 5.1f ), 5.0f, true, true, false, kNoClouds,
-                                             kNoClouds ) );
+                                             kNoClouds, kSameSky, kSameSky ) );
 }
 
 TEST( Rebake, AutoRebakeOffSuppressesSunMovement )
 {
     for ( const float move : { 1.0f, 45.0f, 179.0f } )
         EXPECT_FALSE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( move ), 5.0f, /*autoRebake=*/false,
-                                                  /*hasEnvironment=*/true, false, kNoClouds, kNoClouds ) );
+                                                  /*hasEnvironment=*/true, false, kNoClouds, kNoClouds, kSameSky,
+                                                  kSameSky ) );
 }
 
 TEST( Rebake, AntipodalSunsDoNotProduceNaN )
@@ -228,10 +240,12 @@ TEST( Rebake, AntipodalSunsDoNotProduceNaN )
 
     // acos() of a dot product that lands on -1 - 1e-7 in float is NaN, and NaN compares false against
     // every threshold — which would silently disable rebaking forever rather than loudly break.
-    EXPECT_TRUE( ShouldRebakeSkyEnvironment( up, down, 5.0f, true, true, false, kNoClouds, kNoClouds ) );
-    EXPECT_TRUE(
-         ShouldRebakeSkyEnvironment( up * 3.0f, down * 7.0f, 5.0f, true, true, false, kNoClouds, kNoClouds ) );
-    EXPECT_FALSE( ShouldRebakeSkyEnvironment( up, up, 5.0f, true, true, false, kNoClouds, kNoClouds ) );
+    EXPECT_TRUE( ShouldRebakeSkyEnvironment( up, down, 5.0f, true, true, false, kNoClouds, kNoClouds, kSameSky,
+                                             kSameSky ) );
+    EXPECT_TRUE( ShouldRebakeSkyEnvironment( up * 3.0f, down * 7.0f, 5.0f, true, true, false, kNoClouds, kNoClouds,
+                                             kSameSky, kSameSky ) );
+    EXPECT_FALSE(
+         ShouldRebakeSkyEnvironment( up, up, 5.0f, true, true, false, kNoClouds, kNoClouds, kSameSky, kSameSky ) );
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -814,16 +828,16 @@ TEST( Rebake, CloudsMovingRebakeAStillSun )
     // artist dragging Coverage while the sun stands still has to see the ambient follow.
     EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, /*autoRebake=*/true,
                                              /*hasEnvironment=*/true, /*explicitRequest=*/false, 0x1234ull,
-                                             0x5678ull ) );
+                                             0x5678ull, kSameSky, kSameSky ) );
 
     // ...and an unchanged sky under an unchanged sun still bakes nothing.
     EXPECT_FALSE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, true, true, false, 0x1234ull,
-                                              0x1234ull ) );
+                                              0x1234ull, kSameSky, kSameSky ) );
 
     // Auto Rebake off suppresses the cloud half exactly as it suppresses the sun's, because it means "stop
     // following the sky", not "stop following one part of it".
     EXPECT_FALSE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, /*autoRebake=*/false, true,
-                                              false, 0x1234ull, 0x5678ull ) );
+                                              false, 0x1234ull, 0x5678ull, kSameSky, kSameSky ) );
 }
 
 int main( int argc, char** argv )
