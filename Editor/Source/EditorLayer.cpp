@@ -158,12 +158,12 @@ namespace Desert::Editor
             return ICON_MDI_ANIMATION;
         if ( name == "Node Graph" )
             return ICON_MDI_GRAPH;
-        if ( name == "Anim Graph" )
-            return ICON_MDI_STATE_MACHINE;
         if ( name == "Model from Photos" )
             return ICON_MDI_CUBE_SCAN;
-        if ( name == "Particle Editor" )
-            return ICON_MDI_CREATION;
+        // "Anim Graph" and "Particle Editor" were here. They are DOCUMENTS now, and a document's icon
+        // comes from its registration rather than from a table keyed on a panel name — this table can
+        // only ever match a tool's constant name, and a document is named after the thing it edits.
+        // See SubjectEditorRegistry::Registration::Icon.
         if ( name == "UI Editor" )
             return ICON_MDI_VIEW_DASHBOARD;
         if ( name == "Lua Console" )
@@ -191,8 +191,14 @@ namespace Desert::Editor
         for ( auto& panel : m_Panels )
         {
             // An EXPLICIT request always wins and applies to every panel, contextual or not: a button in
-            // Details ("Open in Sequencer", "Anim Graph", "Particle Editor") asked for this panel by name.
-            // It pins it, exactly like ticking it in the View menu — the user asked, so nothing auto-closes it.
+            // Details ("Sequencer", "Anim Layers") asked for this panel BY NAME. It pins it, exactly like
+            // ticking it in the View menu — the user asked, so nothing auto-closes it.
+            //
+            // BY NAME IS ALL A TOOL CAN BE ASKED FOR, and that is why the Anim Graph and the Particle
+            // Editor no longer come through here: "show the one Anim Graph window" was the most their
+            // Details buttons could say. Those two ask for a SUBJECT now
+            // (Core::SubjectOpenRequests::Request), which is a different wire because it carries what to
+            // edit — see Editor/Core/SubjectOpenRequest.hpp.
             switch ( Core::PanelRequests::Consume( panel->GetName() ) )
             {
                 case Core::PanelRequests::Action::Open:
@@ -2592,8 +2598,9 @@ namespace Desert::Editor
                 // bottom next to Assets/Logs, authoring palettes on the right beside Details.
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Sequencer" ).c_str(), bottom );
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Anim Layers" ).c_str(), bottom );
-                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Anim Graph" ).c_str(), center );
-                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Particle Editor" ).c_str(), right );
+                // No line for "Anim Graph" or "Particle Editor": they are documents, and a document does
+                // not have a fixed home in the layout — it docks into the document well beside the others
+                // (DrawDocuments sets the dock id), which is the whole point of the well existing.
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "UI Editor" ).c_str(), right );
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Modeling" ).c_str(), left );
 
@@ -4491,8 +4498,10 @@ namespace Desert::Editor
         static constexpr const char* kContentGroup[]   = { "Assets", "Asset References", "Shader Library" };
         static constexpr const char* kOutputGroup[]    = { "Logs", "Lua Console", "History" };
         static constexpr const char* kViewportGroup[]  = { "Scene###scene" };
-        static constexpr const char* kGraphGroup[]     = { "Node Graph", "Anim Graph", "Particle Editor",
-                                                           "UI Editor" };
+        // "Anim Graph" and "Particle Editor" are gone from this list because they are gone from the
+        // registry this menu loops over — a name left here would draw a group entry for a panel that does
+        // not exist. They are opened from the component that holds them, in Details.
+        static constexpr const char* kGraphGroup[]     = { "Node Graph", "UI Editor" };
         static constexpr const char* kSequencerGroup[] = { "Sequencer", "Anim Layers" };
         static constexpr const char* kToolGroup[]      = { "Modeling", "Model from Photos", "Build Settings" };
 

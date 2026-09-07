@@ -590,8 +590,12 @@ namespace
     SubjectEditorRegistry::Registration FakeEditor( std::string name )
     {
         return SubjectEditorRegistry::Registration{
-             std::move( name ), "*", []( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
-             { return std::make_unique<FakeDocument>( DocumentTitle( "doc", subject ), subject ); } };
+             std::move( name ), "*",
+             []( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+             { return std::make_unique<FakeDocument>( DocumentTitle( "doc", subject ), subject ); },
+             // The presence test the palette enumerates with. Always true here: what these tests are
+             // about is the registry's bookkeeping, not what a scene happens to contain.
+             []( const SubjectId& ) { return true; } };
     }
 } // namespace
 
@@ -647,6 +651,48 @@ TEST( DocumentEditorCensus, AnAssetTypeAndAComponentTypeCannotCollide )
     EXPECT_EQ( registry.TypeName( Desert::Editor::SubjectTypeKey{ SubjectDomain::Asset, 2u } ), "Material" );
     EXPECT_EQ( registry.TypeName( Desert::Editor::SubjectTypeKey{ SubjectDomain::EntityComponent, 2u } ),
                "SomeComponent" );
+}
+
+TEST( DocumentEditorCensus, AnIncompleteRegistrationIsREFUSED )
+{
+    // A REGISTRATION IS ALL-OR-NOTHING, and the three fields are refused separately because each one has
+    // a different silent failure. Without a factory the kind reads as having an editor and opens nothing.
+    // Without an icon three call sites would each have to invent a fallback. Without a presence test the
+    // palette would offer "open the anim graph of this" for every entity in the scene, because it has no
+    // way to ask which of them has one.
+    //
+    // Refused rather than half-registered: a partial entry is exactly the stub this project's contract
+    // forbids, and it would be discovered as a wrong window rather than as a startup error.
+    SubjectEditorRegistry registry;
+    auto                  good = FakeEditor( "Material" );
+
+    auto noFactory = good;
+    noFactory.Make = nullptr;
+    registry.Register( Asset( 1 ).Type(), std::move( noFactory ) );
+    EXPECT_EQ( registry.Size(), 0u ) << "a factoryless registration must not be stored";
+
+    auto noIcon = good;
+    noIcon.Icon = nullptr;
+    registry.Register( Asset( 1 ).Type(), std::move( noIcon ) );
+    EXPECT_EQ( registry.Size(), 0u ) << "an iconless registration must not be stored";
+
+    auto noPresence   = good;
+    noPresence.Exists = nullptr;
+    registry.Register( Asset( 1 ).Type(), std::move( noPresence ) );
+    EXPECT_EQ( registry.Size(), 0u ) << "a registration that cannot say whether a subject is there must "
+                                        "not be stored";
+
+    // An empty subject TYPE is refused too: nothing could ever ask for it.
+    registry.Register( Desert::Editor::SubjectTypeKey{}, FakeEditor( "Nowhere" ) );
+    EXPECT_EQ( registry.Size(), 0u );
+
+    // And the complete one lands.
+    registry.Register( Asset( 1 ).Type(), std::move( good ) );
+    EXPECT_EQ( registry.Size(), 1u );
+    EXPECT_TRUE( registry.Exists( Asset( 11 ) ) );
+    EXPECT_FALSE( registry.Exists( Component( 11, "AnimationComponent" ) ) )
+         << "a kind nothing is registered for cannot claim a subject exists";
+    EXPECT_FALSE( registry.Exists( SubjectId{} ) );
 }
 
 TEST( DocumentEditorCensus, AnUnregisteredKindOpensNothingRatherThanSomethingElse )
@@ -767,6 +813,80 @@ TEST( DocumentSlotLease, ReleasingTwiceIsNotAnError )
     hidden.ReleaseRendererSlot();
     EXPECT_EQ( pool.InUseCount(), 0u );
     EXPECT_FALSE( hidden.HoldsRendererSlot() );
+}
+
+// =================================================================================================
+// 11. OPENING A FILE: ONE QUESTION, NOT A CHAIN OF `else if`
+// =================================================================================================
+//
+// The asset browser's double-click used to carry one arm per kind of document — `.demat`, then the four
+// cloud extensions — and EditorLayer carried a second copy of the same chain for its own path resolution.
+// A new kind of document was an edit here, an edit there, and a registration; the two that were not the
+// registration are the ones that got forgotten.
+//
+// Asserted here because the browser's own call site cannot be: it needs an AssetManager and a file on
+// disk. What CAN be asserted is the dispatch — that the registry asks the openers in order, stops at the
+// first that claims the path, and says NotMine when none does.
+
+using PathOpenOutcome = SubjectEditorRegistry::PathOpenOutcome;
+
+TEST( PathOpening, TheFirstOpenerThatClaimsThePathWins )
+{
+    SubjectEditorRegistry registry;
+    std::vector<std::string> asked;
+
+    registry.RegisterPathOpener(
+         [&asked]( const std::string& path )
+         {
+             asked.push_back( "materials" );
+             return path.ends_with( ".demat" ) ? PathOpenOutcome::Requested : PathOpenOutcome::NotMine;
+         } );
+    registry.RegisterPathOpener(
+         [&asked]( const std::string& path )
+         {
+             asked.push_back( "clouds" );
+             return path.ends_with( ".decloudtype" ) ? PathOpenOutcome::Requested : PathOpenOutcome::NotMine;
+         } );
+
+    EXPECT_EQ( registry.OpenPath( "M_Crate.demat" ), PathOpenOutcome::Requested );
+    EXPECT_EQ( asked, ( std::vector<std::string>{ "materials" } ) )
+         << "the cloud opener must not be consulted once the material one claimed the path";
+
+    asked.clear();
+    EXPECT_EQ( registry.OpenPath( "Cumulus.decloudtype" ), PathOpenOutcome::Requested );
+    EXPECT_EQ( asked, ( std::vector<std::string>{ "materials", "clouds" } ) );
+}
+
+TEST( PathOpening, APathNothingClaimsIsNotAnError )
+{
+    // Most double-clicks in the browser land on files nothing opens — a `.png`, a folder, a `.fbx`. That
+    // is a normal answer and not a failure, which is why the browser logs nothing for it.
+    SubjectEditorRegistry registry;
+    registry.RegisterPathOpener( []( const std::string& path )
+                                 { return path.ends_with( ".demat" ) ? PathOpenOutcome::Requested
+                                                                     : PathOpenOutcome::NotMine; } );
+
+    EXPECT_EQ( registry.OpenPath( "Rock_Albedo.png" ), PathOpenOutcome::NotMine );
+    EXPECT_EQ( registry.OpenPath( "" ), PathOpenOutcome::NotMine );
+}
+
+TEST( PathOpening, AFailureIsDistinguishedFromNotMine )
+{
+    // The distinction the three outcomes exist for. "It IS one of ours and it would not resolve" has
+    // already been logged BY THE OPENER, with the path and the reason; a caller that reported it again in
+    // its own words would print two messages, the second of them guessing. "It was never ours" has
+    // nothing to report at all. Collapsing the two is how a double-click that does nothing becomes
+    // indistinguishable from a window that failed to draw.
+    SubjectEditorRegistry registry;
+    registry.RegisterPathOpener( []( const std::string& ) { return PathOpenOutcome::Failed; } );
+
+    EXPECT_EQ( registry.OpenPath( "Broken.demat" ), PathOpenOutcome::Failed );
+}
+
+TEST( PathOpening, ARegistryWithNoOpenersClaimsNothing )
+{
+    SubjectEditorRegistry registry;
+    EXPECT_EQ( registry.OpenPath( "M_Crate.demat" ), PathOpenOutcome::NotMine );
 }
 
 int main( int argc, char** argv )
