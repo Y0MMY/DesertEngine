@@ -202,9 +202,11 @@ namespace Desert::Graphic::System
         /// How far that bake has got, 0..1. Meaningless unless IsModellingVolumeBaking(), and 0 for a view
         /// that has never baked one.
         ///
-        /// IT IS A NUMBER AND NOT A SPINNER because the wait it describes is SECONDS long and varies by a
-        /// factor of four with the coverage — measured at 5.9 s for a 256 grid and 1.5 s for a 128 one on
-        /// this machine — so "how much longer" is a question the artist genuinely has. The bake already
+        /// IT IS A NUMBER AND NOT A SPINNER because the wait it describes is SECONDS long and varies by
+        /// four times with the GRID (5 915 ms at 256 against 1 461 ms at 128, this machine, Debug) and by
+        /// another four with how much cloud the coverage asks for (3.31 s to 14.05 s over the slider's own
+        /// travel, measured before this task) — so "how much longer" is a question the artist genuinely has
+        /// and no fixed animation can answer. The bake already
         /// produces the fraction for its own cancellation check (Assets::CloudProceduralBakeProgressFn), so
         /// this costs one relaxed store per XZ slice and nothing at all per voxel.
         float ModellingBakeProgress() const

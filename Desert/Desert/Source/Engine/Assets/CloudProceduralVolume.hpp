@@ -714,9 +714,9 @@ namespace Desert::Assets
      * WHY THIS BAKE NEEDED IT, WHICH IS NOT THE REASON THE SCULPTED ONE DID. That one is started by a button
      * and cancelled by a button. This one is started by a SLIDER: an artist dragging Coverage lands twenty
      * edits in a second, and until O8/Г9 an already-doomed bake ran to completion because `std::async` has
-     * no way to be told otherwise — the frames measured 15.42 s from the last edit to the sky that showed
-     * it, of which the first 4.8 s was a volume nobody would ever see. Cancellation is what turns "finish
-     * the stale one, then start the wanted one" into "start the wanted one".
+     * no way to be told otherwise — the engine's own millisecond log measured 15.42 s from the last edit to
+     * the sky that showed it, of which the first 4 800 ms was a volume nobody would ever see. Cancellation
+     * is what turns "finish the stale one, then start the wanted one" into "start the wanted one".
      */
     using CloudProceduralBakeProgressFn = std::function<bool( float fraction )>;
 
