@@ -128,9 +128,38 @@ namespace Desert::Graphic::API::Vulkan
         m_RenderPassDeletionQueue.push_back( { renderPass, frameIndex } );
     }
 
-    void VulkanAllocator::UnmapMemory( VmaAllocation allocation )
+    MappedMemory VulkanAllocator::MapMemory( VmaAllocation allocation )
     {
-        if ( s_VmaAllocator != VK_NULL_HANDLE ) vmaUnmapMemory( s_VmaAllocator, allocation );
+        if ( s_VmaAllocator == VK_NULL_HANDLE )
+            return MappedMemory::Refused( "the VMA allocator is not initialised" );
+        if ( allocation == VK_NULL_HANDLE )
+            return MappedMemory::Refused( "there is no allocation to map (a null VmaAllocation)" );
+
+        uint8_t*       mappedMemory = nullptr;
+        const VkResult mapped       = vmaMapMemory( s_VmaAllocator, allocation, (void**)&mappedMemory );
+        if ( mapped != VK_SUCCESS )
+        {
+            (void)NoteIfDeviceLost( mapped, "vmaMapMemory", __FILE__, __LINE__ );
+            LOG_ERROR( "[Allocator] vmaMapMemory failed: {}; every write through this mapping is refused.",
+                       VkResultToString( mapped ) );
+            return MappedMemory::Refused( fmt::format( "vmaMapMemory failed: {}", VkResultToString( mapped ) ) );
+        }
+
+        // THE SIZE COMES FROM THE ALLOCATION, not from whatever the caller believes it asked for. That
+        // is what lets MappedMemory refuse an overrun: every one of the old memcpy sites sized its copy
+        // from a width, a height and a format computed several files away from the allocation it was
+        // writing into, and nothing anywhere compared the two.
+        VmaAllocationInfo info{};
+        vmaGetAllocationInfo( s_VmaAllocator, allocation, &info );
+
+        return MappedMemory::Live( allocation, mappedMemory, static_cast<std::size_t>( info.size ),
+                                   &VulkanAllocator::UnmapAllocation );
+    }
+
+    void VulkanAllocator::UnmapAllocation( void* allocation )
+    {
+        if ( s_VmaAllocator != VK_NULL_HANDLE )
+            vmaUnmapMemory( s_VmaAllocator, static_cast<VmaAllocation>( allocation ) );
     }
 
     void VulkanAllocator::ProcessDeletionQueue()

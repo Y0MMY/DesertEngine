@@ -550,14 +550,16 @@ namespace Desert::Graphic::API::Vulkan
         const std::size_t stagingSz = pixels * Graphic::BytesPerPixel( source );
 
         Bytes raw( stagingSz );
-        void* mapped = allocator->MapMemory( static_cast<VmaAllocation>( m_CaptureAllocation ) );
-        if ( mapped == nullptr )
         {
-            release();
-            return Common::MakeError<Bytes>( "the capture staging buffer could not be mapped." );
+            MappedMemory readback = allocator->MapMemory( static_cast<VmaAllocation>( m_CaptureAllocation ) );
+            const auto   read     = readback.ReadInto( raw.data(), stagingSz );
+            if ( !read.IsSuccess() )
+            {
+                readback.Unmap();
+                release();
+                return Common::MakeFormattedError<Bytes>( "the capture staging buffer: {}", read.GetError() );
+            }
         }
-        std::memcpy( raw.data(), mapped, stagingSz );
-        allocator->UnmapMemory( static_cast<VmaAllocation>( m_CaptureAllocation ) );
         release();
 
         Bytes out = Graphic::PackToRGBA8( raw.data(), raw.size(), pixels, source );

@@ -37,11 +37,10 @@ namespace Desert::ShaderResources::API::Vulkan
 
         for ( uint32_t i = 0; i < static_cast<uint32_t>( m_Buffers.size() ); ++i )
         {
-            if ( m_MappedMemories[i] )
-            {
-                allocator->UnmapMemory( m_MemoryAllocs[i] );
-                m_MappedMemories[i] = nullptr;
-            }
+            // Unmap BEFORE the buffer is queued for destruction, exactly as before — the mapping's own
+            // destructor does it now, so an early return cannot skip it.
+            if ( i < m_Mappings.size() )
+                m_Mappings[i].Unmap();
             if ( m_MemoryAllocs[i] )
             {
                 allocator->RT_DestroyBuffer( m_Buffers[i], m_MemoryAllocs[i] );
@@ -53,7 +52,7 @@ namespace Desert::ShaderResources::API::Vulkan
         m_Buffers.clear();
         m_MemoryAllocs.clear();
         m_DescriptorInfos.clear();
-        m_MappedMemories.clear();
+        m_Mappings.clear();
     }
 
     void VulkanUniformBuffer::RT_Invalidate()
@@ -71,7 +70,7 @@ namespace Desert::ShaderResources::API::Vulkan
         m_Buffers.resize( copies, VK_NULL_HANDLE );
         m_MemoryAllocs.resize( copies, nullptr );
         m_DescriptorInfos.resize( copies );
-        m_MappedMemories.resize( copies, nullptr );
+        m_Mappings.resize( copies );
 
         auto vulkanContext = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
                                       EngineContext::GetInstance().GetRendererContext() );
@@ -98,11 +97,14 @@ namespace Desert::ShaderResources::API::Vulkan
             m_DescriptorInfos[i].offset = 0;
             m_DescriptorInfos[i].range  = m_UniformModel.Size;
 
-            // Persistently map for the lifetime of this buffer (CPU_TO_GPU stays mappable).
-            // UnmapMemory() is a no-op; the actual unmap happens in Release().
-            m_MappedMemories[i] = vulkanContext->GetVulkanAllocator()->MapMemory( m_MemoryAllocs[i] );
-            if ( m_MappedMemories[i] )
-                std::memset( m_MappedMemories[i], 0, m_UniformModel.Size );
+            // Persistently mapped for the lifetime of this buffer (CPU_TO_GPU stays mappable); the
+            // actual unmap happens in Release(), through the mapping's own destructor.
+            m_Mappings[i] = vulkanContext->GetVulkanAllocator()->MapMemory( m_MemoryAllocs[i] );
+
+            const auto cleared = m_Mappings[i].Fill( 0, m_UniformModel.Size );
+            if ( !cleared.IsSuccess() )
+                LOG_ERROR( "[UniformBuffer] '{}' copy {} starts uninitialised: {}", m_UniformModel.Name, i,
+                           cleared.GetError() );
         }
     }
 
@@ -110,39 +112,47 @@ namespace Desert::ShaderResources::API::Vulkan
     {
         const uint32_t index = CopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex() );
 
-        if ( index >= m_MappedMemories.size() || !m_MappedMemories[index] )
+        if ( index >= m_Mappings.size() )
         {
+            LOG_ERROR( "[UniformBuffer] '{}' has no copy {} to write ({} exist)", m_UniformModel.Name, index,
+                       m_Mappings.size() );
             return;
         }
 
-        memcpy( m_MappedMemories[index] + offset, data, size );
+        const auto wrote = m_Mappings[index].Write( data, size, offset );
+        if ( wrote.IsSuccess() )
+            return;
+
+        // A COPY THAT NEVER MAPPED WAS ALREADY NAMED, once, by RT_Invalidate — and this runs per frame
+        // per material, so repeating it here would bury the log rather than inform it. A refusal from a
+        // LIVE mapping is different: it is a size that does not fit, it is new information every time,
+        // and it is the write that would previously have run off the end of the buffer.
+        if ( m_Mappings[index].IsMapped() )
+            LOG_ERROR( "[UniformBuffer] '{}': {}", m_UniformModel.Name, wrote.GetError() );
     }
 
-    uint8_t* VulkanUniformBuffer::MapMemory()
+    Common::BoolResultStr VulkanUniformBuffer::EnsureMapped()
     {
         const uint32_t index = CopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex() );
 
-        if ( index >= m_MappedMemories.size() )
-        {
-            return nullptr;
-        }
+        if ( index >= m_Mappings.size() )
+            return Common::MakeFormattedError<bool>( "uniform buffer '{}' has no copy {} ({} exist)",
+                                                     m_UniformModel.Name, index, m_Mappings.size() );
 
-        if ( m_MappedMemories[index] )
-        {
-            return m_MappedMemories[index];
-        }
+        if ( m_Mappings[index].IsMapped() )
+            return BOOLSUCCESS;
 
-        m_MappedMemories[index] = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
-                                           EngineContext::GetInstance().GetRendererContext() )
-                                       ->GetVulkanAllocator()
-                                       ->MapMemory( m_MemoryAllocs[index] );
+        // The retry: RT_Invalidate maps every copy up front, so reaching here means that map failed.
+        m_Mappings[index] = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
+                                     EngineContext::GetInstance().GetRendererContext() )
+                                 ->GetVulkanAllocator()
+                                 ->MapMemory( m_MemoryAllocs[index] );
 
-        return m_MappedMemories[index];
-    }
+        if ( !m_Mappings[index].IsMapped() )
+            return Common::MakeFormattedError<bool>( "uniform buffer '{}' copy {}: {}", m_UniformModel.Name, index,
+                                                     m_Mappings[index].GetRefusal() );
 
-    void VulkanUniformBuffer::UnmapMemory()
-    {
-        // Buffers are persistently mapped until Release(); this call is intentionally a no-op.
+        return BOOLSUCCESS;
     }
 
 } // namespace Desert::ShaderResources::API::Vulkan

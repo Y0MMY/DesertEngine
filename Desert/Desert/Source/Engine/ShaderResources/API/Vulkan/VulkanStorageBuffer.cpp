@@ -35,11 +35,9 @@ namespace Desert::ShaderResources::API::Vulkan
 
         for ( uint32_t i = 0; i < static_cast<uint32_t>( m_Buffers.size() ); ++i )
         {
-            if ( m_MappedMemories[i] )
-            {
-                allocator->UnmapMemory( m_MemoryAllocs[i] );
-                m_MappedMemories[i] = nullptr;
-            }
+            // Unmap BEFORE the deferred destroy is queued, as before; the mapping's destructor does it.
+            if ( i < m_Mappings.size() )
+                m_Mappings[i].Unmap();
             if ( m_MemoryAllocs[i] )
             {
                 // Deferred destroy: in-flight frames may still reference the old buffer.
@@ -52,7 +50,7 @@ namespace Desert::ShaderResources::API::Vulkan
         m_Buffers.clear();
         m_MemoryAllocs.clear();
         m_DescriptorInfos.clear();
-        m_MappedMemories.clear();
+        m_Mappings.clear();
     }
 
     void VulkanStorageBuffer::RT_Invalidate()
@@ -70,7 +68,7 @@ namespace Desert::ShaderResources::API::Vulkan
 
         m_Buffers.resize( copies, VK_NULL_HANDLE );
         m_MemoryAllocs.resize( copies, nullptr );
-        m_MappedMemories.resize( copies, nullptr );
+        m_Mappings.resize( copies );
         // Always the FULL matrix, even when persistent collapses the buffers to one: descriptors are
         // indexed by (frame x slot) regardless, so this array is sized by the layout, not by the buffers.
         const uint32_t descriptorCount = BufferCopyCount( framesInFlight, slots );
@@ -95,8 +93,11 @@ namespace Desert::ShaderResources::API::Vulkan
             if ( !allocatedBuffer.IsSuccess() )
                 continue;
 
-            m_MemoryAllocs[i]   = allocatedBuffer.GetValue();
-            m_MappedMemories[i] = vulkanContext->GetVulkanAllocator()->MapMemory( m_MemoryAllocs[i] );
+            m_MemoryAllocs[i] = allocatedBuffer.GetValue();
+            m_Mappings[i]     = vulkanContext->GetVulkanAllocator()->MapMemory( m_MemoryAllocs[i] );
+            if ( !m_Mappings[i].IsMapped() )
+                LOG_ERROR( "[StorageBuffer] '{}' copy {} could not be mapped: {}", m_BufferName, i,
+                           m_Mappings[i].GetRefusal() );
         }
 
         // Point every (frame x slot) descriptor at its buffer (persistent: all at buffer 0).
@@ -125,14 +126,31 @@ namespace Desert::ShaderResources::API::Vulkan
         // Persistent buffers have a single mapping (index 0); the rest write the copy belonging to this
         // frame AND this view.
         const uint32_t idx = m_Persistent ? 0u : CopyIndex();
-        if ( idx < m_MappedMemories.size() && m_MappedMemories[idx] )
-            std::memcpy( m_MappedMemories[idx] + offset, data, size );
+        if ( idx >= m_Mappings.size() )
+        {
+            LOG_ERROR( "[StorageBuffer] '{}' has no copy {} to write ({} exist)", m_BufferName, idx,
+                       m_Mappings.size() );
+            return;
+        }
+
+        const auto wrote = m_Mappings[idx].Write( data, size, offset );
+        // A copy that never mapped was already named once, at RT_Invalidate; a refusal from a LIVE
+        // mapping is a range that does not fit, which is new information and the corruption this
+        // change exists to stop. Same reasoning as VulkanUniformBuffer::SetData.
+        if ( !wrote.IsSuccess() && m_Mappings[idx].IsMapped() )
+            LOG_ERROR( "[StorageBuffer] '{}': {}", m_BufferName, wrote.GetError() );
     }
 
-    uint8_t* VulkanStorageBuffer::MapMemory()
+    Common::BoolResultStr VulkanStorageBuffer::EnsureMapped()
     {
         const uint32_t idx = m_Persistent ? 0u : CopyIndex();
-        return idx < m_MappedMemories.size() ? m_MappedMemories[idx] : nullptr;
+        if ( idx >= m_Mappings.size() )
+            return Common::MakeFormattedError<bool>( "storage buffer '{}' has no copy {} ({} exist)", m_BufferName,
+                                                     idx, m_Mappings.size() );
+        if ( !m_Mappings[idx].IsMapped() )
+            return Common::MakeFormattedError<bool>( "storage buffer '{}' copy {}: {}", m_BufferName, idx,
+                                                     m_Mappings[idx].GetRefusal() );
+        return BOOLSUCCESS;
     }
 
     uint32_t VulkanStorageBuffer::CopyIndex( uint32_t frameIndex )
@@ -144,11 +162,6 @@ namespace Desert::ShaderResources::API::Vulkan
     uint32_t VulkanStorageBuffer::CopyIndex()
     {
         return CopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex() );
-    }
-
-    void VulkanStorageBuffer::UnmapMemory()
-    {
-        // Persistently mapped until Release(); intentionally a no-op.
     }
 
 } // namespace Desert::ShaderResources::API::Vulkan

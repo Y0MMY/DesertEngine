@@ -64,12 +64,9 @@ namespace
             std::memcpy( copy.data() + offset, data, size );
         }
 
-        uint8_t* MapMemory() override
+        Common::BoolResultStr EnsureMapped() override
         {
-            return reinterpret_cast<uint8_t*>( m_Copies[CurrentCopy()].data() );
-        }
-        void UnmapMemory() override
-        {
+            return Common::MakeSuccess( true );
         }
         const void* GetData() const override
         {

@@ -69,12 +69,9 @@ namespace
             std::memcpy( copy.data() + offset, data, size );
         }
 
-        uint8_t* MapMemory() override
+        Common::BoolResultStr EnsureMapped() override
         {
-            return reinterpret_cast<uint8_t*>( m_Copies[CurrentCopy()].data() );
-        }
-        void UnmapMemory() override
-        {
+            return Common::MakeSuccess( true );
         }
         const void* GetData() const override
         {
@@ -357,12 +354,9 @@ TEST( StorageBufferFields, HasNoneAndTheReferenceOutlivesTheCall )
         void SetData( const void*, uint32_t, uint32_t ) override
         {
         }
-        uint8_t* MapMemory() override
+        Common::BoolResultStr EnsureMapped() override
         {
-            return nullptr;
-        }
-        void UnmapMemory() override
-        {
+            return Common::MakeError<bool>( "this stub has no memory" );
         }
         uint32_t GetBinding() const override
         {

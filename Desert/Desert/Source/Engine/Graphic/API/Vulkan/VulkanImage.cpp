@@ -189,13 +189,25 @@ namespace Desert::Graphic::API::Vulkan
         VkBufferCreateInfo bInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                      .size  = size,
                                      .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT };
-        stagingAlloc =
-             allocator->RT_AllocateBuffer( "SetDataStaging", bInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, staging )
-                  .GetValue();
+        // ASKED, NOT ASSUMED — the same correction as the command buffer below. GetValue() on a failed
+        // result hands back a default-constructed VmaAllocation (null), which the map would then refuse
+        // and the upload would silently carry no pixels.
+        const auto stagingResult =
+             allocator->RT_AllocateBuffer( "SetDataStaging", bInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, staging );
+        if ( !stagingResult.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "Image2D::SetData: {} byte staging buffer failed: {}", size,
+                                                     stagingResult.GetError() );
+        stagingAlloc = stagingResult.GetValue();
 
-        void* mapped = allocator->MapMemory( stagingAlloc );
-        memcpy( mapped, Utils::GetPixelDataPtr( data ), static_cast<size_t>( size ) );
-        allocator->UnmapMemory( stagingAlloc );
+        {
+            MappedMemory staged = allocator->MapMemory( stagingAlloc );
+            const auto   wrote  = staged.Write( Utils::GetPixelDataPtr( data ), static_cast<size_t>( size ) );
+            if ( !wrote.IsSuccess() )
+            {
+                allocator->RT_DestroyBuffer( staging, stagingAlloc );
+                return Common::MakeFormattedError<bool>( "Image2D::SetData: {}", wrote.GetError() );
+            }
+        }
 
         // ASKED, NOT ASSUMED. GetValue() on a failed result hands back a default-constructed
         // VkCommandBuffer — VK_NULL_HANDLE — and every vkCmd* below would then be undefined behaviour
@@ -315,11 +327,28 @@ namespace Desert::Graphic::API::Vulkan
                                                                m_Specification.Format );
             VkBuffer staging; VmaAllocation stagingAlloc;
             VkBufferCreateInfo bInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT };
-            stagingAlloc = allocator->RT_AllocateBuffer( "Staging", bInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, staging ).GetValue();
+            const auto stagingResult =
+                 allocator->RT_AllocateBuffer( "Staging", bInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, staging );
+            if ( !stagingResult.IsSuccess() )
+            {
+                CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
+                return Common::MakeFormattedError<bool>( "Image2D '{}': {} byte staging buffer failed: {}",
+                                                         m_Specification.Tag, size, stagingResult.GetError() );
+            }
+            stagingAlloc = stagingResult.GetValue();
 
-            void* mapped = allocator->MapMemory( stagingAlloc );
-            memcpy( mapped, Utils::GetPixelDataPtr( m_Specification.Data ), static_cast<size_t>( size ) );
-            allocator->UnmapMemory( stagingAlloc );
+            {
+                MappedMemory staged = allocator->MapMemory( stagingAlloc );
+                const auto   wrote =
+                     staged.Write( Utils::GetPixelDataPtr( m_Specification.Data ), static_cast<size_t>( size ) );
+                if ( !wrote.IsSuccess() )
+                {
+                    allocator->RT_DestroyBuffer( staging, stagingAlloc );
+                    CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
+                    return Common::MakeFormattedError<bool>( "Image2D '{}': {}", m_Specification.Tag,
+                                                             wrote.GetError() );
+                }
+            }
 
             // Transition UNDEFINED -> TRANSFER_DST_OPTIMAL -> finalDefaultLayout
             TransitionLayout( cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
@@ -482,9 +511,19 @@ namespace Desert::Graphic::API::Vulkan
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
 
         std::vector<uint8_t> raw( static_cast<size_t>( srcSize ) );
-        void*                mapped = allocator->MapMemory( stagingAlloc );
-        memcpy( raw.data(), mapped, static_cast<size_t>( srcSize ) );
-        allocator->UnmapMemory( stagingAlloc );
+        {
+            // The READBACK direction, and the one this class of defect is nastiest in: unchecked, the
+            // null was the memcpy's SOURCE, so the crash landed inside libc with no frame of ours on it.
+            MappedMemory readback = allocator->MapMemory( stagingAlloc );
+            const auto   read     = readback.ReadInto( raw.data(), static_cast<size_t>( srcSize ) );
+            if ( !read.IsSuccess() )
+            {
+                LOG_ERROR( "[ReadPixelsRGBA8] {}", read.GetError() );
+                readback.Unmap();
+                allocator->RT_DestroyBuffer( staging, stagingAlloc );
+                return {};
+            }
+        }
         allocator->RT_DestroyBuffer( staging, stagingAlloc );
 
         return Graphic::PackToRGBA8( raw.data(), raw.size(), static_cast<size_t>( w ) * h, source );
@@ -777,9 +816,18 @@ namespace Desert::Graphic::API::Vulkan
             }
             stagingAlloc = stagingResult.GetValue();
 
-            void* mapped = allocator->MapMemory( stagingAlloc );
-            memcpy( mapped, Utils::GetPixelDataPtr( m_Specification.Data ), static_cast<size_t>( size ) );
-            allocator->UnmapMemory( stagingAlloc );
+            {
+                MappedMemory staged = allocator->MapMemory( stagingAlloc );
+                const auto   wrote =
+                     staged.Write( Utils::GetPixelDataPtr( m_Specification.Data ), static_cast<size_t>( size ) );
+                if ( !wrote.IsSuccess() )
+                {
+                    allocator->RT_DestroyBuffer( staging, stagingAlloc );
+                    CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
+                    return Common::MakeFormattedError<bool>( "Image3D '{}': {}", m_Specification.Tag,
+                                                             wrote.GetError() );
+                }
+            }
 
             TransitionLayout( cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
 

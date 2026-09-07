@@ -33,9 +33,13 @@ namespace Desert::Graphic::API::Vulkan
                               ->GetVulkanAllocator()
                               .get();
 
-        void* dst = allocator->MapMemory( m_MemoryAllocation );
-        memcpy( (uint8_t*)dst + offset, data, size );
-        allocator->UnmapMemory( m_MemoryAllocation );
+        // A void override has no channel, so the report is the log — and it is a report rather than a
+        // silence: unchecked, this wrote `nullptr + offset` on a failed map, and the offset was never
+        // bounded against the buffer at all. MappedMemory refuses both and names the numbers.
+        MappedMemory mapping = allocator->MapMemory( m_MemoryAllocation );
+        const auto   wrote   = mapping.Write( data, size, offset );
+        if ( !wrote.IsSuccess() )
+            LOG_ERROR( "[VulkanVertexBuffer] SetData wrote nothing: {}", wrote.GetError() );
     }
 
     void VulkanVertexBuffer::Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
@@ -80,9 +84,11 @@ namespace Desert::Graphic::API::Vulkan
             // initial upload
             if ( m_StorageBuffer.Data )
             {
-                void* dst = allocator->MapMemory( m_MemoryAllocation );
-                memcpy( dst, m_StorageBuffer.Data, m_Size );
-                allocator->UnmapMemory( m_MemoryAllocation );
+                MappedMemory mapping = allocator->MapMemory( m_MemoryAllocation );
+                const auto   wrote   = mapping.Write( m_StorageBuffer.Data, m_Size );
+                if ( !wrote.IsSuccess() )
+                    return Common::MakeFormattedError<bool>( "dynamic vertex buffer initial upload: {}",
+                                                             wrote.GetError() );
             }
 
             return Common::MakeSuccess( true );
@@ -92,10 +98,14 @@ namespace Desert::Graphic::API::Vulkan
         {
             auto vertexBufferCreateInfo =
                  CreateVertexBufferInfo( m_Size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE );
-            m_MemoryAllocation = allocator
-                                      ->RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
-                                                           VMA_MEMORY_USAGE_CPU_TO_GPU, m_VulkanBuffer )
-                                      .GetValue();
+            // ASKED, NOT ASSUMED. GetValue() on a failed result is a default-constructed VmaAllocation —
+            // null — and the two branches beside this one already refuse; this one used to report the
+            // whole Invalidate as a success while leaving the buffer bound to nothing.
+            const auto allocated = allocator->RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
+                                                                 VMA_MEMORY_USAGE_CPU_TO_GPU, m_VulkanBuffer );
+            if ( !allocated.IsSuccess() )
+                return Common::MakeError<bool>( allocated.GetError() );
+            m_MemoryAllocation = allocated.GetValue();
         }
 
         else [[likely]]
@@ -116,10 +126,17 @@ namespace Desert::Graphic::API::Vulkan
             auto stagingBufferAllocationVAL = stagingBufferAllocation.GetValue();
 
             // copy data to staging buffer
-
-            auto destData = allocator->MapMemory( stagingBufferAllocationVAL );
-            memcpy( destData, m_StorageBuffer.Data, m_StorageBuffer.Size );
-            allocator->UnmapMemory( stagingBufferAllocationVAL );
+            {
+                MappedMemory staged = allocator->MapMemory( stagingBufferAllocationVAL );
+                const auto   wrote  = staged.Write( m_StorageBuffer.Data, m_StorageBuffer.Size );
+                if ( !wrote.IsSuccess() )
+                {
+                    staged.Unmap();
+                    allocator->RT_DestroyBuffer( stagingBuffer, stagingBufferAllocationVAL );
+                    return Common::MakeFormattedError<bool>( "vertex buffer staging upload: {}",
+                                                             wrote.GetError() );
+                }
+            }
 
             auto vertexBufferCreateInfo = CreateVertexBufferInfo(
                  m_Size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,

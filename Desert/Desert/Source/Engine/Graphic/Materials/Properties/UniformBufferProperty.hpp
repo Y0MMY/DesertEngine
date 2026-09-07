@@ -40,7 +40,19 @@ namespace Desert::Graphic
             if ( !ClaimFill( ShaderResources::FillKind::Fields, "UpdateFields" ) )
                 return;
 
-            [[maybe_unused]] const auto mapPtr = m_Buffer->MapMemory();
+            // THE ANSWER IS READ NOW, AND THE OLD SHAPE IS WHY. This was
+            // `[[maybe_unused]] const auto mapPtr = m_Buffer->MapMemory();` — a pointer taken and thrown
+            // away. When the mapping had failed, every SetData below silently wrote nothing and the
+            // fields were then marked CLEAN, so the material reported an upload that never happened and
+            // the buffer kept last frame's contents with no line anywhere saying so.
+            const auto mapped = m_Buffer->EnsureMapped();
+            if ( !mapped.IsSuccess() )
+            {
+                LOG_ERROR( "[UB] '{}': UpdateFields has nowhere to write, so the fields stay dirty -- {}",
+                           m_Buffer->GetName(), mapped.GetError() );
+                return;
+            }
+
             for ( auto& field : m_FieldProperties )
             {
                 if ( field.IsDirty() )
@@ -50,7 +62,6 @@ namespace Desert::Graphic
                     field.MarkClean();
                 }
             }
-            m_Buffer->UnmapMemory();
             MarkDirty(); // every slot owes itself this write
         }
 
@@ -125,11 +136,16 @@ namespace Desert::Graphic
                            "UniformBufferProperty::SetRawData: data size ({}) exceeds buffer size ({})", size,
                            bufferSize );
 
-            [[maybe_unused]] const auto mapPtr = m_Buffer->MapMemory();
+            // Read, not discarded — see UpdateFields above for the defect the discarded form hid.
+            const auto mapped = m_Buffer->EnsureMapped();
+            if ( !mapped.IsSuccess() )
+            {
+                LOG_ERROR( "[UB] '{}': SetRawData has nowhere to write -- {}", m_Buffer->GetName(),
+                           mapped.GetError() );
+                return;
+            }
 
             m_Buffer->SetData( reinterpret_cast<const void*>( data ), size, 0 );
-
-            m_Buffer->UnmapMemory();
 
             MarkDirty(); // every slot owes itself this write
         }

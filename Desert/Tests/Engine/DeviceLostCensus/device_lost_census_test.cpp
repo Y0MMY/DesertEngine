@@ -199,6 +199,8 @@ namespace
     constexpr DroppedResult k_Census[] = {
          // ---- returns void: nothing to check, listed for completeness -------------------------------
          { "VulkanAllocator.cpp", "vmaUnmapMemory", 1, "void" },
+         // Г7-C: the mapping's SIZE, so MappedMemory can refuse a write that runs off the end of it.
+         { "VulkanAllocator.cpp", "vmaGetAllocationInfo", 1, "void" },
          { "VulkanDevice.cpp", "vkGetPhysicalDeviceProperties", 3, "void" },
          { "VulkanDevice.cpp", "vkGetPhysicalDeviceFeatures", 1, "void" },
          { "VulkanDevice.cpp", "vkGetPhysicalDeviceFormatProperties", 3, "void" },

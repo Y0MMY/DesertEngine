@@ -17,8 +17,7 @@ namespace Desert::ShaderResources::API::Vulkan
 
         virtual void SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
 
-        virtual uint8_t* MapMemory() override;
-        virtual void     UnmapMemory() override;
+        NO_DISCARD virtual Common::BoolResultStr EnsureMapped() override;
 
         // The descriptor for (@p frameIndex x RECORDING RENDERER). The slot is resolved here rather than
         // passed in: every caller wants the copy for the renderer that is recording, and threading a
@@ -46,6 +45,8 @@ namespace Desert::ShaderResources::API::Vulkan
         std::vector<VmaAllocation>          m_MemoryAllocs;
         std::vector<VkBuffer>               m_Buffers;
         std::vector<VkDescriptorBufferInfo> m_DescriptorInfos;
-        std::vector<uint8_t*>               m_MappedMemories;
+        // One persistent mapping per copy. `MappedMemory` rather than `uint8_t*`: the mapping unmaps
+        // itself when this vector is cleared, and nothing here can write through a copy whose map failed.
+        std::vector<Desert::Graphic::MappedMemory> m_Mappings;
     };
 } // namespace Desert::ShaderResources::API::Vulkan
