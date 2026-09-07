@@ -1198,6 +1198,9 @@ TEST( PreferenceOwnershipUnknownKeys, LoadingWritesTheFileBackWithoutTheRetiredK
     EditorPreferences::Get() = EditorPreferences{};
     EditorPreferences::Load();
     EXPECT_EQ( ReadWholeFile( PrefsPath() ), marked ) << "the retirement fires on every launch";
+}
+
+// ---------------------------------------------------------------------------------------------------
 // 8. К10 — A VIEWPORT MODE IS NOT A PREFERENCE
 // ---------------------------------------------------------------------------------------------------
 //
