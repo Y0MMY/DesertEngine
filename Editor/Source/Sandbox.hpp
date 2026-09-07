@@ -5,6 +5,7 @@
 
 #include <Editor/Core/CommandLine.hpp>
 #include <Editor/Core/ProjectContext.hpp>
+#include <Engine/Project/EngineRegistration.hpp>
 #include <Editor/Core/ShotOptions.hpp>
 #include <Editor/Core/Control/ControlChannelOptions.hpp>
 
@@ -67,12 +68,34 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
     // folder, so it must happen BEFORE anything engine-side spins up.
     if ( !options.Project.empty() )
     {
-        if ( !Desert::Editor::ProjectContext::Open( options.Project ) )
+        // A headless capture run stays OUT of the recent-projects registry. Those runs happen in
+        // agent worktrees that are reclaimed within the hour, and each one used to file itself at
+        // the top of the developer's list — which is why the live registry on this machine is
+        // mostly dead paths, and why the launcher needs an "unopenable entry" state at all.
+        const auto record = options.Shot.Active() ? Desert::Editor::ProjectContext::RecordInRecent::No
+                                                  : Desert::Editor::ProjectContext::RecordInRecent::Yes;
+        if ( !Desert::Editor::ProjectContext::Open( options.Project, record ) )
         {
             std::fprintf( stderr, "Could not open project '%s' (missing or corrupt .deproj).\n",
                           options.Project.c_str() );
             std::exit( 1 );
         }
+    }
+
+    // Where this engine is, written down for the launcher — which after L3 has no DESERT_ROOT of
+    // its own and no other way to find an engine. Skipped for the same runs the recent list skips:
+    // a `--shot` run inside a worktree would otherwise register that worktree as an installed
+    // engine, and reclaiming it a day later would leave the launcher offering to start something
+    // that is gone.
+    if ( !options.Shot.Active() )
+    {
+        const char* engineRoot = std::getenv( "DESERT_ROOT" );
+        if ( const auto registered = Desert::Project::RegisterThisEngine(
+                  Desert::Editor::ProjectContext::ConfigDirectory(), engineRoot ? engineRoot : "" );
+             !registered.IsSuccess() )
+            // stderr, not a log line: the consequence is that the LAUNCHER will not list this
+            // engine, and the person who needs to know that is the one reading this terminal.
+            std::fprintf( stderr, "[Engine] %s\n", registered.GetError().c_str() );
     }
 
     // Published before the renderer exists: the flags have to be in force for the very first frame, or a

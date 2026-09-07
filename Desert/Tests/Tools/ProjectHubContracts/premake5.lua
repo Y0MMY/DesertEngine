@@ -21,7 +21,14 @@ project(test_name)
         "%{wks.location}/Tools/ProjectHub/Source/Files.cpp",
         "%{wks.location}/Tools/ProjectHub/Source/Launch.cpp",
         "%{wks.location}/Tools/ProjectHub/Source/Projects.cpp",
+        "%{wks.location}/Tools/ProjectHub/Source/HubConfig.cpp",
+        -- The thumbnail cache decodes PNGs and hands them to a backend it is GIVEN, so the suite can
+        -- run it with a counting backend and no window, no device and no graphics API at all — which
+        -- is the whole reason the decode budget is testable.
+        "%{wks.location}/Tools/ProjectHub/Source/Thumbnails.cpp",
+        "%{wks.location}/ThirdParty/stb/stb_image.cpp",
         "%{wks.location}/ThirdParty/desert-shared/Source/ProjectFormat.cpp",
+        "%{wks.location}/ThirdParty/desert-shared/Source/EngineRegistry.cpp",
     }
 
     includedirs {
@@ -32,6 +39,7 @@ project(test_name)
     -- would otherwise drown our own diagnostics in theirs.
     externalincludedirs {
         "%{wks.location}/ThirdParty/spdlog/include", -- the fmt headers ResultStr.hpp needs
+        "%{wks.location}/ThirdParty/stb/include",
     }
 
     for name, path in pairs(deps.TestSpecific.IncludeDir) do

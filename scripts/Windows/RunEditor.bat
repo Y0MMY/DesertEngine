@@ -18,6 +18,11 @@ if not exist "%EDITOR%" (
     exit /b 1
 )
 
+REM Where this engine lives, so the Editor can record itself in %USERPROFILE%\.desertengine\engines.json
+REM — the file the launcher reads to find an engine at all. Set BEFORE the `cd`, because after it
+REM %CD% is the Editor folder.
+set "DESERT_ROOT=%CD%"
+
 REM The engine resolves Resources/... relative to the working directory.
 cd Editor
 

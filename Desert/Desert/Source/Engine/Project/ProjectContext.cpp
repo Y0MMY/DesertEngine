@@ -3,6 +3,7 @@
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/Version.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -35,7 +36,7 @@ namespace Desert::Project
         return dir.string();
     }
 
-    bool ProjectContext::Open( const std::string& deprojPath )
+    bool ProjectContext::Open( const std::string& deprojPath, RecordInRecent record )
     {
         // Disk first (dev, loose .deproj), else a packaged game serves the descriptor from a mounted .dpak.
         if ( !Common::Utils::FileSystem::Exists( deprojPath ) )
@@ -82,7 +83,10 @@ namespace Desert::Project
                 std::filesystem::create_directories( Common::Constants::Path::ASSETS_PATH / folder, ec );
         }
 
-        if ( onDisk ) // don't pollute the dev hub's recent-projects list from a packaged game
+        // Two independent reasons to stay out of the registry, and they are not the same reason: a
+        // packaged game reads its descriptor out of a mounted .dpak and is not on this machine's
+        // disk at all, and a headless capture run is on disk but is not a person opening a project.
+        if ( onDisk && record == RecordInRecent::Yes )
             RegisterRecent( s_FilePath );
         LOG_INFO( "[Project] Opened '{}' ({}) — assets root: {}", s_Current->Name, s_FilePath,
                   Common::Constants::Path::ASSETS_PATH.string() );
@@ -93,6 +97,11 @@ namespace Desert::Project
     {
         if ( !s_Current || s_FilePath.empty() )
             return false;
+        // Stamped on the way out, at the one place the descriptor is written: EngineVersion means
+        // "the build that last wrote this file", so deriving it anywhere else would make it a claim
+        // about something other than this write. A project the launcher created and nobody has
+        // saved yet keeps the version the launcher put there.
+        s_Current->EngineVersion = Common::Version::Full();
         // Atomic (write-then-rename), because the .deproj is the one file without which the project
         // does not open at all: the plain primitive truncates in place, so a write interrupted half
         // way used to leave zero bytes where the descriptor was.
@@ -142,7 +151,7 @@ namespace Desert::Project
         return ( std::filesystem::path( Directory() ) / s_Current->DefaultScene ).string();
     }
 
-    std::vector<std::string> ProjectContext::RecentProjects()
+    Common::Project::ProjectsRegistry ProjectContext::RecentProjects()
     {
         if ( !std::filesystem::exists( RegistryFile() ) )
             return {};
@@ -157,31 +166,26 @@ namespace Desert::Project
             LOG_ERROR( "[Project] {}: {}", RegistryFile(), parsed.GetError() );
             return {};
         }
-        return parsed.ExtractValue().Projects;
+        // The reader migrates a registry from before LastOpened; the write below then puts the
+        // current shape on disk, so the file upgrades the first time any project is opened.
+        return parsed.ExtractValue();
     }
 
     void ProjectContext::RegisterRecent( const std::string& deprojPath )
     {
-        // Most recent first, unique, and NOT capped. There used to be a silent cap of ten here and
-        // an identical one in the launcher (Tools/ProjectHub, Hub::PromoteRecent) — this file is
-        // shared, so the two had to be lifted together: an uncapped hub next to a capped engine
-        // would have dropped everything past the tenth entry the moment any project was opened.
-        // The cap was safe to lose only once a dead entry became visible: the launcher now resolves
-        // every line against the disk and offers Remove, so the list is curated rather than
-        // truncated. Both copies of this policy move into desert-shared with the {Path, LastOpened}
-        // registry (L2 §10.4, stage E1); until then they are two places that must say the same thing.
-        auto projects = RecentProjects();
-        projects.erase( std::remove( projects.begin(), projects.end(), deprojPath ), projects.end() );
-        projects.insert( projects.begin(), deprojPath );
+        // The policy — most recent first, unique, no cap, LastOpened stamped — is ONE function in
+        // desert-shared now, called by this side and by the launcher. It used to be two copies over
+        // one shared file, which is how both of them ended up carrying the same silent cap of ten:
+        // lifting either alone would have had the other erase what it kept.
+        auto registry = RecentProjects();
+        Common::Project::PromoteRecent( registry, deprojPath, Common::Project::UnixNow() );
 
         // Atomic (write-then-rename): this file is shared with the Project Hub, and an interrupted
         // in-place write left a torn projects.json that neither side could parse — every recent
         // project gone over one crash at the wrong moment. On failure the registry simply keeps its
         // previous list, which is the right outcome for a convenience file: name it and move on.
         if ( !Common::Utils::FileSystem::WriteContentToFileAtomic(
-                  std::filesystem::path( RegistryFile() ),
-                  Common::Project::WriteProjectsRegistry(
-                       Common::Project::ProjectsRegistry{ std::move( projects ) } ) ) )
+                  std::filesystem::path( RegistryFile() ), Common::Project::WriteProjectsRegistry( registry ) ) )
             LOG_ERROR( "[Project] Could not update the recent-projects registry {} — it keeps its "
                        "previous contents",
                        RegistryFile() );
