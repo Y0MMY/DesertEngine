@@ -585,10 +585,13 @@ namespace
          { "ComputePipeline", "GetOutput", "Desert/Desert/Source/Engine/Graphic/Pipeline.hpp",
            "FENCED (API/Vulkan): outputs are set, never read back." },
          { "Device", "IsFormatSupported", "Desert/Desert/Source/Engine/Core/Device.hpp",
-           "FENCED (API/Vulkan): format support is asked through the capability struct instead." },
+           "FENCED (API/Vulkan), and the sharpest row here: its own comment says 'Prefer this over "
+           "adding another Supports<Feature> bool' -- the RECOMMENDED question is the one nobody asks. "
+           "Every caller still reads the cached DeviceCapabilities flags beside it." },
          { "MaterialBackend", "ApplyPushConstants",
            "Desert/Desert/Source/Engine/Graphic/Materials/MaterialBackend.hpp",
-           "FENCED (API/Vulkan): push constants are written by the pipeline, not the material backend." },
+           "FENCED (API/Vulkan): the renderer pushes them itself at draw time out of "
+           "MaterialExecutor::GetPushConstantBuffer(); this second route was never taken." },
          { "UniformImage2D", "GetImageHash", "Desert/Desert/Source/Engine/ShaderResources/UniformImage2D.hpp",
            "FENCED (API/Vulkan): the descriptor caches key off Image::GetHash directly." },
          { "UniformImageCube", "GetImageHash", "Desert/Desert/Source/Engine/ShaderResources/UniformImageCube.hpp",
@@ -611,8 +614,11 @@ namespace
          // ---- EDITOR INTERFACES WHOSE CALLER WAS NEVER WRITTEN ---------------------------------------
          { "IComponentWidget", "EntityHasComponent",
            "Editor/Source/Editor/Panels/SceneProperties/ComponentWidgets/IComponentWidget.hpp",
-           "UNASSIGNED: the add/remove-component surface of the Details widgets; the panel does it "
-           "another way. Needs a task to remove the interface or to route Details through it." },
+           "UNASSIGNED, and the most useful row of the three: the CRTP ComponentWidget<T> implements all "
+           "three `override final` for every widget, and ScenePropertiesPanel still asks "
+           "`entity.HasComponent<T>()` in a hand-written if-chain per component type. The generic route "
+           "exists and is bypassed, so every new component type costs another branch. A task should "
+           "either route Details through it or delete it." },
          { "IComponentWidget", "AddComponentToEntity",
            "Editor/Source/Editor/Panels/SceneProperties/ComponentWidgets/IComponentWidget.hpp",
            "UNASSIGNED: same interface." },
@@ -631,7 +637,8 @@ namespace
 
          // ---- ONE LEFTOVER ---------------------------------------------------------------------------
          { "MeshAsset", "GetMaterialHandle", "Desert/Desert/Source/Engine/Assets/Mesh/MeshAsset.hpp",
-           "UNASSIGNED: both mesh assets implement it; materials are resolved per-submesh instead." },
+           "UNASSIGNED: the SINGULAR of a pair. Both mesh assets implement it, and every caller in the "
+           "engine and the editor uses the plural GetMaterialHandles() beside it." },
     };
 
     std::string Key( const std::string& cls, const std::string& method )
