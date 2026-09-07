@@ -32,6 +32,17 @@ namespace Desert::Graphic::System
         {
         } // histogram + 1x1 buffers are viewport-independent
 
+        // The adapted luminance IS a temporal history — see IRenderSystem::OnSceneReplaced, kind 1 — and
+        // the one it now holds belongs to a world that is gone. Adapting out of it would be a ~1 s ramp
+        // from the old scene's brightness, which is right when a player walks out of a cave and wrong when
+        // a level is loaded. Handled as a one-frame snap rather than by writing the 1x1 image from the CPU:
+        // the adaptation is `mix(prev, target, 1 - exp(-dt * speed))` on the GPU, so an effectively
+        // infinite speed for one dispatch lands exactly on the new scene's own measured luminance.
+        void OnSceneReplaced() override
+        {
+            m_SnapNextAdaptation = true;
+        }
+
         void SetParams( float adaptSpeed, float minLuma, float maxLuma )
         {
             m_AdaptSpeed = adaptSpeed;
@@ -55,8 +66,10 @@ namespace Desert::Graphic::System
         std::shared_ptr<ComputePipeline> m_HistogramPipeline;
         std::shared_ptr<ComputePipeline> m_AveragePipeline;
 
-        int   m_ReadIndex  = 0; // holds the latest adapted luminance after Execute
-        float m_AdaptSpeed = 1.5f;
+        int m_ReadIndex = 0; // holds the latest adapted luminance after Execute
+        // Set by OnSceneReplaced, consumed and cleared by the next Execute — see that override.
+        bool  m_SnapNextAdaptation = false;
+        float m_AdaptSpeed         = 1.5f;
         float m_MinLuma    = 0.02f;
         float m_MaxLuma    = 8.0f;
     };

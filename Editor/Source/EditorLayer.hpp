@@ -174,6 +174,11 @@ namespace Desert::Editor
         void DrawProjectPopup();
 
         void PrepareScenePopup();
+        // Every .desce under the project's scenes root, recursively, sorted by the label the UI shows.
+        // Two readers: the Open Scene popup (through m_AvailableScenes) and the command palette, which
+        // does NOT cache it — the palette is rebuilt only while it is open or when the control channel
+        // asks, which is exactly when a fresh answer is wanted.
+        static std::vector<Common::Filepath> CollectAvailableScenes();
         void LoadScene( const Common::Filepath& path );
         void LoadSceneInternal( const Common::Filepath& path );
 

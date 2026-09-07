@@ -15,23 +15,68 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace Desert::Graphic
 {
+    namespace
+    {
+        // WHAT MAKES A REGISTERED SYSTEM THE SCENE'S RATHER THAN THE RENDERER'S, as one string. Two places
+        // read it and they must not be able to disagree: ExternalSystemKey() stamps it onto every pass the
+        // editor registers, and SceneRenderer::RebindScene() drops exactly the entries carrying it when a
+        // different scene arrives. A prefix renamed in one of the two would leave the rebind matching
+        // nothing while still compiling, and the previous scene's grid would keep drawing over the new one.
+        constexpr std::string_view kExternalSystemPrefix = "External:";
+    } // namespace
+
     void SceneRenderer::Init()
     {
-        // Init may run more than once (e.g. on scene load). Wait for GPU before destroying the old
-        // systems — their materials own descriptor pools that may still be in use by in-flight frames.
-        Renderer::GetInstance().WaitDeviceIdle();
+        // Init runs on the first scene AND on every scene after it — see the header for the two lifetimes
+        // this splits into and the rule that separates them. The timings are logged because the cost of
+        // this call is what Г11 was about and a claim about it should be readable from any run's log
+        // rather than re-measured.
+        const auto started = std::chrono::steady_clock::now();
 
-        // Rebuild from scratch so every system and its framebuffers are recreated consistently —
-        // stale systems hold weak_ptrs to framebuffers that get recreated here, which would dangle.
-        m_RenderSystems.clear();
-        m_RenderSystemOrder.clear();
+        const bool built = EnsureRendererResources();
 
-        // Pipelines key off framebuffer pointers that are recreated below; drop the cache so systems
-        // request fresh pipelines during their Initialize().
-        m_PipelineCache.Clear();
+        const auto resourcesDone = std::chrono::steady_clock::now();
+
+        RebindScene();
+
+        const auto done = std::chrono::steady_clock::now();
+
+        const auto ms = []( auto from, auto to )
+        { return std::chrono::duration<float, std::milli>( to - from ).count(); };
+
+        // The pipeline number is the SHARED CACHE's size and not this renderer's pipeline count — most
+        // systems still build their own with GraphicsPipeline::Create rather than asking the cache, so the
+        // total is several times larger. Printed anyway, and named accurately, because it is the one
+        // pipeline number that can be read without a graphics debugger and it moves when the cache is
+        // wrongly dropped.
+        if ( built )
+        {
+            LOG_INFO( "[SceneRenderer] Renderer slot {} built in {:.1f} ms ({} systems, {} cached pipelines) "
+                      "and bound its first scene in {:.1f} ms.",
+                      m_SlotLease.RecordingSlot(), ms( started, resourcesDone ), m_RenderSystemOrder.size(),
+                      m_PipelineCache.Size(), ms( resourcesDone, done ) );
+        }
+        else
+        {
+            LOG_INFO( "[SceneRenderer] Renderer slot {} rebound to a new scene in {:.1f} ms ({} systems and "
+                      "{} cached pipelines kept).",
+                      m_SlotLease.RecordingSlot(), ms( started, done ), m_RenderSystemOrder.size(),
+                      m_PipelineCache.Size() );
+        }
+    }
+
+    bool SceneRenderer::EnsureRendererResources()
+    {
+        if ( m_RendererResourcesBuilt )
+            return false;
+
+        m_RendererResourcesBuilt = true;
 
         // Ensure the phase registry exists before any system registers custom phases or passes.
         RenderPhaseRegistry::CreateInstance();
@@ -253,6 +298,56 @@ namespace Desert::Graphic
                                               m_RenderGraphBuilder );
         if ( !SP_CAST( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Initialize() )
             DESERT_VERIFY( false );
+
+        // The graph is NOT built here: RebindScene() runs immediately after and builds it once, over the
+        // engine systems above plus whatever external passes survive. Building it twice on the first Init
+        // would be the only place in the engine that did.
+        return true;
+    }
+
+    void SceneRenderer::RebindScene()
+    {
+        // Everything below drops render systems, and a render system owns pipelines and descriptor pools
+        // the last submitted frame may still be executing against. Same rule, same reason, as the five
+        // sites that destroy a whole SceneRenderer (Desert/Tests/Engine/TeardownOrder).
+        //
+        // Paid on EVERY scene load even when there is nothing to drop. That is deliberate: the caller has
+        // just cleared the entity registry and is about to destroy the RenderRegistry, so the frame that
+        // was in flight when the load was requested is referencing objects on their way out either way.
+        Renderer::GetInstance().WaitDeviceIdle();
+
+        // THE PREVIOUS SCENE'S EDITOR PASSES. Collected first and erased after, because ForgetRenderSystem
+        // mutates both containers being walked.
+        //
+        // Matched by the "External:" prefix that RegisterExternalPass itself stamps on — one place decides
+        // what an external pass is called and one place decides what counts as one, so a rename cannot
+        // leave this loop matching nothing while still compiling.
+        std::vector<std::string> external;
+        for ( const auto& name : m_RenderSystemOrder )
+        {
+            if ( name.starts_with( kExternalSystemPrefix ) )
+                external.push_back( name );
+        }
+        for ( const auto& name : external )
+            ForgetRenderSystem( name );
+
+        if ( !external.empty() )
+            LOG_INFO( "[SceneRenderer] Dropped {} external pass(es) belonging to the previous scene.",
+                      external.size() );
+
+        // ...and tell what is LEFT — the engine systems, which are the renderer's and stay — that the world
+        // they have been accumulating over is gone. Most of them do nothing with it; the ones that do are a
+        // temporal history and a per-entity GPU cache, and IRenderSystem::OnSceneReplaced says why those two
+        // are the only kinds that can exist here.
+        //
+        // Walked over m_RenderSystemOrder rather than the map for the reason RebuildRenderGraph gives: the
+        // map's operator[] accesses elsewhere in this file insert null entries, and the order vector never
+        // holds one.
+        for ( const auto& name : m_RenderSystemOrder )
+        {
+            if ( const auto it = m_RenderSystems.find( name ); it != m_RenderSystems.end() && it->second )
+                it->second->OnSceneReplaced();
+        }
 
         RebuildRenderGraph();
     }
@@ -1292,8 +1387,12 @@ namespace Desert::Graphic
     {
         // Adapts an ExternalPassSpecification to the render-system interface so external passes flow
         // through the same graph build as engine systems (phases, dependencies, same-target merging).
-        // The target framebuffer is looked up at RegisterPasses time, so the adapter survives
-        // SceneRenderer re-Init (which recreates the framebuffers) until the owner re-registers.
+        // The target framebuffer is looked up at RegisterPasses time rather than captured, so a resize
+        // that recreates it cannot leave the pass pointing at the old one.
+        //
+        // These are the SCENE's, not the renderer's: the spec closes over the editor's RenderRegistry for a
+        // particular scene, and SceneRenderer::RebindScene drops every one of them when a different scene
+        // is bound. The owner re-registers against the new scene immediately afterwards.
         class ExternalPassSystem final : public IRenderSystem
         {
         public:
@@ -1333,7 +1432,7 @@ namespace Desert::Graphic
         // Namespace external passes so they can never collide with (or evict) an engine system.
         std::string ExternalSystemKey( const std::string& name )
         {
-            return "External:" + name;
+            return std::string( kExternalSystemPrefix ) + name;
         }
     } // namespace
 

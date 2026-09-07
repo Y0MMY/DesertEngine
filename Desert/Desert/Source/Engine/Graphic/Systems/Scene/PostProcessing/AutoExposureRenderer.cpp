@@ -150,7 +150,16 @@ namespace Desert::Graphic::System
                                          GroupCount( sceneH ), 1 );
 
         // 3) Resolve: percentile-clipped weighted average + temporal adaptation -> newLum (1x1).
-        AveragePush ap{ kDeltaTime,        m_AdaptSpeed,    m_MinLuma,          m_MaxLuma,
+        //
+        // kSnapAdaptSpeed makes `1 - exp(-dt * speed)` exactly 1 in float for any dt this engine produces,
+        // so the shader's mix lands on the measured luminance with no ramp at all. Consumed here, once, so
+        // a scene load costs one instant adaptation and every frame after it adapts normally.
+        constexpr float kSnapAdaptSpeed = 1.0e6f;
+
+        const float adaptSpeed = m_SnapNextAdaptation ? kSnapAdaptSpeed : m_AdaptSpeed;
+        m_SnapNextAdaptation   = false;
+
+        AveragePush ap{ kDeltaTime,        adaptSpeed,      m_MinLuma,          m_MaxLuma,
                         kWindow.MinLogLum, kWindow.Range(), kWindow.LowPercent, kWindow.HighPercent };
         m_AveragePipeline->SetStorageBuffer( 0, m_Histogram.get() );
         m_AveragePipeline->SetInput( 1, prevLum );

@@ -546,12 +546,20 @@ namespace Desert::Editor
         // `--scene` or for the project's default scene, so by the time OnAttach gets here the empty "New
         // Scene" this would build a renderer for is a scene NOBODY WILL EVER SEE: OnUpdate returns early
         // for the whole of the staged startup load and draws no scene frame, and the first thing it does
-        // when that finishes is LoadSceneInternal, whose own Init() throws this one away. Measured at
-        // ~1.4 s of every Debug start (Г8) — pipelines and framebuffers built, waited on and destroyed.
+        // when that finishes is LoadSceneInternal, whose own Init() ran second. Measured at ~1.4 s of every
+        // Debug start (Г8) — pipelines and framebuffers built, waited on and destroyed.
         //
-        // It is NOT a "run Init once" flag: re-running Init() is legal and is how a scene load rebuilds
-        // the renderer. Only this first, pre-empted one is skipped, and the deferred-load site in
-        // OnUpdate is what guarantees the scene ends up initialised even if the load refuses the file.
+        // WHAT THIS SAVES CHANGED WITH Г11, AND THE LINE IS STILL RIGHT. Init() no longer rebuilds the
+        // renderer on a second call, so the first one would no longer be THROWN AWAY — it would simply
+        // happen earlier. What it would still be is a renderer built against an empty scene, before the
+        // staged startup load has cooked and preloaded anything, on a frame nobody sees; deferring it to
+        // the load that a person is actually waiting for is what keeps the two costs from being paid one
+        // after the other in the same second.
+        //
+        // It is NOT a "run Init once" flag: re-running Init() is legal, and is what binds a newly loaded
+        // scene to the renderer (SceneRenderer::Init — the renderer half is once, the scene half is every
+        // time). Only this first, pre-empted one is skipped, and the deferred-load site in OnUpdate is what
+        // guarantees the scene ends up initialised even if the load refuses the file.
         //
         // Propagated rather than reported: OnAttach owns a channel and Application::PushLayer now reads
         // it, and an editor whose main scene never initialised has no viewport to show anything in.
@@ -2747,6 +2755,12 @@ namespace Desert::Editor
         return BOOLSUCCESS;
     }
 
+    // Defined with the Open Scene popup's other helpers, further down this file; declared here because the
+    // command palette names its scene entries the same way that popup does, and one naming rule is the
+    // point — a level offered as "Arena.desce" in one list and "Levels/Arena.desce" in the other is two
+    // names for one thing, and the channel would then have a name the UI never shows.
+    static std::string SceneLabel( const Common::Filepath& path );
+
     std::vector<PaletteCommand> EditorLayer::BuildPaletteCommands()
     {
         std::vector<PaletteCommand> commands;
@@ -2944,6 +2958,22 @@ namespace Desert::Editor
                 commands.push_back( { "Open", metadata.Filepath.filename().generic_string(),
                                       [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
             }
+        }
+
+        // THE LEVELS, which every other kind of document could already be opened by name from here and a
+        // level could not — the one thing an editor exists to open was the one thing the palette had no
+        // entry for, and therefore the one thing the control channel could not ask for either (the
+        // channel's vocabulary IS this list). A separate group from "Open" above because these are not
+        // documents: opening one REPLACES the world rather than adding a tab.
+        //
+        // Routed through SceneOpenRequest, not through LoadScene, on purpose: that is the path that runs
+        // the unsaved-changes gate, and a palette entry is at least as easy to hit by accident as the
+        // drag-and-drop it was written for.
+        for ( const Common::Filepath& scene : CollectAvailableScenes() )
+        {
+            const std::string path = scene.string();
+            commands.push_back( { "Scene", "Open Scene " + SceneLabel( scene ),
+                                  [path] { Editor::Core::SceneOpenRequest::Request( path ); } } );
         }
 
         // NAMED VIEWPOINTS for the focused document's preview — the replacement for `--preview-orbit
@@ -3601,9 +3631,9 @@ namespace Desert::Editor
         return rel;
     }
 
-    void EditorLayer::PrepareScenePopup()
+    std::vector<Common::Filepath> EditorLayer::CollectAvailableScenes()
     {
-        m_AvailableScenes.clear();
+        std::vector<Common::Filepath> scenes;
 
         const auto scenePath = Common::Constants::Path::SCENE_PATH;
 
@@ -3621,15 +3651,19 @@ namespace Desert::Editor
 
             std::error_code fileEc; // separate: a failed stat must not end the whole walk
             if ( std::filesystem::is_regular_file( it->path(), fileEc ) )
-                m_AvailableScenes.push_back( it->path() );
+                scenes.push_back( it->path() );
         }
 
         // Sorted by the label the list shows, which keeps every folder's scenes contiguous (they share the
         // "Folder/" prefix) — that is what the folder headers in the popup rely on.
-        std::sort( m_AvailableScenes.begin(), m_AvailableScenes.end(),
-                   []( const Common::Filepath& a, const Common::Filepath& b )
+        std::sort( scenes.begin(), scenes.end(), []( const Common::Filepath& a, const Common::Filepath& b )
                    { return SceneLabel( a ) < SceneLabel( b ); } );
+        return scenes;
+    }
 
+    void EditorLayer::PrepareScenePopup()
+    {
+        m_AvailableScenes    = CollectAvailableScenes();
         m_SelectedSceneIndex = -1;
         m_SceneFilter[0]     = '\0';
     }

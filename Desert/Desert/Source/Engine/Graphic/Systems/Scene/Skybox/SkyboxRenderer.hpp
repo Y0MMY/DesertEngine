@@ -224,8 +224,13 @@ namespace Desert::Graphic::System
         // What the environment on the device was baked from, on the CLOUD side —
         // Graphic::CloudEnvironmentFingerprint of the field the panorama saw. 0 means "no clouds", which
         // is also the value of a scene that has never had any, so the first bake of a cloudless sky is not
-        // charged for one. See ShouldRebakeSkyEnvironment: this is the half of the trigger the sun is not.
+        // charged for one. See ShouldRebakeSkyEnvironment: this is one of the two keys the sun is not.
         uint64_t m_BakedCloudFingerprint = 0;
+
+        // ...and the other one: what it was baked from on the SKY side, Graphic::SkyBakeFingerprint of the
+        // packed block plus the panorama's extent. Stamped only by a bake that SUCCEEDED, exactly like
+        // m_BakedSunDir above — a failed bake that stamped its inputs would look up to date forever.
+        uint64_t m_BakedSkyFingerprint = 0;
 
         // Debounce state (see SkyEnvironmentRebakeMayRun). m_SecondsSinceSunMoved is how long the sun has
         // held still, m_SecondsSinceStale how long a rebake has been wanted; the first collapses a drag

@@ -126,10 +126,22 @@ namespace Desert::Graphic
     // the field the panorama on the device was baked from and of this frame's, and 0 means "no clouds" —
     // so deleting the layer rebakes exactly as adding it does. Wind and the modelling region's origin are
     // deliberately absent from that number; the reason is written where it is computed.
+    //
+    // NOR IS THE SUN THE ONLY THING ABOUT THE SKY ITSELF. Coverage was the second key; the sky's OWN
+    // parameters are the third, and they were missing until Г11. Ground albedo, the medium, the model
+    // switch, the whole artistic palette, the panorama's resolution — every one of them changes what the
+    // dome radiates, none of them moves the sun, and with only the first two keys the environment stayed
+    // baked from whatever sky was there before. The visible form: the sky pixels change the instant a knob
+    // moves (they are marched every frame) and the light on the ground does not. It is also what a scene
+    // LOAD looks like from the renderer's side — a different sky arriving with the sun in much the same
+    // place — which is why this key is what makes reusing a renderer across scenes correct.
+    // @p bakedSkyFingerprint / @p currentSkyFingerprint are Graphic::SkyBakeFingerprint; see it for why
+    // the sun's direction is the one thing it leaves out.
     inline bool ShouldRebakeSkyEnvironment( const glm::vec3& bakedSunDir, const glm::vec3& currentSunDir,
                                             float thresholdDeg, bool autoRebake, bool hasEnvironment,
                                             bool explicitRequest, uint64_t bakedCloudFingerprint,
-                                            uint64_t currentCloudFingerprint )
+                                            uint64_t currentCloudFingerprint, uint64_t bakedSkyFingerprint,
+                                            uint64_t currentSkyFingerprint )
     {
         if ( explicitRequest )
             return true;
@@ -142,10 +154,13 @@ namespace Desert::Graphic
         if ( !autoRebake )
             return false;
 
-        // Checked BEFORE the sun, because it is exact where the sun's test is a threshold: the clouds
-        // either are the ones that were baked or they are not, and an artist dragging Coverage while the
-        // sun stands still would otherwise see nothing happen.
+        // Checked BEFORE the sun, because they are exact where the sun's test is a threshold: the clouds
+        // and the sky either are the ones that were baked or they are not, and an artist dragging Coverage
+        // or Ground Albedo while the sun stands still would otherwise see nothing happen.
         if ( bakedCloudFingerprint != currentCloudFingerprint )
+            return true;
+
+        if ( bakedSkyFingerprint != currentSkyFingerprint )
             return true;
 
         const float baked   = glm::length( bakedSunDir );

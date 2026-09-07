@@ -92,6 +92,17 @@ namespace Desert::ECS
 
             // The HDR cubemap is the other Sky-pass mode: only when no atmosphere is driving the sky, and
             // only if an asset is assigned.
+            //
+            // EXACTLY ONE COMMAND EVERY FRAME, carrying the cubemap or carrying NOTHING. It used to be
+            // emitted only in the case that found one, which made "this scene has no HDR skybox"
+            // inexpressible — and the renderer keeps its state across frames by design, so a cubemap it was
+            // once given stayed. Deleting the SkyboxComponent left it drawing; switching the atmosphere on
+            // left it feeding the IBL; loading a level without one onto a renderer that had one left the
+            // previous LEVEL's sky behind the new world. Same rule, same reason, as the "no sky" command
+            // above and as VolumetricCloudECSSystem's `present = false`.
+            std::shared_ptr<Graphic::MaterialSkybox> cubemap;
+            float                                    cubemapIntensity = 1.0f;
+
             if ( Graphic::ResolveSkyMode( atmosphereEnabled, /*hasHdrSkybox=*/true ) ==
                  Graphic::SkyMode::HdrCubemap )
             {
@@ -99,15 +110,13 @@ namespace Desert::ECS
                 for ( const auto skyboxEntity : skyboxes )
                 {
                     const auto& skybox = registry.get<ECS::SkyboxComponent>( skyboxEntity );
-                    if ( auto skyboxAsset =
-                              Runtime::ResourceRegistry::GetSkyboxService()->Get( skybox.SkyboxHandle ) )
-                    {
-                        renderCommandBuffer.Emplace<Graphic::Render::SkyboxCommand>( skyboxAsset,
-                                                                                     skybox.Intensity );
-                    }
+                    cubemap            = Runtime::ResourceRegistry::GetSkyboxService()->Get( skybox.SkyboxHandle );
+                    cubemapIntensity   = skybox.Intensity;
                     break;
                 }
             }
+
+            renderCommandBuffer.Emplace<Graphic::Render::SkyboxCommand>( cubemap, cubemapIntensity );
         }
 
     private:

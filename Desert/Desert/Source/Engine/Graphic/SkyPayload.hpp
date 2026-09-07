@@ -168,4 +168,62 @@ namespace Desert::Graphic
         payload.SkyApLuminance = glm::vec4( sky.SkyAndAerialPerspectiveLuminanceFactor, 0.0f );
         return payload;
     }
+
+    // How many leading FLOATS of the packed block the bake fingerprint below skips — the sun's direction,
+    // xyz of vec4 0. Named rather than spelled 3, because the test that walks the block asserts on this
+    // number and a reader has to be able to see the two agree.
+    inline constexpr size_t kSkyBakeFingerprintSkippedFloats = 3;
+
+    /**
+     * @brief EVERYTHING THE SKY IBL BAKE READS, AS ONE NUMBER.
+     *
+     * The third key of Graphic::ShouldRebakeSkyEnvironment, beside the sun's angular threshold and the
+     * cloud field's fingerprint. Before it existed the environment was rebaked only when the SUN moved or
+     * the CLOUDS changed, so a sky whose own parameters had been replaced — a different ground albedo, a
+     * different model, a different palette, a whole different LEVEL loaded onto the same renderer — kept
+     * lighting the world with the atmosphere it was baked from. The sky pixels changed immediately (they
+     * are marched every frame) and the ambient did not, which reads as "the ambient is wrong" rather than
+     * as "the ambient is stale".
+     *
+     * TAKEN OVER THE PACKED PAYLOAD, NOT OVER SkySettings, and that is the point. The bake dispatch
+     * (Programs/Compute/BakeProceduralSky.shader) reads this block and nothing else of the sky, so a
+     * fingerprint of the block is a fingerprint of the bake's input BY CONSTRUCTION: a vec4 appended to
+     * the payload is covered the moment PackSky writes it, and the static_assert above ties the block's
+     * size to the shader's own SKY_PACKED_VEC4_COUNT. A hand-written field list would be a second place to
+     * remember — which is exactly how AtmosphereLutFingerprint (the LUT passes' equivalent, which IS a
+     * typed list because it deliberately covers only part of the block) and the bake trigger came to
+     * disagree.
+     *
+     * THE SUN'S DIRECTION IS THE ONLY EXCLUSION. It sits in xyz of vec4 0 and it moves EVERY FRAME under
+     * the time-of-day driver, so comparing it exactly would demand a rebake per frame — which is what
+     * RebakeSunAngleThreshold exists to prevent. The sun is judged by ANGLE and everything else by
+     * EQUALITY. The `w` of that vec4 is the sun's INTENSITY, is not a direction, has no threshold of its
+     * own, and is included.
+     *
+     * @param panoramaSizeKey the bake's one input that is NOT in the block — SkySettings::
+     *        EnvironmentResolution, which picks the panorama's extent. Without it, changing the
+     *        Environment Resolution changed nothing until the sun happened to move.
+     */
+    inline uint64_t SkyBakeFingerprint( const SkyGpuPayload& payload, uint32_t panoramaSizeKey )
+    {
+        // FNV-1a over the raw bytes. Two bit-identical blocks are the same sky; two blocks differing in any
+        // bit are treated as different, which at worst costs one bake that was not needed (-0.0f against
+        // 0.0f is the only way that happens and no authored path produces it).
+        uint64_t hash = 1469598103934665603ull;
+
+        const auto mixByte = [&hash]( unsigned char byte )
+        {
+            hash ^= static_cast<uint64_t>( byte );
+            hash *= 1099511628211ull;
+        };
+
+        const auto* bytes = reinterpret_cast<const unsigned char*>( &payload );
+        for ( size_t i = kSkyBakeFingerprintSkippedFloats * sizeof( float ); i < sizeof( SkyGpuPayload ); ++i )
+            mixByte( bytes[i] );
+
+        for ( size_t i = 0; i < sizeof( panoramaSizeKey ); ++i )
+            mixByte( static_cast<unsigned char>( ( panoramaSizeKey >> ( i * 8 ) ) & 0xFFu ) );
+
+        return hash;
+    }
 } // namespace Desert::Graphic

@@ -70,6 +70,16 @@ namespace Desert::Graphic::System
         {
         }
 
+        // The accumulated indirect light is a reprojection of the previous frame, and the previous frame is
+        // now a different world — see IRenderSystem::OnSceneReplaced, kind 1. The blend weight is 0.92, so
+        // without this the first scene's bounce light survives in the second for tens of frames wherever the
+        // neighbourhood clamp does not reject it. A resize invalidates it for the same reason; this is the
+        // other event that does.
+        void OnSceneReplaced() override
+        {
+            m_HistoryValid = false;
+        }
+
         void Execute( const std::shared_ptr<Framebuffer>& gbuffer, const std::shared_ptr<Image2D>& rsmAlbedo,
                       const std::shared_ptr<Image2D>& rsmNormal, const std::shared_ptr<Image2D>& rsmWorldPos,
                       const glm::mat4& rsmViewProj, const glm::mat4& cameraViewProj,

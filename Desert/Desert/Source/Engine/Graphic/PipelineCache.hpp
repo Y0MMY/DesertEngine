@@ -154,8 +154,11 @@ namespace Desert::Graphic
     }
 
     // Caches GraphicsPipelines keyed by (shader + target + render-state) so identical requests share one
-    // pipeline instead of every renderer creating its own. Owned by SceneRenderer; cleared on Init (full
-    // rebuild) after a WaitDeviceIdle. Created pipelines are Invalidate()'d here.
+    // pipeline instead of every renderer creating its own. Owned by SceneRenderer and filled once, when that
+    // renderer builds its systems; loading a different scene into the same renderer does NOT clear it,
+    // because nothing in the key is scene-derived (see SceneRenderer::Init). Shader hot-reload drops the
+    // affected entries through InvalidateByShader after a WaitDeviceIdle. Created pipelines are
+    // Invalidate()'d here.
     class PipelineCache
     {
     public:
@@ -177,6 +180,14 @@ namespace Desert::Graphic
         void Clear()
         {
             m_Cache.clear();
+        }
+
+        // How many distinct GPU pipelines this renderer is holding. Logged by SceneRenderer::Init so a run's
+        // log says whether a scene load rebuilt them or kept them — the number Г11 is about, readable
+        // without re-measuring anything.
+        NO_DISCARD size_t Size() const
+        {
+            return m_Cache.size();
         }
 
         // Drops every pipeline built against @p shader — used by shader hot-reload so the next

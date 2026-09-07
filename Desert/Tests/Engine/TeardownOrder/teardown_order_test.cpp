@@ -272,10 +272,11 @@ TEST( TeardownOrder, StdExitAppearsOnlyBeforeTheApplicationExists )
 // Г8 removed it, and removing a mechanism that never ran must not remove the thing it LOOKED like it was
 // guaranteeing. The guarantee is real and it is not RAII: releasing a pipeline, a framebuffer or a
 // descriptor pool while the last submitted frame is still executing against it is undefined, and
-// `SceneRenderer::Init()` already waits for exactly that reason before it clears the system map. The
-// destructor cannot take the wait itself — at process teardown it can run after the device is gone, which
-// is the segfault this whole suite exists for — so it belongs to each site that drops one, and every one
-// of them does it today.
+// `SceneRenderer::RebindScene()` waits for exactly that reason before it releases the previous scene's
+// passes (it was `Init()` before Г11 split that function in two; Desert/Tests/Engine/RendererSceneLifetime
+// pins the wait at its new home, and this row's argument is unchanged). The destructor cannot take the
+// wait itself — at process teardown it can run after the device is gone, which is the segfault this whole
+// suite exists for — so it belongs to each site that drops one, and every one of them does it today.
 //
 // A NAMED LIST, like DeviceLostCensus's: there are five of them, each is a deliberate decision, and a
 // sixth surface added without the wait is precisely how this comes back.
