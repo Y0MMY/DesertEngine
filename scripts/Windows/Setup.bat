@@ -118,9 +118,13 @@ if not errorlevel 1 (
 )
 
 REM ---------------------------------------------------------------------------
-REM 6. Version header + project files
+REM 6. Project files
 REM ---------------------------------------------------------------------------
-call "%ROOT%\scripts\Windows\GenVersion.bat"
+REM NO GenVersion.bat CALL HERE ANY MORE. Setup runs once per machine, so the header it wrote was
+REM frozen from then on and every msbuild after it - including every CI build - reported that frozen
+REM version. Generating it is now Common.vcxproj's PreBuildEvent, which runs on every build. Calling it
+REM here as well would hide a PreBuildEvent that had stopped firing: a missing header is a compile
+REM error, a stale one is a lie.
 echo --- Generating project files
 "%PREMAKE%" vs2022 || exit /b 1
 

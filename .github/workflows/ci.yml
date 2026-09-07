@@ -81,6 +81,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          # THE BUILD NUMBER NEEDS HISTORY, and actions/checkout's default is depth 1. `git rev-list
+          # --count HEAD` answers **1** in a shallow clone, so every artifact this workflow has ever
+          # produced carried "0.1.1+<hash>" — a build number that looks like a number and is not one.
+          # scripts/GenVersion.sh now DETECTS the shallow case and emits no build number at all rather
+          # than that lie, which is honest but leaves the artifact without an identity the launcher can
+          # gate a collection on (L2 design §4.4). So: full commit history, blobs fetched lazily — the
+          # same `filter` the format job above uses, and for the same reason (Docs/Clouds/Shots alone is
+          # over half a gigabyte of history nobody here needs). Commits and trees are cheap; it is the
+          # historical blobs that are not, and a build only ever touches the checked-out ones.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Cache Homebrew downloads
         uses: actions/cache@v4
@@ -129,6 +140,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          # Full commit history, blobs lazily — see the note on the sanitizers job's checkout. This is
+          # the job that PACKAGES the Release artifact, so it is the one whose build number is shipped.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Cache Homebrew downloads
         uses: actions/cache@v4
@@ -215,6 +230,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          # Full commit history, blobs lazily — see the note on the sanitizers job's checkout. Windows
+          # packages the Release artifact too, and it is also where the BuildVersion suite proves the
+          # header agrees with git on a platform no developer here can run.
+          fetch-depth: 0
+          filter: blob:none
 
       # The engine links shaderc*.lib and spirv-cross-*.lib out of the SDK's Lib directory, so a
       # headers-only Vulkan install is not enough — this is the real LunarG SDK. Pinned so a new SDK
@@ -257,7 +277,8 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       # Same script a developer runs: fetches the non-submodule third-party (optick, meshoptimizer),
-      # writes Version.gen.hpp and generates the VS solution. Running it here means the documented
+      # and generates the VS solution. (It no longer writes Version.gen.hpp — the build does, through
+      # Common.vcxproj's PreBuildEvent.) Running it here means the documented
       # setup path is itself under test — a broken Setup.bat fails CI instead of the next new machine.
       - name: Setup dependencies + generate projects
         shell: cmd
