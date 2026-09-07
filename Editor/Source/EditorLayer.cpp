@@ -130,6 +130,16 @@ namespace Desert::Editor
     static constexpr const char* kMenuBarMenus[] = { "File",   "Edit",     "View", "Window",
                                                      "Scenes", "Graphics", "About" };
 
+    // THE SNAP STEPS A PERSON ACTUALLY USES, named once for the same reason the menus above are. Read by
+    // DrawSnapControl, which draws them as the magnet popup's list, and by BuildPaletteCommands, which
+    // offers exactly these as commands — so the palette cannot offer a step the toolbar does not, which
+    // is the shape a hand-copied second list always ends up in.
+    //
+    // Translation in CENTIMETRES because 1 world unit IS 1 cm here, so the label and the value are the
+    // same number and nothing has to be converted in anyone's head.
+    static constexpr float kGridSteps[]  = { 1.0f, 5.0f, 10.0f, 25.0f, 50.0f, 100.0f, 500.0f };
+    static constexpr float kAngleSteps[] = { 1.0f, 5.0f, 10.0f, 15.0f, 30.0f, 45.0f, 90.0f };
+
     // "Unsaved changes" marker: the CommandHistory revision at the last save/load. Compared against the
     // current revision for the status-bar dirty dot; reset wherever the scene is (re)loaded or saved.
     static uint64_t s_SavedRevision = 0;
@@ -2831,6 +2841,48 @@ namespace Desert::Editor
         }
         commands.push_back( { "Menu", "Close the open menu", [this] { m_HeldOpenMenu.clear(); } } );
 
+        // THE SNAP, AND THE PERF HUD. Both are things a person does with a single click and neither had a
+        // name, so neither could be done unattended — and a gap in this dictionary is a gap in what an
+        // agent can do at all, which is the claim the palette exists to make good on. Found by needing
+        // them: К6 moved the snap step to one owner and then could not photograph the defect it fixed,
+        // because the sequence is "set a step, do something unrelated, look" and the channel could reach
+        // neither half. The three toolbar popups and the View -> Show menu were the only ways in.
+        //
+        // THE STEPS ARE THE TOOLBAR'S OWN LISTS, not a copy: kGridSteps and kAngleSteps are declared once
+        // at the top of this file and read by DrawSnapControl as well, so a step added there appears here
+        // and the two can never offer different menus.
+        //
+        // Labels are ASCII on purpose. A client addresses a command by its exact label over the control
+        // channel (`desertctl run Snap "Angle snap 15 deg"`), and the degree sign the toolbar button draws
+        // is two UTF-8 bytes that a shell argument carries badly.
+        for ( const float step : kGridSteps )
+        {
+            char label[48];
+            if ( step >= 100.0f )
+                std::snprintf( label, sizeof( label ), "Grid snap %.0f m", step / 100.0f );
+            else
+                std::snprintf( label, sizeof( label ), "Grid snap %.0f cm", step );
+            commands.push_back( { "Snap", label, [step] { Core::GizmoState::SetTranslateSnap( step ); } } );
+        }
+        for ( const float step : kAngleSteps )
+        {
+            char label[48];
+            std::snprintf( label, sizeof( label ), "Angle snap %.0f deg", step );
+            commands.push_back( { "Snap", label, [step] { Core::GizmoState::SetRotateSnapDegrees( step ); } } );
+        }
+        commands.push_back( { "Snap", "Toggle snapping", []
+                              { Core::GizmoState::SetPersistentSnap( !Core::GizmoState::PersistentSnap() ); } } );
+
+        // The View -> Show item, under a name. It is the cheapest action in the editor that saves the
+        // preferences file while having nothing whatever to do with the gizmo, which is exactly what makes
+        // it the other half of К6's scenario — and it is a dictionary entry in its own right, since
+        // "turn the frame timings on" is something a person asks for by name.
+        commands.push_back( { "Action", "Toggle the Perf HUD", []
+                              {
+                                  EditorPreferences::Get().ShowPerfHud = !EditorPreferences::Get().ShowPerfHud;
+                                  EditorPreferences::Save();
+                              } } );
+
         // OPENABLE ASSETS. This is where `--open-panel <path-to-asset>` went — the half of that flag that
         // opened a DOCUMENT rather than a tool, and the only way a document has ever been put on screen
         // unattended, since a document does not exist until something opens its asset and therefore has
@@ -4126,10 +4178,8 @@ namespace Desert::Editor
         namespace ImGui = ::ImGui;
         using Gz        = ::Desert::Editor::Core::GizmoState;
 
-        // Steps a person actually uses. Translation in centimetres because 1 world unit IS 1 cm here, so
-        // the label and the value are the same number and nothing has to be converted in anyone's head.
-        static constexpr float kGridSteps[]  = { 1.0f, 5.0f, 10.0f, 25.0f, 50.0f, 100.0f, 500.0f };
-        static constexpr float kAngleSteps[] = { 1.0f, 5.0f, 10.0f, 15.0f, 30.0f, 45.0f, 90.0f };
+        // The steps are declared once at the top of this file, because the command palette offers exactly
+        // these and a second copy here is how the two lists would drift apart.
 
         char label[64];
         if ( rotation )
