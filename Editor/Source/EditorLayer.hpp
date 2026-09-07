@@ -245,6 +245,19 @@ namespace Desert::Editor
         // stem, or the entity's tag. "this subject" when neither resolves — the refusal happens before any
         // editor is consulted, so this is all that is knowable about it.
         [[nodiscard]] std::string RefusedSubjectName( const SubjectId& subject ) const;
+
+        // Does the entity @p owner in the ACTIVE scene carry component T? The presence test every
+        // component-subject registration is built from (SubjectEditorRegistry::Registration::Exists) —
+        // written once, templated, because five copies of the selection-to-entity-to-component dance is
+        // how one of them comes to be missing the null check.
+        template <typename ComponentT>
+        [[nodiscard]] bool EntityHasComponent( const Common::UUID& owner ) const
+        {
+            if ( !m_MainScene || owner.IsNull() )
+                return false;
+            const auto entOpt = m_MainScene->FindEntityByID( owner );
+            return entOpt && entOpt->get().HasComponent<ComponentT>();
+        }
         // Brings @p subject's window to the front and makes it the most recently used document.
         void FocusDocument( const SubjectId& subject );
         // Ctrl+Tab: move to the next document in most-recently-used order. See DocumentWell::NextMostRecent.

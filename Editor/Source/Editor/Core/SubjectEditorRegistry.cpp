@@ -24,6 +24,15 @@ namespace Desert::Editor
             return;
         }
 
+        if ( !editor.Exists )
+        {
+            LOG_ERROR( "[SubjectEditorRegistry] '{}' registered without a presence test — the command "
+                       "palette enumerates what can be opened, and a kind that cannot say whether a given "
+                       "subject is there would offer an entry for every entity in the scene.",
+                       typeName );
+            return;
+        }
+
         if ( !editor.Icon )
         {
             LOG_ERROR( "[SubjectEditorRegistry] '{}' registered without an icon — the document well, the "
@@ -108,6 +117,14 @@ namespace Desert::Editor
                        it->second.TypeName, subject.ToString() );
         }
         return document;
+    }
+
+    bool SubjectEditorRegistry::Exists( const SubjectId& subject ) const
+    {
+        if ( subject.IsNull() )
+            return false;
+        const auto it = m_Editors.find( subject.Type() );
+        return it != m_Editors.end() && it->second.Exists( subject );
     }
 
     const char* SubjectEditorRegistry::Icon( SubjectTypeKey type, const char* fallback ) const

@@ -594,6 +594,11 @@ namespace Desert::Editor
                            [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
                                return std::make_unique<Editor::MaterialEditorPanel>(
                                     Assets::AssetHandle( subject.Owner ), m_AssetManager );
+                           },
+                           [this]( const SubjectId& subject ) {
+                               return m_AssetManager &&
+                                      m_AssetManager->FindMetadataByHandle(
+                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
 
         // THE FOUR CLOUD DOCUMENTS. Each takes the raw AssetManager pointer the panels already held, so the
@@ -605,6 +610,11 @@ namespace Desert::Editor
                            [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
                                return std::make_unique<Editor::CloudNoiseVolumePanel>(
                                     Assets::AssetHandle( subject.Owner ), m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject ) {
+                               return m_AssetManager &&
+                                      m_AssetManager->FindMetadataByHandle(
+                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
         m_SubjectEditors.Register(
              AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudType ) ),
@@ -612,6 +622,11 @@ namespace Desert::Editor
                            [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
                                return std::make_unique<Editor::CloudTypePanel>(
                                     Assets::AssetHandle( subject.Owner ), m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject ) {
+                               return m_AssetManager &&
+                                      m_AssetManager->FindMetadataByHandle(
+                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
         m_SubjectEditors.Register(
              AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudModellingVolume ) ),
@@ -619,6 +634,11 @@ namespace Desert::Editor
                            [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
                                return std::make_unique<Editor::CloudModellingVolumePanel>(
                                     Assets::AssetHandle( subject.Owner ), m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject ) {
+                               return m_AssetManager &&
+                                      m_AssetManager->FindMetadataByHandle(
+                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
         // The layout document also READS the active scene's cloud layer for its preview numbers — the scene
         // is an input, never a second subject, and SetScene keeps it following the focused viewport exactly
@@ -629,6 +649,11 @@ namespace Desert::Editor
                            [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
                                return std::make_unique<Editor::CloudLayoutPanel>(
                                     Assets::AssetHandle( subject.Owner ), m_MainScene, m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject ) {
+                               return m_AssetManager &&
+                                      m_AssetManager->FindMetadataByHandle(
+                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
 
         // ── THE TWO DOCUMENTS WHOSE SUBJECT IS NOT A FILE ─────────────────────────────────────────────
@@ -652,6 +677,9 @@ namespace Desert::Editor
                                return std::make_unique<Editor::AnimGraphPanel>(
                                     subject, SubjectEntityName( subject, "Anim Graph" ), m_MainScene,
                                     m_AnimationLibrary.get() );
+                           },
+                           [this]( const SubjectId& subject ) {
+                               return EntityHasComponent<ECS::AnimationComponent>( subject.Owner );
                            } } );
         m_SubjectEditors.Register(
              Editor::ParticleEditorPanel::SubjectType(),
@@ -659,6 +687,9 @@ namespace Desert::Editor
                            [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
                                return std::make_unique<Editor::ParticleEditorPanel>(
                                     subject, SubjectEntityName( subject, "Particles" ), m_MainScene );
+                           },
+                           [this]( const SubjectId& subject ) {
+                               return EntityHasComponent<ECS::ParticleEmitterComponent>( subject.Owner );
                            } } );
 
         // ── AND HOW A PATH BECOMES ONE OF THEM ────────────────────────────────────────────────────────
@@ -2724,7 +2755,51 @@ namespace Desert::Editor
                                                ? entity.GetComponent<ECS::TagComponent>().Tag
                                                : std::string( "Entity" );
                 commands.push_back(
-                     { "Entity", std::move( name ), [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
+                     { "Entity", name, [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
+
+                // DELETING ONE IS ALSO SOMETHING A PERSON DOES, and until now the palette could only
+                // SELECT. The Outliner's context menu and the Delete key both reach
+                // Commands::DeleteEntity — the same undoable command this runs — so the capability
+                // was always there and only the dictionary entry was missing.
+                //
+                // FOUND BY NEEDING IT. Verifying "a document closes with its subject" through the control
+                // channel means killing a subject through the control channel, and there was no way to
+                // destroy an entity without a mouse: the channel runs these closures and nothing else. A
+                // gap in the palette is a gap in what an agent can do at all, which is the one claim the
+                // palette exists to make good on.
+                commands.push_back( { "Entity", "Delete " + name,
+                                      [uuid] { Commands::DeleteEntity( uuid ); } } );
+
+                // ── AND WHAT CAN BE OPENED *FROM* THIS ENTITY ─────────────────────────────────────────
+                //
+                // The other half of U7, and the half that makes a component document reachable at all
+                // without a mouse. The Details panel's button is how a person opens one; this is the same
+                // request under a name, which is what puts it in THE DICTIONARY — the palette, and
+                // therefore the control channel, which runs these same closures.
+                //
+                // A DOCUMENT REACHABLE ONLY BY CLICKING A BUTTON IS MISSING FROM THAT DICTIONARY, and the
+                // dictionary is this editor's one claim that "anything a person can do, an agent can do".
+                // The asset documents already had their entry (the Open group below, over the registered
+                // assets); a subject that is not a file had none, because there was no file to enumerate.
+                // Enumerating the ENTITIES against the registered COMPONENT kinds is the same loop over
+                // the other domain.
+                //
+                // DERIVED FROM THE REGISTRY, never a hand-written list of the two kinds that exist today:
+                // a third component document appears here the moment its factory is registered, which is
+                // the census this task exists to stop anybody having to refill.
+                for ( const SubjectTypeKey& type : m_SubjectEditors.RegisteredTypes() )
+                {
+                    if ( type.Domain != SubjectDomain::EntityComponent )
+                        continue;
+
+                    const SubjectId subject{ type.Domain, type.Facet, uuid };
+                    if ( !m_SubjectEditors.Exists( subject ) )
+                        continue;
+
+                    commands.push_back( { "Open",
+                                          name + " \xc2\xb7 " + m_SubjectEditors.TypeName( type ),
+                                          [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
+                }
             }
         }
 

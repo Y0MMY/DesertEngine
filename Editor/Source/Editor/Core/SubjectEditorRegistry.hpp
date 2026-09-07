@@ -46,6 +46,9 @@ namespace Desert::Editor
         // hold, and turning it back into typed authored data is knowledge only the registrant has.
         using Factory = std::function<std::unique_ptr<ISubjectDocument>( const SubjectId& )>;
 
+        // "Is there something under this subject to open?" — see Registration::Exists.
+        using Presence = std::function<bool( const SubjectId& )>;
+
         // WHAT ONE LINE OF REGISTRATION SAYS. Everything the editor needs to know about a kind of subject
         // that is not the document itself: what to call it, what to draw beside it, and how to build it.
         //
@@ -73,6 +76,20 @@ namespace Desert::Editor
             // This is the REACH half of what a subject is (EditorSubject.hpp): the identity is data anyone
             // can hold, and turning it back into typed authored data is knowledge only the registrant has.
             Factory Make;
+
+            // IS THERE SOMETHING HERE TO OPEN, RIGHT NOW? Asked about subjects that are NOT open — "does
+            // entity 12 have an AnimationComponent?" — which is why it cannot be asked of a document: no
+            // document exists yet, and building one to find out would construct a node-editor context per
+            // entity per keystroke.
+            //
+            // NOT THE SAME QUESTION AS ISubjectDocument::IsSubjectAlive, and the difference is load-bearing
+            // rather than a nuance. This one is answered in the CURRENT context — the active scene, the
+            // asset manager as it stands — because that is what "what can I open?" means. A document
+            // answers about the context IT captured: an anim graph opened over the second scene view stays
+            // bound to that scene, so the registry's answer about the active scene would be about a
+            // different registry entirely and would close a window that is perfectly alive. Two questions,
+            // two askers, and neither can stand in for the other.
+            Presence Exists;
         };
 
         // Registering a second editor for a type REPLACES the first and says so: two editors for one kind
@@ -104,6 +121,10 @@ namespace Desert::Editor
         {
             return Icon( subject.Type(), fallback );
         }
+
+        // Is there something under @p subject to open right now? FALSE for a kind nothing is registered
+        // for, which is the honest answer to "can I open this?" and not a claim about the subject.
+        [[nodiscard]] bool Exists( const SubjectId& subject ) const;
 
         // The document for @p subject, or null when no editor is registered for its type — logged with the
         // type's name, because "double-clicking it did nothing" is otherwise indistinguishable from a window
