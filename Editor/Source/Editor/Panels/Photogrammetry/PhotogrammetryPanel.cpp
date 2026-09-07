@@ -599,7 +599,11 @@ namespace Desert::Editor
         if ( m_PreviewInit )
             return;
 
-        m_PreviewRenderer = std::make_unique<Graphic::SceneRenderer>();
+        // NO CASCADES: this preview shows a reconstructed mesh under a fill light and has never drawn a
+        // shadow. Said at CONSTRUCTION because that is when the cascade framebuffers are budgeted — the
+        // `EnableShadows = false` that used to stand below ran after Scene::Init() had already allocated
+        // them, so the flag read as the saving and 320 MiB was spent anyway. See Graphic::ShadowQuality.
+        m_PreviewRenderer = std::make_unique<Graphic::SceneRenderer>( Graphic::kNoShadowQuality );
         m_PreviewScene    = std::make_shared<::Desert::Core::Scene>( "ReconPreview", m_PreviewRenderer.get() );
         // `m_PreviewInit` stays false so the next call retries; with the result dropped the flag was set
         // regardless and every frame afterwards recorded into a scene that had never initialised.
@@ -613,10 +617,9 @@ namespace Desert::Editor
 
         // No grid line here: overlays live on the RENDERER (Graphic::DebugViewState) and default to off,
         // and only the main editor loop pushes the user's flags into one.
-        auto& settings         = m_PreviewScene->GetSettings();
-        settings.EnableShadows = false;
-        settings.EnableBloom   = false;
-        settings.AA            = ::Desert::Core::AntiAliasingMode::FXAA;
+        auto& settings       = m_PreviewScene->GetSettings();
+        settings.EnableBloom = false;
+        settings.AA          = ::Desert::Core::AntiAliasingMode::FXAA;
 
         m_PreviewRenderer->SetOutlineSettings( glm::vec3( 0.0f ), 0.0f, 0.0f, false );
 

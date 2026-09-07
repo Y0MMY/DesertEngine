@@ -35,8 +35,14 @@ namespace Desert::Editor
         if ( m_Inited )
             return;
 
-        m_Renderer = std::make_unique<Graphic::SceneRenderer>();
-        m_Scene    = std::make_shared<::Desert::Core::Scene>( "ThumbnailPreview", m_Renderer.get() );
+        // NO CASCADES AT ALL, and it has to be said HERE — at construction — rather than by the scene
+        // setting below. A thumbnail is a lit object on a backdrop with shadows deliberately off; the
+        // cascade framebuffers are allocated once inside Scene::Init() on the line after this one, from
+        // the budget the renderer was BUILT with, so `settings.EnableShadows = false` a few lines further
+        // down arrives after the money is spent. It was: 320 MiB of shadow maps for a renderer that has
+        // never drawn a shadow and never will. See Graphic::ShadowQuality.
+        m_Renderer        = std::make_unique<Graphic::SceneRenderer>( Graphic::kNoShadowQuality );
+        m_Scene           = std::make_shared<::Desert::Core::Scene>( "ThumbnailPreview", m_Renderer.get() );
         const auto inited = m_Scene->Init();
         if ( !inited.IsSuccess() )
         {
@@ -52,14 +58,18 @@ namespace Desert::Editor
         // Clean preview: no shadows bleeding into the thumbnail. Keep AA on (FXAA) for smoother edges;
         // supersampling (render 2x, downscale) adds the rest.
         //
+        // `settings.EnableShadows = false` USED TO BE HERE and is gone: the shadowless budget above is
+        // the same statement made where it is still worth something. Two ways to say one thing is how the
+        // next reader ends up switching the one that no longer decides anything — and this one never
+        // decided the allocation, only whether the maps it had already paid for were drawn into.
+        //
         // The GRID needs no line here any more: it is a property of the VIEW now
         // (Graphic::DebugViewState, all-off by default) and only EditorLayer's main loop ever pushes the
         // editor's flags into a renderer. This used to switch the scene's own ShowGrid off, which worked
         // and said the wrong thing — a thumbnail scene had to know about an editor aid to opt out of it.
-        auto& settings         = m_Scene->GetSettings();
-        settings.EnableShadows = false;
-        settings.EnableBloom   = false;
-        settings.AA            = ::Desert::Core::AntiAliasingMode::FXAA;
+        auto& settings       = m_Scene->GetSettings();
+        settings.EnableBloom = false;
+        settings.AA          = ::Desert::Core::AntiAliasingMode::FXAA;
 
         // Selection outline is an editor-preference now (no longer a scene setting); force it off on this
         // preview renderer so it never bleeds into a thumbnail (the main editor loop pushes it every frame,

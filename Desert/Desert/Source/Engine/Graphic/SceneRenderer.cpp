@@ -644,8 +644,11 @@ namespace Desert::Graphic
             DeferredShadowInput shadow;
             if ( meshRenderer )
             {
-                shadow.CascadeVP            = meshRenderer->GetCascadeViewProj();
-                shadow.Count                = meshRenderer->GetCascadeCount();
+                shadow.CascadeVP = meshRenderer->GetCascadeViewProj();
+                // The count FITTED this frame, not the count allocated — the same number the forward path
+                // publishes (MeshRenderer::CaptureFrameState). The two paths shadow the same sun and a
+                // disagreement here is a deferred frame shading against matrices the forward one refused.
+                shadow.Count                = meshRenderer->GetValidCascadeCount();
                 shadow.Bias                 = meshRenderer->GetShadowBias();
                 shadow.Enabled              = meshRenderer->AreShadowsEnabled();
                 shadow.CascadeWorldPerTexel = meshRenderer->GetCascadeWorldPerTexel();

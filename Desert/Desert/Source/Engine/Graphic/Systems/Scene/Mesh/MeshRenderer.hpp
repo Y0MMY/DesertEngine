@@ -254,6 +254,19 @@ namespace Desert::Graphic::System
             return m_Shadow.CascadeCount;
         }
 
+        // HOW MANY OF THEM CARRY A MATRIX FROM THIS FRAME'S FIT — the number every SHADER-facing consumer
+        // wants, and a different question from the one above. `GetCascadeCount` answers "what does this
+        // renderer own" (the budget: what to allocate, what to show in Scene Settings); this answers "what
+        // may be sampled right now". They are equal in the ordinary frame and diverge exactly when
+        // UpdateCascades does not run to completion — no main camera, no directional light, a degenerate
+        // fit — which is when publishing the budget hands the shader matrices nothing ever wrote.
+        //
+        // The min() is belt and braces against the two ever being written from different places again.
+        [[nodiscard]] uint32_t GetValidCascadeCount() const
+        {
+            return m_FittedCascades < m_Shadow.CascadeCount ? m_FittedCascades : m_Shadow.CascadeCount;
+        }
+
         // The budget this renderer was created with. Fixed after Initialize — the framebuffers are
         // allocated from it once.
         [[nodiscard]] const ShadowQuality& GetShadowQuality() const
@@ -292,6 +305,11 @@ namespace Desert::Graphic::System
         bool SetupSkinnedGeometryPass();
         bool SetupSilhouettePass();
         bool SetupShadowPass();
+        // The one place the shadow budget is said out loud. Called from both arms of SetupShadowPass —
+        // the allocating one and the zero-budget one — because a renderer that spends nothing on the sun
+        // is exactly as worth reading in a log as one that spends 320 MiB, and a line printed on only one
+        // path is a line whose absence means two different things.
+        void LogShadowBudget( double allocMs ) const;
 
         void DrawStaticMeshes();
         void DrawSkinnedMeshes( bool useLoadPass = false );
@@ -401,7 +419,23 @@ namespace Desert::Graphic::System
         // framebuffers disagreeing, which is the one failure this cannot be allowed to have.
         ShadowQuality m_Shadow;
 
-        glm::mat4 m_CascadeVP[kMaxCascades] = { glm::mat4( 1.0f ) };
+        // The live-total accounting for the cascade framebuffers, held BESIDE them so it is released
+        // exactly when they are — see Graphic::ShadowAttachmentLease for why this is RAII and not a pair
+        // of hand-written add/remove calls.
+        ShadowAttachmentLease m_ShadowAttachments;
+
+        // How many of m_CascadeVP below were written by THIS frame's fit (0 until UpdateCascades runs).
+        // See GetValidCascadeCount for why this is not the same number as m_Shadow.CascadeCount.
+        uint32_t m_FittedCascades = 0;
+
+        // EVERY element identity, spelled element by element. `= { glm::mat4( 1.0f ) }` reads as "all
+        // identity" and is not: it initializes element 0 and VALUE-initializes the rest, so cascades 1..3
+        // began life as ZERO matrices, whose w is 0 and whose perspective divide is a division by zero in
+        // the sampling shader. Nothing should ever read past m_FittedCascades — this is what the array
+        // holds if something does.
+        glm::mat4 m_CascadeVP[kMaxCascades] = { glm::mat4( 1.0f ), glm::mat4( 1.0f ), glm::mat4( 1.0f ),
+                                                glm::mat4( 1.0f ) };
+        static_assert( kMaxCascades == 4, "m_CascadeVP's initializer lists one identity per cascade" );
         // World-space size of one shadow-map texel per cascade (2*radius/res) — drives a cascade-correct
         // normal-offset/bias in the PBR shader instead of the old fixed world-unit constants.
         glm::vec4                         m_CascadeWorldPerTexel    = glm::vec4( 1.0f );
