@@ -27,6 +27,14 @@ namespace Desert::Graphic
     class IPipeline
     {
     public:
+        // The ledger row — see Engine/Graphic/ResourceLedger.hpp. The KIND is passed by the two leaves
+        // below because a `VkPipeline` from a graphics pass and one from a compute dispatch are different
+        // populations to both consumers (eviction never touches either; device-loss recovery rebuilds them
+        // by different routes).
+        explicit IPipeline( const ResourceKind kind ) : m_Accounting( ResourceOwnership::Take( kind ) )
+        {
+        }
+
         virtual ~IPipeline() = default;
 
         virtual void Invalidate() = 0;
@@ -34,6 +42,14 @@ namespace Desert::Graphic
 
         [[nodiscard]] virtual PipelineType GetType() const = 0;
         [[nodiscard]] virtual const std::shared_ptr<Shader>& GetShader() const = 0;
+
+        void ClaimOwnership( const ResourceOwner owner, const Common::AssetHandle asset = Common::AssetHandle{} )
+        {
+            m_Accounting.Claim( owner, asset );
+        }
+
+    private:
+        ResourceOwnership m_Accounting;
     };
 
     // --- Graphics Pipeline ---
@@ -155,6 +171,10 @@ namespace Desert::Graphic
     class GraphicsPipeline : public IPipeline
     {
     public:
+        GraphicsPipeline() : IPipeline( ResourceKind::GraphicsPipeline )
+        {
+        }
+
         [[nodiscard]] virtual const GraphicsPipelineSpecification& GetSpecification() const = 0;
         
         static std::shared_ptr<GraphicsPipeline> Create( const GraphicsPipelineSpecification& spec );
@@ -171,6 +191,10 @@ namespace Desert::Graphic
     class ComputePipeline : public IPipeline
     {
     public:
+        ComputePipeline() : IPipeline( ResourceKind::ComputePipeline )
+        {
+        }
+
         [[nodiscard]] virtual const ComputePipelineSpecification& GetSpecification() const = 0;
 
         // --- Resource-binding API (UE-style): set inputs/outputs/push-constants, then Dispatch ---

@@ -10,7 +10,21 @@ namespace Desert::ShaderResources
     class StorageBuffer : public BaseBuffer
     {
     public:
+        // The ledger row — see Engine/Graphic/ResourceLedger.hpp and the note on UniformBuffer. A
+        // non-persistent storage buffer is frames x slots VkBuffers; a persistent one is a single device
+        // buffer, and this row does not distinguish them, which is why the ledger counts OBJECTS and
+        // reports bytes only where somebody knew them.
+        StorageBuffer() : m_Accounting( Graphic::ResourceOwnership::Take( Graphic::ResourceKind::StorageBuffer ) )
+        {
+        }
+
         virtual ~StorageBuffer() = default;
+
+        void ClaimOwnership( const Graphic::ResourceOwner owner,
+                             const Common::AssetHandle    asset = Common::AssetHandle{} )
+        {
+            m_Accounting.Claim( owner, asset );
+        }
 
         // A storage buffer has NO fields, and that is what makes it a single-route buffer: there are no
         // per-field shadow copies to write, so StorageBufferProperty::SetRawData is the only way to fill
@@ -38,6 +52,9 @@ namespace Desert::ShaderResources
         // persistent buffer is still host-mappable for CPU init/reset.
         static std::shared_ptr<StorageBuffer> Create( const std::string_view debugName, uint32_t size,
                                                       uint32_t binding, bool persistent = false );
+
+    private:
+        Graphic::ResourceOwnership m_Accounting;
     };
 
 } // namespace Desert::ShaderResources

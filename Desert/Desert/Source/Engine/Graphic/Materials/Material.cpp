@@ -16,7 +16,12 @@ namespace Desert::Graphic
 
     Material::Material( std::string&& debugName, std::string&& shaderName )
          : m_MaterialExecutor(
-                Graphic::MaterialExecutor::Create( std::move( debugName ), std::move( shaderName ) ) )
+                Graphic::MaterialExecutor::Create( std::move( debugName ), std::move( shaderName ) ) ),
+           // The ledger row — see Engine/Graphic/ResourceLedger.hpp. A Material is the single most
+           // expensive row in it: on the Vulkan backend one carries its own VkDescriptorPool, a
+           // frames x slots grid of descriptor sets, and one uniform/storage buffer object per block its
+           // shader declares, each of which is itself frames x slots VkBuffers.
+           m_Accounting( ResourceOwnership::Take( ResourceKind::Material ) )
     {
         CachePropertyNames();
     }

@@ -80,15 +80,24 @@ namespace Desert::Graphic
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
     }
 
-    std::shared_ptr<Desert::Graphic::ImageCube>
-    ImageCube::Copy( const std::shared_ptr<ImageCube>& targetImageCube )
-    {
-        // TODO!
-        const auto& image = std::make_shared<API::Vulkan::VulkanImageCube>(
-             *SP_CAST( API::Vulkan::VulkanImageCube, targetImageCube ) );
-
-        return image;
-    }
+    // `ImageCube::Copy` STOOD HERE AND WAS AN ALIAS, NOT A COPY. It read
+    //
+    //     std::make_shared<VulkanImageCube>( *SP_CAST( VulkanImageCube, targetImageCube ) )   // TODO!
+    //
+    // — a copy CONSTRUCTION of the backend object, which memberwise-copies `VkImage`, `VkImageView`,
+    // `VkSampler` and the `VmaAllocation` out of the original. The result is not a second cubemap; it is a
+    // second owner of the first one's device memory, and when either shared_ptr dies the survivor holds
+    // freed handles. Exactly М9's finding about `MaterialProperty::Clone`, whose four implementations were
+    // all aliases of the original's GPU object, one layer further down.
+    //
+    // DELETED RATHER THAN FIXED, for М9's reason and one more of its own: it had no caller anywhere in the
+    // engine or the editor, so nothing is losing a capability, and a real cubemap copy is not a
+    // constructor — it is an allocation plus a `vkCmdCopyImage` on a command buffer with two layout
+    // transitions, i.e. a function that needs a device and a queue and belongs beside the mip generator
+    // rather than beside `Create`. Anybody who needs one should write THAT and not restore this.
+    //
+    // It is also now UNWRITABLE in this shape: `Image` holds a move-only `ResourceOwnership` row
+    // (ResourceLedger.hpp), so copy-constructing any image is a compile error rather than a double free.
 
     namespace Utils
     {

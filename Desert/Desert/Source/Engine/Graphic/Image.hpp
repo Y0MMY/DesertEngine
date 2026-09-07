@@ -4,6 +4,7 @@
 #include <Engine/Graphic/DynamicResources.hpp>
 
 #include <Engine/Graphic/MipMapGenerator.hpp>
+#include <Engine/Graphic/ResourceLedger.hpp>
 
 #include <Common/Core/UUID.hpp>
 
@@ -20,11 +21,45 @@ namespace Desert::Graphic
     public:
         // A runtime-only identity: an Image has no path to derive one from, and two images must never
         // share a key in the descriptor caches.
-        Image() : m_Hash( Common::UUID::Generate() )
+        //
+        // EVERY IMAGE IS IN THE LEDGER FROM HERE, whatever backend made it and whoever ends up holding it.
+        // This constructor is the only place the engine sees all of them: `ImageService` looked like that
+        // place and is not — its Register() is reached from eight call sites while every renderer LUT,
+        // framebuffer attachment, font atlas and panel slice goes straight through `Image2D::Create`. The
+        // KIND comes from the subclass because a base cannot know it; the OWNER does not, because a
+        // constructor cannot know who is about to hold the pointer — see ResourceLedger.hpp on why
+        // "Unclaimed" is a reportable answer rather than a default bucket.
+        explicit Image( const ResourceKind kind )
+             : m_Hash( Common::UUID::Generate() ), m_Accounting( ResourceOwnership::Take( kind ) )
         {
         }
 
         virtual ~Image() = default;
+
+        // NAME THE OPERATION; THE TOKEN ITSELF IS NOT REACHABLE. Handing out a `ResourceOwnership&` would
+        // let a caller move it out and leave the image alive with no row — the one failure this ledger's
+        // whole shape exists to make unwritable (ResourceLedger.hpp, "why a type rather than a pair of
+        // calls"). Same move as MappedMemory: there is no Data(), so the wrong call does not compile.
+        void ClaimOwnership( const ResourceOwner owner, const Common::AssetHandle asset = Common::AssetHandle{} )
+        {
+            m_Accounting.Claim( owner, asset );
+        }
+
+        /// What this image costs on the device, once the backend knows. Ignored when 0.
+        void RecordDeviceBytes( const std::size_t bytes )
+        {
+            m_Accounting.RecordBytes( bytes );
+        }
+
+        [[nodiscard]] ResourceOwner GetResourceOwner() const
+        {
+            return m_Accounting.GetOwner();
+        }
+
+        [[nodiscard]] Common::AssetHandle GetOwningAsset() const
+        {
+            return m_Accounting.GetAsset();
+        }
 
         virtual uint32_t                      GetWidth() const               = 0;
         virtual uint32_t                      GetHeight() const              = 0;
@@ -45,11 +80,18 @@ namespace Desert::Graphic
 
     private:
         const Common::UUID m_Hash;
+        // Move-only and unreachable from outside: the image's row in the ledger, opened by the constructor
+        // above and closed by ~Image. An image cannot be alive without one or dead with one.
+        ResourceOwnership m_Accounting;
     };
 
     class Image2D : public Image, public DynamicResources
     {
     public:
+        Image2D() : Image( ResourceKind::Image2D )
+        {
+        }
+
         virtual ~Image2D() = default;
 
         virtual Core::Formats::Image2DSpecification& GetImageSpecification() = 0;
@@ -74,13 +116,18 @@ namespace Desert::Graphic
     class ImageCube : public Image, public DynamicResources
     {
     public:
+        ImageCube() : Image( ResourceKind::ImageCube )
+        {
+        }
+
         virtual ~ImageCube() = default;
 
         virtual Core::Formats::ImageCubeSpecification& GetImageSpecification() = 0;
 
         static std::shared_ptr<ImageCube> Create( const Core::Formats::ImageCubeSpecification& spec,
                                                   const std::unique_ptr<MipMapCubeGenerator>&  mipGenerator );
-        static std::shared_ptr<ImageCube> Copy( const std::shared_ptr<ImageCube>& targetImageCube );
+        // `Copy()` was declared here and is gone — Image.cpp records what it did and why restoring it in
+        // that shape would be a double free rather than a copy.
     };
 
     /**
@@ -97,6 +144,10 @@ namespace Desert::Graphic
     class Image3D : public Image, public DynamicResources
     {
     public:
+        Image3D() : Image( ResourceKind::Image3D )
+        {
+        }
+
         virtual ~Image3D() = default;
 
         [[nodiscard]] virtual uint32_t GetDepth() const = 0;
