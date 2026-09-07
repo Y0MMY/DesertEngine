@@ -99,4 +99,33 @@ namespace Desert::Editor
         std::sort( out.begin(), out.end() );
         return out;
     }
+
+    std::vector<WithheldRemoval> WithholdReferencedRemovals( Common::Utils::ContentUpdatePlan& plan,
+                                                             const AssetReferenceIndex&        index,
+                                                             const std::string&                indexPathPrefix )
+    {
+        // Decided over a snapshot of the keys, then applied — rather than mutating the plan while
+        // walking it, which happens to be safe here only because no step is added or removed.
+        std::vector<WithheldRemoval> withheld;
+        std::vector<std::string>     planned;
+        for ( const auto& step : plan.Steps )
+            if ( step.Action == Common::Utils::ContentAction::Remove )
+                planned.push_back( step.Key );
+
+        for ( const auto& key : planned )
+        {
+            const std::string indexPath   = indexPathPrefix.empty() ? key : indexPathPrefix + "/" + key;
+            const auto        referencers = index.ReferencersOf( indexPath );
+            if ( referencers.empty() )
+                continue; // nothing points at it: the source dropped it and so may we
+
+            // WithholdRemoval cannot fail here — the key came out of the plan's own Remove steps — but
+            // it is asked rather than assumed, because "cannot fail" is a property of this loop and the
+            // plan does not know that. A silent no-op would mean reporting a file as saved and deleting
+            // it in the same breath.
+            if ( plan.WithholdRemoval( key ) )
+                withheld.push_back( { key, referencers.front(), referencers.size() } );
+        }
+        return withheld;
+    }
 } // namespace Desert::Editor

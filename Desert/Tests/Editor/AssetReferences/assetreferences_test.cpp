@@ -2,7 +2,10 @@
 
 #include <Editor/Core/AssetReferences.hpp>
 
+#include <Common/Utilities/ContentUpdate.hpp>
+
 using Desert::Editor::AssetReferenceIndex;
+using Desert::Editor::WithholdReferencedRemovals;
 
 namespace
 {
@@ -89,6 +92,119 @@ TEST( AssetReferenceIndex, UnknownPathIsEmpty )
     idx.Add( Make( "Textures/A.png", ".png", { "1" }, "" ) );
     EXPECT_TRUE( idx.ReferencersOf( "does/not/exist.png" ).empty() );
     EXPECT_FALSE( idx.IsReferenced( "does/not/exist.png" ) );
+}
+
+// ============================================================================================
+// A CONTENT UPDATE THAT REMOVES FILES, MET BY THE INDEX. Both halves of one relation, because they
+// fail in opposite directions: "never delete" satisfies the first and defeats the whole point of
+// deletions, "always delete" satisfies the second and breaks somebody's scene.
+//
+// The collection installer plans removals from manifests alone — a manifest knows what the source
+// stopped shipping and nothing at all about who is still pointing at it. This is the only moment
+// anything can notice, and it has to notice now: the reference rewrite that will show the affected
+// scenes in a dialog has not moved into the shared submodule yet, so without this the deletion half
+// would ship ahead of the thing that makes it safe.
+// ============================================================================================
+
+namespace
+{
+    // The three manifests a real update is planned from, reduced to the one file under test: the
+    // source shipped it, it is still on disk untouched, and the new release does not carry it.
+    Common::Utils::ContentUpdatePlan PlanRemovalOf( const std::string& key )
+    {
+        const Common::Utils::ContentManifestEntry entry{ key, 4, 0xabcdull };
+
+        Common::Utils::ContentManifest recorded;
+        recorded.Insert( entry );
+        Common::Utils::ContentManifest onDisk;
+        onDisk.Insert( entry );
+        const Common::Utils::ContentManifest incoming; // the source dropped it
+
+        auto plan = Common::Utils::PlanContentUpdate( recorded, onDisk, incoming,
+                                                      Common::Utils::ContentAuthorship::LocallyAuthored );
+        // The premise of both tests below. If this ever stops being a removal they prove nothing.
+        EXPECT_EQ( plan.Steps.size(), 1u );
+        EXPECT_EQ( plan.Steps[0].Action, Common::Utils::ContentAction::Remove );
+        return plan;
+    }
+} // namespace
+
+TEST( AssetReferenceIndex, AFileASceneStillUsesSurvivesTheSourcesRemoval )
+{
+    AssetReferenceIndex idx;
+    // A collection material, keyed the way the project index keys it: relative to the assets root.
+    idx.Add( Make( "Collections/Foliage/meshes/Leaf.demat", ".demat", { "4400000001" }, "{}" ) );
+    idx.Add( Make( "Scenes/Main.desce", ".desce", {}, "{\"Material\":4400000001}" ) );
+    idx.Add( Make( "Scenes/Second.desce", ".desce", {}, "{\"Material\":4400000001}" ) );
+
+    auto       plan     = PlanRemovalOf( "meshes/Leaf.demat" );
+    const auto withheld = WithholdReferencedRemovals( plan, idx, "Collections/Foliage" );
+
+    ASSERT_EQ( withheld.size(), 1u );
+    EXPECT_EQ( withheld[0].Key, "meshes/Leaf.demat" );
+    // Named, and counted: "still used by Main.desce" when two scenes use it is a message that gets
+    // acted on once and is then wrong.
+    EXPECT_EQ( withheld[0].FirstReferencer, "Scenes/Main.desce" );
+    EXPECT_EQ( withheld[0].ReferencerCount, 2u );
+
+    // THE ASSERTION: the plan no longer deletes it.
+    EXPECT_EQ( plan.Steps[0].Action, Common::Utils::ContentAction::None );
+    // And the OBSERVATION is untouched — the source did drop it, and that stays true whatever we
+    // decide to do about it. This is what lets the next update ask the same question again.
+    EXPECT_EQ( plan.Steps[0].State, Common::Utils::ContentFileState::SourceDeleted );
+}
+
+TEST( AssetReferenceIndex, AFileNothingUsesIsRemovedAsPlanned )
+{
+    AssetReferenceIndex idx;
+    idx.Add( Make( "Collections/Foliage/meshes/Leaf.demat", ".demat", { "4400000001" }, "{}" ) );
+    // A scene that references some OTHER material. Present on purpose: an index with nothing in it
+    // would also pass this test, and would pass it for the wrong reason.
+    idx.Add( Make( "Scenes/Main.desce", ".desce", {}, "{\"Material\":9900000002}" ) );
+
+    auto       plan     = PlanRemovalOf( "meshes/Leaf.demat" );
+    const auto withheld = WithholdReferencedRemovals( plan, idx, "Collections/Foliage" );
+
+    EXPECT_TRUE( withheld.empty() );
+    EXPECT_EQ( plan.Steps[0].Action, Common::Utils::ContentAction::Remove );
+}
+
+// The prefix is what makes the plan's key and the index's key the same string, and getting it wrong
+// fails SILENTLY in the dangerous direction: an unknown path has no referencers, so every removal
+// would sail through the guard.
+TEST( AssetReferenceIndex, AKeyThatTheIndexDoesNotRecogniseWithholdsNothing )
+{
+    AssetReferenceIndex idx;
+    idx.Add( Make( "Collections/Foliage/meshes/Leaf.demat", ".demat", { "4400000001" }, "{}" ) );
+    idx.Add( Make( "Scenes/Main.desce", ".desce", {}, "{\"Material\":4400000001}" ) );
+
+    auto plan = PlanRemovalOf( "meshes/Leaf.demat" );
+    EXPECT_TRUE( WithholdReferencedRemovals( plan, idx, "Collections/WrongPack" ).empty() );
+    EXPECT_EQ( plan.Steps[0].Action, Common::Utils::ContentAction::Remove );
+
+    // Which is why the caller derives the prefix from the collection's own place under the assets
+    // root rather than spelling it, and why this test exists to say so out loud.
+    auto correct = PlanRemovalOf( "meshes/Leaf.demat" );
+    EXPECT_EQ( WithholdReferencedRemovals( correct, idx, "Collections/Foliage" ).size(), 1u );
+}
+
+// Withholding is not a general "turn this step off": a caller must not be able to believe it saved a
+// file that was never going to be deleted.
+TEST( AssetReferenceIndex, OnlyAPlannedRemovalCanBeWithheld )
+{
+    Common::Utils::ContentManifest recorded;
+    Common::Utils::ContentManifest onDisk;
+    Common::Utils::ContentManifest incoming;
+    incoming.Insert( { "new.demat", 4, 0x1234ull } ); // an ADDITION, not a removal
+
+    auto plan = Common::Utils::PlanContentUpdate( recorded, onDisk, incoming,
+                                                  Common::Utils::ContentAuthorship::LocallyAuthored );
+    ASSERT_EQ( plan.Steps.size(), 1u );
+    ASSERT_EQ( plan.Steps[0].Action, Common::Utils::ContentAction::Write );
+
+    EXPECT_FALSE( plan.WithholdRemoval( "new.demat" ) );
+    EXPECT_FALSE( plan.WithholdRemoval( "not/in/the/plan.demat" ) );
+    EXPECT_EQ( plan.Steps[0].Action, Common::Utils::ContentAction::Write );
 }
 
 int main( int argc, char** argv )

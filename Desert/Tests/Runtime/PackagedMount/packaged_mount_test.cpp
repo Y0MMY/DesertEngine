@@ -112,6 +112,68 @@ TEST( PackagedMount, AnIntactUpdateMountsAndTheGameSeesItsContent )
                "untouched by the update" );
 }
 
+TEST( PackagedMount, AnUpdateThatREMOVESAFileIsAppliedAtStartup )
+{
+    MountGuard     guard;
+    const fs::path dir = MakeTempDir( "removal" );
+
+    WritePak( dir / "Content.dpak", { { "Assets/level.desce", "first release" },
+                                      { "Assets/cut_character.mesh", "an asset the sequel drops" } } );
+
+    // Present BEFORE the update — with the base alone, because the patch is what has to make the
+    // difference. Writing it first would mount it here too, and the assertion below would pass on an
+    // engine that had never applied a deletion in its life.
+    ASSERT_EQ( Desert::Player::MountPackagedContent( dir, "MyGame" ).ExitCode, Desert::Player::kContentOk );
+    EXPECT_TRUE( Common::Utils::FileSystem::Exists( dir / "Assets/cut_character.mesh" ) );
+    Common::Utils::VFS::Unmount();
+
+    {
+        // A patch that removes one file and changes another — the ordinary shape of a content update,
+        // and the one an overlay mount could not express at all before the deletion list existed.
+        Common::Utils::PakWriter writer( dir / "Patch_001.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        const std::string fixed = "the fix the player downloaded";
+        ASSERT_TRUE( writer.AddData( "Assets/level.desce", fixed.data(), fixed.size() ) );
+        ASSERT_TRUE( writer.SetDeletedKeys( { "Assets/cut_character.mesh" } ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+
+    // Now with the patch in place — this is the whole startup path, not the VFS in isolation.
+    const auto result = Desert::Player::MountPackagedContent( dir, "MyGame" );
+    ASSERT_EQ( result.ExitCode, Desert::Player::kContentOk ) << result.Message;
+    ASSERT_EQ( result.Patches.size(), 1u );
+
+    EXPECT_FALSE( Common::Utils::FileSystem::Exists( dir / "Assets/cut_character.mesh" ) );
+    EXPECT_FALSE( Common::Utils::FileSystem::ReadFileContent( dir / "Assets/cut_character.mesh" ).IsSuccess() );
+    EXPECT_EQ( Common::Utils::FileSystem::ReadFileContent( dir / "Assets/level.desce" ).GetValue(),
+               "the fix the player downloaded" );
+}
+
+TEST( PackagedMount, AnUpdateBuiltAgainstADifferentBaseStopsStartup )
+{
+    MountGuard     guard;
+    const fs::path dir = MakeTempDir( "wrongbase" );
+
+    WritePak( dir / "Content.dpak", { { "Assets/level.desce", "first release" } } );
+    {
+        Common::Utils::PakWriter writer( dir / "Patch_001.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        // This patch removes a file this base has never shipped: it was built against some other
+        // release. Its other changes are therefore about content that is not here either, and applying
+        // them would produce a game nobody has ever tested.
+        ASSERT_TRUE( writer.SetDeletedKeys( { "Assets/from_another_game.mesh" } ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+
+    const auto result = Desert::Player::MountPackagedContent( dir, "MyGame" );
+
+    EXPECT_EQ( result.ExitCode, Desert::Player::kContentPatchArchiveFailed );
+    EXPECT_NE( result.Message.find( "from_another_game.mesh" ), std::string::npos ) << result.Message;
+    EXPECT_NE( result.Message.find( "Patch_001.dpak" ), std::string::npos ) << result.Message;
+    // Nothing half-mounted: refusing means the game does not run on a content set that half applied.
+    EXPECT_FALSE( Common::Utils::VFS::IsMounted() );
+}
+
 TEST( PackagedMount, NoArchiveAtAllIsADevTreeAndNotAFailure )
 {
     MountGuard     guard;

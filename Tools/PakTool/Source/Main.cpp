@@ -1,15 +1,28 @@
 // PakTool — CLI for the Desert .dpak archive format (Common::Utils::PakFile, the exact code the
 // Runtime mounts). Lets scripts/CI build and inspect content archives without booting the editor.
 //
-//   PakTool create  <out.dpak> <srcDir> [--prefix P]   pack every file under srcDir (keys relative
+//   PakTool create   <out.dpak> <srcDir> [--prefix P]  pack every file under srcDir (keys relative
 //                                                      to it, optionally prefixed "P/...")
-//   PakTool list    <archive.dpak>                     print every entry with its size
-//   PakTool extract <archive.dpak> <outDir>            unpack all entries into outDir
-//   PakTool diff    <base.dpak> <new.dpak> <patch.dpak> patch pak = entries of new that are absent
-//                                                      or changed vs base (per-entry content hash;
-//                                                      byte-compare fallback for v1 archives).
-//                                                      Mount it AFTER the base to apply the update.
+//   PakTool list     <archive.dpak>                    print every entry with its size
+//   PakTool extract  <archive.dpak> <outDir>           unpack all entries into outDir
+//   PakTool manifest <archive.dpak|srcDir> <out.txt>   record what this release hands out
+//                                                      [--prefix P]
+//   PakTool patch    <base.manifest> <new.dpak> <patch.dpak>
+//                                                      patch pak = entries of new that are absent or
+//                                                      changed vs the manifest, PLUS the list of keys
+//                                                      the manifest had and new does not. Mount it
+//                                                      AFTER the base to apply the update.
+//
+// `patch` REPLACED `diff`, and the difference is not the spelling. `diff` compared two whole archives,
+// so publishing an update meant keeping every shipped .dpak for ever (318 MB per version here), and it
+// could not express a DELETION at all — its own code counted removals and printed them as "not
+// representable in an overlay patch". A manifest of the same tree is 247 KiB, 0.076 % of it, so a
+// release keeps the manifest of every version and no old archives; and deletions ride inside the patch
+// as a reserved entry (Common/Utilities/PakFile.hpp, kDeletedEntriesKey). `diff` had no caller anywhere
+// — not CI, not the Package scripts, not a test — so it is gone rather than kept beside its
+// replacement. See Docs/Architecture/P3_CONTENT_MANIFEST.md.
 
+#include <Common/Utilities/ContentManifest.hpp>
 #include <Common/Utilities/PakFile.hpp>
 
 #include <cstdio>
@@ -81,8 +94,14 @@ namespace
         }
         for ( const auto& key : reader.KeysWithPrefix( "" ) )
             std::printf( "%10ju  %s\n", (uintmax_t)reader.EntrySize( key ).value_or( 0 ), key.c_str() );
-        std::printf( "PakTool: %zu entr%s in %s\n", reader.EntryCount(),
-                     reader.EntryCount() == 1 ? "y" : "ies", pakPath.string().c_str() );
+        // Deletions are printed EXPLICITLY because they are invisible everywhere else: the reserved
+        // entry is hidden from every content accessor on purpose, so a patch that removes ten files and
+        // adds none would otherwise list as an empty archive.
+        for ( const auto& key : reader.DeletedKeys() )
+            std::printf( "%10s  %s\n", "DELETED", key.c_str() );
+        std::printf( "PakTool: %zu entr%s, %zu deletion(s) in %s\n", reader.EntryCount(),
+                     reader.EntryCount() == 1 ? "y" : "ies", reader.DeletedKeys().size(),
+                     pakPath.string().c_str() );
         return 0;
     }
 
@@ -122,16 +141,85 @@ namespace
         return 0;
     }
 
-    int Diff( const fs::path& basePath, const fs::path& newPath, const fs::path& outPath )
+    // A manifest of whatever the argument is — an archive or the tree an archive is built from. Both
+    // spellings must produce the SAME manifest for the same content; that equality is the whole reason
+    // a release can record its manifest from either side and later diff the other against it, and it is
+    // pinned by ContentManifest.ATreeAndThePakBuiltFromItAgree.
+    int Manifest( const fs::path& source, const fs::path& outPath, const std::string& prefix )
     {
-        Common::Utils::PakReader base( basePath );
-        Common::Utils::PakReader newer( newPath );
-        if ( !base.IsOpen() || !newer.IsOpen() )
+        std::error_code                ec;
+        Common::Utils::ContentManifest manifest;
+
+        if ( fs::is_directory( source, ec ) )
         {
-            const Common::Utils::PakReader& bad = base.IsOpen() ? newer : base;
-            std::fprintf( stderr, "PakTool: cannot open %s: %s\n",
-                          ( base.IsOpen() ? newPath : basePath ).string().c_str(), bad.OpenError().c_str() );
+            auto built = Common::Utils::ContentManifest::FromDirectory( source, prefix );
+            if ( !built )
+            {
+                std::fprintf( stderr, "PakTool: %s\n", built.GetError().c_str() );
+                return 1;
+            }
+            manifest = built.ExtractValue();
+        }
+        else
+        {
+            Common::Utils::PakReader reader( source );
+            if ( !reader.IsOpen() )
+            {
+                std::fprintf( stderr, "PakTool: cannot open %s: %s\n", source.string().c_str(),
+                              reader.OpenError().c_str() );
+                return 1;
+            }
+            manifest = Common::Utils::ContentManifest::FromPak( reader );
+        }
+
+        const std::string text = manifest.Serialize();
+        fs::create_directories( outPath.parent_path(), ec );
+        std::ofstream out( outPath, std::ios::binary | std::ios::trunc );
+        out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
+        out.close();
+        if ( !out )
+        {
+            std::fprintf( stderr, "PakTool: failed to write %s\n", outPath.string().c_str() );
             return 1;
+        }
+        std::printf( "PakTool: manifest of %zu entr%s (%zu bytes) -> %s\n", manifest.Count(),
+                     manifest.Count() == 1 ? "y" : "ies", text.size(), outPath.string().c_str() );
+        return 0;
+    }
+
+    int Patch( const fs::path& baseManifest, const fs::path& newPath, const fs::path& outPath )
+    {
+        std::ifstream in( baseManifest, std::ios::binary );
+        if ( !in )
+        {
+            std::fprintf( stderr, "PakTool: cannot open %s\n", baseManifest.string().c_str() );
+            return 1;
+        }
+        const std::string text( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+        auto              parsed = Common::Utils::ContentManifest::Parse( text );
+        if ( !parsed )
+        {
+            std::fprintf( stderr, "PakTool: %s: %s\n", baseManifest.string().c_str(), parsed.GetError().c_str() );
+            return 1;
+        }
+        const Common::Utils::ContentManifest base = parsed.ExtractValue();
+
+        Common::Utils::PakReader newer( newPath );
+        if ( !newer.IsOpen() )
+        {
+            std::fprintf( stderr, "PakTool: cannot open %s: %s\n", newPath.string().c_str(),
+                          newer.OpenError().c_str() );
+            return 1;
+        }
+        const auto diff =
+             Common::Utils::CompareManifests( base, Common::Utils::ContentManifest::FromPak( newer ) );
+
+        if ( diff.Empty() )
+        {
+            std::printf( "PakTool: no differences — no patch written\n" );
+            std::error_code ec;
+            fs::remove( outPath, ec );
+            return 0;
         }
 
         Common::Utils::PakWriter writer( outPath );
@@ -140,44 +228,21 @@ namespace
             std::fprintf( stderr, "PakTool: cannot create %s\n", outPath.string().c_str() );
             return 1;
         }
-
-        size_t added = 0, changed = 0, removed = 0;
-        for ( const auto& key : newer.KeysWithPrefix( "" ) )
-        {
-            bool same = false;
-            if ( base.Contains( key ) )
+        for ( const auto* keys : { &diff.Added, &diff.Changed } )
+            for ( const auto& key : *keys )
             {
-                const auto oldHash = base.EntryHash( key ).value_or( 0 );
-                const auto newHash = newer.EntryHash( key ).value_or( 0 );
-                if ( oldHash != 0 && newHash != 0 )
-                    same = oldHash == newHash;
-                else
-                    same = base.Read( key ) == newer.Read( key ); // v1 archive: no hashes -> bytes
+                const auto data = newer.Read( key );
+                if ( !data || !writer.AddData( key, data->data(), data->size() ) )
+                {
+                    std::fprintf( stderr, "PakTool: failed to copy entry %s\n", key.c_str() );
+                    return 1;
+                }
             }
-            if ( same )
-                continue;
-
-            const auto data = newer.Read( key );
-            if ( !data || !writer.AddData( key, data->data(), data->size() ) )
-            {
-                std::fprintf( stderr, "PakTool: failed to copy entry %s\n", key.c_str() );
-                return 1;
-            }
-            base.Contains( key ) ? ++changed : ++added;
-        }
-
-        // Deletions are NOT representable in an overlay patch (a later mount can only override).
-        // Report them so the packager knows a full base re-ship is needed to actually drop files.
-        for ( const auto& key : base.KeysWithPrefix( "" ) )
-            if ( !newer.Contains( key ) )
-                ++removed;
-
-        if ( added + changed == 0 )
+        if ( !writer.SetDeletedKeys( diff.Removed ) )
         {
-            std::printf( "PakTool: no differences — no patch written\n" );
-            std::error_code ec;
-            fs::remove( outPath, ec );
-            return 0;
+            std::fprintf( stderr, "PakTool: a deleted key cannot be recorded (empty, reserved, or "
+                                  "containing a line break)\n" );
+            return 1;
         }
         if ( writer.Finalize() == 0 )
         {
@@ -185,22 +250,19 @@ namespace
             return 1;
         }
 
-        std::string removedNote;
-        if ( removed )
-            removedNote =
-                 " (" + std::to_string( removed ) + " deletion(s) not representable in an overlay patch)";
-        std::printf( "PakTool: patch %s — %zu added, %zu changed%s\n", outPath.string().c_str(), added,
-                     changed, removedNote.c_str() );
+        std::printf( "PakTool: patch %s — %zu added, %zu changed, %zu deleted\n", outPath.string().c_str(),
+                     diff.Added.size(), diff.Changed.size(), diff.Removed.size() );
         return 0;
     }
 
     int Usage()
     {
         std::fprintf( stderr, "Usage:\n"
-                              "  PakTool create  <out.dpak> <srcDir> [--prefix P]\n"
-                              "  PakTool list    <archive.dpak>\n"
-                              "  PakTool extract <archive.dpak> <outDir>\n"
-                              "  PakTool diff    <base.dpak> <new.dpak> <patch.dpak>\n" );
+                              "  PakTool create   <out.dpak> <srcDir> [--prefix P]\n"
+                              "  PakTool list     <archive.dpak>\n"
+                              "  PakTool extract  <archive.dpak> <outDir>\n"
+                              "  PakTool manifest <archive.dpak|srcDir> <out.txt> [--prefix P]\n"
+                              "  PakTool patch    <base.manifest> <new.dpak> <patch.dpak>\n" );
         return 2;
     }
 } // namespace
@@ -223,8 +285,16 @@ int main( int argc, char** argv )
         return List( argv[2] );
     if ( cmd == "extract" && argc >= 4 )
         return Extract( argv[2], argv[3] );
-    if ( cmd == "diff" && argc >= 5 )
-        return Diff( argv[2], argv[3], argv[4] );
+    if ( cmd == "manifest" && argc >= 4 )
+    {
+        std::string prefix;
+        for ( int i = 4; i < argc - 1; ++i )
+            if ( std::strcmp( argv[i], "--prefix" ) == 0 )
+                prefix = argv[i + 1];
+        return Manifest( argv[2], argv[3], prefix );
+    }
+    if ( cmd == "patch" && argc >= 5 )
+        return Patch( argv[2], argv[3], argv[4] );
 
     return Usage();
 }

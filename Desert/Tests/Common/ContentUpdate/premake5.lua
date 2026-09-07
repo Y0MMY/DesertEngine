@@ -4,26 +4,22 @@ local test_files = os.matchfiles("*.cpp")
 project(test_name)
     kind "ConsoleApp"
     language "C++"
-
+    
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
-
-    files {
+    
+    files { 
         test_files,
-        -- Only the PURE index is compiled in (std-only). The project scanner (AssetReferencesScan.cpp)
-        -- pulls in engine headers and is intentionally left out of the test.
-        "%{wks.location}/Editor/Source/Editor/Core/AssetReferences.cpp",
     }
-
+    
     includedirs {
         "%{wks.location}/Desert/Common/Source",
-        "%{wks.location}/Editor/Source", -- <Editor/Core/AssetReferences.hpp>
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
         externalincludedirs { path }
     end
-
+    
     for name, path in pairs(deps.TestSpecific.IncludeDir) do
         externalincludedirs { path }
     end
@@ -32,17 +28,15 @@ project(test_name)
         defines { define }
     end
 
-    links { "Common", "Optick" }
+    links { "Common", "Optick" } -- Commons JobSystem registers worker threads with Optick
 
-    -- Common contains Objective-C (MacOSFileSystem's file dialogs), and this suite now reaches it
-    -- transitively: it tests the removal guard against a real ContentUpdatePlan, and the object that
-    -- defines PlanContentUpdate also defines ApplyContentUpdate, which writes files. The linker pulls
-    -- whole objects, so the ObjC runtime + AppKit have to come too — the same two lines every other
-    -- suite that touches FileSystem carries.
+    -- Common contains Objective-C (MacOSFileSystem file dialog) — pulled in here because this test
+    -- references FileSystem, so the ObjC runtime + AppKit must link too.
     filter "system:macosx"
         links { "Cocoa.framework", "Foundation.framework" }
     filter {}
 
+    -- gtest comes from Dependencies.lua (prebuilt .lib on Windows, Homebrew on macOS)
     filter "configurations:Debug"
         for name, path in pairs(deps.TestSpecific.Libraries.Debug) do
             links { path }
@@ -54,5 +48,5 @@ project(test_name)
         end
 
     filter {}
-
+    
 print("Configured test project: " .. test_name)
