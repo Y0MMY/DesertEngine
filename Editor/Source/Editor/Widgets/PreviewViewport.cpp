@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace Desert::Editor
 {
@@ -959,9 +960,17 @@ namespace Desert::Editor
         // panel can forget to draw it.
         if ( IsSkyRebuilding() )
         {
-            constexpr float kPad  = 6.0f;
-            const char*     label = "Rebuilding the sky...";
-            const ImVec2    ts    = ImGui::CalcTextSize( label );
+            // WITH A PERCENTAGE, because the wait is SECONDS and varies by four times with the coverage:
+            // 5.9 s for a 256 grid and 1.5 s for the 128 this pane uses, measured on this machine. "Working"
+            // and "40% of the way through a six-second job" are different sentences to somebody deciding
+            // whether to keep dragging, and the bake already computes the fraction for its own cancellation
+            // check, so it costs one relaxed load here.
+            char label[64];
+            std::snprintf( label, sizeof( label ), "Rebuilding the sky... %.0f%%",
+                           m_Renderer->CloudVolumeBakeProgress() * 100.0f );
+
+            constexpr float kPad = 6.0f;
+            const ImVec2    ts   = ImGui::CalcTextSize( label );
             const ImVec2    boxMin( origin.x + kPad, origin.y + kPad );
             const ImVec2    boxMax( boxMin.x + ts.x + kPad * 2.0f, boxMin.y + ts.y + kPad );
 

@@ -96,7 +96,7 @@ namespace Desert::Graphic::System
         // what keeps that from leaking a worker for seconds afterwards. Nothing the job touches belongs to
         // this object: the parameters, the origin and the flag are all captured BY VALUE, which is what
         // makes not waiting safe rather than merely fast.
-        m_ModellingBakeCancel->store( true, std::memory_order_relaxed );
+        m_ModellingBakeSignal->Cancelled.store( true, std::memory_order_relaxed );
     }
 
     Common::BoolResultStr VolumetricCloudRenderer::Initialize()
@@ -493,7 +493,7 @@ namespace Desert::Graphic::System
                 // done this even if it had had a flag.
                 if ( m_ModellingBake.valid() )
                 {
-                    m_ModellingBakeCancel->store( true, std::memory_order_relaxed );
+                    m_ModellingBakeSignal->Cancelled.store( true, std::memory_order_relaxed );
                     m_ModellingBake = {};
                     ++m_ModellingBakesCancelled;
                 }
@@ -510,10 +510,10 @@ namespace Desert::Graphic::System
                 // shift happens once per lattice cell of camera travel.
                 m_ModellingBakeStarted = std::chrono::steady_clock::now();
 
-                // A FRESH FLAG PER BAKE, not a reset of the old one: the abandoned job still holds the old
+                // A FRESH SIGNAL PER BAKE, not a reset of the old one: the abandoned job still holds the old
                 // shared_ptr and is still reading it, so clearing that flag would un-cancel a bake we have
                 // already stopped caring about and burn a worker for nothing.
-                m_ModellingBakeCancel = std::make_shared<std::atomic<bool>>( false );
+                m_ModellingBakeSignal = std::make_shared<ModellingBakeSignal>();
 
                 // ON THE ENGINE'S POOL AND NOT ON A THREAD OF OUR OWN. Three things follow and all three
                 // were live defects: the work is VISIBLE (DESERT_PROFILE_SCOPE below puts it in Optick and
@@ -522,12 +522,16 @@ namespace Desert::Graphic::System
                 // be able to start unrelated bakes with nothing counting them against the machine); and it
                 // is CANCELLABLE, which is what the block above needs.
                 m_ModellingBake = Common::JobSystem::Get().Async(
-                     [params = wanted, origin = wantedOrigin, cancel = m_ModellingBakeCancel]()
+                     [params = wanted, origin = wantedOrigin, signal = m_ModellingBakeSignal]()
                      {
                          DESERT_PROFILE_SCOPE( "Clouds: Modelling volume bake" );
                          return Assets::BakeCloudProceduralVolume(
                               params, origin,
-                              [&cancel]( float ) { return !cancel->load( std::memory_order_relaxed ); } );
+                              [&signal]( float fraction )
+                              {
+                                  signal->Fraction.store( fraction, std::memory_order_relaxed );
+                                  return !signal->Cancelled.load( std::memory_order_relaxed );
+                              } );
                      } );
             }
         }
@@ -618,10 +622,17 @@ namespace Desert::Graphic::System
             m_ModellingOriginKm = m_PendingOriginKm;
             m_ModellingValid    = true;
 
+            // FROM THE PENDING SET AND NOT FROM THIS FRAME'S, which is the same statement m_ModellingParams
+            // above it makes: what is recorded as "what the volume on the device was built from" has to be
+            // what the finished BAKE was started with. It reads identically today — a bake whose types
+            // changed under it is cancelled and its future dropped, so a collected one is always the wanted
+            // one — but writing `handles` here would leave the cache describing a set the bytes were never
+            // built from the day that stops being true, and the symptom would be a cloud type swap that
+            // never re-bakes at all. Both ends looked right; the middle link is where it is lost.
             for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
-                m_ProfileTypes[slot] = slot < speciesCount ? handles[slot] : Assets::AssetHandle::Null();
-            m_ProfileSpeciesCount = speciesCount;
-            m_ProfileGeneration   = generation;
+                m_ProfileTypes[slot] = m_PendingTypes[slot];
+            m_ProfileSpeciesCount = m_PendingSpeciesCount;
+            m_ProfileGeneration   = m_PendingGeneration;
 
             // THE COST OF A REBAKE IS PRINTED, NOT ASSUMED, and that is the exit criterion this phase was
             // given (ANALYSIS_APPROACH.md §3). It is wall time from starting the worker to collecting it,
@@ -634,7 +645,7 @@ namespace Desert::Graphic::System
             LOG_INFO( "[Clouds] Modelling volume baked for {} cloud type(s) in {:.0f} ms — region {:.0f} km "
                       "at ({:.1f}, {:.1f}), envelope {:.2f} to {:.2f} km, {}x{}x{} RGBA8 ({:.2f} MiB), "
                       "{} lumps, {:.0f} m per voxel, {} stale bake(s) cancelled.",
-                      speciesCount, bakeMs, m_ModellingParams.RegionSizeKm, m_ModellingOriginKm.x,
+                      m_ProfileSpeciesCount, bakeMs, m_ModellingParams.RegionSizeKm, m_ModellingOriginKm.x,
                       m_ModellingOriginKm.y, m_ModellingParams.LayerBottomKm,
                       m_ModellingParams.LayerBottomKm + m_ModellingParams.LayerThicknessKm, bakedSide,
                       Assets::kCloudProceduralVolumeHeight, bakedSide,

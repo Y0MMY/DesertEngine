@@ -158,14 +158,35 @@ namespace Desert::Assets
     inline constexpr uint32_t kCloudProceduralVolumeSide   = 256u; // x and z, world east and north
     inline constexpr uint32_t kCloudProceduralVolumeHeight = 32u;  // y, up, spanning the layer exactly
 
-    /// The coarsest grid this subsystem will bake, and the number is DERIVED rather than picked.
-    /// `CloudProceduralCellExtentKm` floors a species' lattice cell at FOUR voxels — the narrowest cluster
-    /// a volume can carry with an inside and two edges — so at a 48 km region a side of 64 puts that floor
-    /// at exactly 3.00 km, which is the lattice every cloud scene in this repository authors (a 12 km
-    /// Weather Tile, four cells to a tile). One step coarser and the floor starts ENLARGING the shipped
-    /// cells, so the preview would no longer be a coarser picture of the artist's sky but a picture of a
-    /// different sky, with bigger clouds in it. A budget that changes the subject is not a budget.
-    inline constexpr uint32_t kCloudProceduralVolumeSideMin = 64u;
+    /// The coarsest grid this subsystem will bake, and the number is MEASURED rather than argued — the
+    /// first draft of it was 64 on a derivation that turned out to name the wrong mechanism, and both the
+    /// frames and Desert/Tests/Engine/CloudProceduralField said so.
+    ///
+    /// WHAT ACTUALLY BINDS IS THE LUMP FLOOR, NOT THE CELL FLOOR. `CloudProceduralLumpFloorKm` is
+    /// `max( 0.5 * ResolvableChordKm, RegionSizeKm / side )` — a HALF-EXTENT — so at the shipped 48 km
+    /// region it is 187.5 m at 256, 375 m at 128 and 750 m at 64, while the narrowest lump the shipped
+    /// congestus emits is 459 m ACROSS, i.e. a half-extent of 229.5 m. At 256 nothing is clamped; at 128
+    /// only the narrowest tail is; at 64 the clamp is three times the body it is applied to and it applies
+    /// to nearly every lobe in the sky. The cell floor — four voxels, which lands on the shipped 3 km
+    /// lattice at exactly 64 — is the bound the first draft cited, and it is not the one that fires first.
+    ///
+    /// MEASURED, as the fraction of the sky covered top-down at Coverage 0.35 (the suite prints it):
+    ///
+    ///     side 256 -> 0.3177 of the sky      (the reference)
+    ///     side 128 -> 0.3163                 -0.0014, inside the estimator's own noise
+    ///     side  64 -> 0.3613                 +0.0436 — FOUR POINTS OF SKY INVENTED BY THE CONTAINER
+    ///
+    /// and the frames say the same thing in the shape that matters: at 128 the six-point sweep is the same
+    /// clouds in the same places with softer edges (mean 1.1 to 6.2 of 255 against a repeat floor of
+    /// exactly zero), while at 64 a cumulus has visibly swollen and a gap between two lobes has closed.
+    /// A budget that changes the subject is not a budget, so 64 is REFUSED rather than offered.
+    ///
+    /// WHAT WOULD CHANGE THE ANSWER: a much smaller region. The quantity that matters is the VOXEL against
+    /// the narrowest body, not the side against a number, and `RegionSizeKm / side` is what ties them — a
+    /// layer authored at a 16 km region has a 125 m voxel at 128 and could afford a coarser grid than this
+    /// floor allows. Nothing in the repository authors one, so the floor is stated as a side; re-measure
+    /// the table above before relaxing it for such a layer.
+    inline constexpr uint32_t kCloudProceduralVolumeSideMin = 128u;
 
     inline constexpr uint32_t kCloudProceduralBytesPerVoxel = 4u;
 

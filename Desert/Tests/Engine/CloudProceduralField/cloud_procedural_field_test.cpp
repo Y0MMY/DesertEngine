@@ -796,7 +796,7 @@ TEST( CloudProceduralBudget, TheBlockIsExactlyTheSizeTheParametersAskedFor )
     // A LENGTH THAT DOES NOT MATCH THE EXTENTS THE CALLER THEN BUILDS AN IMAGE WITH is the kind of defect
     // that reads as a corrupt sky rather than as a wrong number, so it is asserted for every side the
     // component's own Range permits rather than for the default alone.
-    for ( const uint32_t side : { kCloudProceduralVolumeSideMin, 96u, 128u, kCloudProceduralVolumeSide } )
+    for ( const uint32_t side : { kCloudProceduralVolumeSideMin, 160u, 192u, kCloudProceduralVolumeSide } )
     {
         CloudProceduralFieldParams params = MakeParams();
         params.VolumeSideVoxels           = side;
@@ -849,7 +849,7 @@ TEST( CloudProceduralBudget, ACoarserGridIsTheSameSkySampledMoreCoarsely )
     };
     std::vector<Row> rows;
 
-    for ( const uint32_t side : { kCloudProceduralVolumeSide, 128u, kCloudProceduralVolumeSideMin } )
+    for ( const uint32_t side : { kCloudProceduralVolumeSide, 192u, kCloudProceduralVolumeSideMin } )
     {
         CloudProceduralFieldParams params = MakeParams();
         params.VolumeSideVoxels           = side;
@@ -882,6 +882,13 @@ TEST( CloudProceduralBudget, ACoarserGridIsTheSameSkySampledMoreCoarsely )
     // A HUNDREDTH OF THE SKY. The reference is the shipped 256, and the tolerance is a tenth of the 0.10
     // the Coverage slider itself is held to above — so a budget that moved the sky as much as a tenth of
     // one notch of Coverage fails here.
+    //
+    // AND IT IS WHERE THE FLOOR CAME FROM, which is worth saying because it is the one number in this
+    // feature that a reader would otherwise assume was picked. The first draft of
+    // kCloudProceduralVolumeSideMin was 64, derived from the cell floor; this assertion is what said no.
+    // At 64 the same sky came out at 0.3613 covered against the reference's 0.3177 — four points of sky
+    // that the CONTAINER invented, because the lump floor there is three times the narrowest body it is
+    // applied to. The floor is 128 and the refusal of 64 is recorded on the constant itself.
     ASSERT_EQ( rows.size(), 3u );
     for ( size_t i = 1; i < rows.size(); ++i )
         EXPECT_NEAR( rows[i].Columns, rows[0].Columns, 0.01 )

@@ -199,6 +199,19 @@ namespace Desert::Graphic::System
             return m_ModellingBake.valid();
         }
 
+        /// How far that bake has got, 0..1. Meaningless unless IsModellingVolumeBaking(), and 0 for a view
+        /// that has never baked one.
+        ///
+        /// IT IS A NUMBER AND NOT A SPINNER because the wait it describes is SECONDS long and varies by a
+        /// factor of four with the coverage — measured at 5.9 s for a 256 grid and 1.5 s for a 128 one on
+        /// this machine — so "how much longer" is a question the artist genuinely has. The bake already
+        /// produces the fraction for its own cancellation check (Assets::CloudProceduralBakeProgressFn), so
+        /// this costs one relaxed store per XZ slice and nothing at all per voxel.
+        float ModellingBakeProgress() const
+        {
+            return m_ModellingBakeSignal->Fraction.load( std::memory_order_relaxed );
+        }
+
     private:
         bool CreatePipelines();
         // Allocates (or reallocates) all SIX images the pass owns: the quarter-resolution scatter and
@@ -464,12 +477,26 @@ namespace Desert::Graphic::System
         // packaged_task and its destructor waits for nothing, so abandoning one is a move-assignment.
         std::future<Common::ResultStr<std::vector<unsigned char>>> m_ModellingBake;
 
-        // HOW THE BAKE IN FLIGHT IS TOLD TO STOP. Shared, and a FRESH one per bake rather than a reset of
-        // the old: an abandoned job is still reading the flag it was started with, so clearing that flag
-        // would un-cancel a bake nobody is waiting for and burn a worker to the end of it.
+        /// THE WHOLE CHANNEL BETWEEN A BAKE AND THE VIEW THAT WANTED IT: one flag in, one number out. Both
+        /// are read by the worker at the same instant — between XZ slices, through the one progress hook —
+        /// so they are ONE object rather than two shared_ptrs that a future edit could give different
+        /// lifetimes to.
+        struct ModellingBakeSignal
+        {
+            /// Set by the renderer when this bake's parameters are no longer wanted. The bake returns an
+            /// error at its next slice boundary and its result is never collected.
+            std::atomic<bool> Cancelled{ false };
+
+            /// 0 at the start, 1 at the end. Written by the worker, read by whatever draws the wait.
+            std::atomic<float> Fraction{ 0.0f };
+        };
+
+        // A FRESH SIGNAL PER BAKE rather than a reset of the old one: an abandoned job is still reading the
+        // object it was started with, so clearing that flag would un-cancel a bake nobody is waiting for and
+        // burn a worker to the end of it — and its progress would fight the new bake's for the same number.
         //
-        // Never null, so no call site has to ask. The bake it is handed to reads it between XZ slices.
-        std::shared_ptr<std::atomic<bool>> m_ModellingBakeCancel = std::make_shared<std::atomic<bool>>( false );
+        // Never null, so no call site has to ask.
+        std::shared_ptr<ModellingBakeSignal> m_ModellingBakeSignal = std::make_shared<ModellingBakeSignal>();
 
         // How many bakes this view has abandoned. It is in the log line beside the milliseconds because it
         // is the number that says the cancellation is WORKING — "baked in 3 100 ms, 19 stale bake(s)

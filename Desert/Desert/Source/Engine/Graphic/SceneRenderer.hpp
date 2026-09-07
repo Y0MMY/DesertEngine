@@ -213,6 +213,10 @@ namespace Desert::Graphic
         // False for a view with no cloud layer, which is every mesh preview and every asset thumbnail.
         bool IsCloudVolumeBaking() const;
 
+        // How far that rebuild has got, 0..1. Meaningless unless IsCloudVolumeBaking(); see
+        // System::VolumetricCloudRenderer::ModellingBakeProgress for why the wait is worth a number.
+        float CloudVolumeBakeProgress() const;
+
         // How many SceneRenderers are alive right now. Every one of them pays for its own baked sky
         // environment, which is why the bake announces its cost with this number beside it.
         static uint32_t GetLiveRendererCount();

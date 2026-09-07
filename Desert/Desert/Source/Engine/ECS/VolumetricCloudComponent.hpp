@@ -436,13 +436,14 @@ namespace Desert::ECS
                            "behind material that has already hidden them." ) )
         float StopTransmittance = 0.005f;
 
-        PROPERTY( DisplayName( "Volume Resolution" ), Category( "Quality" ), Range( 64, 256 ), Advanced,
+        PROPERTY( DisplayName( "Volume Resolution" ), Category( "Quality" ), Range( 128, 256 ), Advanced,
                   Tooltip( "Voxels per horizontal side of the camera-centric modelling volume the layer is "
                            "baked into. It is the cost of the BAKE, not of the frame: the bake is a loop "
-                           "over side x side columns, so 128 costs a quarter of 256 and 64 a sixteenth. "
-                           "Lower it when a view has to follow an edit quickly — an asset preview does — "
-                           "and leave it at 256 for a level, where the sky is baked once and looked at for "
-                           "hours." ) )
+                           "over side x side columns, so 128 costs a QUARTER of 256 — measured at 1 461 ms "
+                           "against 5 915 ms. Lower it when a view has to follow an edit quickly (an asset "
+                           "preview does) and leave it at 256 for a level, where the sky is baked once and "
+                           "looked at for hours. It stops at 128 because 64 was measured to invent four "
+                           "points of sky rather than draw the same sky more coarsely." ) )
         // 256, WHICH IS THE ONLY VALUE A LEVEL SHOULD USE, and the field exists for the other end. The
         // resolution used to be a constant, and the consequence was that a 512-pixel material-preview pane
         // baked exactly what a whole level bakes: measured on this machine in Debug, an artist dragging

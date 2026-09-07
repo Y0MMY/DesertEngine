@@ -146,11 +146,14 @@ namespace Desert::Editor
             // the artist's last edit and the sky that showed it, which is what the owner reported twice as
             // "the cloud preview still doesn't update straight away".
             //
-            // 128 AND NOT 64, AND THE NUMBER IS THE MEASUREMENT RATHER THAN THE ARGUMENT — see the report
-            // for O8/Г9 and the table at Assets::kCloudProceduralVolumeSideMin for the floor. 128 quarters
-            // the bake; 64 would quarter it again but sits exactly on the floor where the cell clamp starts
-            // enlarging the shipped 3 km lattice, so the picture would stop being a coarser view of the
-            // artist's sky and start being a different sky.
+            // 128 AND NOT 64, AND THE NUMBER IS A MEASUREMENT RATHER THAN AN ARGUMENT. 128 quarters the
+            // bake — 1 461 ms against 5 915 ms on this machine, Debug, minimum of six — and the six-point
+            // sweep against the shipped 256 is the same clouds in the same places with softer edges (mean
+            // 1.1 to 6.2 of 255, against a repeat floor of exactly zero). 64 would quarter it again and
+            // does not survive the same check: it covers four more points of the sky than 256 does, and in
+            // the frame a cumulus has swollen and a gap between two lobes has closed. The table and the
+            // mechanism are on Assets::kCloudProceduralVolumeSideMin, which is that refusal expressed as a
+            // bound — so this default deliberately SITS ON the floor: the cheapest grid measured honest.
             //
             // A FIELD RATHER THAN A CONSTANT, on exactly the terms the two above are already on: it is
             // ECS::VolumetricCloudData::VolumeResolution, it is written onto the layer by ApplySetup every
