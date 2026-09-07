@@ -118,18 +118,25 @@ namespace Desert::Graphic
         // m_RenderSystems answers YES — the "External:" passes the editor registers against a particular
         // scene's RenderRegistry — and that row is what a rebind drops.
         //
-        // MEASURED, on Clouds_Protocol, Debug, A and B interleaved in one session on a machine shared with
-        // other agents; minimum of N, never the mean:
+        // MEASURED, Debug, on the two scenes Clouds_Protocol and Sky_PhysicalShowcase loaded alternately
+        // through the control channel. Before and after INTERLEAVED across five sessions on a machine shared
+        // with other agents; the spread is quoted and the figure is the MINIMUM of N, never the mean:
         //
-        //   this function                     141-232 ms  (min 141, N = 14)  ->  0.4-0.5 ms (min 0.4, N = 12)
-        //   the whole load, command to frame  6817-7747 ms (min 6817, N = 4) ->  90-537 ms  (min 90,  N = 4)
+        //                                          before                     after
+        //   this function                    141-232 ms  (min 141, N=21)   0.4-0.5 ms (min 0.4, N=19)
+        //   whole load, command to frame:
+        //     reloading the SAME scene       6817-9510 ms (min 6817, N=8)   90-99 ms   (min 90,  N=4)
+        //     loading a DIFFERENT scene      1551-1941 ms (min 1551, N=4)   475-599 ms (min 475, N=8)
         //
-        // The second row is the one that matters and it is much the larger, which is the finding: the cost
-        // was never really the pipelines. Destroying the render systems destroyed VolumetricCloudRenderer's
-        // modelling volume, and rebuilding it is a 5.8-SECOND bake — whose own staleness test had been
-        // comparing the authored parameters correctly all along and was simply never asked, because the
-        // object holding the answer had been deleted. The saving is not "we skipped some work"; it is "we
-        // stopped throwing away a cache that was already right".
+        // The second block is the one a person waits through, and it is much the larger — which is the
+        // finding. The cost was never really the pipelines. Destroying the render systems destroyed
+        // VolumetricCloudRenderer's modelling volume, and rebuilding it is a 5.8-SECOND bake whose own
+        // staleness test had been comparing the authored parameters correctly all along and was simply
+        // never asked, because the object holding the answer had been deleted first. The saving is not "we
+        // skipped some work"; it is "we stopped throwing away a cache that was already right".
+        //
+        // What is LEFT of a cross-scene load is ~450 ms of sky IBL bake, which is correct work: the two
+        // scenes have genuinely different skies, and it fires because the sky fingerprint says so.
         void Init();
 
         [[nodiscard]] Common::BoolResultStr BeginScene( const Desert::Core::Scene& scene );
