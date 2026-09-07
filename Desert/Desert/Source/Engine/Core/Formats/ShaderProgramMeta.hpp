@@ -65,7 +65,7 @@ namespace Desert::Core::Formats
         std::optional<float> Min;                                // present => slider/clamped
         std::optional<float> Max;
 
-        glm::vec4 Default = glm::vec4( 0.0f );                   // numeric default (xyzw as needed)
+        glm::vec4 Default = glm::vec4( 0.0f ); // numeric default (xyzw as needed)
 
         // What this sampler shows when the material binds NOTHING to it — the DSL `= "white"` on a
         // Texture2D property. Read by Graphic::Material::BindSchemaDefaultTexture, which is what makes

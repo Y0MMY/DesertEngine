@@ -98,7 +98,7 @@ TEST( DShaderParser, ParsesProperties )
 // sends the author back to counting braces.
 TEST( DShaderParser, EveryDefaultTextureNameParsesAndAnUnknownOneIsRefusedByName )
 {
-    const auto parseWithDefault = [ ]( const char* name )
+    const auto parseWithDefault = []( const char* name )
     {
         const std::string src = std::string( R"(
 Shader "DefaultTextureProbe"
@@ -106,7 +106,8 @@ Shader "DefaultTextureProbe"
     Domain Surface
     Properties Binding(1) TextureBinding(2)
     {
-        Texture2D u_Slot ("Slot") = ")" ) + name + R"("
+        Texture2D u_Slot ("Slot") = ")" ) +
+                                name + R"("
     }
     Fragment { void main() {} }
 }

@@ -123,8 +123,7 @@ namespace
     std::string StructBody( const std::string& source, const std::string& name )
     {
         const std::string needle = "struct " + name;
-        for ( std::size_t at = source.find( needle ); at != std::string::npos;
-              at             = source.find( needle, at + 1 ) )
+        for ( std::size_t at = source.find( needle ); at != std::string::npos; at = source.find( needle, at + 1 ) )
         {
             if ( !CT::WordAt( source, at + 7, name ) )
                 continue;
@@ -157,9 +156,9 @@ namespace
     {
         std::vector<std::string> fields;
 
-        int         depth     = 0;
-        int         angle     = 0;
-        bool        sawParen  = false;
+        int         depth    = 0;
+        int         angle    = 0;
+        bool        sawParen = false;
         std::string lastIdent;
         std::string pending;
 
@@ -169,11 +168,10 @@ namespace
             {
                 // Keywords a declaration-looking run can end on. `const` and friends cannot be a member
                 // name, and a run that ends on one is not a declaration this census is about.
-                static const std::set<std::string> ignore = { "public", "private", "protected", "struct",
-                                                              "class",  "enum",    "using",     "return",
-                                                              "const",  "static",  "inline",    "bool",
-                                                              "int",    "float",   "double",    "char",
-                                                              "void",   "unsigned" };
+                static const std::set<std::string> ignore = { "public", "private", "protected", "struct", "class",
+                                                              "enum",   "using",   "return",    "const",  "static",
+                                                              "inline", "bool",    "int",       "float",  "double",
+                                                              "char",   "void",    "unsigned" };
                 if ( ignore.count( lastIdent ) == 0 )
                     fields.push_back( lastIdent );
             }
@@ -319,8 +317,7 @@ namespace
          "Desert/Desert/Source/Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.cpp";
     constexpr const char* kParser  = "Desert/Desert/Source/Engine/Core/ShaderCompiler/DShader/DShaderParser.cpp";
     constexpr const char* kMatEdit = "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditorPanel.cpp";
-    constexpr const char* kMatEditStates =
-         "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditStates.hpp";
+    constexpr const char* kMatEditStates = "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditStates.hpp";
 
     constexpr Row k_Census[] = {
          // ---- ShaderParam: the per-property schema --------------------------------------------------
@@ -441,9 +438,8 @@ TEST( ShaderSchemaConsumers, TheScanSeesTheSchemaAtAll )
         ASSERT_FALSE( body.empty() ) << source.Struct << " was not found in " << source.Header;
 
         const auto fields = DataMembers( body );
-        ASSERT_GE( fields.size(), 3u )
-             << source.Struct << " yielded only " << fields.size()
-             << " data members — the enumeration, not the schema, is what is wrong";
+        ASSERT_GE( fields.size(), 3u ) << source.Struct << " yielded only " << fields.size()
+                                       << " data members — the enumeration, not the schema, is what is wrong";
     }
 }
 
@@ -522,12 +518,11 @@ TEST( ShaderSchemaConsumers, EveryWiredRowsFileReallyReadsTheField )
         // The file must SEE the schema, or a member read of a same-named field of some other type would
         // certify this row. That is the vacuity SettingConsumers measured and closed for components; this
         // is the strongest form of it available where the receiver's type is always `auto`.
-        const bool seesSchema = text.find( "ShaderProgramMeta" ) != std::string::npos ||
-                                text.find( "GetProgramMeta" ) != std::string::npos ||
-                                text.find( "GetSchema" ) != std::string::npos ||
-                                text.find( "DShaderParse" ) != std::string::npos ||
-                                text.find( "ShaderParam" ) != std::string::npos ||
-                                text.find( "ShaderRenderState" ) != std::string::npos;
+        const bool seesSchema =
+             text.find( "ShaderProgramMeta" ) != std::string::npos ||
+             text.find( "GetProgramMeta" ) != std::string::npos || text.find( "GetSchema" ) != std::string::npos ||
+             text.find( "DShaderParse" ) != std::string::npos || text.find( "ShaderParam" ) != std::string::npos ||
+             text.find( "ShaderRenderState" ) != std::string::npos;
         EXPECT_TRUE( seesSchema ) << row.Where << " is named as the consumer of " << row.Struct
                                   << "::" << row.Field << " and does not name the schema at all";
 
@@ -584,8 +579,7 @@ TEST( ShaderSchemaConsumers, EveryDefaultTextureKindHasAPixelAndASpelling )
     const std::string root = RepoRoot();
     ASSERT_FALSE( root.empty() );
 
-    const std::string names =
-         ReadAll( root + "Desert/Desert/Source/Engine/Core/Formats/DefaultTexture.hpp" );
+    const std::string names  = ReadAll( root + "Desert/Desert/Source/Engine/Core/Formats/DefaultTexture.hpp" );
     const std::string pixels = ReadAll( root + "Desert/Desert/Source/Engine/Graphic/DefaultTextures.cpp" );
     ASSERT_FALSE( names.empty() );
     ASSERT_FALSE( pixels.empty() );
@@ -705,9 +699,9 @@ namespace
                 }
                 generated = generated || option == "TextureBinding";
 
-                i                     = CT::SkipSpace( source, i + option.size() );
-                const std::size_t end = i < source.size() && source[i] == '(' ? source.find( ')', i )
-                                                                              : std::string::npos;
+                i = CT::SkipSpace( source, i + option.size() );
+                const std::size_t end =
+                     i < source.size() && source[i] == '(' ? source.find( ')', i ) : std::string::npos;
                 if ( end == std::string::npos )
                 {
                     optionsOk = false;
@@ -750,8 +744,8 @@ TEST( ShaderSchemaConsumers, TheDeclaredShaderNameIsTheFileStem )
         const std::string declared = DeclaredShaderName( ReadAll( file ) );
         ASSERT_FALSE( declared.empty() ) << file.string() << " has no `Shader \"…\"` declaration";
         EXPECT_EQ( declared, file.stem().string() )
-             << file.string() << " declares itself `Shader \"" << declared
-             << "\"` and the engine will call it \"" << file.stem().string()
+             << file.string() << " declares itself `Shader \"" << declared << "\"` and the engine will call it \""
+             << file.stem().string()
              << "\" (VulkanShader takes the file stem). Every material naming the declared spelling "
                 "resolves to nothing.";
     }
@@ -775,8 +769,8 @@ TEST( ShaderSchemaConsumers, EveryTexturePropertyHasASamplerToBindTo )
     // fills them from FBX/glTF) and read by no stage of any PBR shader. Deleting them throws away import
     // data the engine may want; wiring them is a shading-model change. Either way it is not a tidy-up,
     // and М9 found it rather than owning it.
-    static const std::set<std::string> knownUnsampled = { "u_MetallicTexture", "u_RoughnessTexture",
-                                                          "u_AOTexture", "u_EmissiveTexture" };
+    static const std::set<std::string> knownUnsampled = { "u_MetallicTexture", "u_RoughnessTexture", "u_AOTexture",
+                                                          "u_EmissiveTexture" };
     std::set<std::string>              seenUnsampled;
 
     for ( const auto& file : ShippedShaders( root ) )
