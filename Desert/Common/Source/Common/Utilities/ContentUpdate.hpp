@@ -89,6 +89,23 @@ namespace Common::Utils
         bool                     CanApply() const;
         size_t                   CountOf( ContentFileState state ) const;
         const ContentUpdateStep* Find( const std::string& key ) const;
+
+        // TURNS ONE PLANNED REMOVAL INTO "LEAVE IT ALONE", for a caller that knows something this
+        // mechanism cannot. A manifest says what the source stopped shipping; it says nothing about who
+        // is still POINTING at that file, and deleting an asset a scene references breaks the scene
+        // with no warning and no undo.
+        //
+        // The knowledge stays outside on purpose: what counts as a reference is a question about asset
+        // FORMATS, and teaching this file about scenes would give the shared mechanism a consumer. So
+        // the mechanism owns the CAPABILITY and the caller owns the REASON — see the editor's
+        // WithholdReferencedRemovals, which supplies that reason from the asset reference index.
+        //
+        // Returns false when @p key is not a planned removal, so a caller cannot believe it withheld
+        // something it did not. The RECORD IS KEPT for a withheld key: the file is still on disk and it
+        // is still the source's, so the next update must see the same removal and withhold it again
+        // until the last reference is gone. ApplyContentUpdate enforces that by looking at the disk
+        // rather than at the state — "the record follows the bytes on disk", taken literally.
+        bool WithholdRemoval( const std::string& key );
     };
 
     ContentUpdatePlan PlanContentUpdate( const ContentManifest& recorded, const ContentManifest& onDisk,
@@ -149,5 +166,11 @@ namespace Common::Utils
     // Leading dot and NO EXTENSION on purpose. The dot keeps content walkers off it; the missing
     // extension keeps it away from the scanners that dispatch on one — AssetReferencesScan treats
     // `.json` as text and would go looking for asset references inside the record.
+    //
+    // That second half is load-bearing rather than tidy, and it took the removal guard to show why. The
+    // record names every key the source handed over. If it were scanned as text it would be counted as
+    // a REFERENCER of each of them, and a removal the guard is meant to allow would be withheld by the
+    // very file that recorded it — for ever, and for a reason nobody would find. It is inert only
+    // because its name has no extension the scanner recognises.
     inline constexpr std::string_view kInstallRecordFileName = ".desert-install";
 } // namespace Common::Utils

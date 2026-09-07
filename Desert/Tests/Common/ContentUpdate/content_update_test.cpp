@@ -345,6 +345,92 @@ TEST( ContentUpdate, AnInstallWithNoRecordAdoptsWhatItCanProveIsTheSources )
     EXPECT_EQ( frozen->Action, ContentAction::None );
 }
 
+// A WITHHELD REMOVAL IS NOT A FORGOTTEN ONE. The caller that withholds knows something this
+// mechanism does not — something is still pointing at the file — and that reason expires. If the
+// record dropped the key here, the next update would find a file it has no record of, call it
+// "locally added", and never offer to remove it again; by then the last reference could be long gone
+// and nothing would ever say so. The disk tells a withheld removal from an already-gone file; the
+// state cannot, and should not have to.
+TEST( ContentUpdate, AWithheldRemovalKeepsItsRecordSoTheNextUpdateAsksAgain )
+{
+    const fs::path dir     = MakeTempDir();
+    const fs::path install = dir / "install";
+
+    const std::string shipped = "a material a scene still points at";
+
+    ContentManifest recorded;
+    recorded.Insert( Entry( "meshes/leaf.demat", shipped ) );
+    WriteFile( install / "meshes" / "leaf.demat", shipped );
+
+    const ContentManifest incoming; // the source dropped it
+
+    auto onDisk = ContentManifest::FromDirectory( install );
+    ASSERT_TRUE( onDisk.IsSuccess() ) << onDisk.GetError();
+
+    auto plan = PlanContentUpdate( recorded, onDisk.GetValue(), incoming, ContentAuthorship::LocallyAuthored );
+    ASSERT_EQ( plan.Steps.size(), 1u );
+    ASSERT_EQ( plan.Steps[0].Action, ContentAction::Remove );
+
+    ASSERT_TRUE( plan.WithholdRemoval( "meshes/leaf.demat" ) );
+    EXPECT_EQ( plan.Steps[0].Action, ContentAction::None );
+
+    const auto applied = ApplyContentUpdate( plan, recorded, incoming, install,
+                                             [&]( const std::string& ) { return std::nullopt; } );
+    ASSERT_TRUE( applied.IsSuccess() ) << applied.GetError();
+
+    EXPECT_TRUE( fs::exists( install / "meshes" / "leaf.demat" ) );
+    EXPECT_EQ( applied.GetValue().Removed, 0u );
+    const auto* stillRecorded = applied.GetValue().Recorded.Find( "meshes/leaf.demat" );
+    ASSERT_NE( stillRecorded, nullptr ) << "the removal must still be pending next time";
+    EXPECT_EQ( stillRecorded->Hash, PakContentHash( shipped.data(), shipped.size() ) );
+
+    // Prove it really is still pending: plan the same update again against the record we just wrote.
+    auto onDiskAgain = ContentManifest::FromDirectory( install );
+    ASSERT_TRUE( onDiskAgain.IsSuccess() ) << onDiskAgain.GetError();
+    const auto again = PlanContentUpdate( applied.GetValue().Recorded, onDiskAgain.GetValue(), incoming,
+                                          ContentAuthorship::LocallyAuthored );
+    ASSERT_EQ( again.Steps.size(), 1u );
+    EXPECT_EQ( again.Steps[0].Action, ContentAction::Remove ) << "and it is offered again";
+}
+
+// The other side of that same disk check: a file the person had already deleted themselves, which the
+// source has now dropped too, IS forgotten — there is nothing left for the record to describe.
+TEST( ContentUpdate, AFileGoneFromBothSidesLeavesTheRecord )
+{
+    const fs::path dir     = MakeTempDir();
+    const fs::path install = dir / "install";
+    fs::create_directories( install );
+
+    ContentManifest recorded;
+    recorded.Insert( Entry( "meshes/leaf.demat", std::string( "was here once" ) ) );
+    const ContentManifest onDisk;   // they deleted it
+    const ContentManifest incoming; // and so did the source
+
+    const auto plan = PlanContentUpdate( recorded, onDisk, incoming, ContentAuthorship::LocallyAuthored );
+    ASSERT_EQ( plan.Steps.size(), 1u );
+    EXPECT_EQ( plan.Steps[0].State, ContentFileState::SourceDeleted );
+    EXPECT_EQ( plan.Steps[0].Action, ContentAction::None ); // nothing on disk to remove
+
+    const auto applied = ApplyContentUpdate( plan, recorded, incoming, install,
+                                             [&]( const std::string& ) { return std::nullopt; } );
+    ASSERT_TRUE( applied.IsSuccess() ) << applied.GetError();
+    EXPECT_EQ( applied.GetValue().Recorded.Find( "meshes/leaf.demat" ), nullptr );
+}
+
+// THE RECORD'S NAME IS A DECISION, NOT A LABEL, and the removal guard is what made that plain. The
+// record names every key the source handed over; if a reference scanner ever read it as text it would
+// count as a referencer of every one of them, and a removal the guard is meant to ALLOW would be
+// withheld for ever by the very file that recorded it. It is inert only because its name carries no
+// extension for a scanner to dispatch on — asserted here, where the name lives, and asserted as the
+// stronger property (no extension at all) rather than against any one scanner's list.
+TEST( ContentUpdate, TheRecordFileNameCannotBeMistakenForAScannedAsset )
+{
+    const std::string name( kInstallRecordFileName );
+    ASSERT_FALSE( name.empty() );
+    EXPECT_EQ( name.front(), '.' ) << "the leading dot is what keeps content walkers off it";
+    EXPECT_EQ( name.find( '.', 1 ), std::string::npos ) << "and no extension is what keeps scanners off";
+}
+
 TEST( ContentUpdate, AKeyThatLeavesTheInstallIsRefusedBeforeAnyByteMoves )
 {
     const fs::path dir     = MakeTempDir();

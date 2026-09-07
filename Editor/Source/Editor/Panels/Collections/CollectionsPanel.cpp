@@ -9,6 +9,7 @@
 
 #include "CollectionsPanel.hpp"
 
+#include <Editor/Core/AssetReferences.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <Editor/Import/MeshMaterial.hpp>
@@ -34,6 +35,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <unordered_map>
 #include <filesystem>
 #include <optional>
 #include <system_error>
@@ -136,16 +138,22 @@ namespace Desert::Editor
         void MaterializeMaterials( Assets::AssetManager& mgr, ImportManager& importer,
                                    const std::filesystem::path& collectionDir, const Manifest& manifest )
         {
-            if ( !manifest.Materials || manifest.Materials->empty() )
-                return;
-
             std::error_code             ec;
-            const std::filesystem::path meshDir = collectionDir / "meshes";
-            std::filesystem::create_directories( meshDir, ec );
-
             const std::filesystem::path recordPath =
                  collectionDir / std::filesystem::path( Common::Utils::kInstallRecordFileName );
             const bool hasRecord = std::filesystem::exists( recordPath, ec );
+
+            // AN EMPTY MATERIAL LIST IS NOT NOTHING TO DO — it is a REMOVAL of everything. This
+            // function used to return here on "no materials", which was harmless while it could only
+            // ever add files and became a hole the moment it could also take them away: a collection
+            // that dropped its last material would leave every .demat it had ever written behind, and
+            // the record would go on claiming they were handed over. Only a collection that has nothing
+            // to offer AND has never handed anything over has genuinely nothing to do.
+            if ( ( !manifest.Materials || manifest.Materials->empty() ) && !hasRecord )
+                return;
+
+            const std::filesystem::path meshDir = collectionDir / "meshes";
+            std::filesystem::create_directories( meshDir, ec );
 
             Common::Utils::ContentManifest recorded;
             if ( hasRecord )
@@ -172,12 +180,63 @@ namespace Desert::Editor
                 return importer.ImportAndRegisterTexture( mgr, *path );
             };
 
+            // Dereferenced through a local empty list rather than `*manifest.Materials`: the early
+            // return above no longer guarantees the optional is engaged, and "the source offers
+            // nothing" now has to reach the planner as an empty INCOMING manifest instead of not
+            // reaching it at all.
+            static const std::vector<ManifestMaterial> kNone;
+            const std::vector<ManifestMaterial>&       offered = manifest.Materials ? *manifest.Materials : kNone;
+
+            // ------------------------------------------------------------------ 1. what has a key
+            //
+            // THE KEY SET IS BUILT FIRST AND FROM BOTH SIDES, AND THAT ORDER IS THE WHOLE POINT.
+            //
+            // The census used to be filled inside the cook loop, which walks the materials the source
+            // is OFFERING — so the one file a removal is about, the one the source has stopped
+            // mentioning, was the one file the census could never contain. The planner then read
+            // "already gone from disk", every deletion became a silent no-op, and the feature reported
+            // itself as working. Nothing caught it but a run of the real editor.
+            //
+            // The class is worth naming because it is not local to this file: an inventory built from
+            // the DELIVERY instead of from the RECORD cannot describe what the delivery left out. So
+            // the union is computed once, up front, and the census below is a loop over it — there is
+            // no second place left in which to forget half of it.
+            std::vector<std::string> keys;
+            keys.reserve( offered.size() + recorded.Count() );
+            for ( const auto& mat : offered )
+                keys.push_back( "meshes/" + SanitizeName( mat.Name ) +
+                                std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) );
+            for ( const auto& entry : recorded.Entries() )
+                keys.push_back( entry.Key );
+            std::sort( keys.begin(), keys.end() );
+            keys.erase( std::unique( keys.begin(), keys.end() ), keys.end() );
+
+            // ------------------------------------------------------------------ 2. what is on disk
+            Common::Utils::ContentManifest               onDisk;
+            std::unordered_map<std::string, std::string> diskBytes;
+            for ( const auto& key : keys )
+            {
+                const std::filesystem::path path = collectionDir / std::filesystem::path( key );
+                // exists() still appears, but it is no longer a DECISION — it only keeps the read
+                // quiet. The read primitive is soft on purpose and logs an error for a file that is
+                // not there, and on a first install every material here is legitimately absent.
+                if ( !std::filesystem::exists( path, ec ) )
+                    continue;
+                const auto bytes = Common::Utils::FileSystem::ReadFileContent( path );
+                if ( !bytes )
+                    continue;
+                onDisk.Insert(
+                     { key, static_cast<uint64_t>( bytes.GetValue().size() ),
+                       Common::Utils::PakContentHash( bytes.GetValue().data(), bytes.GetValue().size() ) } );
+                diskBytes.emplace( key, bytes.GetValue() );
+            }
+
+            // ------------------------------------------------------------------ 3. what the source offers
             Common::Utils::ContentManifest                            incoming;
-            Common::Utils::ContentManifest                            onDisk;
             std::vector<std::pair<std::string, Assets::MaterialData>> cooked; // key -> what we would write
             std::vector<std::string>                                  cookedBytes;
 
-            for ( const auto& mat : *manifest.Materials )
+            for ( const auto& mat : offered )
             {
                 // ALWAYS (re)cook + register the manifest's textures, whatever happens to the .demat —
                 // otherwise a deleted Cooked/ leaves the material's texture references dangling ("missing")
@@ -191,31 +250,16 @@ namespace Desert::Editor
 
                 const std::string key = "meshes/" + SanitizeName( mat.Name ) +
                                         std::string( Common::Constants::Extensions::MATERIAL_EXTENSION );
-                const std::filesystem::path dematPath = collectionDir / std::filesystem::path( key );
 
                 // THE COOK HAS TO BE DETERMINISTIC OR THE COMPARISON MEANS NOTHING. MaterialId is a random
                 // UUID, so re-cooking a material with a fresh one would produce different bytes every run
                 // and read as "the source changed it" for ever — and would renumber an identity that
                 // meshes and scenes already reference. The existing file's own id is therefore reused.
-                //
-                // exists() still appears, but it is no longer the DECISION — it only keeps the read
-                // quiet. The read primitive is soft on purpose and logs an error for a file that is not
-                // there, and on a first install every material in the collection is legitimately absent.
                 std::optional<Common::UUID> identity;
-                std::string                 diskBytes;
-                if ( std::filesystem::exists( dematPath, ec ) )
-                {
-                    if ( const auto existing = Common::Utils::FileSystem::ReadFileContent( dematPath ); existing )
-                        diskBytes = existing.GetValue();
-                }
-                if ( !diskBytes.empty() )
-                {
-                    onDisk.Insert( { key, static_cast<uint64_t>( diskBytes.size() ),
-                                     Common::Utils::PakContentHash( diskBytes.data(), diskBytes.size() ) } );
-                    if ( const auto parsed = rfl::json::read<Assets::MaterialData>( diskBytes );
+                if ( const auto at = diskBytes.find( key ); at != diskBytes.end() )
+                    if ( const auto parsed = rfl::json::read<Assets::MaterialData>( at->second );
                          parsed.has_value() )
                         identity = parsed.value().MaterialId;
-                }
 
                 Assets::PBRSurfaceParams p;
                 p.AlbedoTexture    = albedo;
@@ -244,11 +288,40 @@ namespace Desert::Editor
             if ( !hasRecord )
                 recorded = Common::Utils::AdoptUnrecordedInstall( onDisk, incoming );
 
-            // onDisk is built from the keys this materializer owns, NOT by walking the collection: a
-            // directory walk would see every mesh and texture as a file the person added, and one of them
-            // could then be reported as a conflict for a material that has nothing to do with it.
-            const auto plan = Common::Utils::PlanContentUpdate(
-                 recorded, onDisk, incoming, Common::Utils::ContentAuthorship::LocallyAuthored );
+            // The census covers the keys this materializer OWNS — the union computed in step 1 — and not
+            // a walk of the collection folder: a directory walk would see every mesh and texture as a
+            // file the person added, and one of them could then be reported as a conflict for a
+            // material that has nothing to do with it.
+            auto plan = Common::Utils::PlanContentUpdate( recorded, onDisk, incoming,
+                                                          Common::Utils::ContentAuthorship::LocallyAuthored );
+
+            // A REMOVAL IS ASKED WHO IS STILL POINTING AT THE FILE, BEFORE IT HAPPENS. A material the
+            // collection stopped shipping is still a material a scene may reference by handle, and this
+            // is the only moment anything can notice. The index is built LAZILY — it reads every text
+            // asset in the project — so a collection with nothing to remove, which is nearly all of
+            // them, pays nothing.
+            //
+            // The call goes to the ENGINE's index today; when the reference rewrite moves into the
+            // shared submodule (the launcher will want the same answer), only this address changes. The
+            // question does not: "is anything still using it" is the right guard before and after.
+            const bool removes = std::any_of( plan.Steps.begin(), plan.Steps.end(), []( const auto& step )
+                                              { return step.Action == Common::Utils::ContentAction::Remove; } );
+            if ( removes )
+            {
+                AssetReferenceIndex references;
+                BuildProjectAssetReferenceIndex( references );
+                // The index keys assets relative to the assets root, so the plan's keys need the
+                // collection's own place under it in front of them.
+                const std::string prefix =
+                     std::filesystem::relative( collectionDir, Common::Constants::Path::ASSETS_PATH, ec )
+                          .generic_string();
+                for ( const auto& stopped : WithholdReferencedRemovals( plan, references, prefix ) )
+                    LOG_WARN( "[Collections] {} no longer ships {}, and it was NOT deleted: {} asset(s) "
+                              "still reference it, including {}. It goes when nothing points at it.",
+                              collectionDir.filename().string(), stopped.Key, stopped.ReferencerCount,
+                              stopped.FirstReferencer );
+            }
+
             if ( !plan.CanApply() )
             {
                 // Refusal by default, with the files named. The dialog that should offer the choice

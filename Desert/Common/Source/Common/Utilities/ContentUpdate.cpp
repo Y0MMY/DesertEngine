@@ -113,6 +113,18 @@ namespace Common::Utils
         return at == Steps.end() ? nullptr : &*at;
     }
 
+    bool ContentUpdatePlan::WithholdRemoval( const std::string& key )
+    {
+        const auto at = std::find_if( Steps.begin(), Steps.end(),
+                                      [&key]( const ContentUpdateStep& s ) { return s.Key == key; } );
+        if ( at == Steps.end() || at->Action != ContentAction::Remove )
+            return false;
+        // The STATE is untouched: what happened to the file is still that the source dropped it, and
+        // that observation stays true whatever we decide to do about it. Only the action moves.
+        at->Action = ContentAction::None;
+        return true;
+    }
+
     ContentUpdatePlan PlanContentUpdate( const ContentManifest& recorded, const ContentManifest& onDisk,
                                          const ContentManifest& incoming, ContentAuthorship authorship )
     {
@@ -217,7 +229,18 @@ namespace Common::Utils
                     if ( step.State == ContentFileState::Unchanged && wanted )
                         report.Recorded.Insert( *wanted );
                     else if ( step.State == ContentFileState::SourceDeleted )
-                        report.Recorded.Remove( step.Key ); // gone from disk and from the source alike
+                    {
+                        // Taken literally, and that literalness is what makes a WITHHELD removal work.
+                        // Two different situations reach here as "the source dropped it, do nothing":
+                        // the file was already gone (forget it), and a removal the caller withheld
+                        // because something still points at the file (keep it, or the next update would
+                        // see a file it has no record of, call it locally added, and never offer to
+                        // remove it again — the reference could be gone by then and we would never know).
+                        // The disk tells the two apart; the state cannot, and should not have to.
+                        std::error_code existsEc;
+                        if ( !std::filesystem::exists( target, existsEc ) )
+                            report.Recorded.Remove( step.Key );
+                    }
                     break;
             }
 
