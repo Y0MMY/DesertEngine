@@ -61,6 +61,12 @@ namespace Desert::Engine
 
         void Run();
 
+        /// Process exit status when the run ended because the GPU device was lost. Distinct from 1 (a
+        /// layer or a frame failed for a reason inside this program) so that a script, or a person reading
+        /// a CI log, can tell "someone else's GPU reset took us with it" from "we are broken". 133 — what
+        /// the abort inside VK_CHECK_RESULT used to produce — meant neither of those things.
+        static constexpr int kExitDeviceLost = 3;
+
     public:
         // Ends the run loop after the current frame. Used by the editor's screenshot mode, which renders a
         // fixed number of frames and leaves.
@@ -87,6 +93,11 @@ namespace Desert::Engine
         // Reports a layer's failed result once per distinct (stage, layer, message). See the definition
         // for why the deduplication is not an optimisation.
         void ReportLayerFailure( const char* stage, Common::Layer* layer, const std::string& error );
+
+        /// TRUE when the device is lost, having asked the run to end with kExitDeviceLost. Called at each
+        /// of the three points in the loop where a frame can fail, so that the loop stops at whichever one
+        /// discovers the loss rather than carrying on to the next.
+        NO_DISCARD bool EndRunOnDeviceLoss( const char* stage );
 
     private:
         NO_DISCARD bool OnClose( Common::EventWindowClose& /*e*/ )

@@ -1,5 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
+#include <Engine/Graphic/DeviceLost.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
 
@@ -13,6 +14,15 @@ namespace Desert::Graphic::API::Vulkan
             if ( commandBuffer == VK_NULL_HANDLE )
             {
                 return Common::MakeError<VkResult>( "Command buffer is VK_NULL_HANDLE" );
+            }
+
+            // This is a SUBMIT AND A BLOCKING WAIT — the one-off upload path every texture, mesh and
+            // mipmap chain goes through. On a lost device the submit cannot execute and the wait cannot
+            // ever be signalled, so issuing them is at best pointless and at worst a hang.
+            if ( !Graphic::DeviceLost::AllowWork() )
+            {
+                return Common::MakeError<VkResult>(
+                     "the device is lost; the one-off command buffer is dropped rather than submitted." );
             }
 
             VK_RETURN_RESULT_IF_FALSE_TYPE( VkResult, vkEndCommandBuffer( commandBuffer ) )
@@ -96,6 +106,9 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::ResultStr<VkCommandBuffer> CommandBufferAllocator::RT_GetCommandBufferCompute( bool begin /*= false */ )
     {
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return Common::MakeError<VkCommandBuffer>( "the device is lost; no command buffer is allocated." );
+
         const auto                  frame = EngineContext::GetInstance().GetCurrentFrameIndex();
         VkCommandBufferAllocateInfo allocateInfo;
         allocateInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -122,6 +135,13 @@ namespace Desert::Graphic::API::Vulkan
     Common::ResultStr<VkCommandBuffer>
     CommandBufferAllocator::RT_AllocateCommandBufferGraphic( bool begin /*= false */ )
     {
+        // A REFUSAL HERE IS SAFE ONLY BECAUSE EVERY CALLER NOW READS IT. `Common::ResultStr::GetValue()`
+        // hands back a default-constructed T on a failed result, which for a VkCommandBuffer is
+        // VK_NULL_HANDLE — and recording into VK_NULL_HANDLE is undefined behaviour, not a no-op. Six call
+        // sites took that value without asking; they check now.
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return Common::MakeError<VkCommandBuffer>( "the device is lost; no command buffer is allocated." );
+
         const auto frame = EngineContext::GetInstance().GetCurrentFrameIndex();
 
         VkCommandBufferAllocateInfo allocateInfo;

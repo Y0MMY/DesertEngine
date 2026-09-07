@@ -197,7 +197,16 @@ namespace Desert::Graphic::API::Vulkan
         memcpy( mapped, Utils::GetPixelDataPtr( data ), static_cast<size_t>( size ) );
         allocator->UnmapMemory( stagingAlloc );
 
-        auto cmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+        // ASKED, NOT ASSUMED. GetValue() on a failed result hands back a default-constructed
+        // VkCommandBuffer — VK_NULL_HANDLE — and every vkCmd* below would then be undefined behaviour
+        // rather than a no-op. The allocator can now refuse (a lost device), so the question is live.
+        const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdAlloc.IsSuccess() )
+        {
+            allocator->RT_DestroyBuffer( staging, stagingAlloc );
+            return Common::MakeFormattedError<bool>( "SetData: no command buffer: {}", cmdAlloc.GetError() );
+        }
+        const VkCommandBuffer cmd = cmdAlloc.GetValue();
 
         // The tracked layout (SHADER_READ_ONLY after the first upload) is the transition source.
         TransitionLayout( cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
@@ -294,7 +303,11 @@ namespace Desert::Graphic::API::Vulkan
         for ( uint32_t i = 0; i < m_Resource.MipLevels; ++i )
             m_MipViews.push_back( Utils::CreateView( vkDevice, m_Resource.Image, m_Resource.Format, aspect, VK_IMAGE_VIEW_TYPE_2D, 1, 1, i ) );
 
-        auto cmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+        const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdAlloc.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "VulkanImage2D::CreateResource: no command buffer: {}",
+                                                     cmdAlloc.GetError() );
+        const VkCommandBuffer cmd = cmdAlloc.GetValue();
 
         if ( Core::Formats::HasData( m_Specification.Data ) )
         {
@@ -451,8 +464,15 @@ namespace Desert::Graphic::API::Vulkan
             return {};
         VmaAllocation stagingAlloc = allocRes.GetValue();
 
-        auto                cmd      = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
-        const VkImageLayout original = m_Resource.Layout;
+        const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdAlloc.IsSuccess() )
+        {
+            LOG_ERROR( "[ReadPixelsRGBA8] no command buffer: {}", cmdAlloc.GetError() );
+            allocator->RT_DestroyBuffer( staging, stagingAlloc );
+            return {};
+        }
+        const VkCommandBuffer cmd      = cmdAlloc.GetValue();
+        const VkImageLayout   original = m_Resource.Layout;
         TransitionLayout( cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
         VkBufferImageCopy copy = { .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
                                    .imageExtent      = { w, h, 1 } };
@@ -574,7 +594,11 @@ namespace Desert::Graphic::API::Vulkan
         for ( uint32_t i = 0; i < m_Resource.MipLevels; ++i )
             m_MipViews.push_back( Utils::CreateView( vkDevice, m_Resource.Image, m_Resource.Format, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_CUBE, 6, 1, i ) );
 
-        auto cmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+        const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdAlloc.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "VulkanImageCube::CreateResource: no command buffer: {}",
+                                                     cmdAlloc.GetError() );
+        const VkCommandBuffer cmd = cmdAlloc.GetValue();
         TransitionLayout( cmd, finalDefaultLayout );
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
 
@@ -727,7 +751,11 @@ namespace Desert::Graphic::API::Vulkan
         if ( m_Specification.Properties & Core::Formats::Sample )
             Utils::CreateSampler( vkDevice, m_Resource.Sampler, Utils::SamplerFilterPolicy::AlwaysLinear );
 
-        auto cmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+        const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdAlloc.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "VulkanImage3D::CreateResource: no command buffer: {}",
+                                                     cmdAlloc.GetError() );
+        const VkCommandBuffer cmd = cmdAlloc.GetValue();
 
         if ( Core::Formats::HasData( m_Specification.Data ) )
         {

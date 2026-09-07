@@ -8,6 +8,7 @@
 
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Core/FrameManager.hpp>
+#include <Engine/Graphic/DeviceLost.hpp>
 #include <Engine/Graphic/PixelPack.hpp> // the one packer both readbacks share
 
 #include <cstring> // std::memcpy — the mapped staging buffer
@@ -36,13 +37,28 @@ namespace Desert::Graphic::API::Vulkan
     {
         if ( m_Surface == VK_NULL_HANDLE )
         {
-            glfwCreateWindowSurface( instance, window, nullptr, &m_Surface );
+            // Its VkResult went on the floor. A surface that failed to appear leaves m_Surface at
+            // VK_NULL_HANDLE, and every capability query, format probe and swapchain creation below is then
+            // asked about nothing — a run of validation errors none of which names the surface. This does
+            // not go through NoteIfDeviceLost: it is a GLFW/platform failure at startup, before there is a
+            // device to lose, and it really is an invariant.
+            const VkResult surfaced = glfwCreateWindowSurface( instance, window, nullptr, &m_Surface );
+            DESERT_VERIFY( surfaced == VK_SUCCESS, "glfwCreateWindowSurface failed: {}",
+                           VkResultToString( surfaced ) );
         }
     }
 
     Common::ResultStr<bool> VulkanSwapChain::CreateSwapChain( const std::shared_ptr<Engine::Device>& device,
                                                               uint32_t* width, uint32_t* height )
     {
+        // A swapchain cannot be built on a device that no longer exists, and TRYING is what killed the
+        // process: `VkResult is 'VK_ERROR_DEVICE_LOST' in VulkanSwapChain.cpp:165` was the last line of the
+        // crash, an abort inside VK_CHECK_RESULT over a result that was entirely expected by then.
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return Common::MakeError<bool>(
+                 "the device is lost; refusing to build a swapchain on it. See the [DeviceLost] line above "
+                 "for the cause — this is a consequence of it, not a separate failure." );
+
         const auto vkLogicalDevice = SP_CAST( VulkanLogicalDevice, device );
         const auto& lDevice = vkLogicalDevice->GetVulkanLogicalDevice();
 
@@ -53,7 +69,9 @@ namespace Desert::Graphic::API::Vulkan
 
         if ( m_VkRenderPass == VK_NULL_HANDLE )
         {
-            CreateSwapChainRenderPass();
+            const auto pass = CreateSwapChainRenderPass();
+            if ( !pass.IsSuccess() )
+                return Common::MakeFormattedError<bool>( "the swapchain render pass: {}", pass.GetError() );
         }
 
         auto oldSwapchain = m_SwapChain;
@@ -162,7 +180,16 @@ namespace Desert::Graphic::API::Vulkan
         swapChainCreateInfo.compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         swapChainCreateInfo.oldSwapchain          = oldSwapchain;
 
-        VK_CHECK_RESULT( vkCreateSwapchainKHR( lDevice, &swapChainCreateInfo, nullptr, &m_SwapChain ) );
+        // NOT VK_CHECK_RESULT, and this is the line the whole task is named after. This function has an
+        // error channel of its own, so a failure here can be REPORTED instead of aborting the process; the
+        // macro's abort is for invariants, and "the device died while we were rebuilding" is not one.
+        const VkResult created = vkCreateSwapchainKHR( lDevice, &swapChainCreateInfo, nullptr, &m_SwapChain );
+        if ( created != VK_SUCCESS )
+        {
+            (void)NoteIfDeviceLost( created, "vkCreateSwapchainKHR", __FILE__, __LINE__ );
+            return Common::MakeFormattedError<bool>( "vkCreateSwapchainKHR failed: {}",
+                                                     VkResultToString( created ) );
+        }
 
         if ( oldSwapchain != VK_NULL_HANDLE )
         {
@@ -188,8 +215,14 @@ namespace Desert::Graphic::API::Vulkan
             m_SwapChainImages.ImagesView[i] = createdImageView.GetValue();
         }
 
-        CreateColorAndDepthImages( vkLogicalDevice );
-        CreateSwapChainFramebuffers();
+        const auto attachments = CreateColorAndDepthImages( vkLogicalDevice );
+        if ( !attachments.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "the swapchain colour/depth attachments: {}",
+                                                     attachments.GetError() );
+
+        const auto framebuffers = CreateSwapChainFramebuffers();
+        if ( !framebuffers.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "the swapchain framebuffers: {}", framebuffers.GetError() );
 
         if ( !m_VulkanQueue )
         {
@@ -217,7 +250,9 @@ namespace Desert::Graphic::API::Vulkan
     VulkanSwapChain::GetImageFormatAndColorSpace( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
         VkPhysicalDevice physicalDevice = device->GetPhysicalDevice()->GetVulkanPhysicalDevice();
-        uint32_t formatCount;
+        // Zero-initialised for the reason spelled out in VulkanContext::CreateVKInstance: the result of
+        // the enumeration below is dropped, so the count must be defined even when it fails.
+        uint32_t formatCount = 0;
         vkGetPhysicalDeviceSurfaceFormatsKHR( physicalDevice, m_Surface, &formatCount, nullptr );
         if ( !formatCount ) return Common::MakeError<bool>( "null format count" );
 
@@ -254,6 +289,12 @@ namespace Desert::Graphic::API::Vulkan
     Common::ResultStr<VkResult> VulkanSwapChain::AcquireNextImage( VkSemaphore presentCompleteSemaphore,
                                                                    uint32_t*   imageIndex )
     {
+        // "vkAcquireNextImageKHR(): Semaphore must not have any pending operations" is what this line
+        // produced after the device died — a message that reads as OUR synchronisation defect and is
+        // nothing of the sort. The acquire simply must not be issued.
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return Common::MakeError<VkResult>( "the device is lost; refusing to acquire an image." );
+
         const auto vkLogicalDevice = m_LogicalDevice.lock();
         if ( !vkLogicalDevice ) DESERT_VERIFY( false );
 
@@ -264,13 +305,30 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanSwapChain::OnResize( uint32_t width, uint32_t height )
     {
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return;
+
         const auto device = m_LogicalDevice.lock();
         if ( !device ) DESERT_VERIFY( false );
-        
-        Release();
-        CreateSwapChain( device, &width, &height );
 
-        auto cmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+        Release();
+        // THE RESULT WAS DISCARDED HERE. A swapchain that failed to rebuild left every handle below stale
+        // and the frame loop carried on regardless — including on the device-lost path, where the rebuild
+        // is exactly what must not proceed.
+        const auto recreated = CreateSwapChain( device, &width, &height );
+        if ( !recreated.IsSuccess() )
+        {
+            LOG_ERROR( "[SwapChain] resize to {}x{} failed: {}", width, height, recreated.GetError() );
+            return;
+        }
+
+        const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdAlloc.IsSuccess() )
+        {
+            LOG_ERROR( "[SwapChain] resize could not transition the new images: {}", cmdAlloc.GetError() );
+            return;
+        }
+        const VkCommandBuffer cmd = cmdAlloc.GetValue();
         for ( auto& image : GetSwapChainVKImage() )
         {
             VkImageMemoryBarrier barrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .image = image, .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 } };
@@ -285,7 +343,11 @@ namespace Desert::Graphic::API::Vulkan
         if ( !vkLogicalDevice ) return;
 
         const auto& device = vkLogicalDevice->GetVulkanLogicalDevice();
-        vkDeviceWaitIdle( device );
+        // Skipped on a lost device: there is no outstanding work to wait for, the call can only answer
+        // VK_ERROR_DEVICE_LOST, and everything below it is a vkDestroy*, which the specification keeps
+        // legal precisely so that a lost device can still be torn down.
+        if ( Graphic::DeviceLost::AllowWork() )
+            vkDeviceWaitIdle( device );
 
         if ( m_SwapChain != VK_NULL_HANDLE )
         {
@@ -367,6 +429,13 @@ namespace Desert::Graphic::API::Vulkan
         // EVERY refusal below is named, and none of them falls back to another image. The caller asked for
         // a picture of the editor; a picture of something else carrying that name is the failure this whole
         // path exists to make impossible.
+        if ( !Graphic::DeviceLost::AllowWork() )
+        {
+            return Common::MakeError<bool>(
+                 "the device is lost, so there is no frame to photograph and no queue to copy it with. The "
+                 "editor is shutting down; see the [DeviceLost] line above." );
+        }
+
         if ( !m_SupportsFrameReadback )
         {
             return Common::MakeError<bool>(

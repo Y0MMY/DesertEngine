@@ -241,15 +241,14 @@ namespace Desert::Platform::Windows
         glfwPollEvents();
     }
 
-    void WindowsWindow::PresentFinalImage() const
+    Common::BoolResultStr WindowsWindow::PresentFinalImage() const
     {
-        Graphic::Renderer::GetInstance().PresentFinalImage();
+        return Graphic::Renderer::GetInstance().PresentFinalImage();
     }
 
-
-    void WindowsWindow::PrepareNextFrame() const
+    Common::BoolResultStr WindowsWindow::PrepareNextFrame() const
     {
-        EngineContext::GetInstance().GetRendererContext()->BeginFrame();
+        return EngineContext::GetInstance().GetRendererContext()->BeginFrame();
     }
 
     void WindowsWindow::SetTitle( const std::string& title )

@@ -254,14 +254,14 @@ namespace Desert::Platform::MacOS
         glfwPollEvents();
     }
 
-    void MacOSWindow::PresentFinalImage() const
+    Common::BoolResultStr MacOSWindow::PresentFinalImage() const
     {
-        Graphic::Renderer::GetInstance().PresentFinalImage();
+        return Graphic::Renderer::GetInstance().PresentFinalImage();
     }
 
-    void MacOSWindow::PrepareNextFrame() const
+    Common::BoolResultStr MacOSWindow::PrepareNextFrame() const
     {
-        EngineContext::GetInstance().GetRendererContext()->BeginFrame();
+        return EngineContext::GetInstance().GetRendererContext()->BeginFrame();
     }
 
     void MacOSWindow::SetTitle( const std::string& title )

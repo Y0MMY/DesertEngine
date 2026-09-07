@@ -5,8 +5,10 @@
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
+#include <Engine/Graphic/DeviceLost.hpp>
 #include <Engine/Core/EngineContext.hpp>
 
+#include <string_view>
 #include <vulkan/vulkan.h>
 
 #if defined( DESERT_PLATFORM_WINDOWS )
@@ -29,6 +31,39 @@ namespace Desert::Graphic::API::Vulkan
         (void)messageCode;
         (void)pUserData;
         (void)pLayerPrefix; // Unused arguments
+
+        // THE DRIVER SAYS IT HERE FIRST, AND EARLIER THAN ANY RETURN CODE DOES. A submit executes
+        // asynchronously, so MoltenVK learns the device is gone while the engine is between calls and has
+        // nothing to check; the way it tells us is this callback:
+        //   "VK_ERROR_OUT_OF_DEVICE_MEMORY: Lost VkDevice after MTLCommandBuffer ... execution failed"
+        // Latching on it moves the discovery to the very first line of the incident instead of the second.
+        //
+        // MATCHING ON DRIVER TEXT IS FRAGILE, AND THAT IS ACCEPTABLE HERE ONLY BECAUSE IT IS ADDITIVE:
+        // every return-code path latches too, so if a driver update reworded this the behaviour degrades
+        // to what the return codes already give — one call later, not broken. It also only exists in a
+        // build with validation on; Release has no callback installed at all.
+        if ( pMessage != nullptr )
+        {
+            const std::string_view message( pMessage );
+            if ( message.find( "Lost VkDevice" ) != std::string_view::npos ||
+                 message.find( "VK_ERROR_DEVICE_LOST" ) != std::string_view::npos )
+            {
+                (void)Graphic::DeviceLost::Report( "the Vulkan driver's own debug callback", message );
+                return VK_FALSE;
+            }
+        }
+
+        // EVERY MESSAGE AFTER THE LATCH IS A CONSEQUENCE, and printing it at WARN alongside the real cause
+        // is exactly how "pFences[0] is in use" came to look like a synchronisation defect of ours. It is
+        // still printed — nothing is hidden — but marked as what it is and dropped to TRACE, so the one
+        // explanation stays the loudest thing in the log.
+        if ( Graphic::DeviceLost::IsLost() )
+        {
+            LOG_TRACE( "VulkanDebugCallback (consequence of the lost device, not a defect):\n  Message: {0}",
+                       pMessage != nullptr ? pMessage : "" );
+            return VK_FALSE;
+        }
+
         LOG_WARN( "VulkanDebugCallback:\n  Object Type: {0}\n  Message: {1}", (int)objectType, pMessage );
         return VK_FALSE;
     }
@@ -95,7 +130,12 @@ namespace Desert::Graphic::API::Vulkan
         {
             const char* validationLayers = "VK_LAYER_KHRONOS_validation";
 
-            uint32_t layerCount;
+            // ZERO-INITIALISED, and that is a fix rather than a tidy-up. The result of the call below is
+            // one of the thirteen this tree still drops (see DeviceLostCensus), and a dropped result on a
+            // count-then-fill enumeration is only harmless if the count is defined when the call fails —
+            // this one was not, so a failed enumeration sized a vector from an uninitialised stack value.
+            // The sibling counters in VulkanDevice and VulkanSwapChain were already written this way.
+            uint32_t layerCount = 0;
             vkEnumerateInstanceLayerProperties( &layerCount, nullptr );
 
             std::vector<VkLayerProperties> availableLayers( layerCount );
@@ -145,8 +185,11 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( VK_SUCCESS );
     }
 
-    void VulkanContext::BeginFrame() const
+    Common::BoolResultStr VulkanContext::BeginFrame() const
     {
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return Common::MakeError( "the device is lost; no image is acquired for this frame." );
+
         const auto window = m_Window.lock();
         if ( !window )
         {
@@ -155,18 +198,15 @@ namespace Desert::Graphic::API::Vulkan
 
         const auto& vulkanQueue = SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() )->GetVulkanQueue();
         vulkanQueue->PrepareFrame();
-    }
 
-    void VulkanContext::EndFrame() const
-    {
-        const auto window = m_Window.lock();
-        if ( !window )
-        {
-            DESERT_VERIFY( false );
-        }
+        // Asked AFTER the acquire too. A device that died during the PREVIOUS frame's submit is discovered
+        // here — the submit itself returned VK_SUCCESS and the failure arrived asynchronously — and saying
+        // so in this frame's result is what lets the loop stop now instead of one frame of illegal calls
+        // later.
+        if ( Graphic::DeviceLost::IsLost() )
+            return Common::MakeError( "the device was lost while preparing this frame." );
 
-        const auto& vulkanQueue = SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() )->GetVulkanQueue();
-        vulkanQueue->Present();
+        return BOOLSUCCESS;
     }
 
     void VulkanContext::Shutdown()

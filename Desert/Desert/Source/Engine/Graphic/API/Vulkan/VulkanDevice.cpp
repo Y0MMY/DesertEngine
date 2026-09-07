@@ -5,6 +5,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp> // GetImageVulkanFormat — engine format -> VkFormat
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/RenderConfig.hpp>
+#include <Engine/Graphic/DeviceLost.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
 
@@ -230,7 +231,9 @@ namespace Desert::Graphic::API::Vulkan
             m_QueueCreateInfos.push_back( queueCreateInfo );
         }
 
-        uint32_t extensionCount;
+        // Zero-initialised: the enumeration's result is dropped, so a failure must still leave a
+        // defined count. See VulkanContext::CreateVKInstance.
+        uint32_t extensionCount = 0;
         vkEnumerateDeviceExtensionProperties( m_PhysicalDevice, nullptr, &extensionCount, nullptr );
 
         if ( extensionCount )
@@ -277,7 +280,14 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanLogicalDevice::WaitIdle() const
     {
-        vkDeviceWaitIdle( m_LogicalDevice );
+        // Nothing can be outstanding on a lost device, so this can only report the loss again. Skipping it
+        // is what keeps the teardown path free of calls that add nothing but log noise.
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return;
+
+        const VkResult idle = vkDeviceWaitIdle( m_LogicalDevice );
+        if ( idle != VK_SUCCESS && !NoteIfDeviceLost( idle, "vkDeviceWaitIdle", __FILE__, __LINE__ ) )
+            LOG_ERROR( "[Device] vkDeviceWaitIdle failed: {}", VkResultToString( idle ) );
     }
 
     std::string VulkanLogicalDevice::GetName() const
@@ -320,7 +330,10 @@ namespace Desert::Graphic::API::Vulkan
     {
         if ( m_LogicalDevice != VK_NULL_HANDLE )
         {
-            vkDeviceWaitIdle( m_LogicalDevice );
+            // Same reason as WaitIdle above; vkDestroyPipelineCache and vkDestroyDevice below stay legal on
+            // a lost device, which is what makes an orderly close possible at all.
+            if ( Graphic::DeviceLost::AllowWork() )
+                vkDeviceWaitIdle( m_LogicalDevice );
             if ( m_PipelineCache != VK_NULL_HANDLE )
             {
                 SavePipelineCache(); // persist the driver's accumulated pipeline binaries for next run
@@ -425,6 +438,12 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanLogicalDevice::SavePipelineCache() const
     {
         if ( m_PipelineCache == VK_NULL_HANDLE )
+            return;
+
+        // A lost device has nothing to hand back, and asking it is one more call after the point where the
+        // engine promised to stop. Losing one run's accumulated pipeline binaries costs a slower next
+        // start; it costs nothing that matters.
+        if ( !Graphic::DeviceLost::AllowWork() )
             return;
 
         size_t size = 0;

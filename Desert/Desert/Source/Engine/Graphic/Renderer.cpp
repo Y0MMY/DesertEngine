@@ -99,14 +99,15 @@ namespace Desert::Graphic
         return cmdBuffer;
     }
 
-    void Renderer::PresentFinalImage()
+    // THESE TWO USED TO RETURN void AND THROW THE BACKEND'S RESULT AWAY. `RendererAPI` declares both as
+    // Common::BoolResultStr; this link discarded it, `Window` declared its own pair void, and
+    // `Application::Run` called them as statements — so a failure at submit or present had three separate
+    // places to disappear before anyone could read it. That is the "a middle link drops a property" shape,
+    // and its concrete cost was that a lost device could only ever be discovered one frame later, by
+    // something else.
+    Common::BoolResultStr Renderer::PresentFinalImage()
     {
-        s_RendererAPI->PresentFinalImage();
-    }
-
-    void Renderer::PrepareNextFrame()
-    {
-        s_RendererAPI->PrepareNextFrame();
+        return s_RendererAPI->PresentFinalImage();
     }
 
     void Renderer::SubmitFullscreenQuad( const GraphicsPipeline* pipeline, const MaterialExecutor* materialExecutor )

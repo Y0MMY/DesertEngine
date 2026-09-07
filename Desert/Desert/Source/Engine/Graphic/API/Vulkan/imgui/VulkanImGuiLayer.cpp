@@ -11,6 +11,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/DeviceLost.hpp>
 
 #include <ImGui/backends/imgui_impl_glfw.h>
 #include <ImGui/backends/imgui_impl_vulkan.h>
@@ -116,7 +117,11 @@ namespace Desert::Graphic::API::Vulkan
 
         // Upload Fonts
         {
-            auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+            const auto commandBuffer =
+                 CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+            if ( !commandBuffer.IsSuccess() )
+                return Common::MakeFormattedError<bool>( "the font atlas could not be uploaded: {}",
+                                                         commandBuffer.GetError() );
             ImGui_ImplVulkan_CreateFontsTexture( commandBuffer.GetValue() );
             CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer.GetValue() );
 
@@ -130,7 +135,10 @@ namespace Desert::Graphic::API::Vulkan
     {
         auto device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
 
-        vkDeviceWaitIdle( device );
+        // Nothing is outstanding on a lost device, so the wait can only answer VK_ERROR_DEVICE_LOST; the
+        // ImGui teardown below is destruction, which stays legal.
+        if ( Graphic::DeviceLost::AllowWork() )
+            vkDeviceWaitIdle( device );
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ::ImGui::DestroyContext();
@@ -162,6 +170,19 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanImGui::End()
     {
+        // THE ONE PLACE THAT RECORDS WITHOUT GOING THROUGH VulkanRendererAPI::m_CurrentCommandBuffer.
+        //
+        // Every vkCmd* in VulkanRenderer.cpp is covered by one gate, because BeginFrame is the only writer
+        // of that field and BeginFrame is gated. This function is the exception: it reaches past the
+        // renderer to `queue->GetDrawCommandBuffer()` directly, so no amount of guarding over there
+        // reaches it. Left ungated, a loss discovered during a layer's OnUpdate would still be followed by
+        // a full frame of interface recording. Nothing would crash — recording does not touch the device
+        // and the buffer is never submitted, because PresentFinalImage is gated too — but "no Vulkan call
+        // after the loss" would be false, and a claim that is nearly true is the kind this project pays
+        // for later.
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return;
+
         ImGuiIO& io     = ::ImGui::GetIO();
         auto     window = EngineContext::GetInstance().GetWindow();
         io.DisplaySize = ImVec2( (float)window->GetWidth(), (float)window->GetHeight() );

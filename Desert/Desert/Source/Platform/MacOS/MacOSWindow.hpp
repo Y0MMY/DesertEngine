@@ -47,8 +47,8 @@ namespace Desert::Platform::MacOS
         virtual bool IsWindowMinimized() const override;
         virtual void Maximize() override;
 
-        virtual void PrepareNextFrame() const override;
-        virtual void PresentFinalImage() const override;
+        [[nodiscard]] virtual Common::BoolResultStr PrepareNextFrame() const override;
+        [[nodiscard]] virtual Common::BoolResultStr PresentFinalImage() const override;
 
         virtual void OnEvent( Common::Event& e ) override;
 
