@@ -317,9 +317,9 @@ TEST( DocumentSlotLease, ACpuDrawnDocumentIsNotPendingDemand )
     // claims would refuse a window that costs nothing. The rule lives in AssetEditorRegistry.hpp and is
     // asserted here against the OWNER the editor now asks, rather than against the panel list it used to.
     DocumentWell well;
-    auto&        cpu = static_cast<FakeDocument&>( well.Add( MakeDocument(
-         DocumentTitle( "CT_Cumulus_Fair", Asset( 21, AssetTypeID::CloudType ) ),
-         Asset( 21, AssetTypeID::CloudType ) ) ) );
+    auto&        cpu = static_cast<FakeDocument&>(
+         well.Add( MakeDocument( DocumentTitle( "CT_Cumulus_Fair", Asset( 21, AssetTypeID::CloudType ) ),
+                                        Asset( 21, AssetTypeID::CloudType ) ) ) );
     cpu.m_ClaimsSlot = false;
 
     well.Add( MakeDocument( DocumentTitle( "M_Crate_Painted", Asset( 22 ) ), Asset( 22 ) ) );
@@ -537,7 +537,7 @@ TEST( SubjectIdentity, TheSameSubjectIsTheSameDocument )
     EXPECT_EQ( DocumentTitle( "Hero", Component( 7, "AnimationComponent" ) ),
                DocumentTitle( "Hero", Component( 7, "AnimationComponent" ) ) );
 
-    DocumentWell well;
+    DocumentWell    well;
     const SubjectId anim = Component( 7, "AnimationComponent" );
     well.Add( MakeDocument( DocumentTitle( "Hero", anim ), anim ) );
     EXPECT_NE( well.Find( Component( 7, "AnimationComponent" ) ), nullptr )
@@ -679,10 +679,11 @@ TEST( DocumentEditorCensus, AnUnregisteredKindOpensNothingRatherThanSomethingEls
 TEST( DocumentLiveness, TheSweepFindsExactlyTheDeadOnes )
 {
     DocumentWell well;
-    auto& alive = static_cast<FakeDocument&>(
-         well.Add( MakeDocument( DocumentTitle( "A", Asset( 11 ) ), Asset( 11 ) ) ) );
-    auto& doomed = static_cast<FakeDocument&>( well.Add( MakeDocument(
-         DocumentTitle( "Hero", Component( 12, "AnimationComponent" ) ), Component( 12, "AnimationComponent" ) ) ) );
+    auto&        alive =
+         static_cast<FakeDocument&>( well.Add( MakeDocument( DocumentTitle( "A", Asset( 11 ) ), Asset( 11 ) ) ) );
+    auto& doomed = static_cast<FakeDocument&>(
+         well.Add( MakeDocument( DocumentTitle( "Hero", Component( 12, "AnimationComponent" ) ),
+                                 Component( 12, "AnimationComponent" ) ) ) );
 
     const auto deadSubjects = [&well]
     {

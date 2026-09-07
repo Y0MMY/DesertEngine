@@ -72,7 +72,7 @@ namespace Desert::Editor
 
     CloudTypePanel::CloudTypePanel( const Assets::AssetHandle& subject, Assets::AssetManager* assets )
          : ISubjectDocument( SubjectTitle( subject, assets ),
-                                 AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudType ) ) ),
+                             AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudType ) ) ),
            m_Assets( assets )
     {
         // The subject is read through the SAME OpenType the library combo used to call, so a document opened

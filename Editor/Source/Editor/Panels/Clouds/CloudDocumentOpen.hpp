@@ -5,8 +5,8 @@
 // panels — which spell Desert::Core::Formats as an unqualified `Core::Formats` from inside Desert::Editor.
 // Make Desert::Editor::Core visible before those uses and every one of them silently rebinds to the wrong
 // namespace; it does not silently compile, but the error names a namespace nobody wrote.
-// SubjectEditorRegistry.hpp carries the same note and escapes the same way. So the queueing is declared here and DEFINED in
-// CloudDocumentOpen.cpp, and nothing in this header drags that namespace along.
+// SubjectEditorRegistry.hpp carries the same note and escapes the same way. So the queueing is declared here and
+// DEFINED in CloudDocumentOpen.cpp, and nothing in this header drags that namespace along.
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/CloudLayout.hpp>

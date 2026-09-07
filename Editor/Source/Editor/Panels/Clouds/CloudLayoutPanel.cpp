@@ -89,7 +89,7 @@ namespace Desert::Editor
                                         std::shared_ptr<::Desert::Core::Scene> scene,
                                         Assets::AssetManager*                  assets )
          : ISubjectDocument( SubjectTitle( subject, assets ),
-                                 AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudLayout ) ) ),
+                             AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudLayout ) ) ),
            m_Scene( std::move( scene ) ), m_Assets( assets )
     {
         LoadSubject();
@@ -100,7 +100,8 @@ namespace Desert::Editor
         if ( !m_Assets )
             return;
 
-        const auto painting = m_Assets->FindByHandle<Assets::CloudLayoutAsset>( Assets::AssetHandle( Subject().Owner ) );
+        const auto painting =
+             m_Assets->FindByHandle<Assets::CloudLayoutAsset>( Assets::AssetHandle( Subject().Owner ) );
         if ( !painting || !painting->IsReadyForUse() )
         {
             m_Status        = "This painting is not loaded - the log says why.";

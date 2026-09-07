@@ -191,7 +191,8 @@ namespace Desert::Editor
     }
 
     // The type key for a component kind, WITHOUT an instance — what a factory is registered under.
-    [[nodiscard]] constexpr SubjectTypeKey ComponentSubjectType( const std::string_view componentTypeName ) noexcept
+    [[nodiscard]] constexpr SubjectTypeKey
+    ComponentSubjectType( const std::string_view componentTypeName ) noexcept
     {
         return SubjectTypeKey{ SubjectDomain::EntityComponent, ComponentFacet( componentTypeName ) };
     }

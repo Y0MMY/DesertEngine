@@ -72,8 +72,9 @@ namespace Desert::Editor
 
     CloudNoiseVolumePanel::CloudNoiseVolumePanel( const Assets::AssetHandle& subject,
                                                   Assets::AssetManager*      assets )
-         : ISubjectDocument( SubjectTitle( subject, assets ),
-                                 AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudNoiseVolume ) ) ),
+         : ISubjectDocument(
+                SubjectTitle( subject, assets ),
+                AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudNoiseVolume ) ) ),
            m_Assets( assets )
     {
         LoadSubject( assets );
@@ -84,7 +85,8 @@ namespace Desert::Editor
         if ( !assets )
             return;
 
-        const auto asset = assets->FindByHandle<Assets::CloudNoiseVolumeAsset>( Assets::AssetHandle( Subject().Owner ) );
+        const auto asset =
+             assets->FindByHandle<Assets::CloudNoiseVolumeAsset>( Assets::AssetHandle( Subject().Owner ) );
         if ( !asset || !asset->IsReadyForUse() )
         {
             // NAMED rather than left as an empty panel. The opener (CloudDocumentOpen.hpp) refuses to queue

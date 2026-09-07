@@ -66,9 +66,9 @@ namespace Desert::Editor
         // counts this document at zero for its whole life, and closing it returns nothing because it took
         // nothing. The same is true of the other three cloud documents.
 
-        // The `CloudNoiseVolume` this window is about, gone from the manager — deleted in the browser, or the project
-        // closed under it. Asked of the metadata rather than of a typed lookup: the question is whether the
-        // asset is still THERE, and a typed lookup answers a different one (whether it is still that type).
+        // The `CloudNoiseVolume` this window is about, gone from the manager — deleted in the browser, or the
+        // project closed under it. Asked of the metadata rather than of a typed lookup: the question is whether
+        // the asset is still THERE, and a typed lookup answers a different one (whether it is still that type).
         // DEFINED IN THE .cpp: this header only forward-declares AssetManager, and pulling the whole of
         // it in for one metadata lookup would put the asset system into every translation unit that draws
         // a cloud panel.

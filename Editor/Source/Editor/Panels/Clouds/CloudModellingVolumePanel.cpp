@@ -68,10 +68,9 @@ namespace Desert::Editor
 
     CloudModellingVolumePanel::CloudModellingVolumePanel( const Assets::AssetHandle& subject,
                                                           Assets::AssetManager*      assets )
-         : ISubjectDocument( SubjectTitle( subject, assets ),
-                                 AssetSubject( subject,
-                                               static_cast<uint32_t>(
-                                                    Assets::AssetTypeID::CloudModellingVolume ) ) ),
+         : ISubjectDocument(
+                SubjectTitle( subject, assets ),
+                AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudModellingVolume ) ) ),
            m_Assets( assets )
     {
         // STARTING FROM THE SHIPPED EXAMPLE RATHER THAN FROM AN EMPTY BOX. An empty recipe is refused by
@@ -92,7 +91,8 @@ namespace Desert::Editor
         if ( !assets )
             return;
 
-        const auto asset = assets->FindByHandle<Assets::CloudModellingVolumeAsset>( Assets::AssetHandle( Subject().Owner ) );
+        const auto asset =
+             assets->FindByHandle<Assets::CloudModellingVolumeAsset>( Assets::AssetHandle( Subject().Owner ) );
         if ( !asset )
         {
             m_Status        = "This body is not registered - the log says why. Save would create it anew.";

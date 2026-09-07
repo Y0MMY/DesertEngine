@@ -100,8 +100,7 @@ namespace
     class FakeCpuDocument final : public ISubjectDocument
     {
     public:
-        FakeCpuDocument( const std::string& name, const SubjectId& subject )
-             : ISubjectDocument( name, subject )
+        FakeCpuDocument( const std::string& name, const SubjectId& subject ) : ISubjectDocument( name, subject )
         {
         }
 
@@ -279,8 +278,7 @@ TEST( AssetDocumentIdentity, EveryCloudFormatIsFoundByItsOwnSubject )
     DocumentWell well;
     well.Add( std::make_unique<FakeCpuDocument>( "N.dcnv", Asset( 601, AssetTypeID::CloudNoiseVolume ) ) );
     well.Add( std::make_unique<FakeCpuDocument>( "T.decloudtype", Asset( 602, AssetTypeID::CloudType ) ) );
-    well.Add(
-         std::make_unique<FakeCpuDocument>( "B.dcmv", Asset( 603, AssetTypeID::CloudModellingVolume ) ) );
+    well.Add( std::make_unique<FakeCpuDocument>( "B.dcmv", Asset( 603, AssetTypeID::CloudModellingVolume ) ) );
     well.Add( std::make_unique<FakeCpuDocument>( "L.dclayout", Asset( 604, AssetTypeID::CloudLayout ) ) );
 
     ASSERT_NE( well.Find( Asset( 601, AssetTypeID::CloudNoiseVolume ) ), nullptr );
@@ -307,8 +305,8 @@ TEST( AssetDocumentIdentity, AnEntitysComponentIsAWindowOfItsOwn )
     // data held by a COMPONENT ON AN ENTITY. The Details button the owner asked for had nowhere to send its
     // request, because the request carried a handle.
     DocumentWell well;
-    well.Add( std::make_unique<FakeDocument>( "Hero \xc2\xb7 Anim Graph",
-                                              Component( 88, "AnimationComponent" ) ) );
+    well.Add(
+         std::make_unique<FakeDocument>( "Hero \xc2\xb7 Anim Graph", Component( 88, "AnimationComponent" ) ) );
     well.Add( std::make_unique<FakeDocument>( "Hero \xc2\xb7 Particles",
                                               Component( 88, "ParticleEmitterComponent" ) ) );
 
@@ -378,8 +376,7 @@ TEST( PendingRendererSlotDemand, CpuOnlyDocumentsAreNotPendingDemand )
     std::vector<std::unique_ptr<IPanel>> panels;
     for ( uint64_t i = 0; i < 5; ++i )
     {
-        panels.push_back(
-             std::make_unique<FakeCpuDocument>( "cloud", Asset( 700 + i, AssetTypeID::CloudType ) ) );
+        panels.push_back( std::make_unique<FakeCpuDocument>( "cloud", Asset( 700 + i, AssetTypeID::CloudType ) ) );
     }
 
     EXPECT_EQ( PendingRendererSlotDemand( panels ), 0u )
@@ -398,8 +395,7 @@ TEST( PendingRendererSlotDemand, CountsOnlyTheDocumentsThatWillActuallyClaim )
     panels.push_back( std::make_unique<FakeTool>( "Logs" ) );
     panels.push_back( std::move( drawn ) );
     panels.push_back( std::make_unique<FakeDocument>( "Undrawn", Asset( 802 ) ) );
-    panels.push_back(
-         std::make_unique<FakeCpuDocument>( "L.dclayout", Asset( 803, AssetTypeID::CloudLayout ) ) );
+    panels.push_back( std::make_unique<FakeCpuDocument>( "L.dclayout", Asset( 803, AssetTypeID::CloudLayout ) ) );
 
     EXPECT_EQ( PendingRendererSlotDemand( panels ), 1u );
 }

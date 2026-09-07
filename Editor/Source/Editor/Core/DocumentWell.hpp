@@ -55,7 +55,7 @@ namespace Desert::Editor
     struct ClosedDocument
     {
         std::string         DisplayName;
-        SubjectId   Subject;
+        SubjectId           Subject;
     };
 
     class DocumentWell
@@ -158,7 +158,8 @@ namespace Desert::Editor
             // rather than in the order the vector happened to hold them.
             for ( auto& document : m_Documents )
             {
-                RememberClosed( ClosedDocument{ DocumentDisplayName( document->GetName() ), document->Subject() } );
+                RememberClosed(
+                     ClosedDocument{ DocumentDisplayName( document->GetName() ), document->Subject() } );
                 released.emplace_back( std::move( document ) );
             }
             m_Documents.clear();
@@ -215,7 +216,7 @@ namespace Desert::Editor
         std::vector<std::unique_ptr<ISubjectDocument>> m_Documents;
         // Subjects, most recent first. Subjects and not pointers: an identity cannot dangle, and the whole
         // point of the split is that a document's lifetime is short.
-        std::vector<SubjectId> m_MostRecent;
+        std::vector<SubjectId>           m_MostRecent;
         std::vector<ClosedDocument>      m_RecentlyClosed;
     };
 

@@ -595,10 +595,10 @@ namespace Desert::Editor
                                return std::make_unique<Editor::MaterialEditorPanel>(
                                     Assets::AssetHandle( subject.Owner ), m_AssetManager );
                            },
-                           [this]( const SubjectId& subject ) {
-                               return m_AssetManager &&
-                                      m_AssetManager->FindMetadataByHandle(
-                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
 
         // THE FOUR CLOUD DOCUMENTS. Each takes the raw AssetManager pointer the panels already held, so the
@@ -607,14 +607,15 @@ namespace Desert::Editor
         m_SubjectEditors.Register(
              AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudNoiseVolume ) ),
              Registration{ "CloudNoiseVolume", ICON_MDI_GRID,
-                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
                                return std::make_unique<Editor::CloudNoiseVolumePanel>(
                                     Assets::AssetHandle( subject.Owner ), m_AssetManager.get() );
                            },
-                           [this]( const SubjectId& subject ) {
-                               return m_AssetManager &&
-                                      m_AssetManager->FindMetadataByHandle(
-                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
         m_SubjectEditors.Register(
              AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudType ) ),
@@ -623,22 +624,23 @@ namespace Desert::Editor
                                return std::make_unique<Editor::CloudTypePanel>(
                                     Assets::AssetHandle( subject.Owner ), m_AssetManager.get() );
                            },
-                           [this]( const SubjectId& subject ) {
-                               return m_AssetManager &&
-                                      m_AssetManager->FindMetadataByHandle(
-                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
         m_SubjectEditors.Register(
              AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudModellingVolume ) ),
              Registration{ "CloudModellingVolume", ICON_MDI_CUBE_OUTLINE,
-                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
                                return std::make_unique<Editor::CloudModellingVolumePanel>(
                                     Assets::AssetHandle( subject.Owner ), m_AssetManager.get() );
                            },
-                           [this]( const SubjectId& subject ) {
-                               return m_AssetManager &&
-                                      m_AssetManager->FindMetadataByHandle(
-                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
         // The layout document also READS the active scene's cloud layer for its preview numbers — the scene
         // is an input, never a second subject, and SetScene keeps it following the focused viewport exactly
@@ -646,14 +648,15 @@ namespace Desert::Editor
         m_SubjectEditors.Register(
              AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudLayout ) ),
              Registration{ "CloudLayout", ICON_MDI_IMAGE_FILTER_HDR,
-                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
                                return std::make_unique<Editor::CloudLayoutPanel>(
                                     Assets::AssetHandle( subject.Owner ), m_MainScene, m_AssetManager.get() );
                            },
-                           [this]( const SubjectId& subject ) {
-                               return m_AssetManager &&
-                                      m_AssetManager->FindMetadataByHandle(
-                                           Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
                            } } );
 
         // ── THE TWO DOCUMENTS WHOSE SUBJECT IS NOT A FILE ─────────────────────────────────────────────
@@ -673,24 +676,24 @@ namespace Desert::Editor
         m_SubjectEditors.Register(
              Editor::AnimGraphPanel::SubjectType(),
              Registration{ Editor::AnimGraphPanel::kComponentTypeName, ICON_MDI_STATE_MACHINE,
-                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
                                return std::make_unique<Editor::AnimGraphPanel>(
                                     subject, SubjectEntityName( subject, "Anim Graph" ), m_MainScene,
                                     m_AnimationLibrary.get() );
                            },
-                           [this]( const SubjectId& subject ) {
-                               return EntityHasComponent<ECS::AnimationComponent>( subject.Owner );
-                           } } );
+                           [this]( const SubjectId& subject )
+                           { return EntityHasComponent<ECS::AnimationComponent>( subject.Owner ); } } );
         m_SubjectEditors.Register(
              Editor::ParticleEditorPanel::SubjectType(),
              Registration{ Editor::ParticleEditorPanel::kComponentTypeName, ICON_MDI_CREATION,
-                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
                                return std::make_unique<Editor::ParticleEditorPanel>(
                                     subject, SubjectEntityName( subject, "Particles" ), m_MainScene );
                            },
-                           [this]( const SubjectId& subject ) {
-                               return EntityHasComponent<ECS::ParticleEmitterComponent>( subject.Owner );
-                           } } );
+                           [this]( const SubjectId& subject )
+                           { return EntityHasComponent<ECS::ParticleEmitterComponent>( subject.Owner ); } } );
 
         // ── AND HOW A PATH BECOMES ONE OF THEM ────────────────────────────────────────────────────────
         //
@@ -699,7 +702,8 @@ namespace Desert::Editor
         // instead, beside the editors they feed, so the browser asks once and a new format is a line in
         // this block rather than an edit in two files somebody has to remember exist.
         m_SubjectEditors.RegisterPathOpener(
-             [this]( const std::string& path ) {
+             [this]( const std::string& path )
+             {
                  switch ( RequestMaterialDocument( m_AssetManager.get(), path ) )
                  {
                      case MaterialDocumentRequest::NotAMaterialPath:
@@ -712,7 +716,8 @@ namespace Desert::Editor
                  return SubjectEditorRegistry::PathOpenOutcome::NotMine;
              } );
         m_SubjectEditors.RegisterPathOpener(
-             [this]( const std::string& path ) {
+             [this]( const std::string& path )
+             {
                  switch ( RequestCloudDocument( m_AssetManager.get(), path ) )
                  {
                      case CloudDocumentRequest::NotACloudPath:
@@ -2009,9 +2014,8 @@ namespace Desert::Editor
                 //
                 // The subject is named by its FILE NAME or its ENTITY NAME where one is known: "handle
                 // 3333333333333333333" is the log's identifier, not the user's.
-                m_OpenRefusal = OpenRefusal{ RefusedSubjectName( subject ),
-                                             m_SubjectEditors.TypeName( subject ), live, pending,
-                                             std::move( rows ) };
+                m_OpenRefusal = OpenRefusal{ RefusedSubjectName( subject ), m_SubjectEditors.TypeName( subject ),
+                                             live, pending, std::move( rows ) };
                 m_OpenRefusalPending = true;
                 continue;
             }
@@ -2057,7 +2061,8 @@ namespace Desert::Editor
             // type is consulted, so all that is known about the subject is that it is an asset — and a
             // typed lookup would have to guess which class to ask for. Metadata carries no cast, so there
             // is nothing here that could answer with a stranger.
-            if ( const auto* metadata = m_AssetManager->FindMetadataByHandle( Assets::AssetHandle( subject.Owner ) ) )
+            if ( const auto* metadata =
+                      m_AssetManager->FindMetadataByHandle( Assets::AssetHandle( subject.Owner ) ) )
                 return metadata->Filepath.stem().string();
         }
         if ( subject.Domain == SubjectDomain::EntityComponent && m_MainScene )
@@ -2720,8 +2725,11 @@ namespace Desert::Editor
         {
             const SubjectId subject = document->Subject();
             commands.push_back( { "Document", "Close " + DocumentDisplayName( document->GetName() ),
-                                  [this, subject] { RequestDocumentClose( subject, "closed from the command "
-                                                                                     "palette" ); } } );
+                                  [this, subject]
+                                  {
+                                      RequestDocumentClose( subject, "closed from the command "
+                                                                     "palette" );
+                                  } } );
         }
 
         // Ctrl+Tab, as a command. The key is bound in OnImGuiRender and a key is not available to a
@@ -2754,8 +2762,7 @@ namespace Desert::Editor
                 std::string        name = entity.HasComponent<ECS::TagComponent>()
                                                ? entity.GetComponent<ECS::TagComponent>().Tag
                                                : std::string( "Entity" );
-                commands.push_back(
-                     { "Entity", name, [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
+                commands.push_back( { "Entity", name, [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
 
                 // DELETING ONE IS ALSO SOMETHING A PERSON DOES, and until now the palette could only
                 // SELECT. The Outliner's context menu and the Delete key both reach
@@ -2767,8 +2774,7 @@ namespace Desert::Editor
                 // destroy an entity without a mouse: the channel runs these closures and nothing else. A
                 // gap in the palette is a gap in what an agent can do at all, which is the one claim the
                 // palette exists to make good on.
-                commands.push_back( { "Entity", "Delete " + name,
-                                      [uuid] { Commands::DeleteEntity( uuid ); } } );
+                commands.push_back( { "Entity", "Delete " + name, [uuid] { Commands::DeleteEntity( uuid ); } } );
 
                 // ── AND WHAT CAN BE OPENED *FROM* THIS ENTITY ─────────────────────────────────────────
                 //
@@ -2796,8 +2802,7 @@ namespace Desert::Editor
                     if ( !m_SubjectEditors.Exists( subject ) )
                         continue;
 
-                    commands.push_back( { "Open",
-                                          name + " \xc2\xb7 " + m_SubjectEditors.TypeName( type ),
+                    commands.push_back( { "Open", name + " \xc2\xb7 " + m_SubjectEditors.TypeName( type ),
                                           [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
                 }
             }
@@ -2995,8 +3000,7 @@ namespace Desert::Editor
                 ImGui::TextDisabled( "RECENTLY CLOSED" );
                 for ( const ClosedDocument& closed : m_Documents.RecentlyClosed() )
                 {
-                    ImGui::PushID(
-                         static_cast<int>( std::hash<SubjectId>{}( closed.Subject ) & 0x7fffffff ) );
+                    ImGui::PushID( static_cast<int>( std::hash<SubjectId>{}( closed.Subject ) & 0x7fffffff ) );
                     const std::string row =
                          std::string( m_SubjectEditors.Icon( closed.Subject, kUnknownDocumentIcon ) ) + "  " +
                          closed.DisplayName;
@@ -3033,7 +3037,7 @@ namespace Desert::Editor
 
             const std::string row =
                  std::string( m_SubjectEditors.Icon( document->Subject(), kUnknownDocumentIcon ) ) + "  " +
-                                    DocumentDisplayName( document->GetName() );
+                 DocumentDisplayName( document->GetName() );
             if ( ImGui::Selectable( row.c_str(), subject == m_FocusedDocument,
                                     ImGuiSelectableFlags_AllowItemOverlap ) )
                 FocusDocument( subject );
@@ -3043,8 +3047,7 @@ namespace Desert::Editor
             const char*       slot = document->HoldsRendererSlot()    ? "1 slot"
                                      : document->ClaimsRendererSlot() ? "claiming"
                                                                       : "no slot";
-            const std::string right =
-                 m_SubjectEditors.TypeName( document->Subject() ) + " \xc2\xb7 " + slot;
+            const std::string right  = m_SubjectEditors.TypeName( document->Subject() ) + " \xc2\xb7 " + slot;
             const float rightW = ImGui::CalcTextSize( right.c_str() ).x;
             ImGui::SameLine( ImGui::GetContentRegionMax().x - rightW - 28.0f );
             ImGui::TextDisabled( "%s", right.c_str() );
@@ -3201,8 +3204,7 @@ namespace Desert::Editor
             if ( consumer.Document && m_Documents.Find( *consumer.Document ) )
             {
                 ImGui::SameLine( ImGui::GetContentRegionMax().x - 64.0f );
-                ImGui::PushID(
-                     static_cast<int>( std::hash<SubjectId>{}( *consumer.Document ) & 0x7fffffff ) );
+                ImGui::PushID( static_cast<int>( std::hash<SubjectId>{}( *consumer.Document ) & 0x7fffffff ) );
                 if ( ImGui::SmallButton( "Close" ) )
                     closeRequests.push_back( *consumer.Document );
                 ImGui::PopID();
@@ -5005,8 +5007,7 @@ namespace Desert::Editor
             {
                 const std::string measured = std::string( ICON_MDI_RADIOBOX_MARKED ) + "  " +
                                              m_SubjectEditors.Icon( document->Subject(), kUnknownDocumentIcon ) +
-                                                  std::string( "  " ) +
-                                             DocumentDisplayName( document->GetName() );
+                                             std::string( "  " ) + DocumentDisplayName( document->GetName() );
                 widestRow = std::max( widestRow, ImGui::CalcTextSize( measured.c_str() ).x );
             }
 

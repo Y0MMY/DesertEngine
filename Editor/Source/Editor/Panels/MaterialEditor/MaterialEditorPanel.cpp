@@ -212,7 +212,8 @@ namespace Desert::Editor
     {
         if ( !m_AssetManager )
             return nullptr;
-        return m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( Assets::AssetHandle( Subject().Owner ) );
+        return m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>(
+             Assets::AssetHandle( Subject().Owner ) );
     }
 
     std::shared_ptr<Assets::SurfaceMaterialAsset> MaterialEditorPanel::DrawnMaterial() const
