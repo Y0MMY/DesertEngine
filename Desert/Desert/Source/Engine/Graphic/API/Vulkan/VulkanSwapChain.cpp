@@ -250,7 +250,9 @@ namespace Desert::Graphic::API::Vulkan
     VulkanSwapChain::GetImageFormatAndColorSpace( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
         VkPhysicalDevice physicalDevice = device->GetPhysicalDevice()->GetVulkanPhysicalDevice();
-        uint32_t formatCount;
+        // Zero-initialised for the reason spelled out in VulkanContext::CreateVKInstance: the result of
+        // the enumeration below is dropped, so the count must be defined even when it fails.
+        uint32_t formatCount = 0;
         vkGetPhysicalDeviceSurfaceFormatsKHR( physicalDevice, m_Surface, &formatCount, nullptr );
         if ( !formatCount ) return Common::MakeError<bool>( "null format count" );
 

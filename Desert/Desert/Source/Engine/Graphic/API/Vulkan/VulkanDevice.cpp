@@ -231,7 +231,9 @@ namespace Desert::Graphic::API::Vulkan
             m_QueueCreateInfos.push_back( queueCreateInfo );
         }
 
-        uint32_t extensionCount;
+        // Zero-initialised: the enumeration's result is dropped, so a failure must still leave a
+        // defined count. See VulkanContext::CreateVKInstance.
+        uint32_t extensionCount = 0;
         vkEnumerateDeviceExtensionProperties( m_PhysicalDevice, nullptr, &extensionCount, nullptr );
 
         if ( extensionCount )

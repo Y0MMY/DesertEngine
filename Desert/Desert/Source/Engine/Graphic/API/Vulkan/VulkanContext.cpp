@@ -130,7 +130,12 @@ namespace Desert::Graphic::API::Vulkan
         {
             const char* validationLayers = "VK_LAYER_KHRONOS_validation";
 
-            uint32_t layerCount;
+            // ZERO-INITIALISED, and that is a fix rather than a tidy-up. The result of the call below is
+            // one of the thirteen this tree still drops (see DeviceLostCensus), and a dropped result on a
+            // count-then-fill enumeration is only harmless if the count is defined when the call fails —
+            // this one was not, so a failed enumeration sized a vector from an uninitialised stack value.
+            // The sibling counters in VulkanDevice and VulkanSwapChain were already written this way.
+            uint32_t layerCount = 0;
             vkEnumerateInstanceLayerProperties( &layerCount, nullptr );
 
             std::vector<VkLayerProperties> availableLayers( layerCount );
