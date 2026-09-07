@@ -9,6 +9,7 @@
 // way to assert "what the launcher writes, the engine reads" without writing into the developer's
 // real registry.
 
+#include <optional>
 #include <string>
 
 #include <DesertShared/EngineRegistry.hpp>
@@ -45,7 +46,9 @@ namespace Hub
     {
         std::string Root;            // "" = none found; every engine-dependent action then refuses
         std::string VersionFull;     // "" when the root came from the environment rather than the registry
-        int         CommitCount = 0; // the build number the sidebar shows beside the version
+        // Absent when the engine could not name its own build (shallow clone, no git). The sidebar
+        // says so rather than printing a number nobody can act on — 0 would read as "build 0".
+        std::optional<int> CommitCount;
         // Why the sidebar shows what it shows. Never empty — with no engine it is the reason there
         // is none, which is the sentence the person with a broken install actually needs.
         std::string Explanation;

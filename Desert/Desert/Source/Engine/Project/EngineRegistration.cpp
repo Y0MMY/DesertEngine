@@ -8,6 +8,15 @@
 
 namespace Desert::Project
 {
+    // И7 made the commit count optional so that "unknown" could never be mistaken for a very old
+    // build, and the registry keeps that distinction rather than flattening it here — an engine that
+    // cannot name its build registers WITHOUT a number, and the launcher's ranking says so out loud.
+    static std::optional<int> CommitCountForRegistry()
+    {
+        const auto count = Common::Version::CommitCount();
+        return count ? std::optional<int>( static_cast<int>( *count ) ) : std::nullopt;
+    }
+
     Common::BoolResultStr RegisterThisEngine( const std::string& configDirectory, const std::string& engineRoot )
     {
         if ( engineRoot.empty() )
@@ -49,7 +58,7 @@ namespace Desert::Project
 
         Common::Engine::RegisterInstall(
              registry, Common::Engine::EngineInstall{ root.string(), Common::Version::Full(),
-                                                      static_cast<int>( Common::Version::CommitCount() ) } );
+                                                      CommitCountForRegistry() } );
 
         // Atomic, for the same reason projects.json is: two processes share this file, and an
         // interrupted in-place write leaves a torn one that neither can parse.

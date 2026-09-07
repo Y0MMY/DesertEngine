@@ -340,10 +340,10 @@ namespace
             if ( unregistered )
                 shown = "version not registered";
             TextAt( ImVec2( side.x0 + 22, by + 15 ), unregistered ? kTextDim : kText, shown.c_str(), Bold );
-            if ( st.Engine.CommitCount > 0 )
+            if ( st.Engine.CommitCount && *st.Engine.CommitCount > 0 )
             {
                 char build[32];
-                std::snprintf( build, sizeof( build ), "build %d", st.Engine.CommitCount );
+                std::snprintf( build, sizeof( build ), "build %d", *st.Engine.CommitCount );
                 TextAt( ImVec2( side.x0 + 22 + TextW( shown.c_str(), Bold ) + 8, by + 17 ), kTextFaint, build,
                         Tiny );
             }
