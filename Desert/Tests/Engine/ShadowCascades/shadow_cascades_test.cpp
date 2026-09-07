@@ -195,7 +195,8 @@ namespace
     }
 } // namespace
 
-// The two shipped budgets are not interchangeable and the difference is the whole point of the type.
+// The two DRAWING budgets are not interchangeable and the difference is the whole point of the type.
+// (The third, kNoShadowQuality, draws nothing and is asserted separately below.)
 TEST( ShadowQualityBudget, ThePresetsDifferInAllThreeNumbers )
 {
     using Desert::Graphic::kPreviewShadowQuality;
@@ -212,20 +213,112 @@ TEST( ShadowQualityBudget, ThePresetsDifferInAllThreeNumbers )
 
 // WHY THE BUDGET EXISTS, as a number. Attachment bytes are cascades x size^2 x (RGBA32F + D24S8); the
 // preview must be at least an order cheaper or it is not worth having a second budget at all.
+//
+// Through Graphic::ShadowAttachmentBytes, not a lambda. This test used to carry its own copy of the
+// formula beside the renderer's, which is the mirror-with-no-guard shape: two spellings of one quantity,
+// and the test could only ever agree with itself.
 TEST( ShadowQualityBudget, ThePreviewCostsAnOrderOfMagnitudeLess )
 {
     using Desert::Graphic::kPreviewShadowQuality;
     using Desert::Graphic::kSceneShadowQuality;
+    using Desert::Graphic::ShadowAttachmentBytes;
 
-    const auto bytes = []( const Desert::Graphic::ShadowQuality& q )
+    EXPECT_EQ( ShadowAttachmentBytes( kSceneShadowQuality ), 335544320ull );  // 320 MiB
+    EXPECT_EQ( ShadowAttachmentBytes( kPreviewShadowQuality ), 20971520ull ); // 20 MiB
+    EXPECT_LE( ShadowAttachmentBytes( kPreviewShadowQuality ) * 10ull,
+               ShadowAttachmentBytes( kSceneShadowQuality ) );
+}
+
+// ── A renderer without shadows holds no shadow attachments ────────────────────────────────────────
+//
+// THE RELATION, not the number: whatever the third preset's fields say, what must hold is that a budget
+// which draws no cascade also COSTS no cascade, and that the two are the same fact rather than two facts
+// that happen to agree today. Asserting `kNoShadowQuality.CascadeCount == 0` alone would pass just as
+// well if ShadowAttachmentBytes had a floor in it, or if the size field were still 2048 and some later
+// allocation read the size without the count.
+TEST( ShadowQualityBudget, ABudgetThatDrawsNoCascadeCostsNoBytes )
+{
+    using Desert::Graphic::ShadowAttachmentBytes;
+    using Desert::Graphic::ShadowQuality;
+
+    // Both directions of the iff, over the shipped presets and over the half-states a careless edit
+    // produces: a count of zero with a full-size map still standing, and a full count at size zero.
+    const ShadowQuality cases[] = { Desert::Graphic::kNoShadowQuality, Desert::Graphic::kPreviewShadowQuality,
+                                    Desert::Graphic::kSceneShadowQuality,
+                                    ShadowQuality{ 0u, 2048u, Units::Metres( 150.0f ) },
+                                    ShadowQuality{ 4u, 0u, Units::Metres( 150.0f ) } };
+
+    for ( const auto& q : cases )
     {
-        constexpr uint64_t kBytesPerTexel = 16u + 4u; // RGBA32F colour + DEPTH24STENCIL8
-        return static_cast<uint64_t>( q.CascadeCount ) * q.ShadowMapSize * q.ShadowMapSize * kBytesPerTexel;
-    };
+        const bool drawsNothing = q.CascadeCount == 0 || q.ShadowMapSize == 0;
+        EXPECT_EQ( ShadowAttachmentBytes( q ) == 0ull, drawsNothing )
+             << "count " << q.CascadeCount << ", size " << q.ShadowMapSize;
+    }
 
-    EXPECT_EQ( bytes( kSceneShadowQuality ), 335544320ull );  // 320 MiB
-    EXPECT_EQ( bytes( kPreviewShadowQuality ), 20971520ull ); // 20 MiB
-    EXPECT_LE( bytes( kPreviewShadowQuality ) * 10ull, bytes( kSceneShadowQuality ) );
+    // And the shipped preset is on the free side of it.
+    EXPECT_EQ( ShadowAttachmentBytes( Desert::Graphic::kNoShadowQuality ), 0ull );
+}
+
+// The fitter agrees with the budget: a renderer that allocated nothing must also be told to write no
+// cascade matrices. This is the same middle-link failure ApplyShadowQuality exists to prevent, seen from
+// the zero end — a fitter that produced four matrices for a renderer holding no maps would have the
+// shader walk cascades that were never rendered.
+TEST( ShadowQualityBudget, ANoShadowBudgetFitsNoCascades )
+{
+    CascadeSetup setup = DefaultSetup();
+    ApplyShadowQuality( setup, Desert::Graphic::kNoShadowQuality );
+
+    CascadeFit fits[kMaxShadowCascades];
+    EXPECT_EQ( ComputeShadowCascades( setup, fits ), 0u );
+}
+
+// THE LIVE TOTAL the renderer's log line prints. It exists because two "320 MiB" lines in one editor log
+// were read as 640 MiB held at once, when they were one renderer allocating, releasing and allocating
+// again. What that reading needed and did not have is how many sets are ALIVE — so the property under
+// test is that the total tracks construction and destruction exactly, and that a shadowless renderer
+// contributes nothing to it and does not count as a holder.
+TEST( ShadowQualityBudget, TheLiveTotalTracksWhatIsHeldAndNotWhatWasEverAllocated )
+{
+    using Desert::Graphic::ShadowAttachmentBytes;
+    using Desert::Graphic::ShadowAttachmentLease;
+
+    const uint64_t base      = ShadowAttachmentLease::LiveBytes();
+    const uint32_t baseHold  = ShadowAttachmentLease::LiveHolders();
+    const uint64_t sceneCost = ShadowAttachmentBytes( Desert::Graphic::kSceneShadowQuality );
+
+    {
+        const ShadowAttachmentLease shadowless{ Desert::Graphic::kNoShadowQuality };
+        EXPECT_EQ( ShadowAttachmentLease::LiveBytes(), base );
+        EXPECT_EQ( ShadowAttachmentLease::LiveHolders(), baseHold )
+             << "a renderer holding no cascades must not be counted as one that does";
+    }
+
+    {
+        const ShadowAttachmentLease first{ Desert::Graphic::kSceneShadowQuality };
+        EXPECT_EQ( ShadowAttachmentLease::LiveBytes(), base + sceneCost );
+        EXPECT_EQ( ShadowAttachmentLease::LiveHolders(), baseHold + 1u );
+    }
+
+    // Released, exactly as SceneRenderer::Init drops the old MeshRenderer before building the new one.
+    EXPECT_EQ( ShadowAttachmentLease::LiveBytes(), base );
+    EXPECT_EQ( ShadowAttachmentLease::LiveHolders(), baseHold );
+
+    {
+        // The empty editor's second allocation. TWO log lines, ONE live set — the whole point.
+        const ShadowAttachmentLease second{ Desert::Graphic::kSceneShadowQuality };
+        EXPECT_EQ( ShadowAttachmentLease::LiveBytes(), base + sceneCost );
+        EXPECT_EQ( ShadowAttachmentLease::LiveHolders(), baseHold + 1u );
+
+        // And two genuinely concurrent renderers do add up, or the total would be useless in the
+        // direction it is actually meant to warn about: six live windows.
+        const ShadowAttachmentLease alsoLive{ Desert::Graphic::kPreviewShadowQuality };
+        EXPECT_EQ( ShadowAttachmentLease::LiveBytes(),
+                   base + sceneCost + ShadowAttachmentBytes( Desert::Graphic::kPreviewShadowQuality ) );
+        EXPECT_EQ( ShadowAttachmentLease::LiveHolders(), baseHold + 2u );
+    }
+
+    EXPECT_EQ( ShadowAttachmentLease::LiveBytes(), base );
+    EXPECT_EQ( ShadowAttachmentLease::LiveHolders(), baseHold );
 }
 
 // THE RELATION, and the reason the distance is part of the budget rather than left at the scene's. One

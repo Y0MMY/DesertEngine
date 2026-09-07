@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace Desert::Graphic
 {
@@ -27,15 +28,18 @@ namespace Desert::Graphic
     // It exists because the three numbers are one decision and were three constants. A viewport of a
     // level wants 4 cascades at 2048 over 150 m; a 512-px asset preview showing one object on a floor
     // wants none of that, and paying for it is not a nicety: four 2048 RGBA32F colour attachments plus
-    // their D24S8 depth is 335 MB PER RENDERER, and this editor allows six live renderers at once. That
-    // is why the preview scene had shadows switched off outright (a floor with no shadow under the ball),
-    // and switching them back on as they stood would have been 2 GB of attachments for six open windows.
+    // their D24S8 depth is 320 MiB PER RENDERER (ShadowAttachmentBytes below is the one place that
+    // arithmetic lives), and this editor allows six live renderers at once. That is why the preview scene
+    // had shadows switched off outright (a floor with no shadow under the ball), and switching them back
+    // on as they stood would have been nearly 2 GiB of attachments for six open windows.
     //
     // THE THREE MOVE TOGETHER OR THE RESULT IS A BLOB. Dropping to one cascade while keeping 150 m makes
     // the single map cover the whole distance, so a 1 m object's shadow lands in about seven texels of
     // 1024 — cheaper and useless. The quantity that decides whether a shadow is usable is one texel's
     // world size, 2*Radius/ShadowMapSize, which is what Desert/Tests/Engine/ShadowCascades asserts about
-    // both presets below rather than asserting each number on its own.
+    // the drawing presets below rather than asserting each number on its own. (The third preset,
+    // kNoShadowQuality, is outside that relation on purpose: it draws nothing, so no texel of it has a
+    // world size to be wrong about.)
     struct ShadowQuality
     {
         uint32_t CascadeCount  = kMaxShadowCascades;
@@ -53,6 +57,117 @@ namespace Desert::Graphic
     // primitives are 1 m across (PrimitiveMeshFactory::kPrimitiveSize) and the floor a few metres — so
     // the single cascade is spent entirely on the subject instead of on empty distance.
     inline constexpr ShadowQuality kPreviewShadowQuality{ 1u, 1024u, Common::Units::Metres( 10.0f ) };
+
+    // A RENDERER THAT WILL NEVER DRAW A SHADOW, and therefore holds no map to draw one into. Zero is a
+    // legal cascade count everywhere the count already travels: ComputeShadowCascades returns 0,
+    // RegisterShadowPass registers no pass, and SceneShadowBind writes 0 into u_ShadowParams.w so the
+    // shader's own loop selects no cascade and ShadowFactor returns "lit" without sampling a map.
+    //
+    // WHY THIS, AND NOT `SceneSettings::EnableShadows`. The flag looks like the same decision and is a
+    // different one, in the only way that matters here — its LIFETIME. It is per-scene, serialized,
+    // toggleable from Scene Settings mid-session, and read afresh every frame; the cascade framebuffers
+    // are allocated once, in Initialize, and live as long as the renderer. Two of the three sites that
+    // want no shadows (AssetThumbnailRenderer, PhotogrammetryPanel) also set that flag AFTER
+    // Scene::Init() has already run, so an allocation gated on it would have read `true` and paid in
+    // full at exactly the sites the saving was for. The budget is asked at CONSTRUCTION, which is when
+    // it is knowable and when the answer stops changing.
+    //
+    // All three numbers are zero on purpose rather than "4 cascades of size 0": the decision is "this
+    // renderer spends nothing on the sun", and a resolution or a distance left standing beside a count
+    // of zero is a number the next reader has to work out is dead.
+    inline constexpr ShadowQuality kNoShadowQuality{ 0u, 0u, 0.0f };
+
+    // WHAT A BUDGET COSTS IN ATTACHMENT MEMORY. Derived from the two formats MeshRenderer::SetupShadowPass
+    // actually pushes — one RGBA32F colour map plus one DEPTH24STENCIL8 per cascade — because this figure
+    // had two independent spellings (the renderer's log line and the test's own lambda) and a third would
+    // have been written the next time somebody wanted it. 20 bytes a texel: an estimate of "about a byte
+    // a texel" is wrong by a factor of four, which is the difference between 80 MB and 320 MB.
+    inline constexpr uint64_t kShadowBytesPerTexel = 16u /* RGBA32F */ + 4u /* DEPTH24STENCIL8 */;
+
+    [[nodiscard]] inline constexpr uint64_t ShadowAttachmentBytes( const ShadowQuality& quality )
+    {
+        return static_cast<uint64_t>( quality.CascadeCount ) * quality.ShadowMapSize * quality.ShadowMapSize *
+               kShadowBytesPerTexel;
+    }
+
+    // THE LIVE TOTAL ACROSS EVERY RENDERER, because the per-renderer figure alone does not say how many
+    // renderers hold one. An empty editor logs the allocation line TWICE — SceneRenderer::Init runs again
+    // when the project's default scene loads — and two lines saying "320 MB" were read as 640 MB held for
+    // nothing. They are one renderer: the first set is released before the second is allocated. Nothing
+    // in the log said so, and no arithmetic over the per-renderer line can say so, because the missing
+    // fact is how many of them are ALIVE.
+    //
+    // RAII rather than a matching pair of add/remove calls, and held beside the framebuffers it accounts
+    // for, so the count is destroyed exactly when they are. A hand-written decrement is the middle link
+    // this project keeps losing properties in; there is no site here that can forget one.
+    class ShadowAttachmentLease
+    {
+    public:
+        ShadowAttachmentLease() = default;
+
+        explicit ShadowAttachmentLease( const ShadowQuality& quality )
+             : m_Bytes( ShadowAttachmentBytes( quality ) )
+        {
+            if ( m_Bytes != 0 )
+            {
+                s_LiveBytes += m_Bytes;
+                ++s_LiveHolders;
+            }
+        }
+
+        ShadowAttachmentLease( const ShadowAttachmentLease& )            = delete;
+        ShadowAttachmentLease& operator=( const ShadowAttachmentLease& ) = delete;
+
+        ShadowAttachmentLease( ShadowAttachmentLease&& other ) noexcept : m_Bytes( other.m_Bytes )
+        {
+            other.m_Bytes = 0;
+        }
+
+        ShadowAttachmentLease& operator=( ShadowAttachmentLease&& other ) noexcept
+        {
+            if ( this != &other )
+            {
+                Release();
+                m_Bytes       = other.m_Bytes;
+                other.m_Bytes = 0;
+            }
+            return *this;
+        }
+
+        ~ShadowAttachmentLease()
+        {
+            Release();
+        }
+
+        void Release()
+        {
+            if ( m_Bytes == 0 )
+                return;
+            s_LiveBytes -= m_Bytes;
+            --s_LiveHolders;
+            m_Bytes = 0;
+        }
+
+        // Every cascade set alive in this process, and how many renderers hold one. Read by the
+        // renderer's own log line so a reader never has to guess the multiplier.
+        [[nodiscard]] static uint64_t LiveBytes()
+        {
+            return s_LiveBytes;
+        }
+        [[nodiscard]] static uint32_t LiveHolders()
+        {
+            return s_LiveHolders;
+        }
+
+    private:
+        uint64_t m_Bytes = 0;
+
+        // Not atomic, and that is a statement rather than an omission: cascade framebuffers are created
+        // and destroyed on the render thread only (MeshRenderer::Initialize runs inside
+        // SceneRenderer::Init, which a JobSystem worker may not call — it touches the GPU).
+        inline static uint64_t s_LiveBytes   = 0;
+        inline static uint32_t s_LiveHolders = 0;
+    };
 
     struct CascadeFit
     {

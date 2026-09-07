@@ -11,6 +11,7 @@
 #include <Common/Core/Units.hpp>
 
 #include <variant>
+#include <chrono>
 #include <cmath>
 #include <algorithm>
 #include <unordered_set>
@@ -164,6 +165,17 @@ namespace Desert::Graphic::System
         // from it; from here on nothing may change it, and holding a copy is what makes that true rather
         // than a rule somebody has to keep.
         m_Shadow = m_SceneRenderer ? m_SceneRenderer->GetShadowQuality() : ShadowQuality{};
+        // CLAMPED ONCE, HERE. ShadowQuality is a plain aggregate, so `ShadowQuality{ 5, 2048, ... }`
+        // compiles; every loop below runs to this count while the arrays it indexes are [kMaxCascades].
+        // ComputeShadowCascades clamps its own copy, which made the fitter safe and left the allocation,
+        // the material arrays and the map gather writing one past the end.
+        if ( m_Shadow.CascadeCount > kMaxCascades )
+        {
+            LOG_WARN( "[Shadows] a budget of {} cascades was asked for; this renderer can hold {} and will "
+                      "use that.",
+                      m_Shadow.CascadeCount, kMaxCascades );
+            m_Shadow.CascadeCount = kMaxCascades;
+        }
 
         if ( !SetupGeometryPass() )
             return Common::MakeError( "Failed to setup static geometry pass" );
@@ -226,6 +238,11 @@ namespace Desert::Graphic::System
             m_ShadowSkinnedMaterial[i].reset();
             m_CascadeFB[i].reset();
         }
+        // In step with the framebuffers above. The destructor releases it too, which is what keeps the
+        // live total honest — nothing in this engine calls RenderSystem::Shutdown (SceneRenderer::Init
+        // drops the systems by clearing the map, and Application shuts the renderer down without walking
+        // them), so a total that depended on this function being reached would read as a leak.
+        m_ShadowAttachments.Release();
     }
 
     void MeshRenderer::ClearQueues()
@@ -1461,8 +1478,43 @@ namespace Desert::Graphic::System
         return true;
     }
 
+    void MeshRenderer::LogShadowBudget( double allocMs ) const
+    {
+        // WHAT THIS RENDERER JUST SPENT AND WHAT THE PROCESS NOW HOLDS. The per-renderer figure alone was
+        // read wrong: an empty editor prints this line TWICE — SceneRenderer::Init runs a second time when
+        // the project's default scene loads — and two "320 MiB" lines were taken to mean 640 MiB held for
+        // nothing. It is one renderer, and the first set is released before the second is allocated. The
+        // live total is here so the log answers that directly instead of inviting a multiplication.
+        //
+        // MiB, spelled out. The unit was "MB" while the arithmetic divided by 1024*1024, so the same
+        // quantity read as 320 here and 335 in ShadowQuality's own comment.
+        LOG_INFO( "[Shadows] {} cascade(s) at {}x{} over {:.0f} m = {:.1f} MiB of attachments for this "
+                  "renderer, allocated in {:.1f} ms ({:.1f} MiB live across {} renderer(s) holding "
+                  "cascades).",
+                  m_Shadow.CascadeCount, m_Shadow.ShadowMapSize, m_Shadow.ShadowMapSize,
+                  Common::Units::ToMetres( m_Shadow.MaxDistance ),
+                  static_cast<double>( ShadowAttachmentBytes( m_Shadow ) ) / ( 1024.0 * 1024.0 ), allocMs,
+                  static_cast<double>( ShadowAttachmentLease::LiveBytes() ) / ( 1024.0 * 1024.0 ),
+                  ShadowAttachmentLease::LiveHolders() );
+    }
+
     bool MeshRenderer::SetupShadowPass()
     {
+        // A ZERO BUDGET IS A LEGAL BUDGET, and the only place that has to know it is this one. A renderer
+        // built with Graphic::kNoShadowQuality allocates no map, compiles no caster pipeline and loads no
+        // shadow shader; everything downstream is already driven by the count it publishes
+        // (RegisterShadowPass registers nothing, CaptureFrameState reports 0, and the shader's cascade
+        // loop over u_ShadowParams.w selects none), so there is no second switch to keep in step.
+        //
+        // Returning `true` matters: Initialize treats a false here as fatal, and "this renderer was asked
+        // for no shadows" is not a failure to set them up.
+        if ( m_Shadow.CascadeCount == 0 )
+        {
+            m_ShadowAttachments = ShadowAttachmentLease{};
+            LogShadowBudget( 0.0 );
+            return true;
+        }
+
         m_ShadowShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Shadow" );
         if ( !m_ShadowShader )
         {
@@ -1473,6 +1525,12 @@ namespace Desert::Graphic::System
         // One R32F (in RGBA32F) light-space depth map + depth attachment PER CASCADE. Each cascade also
         // gets its own MaterialShadow so the 4 shadow passes don't alias a single shared light-matrix UBO
         // (all draws recorded into one command buffer would otherwise see the last cascade's matrix).
+        //
+        // TIMED, because "allocate the cascades lazily, when shadows are first switched on" is a real
+        // design option and the only thing that can decide it is how long this loop takes. The clock is
+        // around the ALLOCATION alone — not the pipelines below, which a lazy scheme would build once at
+        // startup anyway.
+        const auto allocStart = std::chrono::steady_clock::now();
         for ( uint32_t i = 0; i < m_Shadow.CascadeCount; ++i )
         {
             FramebufferSpecification shadowSpec;
@@ -1483,22 +1541,13 @@ namespace Desert::Graphic::System
             m_CascadeFB[i]->Resize( m_Shadow.ShadowMapSize, m_Shadow.ShadowMapSize );
             m_ShadowMaterial[i] = std::make_unique<MaterialShadow>();
         }
+        const double allocMs =
+             std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - allocStart ).count();
 
-        // WHAT THIS RENDERER JUST SPENT, said out loud and derived from the two formats pushed three
-        // lines above rather than from a number written down somewhere else. It is here because the
-        // preview shadow budget exists for exactly this quantity and "≈335 MB per open window" was a
-        // figure nobody could check: six live renderers are allowed, so the total is six times whatever
-        // this line prints and it is worth being able to read it in a log.
-        {
-            constexpr uint64_t kBytesPerTexel = 16u /* RGBA32F */ + 4u /* DEPTH24STENCIL8 */;
-            const uint64_t     bytes = static_cast<uint64_t>( m_Shadow.CascadeCount ) * m_Shadow.ShadowMapSize *
-                                   m_Shadow.ShadowMapSize * kBytesPerTexel;
-            LOG_INFO( "[Shadows] {} cascade(s) at {}x{} over {:.0f} m = {:.1f} MB of attachments for this "
-                      "renderer.",
-                      m_Shadow.CascadeCount, m_Shadow.ShadowMapSize, m_Shadow.ShadowMapSize,
-                      Common::Units::ToMetres( m_Shadow.MaxDistance ),
-                      static_cast<double>( bytes ) / ( 1024.0 * 1024.0 ) );
-        }
+        // The lease is what makes the LIVE total below true, and it is taken here rather than in
+        // Initialize so that it is created and destroyed with the framebuffers it accounts for.
+        m_ShadowAttachments = ShadowAttachmentLease{ m_Shadow };
+        LogShadowBudget( allocMs );
 
         GraphicsPipelineSpecification spec;
         spec.DebugName = "ShadowPipeline";
@@ -1592,8 +1641,13 @@ namespace Desert::Graphic::System
         // walk four cascades whatever this renderer had allocated, so a one-cascade renderer would have
         // had three identity matrices tested and three unbound samplers read — the shader's own loop is
         // driven by u_ShadowParams.w and would have found "the fragment is inside cascade 1" everywhere.
-        frame.CascadeCount = m_Shadow.CascadeCount;
-        for ( uint32_t c = 0; c < m_Shadow.CascadeCount; ++c )
+        //
+        // And it is the count FITTED THIS FRAME, not the count allocated — GetValidCascadeCount, see
+        // UpdateCascades. The two differ whenever the fit does not run or degenerates (no sun in the
+        // scene, most commonly), and publishing the allocation then sends the shader through matrices no
+        // frame ever wrote.
+        frame.CascadeCount = GetValidCascadeCount();
+        for ( uint32_t c = 0; c < frame.CascadeCount; ++c )
             frame.CascadeMaps[c] = m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
         frame.CascadeTexelWorld = m_CascadeWorldPerTexel;
         frame.ShadowBias        = m_ShadowBias;
@@ -1626,6 +1680,19 @@ namespace Desert::Graphic::System
 
     void MeshRenderer::UpdateCascades()
     {
+        // HOW MANY MATRICES THIS FRAME ACTUALLY HAS, cleared FIRST so that every path out of this function
+        // — including the two early returns below — leaves it saying the truth.
+        //
+        // This is the third instance of the family the budget already fixed twice (a hardwired cascade
+        // index, and a count asked of the class instead of the instance): the count published to the
+        // shader was the count ALLOCATED, and the count fitted is a different number. A scene with no
+        // directional light returns here having written no matrix at all, and every lit draw was still
+        // told u_ShadowParams.w = 4 — so the shader walked four cascades whose matrices are the array's
+        // initializer, which is identity for cascade 0 and the ZERO matrix for 1..3. A zero matrix divides
+        // by w = 0; identity makes light space equal world space, so fragments near the origin test as
+        // "inside cascade 0" and are sampled from a map nothing rendered. Nothing reports any of it.
+        m_FittedCascades = 0;
+
         const auto camera = m_SceneRenderer->GetMainCamera();
         if ( !camera )
             return;
@@ -1647,6 +1714,10 @@ namespace Desert::Graphic::System
 
         CascadeFit     fits[kMaxShadowCascades];
         const uint32_t n = ComputeShadowCascades( setup, fits );
+        // Written HERE, beside the call whose return value it is, and nowhere else. The fitter can also
+        // hand back 0 without an early return of ours — a zero-length light direction, or a MaxDistance
+        // that has fallen behind the camera's near plane.
+        m_FittedCascades = n;
 
         // Cascade 1 (near-mid) doubles as the Reflective Shadow Map camera. NOT the widest cascade:
         // one-bounce GI only matters within ~tens of metres of the camera, and the widest cascade
