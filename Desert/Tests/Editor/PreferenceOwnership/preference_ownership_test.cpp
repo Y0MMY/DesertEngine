@@ -1207,14 +1207,23 @@ TEST( PreferenceOwnershipSource, NoSaveOfThePreferencesIsFencedByARestoredField 
     for ( const EditorSource& file : EditorSources() )
         for ( const std::size_t at : Text::WordPositions( file.Text, "Save" ) )
         {
-            // A CALL, `EditorPreferences::Save();`, and not the definition of one or a Save on some other
-            // object. The definition is `bool EditorPreferences::Save()` followed by a brace, so requiring
-            // the terminating semicolon is what tells the two apart.
+            // A CALL, `EditorPreferences::Save();`, and not the definition of one or a `Save` on some
+            // other object. The definition is `bool EditorPreferences::Save()` followed by a BRACE, so
+            // requiring the terminating semicolon is what tells the two apart.
+            //
+            // Spaces are skipped at every step rather than assumed away. Relying on clang-format to keep
+            // the call spelled `Save();` would make this census depend on a tool that is not run on every
+            // edit, and a reader that silently skips the one call site a fence was added to is the exact
+            // shape of "a census that certifies nothing" this suite exists to avoid.
             if ( at < 19 || file.Text.compare( at - 19, 19, "EditorPreferences::" ) != 0 )
                 continue;
-            if ( at + 5 >= file.Text.size() || file.Text[at + 4] != '(' || file.Text[at + 5] != ')' )
+            const std::size_t open = Text::SkipSpace( file.Text, at + 4 );
+            if ( open >= file.Text.size() || file.Text[open] != '(' )
                 continue;
-            const std::size_t semi = Text::SkipSpace( file.Text, at + 6 );
+            const std::size_t close = Text::SkipSpace( file.Text, open + 1 );
+            if ( close >= file.Text.size() || file.Text[close] != ')' )
+                continue; // Save( something ) — not this function, which takes no arguments
+            const std::size_t semi = Text::SkipSpace( file.Text, close + 1 );
             if ( semi >= file.Text.size() || file.Text[semi] != ';' )
                 continue;
             ++saves;
