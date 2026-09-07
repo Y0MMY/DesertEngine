@@ -73,7 +73,17 @@ namespace Desert::Editor
                     return false;
                 }
                 ++stats.Files;
-                stats.Bytes += fs::file_size( src, ec );
+                // The error_code overload returns uintmax_t(-1) on failure, so an unchecked add here
+                // does not report a slightly wrong size — it reports 16 exabytes, and the package's own
+                // success message is where that lands. The file is already IN the archive at this point;
+                // only the reported total is affected, so this is a count that skips, not a failure.
+                // Its OWN error_code, not the walk's: the loop's `if ( ec )` at the top reads "the
+                // directory walk failed", and letting a size query write into that slot would report a
+                // walk failure for a file that was read perfectly well.
+                std::error_code sizeEc;
+                const auto      size = fs::file_size( src, sizeEc );
+                if ( !sizeEc )
+                    stats.Bytes += size;
             }
             return true;
         }

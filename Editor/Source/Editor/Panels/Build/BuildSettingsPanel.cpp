@@ -61,14 +61,31 @@ namespace Desert::Editor
         // the answer to the question the person came to this panel with.
         ImGui::Spacing();
         ImGui::TextUnformatted( "Target platform" );
-        const char* icons[] = { ICON_MDI_APPLE "  ", ICON_MDI_MICROSOFT_WINDOWS "  ", ICON_MDI_LINUX "  " };
-        for ( std::size_t i = 0; i < std::size( kTargetPlatforms ); ++i )
+
+        // The icon is chosen BY THE PLATFORM, not by position. A parallel array indexed alongside
+        // kTargetPlatforms is two things that must agree, and reordering the table would silently put
+        // the Apple logo on the Windows row — the exact defect shape this task is about.
+        const auto iconOf = []( TargetPlatform platform ) -> const char*
         {
-            const TargetPlatformInfo& target = kTargetPlatforms[i];
-            const char*               why    = WhyNotPackageableHere( target.Platform );
+            switch ( platform )
+            {
+                case TargetPlatform::MacOS:
+                    return ICON_MDI_APPLE "  ";
+                case TargetPlatform::Windows:
+                    return ICON_MDI_MICROSOFT_WINDOWS "  ";
+                case TargetPlatform::Linux:
+                    return ICON_MDI_LINUX "  ";
+            }
+            return "";
+        };
+
+        for ( const TargetPlatformInfo& target : kTargetPlatforms )
+        {
+            const char* why = WhyNotPackageableHere( target.Platform );
 
             ImGui::BeginDisabled( true );
-            ImGui::RadioButton( ( std::string( icons[i] ) + target.DisplayName ).c_str(), why == nullptr );
+            ImGui::RadioButton( ( std::string( iconOf( target.Platform ) ) + target.DisplayName ).c_str(),
+                                why == nullptr );
             ImGui::EndDisabled();
             if ( why != nullptr )
             {
@@ -84,15 +101,16 @@ namespace Desert::Editor
 
         ImGui::Spacing();
         ImGui::TextUnformatted( "Configuration" );
-        for ( const char* config : { "Debug", "Release" } )
+        const char* configs[] = { "Debug", "Release" };
+        for ( std::size_t i = 0; i < std::size( configs ); ++i )
         {
-            if ( ImGui::RadioButton( config, prefs.PackageConfig == config ) )
+            if ( i > 0 )
+                ImGui::SameLine();
+            if ( ImGui::RadioButton( configs[i], prefs.PackageConfig == configs[i] ) )
             {
-                prefs.PackageConfig = config;
+                prefs.PackageConfig = configs[i];
                 EditorPreferences::Save();
             }
-            if ( config[0] == 'D' )
-                ImGui::SameLine();
         }
 
         ImGui::Spacing();
@@ -203,10 +221,31 @@ namespace Desert::Editor
                                               : ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ),
                                 "%s", m_LastMessage.c_str() );
             ImGui::PopTextWrapPos();
-#ifdef DESERT_PLATFORM_MACOS
-            if ( m_LastSuccess && ImGui::Button( ICON_MDI_FOLDER_OPEN "  Reveal in Finder" ) )
-                std::system( ( "open \"" + m_LastPackageDir + "\"" ).c_str() );
-#endif
+            // REVEAL IS macOS-ONLY ON PURPOSE, and this is a decision rather than an omission.
+            //
+            // `std::system` is `/bin/sh -c`, so the path has to survive a shell. Tools/ProjectHub/Source/
+            // Launch.hpp measured what that costs with a folder name: `$HOME` expanded, a double quote
+            // killed the launch outright, and a BACKTICK EXECUTED ITS CONTENTS. Its answer was to stop
+            // using a shell at all — an argv array through posix_spawn / CreateProcessW — and its own
+            // comment says "the same rule closes Reveal in Finder, which had the identical splice". That
+            // utility lives in the launcher and is not reachable from the Editor, so this line is
+            // single-quoted instead, which IS complete for `/bin/sh`: inside single quotes the shell
+            // expands nothing, and the only character needing care is the quote itself.
+            //
+            // The Windows half is not written here for the same reason: cmd.exe has no equivalent of
+            // single quoting, so adding an `explorer "..."` line would be adding the very splice the
+            // paragraph above is about, on the platform where it is hardest to get right. It waits for
+            // the spawn utility to be hoisted out of ProjectHub into Common — which also owns the three
+            // copies of this same splice in PhotogrammetryPanel.cpp (lines 585-589).
+            if ( HostPlatformInfo().Platform == TargetPlatform::MacOS && m_LastSuccess &&
+                 ImGui::Button( ICON_MDI_FOLDER_OPEN "  Reveal in Finder" ) )
+            {
+                std::string quoted = "'";
+                for ( const char c : m_LastPackageDir )
+                    quoted += c == '\'' ? std::string( "'\\''" ) : std::string( 1, c );
+                quoted += "'";
+                std::system( ( "open " + quoted ).c_str() );
+            }
         }
     }
 } // namespace Desert::Editor

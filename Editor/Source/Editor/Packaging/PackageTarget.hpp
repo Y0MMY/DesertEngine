@@ -51,9 +51,18 @@ namespace Desert::Editor
         // produce a bundle-shaped directory with a bash launcher in it.
         bool SupportsAppBundle;
 
-        // Named in the "Runtime binary not found" message, so the message tells the reader something
-        // they can actually run. It used to name scripts/MacOS/BuildMacOS.sh on every host.
+        // The script that builds a Runtime for this platform, ON that platform — or nullptr when the
+        // engine has no build for it at all. It is named in the packager's "Runtime binary not found"
+        // message (which used to say scripts/MacOS/BuildMacOS.sh on every host), so it is only ever
+        // read for the HOST, and a host always has one — the static_assert below HostPlatformInfo().
         const char* BuildScript;
+
+        // Shown beside the row when this is NOT the host. It is per-row rather than one shared string
+        // because the two non-host rows are not the same answer: the engine really does build for
+        // Windows, just not from a macOS machine, whereas it does not build for Linux at all. Both used
+        // to be one greyed row saying nothing, which is how "Linux x64 (planned)" managed to look like
+        // the same kind of statement as a platform CI builds every day.
+        const char* NotHereReason;
     };
 
     // Every platform the panel lists, host and non-host alike — the non-host rows are shown disabled
@@ -61,19 +70,34 @@ namespace Desert::Editor
     // that vanishes is not.
     inline constexpr TargetPlatformInfo kTargetPlatforms[] = {
          { TargetPlatform::MacOS, "macOS (Apple Silicon)", "Runtime", "run.sh", true,
-           "scripts/MacOS/BuildMacOS.sh" },
+           "scripts/MacOS/BuildMacOS.sh", "build the editor on macOS" },
          { TargetPlatform::Windows, "Windows x64", "Runtime.exe", "run.bat", false,
-           "scripts\\Windows\\BuildWindows.bat" },
-         { TargetPlatform::Linux, "Linux x64", "Runtime", "run.sh", false, "scripts/Linux/BuildLinux.sh" },
+           "scripts\\Windows\\BuildWindows.bat", "build the editor on Windows" },
+         // No build script, and that is the honest entry rather than an invented path: there is no
+         // scripts/Linux, no Linux filter in Editor/premake5.lua and no Linux job in CI. The row exists
+         // so the panel can say that, which is more than "Linux x64 (planned)" ever said.
+         { TargetPlatform::Linux, "Linux x64", "Runtime", "run.sh", false, nullptr,
+           "the engine has no Linux build" },
     };
 
+    inline constexpr std::size_t kTargetPlatformCount = sizeof( kTargetPlatforms ) / sizeof( kTargetPlatforms[0] );
+
+    // INDEXED BY THE ENUM, NOT SEARCHED FOR. A linear search needs a "not found" branch, and the only
+    // things such a branch can do here are return the first row — a silent wrong answer, §1.4 — or
+    // abort. Making the array positionally the enum removes the branch instead of choosing between two
+    // bad answers, and the assertions below are what keep the two in step at compile time.
     inline constexpr const TargetPlatformInfo& PlatformInfo( TargetPlatform platform )
     {
-        for ( const TargetPlatformInfo& info : kTargetPlatforms )
-            if ( info.Platform == platform )
-                return info;
-        return kTargetPlatforms[0];
+        return kTargetPlatforms[static_cast<std::size_t>( platform )];
     }
+
+    static_assert( kTargetPlatformCount == 3, "a platform was added or removed; give it a row below too" );
+    static_assert( kTargetPlatforms[static_cast<std::size_t>( TargetPlatform::MacOS )].Platform ==
+                   TargetPlatform::MacOS );
+    static_assert( kTargetPlatforms[static_cast<std::size_t>( TargetPlatform::Windows )].Platform ==
+                   TargetPlatform::Windows );
+    static_assert( kTargetPlatforms[static_cast<std::size_t>( TargetPlatform::Linux )].Platform ==
+                   TargetPlatform::Linux );
 
     // The platform this editor binary is running on, and therefore the only one it can package for.
     //
@@ -98,6 +122,13 @@ namespace Desert::Editor
         return PlatformInfo( HostPlatform() );
     }
 
+    // The host's build script is the string PackageGame's "Runtime binary not found" message is made of,
+    // and that message is the whole of what a person gets when packaging fails. A null there produces
+    // "Build it first: " and stops — §1.4's empty answer, delivered exactly when somebody needs a real
+    // one. Asserted at compile time because it is a compile-time fact about THIS host.
+    static_assert( HostPlatformInfo().BuildScript != nullptr,
+                   "this editor's own host must name the script that builds its Runtime" );
+
     // Why `platform` cannot be produced by this editor, or nullptr when it can.
     //
     // Kept SHORT because it is shown on the same line as the row it explains, and the panel is 560 px
@@ -108,7 +139,7 @@ namespace Desert::Editor
     {
         if ( platform == HostPlatform() )
             return nullptr;
-        return "no toolchain here";
+        return PlatformInfo( platform ).NotHereReason;
     }
 
     // The paragraph under the platform rows. It has to answer the question the disabled rows raise —

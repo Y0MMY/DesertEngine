@@ -22,8 +22,10 @@
 // defect shape the verify skill's §4 table is made of, and the fix is the same: assert the agreement.
 //
 //   LEFT  — what the panel OFFERS. Derived, never typed: an editing widget in BuildSettingsPanel.cpp
-//           (RadioButton, Checkbox, InputText, ...) naming a data member of the panel or a packaging
-//           field of EditorPreferences. Somebody who adds a widget cannot avoid landing here.
+//           (RadioButton, Checkbox, InputText, ...) naming a data member of the panel or ANY field of
+//           EditorPreferences. Somebody who adds a widget cannot avoid landing here — and the
+//           preference half is taken against the whole struct rather than a `Package*` prefix,
+//           because a naming convention nobody is obliged to follow is not a gate.
 //   RIGHT — what the packager READS. Derived from rfl::fields<PackageOptions>(), the same mechanism
 //           the struct is passed by, and each field must have an ANCHORED READ in GamePackager.cpp
 //           (setting_consumers_reader.hpp: a member access on a receiver this file binds to
@@ -76,19 +78,19 @@ namespace
         // it is declared.
         const char* Name;
 
-        // Exactly one of the three must be set.
+        // Exactly one of the two must be set.
         //
         // Option    — the PackageOptions field this choice fills. The panel must WRITE it and
         //             GamePackager.cpp must READ it; both are checked.
-        // Elsewhere — the choice does not travel through PackageOptions at all, and this names the
-        //             repo-relative file plus the field that consumes it instead.
         // Machinery — not a setting: panel bookkeeping (async handshake, cached lists, last result).
         //             The reason is mandatory, and a member that an editing widget names may not claim
         //             it.
-        const char* Option         = nullptr;
-        const char* Elsewhere      = nullptr;
-        const char* ElsewhereField = nullptr;
-        const char* Machinery      = nullptr;
+        //
+        // There is no third kind for "the choice goes somewhere other than PackageOptions". One was
+        // written and then removed unused, which is the stub §1.2 forbids; the day a choice really does
+        // leave by another door, adding the kind back is three lines and the census will demand it.
+        const char* Option    = nullptr;
+        const char* Machinery = nullptr;
     };
 
     constexpr Row kRows[] = {
@@ -104,19 +106,18 @@ namespace
          { "PackageAppBundle", "MacAppBundle" },
 
          // ---- Panel bookkeeping -------------------------------------------------------------------
-         { "m_Building", nullptr, nullptr, nullptr,
-           "the async handshake: set on submit, cleared by the worker. Not a choice." },
-         { "m_HasResult", nullptr, nullptr, nullptr,
+         { "m_Building", nullptr, "the async handshake: set on submit, cleared by the worker. Not a choice." },
+         { "m_HasResult", nullptr,
            "the other half of that handshake — whether the strings below are readable yet." },
-         { "m_LastSuccess", nullptr, nullptr, nullptr, "the finished job's outcome, displayed and nothing else." },
-         { "m_LastMessage", nullptr, nullptr, nullptr, "the finished job's message, displayed and nothing else." },
-         { "m_LastPackageDir", nullptr, nullptr, nullptr,
+         { "m_LastSuccess", nullptr, "the finished job's outcome, displayed and nothing else." },
+         { "m_LastMessage", nullptr, "the finished job's message, displayed and nothing else." },
+         { "m_LastPackageDir", nullptr,
            "where the finished job wrote, so Reveal in Finder has somewhere to open." },
-         { "m_Scenes", nullptr, nullptr, nullptr,
+         { "m_Scenes", nullptr,
            "the CANDIDATE list for the startup-scene combo. The chosen value is not held here at all: it "
            "goes straight into the .deproj through ProjectContext::SetDefaultScene, where "
            "Desert/Tests/Engine/ConfigOwnership censuses it as DefaultScene." },
-         { "m_ScenesScanned", nullptr, nullptr, nullptr, "whether that list has been filled yet." },
+         { "m_ScenesScanned", nullptr, "whether that list has been filled yet." },
     };
 
     // The ImGui calls through which a person CHANGES something. A member or preference named inside one
@@ -280,18 +281,27 @@ namespace
         return nullptr;
     }
 
-    // The packaging half of editor.json, by prefix. The prefix is the contract: a packaging preference is
-    // named `Package<Something>` so that this suite can find it without a second hand-typed list, and
-    // `EveryPackagingPreferenceIsOfferedByThePanel` is what stops one being added and never drawn.
-    std::vector<std::string> PackagingPreferenceFields()
+    std::vector<std::string> AllPreferenceFields()
     {
         std::vector<std::string> out;
         for ( const auto& meta : rfl::fields<Desert::Editor::EditorPreferences>() )
-        {
-            const std::string name = meta.name();
+            out.push_back( meta.name() );
+        return out;
+    }
+
+    // The packaging half of editor.json, by prefix. The prefix is a NAMING CONVENTION and is used in one
+    // direction only — `EveryPackagingPreferenceIsOfferedByThePanel`, which stops a `Package*` field
+    // being added to editor.json and never drawn anywhere.
+    //
+    // Coverage in the other direction deliberately does NOT rest on it: what the panel OFFERS is derived
+    // from the widget calls against the WHOLE preference struct, so a packaging setting somebody names
+    // something else is censused all the same. A prefix nobody is obliged to use is not a gate.
+    std::vector<std::string> PackagingPreferenceFields()
+    {
+        std::vector<std::string> out;
+        for ( const std::string& name : AllPreferenceFields() )
             if ( name.rfind( "Package", 0 ) == 0 )
                 out.push_back( name );
-        }
         return out;
     }
 
@@ -350,14 +360,24 @@ TEST( BuildSettingsConsumers, TheSourcesThisSuiteReadsAreWhereItThinksTheyAre )
 // 1. THE TABLE COVERS THE PANEL, IN BOTH DIRECTIONS
 // ---------------------------------------------------------------------------------------------------
 
-TEST( BuildSettingsConsumers, EveryPanelMemberAndPackagingPreferenceIsCensusedExactlyOnce )
+// What the table must cover is DERIVED from two facts about the tree and neither is a list anybody
+// types: every data member the panel declares, and every editor PREFERENCE one of its widgets edits.
+// The second half is taken against the whole EditorPreferences struct rather than against a `Package*`
+// prefix on purpose — a naming convention is not a gate, and a packaging setting called something else
+// has to land here too.
+TEST( BuildSettingsConsumers, EveryPanelMemberAndPreferenceItEditsIsCensusedExactlyOnce )
 {
     const Sources src = ReadSources();
     ASSERT_FALSE( src.Header.empty() );
+    ASSERT_FALSE( src.Panel.empty() );
+
+    const std::vector<std::string> offered  = NamesInEditingWidgets( src.Panel );
+    const std::vector<std::string> allPrefs = AllPreferenceFields();
 
     std::vector<std::string> expected = DeclaredMembers( src.Header );
-    for ( const std::string& pref : PackagingPreferenceFields() )
-        AddUnique( expected, pref );
+    for ( const std::string& pref : allPrefs )
+        if ( std::find( offered.begin(), offered.end(), pref ) != offered.end() )
+            AddUnique( expected, pref );
 
     std::vector<std::string> fromTable;
     for ( const Row& r : kRows )
@@ -377,12 +397,9 @@ TEST( BuildSettingsConsumers, EveryRowNamesExactlyOneKindOfConsumer )
     for ( const Row& r : kRows )
     {
         SCOPED_TRACE( r.Name );
-        const int kinds = ( r.Option != nullptr ) + ( r.Elsewhere != nullptr ) + ( r.Machinery != nullptr );
-        EXPECT_EQ( kinds, 1 ) << "a row must name exactly one of: the PackageOptions field it fills, the "
-                                 "file that consumes it instead, or the reason it is not a setting";
-
-        if ( r.Elsewhere != nullptr )
-            EXPECT_NE( r.ElsewhereField, nullptr ) << "an Elsewhere row must say WHICH field is read there";
+        const int kinds = ( r.Option != nullptr ) + ( r.Machinery != nullptr );
+        EXPECT_EQ( kinds, 1 ) << "a row must name exactly one of: the PackageOptions field it fills, or "
+                                 "the reason it is not a setting at all";
 
         if ( r.Machinery != nullptr )
             EXPECT_GE( std::string( r.Machinery ).size(), 20u )
@@ -408,7 +425,7 @@ TEST( BuildSettingsConsumers, NothingAnEditingWidgetOffersIsCalledMachinery )
 
     const std::vector<std::string> offered = NamesInEditingWidgets( src.Panel );
     const std::vector<std::string> members = DeclaredMembers( src.Header );
-    const std::vector<std::string> prefs   = PackagingPreferenceFields();
+    const std::vector<std::string> prefs   = AllPreferenceFields();
 
     for ( const std::string& name : offered )
     {
@@ -518,14 +535,20 @@ TEST( BuildSettingsConsumers, EveryEditingWidgetInThePanelIsOneThisSuiteKnows )
          "BulletText",
     };
 
-    // Every `ImGui::<Name>` the panel calls.
+    // Every `ImGui::<Name>` the panel calls — and every `ImGuiUtilities::<Name>` too, because the
+    // engine's own wrappers are widgets as much as ImGui's are. The output-folder field is one:
+    // `Utils::ImGuiUtilities::InputText` edits a std::string, and a version of this test that watched
+    // only the `ImGui::` namespace would have let a whole second family of widgets in unclassified.
     std::vector<std::string> called;
-    for ( std::size_t at : WordPositions( src.Panel, "ImGui" ) )
+    for ( const char* ns : { "ImGui", "ImGuiUtilities" } )
     {
-        std::size_t i = SkipSpace( src.Panel, at + 5 );
-        if ( i + 1 >= src.Panel.size() || src.Panel[i] != ':' || src.Panel[i + 1] != ':' )
-            continue;
-        AddUnique( called, IdentAt( src.Panel, SkipSpace( src.Panel, i + 2 ) ) );
+        for ( std::size_t at : WordPositions( src.Panel, ns ) )
+        {
+            std::size_t i = SkipSpace( src.Panel, at + std::string( ns ).size() );
+            if ( i + 1 >= src.Panel.size() || src.Panel[i] != ':' || src.Panel[i + 1] != ':' )
+                continue;
+            AddUnique( called, IdentAt( src.Panel, SkipSpace( src.Panel, i + 2 ) ) );
+        }
     }
     ASSERT_FALSE( called.empty() ) << "no ImGui:: call found in the panel at all";
 
@@ -561,7 +584,7 @@ TEST( PackageTargetTable, EveryPlatformsArtifactNamesAgreeWithThatPlatform )
 {
     using namespace Desert::Editor;
 
-    ASSERT_EQ( std::size( kTargetPlatforms ), 3u ) << "a platform was added or removed without a decision";
+    ASSERT_EQ( kTargetPlatformCount, 3u ) << "a platform was added or removed without a decision";
 
     int bundleHosts = 0;
     for ( const TargetPlatformInfo& target : kTargetPlatforms )
@@ -571,12 +594,19 @@ TEST( PackageTargetTable, EveryPlatformsArtifactNamesAgreeWithThatPlatform )
         const std::string binary   = target.RuntimeBinary;
         const std::string launcher = target.LauncherName;
 
-        EXPECT_EQ( &PlatformInfo( target.Platform ), &target ) << "PlatformInfo() does not return this row";
+        EXPECT_EQ( &PlatformInfo( target.Platform ), &target )
+             << "PlatformInfo() does not return this row — the table's order and the enum have drifted";
         EXPECT_FALSE( binary.empty() );
         EXPECT_FALSE( launcher.empty() );
-        EXPECT_FALSE( std::string( target.BuildScript ).empty() )
-             << "the 'Runtime binary not found' message names this script; an empty one tells the reader "
-                "nothing they can run";
+
+        // A null BuildScript is a legitimate row (Linux: the engine has no build for it), an EMPTY one
+        // is not — that is a row claiming to name a script and naming nothing.
+        if ( target.BuildScript != nullptr )
+            EXPECT_FALSE( std::string( target.BuildScript ).empty() );
+
+        ASSERT_NE( target.NotHereReason, nullptr )
+             << "every row needs the sentence the panel shows when it is not the host";
+        EXPECT_FALSE( std::string( target.NotHereReason ).empty() );
 
         const bool windows = target.Platform == TargetPlatform::Windows;
         EXPECT_EQ( binary.size() > 4 && binary.substr( binary.size() - 4 ) == ".exe", windows )
@@ -620,6 +650,9 @@ TEST( PackageTargetTable, ThisEditorOffersItsOwnHostAndRefusesEveryOtherWithARea
         EXPECT_FALSE( std::string( why ).empty() );
     }
     EXPECT_EQ( hosts, 1 ) << "exactly one row is this editor's host";
+    // That the HOST always has a build script is asserted where it belongs, at compile time in
+    // PackageTarget.hpp: it is the string the packager's "Runtime binary not found" message is made of,
+    // and a null there is a build error rather than a test failure.
 
     EXPECT_GE( std::string( kWhyOnlyTheHostIsOffered ).size(), 60u )
          << "the paragraph under the rows has to answer 'then how do I get a Windows build?' — a refusal "
