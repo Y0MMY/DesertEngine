@@ -196,6 +196,13 @@ namespace Desert::Editor
         return Core::ApplyViewportModes( user, modes );
     }
 
+    void ViewportPanel::ToggleUIMode( const Desert::Core::Scene& scene )
+    {
+        for ( ViewportPanel* panel : s_Live )
+            if ( panel->m_Scene.get() == &scene )
+                panel->m_Modes.UI2D = !panel->m_Modes.UI2D;
+    }
+
     void ViewportPanel::UpdateAsyncLoads()
     {
         if ( !m_AsyncLoader || !m_AssetManager )
@@ -499,7 +506,11 @@ namespace Desert::Editor
                 }
             }
 
-            if ( canvas != entt::null )
+            // The toolbar row is shown for a scene that HAS a canvas — and also whenever 2D mode is
+            // already on, whatever the scene holds. The palette can turn the mode on from outside
+            // (ToggleUIMode) and a canvas can be deleted while the mode is running; without the second
+            // condition either leaves a viewport in a mode whose only OFF switch has disappeared.
+            if ( canvas != entt::null || m_Modes.UI2D )
             {
                 ImGui::SameLine();
                 // A MODE, AND IT TOUCHES NOTHING BUT ITSELF. What 2D mode hides is applied to a COPY of

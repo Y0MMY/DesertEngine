@@ -2953,6 +2953,28 @@ namespace Desert::Editor
                                   EditorPreferences::Save();
                               } } );
 
+        // THE TWO ENDS OF К10's SCENARIO, UNDER NAMES, for the reason К6 named the snap steps and the item
+        // above: a scenario whose steps can only be reached by clicking is a scenario no unattended run can
+        // walk, and a claim about it is therefore unphotographable. Both are dictionary entries in their own
+        // right — "show me the grid" and "switch to 2D" are things a person asks for by name, and UE's own
+        // Show > Grid is searchable for the same reason.
+        //
+        // Note which one saves and which one does not, because that IS К10: the grid is the USER'S ANSWER
+        // and persists on the click; 2D UI mode is a VIEWPORT MODE and persists nowhere at all.
+        commands.push_back( { "View", "Toggle the grid",
+                              []
+                              {
+                                  auto& view    = EditorPreferences::Get().DebugView;
+                                  view.ShowGrid = !view.ShowGrid;
+                                  EditorPreferences::Save();
+                              } } );
+        commands.push_back( { "View", "Toggle 2D UI mode",
+                              [this]
+                              {
+                                  if ( m_MainScene )
+                                      Editor::ViewportPanel::ToggleUIMode( *m_MainScene );
+                              } } );
+
         // OPENABLE ASSETS. This is where `--open-panel <path-to-asset>` went — the half of that flag that
         // opened a DOCUMENT rather than a tool, and the only way a document has ever been put on screen
         // unattended, since a document does not exist until something opens its asset and therefore has

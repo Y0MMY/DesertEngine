@@ -76,6 +76,13 @@ namespace Desert::Editor
         static Graphic::DebugViewState EffectiveDebugView( const Graphic::DebugViewState& user,
                                                            const Desert::Core::Scene&     scene );
 
+        // Flip 2D UI mode on every viewport showing `scene`, from outside the panel — the command palette's
+        // "Toggle 2D UI mode". It exists for the same reason К6 gave the snap steps and the Perf HUD names:
+        // a mode that can only be reached by clicking a checkbox is a mode no unattended run can enter, so
+        // the scenario it is part of cannot be photographed and therefore cannot be proved. It writes
+        // nothing and saves nothing, exactly like the checkbox.
+        static void ToggleUIMode( const Desert::Core::Scene& scene );
+
         // Called (once, while this viewport window has ImGui focus) so the editor can make this viewport's
         // scene the active one — the Outliner/Details/gizmo then follow whichever viewport you work in.
         void SetOnActivate( std::function<void()> cb )
