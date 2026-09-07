@@ -151,6 +151,27 @@ TEST( MappedMemoryGuard, ADefaultMappingIsARefusalAndNotAnEmptySuccess )
     EXPECT_NE( wrote.GetError().find( "never attempted" ), std::string::npos ) << wrote.GetError();
 }
 
+TEST( MappedMemoryGuard, ALiveMappingCarriesNoReasonAndAReleasedOneSaysSo )
+{
+    // The observable half of "a successful map allocates nothing": while the mapping is live it holds no
+    // reason at all, because the standing reasons are `const char*` and the built one is empty. Assert
+    // the states rather than the allocation — a malloc counter here would measure the allocator.
+    Fixture                fixture;
+    std::array<uint8_t, 4> device{};
+
+    MappedMemory mapping = Live( device.data(), device.size() );
+    EXPECT_TRUE( mapping.GetRefusal().empty() ) << "a live mapping has nothing to refuse";
+
+    // A specific reason survives a stray Unmap; a generic one is replaced by the specific "released".
+    MappedMemory refused = MappedMemory::Refused( "VK_ERROR_MEMORY_MAP_FAILED" );
+    refused.Unmap();
+    EXPECT_EQ( refused.GetRefusal(), "VK_ERROR_MEMORY_MAP_FAILED" )
+         << "unmapping something that never mapped must not overwrite WHY it never mapped";
+
+    mapping.Unmap();
+    EXPECT_NE( mapping.GetRefusal().find( "already been released" ), std::string::npos ) << mapping.GetRefusal();
+}
+
 TEST( MappedMemoryGuard, ARefusalCarriesItsReasonIntoEveryTransfer )
 {
     MappedMemory refused = MappedMemory::Refused( "vmaMapMemory failed: VK_ERROR_MEMORY_MAP_FAILED" );

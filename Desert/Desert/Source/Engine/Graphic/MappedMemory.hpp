@@ -67,22 +67,26 @@ namespace Desert::Graphic
         static MappedMemory Refused( std::string reason )
         {
             MappedMemory refused;
-            refused.m_Refusal = std::move( reason );
+            if ( !reason.empty() )
+            {
+                refused.m_Refusal = std::move( reason );
+                refused.m_Reason  = nullptr; // the specific reason wins over the generic one
+            }
             return refused;
         }
 
         /// A live mapping of @p size bytes at @p bytes, released through @p unmap( @p allocation ).
         static MappedMemory Live( void* allocation, uint8_t* bytes, std::size_t size, UnmapFn unmap )
         {
-            MappedMemory live;
             if ( bytes == nullptr )
                 return Refused( "the mapping reported success and handed back no address" );
 
+            MappedMemory live;
             live.m_Allocation = allocation;
             live.m_Bytes      = bytes;
             live.m_Size       = size;
             live.m_Unmap      = unmap;
-            live.m_Refusal.clear();
+            live.m_Reason     = nullptr;
             return live;
         }
 
@@ -126,9 +130,18 @@ namespace Desert::Graphic
         }
 
         /// Why there is nothing to write to. Empty while the mapping is live.
-        const std::string& GetRefusal() const noexcept
+        ///
+        /// By value, and the reason is worth a line: a mapping is created on the hot upload path (every
+        /// dynamic vertex and index buffer, every frame), so the SUCCESS path must not allocate. Holding
+        /// the three standing reasons as `const char*` and only the formatted one as a `std::string`
+        /// keeps a live mapping allocation-free from construction to destruction — the first draft
+        /// default-initialised a 35-character `std::string`, which is one malloc/free per upload for a
+        /// sentence nobody was ever going to read.
+        std::string GetRefusal() const
         {
-            return m_Refusal;
+            if ( !m_Refusal.empty() )
+                return m_Refusal;
+            return m_Reason != nullptr ? std::string( m_Reason ) : std::string();
         }
 
         /// @p bytes from @p source into the mapping at @p offset. Refuses, writing nothing, when the
@@ -181,30 +194,42 @@ namespace Desert::Graphic
         /// refuses every transfer afterwards rather than writing into memory the driver has taken back.
         void Unmap() noexcept
         {
-            if ( m_Bytes != nullptr && m_Unmap != nullptr )
+            // A mapping that was never live keeps the reason it already had — "the map failed because X"
+            // is more use to the next reader than "released".
+            const bool wasLive = m_Bytes != nullptr;
+            if ( wasLive && m_Unmap != nullptr )
                 m_Unmap( m_Allocation );
             m_Allocation = nullptr;
             m_Bytes      = nullptr;
             m_Size       = 0;
             m_Unmap      = nullptr;
-            if ( m_Refusal.empty() )
-                m_Refusal = "the mapping has already been released";
+            if ( wasLive )
+            {
+                m_Refusal.clear();
+                m_Reason = kReleased;
+            }
         }
 
     private:
+        static constexpr const char* kNeverAttempted = "the mapping was never attempted";
+        static constexpr const char* kReleased       = "the mapping has already been released";
+        static constexpr const char* kMovedOut       = "the mapping was moved out of this object";
+
         void Adopt( MappedMemory&& other ) noexcept
         {
             m_Allocation = other.m_Allocation;
             m_Bytes      = other.m_Bytes;
             m_Size       = other.m_Size;
             m_Unmap      = other.m_Unmap;
+            m_Reason     = other.m_Reason;
             m_Refusal    = std::move( other.m_Refusal );
 
             other.m_Allocation = nullptr;
             other.m_Bytes      = nullptr;
             other.m_Size       = 0;
             other.m_Unmap      = nullptr;
-            other.m_Refusal    = "the mapping was moved out of this object";
+            other.m_Reason     = kMovedOut;
+            other.m_Refusal.clear();
         }
 
         // The one place the two questions are asked, so a new transfer cannot answer only one of them.
@@ -214,7 +239,7 @@ namespace Desert::Graphic
         {
             if ( !IsMapped() )
                 return Common::MakeFormattedError<bool>( "a mapped {} of {} byte(s) was refused: {}", what, bytes,
-                                                         m_Refusal );
+                                                         GetRefusal() );
             if ( offset > m_Size || bytes > m_Size - offset )
                 return Common::MakeFormattedError<bool>(
                      "a mapped {} of {} byte(s) at offset {} does not fit a {}-byte mapping", what, bytes, offset,
@@ -226,6 +251,10 @@ namespace Desert::Graphic
         uint8_t*    m_Bytes      = nullptr;
         std::size_t m_Size       = 0;
         UnmapFn     m_Unmap      = nullptr;
-        std::string m_Refusal    = "the mapping was never attempted";
+        // The standing reason, or null while the mapping is live. A pointer rather than a string so that
+        // a successful map costs no allocation at all (see GetRefusal).
+        const char* m_Reason = kNeverAttempted;
+        // The reason that had to be built — the driver's own words. Empty unless one was given.
+        std::string m_Refusal;
     };
 } // namespace Desert::Graphic

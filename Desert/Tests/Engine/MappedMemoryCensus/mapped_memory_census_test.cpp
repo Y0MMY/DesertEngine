@@ -5,29 +5,36 @@
 // halves fail in opposite directions and neither alone is evidence: a correct type nobody uses is worth
 // exactly as much as no type at all.
 //
-// WHAT WAS ACTUALLY TRUE OF `dev` WHEN THIS WAS WRITTEN, measured by the scan below rather than counted by
-// eye. Sixteen call sites of a "map this memory" primitive:
+// WHAT THIS SCAN REPORTED ON `dev` (85a80feb), RUN RATHER THAN ESTIMATED: **11 of 16 mapping call sites
+// unsafe**. Reproduce it by restoring the twelve production files from `dev` and running this binary; the
+// per-site verdicts are the enumeration below.
 //
 //     10  passed the result straight to memcpy/memset with nothing between   <- these ten crash on null
-//      2  checked it and refused (VulkanSwapChain, VulkanUniformBuffer)
-//      4  took the pointer and never dereferenced it at the site
+//      1  checked it, refused, and still held a RAW POINTER (VulkanSwapChain::TakeCapturedFrameRGBA8)
+//      1  checked it before its memset (VulkanUniformBuffer::RT_Invalidate)
+//      4  bound the pointer and never dereferenced it at the site
 //
-// The brief that opened this task said "one checks, thirteen dereference unchecked". Sixteen is exact.
-// The other two numbers are not, and the difference is worth writing down rather than quietly correcting:
-// VulkanUniformBuffer::RT_Invalidate DID test the pointer before its memset, and three of the four
-// non-dereferencing sites are non-dereferencing rather than merely lucky — two persistently-mapped
-// buffers store the pointer and every reader of the stored value tests it, and two more bound it to a
-// `[[maybe_unused]]` local and threw it away. So the crash count was TEN, and the count of sites that
-// could ever have been made safe by hand was sixteen. That is the argument for a type rather than for
-// thirteen `if`s: hand-written checks were already present at two sites out of sixteen, written by people
-// who knew, and the other fourteen were written by people who did not.
+// The census flags eleven, not ten, and the eleventh is deliberate: VulkanSwapChain did everything right
+// and is flagged anyway, because rule (a) below is about the SHAPE. A `void* mapped = ...` with a hand-
+// written `if` beside it is one careless edit away from the other ten, and the whole argument of this task
+// is that the ten were written by people who did not know while the one was written by somebody who did.
+// A census that graded intent rather than shape would have to be re-earned at every edit.
+//
+// THE NUMBERS IN THE BRIEF THAT OPENED THE TASK, CHECKED. "Sixteen call sites" is exact. "One checks" is
+// two — VulkanUniformBuffer::RT_Invalidate tested the pointer before its memset. "Thirteen dereference
+// unchecked" is TEN: four sites take the pointer without dereferencing it there, not two, because the two
+// persistently-mapped buffers store it and every reader of the stored value tests it. (The comment Г7 left
+// on the primitive said eleven, which is also not the crash count.) None of that changes the fix — all
+// sixteen go through the type — but a number quoted in a commit message ought to be a number somebody ran.
 //
 // HOW THE SCAN DECIDES. Comments and literals are blanked first with the shared reader (Д33) — a census
 // that counted the memcpys named in prose would report this file's own paragraphs as defects. A call site
 // is a `MapMemory` token preceded by `.` or `->`, which distinguishes a CALL from the declaration and the
-// definition without parsing C++. From there the scan takes the name the result is bound to, walks the
-// enclosing block, and looks for a raw byte-copy naming that name. A null test of that name between the
-// two clears it.
+// definition without parsing C++. From there, two rules:
+//
+//   (a) the result may not be bound to a RAW POINTER, whatever is done with it next;
+//   (b) no memcpy/memmove/memset in the enclosing block may name the binding unless the binding is null-
+//       tested between the two.
 //
 // IT IS CONSERVATIVE IN THE SAFE DIRECTION, DELIBERATELY. A guard it cannot recognise reads as a defect,
 // and the author must then say where the check is; the reverse — a defect it cannot see — is what makes a
