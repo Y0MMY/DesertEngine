@@ -204,6 +204,19 @@ namespace Desert::Graphic
         // Engine/Graphic/Clouds/CloudEnvironmentBake.hpp for what crosses.
         CloudEnvironmentBake BuildCloudEnvironmentBake();
 
+        // Is this view rebuilding its cloud modelling volume right now? See
+        // System::VolumetricCloudRenderer::IsModellingVolumeBaking for what the answer is FOR — in one
+        // line, about half of a cloud material's parameters cost a multi-second bake on a worker, and
+        // without a signal the artist cannot tell "expensive" from "broken". The route is here for the same
+        // reason BuildCloudEnvironmentBake above is: an editor panel must not reach into a render system.
+        //
+        // False for a view with no cloud layer, which is every mesh preview and every asset thumbnail.
+        bool IsCloudVolumeBaking() const;
+
+        // How far that rebuild has got, 0..1. Meaningless unless IsCloudVolumeBaking(); see
+        // System::VolumetricCloudRenderer::ModellingBakeProgress for why the wait is worth a number.
+        float CloudVolumeBakeProgress() const;
+
         // How many SceneRenderers are alive right now. Every one of them pays for its own baked sky
         // environment, which is why the bake announces its cost with this number beside it.
         static uint32_t GetLiveRendererCount();

@@ -591,9 +591,9 @@ TEST( CloudSkyOcclusion, TheVolumeIsHalfTheModellingVolumeOnEveryAxisAndItsTexel
     // quantity does not have, and one much coarser would lose the cloud-scale variation that IS the
     // point. Half the modelling volume on every axis lands comfortably between the two.
     EXPECT_FLOAT_EQ( CLOUD_SKY_OCCLUSION_RESOLUTION * 2.0f,
-                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeWidth ) );
+                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeSide ) );
     EXPECT_FLOAT_EQ( CLOUD_SKY_OCCLUSION_RESOLUTION * 2.0f,
-                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeDepth ) );
+                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeSide ) );
     EXPECT_FLOAT_EQ( CLOUD_SKY_OCCLUSION_SLICES * 2.0f,
                      static_cast<float>( Desert::Assets::kCloudProceduralVolumeHeight ) );
 
@@ -603,7 +603,7 @@ TEST( CloudSkyOcclusion, TheVolumeIsHalfTheModellingVolumeOnEveryAxisAndItsTexel
     const float regionKm     = 48.0f;
     const float thicknessKm  = 3.6f;
     const float texelKm      = regionKm / CLOUD_SKY_OCCLUSION_RESOLUTION;
-    const float fieldTexelKm = regionKm / static_cast<float>( Desert::Assets::kCloudProceduralVolumeWidth );
+    const float fieldTexelKm = regionKm / static_cast<float>( Desert::Assets::kCloudProceduralVolumeSide );
 
     // ABOVE: the term's own horizontal footprint is the height of the cloud over the sample, and nothing
     // above the layer contributes at all — so a grid coarser than the deck is thick would average across

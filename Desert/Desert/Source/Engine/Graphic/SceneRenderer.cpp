@@ -1228,6 +1228,28 @@ namespace Desert::Graphic
              ->BuildEnvironmentBake();
     }
 
+    bool SceneRenderer::IsCloudVolumeBaking() const
+    {
+        // `find` rather than `operator[]`, exactly as GetCloudShadowInput does it: this is a const observer
+        // and must not insert an empty system into the map on the way to answering "is there one".
+        const auto it = m_RenderSystems.find( "VolumetricCloudSystem" );
+        if ( it == m_RenderSystems.end() )
+            return false;
+
+        const auto* clouds = UNIQUE_GET_AS( System::VolumetricCloudRenderer, it->second );
+        return clouds && clouds->IsModellingVolumeBaking();
+    }
+
+    float SceneRenderer::CloudVolumeBakeProgress() const
+    {
+        const auto it = m_RenderSystems.find( "VolumetricCloudSystem" );
+        if ( it == m_RenderSystems.end() )
+            return 0.0f;
+
+        const auto* clouds = UNIQUE_GET_AS( System::VolumetricCloudRenderer, it->second );
+        return clouds ? clouds->ModellingBakeProgress() : 0.0f;
+    }
+
     std::optional<Environment> SceneRenderer::GetEnvironment()
     {
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->GetEnvironment();

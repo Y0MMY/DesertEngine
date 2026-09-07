@@ -138,6 +138,35 @@ namespace Desert::Editor
             int32_t CloudMaxSteps          = 96;
             float   CloudStopTransmittance = 0.03f;
 
+            // THE DOME'S OTHER BUDGET, AND UNTIL O8 IT DID NOT EXIST. The two numbers above bound the MARCH
+            // — what a frame costs. About half of a cloud material's parameters are inputs to a BAKE of the
+            // modelling volume instead, and that one is not a frame: it is a loop over side x side columns
+            // on a worker, and a 512-pixel preview pane was running exactly the one a whole level runs.
+            // Measured on this machine, Debug: dragging Coverage twenty times in 1.02 s put 15.42 s between
+            // the artist's last edit and the sky that showed it, which is what the owner reported twice as
+            // "the cloud preview still doesn't update straight away".
+            //
+            // 128 AND NOT 64, AND THE NUMBER IS A MEASUREMENT RATHER THAN AN ARGUMENT. 128 quarters the
+            // bake — 1 461 ms against 5 915 ms on this machine, Debug, minimum of six — and the six-point
+            // sweep against the shipped 256 is the same clouds in the same places with softer edges (mean
+            // 1.1 to 6.2 of 255, against a repeat floor of exactly zero). 64 would quarter it again and
+            // does not survive the same check: it covers four more points of the sky than 256 does, and in
+            // the frame a cumulus has swollen and a gap between two lobes has closed. The table and the
+            // mechanism are on Assets::kCloudProceduralVolumeSideMin, which is that refusal expressed as a
+            // bound — so this default deliberately SITS ON the floor: the cheapest grid measured honest.
+            //
+            // A FIELD RATHER THAN A CONSTANT, on exactly the terms the two above are already on: it is
+            // ECS::VolumetricCloudData::VolumeResolution and ApplySetup writes it onto the layer every
+            // frame.
+            //
+            // IT HAS NO ROW IN THE PREVIEW SCENE TAB YET, and that is stated rather than left to be
+            // discovered: the tab is drawn by MaterialEditorPanel, which O8 does not own. The row is one
+            // line beside the Max Steps slider — `ImGui::SliderInt( "Volume Resolution",
+            // &setup.CloudVolumeResolution, 128, 256 )` — and until it exists an artist who wants to see
+            // the sky at the level's own fidelity has to change it on the level's cloud component instead.
+            // Nothing here is dead: the value IS applied and it IS what the pane bakes at.
+            int32_t CloudVolumeResolution = 128;
+
             // Direction the light TRAVELS (sun -> scene), which is what TransformComponent::Translation on
             // a directional light means. Derived, never stored: two copies of one direction is how a sky
             // ends up lit from below.
@@ -208,6 +237,21 @@ namespace Desert::Editor
         {
             return m_HasContent;
         }
+
+        // Is this preview's sky being rebuilt right now?
+        //
+        // WHAT IT IS FOR. About half of a cloud material's parameters — Coverage, the seed, the placement
+        // four, the weather tile, the painted layout, the cloud types — are inputs to a BAKE of the
+        // modelling volume rather than to the march, so moving one of them costs seconds on a worker while
+        // this pane goes on showing the PREVIOUS volume. Draw() paints its own badge from this, which is
+        // why the widget needs no cooperation from the panel; the accessor is public because a panel may
+        // reasonably want to say the same thing in its own status line, and because a test can assert the
+        // route exists without an editor.
+        //
+        // The five that answer within the frame and cost nothing — Extinction Scale, Phase G, Detail
+        // Strength, Scattering Albedo, Density Scale — never make this true, which is the whole point of
+        // it: an artist who sees no badge has just moved a cheap knob and the picture is already right.
+        [[nodiscard]] bool IsSkyRebuilding() const;
 
         // Records this frame's offscreen render at the requested size. Call ONCE per frame from
         // OnPreUpdate(), and only while the preview is actually visible — a collapsed section or a

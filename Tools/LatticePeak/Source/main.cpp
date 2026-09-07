@@ -72,9 +72,9 @@ namespace
      */
     std::vector<float> ProjectDown( const std::vector<unsigned char>& voxels, uint32_t slot, bool useSum )
     {
-        const uint32_t width  = Desert::Assets::kCloudProceduralVolumeWidth;
+        const uint32_t width  = Desert::Assets::kCloudProceduralVolumeSide;
         const uint32_t height = Desert::Assets::kCloudProceduralVolumeHeight;
-        const uint32_t depth  = Desert::Assets::kCloudProceduralVolumeDepth;
+        const uint32_t depth  = Desert::Assets::kCloudProceduralVolumeSide;
 
         std::vector<float> map( static_cast<size_t>( width ) * depth, 0.0f );
 
@@ -113,9 +113,9 @@ namespace
     VolumeAspect MeasureAspect( const std::vector<unsigned char>& voxels, uint32_t slot, float voxelKm,
                                 float layerThicknessKm )
     {
-        const uint32_t width  = Desert::Assets::kCloudProceduralVolumeWidth;
+        const uint32_t width  = Desert::Assets::kCloudProceduralVolumeSide;
         const uint32_t height = Desert::Assets::kCloudProceduralVolumeHeight;
-        const uint32_t depth  = Desert::Assets::kCloudProceduralVolumeDepth;
+        const uint32_t depth  = Desert::Assets::kCloudProceduralVolumeSide;
 
         // `width` and `height` are const integrals with constant initialisers, so they are not odr-used
         // here and capturing them captures nothing.
@@ -473,8 +473,8 @@ namespace
         params.LayerThicknessKm = std::max( envelope.TopKm - params.LayerBottomKm, 0.001f );
         params.Species.push_back( species );
 
-        const int   width   = static_cast<int>( Desert::Assets::kCloudProceduralVolumeWidth );
-        const int   depth   = static_cast<int>( Desert::Assets::kCloudProceduralVolumeDepth );
+        const int   width   = static_cast<int>( Desert::Assets::kCloudProceduralVolumeSide );
+        const int   depth   = static_cast<int>( Desert::Assets::kCloudProceduralVolumeSide );
         const float voxelKm = regionKm / static_cast<float>( width );
         const int   maxLag  = std::min( width / 2, static_cast<int>( maxLagKm / voxelKm ) );
 

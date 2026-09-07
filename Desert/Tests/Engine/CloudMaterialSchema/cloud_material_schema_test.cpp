@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <set>
@@ -376,6 +377,95 @@ TEST( CloudMaterialSchema, TheSharedDefaultMaterialStatesNoOverridesAndSoCannotD
          << path << " states a Param — it must defer to the schema's own default instead of copying it";
     EXPECT_NE( json.find( "\"Textures\":[]" ), std::string::npos )
          << path << " states a Texture — it must defer to the schema's own default instead of copying it";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// WHICH PARAMETERS COST SECONDS, AND WHY THE PANEL CAN SAY SO WITH ONE LINE (O8-3)
+// ---------------------------------------------------------------------------------------------------
+//
+// THE COMPLAINT THIS ANSWERS, in the owner's words, twice: "I'd like the clouds in the preview to update
+// straight away". Half of them already do. A cloud material's parameters fall into two classes with
+// completely different costs, and nothing on screen distinguishes them:
+//
+//   * READ BY THE BAKE. Graphic::System::VolumetricCloudRenderer::BuildProceduralParams turns them into
+//     Assets::CloudProceduralFieldParams, and moving one rebuilds a volume of a few thousand bodies on a
+//     worker — measured at 5 915 ms for a 256 grid and 1 461 ms for a 128 one, Debug, on this machine.
+//     The sky goes on showing the PREVIOUS volume until it lands.
+//   * READ BY THE MARCH. They travel to the GPU inside Graphic::PackCloudParams' block and the very next
+//     frame is drawn with them.
+//
+// WHAT THIS TEST PINS, AND IT IS A RELATION AND NOT A LIST. The two classes are ALREADY exactly the
+// schema's own category boundary — the first four categories are the bake's, the last two are the
+// march's — so the panel needs no re-ordering at all, only a heading. That property is not an accident
+// anybody wrote down, which is precisely why it needs asserting: the day somebody adds a knob to
+// "Weather" that the bake does not read, or one to "Detail" that it does, the heading becomes a lie and
+// this goes red naming the parameter.
+//
+// It is read out of the two files that ALREADY own the answer — the schema, and the renderer's own
+// source — rather than out of a third list. A third list is the mirror-with-one-reader the dev skill
+// names, and it would be the thing that drifts.
+TEST( CloudMaterialSchema, TheCategoriesAlreadySeparateTheParametersThatCostSecondsFromTheOnesThatDoNot )
+{
+    const std::string renderer = ReadAll(
+         RepoRoot() + "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Clouds/VolumetricCloudRenderer.cpp" );
+    ASSERT_FALSE( renderer.empty() ) << "the renderer's source is unreadable, so this proves nothing";
+
+    // The BODY of BuildProceduralParams, by brace matching from its definition. Searching the whole file
+    // would count SetCloudSettings' and the packer's reads as the bake's, which is the opposite of what
+    // is being asked.
+    const std::size_t at = renderer.find( "VolumetricCloudRenderer::BuildProceduralParams(" );
+    ASSERT_NE( at, std::string::npos ) << "BuildProceduralParams was renamed; this test names the wrong "
+                                          "function and would certify anything";
+    const std::size_t open = renderer.find( '{', at );
+    ASSERT_NE( open, std::string::npos );
+
+    std::size_t close = open;
+    for ( int depth = 0; close < renderer.size(); ++close )
+    {
+        if ( renderer[close] == '{' )
+            ++depth;
+        else if ( renderer[close] == '}' && --depth == 0 )
+            break;
+    }
+    ASSERT_LT( close, renderer.size() ) << "the braces of BuildProceduralParams do not balance";
+    const std::string body = renderer.substr( open, close - open );
+
+    // The four categories whose parameters place the clouds. Named rather than counted, because the claim
+    // is about WHICH categories and a count would pass on the wrong four.
+    const std::set<std::string> bakeCategories = { "Cloud Types", "Weather", "Placement", "Layout" };
+
+    uint32_t bakes   = 0;
+    uint32_t marches = 0;
+
+    for ( const ShaderParam& p : Schema().Params )
+    {
+        // THE FOUR TYPE SLOTS REACH THE BAKE THROUGH AN ARGUMENT, not through a member access: the
+        // renderer resolves them in ResolveSpecies and hands BuildProceduralParams the SHAPES. So they
+        // are read by the bake and there is no `m_Material.CloudTypeN` to find, and saying so here is the
+        // difference between a test that knows why and a test with an unexplained hole in it.
+        const bool byArgument     = p.Name.rfind( "CloudType", 0 ) == 0;
+        const bool readByBake     = byArgument || body.find( "m_Material." + p.Name ) != std::string::npos;
+        const bool inBakeCategory = bakeCategories.count( p.Category ) != 0;
+
+        EXPECT_EQ( readByBake, inBakeCategory )
+             << p.Name << " sits in the '" << p.Category << "' category but is "
+             << ( readByBake ? "READ BY THE BAKE" : "not read by the bake" )
+             << ". The Material Editor labels a whole category as costing seconds or not, so a parameter "
+                "on the wrong side of that line is either a knob that looks free and stalls the editor, "
+                "or one that looks expensive and is instant.";
+
+        readByBake ? ++bakes : ++marches;
+    }
+
+    // QUOTED, so a schema that silently shrank is visible. TWENTY place the clouds and FOURTEEN shade
+    // them, and that is the sentence the panel's two headings say. The counts are pinned as well as the
+    // per-parameter check because the loop above is vacuously green over an empty schema — a parse that
+    // returned nothing would pass every EXPECT_EQ in it and prove exactly nothing.
+    std::printf( "[CloudMaterialSchema] %u of %u parameters rebuild the cloud volume; %u reach the march "
+                 "in the same frame\n",
+                 bakes, bakes + marches, marches );
+    EXPECT_EQ( bakes, 20u );
+    EXPECT_EQ( marches, 14u );
 }
 
 int main( int argc, char** argv )

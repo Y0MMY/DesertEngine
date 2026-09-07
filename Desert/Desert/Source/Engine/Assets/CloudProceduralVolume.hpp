@@ -9,6 +9,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -141,15 +142,63 @@ namespace Desert::Assets
     /// error field's coherence is 0.85 to 1.43 — a slowly-varying shift rather than added structure, which
     /// is the instrument saying in its own units that nothing was sharpened. The zenith is still one soft
     /// mass and the mid angle is still smooth lobes, and those are the two points the complaint lives at.
-    inline constexpr uint32_t kCloudProceduralVolumeWidth  = 256u; // x, world east
+    ///
+    /// THE HORIZONTAL SIDE IS NOW A PARAMETER AND THE VERTICAL ONE IS NOT, which is the one thing about
+    /// this block that changed for O8 and the reason it could change at all. The shader knows the HEIGHT as
+    /// a compile-time number (it pulls the vertical fetch in by half a texel) and it knows nothing of the
+    /// width or the depth, because the horizontal mapping is `(world - origin) * invRegionSize` and is in
+    /// texture units already. So a view may bake a coarser grid over the same region without a shader
+    /// recompile, a second sampler or a second march — which is what makes a 512-pixel asset preview able
+    /// to stop paying a whole level's bake. `CloudProceduralFieldParams::VolumeSideVoxels` carries it, and
+    /// the constant below is that field's DEFAULT rather than a second statement of it.
+    ///
+    /// ONE SIDE AND NOT A WIDTH AND A DEPTH. `RegionSizeKm` is one number for both horizontal axes, so a
+    /// non-square grid over it would give anisotropic voxels — two numbers that must agree is the defect
+    /// class §2.3.1 names, and the pair that stood here was equal in every build this engine has ever had.
+    inline constexpr uint32_t kCloudProceduralVolumeSide   = 256u; // x and z, world east and north
     inline constexpr uint32_t kCloudProceduralVolumeHeight = 32u;  // y, up, spanning the layer exactly
-    inline constexpr uint32_t kCloudProceduralVolumeDepth  = 256u; // z, world north
+
+    /// The coarsest grid this subsystem will bake, and the number is MEASURED rather than argued — the
+    /// first draft of it was 64 on a derivation that turned out to name the wrong mechanism, and both the
+    /// frames and Desert/Tests/Engine/CloudProceduralField said so.
+    ///
+    /// WHAT ACTUALLY BINDS IS THE LUMP FLOOR, NOT THE CELL FLOOR. `CloudProceduralLumpFloorKm` is
+    /// `max( 0.5 * ResolvableChordKm, RegionSizeKm / side )` — a HALF-EXTENT — so at the shipped 48 km
+    /// region it is 187.5 m at 256, 375 m at 128 and 750 m at 64, while the narrowest lump the shipped
+    /// congestus emits is 459 m ACROSS, i.e. a half-extent of 229.5 m. At 256 nothing is clamped; at 128
+    /// only the narrowest tail is; at 64 the clamp is three times the body it is applied to and it applies
+    /// to nearly every lobe in the sky. The cell floor — four voxels, which lands on the shipped 3 km
+    /// lattice at exactly 64 — is the bound the first draft cited, and it is not the one that fires first.
+    ///
+    /// MEASURED, as the fraction of the sky covered top-down at Coverage 0.35 (the suite prints it):
+    ///
+    ///     side 256 -> 0.3177 of the sky      (the reference)
+    ///     side 128 -> 0.3163                 -0.0014, inside the estimator's own noise
+    ///     side  64 -> 0.3613                 +0.0436 — FOUR POINTS OF SKY INVENTED BY THE CONTAINER
+    ///
+    /// and the frames say the same thing in the shape that matters: at 128 the six-point sweep is the same
+    /// clouds in the same places with softer edges (mean 1.1 to 6.2 of 255 against a repeat floor of
+    /// exactly zero), while at 64 a cumulus has visibly swollen and a gap between two lobes has closed.
+    /// A budget that changes the subject is not a budget, so 64 is REFUSED rather than offered.
+    ///
+    /// WHAT WOULD CHANGE THE ANSWER: a much smaller region. The quantity that matters is the VOXEL against
+    /// the narrowest body, not the side against a number, and `RegionSizeKm / side` is what ties them — a
+    /// layer authored at a 16 km region has a 125 m voxel at 128 and could afford a coarser grid than this
+    /// floor allows. Nothing in the repository authors one, so the floor is stated as a side; re-measure
+    /// the table above before relaxing it for such a layer.
+    inline constexpr uint32_t kCloudProceduralVolumeSideMin = 128u;
 
     inline constexpr uint32_t kCloudProceduralBytesPerVoxel = 4u;
 
-    inline constexpr uint64_t kCloudProceduralVoxelBytes =
-         static_cast<uint64_t>( kCloudProceduralVolumeWidth ) * kCloudProceduralVolumeHeight *
-         kCloudProceduralVolumeDepth * kCloudProceduralBytesPerVoxel;
+    /// The exact size of the byte block @ref BakeCloudProceduralVolume returns for a grid of @p sideVoxels.
+    /// A FUNCTION and not a constant, because the side is a parameter now: a constant would be the size of
+    /// one particular volume being read as the size of every volume, which is how a caller ends up
+    /// asserting a length that belongs to a different view.
+    inline constexpr uint64_t CloudProceduralVoxelBytes( uint32_t sideVoxels )
+    {
+        return static_cast<uint64_t>( sideVoxels ) * kCloudProceduralVolumeHeight * sideVoxels *
+               kCloudProceduralBytesPerVoxel;
+    }
 
     /// A LUMP'S HEIGHT OVER ITS OWN WIDTH — the one ratio that turns a cluster's single size into both of a
     /// lump's radii. The decision behind it, the alternative it was chosen over and the ladder it was read
@@ -206,6 +255,22 @@ namespace Desert::Assets
         /// The horizontal side of the region the volume covers, kilometres. It is also the PERIOD the
         /// volume tiles with, because the bake wraps — see the file note.
         float RegionSizeKm = 48.0f;
+
+        /// How many voxels the region is divided into on EACH horizontal axis. The vertical count is fixed
+        /// at @ref kCloudProceduralVolumeHeight, which the shader mirrors.
+        ///
+        /// IT IS THE BAKE'S COST, ALMOST EXACTLY. The bake is a loop over `side * side` columns of 32 rows,
+        /// so halving this quarters the work — measured rather than assumed at the definition of
+        /// `ECS::VolumetricCloudData::VolumeResolution`, which is the field an artist actually moves. It is
+        /// here, in the pure parameters, because four other pure functions are written in terms of it (the
+        /// voxel-against-the-march bound in ValidateCloudProceduralParams, CloudProceduralLumpFloorKm,
+        /// CloudProceduralCellExtentKm and the bake itself), and a resolution passed beside the parameters
+        /// would let those four disagree with the grid actually written.
+        ///
+        /// COMPARED BY CloudProceduralParamsEqual, necessarily: two volumes of different resolutions over
+        /// the same region are different bytes, and a cache that could not see this would show a preview
+        /// its own budget had already been changed away from.
+        uint32_t VolumeSideVoxels = kCloudProceduralVolumeSide;
 
         /// The shell the volume spans vertically: the layer's base altitude and its thickness, kilometres.
         /// The volume's 32 rows are spread over exactly this, so a voxel's height is Thickness/32.
@@ -631,10 +696,44 @@ namespace Desert::Assets
      * @param params  validated by ValidateCloudProceduralParams; an invalid set is an error, never a
      *                silently substituted default.
      * @param regionOriginKm  the region's minimum corner, from CloudProceduralRegionOriginKm.
-     * @return exactly kCloudProceduralVoxelBytes bytes, or an error naming what was wrong.
+     * @return exactly `CloudProceduralVoxelBytes( params.VolumeSideVoxels )` bytes, or an error naming what
+     *         was wrong.
      */
     Common::ResultStr<std::vector<unsigned char>>
     BakeCloudProceduralVolume( const CloudProceduralFieldParams& params, const glm::vec2& regionOriginKm );
+
+    /**
+     * @brief Told how far the bake has got, and asked whether to carry on.
+     *
+     * @param  fraction 0 at the start, 1 at the end, monotonically increasing.
+     * @return false to abandon the bake, which then returns an error rather than a partial volume.
+     *
+     * THE SAME SHAPE THE SCULPTED BAKE ALREADY USES (CloudModellingBakeProgressFn), deliberately, because a
+     * second spelling of "stop what you are doing" is a second mechanism for one thing.
+     *
+     * WHY THIS BAKE NEEDED IT, WHICH IS NOT THE REASON THE SCULPTED ONE DID. That one is started by a button
+     * and cancelled by a button. This one is started by a SLIDER: an artist dragging Coverage lands twenty
+     * edits in a second, and until O8/Г9 an already-doomed bake ran to completion because `std::async` has
+     * no way to be told otherwise — the engine's own millisecond log measured 15.42 s from the last edit to
+     * the sky that showed it, of which the first 4 800 ms was a volume nobody would ever see. Cancellation
+     * is what turns "finish the stale one, then start the wanted one" into "start the wanted one".
+     */
+    using CloudProceduralBakeProgressFn = std::function<bool( float fraction )>;
+
+    /**
+     * @brief The same bake, reporting progress and able to be abandoned.
+     *
+     * PURITY IS UNCHANGED. @p onProgress may not influence the result: it is called between XZ slices, it is
+     * handed a number, and nothing it does is read back into the arithmetic. Baking with a callback and
+     * baking without one produce identical bytes, and Desert/Tests/Engine/CloudProceduralField asserts
+     * exactly that — a "pure function with a progress hook" is otherwise a claim nobody has checked.
+     *
+     * The two-argument overload above is this one with an empty callback, so there is ONE bake and not two
+     * that must be kept in step.
+     */
+    Common::ResultStr<std::vector<unsigned char>>
+    BakeCloudProceduralVolume( const CloudProceduralFieldParams& params, const glm::vec2& regionOriginKm,
+                               const CloudProceduralBakeProgressFn& onProgress );
 
     /**
      * @brief The Dimensional Profile at one point, gathered over @p blobs — 0 outside the body, 1 at

@@ -19,6 +19,7 @@
 
 #include <glm/glm.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <future>
@@ -173,6 +174,45 @@ namespace Desert::Graphic::System
          *         descriptor the bake declares.
          */
         CloudEnvironmentBake BuildEnvironmentBake();
+
+        /**
+         * @brief Is a modelling-volume bake in flight for this view right now?
+         *
+         * WHAT IT IS FOR, AND IT IS NOT DIAGNOSTICS. About half of a cloud material's parameters are inputs
+         * to a bake of a 256 x 32 x 256 volume out of a few thousand bodies, and moving one of those costs
+         * SECONDS on a worker while the sky keeps showing the PREVIOUS volume. With no signal out of here
+         * the artist's experience of that is "I moved the knob and nothing happened", which is
+         * indistinguishable from the dead setting §1.3 of the contract forbids — the owner reported exactly
+         * that sentence twice. A view that can say "rebuilding" turns a defect back into a wait.
+         *
+         * ASKED OF THE RENDERER RATHER THAN REDERIVED BY A PANEL, because this object is the only one that
+         * can answer: the decision to re-bake is a comparison (Assets::CloudProceduralParamsEqual) against
+         * what is on THIS view's device, and a caller repeating it would need this view's camera, its
+         * resolved species and its resolved material — three things it does not have and one of which
+         * (the region origin) follows the camera every frame.
+         *
+         * TRUE ALSO DURING THE FIRST, BLOCKING BAKE, but nobody can observe that: the frame it blocks in is
+         * the frame that would have drawn the label.
+         */
+        bool IsModellingVolumeBaking() const
+        {
+            return m_ModellingBake.valid();
+        }
+
+        /// How far that bake has got, 0..1. Meaningless unless IsModellingVolumeBaking(), and 0 for a view
+        /// that has never baked one.
+        ///
+        /// IT IS A NUMBER AND NOT A SPINNER because the wait it describes is SECONDS long and varies by
+        /// four times with the GRID (5 915 ms at 256 against 1 461 ms at 128, this machine, Debug) and by
+        /// another four with how much cloud the coverage asks for (3.31 s to 14.05 s over the slider's own
+        /// travel, measured before this task) — so "how much longer" is a question the artist genuinely has
+        /// and no fixed animation can answer. The bake already
+        /// produces the fraction for its own cancellation check (Assets::CloudProceduralBakeProgressFn), so
+        /// this costs one relaxed store per XZ slice and nothing at all per voxel.
+        float ModellingBakeProgress() const
+        {
+            return m_ModellingBakeSignal->Fraction.load( std::memory_order_relaxed );
+        }
 
     private:
         bool CreatePipelines();
@@ -425,10 +465,45 @@ namespace Desert::Graphic::System
         // cloud component never allocates it, which is every asset thumbnail and every mesh preview.
         std::shared_ptr<Image3D> m_ModellingVolume;
 
-        // A BAKE IN FLIGHT. A future rather than a raw thread so the result is collected exactly once and
-        // the destructor has something to wait on — the same arrangement, for the same reason, that the
-        // sculpting panel's bake uses.
+        // A BAKE IN FLIGHT, on Common::JobSystem. A future rather than a raw thread so the result is
+        // collected exactly once — the same arrangement, for the same reason, that the sculpting panel's
+        // bake uses.
+        //
+        // IT USED TO BE `std::async` AND THAT WAS THREE DEFECTS AT ONCE (Г9). The work was invisible to the
+        // profiler, so the delay the owner reported had to be measured off log timestamps over a whole day;
+        // it obeyed no thread budget, so two document windows could each start bakes with nothing counting
+        // them; and it could not be STOPPED, so an already-doomed bake ran to the end while the wanted one
+        // waited behind it. There is a fourth, quieter one: the destructor of a future returned by
+        // std::async BLOCKS until the task finishes, so simply dropping a stale bake was not available —
+        // which is why the old code could only ever have one in flight. A JobSystem future wraps a
+        // packaged_task and its destructor waits for nothing, so abandoning one is a move-assignment.
         std::future<Common::ResultStr<std::vector<unsigned char>>> m_ModellingBake;
+
+        /// THE WHOLE CHANNEL BETWEEN A BAKE AND THE VIEW THAT WANTED IT: one flag in, one number out. Both
+        /// are read by the worker at the same instant — between XZ slices, through the one progress hook —
+        /// so they are ONE object rather than two shared_ptrs that a future edit could give different
+        /// lifetimes to.
+        struct ModellingBakeSignal
+        {
+            /// Set by the renderer when this bake's parameters are no longer wanted. The bake returns an
+            /// error at its next slice boundary and its result is never collected.
+            std::atomic<bool> Cancelled{ false };
+
+            /// 0 at the start, 1 at the end. Written by the worker, read by whatever draws the wait.
+            std::atomic<float> Fraction{ 0.0f };
+        };
+
+        // A FRESH SIGNAL PER BAKE rather than a reset of the old one: an abandoned job is still reading the
+        // object it was started with, so clearing that flag would un-cancel a bake nobody is waiting for and
+        // burn a worker to the end of it — and its progress would fight the new bake's for the same number.
+        //
+        // Never null, so no call site has to ask.
+        std::shared_ptr<ModellingBakeSignal> m_ModellingBakeSignal = std::make_shared<ModellingBakeSignal>();
+
+        // How many bakes this view has abandoned. It is in the log line beside the milliseconds because it
+        // is the number that says the cancellation is WORKING — "baked in 3 100 ms, 19 stale bake(s)
+        // cancelled" is a sentence a slider drag produces and a single edit does not.
+        uint32_t m_ModellingBakesCancelled = 0;
 
         // WHAT THE VOLUME ON THE DEVICE WAS BAKED FROM. Two things, and both have to be asked about: the
         // PARAMETERS, which change when the artist moves a slider or drops a different type into a slot,
@@ -473,6 +548,15 @@ namespace Desert::Graphic::System
         // the region that was actually baked rather than at wherever the camera is by then.
         Assets::CloudProceduralFieldParams m_PendingParams{};
         glm::vec2                          m_PendingOriginKm{ 0.0f };
+
+        // AND WHICH TYPES IT IS FOR, which the pending set did not carry until cancellation arrived. With
+        // no way to stop a bake, "is one in flight" was the whole question and the answer was enough; with
+        // one, the question becomes "is the one in flight the one I WANT", and a bake started for a
+        // different set of cloud types is exactly as stale as one started for different parameters. Without
+        // these three the guard would either restart a wanted bake every frame or keep a stale one.
+        Assets::AssetHandle m_PendingTypes[kCloudSpeciesSlots]{};
+        uint32_t            m_PendingSpeciesCount = 0;
+        uint32_t            m_PendingGeneration   = 0;
 
         // When the bake in flight was started, so the log line that collects it can print what it cost.
         // Wall time and not CPU time: what this number bounds is how far the sky lags the camera.
