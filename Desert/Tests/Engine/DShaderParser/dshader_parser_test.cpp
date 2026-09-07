@@ -87,7 +87,48 @@ TEST( DShaderParser, ParsesProperties )
     EXPECT_FLOAT_EQ( params[1].Default.x, 4.0f );
 
     EXPECT_TRUE( params[2].IsTexture );
-    EXPECT_EQ( params[2].DefaultTexture, "white" );
+    EXPECT_EQ( params[2].DefaultTexture, DefaultTextureKind::White );
+}
+
+// The default texture is a CLOSED SET, and the parser is the only place a typo in it can still be
+// caught. It used to be a free `std::string` that nothing downstream read, so `= "wihte"` parsed, the
+// shader compiled and loaded, and the evidence was a surface somebody eventually noticed was the wrong
+// colour. Both directions are asserted: the four legal names survive the round trip, and a fifth is a
+// refusal that NAMES the property and lists the alternatives — a message that only says "parse error"
+// sends the author back to counting braces.
+TEST( DShaderParser, EveryDefaultTextureNameParsesAndAnUnknownOneIsRefusedByName )
+{
+    const auto parseWithDefault = [ ]( const char* name )
+    {
+        const std::string src = std::string( R"(
+Shader "DefaultTextureProbe"
+{
+    Domain Surface
+    Properties Binding(1) TextureBinding(2)
+    {
+        Texture2D u_Slot ("Slot") = ")" ) + name + R"("
+    }
+    Fragment { void main() {} }
+}
+)";
+        return DShaderParser::Parse( src );
+    };
+
+    for ( const DefaultTextureKind kind : kAllDefaultTextureKinds )
+    {
+        auto res = parseWithDefault( DefaultTextureKindName( kind ) );
+        ASSERT_TRUE( res.IsSuccess() ) << DefaultTextureKindName( kind ) << ": " << res.GetError();
+        ASSERT_EQ( res.GetValue().Meta.Params.size(), 1u );
+        EXPECT_EQ( res.GetValue().Meta.Params[0].DefaultTexture, kind )
+             << "'" << DefaultTextureKindName( kind ) << "' did not survive the round trip";
+    }
+
+    auto bad = parseWithDefault( "wihte" );
+    ASSERT_FALSE( bad.IsSuccess() ) << "an unknown default texture name was accepted";
+    EXPECT_NE( bad.GetError().find( "wihte" ), std::string::npos ) << bad.GetError();
+    EXPECT_NE( bad.GetError().find( "u_Slot" ), std::string::npos ) << bad.GetError();
+    EXPECT_NE( bad.GetError().find( "\"white\"" ), std::string::npos )
+         << "the refusal must list the legal set: " << bad.GetError();
 }
 
 // A TextureCube property is CUBE IN THE SCHEMA, not merely in the generated sampler: the editor's

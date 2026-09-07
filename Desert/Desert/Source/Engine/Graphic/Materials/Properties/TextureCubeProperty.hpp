@@ -26,15 +26,6 @@ namespace Desert::Graphic
             }
         }
 
-        std::unique_ptr<MaterialProperty> Clone() const override
-        {
-            /*auto prop = std::make_unique<TextureCubeProperty>( m_Uniform );
-            prop->SetTexture( m_Texture );
-            return prop;*/
-
-            return nullptr;
-        }
-
         void SetTexture( const ImageCube* texture )
         {
             m_Texture = texture;

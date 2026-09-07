@@ -35,11 +35,6 @@ namespace Desert::Graphic
             }
         }
 
-        std::unique_ptr<MaterialProperty> Clone() const override
-        {
-            return nullptr; // std::make_unique<UniformBufferProperty>( m_Buffer );
-        }
-
         void UpdateFields()
         {
             if ( !ClaimFill( ShaderResources::FillKind::Fields, "UpdateFields" ) )

@@ -32,8 +32,17 @@ namespace Desert::Graphic
 
         auto bindTexture = [&]( const Assets::AssetHandle& handle, const char* shaderName )
         {
+            // AN UNSET SLOT IS AN AUTHORED DECISION, AND IT IS NOW EXECUTED RATHER THAN SKIPPED. This
+            // used to `return` here, which is correct only for a material being built from scratch: a
+            // material is also RE-APPLIED in place (AssetHotReload re-runs the factory over the live
+            // object when the `.demat` changes), and then skipping meant the descriptor kept the texture
+            // the file had just stopped naming. Binding the schema's default is what makes clearing a
+            // slot in the editor reach the picture at all.
             if ( static_cast<uint64_t>( handle ) == 0 )
-                return; // an unset slot is an authored decision, not a failure
+            {
+                material.BindSchemaDefaultTexture( shaderName );
+                return;
+            }
 
             if ( auto* img = resolveImage( handle ) )
             {
@@ -41,6 +50,11 @@ namespace Desert::Graphic
                     prop->SetImage( img );
                 return;
             }
+
+            // The handle names a texture nobody has: the slot falls back to its schema default so the
+            // surface at least shows what an EMPTY slot shows, rather than the previous material's map.
+            // The error below is what says the difference out loud.
+            material.BindSchemaDefaultTexture( shaderName );
 
             // DC §1.4, and this is THE site the rule was written for. A `.demat` names its textures by
             // number and by nothing else, so a reference that stops resolving produces a surface that is
@@ -89,48 +103,68 @@ namespace Desert::Graphic
             return nullptr;
         };
 
-        for ( const auto& t : data.Textures )
+        // THE LOOP IS OVER THE SCHEMA, NOT OVER THE FILE, and that is М9's change. Iterating
+        // `data.Textures` visits only the slots a material HAS something to say about, so the two cases
+        // that matter most were unreachable from it: a slot the material never mentioned, and a slot the
+        // material has just STOPPED mentioning. This function is also re-run over a LIVE material when
+        // the `.demat` changes (AssetHotReload), so "not mentioned" had to mean "leave whatever is bound"
+        // — the file could lose a texture and the surface would keep drawing it. Every 2D sampler the
+        // shader declares is now given a value on every application: the authored one, or the schema's
+        // own default.
+        for ( const auto& param : schema.Params )
         {
-            if ( t.TextureHandle == 0 )
+            // A non-texture asset reference (its service reads it out of MaterialData directly) or a cube
+            // slot (bound by MaterialSkybox from the environment, not from here). Neither is this loop's.
+            if ( !param.IsTexture || param.IsCubeTexture || param.IsAssetRef() )
                 continue;
 
-            const Core::Formats::ShaderParam* param = paramFor( t.Name );
-            if ( !param )
+            const uint64_t handle = data.GetTexture( param.Name );
+            if ( handle == 0 )
             {
-                // Only worth saying when there IS a schema to be absent from: a shader that failed to
-                // load leaves this empty, and that failure is already reported by the ShaderService.
-                if ( !schema.Params.empty() )
-                    LOG_WARN( "[Materials] '{0}' carries a value for '{1}', which the shader '{2}' does not "
-                              "declare. The value is ignored — the slot was renamed or removed from the "
-                              "shader since this material was authored.",
-                              asset.GetMetadata().Filepath.string(), t.Name, material.GetShaderName() );
+                // An empty slot, whether it was never filled or has just been cleared. Not a failure and
+                // not silent in the sense DC §1.4 forbids: the value the sampler gets is the one the
+                // SHADER declares for an empty slot, so nothing is being substituted behind anybody.
+                material.SetTexture( param.Name, nullptr );
                 continue;
             }
 
-            // A non-texture asset reference (its service reads it out of MaterialData directly) or a cube
-            // slot (bound by MaterialSkybox from the environment, not from here). Neither is this loop's.
-            if ( param->IsAssetRef() || param->IsCubeTexture || !param->IsTexture )
-                continue;
-
-            auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( Common::UUID( t.TextureHandle ) );
+            auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( Common::UUID( handle ) );
             auto* img = tex ? static_cast<Graphic::Image2D*>(
                                    Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) )
                             : nullptr;
             if ( img )
             {
-                material.SetTexture( t.Name, img );
+                material.SetTexture( param.Name, img );
                 continue;
             }
 
             // DC §1.4 — the same obligation, and the same wording, as the PBR path above. Both `continue`s
             // this replaces were silent, and the visible result of either was a shader sampling its
             // fallback: a surface that looks authored rather than broken.
+            material.SetTexture( param.Name, nullptr );
             LOG_ERROR( "[Materials] '{0}' names texture handle {1} in its '{2}' slot and no texture with "
-                       "that handle is registered, so '{3}' samples its fallback instead. A texture's "
-                       "handle is AssetHandle::FromCookedPath of its source image, so this usually means "
-                       "the image was renamed, moved, or cooked before the derivation changed; re-cook it "
-                       "(Assets > Rebuild Cooked Assets) and re-assign the slot.",
-                       asset.GetMetadata().Filepath.string(), t.TextureHandle, t.Name, material.GetShaderName() );
+                       "that handle is registered, so '{3}' samples that slot's schema default instead. A "
+                       "texture's handle is AssetHandle::FromCookedPath of its source image, so this "
+                       "usually means the image was renamed, moved, or cooked before the derivation "
+                       "changed; re-cook it (Assets > Rebuild Cooked Assets) and re-assign the slot.",
+                       asset.GetMetadata().Filepath.string(), handle, param.Name, material.GetShaderName() );
+        }
+
+        // The file's side of the same relation: a name the material carries that the shader no longer
+        // declares. It cannot be found by the loop above (which only walks names the shader HAS), and it
+        // is the one thing that loop can no longer report.
+        if ( !schema.Params.empty() )
+        {
+            for ( const auto& t : data.Textures )
+            {
+                if ( t.TextureHandle == 0 || paramFor( t.Name ) )
+                    continue;
+
+                LOG_WARN( "[Materials] '{0}' carries a value for '{1}', which the shader '{2}' does not "
+                          "declare. The value is ignored — the slot was renamed or removed from the "
+                          "shader since this material was authored.",
+                          asset.GetMetadata().Filepath.string(), t.Name, material.GetShaderName() );
+            }
         }
     }
 

@@ -28,7 +28,14 @@ Shader "StaticMeshPBR"
         Color       GlassTint ("Glass Tint", Category("Glass")) = (1, 1, 1, 1)
         Vec2        UVTiling ("UV Tiling", Category("Surface")) = (1, 1)
         Texture2D   u_AlbedoTexture ("Albedo Map", Category("Textures"))
-        Texture2D   u_NormalTexture ("Normal Map", Category("Textures"))
+        // The ONE slot whose empty state is not white. A normal map is unpacked with `2*t - 1`, so a
+        // white texel decodes to a normalised (1,1,1) — a normal tilted 54 degrees off the surface —
+        // whereas (0.5,0.5,1) decodes to +Z, which is what "this surface has no normal detail" means.
+        // The fragment stages here, in StaticMeshGBuffer and in StaticMeshPBR_Instanced all guard with
+        // `textureSize(u_NormalTexture,0).x > 1` and skip a 1x1, so this changes no pixel today; it is
+        // written down so the guard is a fast path rather than the only thing standing between an empty
+        // slot and a wrong normal.
+        Texture2D   u_NormalTexture ("Normal Map", Category("Textures")) = "normal"
         Texture2D   u_OpacityTexture ("Opacity Map", Category("Textures"))
         Texture2D   u_MetallicTexture ("Metallic Map", Category("Textures"))
         Texture2D   u_RoughnessTexture ("Roughness Map", Category("Textures"))

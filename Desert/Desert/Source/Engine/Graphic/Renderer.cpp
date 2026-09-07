@@ -264,6 +264,14 @@ namespace Desert::Graphic
             LOG_ERROR( "[Renderer] fallback textures were not released: {}", released.GetError() );
         }
 
+        // The schema's own default textures (Graphic/DefaultTextures.hpp) are a separate table with the
+        // same lifetime problem: they are 1x1 GPU images owned by a static, so the device would be gone
+        // by the time a static destructor ran.
+        if ( const auto released = DefaultTextures::Get().Release(); !released )
+        {
+            LOG_ERROR( "[Renderer] schema default textures were not released: {}", released.GetError() );
+        }
+
         s_RendererAPI->Shutdown();
         delete s_RendererAPI;
         s_RendererAPI = nullptr;

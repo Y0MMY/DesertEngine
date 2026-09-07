@@ -390,7 +390,26 @@ namespace Desert::Core::Preprocess
                     err = { c.Line, "string default is only valid for texture properties" };
                     return false;
                 }
-                return ReadQuoted( c, param.DefaultTexture, err );
+
+                const uint32_t line = c.Line;
+                std::string    name;
+                if ( !ReadQuoted( c, name, err ) )
+                    return false;
+
+                // REFUSED HERE OR NEVER. An unknown name used to be stored verbatim in a std::string that
+                // nothing read, so `= "wihte"` parsed, compiled, loaded and drew — and the only evidence
+                // was a surface somebody eventually noticed was the wrong colour. Now the set is closed
+                // (Core/Formats/DefaultTexture.hpp) and this is the one line that can still say WHICH
+                // file, WHICH property and WHICH line, so it says all three.
+                const auto kind = ParseDefaultTextureKind( name );
+                if ( !kind )
+                {
+                    err = { line, "unknown default texture '" + name + "' for property '" + param.Name +
+                                       "' (expected one of " + DefaultTextureKindList() + ")" };
+                    return false;
+                }
+                param.DefaultTexture = *kind;
+                return true;
             }
 
             if ( c.Peek() == '(' ) // vector default: = (r, g, b, a)

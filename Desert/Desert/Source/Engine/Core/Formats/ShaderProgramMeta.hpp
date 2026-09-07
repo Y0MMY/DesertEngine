@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Engine/Core/Formats/DefaultTexture.hpp>
 #include <Engine/Core/Formats/Shader.hpp>
 
 #include <glm/glm.hpp>
@@ -64,8 +65,15 @@ namespace Desert::Core::Formats
         std::optional<float> Min;                                // present => slider/clamped
         std::optional<float> Max;
 
-        glm::vec4   Default        = glm::vec4( 0.0f );          // numeric default (xyzw as needed)
-        std::string DefaultTexture;                              // texture param default (e.g. "white")
+        glm::vec4 Default = glm::vec4( 0.0f );                   // numeric default (xyzw as needed)
+
+        // What this sampler shows when the material binds NOTHING to it — the DSL `= "white"` on a
+        // Texture2D property. Read by Graphic::Material::BindSchemaDefaultTexture, which is what makes
+        // "clear this slot" a thing a material can express at all: the alternative is a slot the file
+        // says is empty and the descriptor still points at the last texture somebody assigned.
+        // Meaningless (and left at White) for a non-texture param; see DefaultTexture.hpp for why the
+        // implicit value reproduces the old picture rather than choosing a new one.
+        DefaultTextureKind DefaultTexture = DefaultTextureKind::White;
 
         bool IsAssetRef() const
         {
