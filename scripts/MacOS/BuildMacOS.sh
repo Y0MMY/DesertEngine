@@ -30,8 +30,12 @@ if ! command -v premake5 >/dev/null 2>&1; then
     exit 1
 fi
 
-# Refresh the build identity (no-op when the version did not change).
-./scripts/GenVersion.sh || true
+# NO GenVersion.sh CALL HERE, AND THE ABSENCE IS THE FIX. This script's single call to it was the
+# ONLY one in the repository, so the build identity was refreshed for whoever went through this
+# wrapper and for nobody else — `make` on its own compiled a header a month out of date. The generator
+# is now part of the Common project's own makefile, which the `make` below runs anyway. Calling it
+# here as well would put the refresh in two places, and the one that runs first would hide a hook that
+# had stopped working: a missing header is a compile error, a stale one is a lie.
 
 echo "--- Generating Makefiles (premake5 gmake2)"
 premake5 gmake2 "${PREMAKE_ARGS[@]+"${PREMAKE_ARGS[@]}"}"

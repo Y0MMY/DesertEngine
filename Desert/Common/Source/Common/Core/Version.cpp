@@ -1,29 +1,61 @@
 #include "Version.hpp"
 
-// The generated header exists only after scripts/GenVersion.sh ran (BuildMacOS.sh does it before
-// premake). Builds without git / without the script still compile — with an "unknown" identity.
-#if __has_include( "Version.gen.hpp" )
-#include "Version.gen.hpp"
-#else
-#define DESERT_VERSION_BASE "0.0"
-#define DESERT_VERSION_COMMITS 0u
-#define DESERT_VERSION_HASH "unknown"
-#define DESERT_VERSION_BRANCH "unknown"
-#define DESERT_VERSION_DIRTY 0
+// THE GENERATED HEADER CANNOT BE MISSING, AND THIS FILE MUST NOT SURVIVE ITS ABSENCE.
+//
+// It used to. The include sat behind `__has_include` with a "0.0.0+unknown" fallback, and that guard
+// was not free: ccache's direct mode keys an object on the headers the translation unit ACTUALLY
+// included, so a header that appears later never invalidates the cached object. A tree built once
+// before the generator had ever run kept reporting 0.0.0 until somebody deleted Version.o by hand —
+// and that string is not cosmetic, it reaches the user through engines.json and the launcher sidebar.
+//
+// Generating the header is now part of the build — the Common project does it before this file can be
+// compiled — so it is on disk by the time this TU is compiled, or the build has already failed. The
+// guard therefore becomes a diagnostic and never a fallback: it produces no code path, it only says
+// what to run. That is `premake5 gmake2` (scripts/Windows/Setup.bat on Windows), because a tree whose
+// makefiles or project files predate the version hook has no hook to fire.
+#if !__has_include( "Version.gen.hpp" )
+#error "Version.gen.hpp is missing. The build generates it: re-run premake5, then build again."
 #endif
+#include "Version.gen.hpp"
 
 #include <cstdio>
+#include <string>
 
 namespace Common::Version
 {
+    std::optional<std::uint32_t> CommitCount()
+    {
+        // The generator emits DESERT_VERSION_COMMITS only when git could supply a count it trusts, so
+        // "unknown" is the macro's ABSENCE rather than any particular value of it.
+#ifdef DESERT_VERSION_COMMITS
+        return DESERT_VERSION_COMMITS;
+#else
+        return std::nullopt;
+#endif
+    }
+
     const char* Full()
     {
-        static char s_Full[96] = {};
-        if ( s_Full[0] == '\0' )
-            std::snprintf( s_Full, sizeof( s_Full ), "%s.%u+%s%s", DESERT_VERSION_BASE,
-                           DESERT_VERSION_COMMITS, DESERT_VERSION_HASH,
-                           DESERT_VERSION_DIRTY ? ".dirty" : "" );
-        return s_Full;
+        // Composed once, and the initialisation is thread-safe by the language rather than by luck: the
+        // previous `static char[96]` guarded by `if ( s_Full[0] == '\0' )` let two threads format into
+        // the same buffer at the same time. They would have written the same bytes, but this engine runs
+        // a JobSystem and a benign race is still a race — and removing it cost nothing while the
+        // function was being rewritten anyway.
+        static const std::string s_Full = []() -> std::string
+        {
+            char text[96] = {};
+            if ( const std::optional<std::uint32_t> commits = CommitCount() )
+                std::snprintf( text, sizeof( text ), "%s.%u+%s%s", DESERT_VERSION_BASE, *commits,
+                               DESERT_VERSION_HASH, DESERT_VERSION_DIRTY ? ".dirty" : "" );
+            else
+                // No build-number field at all rather than a zero one. "0.1+unknown" cannot be misread
+                // as an ancient build the way "0.1.0+unknown" can, and it cannot be parsed into a
+                // number that would then lose a comparison it was never able to enter.
+                std::snprintf( text, sizeof( text ), "%s+%s%s", DESERT_VERSION_BASE, DESERT_VERSION_HASH,
+                               DESERT_VERSION_DIRTY ? ".dirty" : "" );
+            return text;
+        }();
+        return s_Full.c_str();
     }
 
     const char* Base()
@@ -39,11 +71,6 @@ namespace Common::Version
     const char* Branch()
     {
         return DESERT_VERSION_BRANCH;
-    }
-
-    uint32_t CommitCount()
-    {
-        return DESERT_VERSION_COMMITS;
     }
 
     bool Dirty()
