@@ -18,6 +18,11 @@ project(test_name)
         test_files,
         "%{wks.location}/Editor/Source/Editor/Core/EditorPreferences.cpp",
         "%{wks.location}/Editor/Source/Editor/Core/GizmoState.cpp",
+        -- К10's seam: the pure "user's answer minus what a viewport mode hides" function. It is a
+        -- separate translation unit from ViewportPanel precisely so a test can link it — the panel
+        -- itself needs ImGui, ImGuizmo and the whole renderer, and the arithmetic under test needs none
+        -- of that.
+        "%{wks.location}/Editor/Source/Editor/Core/ViewportModes.cpp",
         "%{wks.location}/Desert/Desert/Source/Engine/Project/ProjectContext.cpp",
     }
 

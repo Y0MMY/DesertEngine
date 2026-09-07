@@ -1849,7 +1849,12 @@ namespace Desert::Editor
             const auto& prefs = EditorPreferences::Get();
             sr->SetOutlineSettings( prefs.OutlineColor, prefs.OutlineWidth, prefs.OutlineSmoothness,
                                     prefs.EnableOutline );
-            sr->SetDebugView( prefs.DebugView );
+            // THE USER'S ANSWER, MINUS WHAT THIS SCENE'S VIEWPORTS ARE HIDING RIGHT NOW. `prefs.DebugView`
+            // is what the user chose and what editor.json holds; a viewport MODE (2D UI editing hides the
+            // ground grid) suppresses a flag in the COPY that reaches the renderer and never in the store.
+            // Before К10 the mode wrote the store directly and every unrelated EditorPreferences::Save()
+            // could make the suppression permanent — see Editor/Core/ViewportModes.hpp.
+            sr->SetDebugView( ViewportPanel::EffectiveDebugView( prefs.DebugView, scene ) );
         }
 
         {
@@ -2946,6 +2951,26 @@ namespace Desert::Editor
                               {
                                   EditorPreferences::Get().ShowPerfHud = !EditorPreferences::Get().ShowPerfHud;
                                   EditorPreferences::Save();
+                              } } );
+
+        // THE TWO ENDS OF К10's SCENARIO, UNDER NAMES, for the reason К6 named the snap steps and the item
+        // above: a scenario whose steps can only be reached by clicking is a scenario no unattended run can
+        // walk, and a claim about it is therefore unphotographable. Both are dictionary entries in their own
+        // right — "show me the grid" and "switch to 2D" are things a person asks for by name, and UE's own
+        // Show > Grid is searchable for the same reason.
+        //
+        // Note which one saves and which one does not, because that IS К10: the grid is the USER'S ANSWER
+        // and persists on the click; 2D UI mode is a VIEWPORT MODE and persists nowhere at all.
+        commands.push_back( { "View", "Toggle the grid", []
+                              {
+                                  auto& view    = EditorPreferences::Get().DebugView;
+                                  view.ShowGrid = !view.ShowGrid;
+                                  EditorPreferences::Save();
+                              } } );
+        commands.push_back( { "View", "Toggle 2D UI mode", [this]
+                              {
+                                  if ( m_MainScene )
+                                      Editor::ViewportPanel::ToggleUIMode( *m_MainScene );
                               } } );
 
         // OPENABLE ASSETS. This is where `--open-panel <path-to-asset>` went — the half of that flag that

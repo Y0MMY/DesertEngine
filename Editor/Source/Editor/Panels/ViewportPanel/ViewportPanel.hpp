@@ -2,9 +2,11 @@
 
 #include <functional>
 #include <optional>
+#include <vector>
 
 #include <Engine/Desert.hpp>
 
+#include "Editor/Core/ViewportModes.hpp"
 #include "Editor/Panels/IPanel.hpp"
 
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
@@ -58,6 +60,28 @@ namespace Desert::Editor
         void OnPreUpdate() override;
 
         void OnEvent( Common::Event& e ) override;
+
+        // THE VIEW `scene`'s RENDERER MUST BE GIVEN THIS FRAME: the user's persisted answer (`user`,
+        // which is EditorPreferences::DebugView), minus whatever the viewports looking at that scene are
+        // hiding right now. Called from the one place the editor pushes a debug view down,
+        // EditorLayer::UpdateSceneFrame, so a mode's suppression exists only in the copy that reaches the
+        // renderer and can never be written to ~/.desertengine/editor.json. Editor/Core/ViewportModes.hpp
+        // carries the argument for why that separation is the fix and a fence around each Save() is not.
+        //
+        // IT IS KEYED ON THE SCENE, NOT GLOBAL, and that closes a second defect of the old code: the
+        // suppression used to be a single write into the one shared preference struct, so putting ONE
+        // viewport into 2D mode blanked the grid in every other viewport as well. A scene has one
+        // SceneRenderer, so per-scene is the finest granularity that exists here; two viewports on one
+        // scene still share an answer, and any of them being in 2D mode hides the grid for that scene.
+        static Graphic::DebugViewState EffectiveDebugView( const Graphic::DebugViewState& user,
+                                                           const Desert::Core::Scene&     scene );
+
+        // Flip 2D UI mode on every viewport showing `scene`, from outside the panel — the command palette's
+        // "Toggle 2D UI mode". It exists for the same reason К6 gave the snap steps and the Perf HUD names:
+        // a mode that can only be reached by clicking a checkbox is a mode no unattended run can enter, so
+        // the scenario it is part of cannot be photographed and therefore cannot be proved. It writes
+        // nothing and saves nothing, exactly like the checkbox.
+        static void ToggleUIMode( const Desert::Core::Scene& scene );
 
         // Called (once, while this viewport window has ImGui focus) so the editor can make this viewport's
         // scene the active one — the Outliner/Details/gizmo then follow whichever viewport you work in.
@@ -121,12 +145,20 @@ namespace Desert::Editor
         // OnMousePressed to suppress scene picking (a click there snaps the camera, it doesn't select).
         bool m_ViewAxisGizmoHovered = false;
 
-        // 2D UI-editing mode (toolbar "2D"): hides the grid + orientation gizmo so a screen-space canvas
-        // reads like a UI designer. m_SavedShowGrid restores the USER's grid preference when toggled off
-        // (the flag lives in EditorPreferences::DebugView since К2, not in the scene file).
-        bool m_UIMode        = false;
-        bool m_SavedShowGrid = false;
-        bool m_UIPreview     = false; // Design (drag/select) <-> Preview (buttons interactive) toggle
+        // WHAT THIS ONE VIEWPORT IS DOING — not what the user has chosen to see. 2D UI-editing mode
+        // (toolbar "2D") hides the grid and the orientation triad so a screen-space canvas reads like a UI
+        // designer, and it does so by SUPPRESSING them on the way to the renderer: there is deliberately
+        // no second copy of the user's grid preference here to restore from, because a stashed copy is
+        // what made a mode's suppression reachable by every EditorPreferences::Save() in the editor
+        // (К10 — see Editor/Core/ViewportModes.hpp). Toggling this writes nothing and saves nothing.
+        Core::ViewportModes m_Modes;
+        bool                m_UIPreview = false; // Design (drag/select) <-> Preview (buttons interactive)
+
+        // Every ViewportPanel alive right now, so EffectiveDebugView can ask "is anybody looking at this
+        // scene in 2D mode?" without the push site having to know about panels. Registered by the
+        // constructor and removed by the destructor, so a closed scene view stops suppressing the moment
+        // it stops existing — which a flag hanging off the scene or off the preferences could not manage.
+        static std::vector<ViewportPanel*> s_Live;
 
         // In-scene UI drag/resize state. Offsets are captured at drag start so the drag is absolute (no drift).
         UIHandle  m_UIDrag = UIHandle::None;

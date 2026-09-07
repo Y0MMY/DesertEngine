@@ -160,6 +160,8 @@ namespace Desert::Editor
         }
     } // namespace
 
+    std::vector<ViewportPanel*> ViewportPanel::s_Live;
+
     ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
                                   const Assets::AssetManager* assetManager, std::string title )
          : IPanel( std::move( title ) ), m_Scene( scene ), m_AssetManager( assetManager )
@@ -169,10 +171,37 @@ namespace Desert::Editor
 
         m_LightGizmoRenderer = std::make_unique<LightGizmoRenderer>( scene );
         m_AsyncLoader        = std::make_unique<AsyncMeshLoader>(); // starts the background cook worker
+
+        s_Live.push_back( this );
     }
 
-    // Out-of-line so unique_ptr<AsyncMeshLoader> destroys with the complete type (joins the worker thread).
-    ViewportPanel::~ViewportPanel() = default;
+    // Out-of-line so unique_ptr<AsyncMeshLoader> destroys with the complete type (joins the worker thread) —
+    // and so the registry entry goes with the panel rather than outliving it as a dangling suppression.
+    ViewportPanel::~ViewportPanel()
+    {
+        s_Live.erase( std::remove( s_Live.begin(), s_Live.end(), this ), s_Live.end() );
+    }
+
+    Graphic::DebugViewState ViewportPanel::EffectiveDebugView( const Graphic::DebugViewState& user,
+                                                               const Desert::Core::Scene&     scene )
+    {
+        // The modes of every viewport pointed at THIS scene, folded together. Two viewports on one scene
+        // share a SceneRenderer and therefore share one answer; OR is the only defensible fold, because a
+        // mode says "hide this from me" and the viewport that asked for it must get what it asked for.
+        Core::ViewportModes modes;
+        for ( const ViewportPanel* panel : s_Live )
+            if ( panel->m_Scene.get() == &scene )
+                modes.UI2D = modes.UI2D || panel->m_Modes.UI2D;
+
+        return Core::ApplyViewportModes( user, modes );
+    }
+
+    void ViewportPanel::ToggleUIMode( const Desert::Core::Scene& scene )
+    {
+        for ( ViewportPanel* panel : s_Live )
+            if ( panel->m_Scene.get() == &scene )
+                panel->m_Modes.UI2D = !panel->m_Modes.UI2D;
+    }
 
     void ViewportPanel::UpdateAsyncLoads()
     {
@@ -477,24 +506,21 @@ namespace Desert::Editor
                 }
             }
 
-            if ( canvas != entt::null )
+            // The toolbar row is shown for a scene that HAS a canvas — and also whenever 2D mode is
+            // already on, whatever the scene holds. The palette can turn the mode on from outside
+            // (ToggleUIMode) and a canvas can be deleted while the mode is running; without the second
+            // condition either leaves a viewport in a mode whose only OFF switch has disappeared.
+            if ( canvas != entt::null || m_Modes.UI2D )
             {
                 ImGui::SameLine();
-                if ( ImGui::Checkbox( "2D", &m_UIMode ) )
-                {
-                    // NOT saved to editor.json: this suppression belongs to the 2D mode it is part of, and
-                    // writing it would make "I was editing a canvas once" the user's permanent grid answer.
-                    auto& view = EditorPreferences::Get().DebugView;
-                    if ( m_UIMode )
-                    {
-                        m_SavedShowGrid = view.ShowGrid;
-                        view.ShowGrid   = false;
-                    }
-                    else
-                    {
-                        view.ShowGrid = m_SavedShowGrid;
-                    }
-                }
+                // A MODE, AND IT TOUCHES NOTHING BUT ITSELF. What 2D mode hides is applied to a COPY of
+                // the user's view state on its way to the renderer (EffectiveDebugView), so this toggle
+                // writes no preference and saves no file — and no save anywhere else in the editor can
+                // therefore carry "the grid is off" to disk on its behalf. It used to write
+                // EditorPreferences::DebugView.ShowGrid = false and park the real answer in a member of
+                // this panel; see Editor/Core/ViewportModes.hpp for why a fence around each Save() was
+                // the wrong shape of fix.
+                ImGui::Checkbox( "2D", &m_Modes.UI2D );
                 if ( ImGui::IsItemHovered() )
                     ImGui::SetTooltip( "2D UI mode: hide the grid + orientation gizmo" );
 
@@ -620,19 +646,18 @@ namespace Desert::Editor
                 ImGui::TextUnformatted( "Show" );
                 ImGui::Separator();
                 bool viewChanged = false;
-                // The grid is FORCED off while 2D UI mode is on, so the live value is not the user's
-                // answer and the checkbox must not pretend otherwise: it is disabled and shows what will
-                // come back when 2D mode ends.
-                ImGui::BeginDisabled( m_UIMode );
-                bool grid = m_UIMode ? m_SavedShowGrid : view.ShowGrid;
-                if ( ImGui::Checkbox( "Grid", &grid ) )
+                // THIS CHECKBOX IS THE USER'S ANSWER AND ALWAYS SHOWS IT, including while 2D UI mode is
+                // hiding the grid — the suppression lives in the mode now and never in this field, so
+                // there is nothing left for the control to lie about. It used to be DISABLED in 2D mode
+                // and read a shadow copy, because the field underneath had been overwritten with the
+                // suppression; a user in 2D mode therefore could not state a grid preference at all.
+                // The note beside it is what explains an empty viewport with the box ticked.
+                viewChanged |= ImGui::Checkbox( "Grid", &view.ShowGrid );
+                if ( m_Modes.UI2D )
                 {
-                    view.ShowGrid = grid;
-                    viewChanged   = true;
+                    ImGui::SameLine();
+                    ImGui::TextDisabled( "(hidden while 2D is on)" );
                 }
-                ImGui::EndDisabled();
-                if ( m_UIMode && ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
-                    ImGui::SetTooltip( "2D UI mode hides the grid. Leave 2D to get it back." );
                 viewChanged |= ImGui::Checkbox( "Bounding Boxes", &view.ShowBoundingBoxes );
                 ImGui::BeginDisabled( !view.ShowBoundingBoxes );
                 viewChanged |= ImGui::ColorEdit3( "BB Color", &view.BoundingBoxColor.x );
@@ -640,19 +665,13 @@ namespace Desert::Editor
                 ImGui::EndDisabled();
                 viewChanged |= ImGui::Checkbox( "Colliders", &view.ShowColliders );
                 viewChanged |= ImGui::Checkbox( "Wireframe", &view.WireframeMode );
+                // A PLAIN SAVE, and that is the deliverable of К10. This call used to be wrapped in three
+                // lines that put the user's real grid answer back before writing and took it away again
+                // afterwards, because 2D mode kept its suppression in the field being written. Eleven
+                // other Save() call sites had no such wrapper and would each have made the suppression
+                // permanent. There is nothing left to wrap: the struct always holds the user's answer.
                 if ( viewChanged )
-                {
-                    // THE USER'S ANSWER IS SAVED, NEVER THE SUPPRESSION. `Save()` writes the whole
-                    // preferences struct, so toggling any flag while 2D mode holds ShowGrid at false would
-                    // make that false PERMANENT — the user's grid would be off for good, in every scene,
-                    // because they once edited a canvas. The same trap existed before К2 and was worse: the
-                    // suppression lived in SceneSettings, so any Ctrl+S wrote it into the LEVEL.
-                    const bool live = view.ShowGrid;
-                    if ( m_UIMode )
-                        view.ShowGrid = m_SavedShowGrid;
                     EditorPreferences::Save();
-                    view.ShowGrid = live;
-                }
 
                 ImGui::Separator();
                 ImGui::TextDisabled( "Scene" );
@@ -714,12 +733,9 @@ namespace Desert::Editor
                     default:
                         break; // VM_Lit
                 }
-                // Same guard as the Show popup: never let 2D mode's forced-off grid reach editor.json.
-                const bool live = view.ShowGrid;
-                if ( m_UIMode )
-                    view.ShowGrid = m_SavedShowGrid;
+                // No guard, for the same reason as the Show popup above: a viewport mode no longer has a
+                // field in the struct this writes.
                 EditorPreferences::Save();
-                view.ShowGrid = live;
             }
             ImGui::PopStyleVar();
             if ( ImGui::IsItemHovered() )
@@ -1062,7 +1078,9 @@ namespace Desert::Editor
                                           m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y );
 
         // Corner XYZ orientation triad — a 3D aid, so hide it in 2D UI mode (like Unity's 2D scene view).
-        if ( !m_UIMode )
+        // THE MODEL THE GRID NOW FOLLOWS: the mode decides what it draws at the moment it draws it and
+        // stores the decision nowhere, so no save can find it and no call site can forget to fence it.
+        if ( !m_Modes.UI2D )
             DrawViewAxisGizmo( m_ViewportData.ViewportPos, m_ViewportData.Size );
 
         // Perf HUD (View -> Perf HUD): FPS + frame graph + top CPU scopes, useful in Play too.
