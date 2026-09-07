@@ -77,40 +77,21 @@ namespace
         return text;
     }
 
-    // A CHARACTER LITERAL HOLDING A QUOTE EATS THE REST OF THE FILE, and this cost an afternoon before it
-    // was found. `ConsumerText::StripCommentsAndLiterals` knows about `"…"` and about comments and NOT
-    // about `'…'`, so the perfectly ordinary `c.Peek() == '"'` in DShaderParser.cpp opened a string
-    // literal that ran to the next quote hundreds of lines away — and every field written in between was
-    // reported as never touched by the parser. Six rows of this census went red for a defect in the
-    // census. Char literals are blanked first, so the shared stripper only ever sees quotes that really
-    // open strings.
+    // A CHARACTER LITERAL HOLDING A QUOTE ONCE ATE THE REST OF THE FILE, and this cost М9 an afternoon.
+    // `ConsumerText::StripCommentsAndLiterals` knew about `"…"` and about comments and NOT about `'…'`,
+    // so the perfectly ordinary `c.Peek() == '"'` in DShaderParser.cpp opened a string literal that ran
+    // to the next quote hundreds of lines away — and every field written in between was reported as never
+    // touched by the parser. Six rows of this census went red for a defect in the census.
     //
-    // IT IS A HAZARD FOR THE SUITE NEXT DOOR TOO: any consumer file SettingConsumers names that contains
-    // a `'"'` has the same hole, and its reads after that point are invisible. Reported rather than
-    // fixed there, because that suite's rows are not М9's to re-verify.
-    std::string BlankCharLiterals( const std::string& src )
-    {
-        std::string out = src;
-        for ( std::size_t i = 0; i + 2 < out.size(); ++i )
-        {
-            if ( out[i] != '\'' )
-                continue;
-            const std::size_t end = out[i + 1] == '\\' ? i + 3 : i + 2;
-            if ( end < out.size() && out[end] == '\'' )
-            {
-                for ( std::size_t j = i; j <= end; ++j )
-                    out[j] = ' ';
-                i = end;
-            }
-        }
-        return out;
-    }
-
-    /// Comments and string literals gone, char literals neutralised first. The one entry point, so no
-    /// caller of this file can forget the hazard above.
+    // М9 worked around it HERE, with a pre-pass that blanked character literals before handing the text
+    // to the shared stripper, and said in this comment that the suite next door had the same hole. Д33
+    // fixed the shared stripper instead — character literals, raw strings and encoding prefixes are all
+    // part of it now, and each form is pinned by a table in `SettingConsumers`. The pre-pass is gone
+    // rather than kept as a belt-and-braces second layer: two places that both decide what a literal is
+    // are two places that can disagree, and the workaround was itself blind to raw strings.
     std::string Strip( const std::string& src )
     {
-        return CT::StripCommentsAndLiterals( BlankCharLiterals( src ) );
+        return CT::StripCommentsAndLiterals( src );
     }
 
     // ---- Enumerating a struct's data members out of its header -----------------------------------

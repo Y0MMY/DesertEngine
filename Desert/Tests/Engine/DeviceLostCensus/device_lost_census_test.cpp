@@ -27,6 +27,8 @@
 // string literals are stripped first, and "statement position" is decided from the preceding token rather
 // than from indentation.
 
+#include "../SettingConsumers/setting_consumers_reader.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -44,7 +46,9 @@ namespace
 
     // Walks up from the working directory looking for a file only the repository has. Copied in shape from
     // AssetReferenceCensus, which needs the same thing for the same reason: the runner's working directory
-    // is not fixed. (The suites share no header; copy-paste is the convention this directory follows.)
+    // is not fixed. THIS ONE is still copy-pasted on purpose: each census probes a DIFFERENT sentinel
+    // file, so a shared version would need the sentinel as a parameter and would say less than the
+    // three lines it replaced. The text READER is a different matter and is shared (Д33).
     std::string RepoRoot()
     {
         std::string prefix = "./";
@@ -66,52 +70,19 @@ namespace
         return buffer.str();
     }
 
-    // Replaces comments and string literals with spaces, keeping every newline so line numbers survive. A
-    // census that counted the calls named in comments would report defects that are prose, and this file is
-    // full of prose naming Vulkan calls.
+    // Replaces comments and literals with spaces, keeping every newline so line numbers survive. A census
+    // that counted the calls named in comments would report defects that are prose, and this file is full
+    // of prose naming Vulkan calls.
+    //
+    // Д33: THIS WAS A PRIVATE COPY OF THE READER NEXT DOOR, byte for byte the same as PureVirtualCensus's,
+    // and all three copies shared one hole — a character literal holding a quote (`c.Peek() == '"'`) opened
+    // a string that ran to the next quote hundreds of lines away, deleting every call in between. Measured
+    // on this census's own scope (Engine/Graphic, 259 files) the hole happened to be EMPTY today, so
+    // nothing here was ever mis-counted; it stays fixed by construction rather than by luck, which is the
+    // whole reason to have one reader instead of three.
     std::string StripCommentsAndStrings( const std::string& src )
     {
-        std::string out;
-        out.reserve( src.size() );
-        for ( std::size_t i = 0; i < src.size(); )
-        {
-            if ( src.compare( i, 2, "//" ) == 0 )
-            {
-                while ( i < src.size() && src[i] != '\n' )
-                {
-                    out.push_back( ' ' );
-                    ++i;
-                }
-            }
-            else if ( src.compare( i, 2, "/*" ) == 0 )
-            {
-                const std::size_t end = src.find( "*/", i + 2 );
-                const std::size_t to  = end == std::string::npos ? src.size() : end + 2;
-                for ( ; i < to; ++i )
-                    out.push_back( src[i] == '\n' ? '\n' : ' ' );
-            }
-            else if ( src[i] == '"' )
-            {
-                out.push_back( ' ' );
-                ++i;
-                while ( i < src.size() && src[i] != '"' )
-                {
-                    out.push_back( src[i] == '\n' ? '\n' : ' ' );
-                    i += src[i] == '\\' ? 2 : 1;
-                }
-                if ( i < src.size() )
-                {
-                    out.push_back( ' ' );
-                    ++i;
-                }
-            }
-            else
-            {
-                out.push_back( src[i] );
-                ++i;
-            }
-        }
-        return out;
+        return Desert::Tests::ConsumerText::StripCommentsAndLiterals( src );
     }
 
     bool IsIdentChar( char c )
