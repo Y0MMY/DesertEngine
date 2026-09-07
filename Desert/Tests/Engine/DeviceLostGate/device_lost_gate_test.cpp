@@ -48,14 +48,14 @@ namespace
     // The frame loop, in the order the recorded crash walked it. Each entry is a point that would issue
     // device work; `AllowWork()` is what each of them asks before doing so.
     const char* const k_FrameSequence[] = {
-         "VulkanQueue::PrepareFrame",            // vkResetFences  <- "pFences[0] is in use"
-         "VulkanSwapChain::AcquireNextImage",    // vkAcquireNextImageKHR <- "Semaphore must not have..."
-         "VulkanSwapChain::OnResize",            // the rebuild
-         "VulkanSwapChain::CreateSwapChain",     // vkCreateSwapchainKHR <- the abort, at line 165
-         "VulkanRendererAPI::BeginFrame",        // vkBeginCommandBuffer
-         "VulkanQueue::Submit",                  // vkQueueSubmit
-         "VulkanQueue::Present",                 // vkQueuePresentKHR + vkWaitForFences
-         "VulkanRendererAPI::WaitDeviceIdle",    // vkDeviceWaitIdle
+         "VulkanQueue::PrepareFrame",         // vkResetFences  <- "pFences[0] is in use"
+         "VulkanSwapChain::AcquireNextImage", // vkAcquireNextImageKHR <- "Semaphore must not have..."
+         "VulkanSwapChain::OnResize",         // the rebuild
+         "VulkanSwapChain::CreateSwapChain",  // vkCreateSwapchainKHR <- the abort, at line 165
+         "VulkanRendererAPI::BeginFrame",     // vkBeginCommandBuffer
+         "VulkanQueue::Submit",               // vkQueueSubmit
+         "VulkanQueue::Present",              // vkQueuePresentKHR + vkWaitForFences
+         "VulkanRendererAPI::WaitDeviceIdle", // vkDeviceWaitIdle
     };
 
     // Runs the sequence and answers how many of its steps were allowed to issue work.
@@ -115,8 +115,8 @@ TEST( DeviceLostGate, TheHumanIsToldOnceNoMatterHowManyPlacesNoticed )
     // advance: the submit, the fence reset, the acquire, the present, the driver's own callback.
     EXPECT_TRUE( DeviceLost::Report( "the Vulkan driver's own debug callback", "Lost VkDevice after ..." ) );
     EXPECT_FALSE( DeviceLost::Report( "VulkanQueue::PrepareFrame / vkResetFences", "VK_ERROR_DEVICE_LOST" ) );
-    EXPECT_FALSE( DeviceLost::Report( "VulkanSwapChain::CreateSwapChain / vkCreateSwapchainKHR",
-                                      "VK_ERROR_DEVICE_LOST" ) );
+    EXPECT_FALSE(
+         DeviceLost::Report( "VulkanSwapChain::CreateSwapChain / vkCreateSwapchainKHR", "VK_ERROR_DEVICE_LOST" ) );
     EXPECT_FALSE( DeviceLost::Report( "VulkanQueue::Present / vkQueuePresentKHR", "VK_ERROR_DEVICE_LOST" ) );
 
     // ONE explanation, from the FIRST reporter. The twenty consequence lines are exactly what sent a

@@ -246,7 +246,6 @@ namespace Desert::Platform::Windows
         return Graphic::Renderer::GetInstance().PresentFinalImage();
     }
 
-
     Common::BoolResultStr WindowsWindow::PrepareNextFrame() const
     {
         return EngineContext::GetInstance().GetRendererContext()->BeginFrame();

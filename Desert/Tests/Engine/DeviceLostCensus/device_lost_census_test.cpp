@@ -181,8 +181,8 @@ namespace
            "VulkanSwapChain::AcquireNextImage", "vkAcquireNextImageKHR" },
          { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanSwapChain.cpp",
            "VulkanSwapChain::RecordFrameCapture", "a staging allocation and an image copy" },
-         { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanRenderer.cpp",
-           "VulkanRendererAPI::BeginFrame", "vkBeginCommandBuffer -- and every vkCmd* after it" },
+         { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanRenderer.cpp", "VulkanRendererAPI::BeginFrame",
+           "vkBeginCommandBuffer -- and every vkCmd* after it" },
          { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanRenderer.cpp", "VulkanRendererAPI::EndFrame",
            "vkEndCommandBuffer" },
          { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanRenderer.cpp",
@@ -195,8 +195,8 @@ namespace
            "CommandBufferAllocator::RT_AllocateCommandBufferGraphic", "vkAllocateCommandBuffers" },
          { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/CommandBufferAllocator.cpp",
            "CommandBufferAllocator::RT_GetCommandBufferCompute", "vkAllocateCommandBuffers" },
-         { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanDevice.cpp",
-           "VulkanLogicalDevice::WaitIdle", "vkDeviceWaitIdle" },
+         { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanDevice.cpp", "VulkanLogicalDevice::WaitIdle",
+           "vkDeviceWaitIdle" },
          { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanDevice.cpp",
            "VulkanLogicalDevice::SavePipelineCache", "vkGetPipelineCacheData" },
     };
@@ -237,8 +237,7 @@ namespace
          { "VulkanContext.cpp", "vkEnumerateInstanceLayerProperties", 2, "dropped: startup enumeration" },
          { "VulkanDevice.cpp", "vkEnumeratePhysicalDevices", 2, "dropped: startup enumeration" },
          { "VulkanDevice.cpp", "vkEnumerateDeviceExtensionProperties", 2, "dropped: startup enumeration" },
-         { "VulkanSwapChain.cpp", "vkGetPhysicalDeviceSurfacePresentModesKHR", 2,
-           "dropped: startup enumeration" },
+         { "VulkanSwapChain.cpp", "vkGetPhysicalDeviceSurfacePresentModesKHR", 2, "dropped: startup enumeration" },
          { "VulkanSwapChain.cpp", "vkGetPhysicalDeviceSurfaceFormatsKHR", 2, "dropped: startup enumeration" },
 
          // Teardown waits. All three are already behind DeviceLost::AllowWork(), so on a lost device they
@@ -270,8 +269,8 @@ namespace
         std::vector<Found> found;
         const fs::path     base = fs::path( root ) / "Desert/Desert/Source/Engine/Graphic";
         std::error_code    ec;
-        for ( auto it = fs::recursive_directory_iterator( base, ec );
-              it != fs::recursive_directory_iterator(); ++it )
+        for ( auto it = fs::recursive_directory_iterator( base, ec ); it != fs::recursive_directory_iterator();
+              ++it )
         {
             if ( ec )
                 break;
@@ -310,14 +309,15 @@ namespace
                 // control-flow condition (`if ( x ) vkFoo();` has no braces and is still statement
                 // position). Anything else means somebody is consuming the value.
                 std::size_t k = i;
-                while ( k > 0 && ( src[k - 1] == ' ' || src[k - 1] == '\n' || src[k - 1] == '\t' ||
-                                   src[k - 1] == '\r' ) )
+                while ( k > 0 &&
+                        ( src[k - 1] == ' ' || src[k - 1] == '\n' || src[k - 1] == '\t' || src[k - 1] == '\r' ) )
                     --k;
-                if ( k == 0 || src[k - 1] == ';' || src[k - 1] == '{' || src[k - 1] == '}' ||
-                     src[k - 1] == ')' || ( k >= 4 && src.compare( k - 4, 4, "else" ) == 0 ) )
+                if ( k == 0 || src[k - 1] == ';' || src[k - 1] == '{' || src[k - 1] == '}' || src[k - 1] == ')' ||
+                     ( k >= 4 && src.compare( k - 4, 4, "else" ) == 0 ) )
                 {
-                    found.push_back( { p.filename().string(), name,
-                                       1 + static_cast<int>( std::count( src.begin(), src.begin() + i, '\n' ) ) } );
+                    found.push_back(
+                         { p.filename().string(), name,
+                           1 + static_cast<int>( std::count( src.begin(), src.begin() + i, '\n' ) ) } );
                 }
                 i = e;
             }
@@ -350,9 +350,8 @@ TEST( DeviceLostCensus, VkCheckResultCannotAbortOnALostDevice )
     const std::string root = RepoRoot();
     ASSERT_FALSE( root.empty() );
 
-    const std::string helper =
-         ReadAll( fs::path( root ) /
-                  "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp" );
+    const std::string helper = ReadAll(
+         fs::path( root ) / "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp" );
 
     // The exact condition, not merely "the file mentions NoteIfDeviceLost somewhere". This is the line the
     // process died on, and the shape of it is the fix: a failed result reaches DESERT_VERIFY only when it
@@ -371,8 +370,9 @@ TEST( DeviceLostCensus, VkCheckResultCannotAbortOnALostDevice )
         const std::size_t next = helper.find( "#define ", at + 8 );
         const std::string body = helper.substr( at, ( next == std::string::npos ? helper.size() : next ) - at );
         EXPECT_NE( body.find( "NoteIfDeviceLost(" ), std::string::npos )
-             << macroName << " swallows a device loss without latching it, so the first place to meet the "
-                             "loss would not be the place that reports it.";
+             << macroName
+             << " swallows a device loss without latching it, so the first place to meet the "
+                "loss would not be the place that reports it.";
     }
 }
 
@@ -403,9 +403,8 @@ TEST( DeviceLostCensus, TheDroppedResultCensusStillHoldsAndCanOnlyShrink )
              << " and throws away what it returns, with no row in the census saying why that is all right. "
                 "Either read the result or add a row with a reason.";
         if ( it != expected.end() )
-            EXPECT_EQ( count, it->second )
-                 << key.first << " now has " << count << " statement-position calls to " << key.second
-                 << ", the census says " << it->second;
+            EXPECT_EQ( count, it->second ) << key.first << " now has " << count << " statement-position calls to "
+                                           << key.second << ", the census says " << it->second;
     }
     for ( const auto& [key, count] : expected )
     {

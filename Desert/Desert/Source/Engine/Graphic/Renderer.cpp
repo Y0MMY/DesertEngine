@@ -110,7 +110,6 @@ namespace Desert::Graphic
         return s_RendererAPI->PresentFinalImage();
     }
 
-
     void Renderer::SubmitFullscreenQuad( const GraphicsPipeline* pipeline, const MaterialExecutor* materialExecutor )
     {
         s_RendererAPI->SubmitFullscreenQuad( pipeline, materialExecutor );

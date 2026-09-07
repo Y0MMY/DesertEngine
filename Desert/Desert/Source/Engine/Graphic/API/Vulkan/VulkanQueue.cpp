@@ -125,8 +125,7 @@ namespace Desert::Graphic::API::Vulkan
 
         Engine::FrameManager::GetInstance().NextFrame();
         uint32_t       newCurrentFrame = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
-        const VkResult waited =
-             vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE, UINT64_MAX );
+        const VkResult waited = vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE, UINT64_MAX );
         if ( waited != VK_SUCCESS )
         {
             // Also previously unchecked. A dropped result here is worse than most: this is the ONE place

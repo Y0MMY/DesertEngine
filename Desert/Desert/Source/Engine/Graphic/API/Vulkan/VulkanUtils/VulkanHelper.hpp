@@ -51,7 +51,7 @@ namespace Desert::Graphic::API::Vulkan
         {                                                                                                         \
             (void)NoteIfDeviceLost( res, #f, __FILE__, __LINE__ );                                                \
             LOG_ERROR( "VkResult is '{}' in {}:{}", VkResultToString( res ), __FILE__, __LINE__ );                \
-            return Common::MakeFormattedError<bool>( "VkResult is '{}' in {}:{}", VkResultToString( res ),         \
+            return Common::MakeFormattedError<bool>( "VkResult is '{}' in {}:{}", VkResultToString( res ),        \
                                                      __FILE__, __LINE__ );                                        \
         }                                                                                                         \
     }
