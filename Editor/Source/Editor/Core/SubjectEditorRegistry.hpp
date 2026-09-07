@@ -38,25 +38,22 @@ namespace Desert::Editor
     class SubjectEditorRegistry
     {
     public:
-        // Builds the document window for one subject. Given only the subject: everything else the editor
-        // needs (the asset manager, the scene, the shape of the window) belongs to whatever registers the
-        // factory, captured there once instead of threaded through this call.
-        //
-        // This is the REACH half of what a subject is (EditorSubject.hpp): the identity is data anyone can
-        // hold, and turning it back into typed authored data is knowledge only the registrant has.
+        // Builds the document window for one subject — see Registration::Make.
         using Factory = std::function<std::unique_ptr<ISubjectDocument>( const SubjectId& )>;
 
         // "Is there something under this subject to open?" — see Registration::Exists.
         using Presence = std::function<bool( const SubjectId& )>;
 
         // WHAT ONE LINE OF REGISTRATION SAYS. Everything the editor needs to know about a kind of subject
-        // that is not the document itself: what to call it, what to draw beside it, and how to build it.
+        // that is not the document itself: what to call it, what to draw beside it, how to build one, and
+        // how to tell whether there is one there to build.
         //
         // GROUPED, and that is not tidiness. The name and the icon used to live in two hand-written tables
         // in EditorLayer.cpp keyed on Assets::AssetTypeID — one `switch` for the icon and one call to
         // AssetTypeName for the text — so adding a kind of document meant three edits in three files and
-        // the two that were not the registration are the ones that got forgotten. Here a kind that is
-        // registered HAS a name and an icon, by construction.
+        // the two that were not the registration are the ones that got forgotten. All four fields are
+        // REQUIRED and an incomplete registration is refused by name: a half-registered kind is the stub
+        // this project's contract forbids, and it would surface as a wrong window rather than an error.
         struct Registration
         {
             // What a log, a refusal census and the control channel call this kind of subject — "Material",

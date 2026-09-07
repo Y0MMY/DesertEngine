@@ -314,7 +314,7 @@ TEST( DocumentSlotLease, ClosingEveryDocumentLeavesOnlyTheViewport )
 TEST( DocumentSlotLease, ACpuDrawnDocumentIsNotPendingDemand )
 {
     // The four cloud documents bake on the CPU: they hold no slot and never will, so counting them as
-    // claims would refuse a window that costs nothing. The rule lives in AssetEditorRegistry.hpp and is
+    // claims would refuse a window that costs nothing. The rule lives in SubjectEditorRegistry.hpp and is
     // asserted here against the OWNER the editor now asks, rather than against the panel list it used to.
     DocumentWell well;
     auto&        cpu = static_cast<FakeDocument&>(

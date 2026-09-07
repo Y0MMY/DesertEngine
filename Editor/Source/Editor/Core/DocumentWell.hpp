@@ -38,7 +38,7 @@ namespace Desert::Editor
     // compiled by no suite, scripts/CI/UnreachedSources.sh).
 
     // The visible half of a document's name. A document's panel name is "<display>###doc<subject>"
-    // (AssetDocumentTitle), and every place that shows one to a person wants the part before the "###":
+    // (DocumentTitle), and every place that shows one to a person wants the part before the "###":
     // a user closes a window titled "M_Crate_Painted", not one titled
     // "M_Crate_Painted###docasset:2:3333333333333333333". One function rather than the three separate
     // find-and-erase copies this rule used to have.

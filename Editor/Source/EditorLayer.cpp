@@ -2118,11 +2118,12 @@ namespace Desert::Editor
         // WITH A NAMED REASON. Three different causes now queue a close, and a user whose window vanished
         // is owed which one it was; ServiceDocumentCloses prints it.
         //
-        // ASKED EVERY FRAME, and it has to be: there is no one deletion event that covers an asset leaving
-        // the manager, an entity destroyed in any open scene, and a scene closed out from under a document.
-        // A subscription to one of the four would be worse than none, because the other three would look
-        // handled. The cost is one resolution per open document per frame — the same resolution each
-        // document performs to draw itself, and there are rarely more than six.
+        // ASKED EVERY FRAME, and it has to be. There are FOUR ways a subject dies and no single event
+        // covers them: an asset leaves the manager, an entity is destroyed, a COMPONENT is removed from an
+        // entity that survives, or the scene a document was opened over is closed. A subscription to one
+        // of the four would be worse than none, because the other three would then look handled. The cost
+        // is one resolution per open document per frame — the same resolution each document already
+        // performs to draw itself, and there are rarely more than six of them.
         std::vector<SubjectId> dead;
         for ( const auto& document : m_Documents )
             if ( !document->IsSubjectAlive() )
