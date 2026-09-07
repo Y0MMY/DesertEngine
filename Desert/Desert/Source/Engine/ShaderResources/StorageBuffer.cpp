@@ -4,6 +4,8 @@
 
 #include <Engine/ShaderResources/API/Vulkan/VulkanStorageBuffer.hpp>
 
+#include <Common/Core/Logger.hpp>
+
 #include <numeric>
 
 namespace Desert::ShaderResources
@@ -17,7 +19,28 @@ namespace Desert::ShaderResources
             case Graphic::RendererAPIType::None:
                 return nullptr;
             case Graphic::RendererAPIType::Vulkan:
-                return std::make_shared<API::Vulkan::VulkanStorageBuffer>( debugName, size, binding, persistent );
+            {
+                // A BUFFER THAT DID NOT BUILD DOES NOT LEAVE THIS FUNCTION. Its constructor allocates and
+                // maps every copy, and since Г13 it refuses as a whole rather than skipping the copy it
+                // could not make — so an object that failed has no device buffer, no mapping and no
+                // descriptor to offer, and every caller in the engine already tests this result for null
+                // (`if ( !m_ParamsBuffer ) return Common::MakeError( ... )`). Handing one back would put
+                // the failure at the descriptor write instead of here, where the size and the name are.
+                //
+                // The RendererAPIType::None arm above already returns nullptr, so null is inside this
+                // function's declared contract rather than a new outcome.
+                auto buffer =
+                     std::make_shared<API::Vulkan::VulkanStorageBuffer>( debugName, size, binding, persistent );
+                const auto usable = buffer->EnsureMapped();
+                if ( !usable.IsSuccess() )
+                {
+                    LOG_ERROR( "[StorageBuffer] '{}' ({} bytes, binding {}) is not usable and was not "
+                               "created: {}",
+                               debugName, size, binding, usable.GetError() );
+                    return nullptr;
+                }
+                return buffer;
+            }
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
         return nullptr;

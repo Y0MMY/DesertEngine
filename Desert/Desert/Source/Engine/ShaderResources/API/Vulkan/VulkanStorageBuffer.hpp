@@ -47,7 +47,22 @@ namespace Desert::ShaderResources::API::Vulkan
         // ask about another frame gets a silently wrong buffer.
         const VkDescriptorBufferInfo& GetDescriptorBufferInfo( uint32_t frameIndex ) const
         {
-            return m_DescriptorInfos[CopyIndex( frameIndex )];
+            // BOUNDS-CHECKED, because RT_Invalidate can now leave this array EMPTY. It refuses as a
+            // whole and releases what it had (Г13) rather than publishing a descriptor for a copy that
+            // was never allocated — which means an unbuilt buffer has no descriptors at all, and the
+            // unchecked subscript that stood here would read past the end of an empty vector.
+            //
+            // A zeroed VkDescriptorBufferInfo is the same value `dev` published for a failed copy, so
+            // this is not a new silence; what has changed is that reaching it now takes a buffer whose
+            // factory refused to hand it out (StorageBuffer::Create returns nullptr for one that did
+            // not build) or whose Grow refused after the fact and said so in the log.
+            const uint32_t copy = CopyIndex( frameIndex );
+            if ( copy >= m_DescriptorInfos.size() )
+            {
+                static const VkDescriptorBufferInfo none{};
+                return none;
+            }
+            return m_DescriptorInfos[copy];
         }
 
         virtual const void* GetData() const override

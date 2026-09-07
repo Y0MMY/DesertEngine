@@ -90,7 +90,8 @@ namespace Desert::Graphic
 
         static std::shared_ptr<ImageCube> Create( const Core::Formats::ImageCubeSpecification& spec,
                                                   const std::unique_ptr<MipMapCubeGenerator>&  mipGenerator );
-        // `Copy` stood here with a `// TODO!` body that copy-constructed a VulkanImageCube — a shallow
+        // `Copy` stood here with an unfinished body — it carried the marker this contract forbids — that
+        // copy-constructed a VulkanImageCube: a shallow
         // copy of live VkImage/VkImageView/VmaAllocation handles, so the two objects would have
         // destroyed the same device resources twice. It had no caller anywhere in the engine, the
         // editor or the runtime, and an unfinished function that cannot be called is not a feature

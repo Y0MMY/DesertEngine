@@ -137,21 +137,35 @@ namespace Desert::ShaderResources::API::Vulkan
         m_Size                  = newSize;
 
         const auto rebuilt = RT_Invalidate();
-        if ( !rebuilt.IsSuccess() )
+        if ( rebuilt.IsSuccess() )
         {
-            // THE SIZE GOES BACK, and that matters more than it looks: RT_Invalidate has already
-            // released everything, so leaving m_Size at the value that could not be allocated would make
-            // every later write compare itself against a capacity the object does not have and never
-            // will. m_Built carries the refusal; the size carries the truth about what was last built.
-            m_Size  = previous;
-            m_Built = Common::MakeFormattedError<bool>( "storage buffer '{}' could not grow from {} to {} "
-                                                        "bytes: {}",
-                                                        m_BufferName, previous, newSize, rebuilt.GetError() );
+            m_Built = BOOLSUCCESS;
             return m_Built;
         }
 
-        m_Built = BOOLSUCCESS;
-        return m_Built;
+        // THE OLD SIZE IS PUT BACK AND THE OLD BUFFER REBUILT, rather than leaving the object empty.
+        // RT_Invalidate refuses as a whole and releases what it had, so a failed growth would otherwise
+        // destroy a buffer that was working perfectly at its previous size — a write asking for more
+        // room than the device can spare would take the buffer's EXISTING contents down with it, which
+        // is a far worse outcome than refusing the one oversized write.
+        m_Size                 = previous;
+        const auto restoration = RT_Invalidate();
+        if ( restoration.IsSuccess() )
+        {
+            // Braced, and not because of style: `BOOLSUCCESS` is a macro that ENDS IN A SEMICOLON, so an
+            // unbraced `m_Built = BOOLSUCCESS;` here expands to two statements and detaches the `else`.
+            m_Built = BOOLSUCCESS; // the WRITE is what was refused, not the buffer
+        }
+        else
+        {
+            m_Built = Common::MakeFormattedError<bool>(
+                 "storage buffer '{}' could not grow to {} bytes ({}) and could not be rebuilt at {} "
+                 "either: {}",
+                 m_BufferName, newSize, rebuilt.GetError(), previous, restoration.GetError() );
+        }
+
+        return Common::MakeFormattedError<bool>( "storage buffer '{}' could not grow from {} to {} bytes: {}",
+                                                 m_BufferName, previous, newSize, rebuilt.GetError() );
     }
 
     Common::BoolResultStr VulkanStorageBuffer::SetData( const void* data, uint32_t size, uint32_t offset )

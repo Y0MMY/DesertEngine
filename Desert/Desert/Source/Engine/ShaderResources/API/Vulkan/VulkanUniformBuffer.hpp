@@ -27,7 +27,16 @@ namespace Desert::ShaderResources::API::Vulkan
         // way — the two used to disagree about whether this argument meant anything.
         const VkDescriptorBufferInfo& GetDescriptorBufferInfo( uint32_t frameIndex ) const
         {
-            return m_DescriptorInfos[CopyIndex( frameIndex )];
+            // Bounds-checked for the reason spelled out on the sibling accessor in
+            // VulkanStorageBuffer.hpp: an unbuilt buffer has no descriptor array at all now that
+            // RT_Invalidate refuses as a whole, and the unchecked subscript read past the end of it.
+            const uint32_t copy = CopyIndex( frameIndex );
+            if ( copy >= m_DescriptorInfos.size() )
+            {
+                static const VkDescriptorBufferInfo none{};
+                return none;
+            }
+            return m_DescriptorInfos[copy];
         }
         virtual const void* GetData() const override
         {
