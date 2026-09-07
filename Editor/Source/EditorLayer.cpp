@@ -2961,15 +2961,13 @@ namespace Desert::Editor
         //
         // Note which one saves and which one does not, because that IS К10: the grid is the USER'S ANSWER
         // and persists on the click; 2D UI mode is a VIEWPORT MODE and persists nowhere at all.
-        commands.push_back( { "View", "Toggle the grid",
-                              []
+        commands.push_back( { "View", "Toggle the grid", []
                               {
                                   auto& view    = EditorPreferences::Get().DebugView;
                                   view.ShowGrid = !view.ShowGrid;
                                   EditorPreferences::Save();
                               } } );
-        commands.push_back( { "View", "Toggle 2D UI mode",
-                              [this]
+        commands.push_back( { "View", "Toggle 2D UI mode", [this]
                               {
                                   if ( m_MainScene )
                                       Editor::ViewportPanel::ToggleUIMode( *m_MainScene );
