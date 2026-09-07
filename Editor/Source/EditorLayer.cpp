@@ -1849,7 +1849,12 @@ namespace Desert::Editor
             const auto& prefs = EditorPreferences::Get();
             sr->SetOutlineSettings( prefs.OutlineColor, prefs.OutlineWidth, prefs.OutlineSmoothness,
                                     prefs.EnableOutline );
-            sr->SetDebugView( prefs.DebugView );
+            // THE USER'S ANSWER, MINUS WHAT THIS SCENE'S VIEWPORTS ARE HIDING RIGHT NOW. `prefs.DebugView`
+            // is what the user chose and what editor.json holds; a viewport MODE (2D UI editing hides the
+            // ground grid) suppresses a flag in the COPY that reaches the renderer and never in the store.
+            // Before К10 the mode wrote the store directly and every unrelated EditorPreferences::Save()
+            // could make the suppression permanent — see Editor/Core/ViewportModes.hpp.
+            sr->SetDebugView( ViewportPanel::EffectiveDebugView( prefs.DebugView, scene ) );
         }
 
         {

@@ -55,6 +55,14 @@ namespace Desert::Graphic
     // preview — renders the lit world and no overlay, without having to remember to turn anything off. The
     // editor pushes its own persisted state (Editor::EditorPreferences::DebugView) into the viewport's
     // renderer every frame, exactly as it already does for the selection outline.
+    //
+    // WHAT IS PUSHED IS NOT ALWAYS WHAT IS STORED, and the difference has an owner. A viewport MODE — 2D
+    // UI editing, which hides the ground grid the way Unity's 2D scene view does — suppresses a flag for
+    // as long as the mode is on. That suppression is applied to a COPY of the persisted state on its way
+    // in (Editor/Core/ViewportModes.hpp), and never to the persisted state itself: it belongs to one
+    // viewport and dies with the toggle, while the stored flag belongs to the user and outlives the
+    // session. К10 exists because the two were once the same field, which made every unrelated save of
+    // the preference file able to write a transient mode into the user's permanent answer.
     struct DebugViewState
     {
         // The editor's infinite ground grid. Drawn by Editor::Render::EditorGridPass, which is compiled

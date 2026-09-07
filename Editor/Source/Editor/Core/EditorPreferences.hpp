@@ -88,6 +88,18 @@ namespace Desert::Editor
         // means here; and it makes one rule — an overlay appears because YOU turned it on — instead of one
         // default per flag. Turning the grid on is one click in the Show popup and it then persists across
         // scenes and sessions, which is strictly more than the old behaviour offered.
+        //
+        // AND IT IS THE USER'S ANSWER AT EVERY INSTANT — never a viewport's idea of what should be visible
+        // right now. К10: the viewport's 2D UI mode used to write `ShowGrid = false` straight into this
+        // struct and park the real answer in a member of the panel, so any of the twenty-odd
+        // EditorPreferences::Save() call sites, fired while 2D mode was on, wrote "this user does not want
+        // a grid" to disk — permanently, in every scene, because they once edited a canvas. К2 fenced the
+        // two save sites that existed then; К8 raised the count of unfenced ones to eleven.
+        //
+        // The rule that replaced the fences: A VIEWPORT MODE MAY NOT HAVE A FIELD IN THIS STRUCT. What a
+        // mode hides is applied to a COPY on the way to the renderer — Editor/Core/ViewportModes.hpp and
+        // ViewportPanel::EffectiveDebugView — so a twelfth save site has nothing to remember.
+        // Desert/Tests/Editor/PreferenceOwnership §7 holds both halves of that line.
         Graphic::DebugViewState DebugView;
 
         // Photogrammetry (Model-from-Photos panel): TOOL-AGNOSTIC external command. Reconstruct: {input} = the
