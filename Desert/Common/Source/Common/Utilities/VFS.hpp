@@ -1,5 +1,8 @@
 #pragma once
 
+#include <Common/Core/Core.hpp>
+#include <Common/Core/ResultStr.hpp>
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -25,10 +28,20 @@ namespace Common::Utils
     class VFS
     {
     public:
-        // Mounts one archive on top of the stack. Returns false when missing/corrupt.
-        static bool MountPak( const std::filesystem::path& pakFile );
-        static bool IsMounted();
-        static void Unmount();
+        // Mounts one archive on top of the stack.
+        //
+        // NO_DISCARD AND A NAMED ERROR, BOTH FOR THE SAME REASON. This returned a bare `bool`, and the
+        // packaged game's own startup path dropped it at both call sites: a damaged patch pak mounted
+        // "successfully", the player kept playing the content the update was supposed to replace, and
+        // there was nothing in the log to find. A discarded result is now a compiler warning in a tree
+        // that builds at zero warnings — the mechanism, not a convention someone has to remember.
+        //
+        // The error text is the reader's own account of WHICH step failed with the actual numbers (see
+        // PakReader::OpenError), because the caller has to put it in front of a player who has no
+        // sources: "missing or corrupt" is not something anyone can act on.
+        NO_DISCARD static Common::BoolResultStr MountPak( const std::filesystem::path& pakFile );
+        static bool                             IsMounted();
+        static void                             Unmount();
 
         static bool                        Exists( const std::filesystem::path& path );
         static std::optional<std::string>  ReadFile( const std::filesystem::path& path );

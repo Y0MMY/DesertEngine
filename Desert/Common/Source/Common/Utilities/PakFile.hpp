@@ -58,11 +58,22 @@ namespace Common::Utils
     class PakReader
     {
     public:
-        // Opens + parses the index. Check IsOpen().
+        // Opens + parses the index. Check IsOpen(), and read OpenError() when it is false.
         explicit PakReader( const std::filesystem::path& pakPath );
 
         bool   IsOpen() const;
         size_t EntryCount() const;
+
+        // WHY the archive did not open, naming the STEP and the actual numbers — "the index is
+        // declared at offset 4194304 but the file is only 1048576 bytes". Empty exactly when
+        // IsOpen().
+        //
+        // This exists because the only thing the caller could say before was "missing or corrupt",
+        // and the person who has to act on it is a player with a shipped game: no sources, no
+        // editor, and one line of text between them and a game that will not start. "Missing" and
+        // "the download stopped two thirds of the way through" call for completely different
+        // actions, and the reader is the only place that knows which one happened.
+        const std::string& OpenError() const;
 
         bool Contains( const std::string& key ) const;
         std::optional<uint64_t> EntrySize( const std::string& key ) const;
@@ -70,6 +81,10 @@ namespace Common::Utils
         std::optional<uint64_t> EntryHash( const std::string& key ) const;
 
         // Reads one entry (opens its own stream — safe to call from any thread).
+        //
+        // VERIFIES THE ENTRY'S CONTENT HASH before handing the bytes back (v2 archives; v1 has no
+        // hash column and is read unverified). A mismatch logs the key, the archive and both hashes
+        // and returns nullopt — corrupt content is a failed read, never a successful one.
         std::optional<std::string> Read( const std::string& key ) const;
 
         // Keys under the given prefix ("Cooked/Meshes"); prefix "" = everything.
@@ -85,6 +100,8 @@ namespace Common::Utils
 
         std::filesystem::path                 m_Path;
         std::unordered_map<std::string, Span> m_Index;
-        bool                                  m_Ok = false;
+        std::string                           m_OpenError;
+        bool                                  m_Ok        = false;
+        bool                                  m_HasHashes = false; // false for a v1 archive
     };
 } // namespace Common::Utils

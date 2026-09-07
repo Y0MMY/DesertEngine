@@ -162,7 +162,8 @@ TEST( PackagedContent, BuildContentPakPacksWhatTheScannersFind )
                                          Desert::Editor::kPackagedAssetsRoot + "\",\"DefaultScene\":\"\"}" );
 
     fs::current_path( pkg );
-    ASSERT_TRUE( Common::Utils::VFS::MountPak( pkg / "Content.dpak" ) );
+    const auto mounted = Common::Utils::VFS::MountPak( pkg / "Content.dpak" );
+    ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
     ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( pkg / "Game.deproj" ).string() ) );
 
     // The scanners' own enumeration: roots from ServiceScanRoots, both halves via ListFilesRecursive.
@@ -248,7 +249,8 @@ TEST( PackagedContent, CookedArtifactsTravelFromThePackagerToTheRuntimeLookup )
     WriteFile( pkg / "Game.deproj", std::string( "{\"Name\":\"T\",\"AssetsRoot\":\"" ) +
                                          Desert::Editor::kPackagedAssetsRoot + "\",\"DefaultScene\":\"\"}" );
     fs::current_path( pkg );
-    ASSERT_TRUE( Common::Utils::VFS::MountPak( pkg / "Content.dpak" ) );
+    const auto mounted = Common::Utils::VFS::MountPak( pkg / "Content.dpak" );
+    ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
     ASSERT_TRUE( Desert::Project::ProjectContext::Open( ( pkg / "Game.deproj" ).string() ) );
 
     // The runtime's own lookups, byte for byte, with no loose Cooked/ anywhere.

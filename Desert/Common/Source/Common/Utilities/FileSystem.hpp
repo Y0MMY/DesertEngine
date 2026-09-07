@@ -54,9 +54,12 @@ namespace Common::Utils
         // `ExtractValue()` hand back a default-constructed T when the result is an error, so an
         // unchecked unwrap still compiles and still yields the silent emptiness §1.4 forbids — one
         // method call away, with no diagnostic. Do not read "returns a Result" as "the compiler has
-        // checked this for you"; the check is still yours to write. (`[[nodiscard]]` below catches
-        // only a wholly discarded call, and even that is silent in this workspace, which builds
-        // every target with -w — see BuildScripts/Workspace.lua.)
+        // checked this for you"; the check is still yours to write. `[[nodiscard]]` below catches
+        // only a WHOLLY discarded call — but it does now catch that one: this comment used to end
+        // "and even that is silent in this workspace, which builds every target with -w", which
+        // stopped being true on 2026-09-06 when Workspace.lua replaced `warnings "Off"` with
+        // `warnings "Extra"`. Verified 2026-09-07 by discarding a NO_DISCARD result on purpose and
+        // watching -Wunused-result fire, so the attribute is a real gate now and worth reaching for.
         //
         // It does end the old ambiguity this comment used to have to explain away — a genuinely
         // zero-byte file is a SUCCESS holding an empty value, a missing file is an error, and the
@@ -86,9 +89,11 @@ namespace Common::Utils
         // showed a green "Saved 'X'" toast for a scene that had not been written. Two write primitives
         // meant every new call site was a coin toss between the safe one and the silent one, so the
         // silent one is gone rather than deprecated, and its NAME is gone with it: changing only the
-        // return type would have left every old call site compiling (a discarded return is legal, and
-        // this workspace builds with -w so even [[nodiscard]] is mute). Removing the name is what made
-        // the COMPILER, rather than the eye, find all twenty-eight.
+        // return type would have left every old call site compiling, because at the time this
+        // workspace built with -w and even [[nodiscard]] was mute. (That has since changed —
+        // `warnings "Extra"` landed 2026-09-06 — so the same migration today would also have had the
+        // attribute behind it. Removing the name is still what made the COMPILER, rather than the
+        // eye, find all twenty-eight, and a warning would not have been an error.)
         //
         // On failure the result names which step failed and where, and the file on disk is unchanged —
         // the caller owns the policy (a tool counts the file as failed and exits non-zero; the editor

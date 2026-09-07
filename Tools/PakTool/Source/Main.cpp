@@ -73,7 +73,10 @@ namespace
         Common::Utils::PakReader reader( pakPath );
         if ( !reader.IsOpen() )
         {
-            std::fprintf( stderr, "PakTool: cannot open %s\n", pakPath.string().c_str() );
+            // WITH THE REASON. This tool is what a developer runs to find out why a shipped archive
+            // will not mount, and "cannot open" answered that question with the question.
+            std::fprintf( stderr, "PakTool: cannot open %s: %s\n", pakPath.string().c_str(),
+                          reader.OpenError().c_str() );
             return 1;
         }
         for ( const auto& key : reader.KeysWithPrefix( "" ) )
@@ -88,7 +91,8 @@ namespace
         Common::Utils::PakReader reader( pakPath );
         if ( !reader.IsOpen() )
         {
-            std::fprintf( stderr, "PakTool: cannot open %s\n", pakPath.string().c_str() );
+            std::fprintf( stderr, "PakTool: cannot open %s: %s\n", pakPath.string().c_str(),
+                          reader.OpenError().c_str() );
             return 1;
         }
 
@@ -124,8 +128,9 @@ namespace
         Common::Utils::PakReader newer( newPath );
         if ( !base.IsOpen() || !newer.IsOpen() )
         {
-            std::fprintf( stderr, "PakTool: cannot open %s\n",
-                          ( base.IsOpen() ? newPath : basePath ).string().c_str() );
+            const Common::Utils::PakReader& bad = base.IsOpen() ? newer : base;
+            std::fprintf( stderr, "PakTool: cannot open %s: %s\n",
+                          ( base.IsOpen() ? newPath : basePath ).string().c_str(), bad.OpenError().c_str() );
             return 1;
         }
 

@@ -154,7 +154,8 @@ TEST( FileSystemRead, MissingFileUnderAMountedPakIsStillSoft )
         ASSERT_TRUE( writer.AddData( "Assets/present.txt", other.data(), other.size() ) );
         ASSERT_TRUE( writer.Finalize() > 0 );
     }
-    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Content.dpak" ) );
+    const auto mounted = Common::Utils::VFS::MountPak( dir / "Content.dpak" );
+    ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
 
     EXPECT_FALSE( Common::Utils::FileSystem::ReadFileContent( dir / "Assets/absent.txt" ).IsSuccess() );
     EXPECT_FALSE( Common::Utils::FileSystem::ReadByteFileContent( dir / "Assets/absent.txt" ).IsSuccess() );
@@ -176,7 +177,8 @@ TEST( FileSystemRead, ListFilesRecursiveMergesDiskAndPakAndTheLooseFileWins )
         ASSERT_TRUE( writer.AddData( "Fonts/b.ttf", b.data(), b.size() ) );
         ASSERT_TRUE( writer.Finalize() > 0 );
     }
-    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Content.dpak" ) );
+    const auto mounted = Common::Utils::VFS::MountPak( dir / "Content.dpak" );
+    ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
 
     const auto listed = Common::Utils::FileSystem::ListFilesRecursive( dir / "Fonts" );
     ASSERT_EQ( listed.size(), 2u ); // a.ttf deduplicated across the two halves, b.ttf from the pak
@@ -207,7 +209,8 @@ TEST( FileSystemRead, ListFilesRecursiveResolvesARelativeRootThroughThePak )
 
     CwdGuard cwd;
     fs::current_path( dir );
-    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Content.dpak" ) );
+    const auto mounted = Common::Utils::VFS::MountPak( dir / "Content.dpak" );
+    ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
     ASSERT_FALSE( fs::exists( "Resources/Fonts" ) ); // nothing loose — the pak is the only source
 
     const auto listed = Common::Utils::FileSystem::ListFilesRecursive( "Resources/Fonts/" );

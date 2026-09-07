@@ -143,6 +143,24 @@ namespace Common::Utils
         return filepath.parent_path().string();
     }
 
+    // WHY A FAILED READ IS NOT ALWAYS A MISSING FILE, and why saying so matters. Both read primitives
+    // reach the VFS through an `optional`, which collapses two different events into one empty value:
+    // the archive does not hold this key at all, and the archive holds it but the entry would not come
+    // back. The second became reachable when PakReader started verifying each entry's content hash —
+    // and the log then printed two adjacent lines that contradicted each other, "entry is CORRUPT"
+    // followed by "not in a mounted pak". A middle link restating a specific failure as a generic one
+    // is worse than no message: it sends whoever reads it looking for the wrong thing.
+    //
+    // Contains() and Read() are the two sides that must agree, so ask Contains() before concluding
+    // absence.
+    static std::string MissReason( const std::filesystem::path& filepath )
+    {
+        if ( VFS::Exists( filepath ) )
+            return "present in a mounted archive but unreadable — see the [Pak] error above for which "
+                   "entry and why";
+        return "not on disk, not in a mounted pak";
+    }
+
     Common::ResultStr<std::string> FileSystem::ReadFileContent( const std::filesystem::path& filepath )
     {
         std::ifstream in( filepath, std::ios::in | std::ios::binary );
@@ -157,10 +175,10 @@ namespace Common::Utils
             // the error VALUE is what forces the caller to have one. This used to DESERT_VERIFY,
             // i.e. abort in every configuration — which made every "file is empty or missing" branch
             // in the loaders dead code and turned one missing asset into a crash of a packaged game.
-            LOG_ERROR( "[FileSystem] Could not read file (not on disk, not in a mounted pak): {}",
-                       filepath.string() );
-            return Common::MakeFormattedError<std::string>(
-                 "Could not read file (not on disk, not in a mounted pak): {}", filepath.string() );
+            const std::string reason = MissReason( filepath );
+            LOG_ERROR( "[FileSystem] Could not read file ({}): {}", reason, filepath.string() );
+            return Common::MakeFormattedError<std::string>( "Could not read file ({}): {}", reason,
+                                                            filepath.string() );
         }
 
         std::string fileContent;
@@ -200,10 +218,10 @@ namespace Common::Utils
                 return Common::MakeSuccess( std::vector<uint8_t>( packed->begin(), packed->end() ) );
 
             // Soft by contract (see the header) — same reasoning as ReadFileContent above.
-            LOG_ERROR( "[FileSystem] Could not open file (not on disk, not in a mounted pak): {}",
-                       filepath.string() );
-            return Common::MakeFormattedError<std::vector<uint8_t>>(
-                 "Could not open file (not on disk, not in a mounted pak): {}", filepath.string() );
+            const std::string reason = MissReason( filepath );
+            LOG_ERROR( "[FileSystem] Could not open file ({}): {}", reason, filepath.string() );
+            return Common::MakeFormattedError<std::vector<uint8_t>>( "Could not open file ({}): {}", reason,
+                                                                     filepath.string() );
         }
 
         file.seekg( 0, std::ios::end );

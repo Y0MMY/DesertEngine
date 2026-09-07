@@ -66,7 +66,8 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
         ASSERT_TRUE( writer.Finalize() > 0 );
     }
 
-    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Content.dpak" ) );
+    const auto mounted = Common::Utils::VFS::MountPak( dir / "Content.dpak" );
+    ASSERT_TRUE( mounted.IsSuccess() ) << mounted.GetError();
 
     // The file does NOT exist on disk — only in the pak. Absolute path under the mount root resolves.
     const fs::path virtualPath = dir / "Assets" / "Scenes" / "Main.desce";
@@ -145,8 +146,10 @@ TEST( Pak, PatchMountOverridesBase )
         ASSERT_TRUE( writer.Finalize() > 0 );
     }
 
-    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Content.dpak" ) );
-    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Patch_001.dpak" ) ); // later mount wins
+    const auto mountedBase = Common::Utils::VFS::MountPak( dir / "Content.dpak" );
+    ASSERT_TRUE( mountedBase.IsSuccess() ) << mountedBase.GetError();
+    const auto mountedPatch = Common::Utils::VFS::MountPak( dir / "Patch_001.dpak" ); // later mount wins
+    ASSERT_TRUE( mountedPatch.IsSuccess() ) << mountedPatch.GetError();
 
     // The patched key reads from the LATER mount; untouched keys still come from the base.
     EXPECT_EQ( Common::Utils::VFS::ReadFile( dir / "Assets/a.txt" ).value_or( "" ), "patched" );

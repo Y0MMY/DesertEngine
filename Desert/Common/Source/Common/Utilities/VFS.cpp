@@ -70,13 +70,16 @@ namespace Common::Utils
         }
     } // namespace
 
-    bool VFS::MountPak( const std::filesystem::path& pakFile )
+    NO_DISCARD Common::BoolResultStr VFS::MountPak( const std::filesystem::path& pakFile )
     {
         auto reader = std::make_unique<PakReader>( pakFile );
         if ( !reader->IsOpen() )
         {
-            LOG_WARN( "[VFS] Could not mount {} (missing or corrupt)", pakFile.string() );
-            return false;
+            // LOG_ERROR, not LOG_WARN: nothing downstream recovers from an archive that did not mount
+            // — its content is simply absent — so this is a failure, not a caution. The message is
+            // only half the answer, though; the RESULT is the half the caller cannot ignore.
+            LOG_ERROR( "[VFS] Could not mount {}: {}", pakFile.string(), reader->OpenError() );
+            return Common::MakeFormattedError( "{}: {}", pakFile.string(), reader->OpenError() );
         }
 
         Mount mount;
@@ -87,7 +90,7 @@ namespace Common::Utils
         LOG_INFO( "[VFS] Mounted {} ({} entries, root {}, priority {})", pakFile.string(),
                   mount.Pak->EntryCount(), mount.Root.string(), s_Mounts.size() );
         s_Mounts.push_back( std::move( mount ) );
-        return true;
+        return Common::MakeSuccess( true );
     }
 
     bool VFS::IsMounted()
