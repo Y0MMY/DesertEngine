@@ -467,6 +467,11 @@ namespace Desert::Assets
         // in the shipped library is the altocumulus' 0.30, giving 0.90 km against this 0.75 km. The floor
         // is live and it clamps — a species asked for 0.375 km bakes byte-for-byte identically to one asked
         // for 0.75 km — but no authored sky is standing on it.
+        //
+        // THE 0.75 km IN THAT PARAGRAPH IS THE VALUE AT THE SHIPPED GRID, and since O8 the grid is a
+        // parameter: `4 * RegionSize / side` is 0.75 km at 256 and 1.5 km at the 128 an asset preview uses.
+        // The margin above therefore narrows with the budget, and that is measured rather than assumed —
+        // Assets::kCloudProceduralVolumeSideMin carries the table and the refusal of anything coarser.
         const float voxelKm = params.RegionSizeKm / static_cast<float>( params.VolumeSideVoxels );
         const float floorKm = std::max( 4.0f * voxelKm, 2.0f * params.ResolvableChordKm );
 
@@ -710,6 +715,7 @@ namespace Desert::Assets
         // them, and the march searches at ResolvableChordKm — so a region small enough to make the voxel
         // finer than half that chord fills the volume with structure the ray finds only when its jitter
         // happens to land on it, which is the definition of speckle.
+        //
         // THE SIDE ITSELF IS CHECKED FIRST, because it is a parameter now and a zero would divide by zero
         // three lines down while a million would ask for a terabyte. The ceiling is the shipped default:
         // the volume is what a view marches, and raising it above 256 was BUILT, MEASURED at +1.7 m of

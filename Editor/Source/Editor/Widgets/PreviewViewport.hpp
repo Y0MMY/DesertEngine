@@ -156,9 +156,15 @@ namespace Desert::Editor
             // bound — so this default deliberately SITS ON the floor: the cheapest grid measured honest.
             //
             // A FIELD RATHER THAN A CONSTANT, on exactly the terms the two above are already on: it is
-            // ECS::VolumetricCloudData::VolumeResolution, it is written onto the layer by ApplySetup every
-            // frame, and the Preview Scene tab can move it. An artist who wants to see what the level will
-            // see puts it back to 256 and waits.
+            // ECS::VolumetricCloudData::VolumeResolution and ApplySetup writes it onto the layer every
+            // frame.
+            //
+            // IT HAS NO ROW IN THE PREVIEW SCENE TAB YET, and that is stated rather than left to be
+            // discovered: the tab is drawn by MaterialEditorPanel, which O8 does not own. The row is one
+            // line beside the Max Steps slider — `ImGui::SliderInt( "Volume Resolution",
+            // &setup.CloudVolumeResolution, 128, 256 )` — and until it exists an artist who wants to see
+            // the sky at the level's own fidelity has to change it on the level's cloud component instead.
+            // Nothing here is dead: the value IS applied and it IS what the pane bakes at.
             int32_t CloudVolumeResolution = 128;
 
             // Direction the light TRAVELS (sun -> scene), which is what TransformComponent::Translation on
