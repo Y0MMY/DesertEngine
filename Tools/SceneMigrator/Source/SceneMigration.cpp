@@ -1358,6 +1358,43 @@ namespace Desert::Migration
         return report;
     }
 
+    DebugViewMigrationReport MigrateDebugViewV12ToV13( std::optional<rfl::Generic>& settings )
+    {
+        DebugViewMigrationReport report;
+
+        if ( !settings.has_value() )
+            return report; // no Settings block states no debug flags; nothing to remove
+
+        const auto fields = settings.value().to_object();
+        if ( !fields.has_value() )
+        {
+            LOG_WARN( "[SceneMigration] the Settings block is {0}, not an object - the viewport debug "
+                      "flags could not be removed and stay in the file",
+                      Describe( settings.value() ) );
+            return report;
+        }
+
+        rfl::Generic::Object kept;
+        for ( const auto& [key, value] : fields.value() )
+        {
+            const bool isDebugKey = std::any_of( std::begin( kDebugViewKeys ), std::end( kDebugViewKeys ),
+                                                 [&key]( const char* name ) { return key == name; } );
+            if ( !isDebugKey )
+            {
+                kept[key] = value;
+                continue;
+            }
+
+            // NAMED WITH ITS VALUE, not counted. `ShowColliders=true` in the log is what tells the person
+            // running this why their green wireframes are gone; "10 keys removed" does not.
+            ++report.KeysRemoved;
+            report.RemovedNames.push_back( key + "=" + Describe( value ) );
+        }
+
+        settings = rfl::Generic( kept );
+        return report;
+    }
+
     CloudMaterialMigrationReport MigrateCloudMaterialV11ToV12( std::vector<Assets::EntityData>& entities,
                                                                const std::string&               sceneName )
     {
@@ -1769,6 +1806,15 @@ namespace Desert::Migration
         {
             report.CloudMaterialRaised = true;
             report.CloudMaterial       = MigrateCloudMaterialV11ToV12( scene.Entities, scene.SceneName );
+        }
+
+        // Touches only the Settings block, so it is independent of every step above and of the two that
+        // also edit Settings (gravity v8->v9, SSR v10->v11) - those rewrite one key each and this one
+        // removes ten others.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionDebugView )
+        {
+            report.DebugViewRaised = true;
+            report.DebugView       = MigrateDebugViewV12ToV13( scene.Settings );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

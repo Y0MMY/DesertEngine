@@ -611,8 +611,9 @@ namespace Desert::Editor
             return;
         }
 
+        // No grid line here: overlays live on the RENDERER (Graphic::DebugViewState) and default to off,
+        // and only the main editor loop pushes the user's flags into one.
         auto& settings         = m_PreviewScene->GetSettings();
-        settings.ShowGrid      = false;
         settings.EnableShadows = false;
         settings.EnableBloom   = false;
         settings.AA            = ::Desert::Core::AntiAliasingMode::FXAA;

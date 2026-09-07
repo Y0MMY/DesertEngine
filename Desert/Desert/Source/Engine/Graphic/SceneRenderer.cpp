@@ -324,14 +324,16 @@ namespace Desert::Graphic
         // Selection-outline appearance is NOT read from the scene: it's an editor-only viewport aid pushed
         // each frame via SetOutlineSettings (from EditorPreferences). Runtime builds never push -> the
         // JumpFlood system keeps its defaults, and MeshRenderer::HasOutline() gates whether it draws.
+        //
+        // The DEBUG VIEW (m_DebugView) is pushed the same way and read here rather than from the scene, for
+        // the same reason and on the same terms — SetDebugView, from EditorPreferences, every frame.
 
         m_AAMode = sceneSettings.AA;
         // Wireframe is a FORWARD-only debug view (the deferred G-buffer pipeline has no wireframe
         // variant — that's why turning it on in the default Deferred path did nothing). Force forward
         // while it's active so the wireframe pipeline is actually used and the grid composites over it.
-        m_RenderPath    = sceneSettings.WireframeMode ? Core::RenderPath::Forward : sceneSettings.RenderingPath;
-        m_DeferredDebug = sceneSettings.DeferredDebug;
-        m_EnableSSAO     = sceneSettings.EnableSSAO;
+        m_RenderPath = m_DebugView.WireframeMode ? Core::RenderPath::Forward : sceneSettings.RenderingPath;
+        m_EnableSSAO = sceneSettings.EnableSSAO;
         // The cloud layer's cost ceiling, refreshed here with every other cost-versus-quality choice
         // rather than read from a global at the point of use: several SceneRenderers are live at once
         // (Docs/RENDERER_FRAME_STATE.md) and each one renders the scene it was given.
@@ -383,16 +385,15 @@ namespace Desert::Graphic
              ->SetWhitePoint( sceneSettings.WhitePoint );
 
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
-             ->SetWireframe( sceneSettings.WireframeMode );
+             ->SetWireframe( m_DebugView.WireframeMode );
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SetLODEnabled( sceneSettings.MeshLOD );
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SetShadows( sceneSettings.EnableShadows, sceneSettings.ShadowBias,
-                           static_cast<int>( sceneSettings.ShadowDebug ), sceneSettings.CascadeSplitLambda );
+                           static_cast<int>( m_DebugView.ShadowDebug ), sceneSettings.CascadeSplitLambda );
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
-             ->SetDebugView( sceneSettings.ShowNormals, sceneSettings.ShowBoundingBoxes,
-                             sceneSettings.BoundingBoxColor, sceneSettings.BoundingBoxLineWidth,
-                             sceneSettings.LightingDebug );
+             ->SetDebugView( m_DebugView.ShowNormals, m_DebugView.ShowBoundingBoxes, m_DebugView.BoundingBoxColor,
+                             m_DebugView.BoundingBoxLineWidth, m_DebugView.LightingDebug );
 
         // Global texture filter: push into RenderConfig (read by sampler creation). On an actual change,
         // recreate all image samplers so the new filter applies live (no reload).
@@ -697,9 +698,10 @@ namespace Desert::Graphic
                 // unmeasurable at exactly the moment it acquired two cube samples and a LUT fetch.
                 DESERT_PROFILE_PASS( "Deferred: Composite" );
                 UNIQUE_GET_AS( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
-                     ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
-                                GetPointLights(), GetSpotLights(), shadow, aoImage, giIntensity, m_EnableSSAO,
-                                static_cast<int>( m_GIMode ), giImage, cloudShadow, environment );
+                     ->Execute( m_GBuffer, lightDir, lightColor, cameraPos,
+                                static_cast<int>( m_DebugView.DeferredDebug ), GetPointLights(), GetSpotLights(),
+                                shadow, aoImage, giIntensity, m_EnableSSAO, static_cast<int>( m_GIMode ), giImage,
+                                cloudShadow, environment );
             }
 
             // Custom-shader (generic) meshes have no G-buffer variant — draw them forward OVER
@@ -781,7 +783,7 @@ namespace Desert::Graphic
 
         // Overdraw debug view: re-rasterize all meshes additively into a heat map over the finished scene
         // color. Path-independent (redraws geometry, ignores the G-buffer), so it runs for Forward too.
-        if ( m_DeferredDebug == Core::DeferredDebugMode::Overdraw )
+        if ( m_DebugView.DeferredDebug == DeferredDebugMode::Overdraw )
         {
             DESERT_PROFILE_PASS( "Debug: Overdraw" );
             UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->RenderOverdrawManual();

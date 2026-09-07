@@ -327,8 +327,10 @@ TEST( SceneCloudMaterialMigration, MigrateSceneRunsItLastAndStampsTheFileSoItNev
     EXPECT_EQ( report.CloudMaterial.Entities, 1 );
     EXPECT_TRUE( report.Changed() );
     EXPECT_EQ( scene.SceneVersion.value_or( 0 ), kSceneVersion );
-    EXPECT_EQ( kSceneVersionCloudMaterial, kSceneVersion )
-         << "a newer step exists; move this suite's stamp expectation the way the older cloud suites did";
+    // A newer step exists now (v12 -> v13, the debug-view removal), so this suite takes the shape the
+    // older cloud suites already had: the head is at or past THIS step's version, and the tree comes out
+    // stamped at the head rather than at this step's number.
+    EXPECT_GE( kSceneVersion, kSceneVersionCloudMaterial );
 
     // Second pass over the stamped tree: nothing left to do — which is also what keeps the tool from
     // writing a numbered sibling material on every run.

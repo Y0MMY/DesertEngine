@@ -1,6 +1,7 @@
 #include "EditorGridPass.hpp"
 
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp> // the view's own debug/show state
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Editor::Render
@@ -43,8 +44,15 @@ namespace Desert::Editor::Render
         pass.PipelineSpecification = m_Pipeline->GetSpecification();
         pass.Execute               = [this]( const Graphic::ExternalPassContext& ctx )
         {
+            // The flag is asked of the RENDERER this pass is drawing into, not of the scene and not of a
+            // global: it is what THIS view is showing (Graphic/DebugViewState.hpp). A scene rendered into
+            // two views could legitimately have the grid in one of them, and a preview renderer that
+            // nobody pushes to gets the all-off default without having to opt out.
             const auto scene = m_Scene.lock();
-            if ( !scene || ctx.ScenePlaying || !scene->GetSettings().ShowGrid || !ctx.Camera )
+            if ( !scene || ctx.ScenePlaying || !ctx.Camera )
+                return;
+            const auto* renderer = scene->GetSceneRenderer();
+            if ( !renderer || !renderer->GetDebugView().ShowGrid )
                 return;
 
             m_Material->Update( ctx.Camera );

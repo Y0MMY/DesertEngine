@@ -149,6 +149,23 @@ most expensive defects in this project all shipped built, tested and unseen.
 6. **A report.** What was done; what was decided and why; **what differs from the requirements and
    for what reason**; what was left out of scope deliberately. A divergence you name is a
    discussion. A divergence found on review is a return.
+7. **The owner's audit, run on yourself before you call it done** (his standing rule, 2026-09-07).
+   A task is finished when **everything the owner said about it is closed**, or the work **captures
+   the essence** of what he asked — *and* when your own audit leaves no open question. The questions
+   are not a ritual; pick the ones the task deserves and **answer them in writing**:
+   - **Did we build it right?** Not "does it work" — is this the right shape, or the shape that was
+     easiest from here?
+   - **What is still worth improving?**
+   - **Is it convenient?** Would the person who uses this every day thank us or work around us?
+   - **What can be fixed now, cheaply, while we are here?**
+   - **What is left unfinished?** Name it. "Landed with a named remainder" is NOT done.
+   - **What does this open up?** A seam that now makes three other things possible is part of the
+     result and belongs in the report.
+
+   **The trap this closes:** a task can pass 1–6 completely — builds, tests, frames, honest report —
+   and still be unfinished, because the report *names* the remainder instead of closing it. Naming a
+   gap is the minimum, not the finish line. If the remainder genuinely belongs to another task, it
+   must be filed **and the parent stays open until that one lands**.
 
 ### A measured refusal counts as done
 

@@ -214,8 +214,12 @@ namespace Desert::Editor
         //
         // The cloud quality tier drops with them, for the same reason and by the same argument: a
         // 512-pixel pane marching at quarter resolution has no use for the viewport's sample ceiling.
+        //
+        // AND THE GRID NEEDS NO LINE HERE ANY MORE: debug overlays left SceneSettings for the RENDERER
+        // (Graphic::DebugViewState), default to off, and only the main editor loop pushes a user's flags
+        // into one. Two tasks met in this block — one turned the shadows on, the other took the overlay
+        // out — and both belong: the preview owns its lighting budget, and it no longer owns the overlay.
         auto& settings            = m_Scene->GetSettings();
-        settings.ShowGrid         = false;
         settings.EnableBloom      = false;
         settings.AA               = ::Desert::Core::AntiAliasingMode::FXAA;
         settings.CloudQualityTier = ::Desert::Core::CloudQuality::Low;
@@ -394,7 +398,15 @@ namespace Desert::Editor
         // it would render an empty depth map every frame and every fragment would fall outside it.
         auto& settings         = m_Scene->GetSettings();
         settings.EnableShadows = m_Fill != Fill::SkyDome && m_Setup.ShowFloor && m_Setup.FloorReceivesShadow;
-        settings.ShowGrid      = m_Setup.ShowGrid;
+        // THE GRID IS NOT A SCENE SETTING ANY MORE. К2 moved every debug overlay onto the RENDERER
+        // (Graphic::DebugViewState), because a view preference in a level file is one person's opinion
+        // travelling through git — and six of those flags reached the Runtime, one of them forcing the
+        // forward render path. The preview owns its own view, so it pushes its own state rather than
+        // inheriting the editor's: a floor grid under a material ball is the preview's business, not the
+        // level's.
+        Graphic::DebugViewState debugView;
+        debugView.ShowGrid = m_Setup.ShowGrid;
+        m_Renderer->SetDebugView( debugView );
 
         // THE FLAG NEEDS A READER, and in this scene there was none. SceneSettings::ShowGrid is consumed
         // by EditorGridPass, which the editor installs on the MAIN scene through its RenderRegistry and
@@ -410,8 +422,9 @@ namespace Desert::Editor
                 // no grid in it — a silent fallback is exactly what this branch exists to avoid.
                 LOG_ERROR( "[Preview] the grid pass could not be installed, so the preview has no grid: {}",
                            result.GetError() );
-                m_Setup.ShowGrid  = false;
-                settings.ShowGrid = false;
+                m_Setup.ShowGrid   = false;
+                debugView.ShowGrid = false;
+                m_Renderer->SetDebugView( debugView );
             }
             else
             {

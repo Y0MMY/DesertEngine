@@ -102,12 +102,18 @@ namespace Desert::Migration
     //                   material and renders the schema defaults, which are the old component defaults
     //                   digit for digit
     inline constexpr int kSceneVersionCloudMaterial = 12;
+    //  13             - a scene no longer states what the VIEWPORT is drawing on top of it. The ten debug
+    //                   visualization keys leave the Settings block for Graphic::DebugViewState, which is
+    //                   per-SceneRenderer and never serialized: ShowGrid, ShowColliders, ShowBoundingBoxes,
+    //                   BoundingBoxColor, BoundingBoxLineWidth, WireframeMode, ShowNormals, LightingDebug,
+    //                   ShadowDebug and DeferredDebug
+    inline constexpr int kSceneVersionDebugView = 13;
 
     // The last step this tool knows and the generation the engine requires are ONE number, and this is
     // where that is checked. If a schema step is ever added here without raising Core::kSceneVersion, the
     // tool would stamp files at a version the loader refuses - every scene in the repository would stop
     // opening at once, and the file that caused it would look correct in isolation.
-    static_assert( kSceneVersionCloudMaterial == kSceneVersion,
+    static_assert( kSceneVersionDebugView == kSceneVersion,
                    "the last migration step and the engine's required scene version must be the same "
                    "generation - raise Core::kSceneVersion in Engine/Core/Serialize/SceneFormat.hpp" );
 
@@ -667,6 +673,53 @@ namespace Desert::Migration
     // `.demat` naming `CloudLayout` remains anywhere it could be run.
     CloudMaterialLayoutReport MigrateCloudMaterialLayoutInputs( Assets::MaterialData& material );
 
+    // THE TEN KEYS a scene no longer states, in the order they are reported. Stated ONCE, here, because
+    // three things have to agree about the set — this migration, the census that keeps them out of
+    // Core::SceneSettings and out of every .desce on disk (Desert/Tests/Engine/SceneDebugFields), and the
+    // struct that owns them now (Graphic::DebugViewState) — and two of the three are in different targets.
+    // A test asserts this list against DebugViewState's own declaration, so a field ADDED there and
+    // forgotten here fails rather than quietly stays serializable.
+    inline constexpr const char* kDebugViewKeys[] = {
+         "ShowGrid",      "ShowColliders", "ShowBoundingBoxes", "BoundingBoxColor", "BoundingBoxLineWidth",
+         "WireframeMode", "ShowNormals",   "LightingDebug",     "ShadowDebug",      "DeferredDebug",
+    };
+
+    // What MigrateDebugViewV12ToV13 removed from one file.
+    struct DebugViewMigrationReport
+    {
+        int KeysRemoved = 0; // 0..10 - how many of kDebugViewKeys the Settings block actually stated
+
+        // WHICH ones, and what each said, as "ShowColliders=true". Named rather than counted, like every
+        // step above that drops a value: these keys were AUTHORED (55 of the 80 scenes in this repository
+        // stated ShowColliders true, 72 of 77 stated ShowGrid false), and the operator has to be able to
+        // see that the collider wireframes they are used to are gone because the file stopped deciding it,
+        // not because something broke. §1.4 - nothing is dropped silently.
+        std::vector<std::string> RemovedNames;
+    };
+
+    // Raises a scene from schema v12 to v13: the Settings block stops stating what the VIEWPORT draws on
+    // top of the world.
+    //
+    // WHY IT REMOVES AND CARRIES NOTHING. There is nowhere to carry them TO. Graphic::DebugViewState lives
+    // on the SceneRenderer, one per view, and is deliberately not serialized anywhere - not in the scene,
+    // not per-scene in the editor's config. The editor's own copy is a USER preference
+    // (Editor::EditorPreferences::DebugView, editor.json), and writing 80 scenes' worth of one-time view
+    // state into it would be turning "the last person to save this level had colliders on" into "this user
+    // wants colliders on", which is the same confusion in a new file. Every flag defaults OFF; the user
+    // turns on what they want once, and it then follows them across scenes instead of the other way round.
+    //
+    // A key present but of the wrong JSON type is removed like the rest and reported with its value: the
+    // field it named does not exist any more, so there is no type for it to be right for.
+    //
+    // PURE - no GPU, no filesystem, no global state. The counters go back to the caller, which is the one
+    // that knows which file this was.
+    //
+    // Idempotent: a Settings block stating none of the ten is left byte-identical and reports zero. So is
+    // a scene with no Settings block at all.
+    //
+    // SHELF LIFE: this raises v12 to v13 and nothing else. It is deleted once no v12 file remains.
+    DebugViewMigrationReport MigrateDebugViewV12ToV13( std::optional<rfl::Generic>& settings );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -701,12 +754,16 @@ namespace Desert::Migration
         // the schema was below kSceneVersionCloudMaterial
         bool                         CloudMaterialRaised = false;
         CloudMaterialMigrationReport CloudMaterial;
+        // the schema was below kSceneVersionDebugView
+        bool                     DebugViewRaised = false;
+        DebugViewMigrationReport DebugView;
 
         bool Changed() const
         {
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
                    CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised ||
-                   GravityUnitsRaised || UIVisibilityRaised || SSRUnitsRaised || CloudMaterialRaised;
+                   GravityUnitsRaised || UIVisibilityRaised || SSRUnitsRaised || CloudMaterialRaised ||
+                   DebugViewRaised;
         }
     };
 

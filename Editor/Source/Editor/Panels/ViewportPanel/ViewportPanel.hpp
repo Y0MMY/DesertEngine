@@ -122,9 +122,10 @@ namespace Desert::Editor
         bool m_ViewAxisGizmoHovered = false;
 
         // 2D UI-editing mode (toolbar "2D"): hides the grid + orientation gizmo so a screen-space canvas
-        // reads like a UI designer. m_SavedShowGrid restores the scene's grid setting when toggled off.
+        // reads like a UI designer. m_SavedShowGrid restores the USER's grid preference when toggled off
+        // (the flag lives in EditorPreferences::DebugView since К2, not in the scene file).
         bool m_UIMode        = false;
-        bool m_SavedShowGrid = true;
+        bool m_SavedShowGrid = false;
         bool m_UIPreview     = false; // Design (drag/select) <-> Preview (buttons interactive) toggle
 
         // In-scene UI drag/resize state. Offsets are captured at drag start so the drag is absolute (no drift).

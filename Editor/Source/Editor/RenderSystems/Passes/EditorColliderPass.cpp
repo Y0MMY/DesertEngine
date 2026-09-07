@@ -1,6 +1,7 @@
 #include "EditorColliderPass.hpp"
 
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp> // the view's own debug/show state
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <glm/gtc/quaternion.hpp>
@@ -92,8 +93,14 @@ namespace Desert::Editor::Render
         pass.PipelineSpecification = m_Pipeline->GetSpecification();
         pass.Execute               = [this]( const Graphic::ExternalPassContext& ctx )
         {
+            // Asked of the RENDERER, not the scene — see EditorGridPass for why. This flag in particular:
+            // it defaulted to `true` in SceneSettings and 55 of 80 committed scenes carried it on, so the
+            // green wireframes travelled through git into everybody's viewport.
             const auto scene = m_Scene.lock();
-            if ( !scene || ctx.ScenePlaying || !scene->GetSettings().ShowColliders || !ctx.Camera )
+            if ( !scene || ctx.ScenePlaying || !ctx.Camera )
+                return;
+            const auto* renderer = scene->GetSceneRenderer();
+            if ( !renderer || !renderer->GetDebugView().ShowColliders )
                 return;
 
             std::vector<LineVertex> lines;

@@ -371,21 +371,24 @@ namespace
     //
     // Most of it funnels through SceneRenderer::SetSceneData, which is where the scene's authored
     // rendering policy becomes the frame's. The exceptions are named individually because WHERE a setting
-    // is consumed is the interesting half of the row: the two editor-only aids are read by the editor
-    // passes they gate (and by nothing in the engine, deliberately), physics reads its own two, and the
-    // splash trio is the RUNTIME's - it is the only thing in this file consumed by the shipping player
-    // and by neither the editor nor the renderer.
+    // is consumed is the interesting half of the row: physics reads its own two, and the splash trio is
+    // the RUNTIME's - it is the only thing in this file consumed by the shipping player and by neither the
+    // editor nor the renderer.
+    //
+    // THE TWO EDITOR-ONLY AIDS USED TO BE THE OTHER EXCEPTION, and their disappearance from this table is
+    // the point of К2. `ShowGrid` and `ShowColliders` were rows pointing at EditorGridPass and
+    // EditorColliderPass - correct rows, about fields that should never have been in a scene file at all.
+    // A consumer census answers "does anything read this?"; it cannot answer "should this be here?", and
+    // both fields passed it for as long as they existed. Desert/Tests/Engine/SceneDebugFields is the
+    // census that asks the second question.
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kSceneRenderer = "Desert/Desert/Source/Engine/Graphic/SceneRenderer.cpp";
     constexpr const char* kPhysicsSystem = "Desert/Desert/Source/Engine/ECS/System/PhysicsECSSystem.hpp";
-    constexpr const char* kGridPass      = "Editor/Source/Editor/RenderSystems/Passes/EditorGridPass.cpp";
-    constexpr const char* kColliderPass  = "Editor/Source/Editor/RenderSystems/Passes/EditorColliderPass.cpp";
     constexpr const char* kRuntimeLayer  = "Runtime/Source/RuntimeLayer.cpp";
 
     constexpr Row kSceneSettingsRows[] = {
          { "RenderingPath", kSceneRenderer },
-         { "DeferredDebug", kSceneRenderer },
          { "EnableSSAO", kSceneRenderer },
          { "CloudQualityTier", kSceneRenderer },
          { "GlobalIllumination", kSceneRenderer },
@@ -396,7 +399,6 @@ namespace
          { "EnableShadows", kSceneRenderer },
          { "ShadowBias", kSceneRenderer },
          { "CascadeSplitLambda", kSceneRenderer },
-         { "ShadowDebug", kSceneRenderer },
          { "Tonemapper", kSceneRenderer },
          { "Exposure", kSceneRenderer },
          { "Gamma", kSceneRenderer },
@@ -430,15 +432,20 @@ namespace
          { "TextureFilterMode", kSceneRenderer },
          { "Anisotropy", kSceneRenderer },
 
-         // Editor aids. The pass that draws the thing is what reads the flag, which is why these two
-         // point at Editor/ and the debug-view trio above them does not.
-         { "ShowGrid", kGridPass },
-         { "ShowColliders", kColliderPass },
-         { "ShowBoundingBoxes", kSceneRenderer },
-         { "BoundingBoxColor", kSceneRenderer },
-         { "BoundingBoxLineWidth", kSceneRenderer },
-         { "WireframeMode", kSceneRenderer },
+         // Distance-based mesh LOD. Machine quality rather than level data - it and its four siblings
+         // (AA, TextureFilterMode, Anisotropy, CloudQualityTier) are named as a group in SceneSettings'
+         // own comment, awaiting a decision about who owns quality. Read where every other quality choice
+         // is read.
          { "MeshLOD", kSceneRenderer },
+
+         // The eight debug rows that used to sit here - ShowGrid, ShowColliders, ShowBoundingBoxes,
+         // BoundingBoxColor, BoundingBoxLineWidth, WireframeMode, ShadowDebug, DeferredDebug - are gone
+         // with the fields (К2). They were never level data: they said what a VIEWPORT was drawing on top
+         // of the world, and 55 of 80 scenes shipped `ShowColliders: true` through git as a result. They
+         // live in Graphic::DebugViewState now, one per SceneRenderer, pushed in from
+         // Editor::EditorPreferences and serialized nowhere. Desert/Tests/Engine/SceneDebugFields is the
+         // census that keeps them out - of this struct and of every .desce on disk - and it derives its
+         // list from DebugViewState's own declaration rather than from a second hand-written table.
 
          { "Gravity", kPhysicsSystem },
          // "PauseSimulation" had a DEAD row here. Д26 deleted the field rather than wiring it: the

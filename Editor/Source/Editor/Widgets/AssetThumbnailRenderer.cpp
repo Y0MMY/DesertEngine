@@ -49,10 +49,14 @@ namespace Desert::Editor
             return;
         }
 
-        // Clean preview: no editor ground grid / selection outline / shadows bleeding into the thumbnail.
-        // Keep AA on (FXAA) for smoother edges; supersampling (render 2x, downscale) adds the rest.
+        // Clean preview: no shadows bleeding into the thumbnail. Keep AA on (FXAA) for smoother edges;
+        // supersampling (render 2x, downscale) adds the rest.
+        //
+        // The GRID needs no line here any more: it is a property of the VIEW now
+        // (Graphic::DebugViewState, all-off by default) and only EditorLayer's main loop ever pushes the
+        // editor's flags into a renderer. This used to switch the scene's own ShowGrid off, which worked
+        // and said the wrong thing — a thumbnail scene had to know about an editor aid to opt out of it.
         auto& settings         = m_Scene->GetSettings();
-        settings.ShowGrid      = false;
         settings.EnableShadows = false;
         settings.EnableBloom   = false;
         settings.AA            = ::Desert::Core::AntiAliasingMode::FXAA;

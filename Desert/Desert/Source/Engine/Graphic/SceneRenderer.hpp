@@ -45,6 +45,7 @@
 #include "Systems/Scene/Fog/HeightFogRenderer.hpp"
 
 #include <Engine/Core/SceneSettings.hpp>
+#include <Engine/Graphic/DebugViewState.hpp>
 
 #include <Engine/Graphic/IRenderSystem.hpp>
 #include <Engine/Graphic/ExternalRenderPass.hpp>
@@ -144,6 +145,26 @@ namespace Desert::Graphic
         // Selection-outline (Jump Flood) appearance. Editor-only: pushed each frame from EditorPreferences
         // (the outline is a viewport visualization, not a scene property, so it does not live in SceneSettings).
         void SetOutlineSettings( const glm::vec3& color, float width, float smoothness, bool enabled );
+
+        // What this view draws ON TOP of the world: grid, colliders, bounding boxes, wireframe, the buffer
+        // and shadow debug views. Pushed in for exactly the same reason the outline is — it is a property
+        // of the view, not of the scene (Graphic/DebugViewState.hpp records the measurement that settled
+        // it). A renderer nobody pushes to shows the lit world and no overlay, which is what the Runtime
+        // and every offscreen preview renderer rely on.
+        //
+        // Call it BEFORE BeginScene: the flags reach the mesh renderer from there, so a push afterwards
+        // lands one frame late.
+        void SetDebugView( const DebugViewState& state )
+        {
+            m_DebugView = state;
+        }
+        // Read back by the editor's own external passes (grid, colliders), which draw INTO this view and
+        // therefore must ask this view what it is showing — not a global, or every offscreen preview would
+        // inherit the main viewport's flags.
+        [[nodiscard]] const DebugViewState& GetDebugView() const
+        {
+            return m_DebugView;
+        }
         // BY VALUE, and it has to be. SkyboxRenderer::GetEnvironment() composes its answer — procedural
         // bake or skybox-asset environment — and therefore returns a temporary; this used to hand back a
         // reference to it, which dangled the instant the call returned. The forward path read that
@@ -402,8 +423,11 @@ namespace Desert::Graphic
         // The volumetric cloud layer's cost ceiling, refreshed from SceneSettings each BeginScene and
         // handed to the cloud renderer with the layer itself. HIGH is the calibrated reference, so a
         // renderer that is never given a scene renders correctly rather than cheaply.
-        Core::CloudQuality      m_CloudQuality   = Core::CloudQuality::High;
-        Core::DeferredDebugMode m_DeferredDebug = Core::DeferredDebugMode::Off; // G-buffer debug view (deferred)
+        Core::CloudQuality m_CloudQuality = Core::CloudQuality::High;
+        // What this VIEW is drawing on top of the world. NOT refreshed from the scene — pushed in by
+        // whoever owns the view (SetDebugView), and "show nothing" until someone does. See
+        // Graphic/DebugViewState.hpp for why it stopped being scene data.
+        DebugViewState          m_DebugView;
         bool                    m_EnableSSAO    = true; // deferred SSAO pass on/off (refreshed from SceneSettings)
         Core::GIMode            m_GIMode        = Core::GIMode::ScreenSpace; // indirect-light source
         float                   m_GIIntensity   = 2.0f;

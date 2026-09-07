@@ -18,15 +18,6 @@ namespace Desert::Core
         SMAA,
     };
 
-    // Directional-shadow debug visualization (CSM). Off = normal lit; ShadowFactor = raw grayscale shadow
-    // term; Cascades = tint each fragment by the cascade that shadows it (red/green/blue/yellow front→back).
-    enum class ShadowDebugMode : int
-    {
-        Off = 0,
-        ShadowFactor,
-        Cascades,
-    };
-
     // Global texture sampler filter (applies to all sampled images; live — recreates samplers on change).
     // Must match Graphic::TextureFilterMode.
     enum class TextureFilter : int
@@ -70,22 +61,6 @@ namespace Desert::Core
     {
         Forward  = 0,
         Deferred = 1,
-    };
-
-    // Deferred G-buffer debug visualization (UE-style buffer view). Off = normal lit; the others fill the
-    // screen with a raw G-buffer channel so the deferred passes can be inspected. Only used in the Deferred path.
-    enum class DeferredDebugMode : int
-    {
-        Off       = 0,
-        Albedo    = 1,
-        Normal    = 2,
-        Metallic  = 3,
-        Roughness = 4,
-        AO        = 5,
-        GI        = 6, // indirect light only (whichever GIMode is active) — for judging GI in isolation
-        LightComplexity    = 7, // per-pixel count of point/spot light volumes, heat-mapped (UE-style)
-        Overdraw           = 8, // additive re-raster of all meshes -> heat-mapped overdraw count (both paths)
-        MaterialComplexity = 9, // per-pixel sampled-texture count (from GBufferC.w), heat-mapped (UE-style)
     };
 
     // Source of the one-bounce indirect light (Deferred path only).
@@ -133,6 +108,13 @@ namespace Desert::Core
     // EnableSSAO, EnableSSR, AA, Anisotropy), and adding a second settings system for the ninth such knob
     // is the duplication §2.1 of the contract forbids. When a machine-level store arrives, this field is
     // one of nine that move into it together, not one that has to be un-invented first.
+    //
+    // К2 RE-EXAMINED THIS AND LEFT IT STANDING, deliberately. That task moved the DEBUG fields out of this
+    // struct, and the obvious next question was whether the quality group should follow. It should not, not
+    // yet: "out of the level file" was never in doubt for a debug overlay, whereas quality has three
+    // candidate owners (the scene, the project, the machine) and picking one is a decision, not a cleanup.
+    // The five are named together in SceneSettings' own header comment so the group is visible while it
+    // waits, instead of being rediscovered a field at a time.
     enum class CloudQuality : int
     {
         Low    = 0,
@@ -169,13 +151,39 @@ namespace Desert::Core
         // editor-only viewport visualization (runtime builds have no selection), not a scene property.
         // See Editor::EditorPreferences (OutlineColor/Width/Smoothness/EnableOutline), pushed to the
         // renderer each frame via SceneRenderer::SetOutlineSettings.
+        //
+        // THE TEN DEBUG-VISUALIZATION FIELDS FOLLOWED IT OUT (К2), for the same reason and with harder
+        // evidence: ShowGrid, ShowColliders, ShowBoundingBoxes + its colour and width, WireframeMode,
+        // ShowNormals, LightingDebug, ShadowDebug and DeferredDebug are what a VIEW is drawing on top of
+        // the world, not anything the world is. They now live in Graphic::DebugViewState, one per
+        // SceneRenderer, defaulted to "show nothing" and pushed in from Editor::EditorPreferences the way
+        // the outline is. Scene schema v12 -> v13 strips them from every file (Tools/SceneMigrator), and
+        // Desert/Tests/Engine/SceneDebugFields keeps them out — of this struct AND of every .desce on disk.
+        //
+        // WHAT THIS STRUCT IS, THEN. A LEVEL's rendering, lighting and physics policy: the render path, its
+        // screen-space effects, shadows, the grade, the lens, wind, gravity, the splash. Things a level
+        // designer authors and expects to travel with the level.
+        //
+        // WHAT IS STILL HERE THAT ARGUABLY SHOULD NOT BE — named rather than moved, because moving it needs
+        // a decision this struct cannot make. Five fields describe what a MACHINE can afford rather than
+        // what the level is: AA, TextureFilterMode, Anisotropy, MeshLOD and CloudQualityTier. A weak
+        // machine cannot turn any of them down without editing a file that goes to the repository. The
+        // right home is a per-user scalability store the engine does not have, and picking one (scene vs
+        // project vs machine) is a separate decision — see CloudQuality's own comment, which has argued the
+        // same thing since that field was added. They stay here, together, until that store exists; the
+        // debug ten left because their home was never in doubt.
 
         // Rendering path. Default is Deferred — see the enum's own comment for what that costs.
         PROPERTY( DisplayName( "Render Path" ), Category( "Rendering" ) )
         RenderPath RenderingPath = RenderPath::Deferred;
 
-        PROPERTY( DisplayName( "Deferred Debug" ), Category( "Rendering" ) )
-        DeferredDebugMode DeferredDebug = DeferredDebugMode::Off;
+        // Distance-based mesh level of detail. LOD0 (near) is byte-identical geometry, so this only changes
+        // what is drawn far from the camera. MACHINE QUALITY, not level data — see the note at the top of
+        // this struct; it sits under Rendering with its four siblings rather than in a "Debug" category of
+        // its own, which is where it used to be and which said the wrong thing about it.
+        PROPERTY( DisplayName( "Mesh LOD (auto)" ), Category( "Rendering" ),
+                  Tooltip( "Distance-based mesh level of detail. LOD0 (near) is identical geometry." ) )
+        bool MeshLOD = true;
 
         // Deferred screen-space effects (Deferred path only). Both cost a full-screen multi-sample pass —
         // turn off for maximum FPS.
@@ -221,9 +229,7 @@ namespace Desert::Core
         PROPERTY( DisplayName( "Shadow Bias" ), Category( "Shadows" ), Range( 0.0f, 0.05f ) )
         float ShadowBias              = 0.005f;
         PROPERTY( DisplayName( "Cascade Split Lambda" ), Category( "Shadows" ), Range( 0.0f, 1.0f ) )
-        float CascadeSplitLambda      = 0.6f;
-        PROPERTY( DisplayName( "Shadow Debug" ), Category( "Shadows" ) )
-        ShadowDebugMode ShadowDebug   = ShadowDebugMode::Off;
+        float CascadeSplitLambda = 0.6f;
 
         // Post-processing. The operator comes FIRST because it decides what the knobs under it mean:
         // WhitePoint belongs to Reinhard alone and the editor hides it in the other mode.
@@ -341,27 +347,11 @@ namespace Desert::Core
         PROPERTY( DisplayName( "Anisotropy" ), Category( "Textures" ), Range( 1.0f, 16.0f ) )
         int           Anisotropy        = 8; // 1/2/4/8/16x — used only in Anisotropic filter mode
 
-        // Debug visualization
-        PROPERTY( DisplayName( "Show Grid" ), Category( "Debug" ) )
-        bool      ShowGrid             = true; // infinite editor scene grid
-        PROPERTY( DisplayName( "Show Bounding Boxes" ), Category( "Debug" ) )
-        bool      ShowBoundingBoxes    = false;
-        PROPERTY( DisplayName( "BB Color" ), Category( "Debug" ), Color )
-        glm::vec3 BoundingBoxColor     = glm::vec3( 0.25f, 0.95f, 0.35f );
-        PROPERTY( DisplayName( "BB Line Width" ), Category( "Debug" ), Range( 1.0f, 10.0f ) )
-        float     BoundingBoxLineWidth = 1.5f;
-        PROPERTY( DisplayName( "Show Colliders" ), Category( "Debug" ) )
-        bool      ShowColliders        = true; // green physics-collider wireframes (editor aid, UE-style)
-        // ShowNormals / LightingDebug are driven by the viewport View Mode dropdown (Normals /
-        // Light Complexity), not a Scene Settings toggle — kept as plain fields (no PROPERTY, so they
-        // neither serialize nor show in a reflected panel), still consumed by the mesh renderer.
-        bool      ShowNormals          = false;
-        PROPERTY( DisplayName( "Wireframe" ), Category( "Debug" ) )
-        bool      WireframeMode        = false;
-        PROPERTY( DisplayName( "Mesh LOD (auto)" ), Category( "Debug" ),
-                  Tooltip( "Distance-based mesh level of detail. LOD0 (near) is identical geometry." ) )
-        bool      MeshLOD              = true;
-        bool      LightingDebug        = false; // see note above — no longer a Scene Settings property
+        // The "Debug" category used to be here: ten fields naming what the viewport was drawing on top of
+        // the world. It is gone, not renamed and not hidden — see the note at the top of this struct and
+        // Graphic::DebugViewState, which owns them now. Two of them (ShowNormals, LightingDebug) had
+        // already been demoted to un-reflected plain members "so they neither serialize nor show in a
+        // panel", which was the right instinct applied to two of ten and left the other eight in the file.
 
         // Other scene-wide settings
         PROPERTY( DisplayName( "Gravity" ), Category( "Physics" ), Range( 0.0f, 5000.0f ) )
