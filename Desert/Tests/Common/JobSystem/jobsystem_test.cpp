@@ -3,7 +3,9 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <numeric>
+#include <thread>
 #include <vector>
 
 // The pool is a process-global singleton — tests share it, which is exactly how the engine uses it.
@@ -87,15 +89,104 @@ TEST( JobSystem, NestedSubmitFromWorker )
     SUCCEED();
 }
 
+TEST( JobSystem, ParallelRangesCoversEveryIndexExactlyOnceInContiguousRanges )
+{
+    constexpr size_t              kCount = 10007; // prime: the last range is short
+    constexpr size_t              kGrain = 64;
+    std::vector<std::atomic<int>> hits( kCount );
+    std::atomic<int>              badRange{ 0 };
+
+    Common::JobSystem::Get().ParallelRanges( kCount, kGrain,
+                                             [&]( size_t begin, size_t end )
+                                             {
+                                                 // The contract is a range, not a pair of loose numbers:
+                                                 // a body that trusted `end - begin == grain` would walk
+                                                 // off the end of the last one.
+                                                 if ( begin >= end || end > kCount || end - begin > kGrain )
+                                                     badRange.fetch_add( 1 );
+                                                 for ( size_t i = begin; i < end; ++i )
+                                                     hits[i].fetch_add( 1 );
+                                             } );
+
+    EXPECT_EQ( badRange.load(), 0 );
+    for ( size_t i = 0; i < kCount; ++i )
+        ASSERT_EQ( hits[i].load(), 1 ) << "index " << i;
+}
+
+TEST( JobSystem, ParallelRangesGrainZeroIsOneIndexPerRange )
+{
+    std::atomic<int> ranges{ 0 };
+    std::atomic<int> indices{ 0 };
+
+    Common::JobSystem::Get().ParallelRanges( 8, 0,
+                                             [&]( size_t begin, size_t end )
+                                             {
+                                                 ranges.fetch_add( 1 );
+                                                 indices.fetch_add( static_cast<int>( end - begin ) );
+                                             } );
+
+    EXPECT_EQ( ranges.load(), 8 );
+    EXPECT_EQ( indices.load(), 8 );
+}
+
+// THE REGRESSION TEST FOR THE HANG THAT MADE ParallelRanges NECESSARY (Г10).
+//
+// Every worker is held inside a parallel loop AT THE SAME TIME — not "probably", the barrier makes it
+// certain — so every helper job any of them submits is stuck behind workers that are all waiting. The
+// previous implementation waited for every chunk it had submitted, which under exactly this arrangement
+// is a cycle: no chunk can run until a worker frees, no worker frees until its chunk runs. It hung.
+//
+// It is not a hypothetical: the cloud modelling bake runs ON a worker, and parallelising its z-slices is
+// this call graph.
+TEST( JobSystem, AParallelLoopInsideEveryWorkerStillFinishes )
+{
+    const size_t      workers = Common::JobSystem::Get().WorkerCount();
+    std::atomic<int>  arrived{ 0 };
+    std::atomic<int>  finished{ 0 };
+    std::atomic<long> total{ 0 };
+
+    for ( size_t w = 0; w < workers; ++w )
+    {
+        Common::JobSystem::Get().Submit(
+             [&, workers]
+             {
+                 // Occupy every worker before any of them nests, so the pool really is saturated when the
+                 // inner loop asks for help.
+                 arrived.fetch_add( 1 );
+                 while ( arrived.load() < static_cast<int>( workers ) )
+                     std::this_thread::yield();
+
+                 Common::JobSystem::Get().ParallelFor( 1024, [&]( size_t i )
+                                                       { total.fetch_add( static_cast<long>( i ) ); } );
+                 finished.fetch_add( 1 );
+             } );
+    }
+
+    // A DEADLINE RATHER THAN AN UNBOUNDED WAIT: a returned defect must fail the suite loudly, and a sweep
+    // that hangs here is a sweep nobody reads.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
+    while ( finished.load() < static_cast<int>( workers ) && std::chrono::steady_clock::now() < deadline )
+        std::this_thread::yield();
+
+    ASSERT_EQ( finished.load(), static_cast<int>( workers ) )
+         << "a parallel loop nested inside the pool did not finish within 60 s — the pool is deadlocked, "
+            "which is what ParallelRanges' claim-don't-deal design exists to make impossible";
+
+    const long expected = 1023L * 1024L / 2L * static_cast<long>( workers );
+    EXPECT_EQ( total.load(), expected );
+}
+
 TEST( JobSystem, WorkerCountIsPositive )
 {
     EXPECT_GE( Common::JobSystem::Get().WorkerCount(), static_cast<size_t>( 1 ) );
 }
 
+// NO EXPLICIT Shutdown() HERE, DELIBERATELY. This main() used to end with one, commented "join workers
+// before static destruction" — a workaround for the pool outliving Optick's own singleton, which every
+// binary that uses the pool would have had to remember. The ordering is now guaranteed in JobSystem's
+// constructor, and leaving the workaround in would mean this suite could never notice if it broke.
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
-    const int result = RUN_ALL_TESTS();
-    Common::JobSystem::Get().Shutdown(); // join workers before static destruction
-    return result;
+    return RUN_ALL_TESTS();
 }
