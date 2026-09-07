@@ -108,6 +108,26 @@ namespace Desert::Editor
         // the camera overlay. Empty / dlib-not-built => a placeholder overlay is drawn instead.
         std::string PhotogrammetryFaceModel = "";
 
+        // --- Packaging (Build Settings) -------------------------------------------------------------
+        // The three answers the Build Settings panel asks for. They are HERE and not in the panel, and
+        // not in the .deproj, by the К1 procedure's first question: two people working on this project
+        // at the same moment legitimately want different values for all three — an output path is a
+        // place on one person's disk, which Runtime to bundle depends on whether that person is
+        // debugging or cutting a playtest build, and a .app is one developer's convenience. None of
+        // them is a fact about the product, and the shipped Runtime never reads them: they are consumed
+        // by the editor BEFORE the game exists.
+        //
+        // The panel edits these in place and keeps no copy of its own. That is the rule this header
+        // states above and the one К6 had to restore for the gizmo snap: a second copy means one of the
+        // two stops being written, and which one is not visible from either side.
+        //
+        // The target PLATFORM is deliberately not among them. It is not a choice: this editor packages
+        // for its own host and nothing else (Editor/Packaging/PackageTarget.hpp), so storing an answer
+        // would be storing the only value it can have. П6 deleted the chooser that pretended otherwise.
+        std::string PackageOutputDir = "Build/Output"; // relative to the editor cwd, or absolute
+        std::string PackageConfig    = "Release";      // which Runtime binary to bundle: "Debug" | "Release"
+        bool        PackageAppBundle = true;           // macOS: <Name>.app with MoltenVK inside
+
         // --- Details panel ------------------------------------------------------------------------
         // Fields the user pinned to the top of Details, as "TypeName.FieldName" (e.g. "PointLightData.
         // Intensity"). Only reflected fields can be pinned — a hand-written component widget has no

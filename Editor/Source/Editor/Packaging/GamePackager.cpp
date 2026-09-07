@@ -1,5 +1,6 @@
 #include "GamePackager.hpp"
 #include "PackageCook.hpp"
+#include "PackageTarget.hpp"
 #include "PackagedContentTrees.hpp"
 
 #include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
@@ -72,7 +73,17 @@ namespace Desert::Editor
                     return false;
                 }
                 ++stats.Files;
-                stats.Bytes += fs::file_size( src, ec );
+                // The error_code overload returns uintmax_t(-1) on failure, so an unchecked add here
+                // does not report a slightly wrong size — it reports 16 exabytes, and the package's own
+                // success message is where that lands. The file is already IN the archive at this point;
+                // only the reported total is affected, so this is a count that skips, not a failure.
+                // Its OWN error_code, not the walk's: the loop's `if ( ec )` at the top reads "the
+                // directory walk failed", and letting a size query write into that slot would report a
+                // walk failure for a file that was read perfectly well.
+                std::error_code sizeEc;
+                const auto      size = fs::file_size( src, sizeEc );
+                if ( !sizeEc )
+                    stats.Bytes += size;
             }
             return true;
         }
@@ -96,24 +107,45 @@ namespace Desert::Editor
         const std::string projectName = ProjectContext::Current().Name;
         const std::string safeName    = SanitizeName( projectName );
 
-        // 1) The Runtime binary for the chosen configuration (editor cwd is Editor/).
-        const fs::path runtimeBin = fs::path( ".." ) / "build" / "Bin" / options.Config / "Runtime";
+        // THE TARGET IS THIS EDITOR'S OWN HOST, and everything below that used to be a macOS literal now
+        // comes out of that one description (PackageTarget.hpp): the binary's name, whether a .app is a
+        // thing at all, the launcher, and the build script named in the error. The panel reads the same
+        // description to say which platform it can produce, so the two cannot disagree — which is the
+        // repair П6 was opened for.
+        const TargetPlatformInfo& host = HostPlatformInfo();
+
+        // 1) The Runtime binary for the chosen configuration (editor cwd is Editor/). The FILE NAME is
+        // the host's: looking for an extensionless `Runtime` on Windows could only ever fail, and it
+        // failed by naming a macOS build script in the message.
+        const fs::path  runtimeBin = fs::path( ".." ) / "build" / "Bin" / options.Config / host.RuntimeBinary;
         std::error_code ec;
         if ( !fs::exists( runtimeBin, ec ) )
             return { false,
                      "Runtime binary not found (" + runtimeBin.string() +
-                          "). Build it first: scripts/MacOS/BuildMacOS.sh " + options.Config,
+                          "). Build it first: " + host.BuildScript + " " + options.Config,
                      "" };
 
-        // Layout: a macOS .app bundle (default) or a plain folder. Same content either way — the pak
-        // keys are mount-root-relative, so whatever directory holds Content.dpak becomes the content
+        // Layout: a macOS .app bundle (default there) or a plain folder. Same content either way — the
+        // pak keys are mount-root-relative, so whatever directory holds Content.dpak becomes the content
         // root the VFS serves from.
-        const bool     bundle  = options.MacAppBundle;
+        //
+        // A .app asked for on a host that has no such concept is REFUSED OUT LOUD rather than obeyed or
+        // dropped: obeying it produced a bundle-shaped directory with a bash launcher inside on Windows,
+        // and dropping it quietly is the silent substitution §1.4 forbids.
+        bool bundle = options.MacAppBundle;
+        if ( bundle && !host.SupportsAppBundle )
+        {
+            LOG_WARN( "[Package] a .app bundle was requested but {} has no such layout — packaging as a "
+                      "plain folder with {}",
+                      host.DisplayName, host.LauncherName );
+            bundle = false;
+        }
+
         const fs::path root    = fs::path( options.OutputDir ) / ( bundle ? safeName + ".app" : safeName );
         const fs::path binDir  = bundle ? root / "Contents" / "MacOS" : root;
         const fs::path resDir  = bundle ? root / "Contents" / "Resources" : root;
         const fs::path fwDir   = root / "Contents" / "Frameworks"; // bundle only
-        const char*    binName = bundle ? "Runtime-bin" : "Runtime";
+        const char*    binName = bundle ? "Runtime-bin" : host.RuntimeBinary;
 
         fs::create_directories( binDir, ec );
         fs::create_directories( resDir, ec );
@@ -291,20 +323,39 @@ namespace Desert::Editor
         }
         else
         {
+            // The plain-folder launcher, in the host's own shell. On macOS it has to find MoltenVK
+            // through Homebrew (there is no Frameworks directory outside a bundle); on Windows the
+            // Vulkan loader is installed by the graphics driver and there is nothing to point at, so the
+            // script only has to cd and run. Writing the bash version on Windows produced a `run.sh`
+            // nothing there can execute.
             std::ostringstream run;
-            run << "#!/usr/bin/env bash\n"
-                << "# Launches " << projectName << " (packaged by the Desert Editor).\n"
-                << "set -euo pipefail\n"
-                << "cd \"$(dirname \"$0\")\"\n"
-                << "BREW_PREFIX=\"${HOMEBREW_PREFIX:-$(brew --prefix 2>/dev/null || echo /opt/homebrew)}\"\n"
-                << "export VK_ICD_FILENAMES=\"${VK_ICD_FILENAMES:-$BREW_PREFIX/etc/vulkan/icd.d/MoltenVK_icd.json}\"\n"
-                << "export DYLD_FALLBACK_LIBRARY_PATH=\"$BREW_PREFIX/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}\"\n"
-                << "exec ./Runtime --project " << safeName << ".deproj \"$@\"\n";
-            const fs::path runSh = root / "run.sh";
-            if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( runSh, run.str() );
+            if ( host.Platform == TargetPlatform::Windows )
+            {
+                run << "@echo off\r\n"
+                    << "REM Launches " << projectName << " (packaged by the Desert Editor).\r\n"
+                    << "cd /d \"%~dp0\"\r\n"
+                    << "\"" << host.RuntimeBinary << "\" --project " << safeName << ".deproj %*\r\n";
+            }
+            else
+            {
+                run << "#!/usr/bin/env bash\n"
+                    << "# Launches " << projectName << " (packaged by the Desert Editor).\n"
+                    << "set -euo pipefail\n"
+                    << "cd \"$(dirname \"$0\")\"\n"
+                    << "BREW_PREFIX=\"${HOMEBREW_PREFIX:-$(brew --prefix 2>/dev/null || echo /opt/homebrew)}\"\n"
+                    << "export "
+                       "VK_ICD_FILENAMES=\"${VK_ICD_FILENAMES:-$BREW_PREFIX/etc/vulkan/icd.d/"
+                       "MoltenVK_icd.json}\"\n"
+                    << "export "
+                       "DYLD_FALLBACK_LIBRARY_PATH=\"$BREW_PREFIX/"
+                       "lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}\"\n"
+                    << "exec ./" << host.RuntimeBinary << " --project " << safeName << ".deproj \"$@\"\n";
+            }
+            const fs::path launcher = root / host.LauncherName;
+            if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic( launcher, run.str() );
                  !written )
-                return { false, "Could not write " + runSh.string() + ": " + written.GetError(), "" };
-            makeExecutable( runSh );
+                return { false, "Could not write " + launcher.string() + ": " + written.GetError(), "" };
+            makeExecutable( launcher );
         }
 
         std::ostringstream msg;
