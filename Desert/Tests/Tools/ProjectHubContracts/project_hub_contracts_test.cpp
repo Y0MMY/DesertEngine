@@ -328,17 +328,28 @@ TEST( ProjectHubNames, ANameIsAFolderNameAndNotAPath )
 namespace
 {
     // Writes a template folder the way an author would: a manifest, optionally a payload.
+    //
+    // BINARY, AND THAT IS THE WHOLE POINT OF THE FIXTURE. Windows' text mode expands every '\n' into
+    // "\r\n" on the way to disk, so a payload written here in text mode is 20 bytes where the literal
+    // beside the assertion is 19. The launcher then copies those 20 bytes perfectly — Files.cpp reads
+    // AND writes binary — and `ThePayloadIsCopiedByteForByteWithNoSubstitutions` compared the faithful
+    // copy against a string the fixture had never actually written. It failed on Windows CI while the
+    // code under test was correct, which is the worst kind of red: it accuses the subject of the
+    // fixture's fault, and only a 40-minute job on a machine nobody develops on can report it.
+    //
+    // A test whose claim is "byte for byte" must lay down its own bytes byte for byte. Nothing here
+    // wants line-ending translation — these are payload files whose exact contents are the assertion.
     void MakeTemplate( const fs::path& engineRoot, const std::string& id, const std::string& manifest,
                        const std::vector<std::pair<std::string, std::string>>& payload = {} )
     {
         const fs::path folder = engineRoot / "Templates" / id;
         fs::create_directories( folder );
-        std::ofstream( folder / "template.json" ) << manifest;
+        std::ofstream( folder / "template.json", std::ios::binary ) << manifest;
         for ( const auto& [relative, content] : payload )
         {
             const fs::path file = folder / "Payload" / relative;
             fs::create_directories( file.parent_path() );
-            std::ofstream( file ) << content;
+            std::ofstream( file, std::ios::binary ) << content;
         }
     }
 } // namespace
