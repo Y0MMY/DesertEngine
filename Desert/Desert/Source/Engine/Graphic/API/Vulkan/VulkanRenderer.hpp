@@ -19,7 +19,6 @@ namespace Desert::Graphic::API::Vulkan
 
         [[nodiscard]] virtual Common::BoolResultStr BeginFrame() override;
         [[nodiscard]] virtual Common::BoolResultStr EndFrame() override;
-        [[nodiscard]] virtual Common::BoolResultStr PrepareNextFrame() override;
         [[nodiscard]] virtual Common::BoolResultStr PresentFinalImage() override;
         [[nodiscard]] virtual Common::BoolResultStr BeginRenderPass( const RenderPass* renderPass,
                                                                      bool              clearFrame ) override;

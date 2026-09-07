@@ -1,5 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanQueue.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
+#include <Engine/Graphic/DeviceLost.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
@@ -30,19 +31,43 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanQueue::PrepareFrame()
     {
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return;
+
         uint32_t currentIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
 
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                                ->GetVulkanLogicalDevice();
 
-        vkResetFences( device, 1, &m_WaitFences[currentIndex] );
+        // THIS RESULT USED TO GO STRAIGHT ON THE FLOOR, and it is the first line of the crash that
+        // motivated all of this: "vkResetFences(): pFences[0] is in use. (a VK_ERROR_DEVICE_LOST has
+        // occurred, the fence must be destroyed)". The engine had already lost the device one submit
+        // earlier, asked nothing, and carried on into an acquire and a swapchain rebuild. Reading the
+        // result here is what turns three further illegal calls into one honest stop.
+        const VkResult reset = vkResetFences( device, 1, &m_WaitFences[currentIndex] );
+        if ( reset != VK_SUCCESS )
+        {
+            if ( !NoteIfDeviceLost( reset, "vkResetFences", __FILE__, __LINE__ ) )
+                LOG_ERROR( "[PrepareFrame] vkResetFences failed: {}", VkResultToString( reset ) );
+            return;
+        }
 
         const auto acquire = m_SwapChain->AcquireNextImage( m_FrameSemaphores[currentIndex].PresentComplete, &m_ImageIndex );
         if ( !acquire )
         {
+            // A LOST DEVICE IS NOT A RESIZE, and telling them apart is the whole fix. Recreating the
+            // swapchain here is right for VK_ERROR_OUT_OF_DATE_KHR and catastrophic for device loss: the
+            // rebuild is what reached vkCreateSwapchainKHR, got VK_ERROR_DEVICE_LOST from it, and aborted
+            // inside VK_CHECK_RESULT with everything unsaved. AcquireNextImage latches on the way out, so
+            // this question is already answered by the time it returns.
+            if ( Graphic::DeviceLost::IsLost() )
+                return;
+
             // Most commonly VK_ERROR_OUT_OF_DATE_KHR after a window resize — recreate the swapchain (it
             // re-queries the surface extent) and re-acquire from the fresh swapchain.
             m_SwapChain->OnResize( m_SwapChain->GetWidth(), m_SwapChain->GetHeight() );
+            if ( Graphic::DeviceLost::IsLost() )
+                return;
             const auto reacquire =
                  m_SwapChain->AcquireNextImage( m_FrameSemaphores[currentIndex].PresentComplete, &m_ImageIndex );
             if ( !reacquire )
@@ -52,6 +77,9 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanQueue::Submit()
     {
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return;
+
         uint32_t currentIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
 
         const auto& queue =
@@ -73,6 +101,9 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanQueue::Present()
     {
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return;
+
         uint32_t currentIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                                ->GetVulkanLogicalDevice();
@@ -85,9 +116,26 @@ namespace Desert::Graphic::API::Vulkan
             LOG_INFO( "[QueuePresent] Error: {}", queuePresent.GetError() );
         }
 
+        // Present is the OTHER place the loss surfaces first (a submit executes asynchronously, so the
+        // frame that killed the device is usually already gone by the time anyone is told). Nothing below
+        // may run once it has: waiting on a fence of a dead device is the second illegal call in the
+        // recorded sequence, and the deletion queue destroys objects the frame still nominally owns.
+        if ( Graphic::DeviceLost::IsLost() )
+            return;
+
         Engine::FrameManager::GetInstance().NextFrame();
-        uint32_t newCurrentFrame = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
-        vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE, UINT64_MAX );
+        uint32_t       newCurrentFrame = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
+        const VkResult waited =
+             vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE, UINT64_MAX );
+        if ( waited != VK_SUCCESS )
+        {
+            // Also previously unchecked. A dropped result here is worse than most: this is the ONE place
+            // the CPU learns that a submitted frame finished, so a device that died mid-frame reports it
+            // here first and nowhere else.
+            if ( !NoteIfDeviceLost( waited, "vkWaitForFences", __FILE__, __LINE__ ) )
+                LOG_ERROR( "[Present] vkWaitForFences failed: {}", VkResultToString( waited ) );
+            return;
+        }
 
         SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
              ->GetVulkanAllocator()
@@ -118,6 +166,12 @@ namespace Desert::Graphic::API::Vulkan
         {
             return Common::MakeSuccess( VK_SUCCESS );
         }
+
+        // ASKED BEFORE THE RESIZE BRANCH, and the order is the fix. Device loss and "the window moved" are
+        // both non-VK_SUCCESS results out of the same call, and answering the wrong one rebuilds a
+        // swapchain on a dead device.
+        if ( NoteIfDeviceLost( res, "vkQueuePresentKHR", __FILE__, __LINE__ ) )
+            return Common::MakeFormattedError<VkResult>( "result: {}", VkResultToString( res ) );
 
         // Window was resized/minimized between acquire and present — recreate the swapchain (it re-queries
         // the current surface extent) and treat this frame as handled. Standard Vulkan resize handling.

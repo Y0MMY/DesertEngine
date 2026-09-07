@@ -2,6 +2,8 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <Engine/Graphic/DeviceLost.hpp>
+
 inline PFN_vkSetDebugUtilsObjectNameEXT
      fpSetDebugUtilsObjectNameEXT; // Making it static randomly sets it to nullptr for some reason.
 inline PFN_vkCmdBeginDebugUtilsLabelEXT fpCmdBeginDebugUtilsLabelEXT; // command-buffer regions (RenderDoc tree)
@@ -11,21 +13,43 @@ namespace Desert::Graphic::API::Vulkan
 {
     void VulkanLoadDebugUtilsExtensions( VkInstance instance );
 
+    const std::string VkResultToString( VkResult result );
+
+    /// TRUE when @p result means the device is gone, having latched `Graphic::DeviceLost` on the way. Every
+    /// macro below asks this before deciding what a failed result means, so that ONE result — the one the
+    /// engine cannot do anything about and did not cause — is recognised wherever it appears rather than
+    /// only where somebody remembered to look for it.
+    ///
+    /// It is deliberately not `noexcept`-narrow and deliberately not inline-only: the site string is built
+    /// here so that every route into device loss names its call the same way.
+    [[nodiscard]] bool NoteIfDeviceLost( VkResult result, const char* call, const char* file, int line );
+
+    // A FAILED RESULT IS AN INVARIANT VIOLATION — EXCEPT FOR THE ONE THAT IS NOT.
+    //
+    // `VK_ERROR_DEVICE_LOST` is a state this engine expects to meet (see Engine/Graphic/DeviceLost.hpp:
+    // on macOS any other process's GPU fault takes us down with it). Aborting on it treats an expected
+    // event as an impossible one and loses everything the user had not saved, with a log whose last line
+    // points at a synchronisation defect that does not exist. So device loss latches and returns; every
+    // OTHER failure still aborts exactly as it always did, because those really are invariant violations.
 #define VK_CHECK_RESULT( f )                                                                                      \
     {                                                                                                             \
         VkResult res = ( f );                                                                                     \
-        if ( res != VK_SUCCESS )                                                                                  \
+        if ( res != VK_SUCCESS && !NoteIfDeviceLost( res, #f, __FILE__, __LINE__ ) )                              \
         {                                                                                                         \
             LOG_ERROR( "VkResult is '{}' in {}:{}", VkResultToString( res ), __FILE__, __LINE__ );                \
             DESERT_VERIFY( false );                                                                               \
         }                                                                                                         \
     }
 
+    // The three error-RETURNING macros already stop their function, so device loss needs no special
+    // control flow here — only the latch, so that whichever of them meets it first is the one that names
+    // the cause. The result of NoteIfDeviceLost is discarded on purpose: these macros return either way.
 #define VK_CHECK_RESULT_BOOL( f )                                                                                 \
     {                                                                                                             \
         VkResult res = ( f );                                                                                     \
         if ( res != VK_SUCCESS )                                                                                  \
         {                                                                                                         \
+            (void)NoteIfDeviceLost( res, #f, __FILE__, __LINE__ );                                                \
             LOG_ERROR( "VkResult is '{}' in {}:{}", VkResultToString( res ), __FILE__, __LINE__ );                \
             return Common::MakeFormattedError<bool>( "VkResult is '{}' in {}:{}", VkResultToString( res ),         \
                                                      __FILE__, __LINE__ );                                        \
@@ -37,6 +61,7 @@ namespace Desert::Graphic::API::Vulkan
         VkResult res = ( f );                                                                                     \
         if ( res != VK_SUCCESS )                                                                                  \
         {                                                                                                         \
+            (void)NoteIfDeviceLost( res, #f, __FILE__, __LINE__ );                                                \
             return Common::MakeFormattedError<VkResult>( "VkResult is '{}' in {}:{}", VkResultToString( res ),    \
                                                          __FILE__, __LINE__ );                                    \
         }                                                                                                         \
@@ -47,6 +72,7 @@ namespace Desert::Graphic::API::Vulkan
         VkResult res = ( f );                                                                                     \
         if ( res != VK_SUCCESS )                                                                                  \
         {                                                                                                         \
+            (void)NoteIfDeviceLost( res, #f, __FILE__, __LINE__ );                                                \
             return Common::MakeFormattedError<type>( "VkResult is '{}' in {}:{}", VkResultToString( res ),        \
                                                      __FILE__, __LINE__ );                                        \
         }                                                                                                         \
@@ -57,6 +83,7 @@ namespace Desert::Graphic::API::Vulkan
         VkResult res = ( f );                                                                                     \
         if ( res != VK_SUCCESS )                                                                                  \
         {                                                                                                         \
+            (void)NoteIfDeviceLost( res, #f, __FILE__, __LINE__ );                                                \
             /* The stringified call is an ARGUMENT, never the format string: `#f` is arbitrary source             \
                text, so a brace anywhere in it would be parsed as a placeholder and throw - from inside           \
                the code reporting a Vulkan failure. */                                                            \
@@ -67,8 +94,6 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeSuccess( res );                                                                    \
         }                                                                                                         \
     }
-
-    const std::string VkResultToString( VkResult result );
 
     namespace Utils
     {

@@ -51,8 +51,10 @@ namespace Desert
         virtual bool IsWindowMinimized() const = 0;
         virtual void Maximize()                = 0;
 
-        virtual void PrepareNextFrame() const  = 0;
-        virtual void PresentFinalImage() const = 0;
+        // The frame's own result, passed through rather than swallowed. See Renderer.cpp: this link
+        // declared them void, which is one of the three places a failed present used to vanish.
+        [[nodiscard]] virtual Common::BoolResultStr PrepareNextFrame() const  = 0;
+        [[nodiscard]] virtual Common::BoolResultStr PresentFinalImage() const = 0;
 
         virtual std::shared_ptr<Graphic::SwapChain> GetWindowSwapChain() = 0;
 

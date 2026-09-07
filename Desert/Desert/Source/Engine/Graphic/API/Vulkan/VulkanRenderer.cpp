@@ -19,6 +19,7 @@
 #include <Engine/ShaderResources/API/Vulkan/VulkanStorageBuffer.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/DeviceLost.hpp>
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Core/FrameManager.hpp>
 
@@ -35,6 +36,17 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResultStr VulkanRendererAPI::BeginFrame()
     {
+        // THE STRUCTURAL GATE FOR EVERY vkCmd* IN THIS FILE. Nothing below records a command without
+        // m_CurrentCommandBuffer, and this is the only function that ever sets it — so leaving it null
+        // here turns all forty-odd recording entry points into no-ops without a guard in each of them.
+        // Application::Run reads this result and ends the run, which is the intended exit.
+        if ( !Graphic::DeviceLost::AllowWork() )
+        {
+            m_CurrentCommandBuffer = nullptr;
+            return Common::MakeError( "the device is lost; no frame can be recorded. See the [DeviceLost] "
+                                      "line above for the cause." );
+        }
+
         auto window = m_Window.lock();
         if ( !window )
             return Common::MakeError( "Window is null" );
@@ -60,6 +72,15 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResultStr VulkanRendererAPI::EndFrame()
     {
+        // A command buffer that was never begun cannot be ended, and on the device-lost path BeginFrame
+        // deliberately left it null — so this is already a no-op there. The gate is here for the other
+        // order: a loss discovered mid-frame, between BeginFrame and here.
+        if ( !Graphic::DeviceLost::AllowWork() )
+        {
+            m_CurrentCommandBuffer = nullptr;
+            return Common::MakeError( "the device is lost; the frame is abandoned rather than closed." );
+        }
+
         if ( m_CurrentCommandBuffer )
         {
             m_GpuProfiler.EndFrame( m_CurrentCommandBuffer );
@@ -70,17 +91,11 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
-    Common::BoolResultStr VulkanRendererAPI::PrepareNextFrame()
-    {
-        auto window = m_Window.lock();
-        if ( !window )
-            return Common::MakeError( "Window is null" );
-        SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() )->PrepareFrame();
-        return BOOLSUCCESS;
-    }
-
     Common::BoolResultStr VulkanRendererAPI::PresentFinalImage()
     {
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return Common::MakeError( "the device is lost; nothing is submitted or presented." );
+
         auto window = m_Window.lock();
         if ( !window )
             return Common::MakeError( "Window is null" );
@@ -96,6 +111,12 @@ namespace Desert::Graphic::API::Vulkan
 
         swapChain->GetVulkanQueue()->Submit();
         swapChain->Present();
+
+        // The submit and the present are where an asynchronous loss surfaces. Saying so HERE, in this
+        // frame's own result, is what carries it up to Application::Run — before which the result of this
+        // function was thrown away at three separate links.
+        if ( Graphic::DeviceLost::IsLost() )
+            return Common::MakeError( "the device was lost while submitting or presenting this frame." );
 
         return BOOLSUCCESS;
     }
@@ -711,8 +732,16 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::WaitDeviceIdle()
     {
-        vkDeviceWaitIdle( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
-                               ->GetVulkanLogicalDevice() );
+        // Nothing is in flight on a lost device and nothing ever will be, so this can only return
+        // VK_ERROR_DEVICE_LOST. Skipping it is not a shortcut: the callers use it to make teardown safe,
+        // and teardown after a loss is safe by construction because no work is outstanding.
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return;
+
+        const VkResult idle = vkDeviceWaitIdle(
+             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice() );
+        if ( idle != VK_SUCCESS && !NoteIfDeviceLost( idle, "vkDeviceWaitIdle", __FILE__, __LINE__ ) )
+            LOG_ERROR( "[Renderer] vkDeviceWaitIdle failed: {}", VkResultToString( idle ) );
     }
     std::shared_ptr<Framebuffer> VulkanRendererAPI::GetCompositeFramebuffer() const
     {

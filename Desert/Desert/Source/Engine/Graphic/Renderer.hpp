@@ -86,8 +86,10 @@ namespace Desert::Graphic
         // Set the scissor rect (framebuffer px, top-left origin). Used by the 2D batcher for UI clipping.
         void SetScissor( int32_t x, int32_t y, uint32_t width, uint32_t height );
 
-        void PrepareNextFrame();
-        void PresentFinalImage();
+        // Carries the backend's own result: a failed submit or present is what a lost device looks like
+        // from here, and Application::Run ends the run on it. See Renderer.cpp for why it was void, and
+        // RendererAPI.hpp for why the PrepareNextFrame that stood beside it is gone.
+        [[nodiscard]] Common::BoolResultStr PresentFinalImage();
 
         void ResizeWindowEvent( uint32_t width, uint32_t height );
         void WaitDeviceIdle();

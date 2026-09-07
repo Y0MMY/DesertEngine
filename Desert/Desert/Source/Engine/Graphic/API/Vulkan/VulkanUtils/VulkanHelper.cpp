@@ -28,6 +28,19 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
+    bool NoteIfDeviceLost( VkResult result, const char* call, const char* file, int line )
+    {
+        if ( result != VK_ERROR_DEVICE_LOST )
+            return false;
+
+        // The SITE is the call plus the source position, because the first thing a reader asks after
+        // "the device is gone" is "gone where?" — and the answer is nearly always a submit or a present,
+        // which tells them immediately that it was asynchronous and therefore not this line's fault.
+        std::string site = std::string( call ) + " (" + file + ":" + std::to_string( line ) + ")";
+        (void)Graphic::DeviceLost::Report( site, VkResultToString( result ) );
+        return true;
+    }
+
     void Utils::InsertImageMemoryBarrier( VkCommandBuffer cmdbuffer, VkImage image,
                                                VkAccessFlags srcAccessMask, VkAccessFlags dstAccessMask,
                                                VkImageLayout oldImageLayout, VkImageLayout newImageLayout,

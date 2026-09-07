@@ -1,6 +1,7 @@
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/DeviceLost.hpp>
 
 #include <Common/Core/EventRegistry.hpp>
 #include <Common/Core/Profiler.hpp>
@@ -125,6 +126,22 @@ namespace Desert::Engine
             ReportLayerFailure( "OnDetach", layer, detached.GetError() );
     }
 
+    bool Application::EndRunOnDeviceLoss( const char* stage )
+    {
+        if ( !Graphic::DeviceLost::IsLost() )
+            return false;
+
+        // The explanation was already printed, once, by whoever first met the loss. This line only says
+        // which stage of the loop is standing down, so that the log reads as one event with an ending
+        // rather than as a second, unrelated failure.
+        LOG_ERROR( "[Application] the device is lost; ending the run while {}. The [DeviceLost] block "
+                   "above is the cause, and the {} Vulkan calls refused since then are what did NOT go to "
+                   "a dead device.",
+                   stage, Graphic::DeviceLost::RefusedCalls() );
+        Close( kExitDeviceLost );
+        return true;
+    }
+
     void Application::Run()
     {
         float m_LastFrameTime = 0.0f;
@@ -151,7 +168,16 @@ namespace Desert::Engine
             // 2. Prepare Frame (Acquire next image) — CPU blocks here if the GPU is behind / vsync-gated.
             {
                 DESERT_PROFILE_SCOPE( "PrepareNextFrame (Acquire)" );
-                m_Window->PrepareNextFrame();
+                // ITS RESULT USED TO BE DISCARDED — by this line, and by the two links beneath it, which
+                // both declared themselves void over a backend that returns one. A frame that could not
+                // acquire an image was therefore recorded and submitted anyway.
+                const auto prepared = m_Window->PrepareNextFrame();
+                if ( !prepared.IsSuccess() )
+                {
+                    if ( EndRunOnDeviceLoss( "acquiring the next image" ) )
+                        break;
+                    LOG_ERROR( "[Application] PrepareNextFrame failed: {}", prepared.GetError() );
+                }
             }
 
             // 3. Start recording commands for this frame
@@ -172,6 +198,9 @@ namespace Desert::Engine
                 // Both of BeginFrame's failures are terminal anyway — the window is gone, or
                 // vkBeginCommandBuffer refused, which means the device is lost. Exit code 1 so a script
                 // that ran the editor headless is told.
+                if ( EndRunOnDeviceLoss( "beginning the frame" ) )
+                    break;
+
                 LOG_ERROR( "[Application] BeginFrame failed, ending the run: {}", frameBegun.GetError() );
                 Close( 1 );
                 break;
@@ -199,7 +228,17 @@ namespace Desert::Engine
             // 6. Submit all recorded commands and Present — CPU blocks here on submit/present (GPU-bound/vsync).
             {
                 DESERT_PROFILE_SCOPE( "PresentFinalImage (Submit)" );
-                m_Window->PresentFinalImage();
+                const auto presented = m_Window->PresentFinalImage();
+                if ( !presented.IsSuccess() )
+                {
+                    // THE FIRST PLACE A LOST DEVICE IS NORMALLY NOTICED. A submit executes asynchronously,
+                    // so the frame that killed the device has already gone by the time anyone is told, and
+                    // this is where the news lands. Breaking HERE — rather than one iteration later — is
+                    // what keeps step 7 below from asking the dead device for a screenshot.
+                    if ( EndRunOnDeviceLoss( "submitting and presenting the frame" ) )
+                        break;
+                    LOG_ERROR( "[Application] PresentFinalImage failed: {}", presented.GetError() );
+                }
             }
 
             // 7. The frame is OUT. The only point in this loop at which the composited picture — scene and

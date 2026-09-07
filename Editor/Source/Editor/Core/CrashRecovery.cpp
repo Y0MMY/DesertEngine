@@ -4,6 +4,8 @@
 #include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
+#include <Engine/Graphic/DeviceLost.hpp>
+
 namespace Desert::Editor
 {
     std::filesystem::path CrashRecovery::AutosaveDir()
@@ -51,6 +53,21 @@ namespace Desert::Editor
 
     void CrashRecovery::DisarmSession()
     {
+        // A DEVICE-LOST SHUTDOWN IS NOT A CLEAN EXIT, AND THE DIFFERENCE IS THE USER'S UNSAVED WORK.
+        //
+        // The engine now closes in order when the GPU device is lost, which means it walks the ordinary
+        // quit path — Application::Run leaves its loop, every layer is detached, and the editor's detach
+        // calls this. Dropping the lock here would tell the next start that the session ended normally,
+        // and the recovery prompt that offers the latest autosave would never appear. The exit was
+        // orderly; the session was not.
+        if ( Graphic::DeviceLost::IsLost() )
+        {
+            LOG_WARN( "[Recovery] the session lock is LEFT IN PLACE: this shutdown was caused by a lost "
+                      "GPU device, not by you closing the editor. The next start will offer to reopen the "
+                      "latest autosave." );
+            return;
+        }
+
         std::error_code ec;
         std::filesystem::remove( LockPath(), ec );
     }

@@ -16,8 +16,7 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual void Init() override;
 
-        virtual void BeginFrame() const override;
-        virtual void EndFrame() const override;
+        [[nodiscard]] virtual Common::BoolResultStr BeginFrame() const override;
 
         // EMPTY BY OBLIGATION, not by omission. `RendererContext::OnResize` is pure virtual, and on Vulkan
         // there is nothing at CONTEXT level that a resize touches: the swapchain owns every size-dependent
