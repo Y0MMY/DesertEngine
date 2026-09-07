@@ -209,6 +209,7 @@ namespace
 
     constexpr const char* kEditorLayer    = "Editor/Source/EditorLayer.cpp";
     constexpr const char* kPrefsImpl      = "Editor/Source/Editor/Core/EditorPreferences.cpp";
+    constexpr const char* kGizmoState     = "Editor/Source/Editor/Core/GizmoState.cpp";
     constexpr const char* kViewportPanel  = "Editor/Source/Editor/Panels/ViewportPanel/ViewportPanel.cpp";
     constexpr const char* kPhotogrammetry = "Editor/Source/Editor/Panels/Photogrammetry/PhotogrammetryPanel.cpp";
 
@@ -216,12 +217,15 @@ namespace
          // Applied to the editor camera once a camera exists.
          { "CameraSpeed", Owner::Machine, kEditorLayer },
 
-         // The four gizmo snap values and their modifier policy. Load()/Save() push them into GizmoState,
-         // which is where every gizmo actually reads them from.
-         { "TranslateSnap", Owner::Machine, kPrefsImpl },
-         { "RotateSnapDeg", Owner::Machine, kPrefsImpl },
-         { "ScaleSnap", Owner::Machine, kPrefsImpl },
-         { "PersistentSnap", Owner::Machine, kPrefsImpl },
+         // The four gizmo snap values and their modifier policy. These rows named EditorPreferences.cpp
+         // until К6, because Save() pushed them into Core::GizmoState — which kept its OWN copy and was
+         // written directly by two toolbars, so the push reverted a live user choice on every unrelated
+         // save and no toolbar write ever reached the file. The second copy is gone; GizmoState.cpp now
+         // reads these four out of here and is the file this census follows them to.
+         { "TranslateSnap", Owner::Machine, kGizmoState },
+         { "RotateSnapDeg", Owner::Machine, kGizmoState },
+         { "ScaleSnap", Owner::Machine, kGizmoState },
+         { "PersistentSnap", Owner::Machine, kGizmoState },
 
          { "AutosaveMinutes", Owner::Machine, kEditorLayer },
          { "ShowPerfHud", Owner::Machine, kViewportPanel },

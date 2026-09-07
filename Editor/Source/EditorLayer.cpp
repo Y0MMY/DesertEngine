@@ -4430,22 +4430,18 @@ namespace Desert::Editor
             ImGui::Spacing();
             ImGui::TextDisabled( "Gizmo Snap" );
             ImGui::Separator();
-            bool snapChanged = false;
-            snapChanged |= ImGui::Checkbox( "Snap always on (Ctrl inverts)", &prefs.PersistentSnap );
+            ImGui::Checkbox( "Snap always on (Ctrl inverts)", &prefs.PersistentSnap );
             // CENTIMETRES, which is what the value has always been fed into: this control said "(m)" and
             // clamped to 0.01..100 while writing a field GizmoState reads as world units, and a world
             // unit is 1 cm. A slider whose unit disagrees with its consumer is how the shipped grid snap
             // ended up at half a centimetre (see EditorPreferences::TranslateSnap).
-            snapChanged |= ImGui::DragFloat( "Move (cm)", &prefs.TranslateSnap, 1.0f, 1.0f, 10000.0f, "%.0f" );
-            snapChanged |= ImGui::DragFloat( "Rotate (deg)", &prefs.RotateSnapDeg, 0.5f, 0.1f, 180.0f, "%.1f" );
-            snapChanged |= ImGui::DragFloat( "Scale", &prefs.ScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f" );
-            if ( snapChanged )
-            {
-                Core::GizmoState::SetTranslateSnap( prefs.TranslateSnap );
-                Core::GizmoState::SetRotateSnapDegrees( prefs.RotateSnapDeg );
-                Core::GizmoState::SetScaleSnap( prefs.ScaleSnap );
-                Core::GizmoState::SetPersistentSnap( prefs.PersistentSnap );
-            }
+            //
+            // Nothing is pushed anywhere afterwards: these four ARE the snap's storage and GizmoState
+            // reads them, so the gizmo follows on the same frame. The block that used to copy them into
+            // GizmoState is gone with the copy it fed (К6).
+            ImGui::DragFloat( "Move (cm)", &prefs.TranslateSnap, 1.0f, 1.0f, 10000.0f, "%.0f" );
+            ImGui::DragFloat( "Rotate (deg)", &prefs.RotateSnapDeg, 0.5f, 0.1f, 180.0f, "%.1f" );
+            ImGui::DragFloat( "Scale", &prefs.ScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f" );
 
             ImGui::Spacing();
             ImGui::TextDisabled( "Autosave" );

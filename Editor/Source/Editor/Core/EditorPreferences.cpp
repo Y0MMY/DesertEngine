@@ -1,7 +1,5 @@
 #include "EditorPreferences.hpp"
 
-#include <Editor/Core/GizmoState.hpp>
-
 #include <Engine/Graphic/RenderConfig.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 
@@ -36,16 +34,24 @@ namespace Desert::Editor
         return EditorPreferences::ConfigDirectory() + "/editor.json";
     }
 
-    static void ApplyToGizmoState( const EditorPreferences& p )
+    // The renderer's copy of the one preference a Vulkan-side system has to see for itself.
+    // Engine/Graphic must not know the editor exists, so the value is PUSHED down a layer rather than
+    // pulled up one. MSAA is consumed by SceneRenderer::Init — Load() runs in the EditorLayer
+    // constructor, before any render system initializes, so a startup-baked setting lands in time, and
+    // Save() repeats it because a second viewport creates a SceneRenderer mid-session and that new
+    // renderer must bake the CURRENT selection rather than the one this process started with.
+    //
+    // THIS IS NOT THE SIDE EFFECT THAT USED TO SHARE THIS FUNCTION. Its predecessor was called
+    // ApplyToGizmoState and pushed the four gizmo snap values into Core::GizmoState, which was a second
+    // STORE for them that four other places also wrote — so running it from Save() overwrote whatever
+    // the user had just chosen with whatever was last loaded, on every unrelated save. There is no such
+    // hazard here and the difference is structural, not a matter of degree: RenderConfig::MSAASamples
+    // has exactly ONE writer, this line, and is derived from exactly one source, the field beside it.
+    // Re-running it can only restate what the owner already says. A push is safe precisely when the
+    // side being pushed to is not also an authority on the value.
+    static void PushToRenderConfig( const EditorPreferences& p )
     {
-        // MSAA is consumed by SceneRenderer::Init — Load() runs in the EditorLayer constructor,
-        // before any render system initializes, so a startup-baked setting lands in time.
         Graphic::RenderConfig::MSAASamples = p.MSAASamples;
-
-        Core::GizmoState::SetTranslateSnap( p.TranslateSnap );
-        Core::GizmoState::SetRotateSnapDegrees( p.RotateSnapDeg );
-        Core::GizmoState::SetScaleSnap( p.ScaleSnap );
-        Core::GizmoState::SetPersistentSnap( p.PersistentSnap );
     }
 
     void EditorPreferences::Load()
@@ -54,7 +60,7 @@ namespace Desert::Editor
         // error line, which would be noise for a state that is expected.
         if ( !std::filesystem::exists( PrefsFile() ) )
         {
-            ApplyToGizmoState( Get() );
+            PushToRenderConfig( Get() );
             return;
         }
 
@@ -89,7 +95,7 @@ namespace Desert::Editor
             Save(); // written back in the new form: the migration runs once, not every launch
         }
 
-        ApplyToGizmoState( Get() );
+        PushToRenderConfig( Get() );
     }
 
     bool EditorPreferences::IsFavouriteField( const std::string& key )
@@ -130,7 +136,13 @@ namespace Desert::Editor
 
     bool EditorPreferences::Save()
     {
-        ApplyToGizmoState( Get() );
+        // A SAVE MUST NOT CHANGE A SINGLE FIELD THE USER DID NOT TOUCH. This function's first statement
+        // used to be ApplyToGizmoState(), which reverted the four gizmo snap values to whatever this
+        // struct last held — so toggling the Perf HUD, picking an MSAA level or starring a field in
+        // Details silently undid a snap step chosen from the toolbar. The line below is the whole of
+        // what a save is now allowed to do besides writing the file, and its header says why it cannot
+        // have the same effect. Desert/Tests/Editor/PreferenceOwnership asserts the relation.
+        PushToRenderConfig( Get() );
         // Load() checks its read and handles a corrupt file; Save() logged success unconditionally, so
         // preferences silently stopped persisting the moment the config directory became unwritable.
         if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
