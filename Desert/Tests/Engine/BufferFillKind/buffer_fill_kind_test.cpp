@@ -61,12 +61,16 @@ namespace
         {
         }
 
-        void SetData( const void* data, uint32_t size, uint32_t offset ) override
+        // Answers, like the interface (Г13) -- see the note on the same double in MaterialParamUpload.
+        Common::BoolResultStr SetData( const void* data, uint32_t size, uint32_t offset ) override
         {
             ++m_Writes;
             auto& copy = m_Copies[CurrentCopy()];
-            ASSERT_LE( offset + size, copy.size() );
+            if ( static_cast<size_t>( offset ) + size > copy.size() )
+                return Common::MakeFormattedError<bool>( "{} byte(s) at offset {} do not fit {}", size, offset,
+                                                         copy.size() );
             std::memcpy( copy.data() + offset, data, size );
+            return Common::MakeSuccess( true );
         }
 
         Common::BoolResultStr EnsureMapped() override
@@ -351,8 +355,9 @@ TEST( StorageBufferFields, HasNoneAndTheReferenceOutlivesTheCall )
     class Stub final : public StorageBuffer
     {
     public:
-        void SetData( const void*, uint32_t, uint32_t ) override
+        Common::BoolResultStr SetData( const void*, uint32_t, uint32_t ) override
         {
+            return Common::MakeError<bool>( "this stub has no memory" );
         }
         Common::BoolResultStr EnsureMapped() override
         {

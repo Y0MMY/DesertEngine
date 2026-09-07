@@ -118,8 +118,21 @@ namespace Desert::Graphic::System
                 e.Material = std::make_unique<MaterialParticleBillboard>();
 
             // All particles start dead (VelLife.w = 0, Color.a = 0): a zeroed buffer, so compute respawns them.
+            //
+            // AND IF IT DOES NOT ZERO, THE EMITTER MUST NOT RUN. This is the one buffer in the engine
+            // created `persistent = true`: nothing rewrites it per frame, the compute pass reads what is
+            // there and writes back. So an initialisation that silently did nothing does not produce a
+            // stale frame, it produces a simulation seeded from whatever VMA handed back — particles with
+            // NaN lifetimes and positions, for as long as the emitter exists. Dropping the buffer makes
+            // GetOrCreate try again next frame instead of running on garbage.
             std::vector<uint8_t> zeros( static_cast<size_t>( cap ) * kParticleStride, 0 );
-            e.Particles->SetData( zeros.data(), static_cast<uint32_t>( zeros.size() ) );
+            const auto cleared = e.Particles->SetData( zeros.data(), static_cast<uint32_t>( zeros.size() ) );
+            if ( !cleared.IsSuccess() )
+            {
+                LOG_ERROR( "[Particles] emitter {} could not be initialised, so it does not run: {}", entityId,
+                           cleared.GetError() );
+                e.Particles = nullptr;
+            }
         }
         return e;
     }
@@ -168,7 +181,16 @@ namespace Desert::Graphic::System
                      {
                          const std::vector<uint8_t> zeros(
                               static_cast<size_t>( it->second.MaxParticles ) * kParticleStride, 0 );
-                         it->second.Particles->SetData( zeros.data(), static_cast<uint32_t>( zeros.size() ) );
+                         // A Restart that wrote nothing left the emitter running with the OLD state
+                         // while the editor's transport reported it restarted. The report is the log
+                         // here: the transport flag has already been consumed and there is no second
+                         // place to put a failure, but "the button did nothing" must at least be
+                         // findable.
+                         const auto restarted =
+                              it->second.Particles->SetData( zeros.data(), static_cast<uint32_t>( zeros.size() ) );
+                         if ( !restarted.IsSuccess() )
+                             LOG_ERROR( "[Particles] Restart on emitter {} did not clear the state: {}",
+                                        static_cast<uint32_t>( entity ), restarted.GetError() );
                          it->second.SpawnAccum = 0.0f;
                      }
                  }
@@ -178,6 +200,12 @@ namespace Desert::Graphic::System
 
                  EmitterGpu& gpu = GetOrCreate( static_cast<uint32_t>( entity ), d.MaxParticles );
 
+                 // GetOrCreate refuses by leaving the state buffer null when it could not be zeroed
+                 // (see there). It has already said why; this emitter simply does not take part in the
+                 // frame, and the next frame tries to create it again.
+                 if ( !gpu.Particles || !gpu.Counter )
+                     return;
+
                  // Spawn budget for this frame (fractional carry so low rates still emit).
                  gpu.SpawnAccum += d.SpawnRate * dt;
                  uint32_t budget = static_cast<uint32_t>( gpu.SpawnAccum );
@@ -185,9 +213,18 @@ namespace Desert::Graphic::System
                  if ( !d.Looping )
                      budget = 0; // one-shot bursts are a follow-up; looping emits continuously
 
-                 // Zero the spawn counter for this frame.
-                 const uint32_t zero = 0;
-                 gpu.Counter->SetData( &zero, sizeof( zero ) );
+                 // Zero the spawn counter for this frame. A counter that did not reset holds LAST
+                 // frame's atomic total, so the compute pass would spawn from an index past the end of
+                 // the live range — the emitter must sit this frame out rather than simulate from it.
+                 const uint32_t zero    = 0;
+                 const auto     counter = gpu.Counter->SetData( &zero, sizeof( zero ) );
+                 if ( !counter.IsSuccess() )
+                 {
+                     LOG_ERROR( "[Particles] emitter {} sits out this frame, its spawn counter did not "
+                                "reset: {}",
+                                static_cast<uint32_t>( entity ), counter.GetError() );
+                     return;
+                 }
 
                  const glm::vec3 worldPos = glm::vec3( transform.GetTransform()[3] );
                  glm::vec3       dir      = d.Direction;

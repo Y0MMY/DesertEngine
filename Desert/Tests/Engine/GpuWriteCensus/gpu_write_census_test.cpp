@@ -258,8 +258,8 @@ namespace
         while ( i > 0 )
         {
             const char c = src[i - 1];
-            if ( std::isspace( static_cast<unsigned char>( c ) ) != 0 || Desert::Tests::ConsumerText::IsIdentChar( c ) ||
-                 c == '.' || c == '>' || c == '-' || c == ':' )
+            if ( std::isspace( static_cast<unsigned char>( c ) ) != 0 ||
+                 Desert::Tests::ConsumerText::IsIdentChar( c ) || c == '.' || c == '>' || c == '-' || c == ':' )
             {
                 --i;
                 continue;
@@ -307,8 +307,8 @@ namespace
                     if ( !leading.empty() )
                         continue; // bound, returned, compared, passed on — the answer is in play
 
-                    out.push_back( { path.string(), LineOf( src, at ),
-                                     "the answer from " + name + " is discarded" } );
+                    out.push_back(
+                         { path.string(), LineOf( src, at ), "the answer from " + name + " is discarded" } );
                 }
             }
         }
@@ -340,7 +340,8 @@ namespace
                 const std::string condition = src.substr( open, close - open );
                 // A NEGATED test of a result. `if ( x.IsSuccess() ) continue;` is the opposite statement
                 // and a legitimate one, so the `!` is load-bearing rather than decoration.
-                if ( condition.find( "IsSuccess" ) == std::string::npos || condition.find( '!' ) == std::string::npos )
+                if ( condition.find( "IsSuccess" ) == std::string::npos ||
+                     condition.find( '!' ) == std::string::npos )
                     continue;
 
                 std::size_t body = SkipSpace( src, close + 1 );
@@ -406,14 +407,13 @@ namespace
                     const auto hits = WordPositions( body, destroyer );
                     if ( hits.empty() )
                         continue;
-                    out.push_back(
-                         { path.string(), LineOf( src, bodyOpen + hits.front() ),
-                           std::string( "SetData calls " ) + destroyer +
-                                ", so the per-frame WRITE path destroys and re-creates the buffer it is "
-                                "writing into. For a buffer whose contents must survive across frames "
-                                "(GPU simulation state) that is the state gone, silently. Growing is a "
-                                "different operation from writing and needs its own name and its own "
-                                "refusal" } );
+                    out.push_back( { path.string(), LineOf( src, bodyOpen + hits.front() ),
+                                     std::string( "SetData calls " ) + destroyer +
+                                          ", so the per-frame WRITE path destroys and re-creates the buffer it is "
+                                          "writing into. For a buffer whose contents must survive across frames "
+                                          "(GPU simulation state) that is the state gone, silently. Growing is a "
+                                          "different operation from writing and needs its own name and its own "
+                                          "refusal" } );
                     break;
                 }
             }
@@ -544,10 +544,9 @@ TEST( BufferGrowth, EveryVerdictHasAName )
     // A refusal that reaches a log as an integer is a refusal nobody reads. Every enumerator, not the
     // three somebody remembered -- the switch in BufferWriteVerdictName has no default, so a fifth
     // verdict added tomorrow stops compiling instead of printing "unknown".
-    for ( const BufferWriteVerdict v :
-          { BufferWriteVerdict::Fits, BufferWriteVerdict::Grow,
-            BufferWriteVerdict::RefuseWouldDestroyPersistentState,
-            BufferWriteVerdict::RefuseWouldNotFitAnyBuffer } )
+    for ( const BufferWriteVerdict v : { BufferWriteVerdict::Fits, BufferWriteVerdict::Grow,
+                                         BufferWriteVerdict::RefuseWouldDestroyPersistentState,
+                                         BufferWriteVerdict::RefuseWouldNotFitAnyBuffer } )
     {
         const char* name = Desert::ShaderResources::BufferWriteVerdictName( v );
         ASSERT_NE( name, nullptr );

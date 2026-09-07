@@ -576,7 +576,18 @@ namespace Desert::Graphic::System
         const uint32_t bladesPerClump =
              static_cast<uint32_t>( std::clamp( gt->GrassTint.y, 1.0f, 12.0f ) + 0.5f );
         GrassDrawIndirect args{ bladesPerClump * kGrassVertsPerBlade, 0u, 0u, 0u };
-        m_GrassIndirectBuf->SetData( &args, sizeof( args ) );
+        const auto        reset = m_GrassIndirectBuf->SetData( &args, sizeof( args ) );
+        if ( !reset.IsSuccess() )
+        {
+            // NO RESET, NO CULL. instanceCount is an accumulator the compute pass atomicAdds into; if
+            // it was not zeroed it still holds LAST frame's visible count, so the dispatch below would
+            // add this frame's clumps on top and the indirect draw would read instance indices past the
+            // end of the visible list. Skipping the cull leaves the previous frame's args standing,
+            // which draws the previous frame's grass — wrong, but in-bounds.
+            LOG_ERROR( "[Terrain] grass culling is skipped this frame, the indirect args did not reset: {}",
+                       reset.GetError() );
+            return;
+        }
 
         GrassCullPush push{};
         push.MVP =

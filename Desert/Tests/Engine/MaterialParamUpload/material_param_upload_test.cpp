@@ -57,11 +57,18 @@ namespace
         {
         }
 
-        void SetData( const void* data, uint32_t size, uint32_t offset ) override
+        // Answers, like the interface it stands in for (Г13). A double that could not refuse would let
+        // this suite pass over a production signature that can, which is how a fake stops testing
+        // anything -- and the out-of-range case is now the REFUSAL the real buffer gives rather than a
+        // fatal assertion, so the caller's handling of it is exercised too.
+        Common::BoolResultStr SetData( const void* data, uint32_t size, uint32_t offset ) override
         {
             auto& copy = m_Copies[CurrentCopy()];
-            ASSERT_LE( offset + size, copy.size() );
+            if ( static_cast<size_t>( offset ) + size > copy.size() )
+                return Common::MakeFormattedError<bool>( "{} byte(s) at offset {} do not fit {}", size, offset,
+                                                         copy.size() );
             std::memcpy( copy.data() + offset, data, size );
+            return Common::MakeSuccess( true );
         }
 
         Common::BoolResultStr EnsureMapped() override

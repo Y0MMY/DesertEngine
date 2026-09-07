@@ -11,7 +11,13 @@ namespace Desert::ShaderResources::API::Vulkan
     VulkanUniformBuffer::VulkanUniformBuffer( const ShaderLayout::UniformBuffer& uniform )
          : UniformBuffer( uniform )
     {
-        RT_Invalidate();
+        // A constructor has no channel, so the answer is KEPT rather than logged and forgotten: every
+        // SetData and EnsureMapped afterwards hands the caller this refusal, with its original reason.
+        // Logged once as well, here, because this is where the numbers are and because a buffer that
+        // never built is worth a line even if nothing writes to it this session.
+        m_Built = RT_Invalidate();
+        if ( !m_Built.IsSuccess() )
+            LOG_ERROR( "[UniformBuffer] '{}' was not built: {}", m_UniformModel.Name, m_Built.GetError() );
     }
 
     VulkanUniformBuffer::~VulkanUniformBuffer()
@@ -55,7 +61,7 @@ namespace Desert::ShaderResources::API::Vulkan
         m_Mappings.clear();
     }
 
-    void VulkanUniformBuffer::RT_Invalidate()
+    Common::BoolResultStr VulkanUniformBuffer::RT_Invalidate()
     {
         Release();
 
@@ -87,9 +93,18 @@ namespace Desert::ShaderResources::API::Vulkan
                               i / EngineContext::kMaxRendererSlots, i % EngineContext::kMaxRendererSlots ),
                  bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffers[i] );
 
+            // REFUSED, NOT SKIPPED. This was `continue`, which left m_Buffers[i] as VK_NULL_HANDLE and
+            // m_DescriptorInfos[i] zeroed while the function went on to report the buffer built. The
+            // descriptor is then written into a set and handed to the driver, and the only symptom is
+            // that one frame in flight — one in two, or one in six with the slot dimension — renders
+            // wrong. Release() below puts the object back to empty so that a half-built buffer is not a
+            // state anything else can observe.
             if ( !allocatedBuffer.IsSuccess() )
             {
-                continue;
+                Release();
+                return Common::MakeFormattedError<bool>( "uniform buffer '{}' copy {} of {}: {}",
+                                                         m_UniformModel.Name, i, copies,
+                                                         allocatedBuffer.GetError() );
             }
             m_MemoryAllocs[i] = allocatedBuffer.GetValue();
 
@@ -101,56 +116,71 @@ namespace Desert::ShaderResources::API::Vulkan
             // actual unmap happens in Release(), through the mapping's own destructor.
             m_Mappings[i] = vulkanContext->GetVulkanAllocator()->MapMemory( m_MemoryAllocs[i] );
 
+            // A COPY THAT DID NOT MAP IS THE SAME FAILURE AS ONE THAT DID NOT ALLOCATE, and it used to
+            // be a log line while the object still claimed to be built. Every write to this copy would
+            // refuse for the lifetime of the buffer — MappedMemory sees to that — so "built" was simply
+            // untrue for one frame in flight.
             const auto cleared = m_Mappings[i].Fill( 0, m_UniformModel.Size );
             if ( !cleared.IsSuccess() )
-                LOG_ERROR( "[UniformBuffer] '{}' copy {} starts uninitialised: {}", m_UniformModel.Name, i,
-                           cleared.GetError() );
+            {
+                const std::string reason = cleared.GetError();
+                Release();
+                return Common::MakeFormattedError<bool>( "uniform buffer '{}' copy {} of {}: {}",
+                                                         m_UniformModel.Name, i, copies, reason );
+            }
         }
+
+        return BOOLSUCCESS;
     }
 
-    void VulkanUniformBuffer::SetData( const void* data, uint32_t size, uint32_t offset )
+    Common::BoolResultStr VulkanUniformBuffer::SetData( const void* data, uint32_t size, uint32_t offset )
     {
+        // THE CAUSE, NOT THE CONSEQUENCE. A buffer that failed to build has no copies at all, so the
+        // index check below would answer "there is no copy 0", which is true and tells the reader
+        // nothing. The constructor's own reason is what they need.
+        if ( !m_Built.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "uniform buffer '{}' was never built: {}",
+                                                     m_UniformModel.Name, m_Built.GetError() );
+
         const uint32_t index = CopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex() );
 
         if ( index >= m_Mappings.size() )
-        {
-            LOG_ERROR( "[UniformBuffer] '{}' has no copy {} to write ({} exist)", m_UniformModel.Name, index,
-                       m_Mappings.size() );
-            return;
-        }
+            return Common::MakeFormattedError<bool>( "uniform buffer '{}' has no copy {} to write ({} exist)",
+                                                     m_UniformModel.Name, index, m_Mappings.size() );
 
         const auto wrote = m_Mappings[index].Write( data, size, offset );
-        if ( wrote.IsSuccess() )
-            return;
+        if ( !wrote.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "uniform buffer '{}' copy {}: {}", m_UniformModel.Name, index,
+                                                     wrote.GetError() );
 
-        // A COPY THAT NEVER MAPPED WAS ALREADY NAMED, once, by RT_Invalidate — and this runs per frame
-        // per material, so repeating it here would bury the log rather than inform it. A refusal from a
-        // LIVE mapping is different: it is a size that does not fit, it is new information every time,
-        // and it is the write that would previously have run off the end of the buffer.
-        if ( m_Mappings[index].IsMapped() )
-            LOG_ERROR( "[UniformBuffer] '{}': {}", m_UniformModel.Name, wrote.GetError() );
+        // NO LOG ON THIS PATH ANY MORE, and that is the change rather than an omission. The log line
+        // that stood here ran per frame per material and had to guard itself against burying itself; the
+        // caller now receives the refusal and decides once, where it knows what the write was for.
+        return BOOLSUCCESS;
     }
 
     Common::BoolResultStr VulkanUniformBuffer::EnsureMapped()
     {
+        if ( !m_Built.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "uniform buffer '{}' was never built: {}",
+                                                     m_UniformModel.Name, m_Built.GetError() );
+
         const uint32_t index = CopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex() );
 
         if ( index >= m_Mappings.size() )
             return Common::MakeFormattedError<bool>( "uniform buffer '{}' has no copy {} ({} exist)",
                                                      m_UniformModel.Name, index, m_Mappings.size() );
 
-        if ( m_Mappings[index].IsMapped() )
-            return BOOLSUCCESS;
-
-        // The retry: RT_Invalidate maps every copy up front, so reaching here means that map failed.
-        m_Mappings[index] = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
-                                     EngineContext::GetInstance().GetRendererContext() )
-                                 ->GetVulkanAllocator()
-                                 ->MapMemory( m_MemoryAllocs[index] );
-
+        // THE RETRY THAT STOOD HERE IS GONE, AND THE REASON IS THE FIX ABOVE. It re-mapped a copy whose
+        // map had failed, because RT_Invalidate used to tolerate exactly that state — a buffer that was
+        // "built" with one copy unmapped. It cannot be now: RT_Invalidate is all or nothing, so a built
+        // buffer has every copy mapped and this question has one answer. Keeping the retry would be a
+        // second path to a state that no longer exists, which is the "two paths, one untested" shape §4
+        // of the contract is about.
         if ( !m_Mappings[index].IsMapped() )
-            return Common::MakeFormattedError<bool>( "uniform buffer '{}' copy {}: {}", m_UniformModel.Name, index,
-                                                     m_Mappings[index].GetRefusal() );
+            return Common::MakeFormattedError<bool>(
+                 "uniform buffer '{}' copy {} reports itself unmapped although the buffer was built: {}",
+                 m_UniformModel.Name, index, m_Mappings[index].GetRefusal() );
 
         return BOOLSUCCESS;
     }

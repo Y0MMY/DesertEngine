@@ -43,8 +43,8 @@ namespace Desert::ShaderResources
     {
         Fits                              = 0, ///< Write it; the buffer is big enough as it stands.
         Grow                              = 1, ///< Re-create at the larger size, then write.
-        RefuseWouldDestroyPersistentState  = 2, ///< Growing would throw away state only the GPU has.
-        RefuseWouldNotFitAnyBuffer         = 3, ///< size + offset does not fit in the size type at all.
+        RefuseWouldDestroyPersistentState = 2, ///< Growing would throw away state only the GPU has.
+        RefuseWouldNotFitAnyBuffer        = 3, ///< size + offset does not fit in the size type at all.
     };
 
     /// The bytes a buffer must hold for a write of @p size at @p offset, or 0 when the sum cannot be

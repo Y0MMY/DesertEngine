@@ -177,8 +177,28 @@ namespace Desert::Graphic::Render2D
         const auto& idx   = m_DrawList.GetIndices();
 
         EnsureCapacity( (uint32_t)verts.size(), (uint32_t)idx.size() );
-        m_VertexBuffer->SetData( (void*)verts.data(), (uint32_t)( verts.size() * sizeof( Vertex2D ) ), 0 );
-        m_IndexBuffer->SetData( (void*)idx.data(), (uint32_t)( idx.size() * sizeof( uint32_t ) ), 0 );
+
+        // REFUSE THE WHOLE FLUSH RATHER THAN DRAW FROM ONE OF THE TWO. The vertex and index buffers are
+        // one geometry between them: if only the indices arrived, every command below indexes the
+        // PREVIOUS frame's vertices — which is not a stale picture, it is triangles built from unrelated
+        // positions, and out-of-range indices at that when the batch shrank. Drawing nothing for one
+        // frame is a recoverable glitch; drawing that is not.
+        const auto vertices =
+             m_VertexBuffer->SetData( (void*)verts.data(), (uint32_t)( verts.size() * sizeof( Vertex2D ) ), 0 );
+        const auto indices =
+             m_IndexBuffer->SetData( (void*)idx.data(), (uint32_t)( idx.size() * sizeof( uint32_t ) ), 0 );
+        if ( !vertices.IsSuccess() || !indices.IsSuccess() )
+        {
+            LOG_ERROR( "[Render2D] the batch was not uploaded, so nothing is drawn this frame. "
+                       "vertices: {} | indices: {}",
+                       vertices.IsSuccess() ? "ok" : vertices.GetError(),
+                       indices.IsSuccess() ? "ok" : indices.GetError() );
+            // The draw list is deliberately left standing: it is Reset() at the start of the next frame,
+            // so nothing accumulates, and if the failure was transient the same batch is simply
+            // re-uploaded then. No draw was issued, so no backdrop was used either.
+            m_UsedBackdrop = false;
+            return;
+        }
 
         auto& renderer     = Renderer::GetInstance();
         bool  usedBackdrop = false;

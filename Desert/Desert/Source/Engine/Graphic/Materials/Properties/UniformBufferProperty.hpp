@@ -53,15 +53,36 @@ namespace Desert::Graphic
                 return;
             }
 
+            // THE ANSWER FROM THE WRITE ITSELF IS NOW READ, AND IT DECIDES WHETHER THE FIELD IS CLEAN.
+            // This is where the refusal Г13 gave SetData terminates, on purpose and with an argument:
+            // above this line there is a render-graph pass with no channel of its own, and the thing a
+            // caller would DO with the failure is exactly what happens here — the field stays DIRTY, so
+            // the write is attempted again next frame instead of being reported as delivered. Marking a
+            // field clean after a write that refused is the same false claim EnsureMapped closed one
+            // paragraph above; this closes the other half of it.
+            bool        allWritten = true;
+            std::string firstFailure;
             for ( auto& field : m_FieldProperties )
             {
-                if ( field.IsDirty() )
+                if ( !field.IsDirty() )
+                    continue;
+
+                const auto wrote = m_Buffer->SetData( field.GetLocalData().Data, field.GetFieldInfo().Size,
+                                                      field.GetFieldInfo().Offset );
+                if ( !wrote.IsSuccess() )
                 {
-                    m_Buffer->SetData( field.GetLocalData().Data, field.GetFieldInfo().Size,
-                                       field.GetFieldInfo().Offset );
-                    field.MarkClean();
+                    allWritten = false;
+                    if ( firstFailure.empty() )
+                        firstFailure = field.GetFieldInfo().Name + ": " + wrote.GetError();
+                    continue; // still dirty, so the next frame tries again
                 }
+                field.MarkClean();
             }
+
+            if ( !allWritten )
+                LOG_ERROR( "[UB] '{}': one or more fields were not uploaded and stay dirty -- {}",
+                           m_Buffer->GetName(), firstFailure );
+
             MarkDirty(); // every slot owes itself this write
         }
 
@@ -145,7 +166,16 @@ namespace Desert::Graphic
                 return;
             }
 
-            m_Buffer->SetData( reinterpret_cast<const void*>( data ), size, 0 );
+            // Read, and terminated here with the same argument as UpdateFields above. There is no
+            // per-field dirty flag on this route to leave standing, and none is needed: a whole-block
+            // buffer is rewritten from its owner's C++ struct every frame, so a refused write is retried
+            // by construction on the next one. What was missing was the LINE SAYING SO — before this,
+            // the frame simply rendered from whatever the buffer last held.
+            const auto wrote = m_Buffer->SetData( reinterpret_cast<const void*>( data ), size, 0 );
+            if ( !wrote.IsSuccess() )
+                LOG_ERROR( "[UB] '{}': SetRawData delivered nothing, the shader will read the previous "
+                           "frame's block -- {}",
+                           m_Buffer->GetName(), wrote.GetError() );
 
             MarkDirty(); // every slot owes itself this write
         }

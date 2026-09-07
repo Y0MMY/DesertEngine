@@ -12,7 +12,16 @@ namespace Desert::ShaderResources
     public:
         virtual ~BaseBuffer() = default;
 
-        virtual void SetData( const void* data, uint32_t size, uint32_t offset = 0 ) = 0;
+        /// Write @p size bytes at @p offset into the copy belonging to the frame and view being
+        /// recorded. Refuses, having written nothing, when there is no such copy, when its memory never
+        /// mapped, when the range does not fit, or when growing the buffer would destroy contents that
+        /// are required to outlive the frame (see BufferGrowth.hpp).
+        ///
+        /// IT ANSWERS. Declared `void` until Г13: EnsureMapped above had already been given a channel
+        /// for "there is nowhere to write", and the write itself still had none — so a refusal from
+        /// MappedMemory::Write reached a LOG_ERROR and the caller went on to mark its data uploaded.
+        NO_DISCARD virtual Common::BoolResultStr SetData( const void* data, uint32_t size,
+                                                          uint32_t offset = 0 ) = 0;
 
         // THIS USED TO BE `uint8_t* MapMemory()` PAIRED WITH `void UnmapMemory()`, AND THE PAIR WAS A
         // POINTER NOBODY EVER READ. Both call sites in the engine bound the return value to a

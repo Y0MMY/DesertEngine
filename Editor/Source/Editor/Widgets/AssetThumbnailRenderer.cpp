@@ -357,9 +357,20 @@ namespace Desert::Editor
 
         if ( auto finalImage = m_Scene->GetFinalImage() )
         {
-            std::vector<uint8_t> src = finalImage->ReadPixelsRGBA8();
-            read                     = std::chrono::steady_clock::now();
-            if ( src.size() == static_cast<size_t>( kRenderSize ) * kRenderSize * 4 )
+            // THE SIZE MISMATCH BELOW USED TO BE THE ONLY REPORT, and it was a report about the wrong
+            // thing: a refused readback also came back as an empty vector, so "the staging buffer could
+            // not be allocated" was printed as "returned 0 bytes, expected 4194304". The readback now
+            // says why, and the size check keeps its own, separate meaning.
+            const auto readback = finalImage->ReadPixelsRGBA8();
+            read                = std::chrono::steady_clock::now();
+            if ( !readback.IsSuccess() )
+            {
+                LOG_ERROR( "[AssetThumbnailRenderer] readback for '{}' was refused: {} — no thumbnail "
+                           "written.",
+                           m_PendingPng, readback.GetError() );
+            }
+            else if ( const std::vector<uint8_t>& src = readback.GetValue();
+                      src.size() == static_cast<size_t>( kRenderSize ) * kRenderSize * 4 )
             {
                 // Supersample downscale kRenderSize -> kSize via NxN box filter (clean anti-aliased edges).
                 // Supersample downscale kRenderSize -> kSize (NxN box filter). The framebuffer readback is

@@ -141,12 +141,12 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] bool IsLoaded() const override { return m_IsLoaded; }
         [[nodiscard]] Core::Formats::Image2DSpecification& GetImageSpecification() override { return m_Specification; }
         [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
-        std::vector<uint8_t> ReadPixelsRGBA8() override;
+        NO_DISCARD Common::ResultStr<std::vector<uint8_t>> ReadPixelsRGBA8() override;
 
         void Use( uint32_t slot = 0 ) const override;
         Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
-        Common::BoolResultStr SetData( const Core::Formats::ImagePixelData& data ) override;
+        NO_DISCARD Common::BoolResultStr SetData( const Core::Formats::ImagePixelData& data ) override;
 
         // --- IVulkanImage Interface ---
         [[nodiscard]] const VulkanImageResource& GetResource() const override { return m_Resource; }
@@ -159,7 +159,7 @@ namespace Desert::Graphic::API::Vulkan
         void                        RecreateSampler() override;
 
         // --- Vulkan Specific ---
-        Common::BoolResultStr RT_Invalidate();
+        NO_DISCARD Common::BoolResultStr RT_Invalidate();
 
     private:
         Common::BoolResultStr CreateResource();
@@ -216,7 +216,7 @@ namespace Desert::Graphic::API::Vulkan
         void RecreateSampler() override;
 
         // --- Vulkan Specific ---
-        Common::BoolResultStr RT_Invalidate();
+        NO_DISCARD Common::BoolResultStr RT_Invalidate();
 
     private:
         Common::BoolResultStr CreateResource();
@@ -291,7 +291,7 @@ namespace Desert::Graphic::API::Vulkan
         void                        RecreateSampler() override;
 
         // --- Vulkan Specific ---
-        Common::BoolResultStr RT_Invalidate();
+        NO_DISCARD Common::BoolResultStr RT_Invalidate();
 
     private:
         Common::BoolResultStr CreateResource();

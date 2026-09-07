@@ -233,8 +233,17 @@ namespace Desert::Graphic::API::Vulkan
                  .Usage      = Core::Formats::Image2DUsage::Attachment,
                  .Properties = Core::Formats::Sample };
 
-            auto image = std::make_shared<VulkanImage2D>( imageSpec );
-            image->RT_Invalidate();
+            auto       image     = std::make_shared<VulkanImage2D>( imageSpec );
+            const auto allocated = image->RT_Invalidate();
+            // AN ATTACHMENT THAT DID NOT ALLOCATE CANNOT BE PUT IN A FRAMEBUFFER. Its ImageView is
+            // VK_NULL_HANDLE, which is pushed into `attachments` two lines down and handed to
+            // vkCreateFramebuffer — a validation error at best, and at worst a framebuffer that renders
+            // into nothing. Refusing here names the attachment; before this the answer was dropped and
+            // the first sign was a driver message about a handle nobody could trace to a spec.
+            if ( !allocated.IsSuccess() )
+                return Common::MakeFormattedError<bool>(
+                     "framebuffer '{}': attachment {}x{} failed: {}", m_FramebufferSpecification.DebugName,
+                     m_FramebufferSpecification.Width, m_FramebufferSpecification.Height, allocated.GetError() );
 
             if ( Graphic::Utils::IsDepthFormat( format ) )
                 m_DepthAttachment = image;
@@ -265,8 +274,13 @@ namespace Desert::Graphic::API::Vulkan
                      .Usage      = Core::Formats::Image2DUsage::Attachment,
                      .Properties = Core::Formats::Sample };
 
-                auto image = std::make_shared<VulkanImage2D>( resolveSpec );
-                image->RT_Invalidate();
+                auto       image     = std::make_shared<VulkanImage2D>( resolveSpec );
+                const auto allocated = image->RT_Invalidate();
+                if ( !allocated.IsSuccess() )
+                    return Common::MakeFormattedError<bool>(
+                         "framebuffer '{}': MSAA resolve attachment {}x{} failed: {}",
+                         m_FramebufferSpecification.DebugName, m_FramebufferSpecification.Width,
+                         m_FramebufferSpecification.Height, allocated.GetError() );
                 m_ColorAttachments.push_back( image );
                 attachments.push_back( image->GetResource().ImageView );
             }

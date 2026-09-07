@@ -85,7 +85,7 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         // --- Vulkan Specific ---
-        Common::BoolResultStr RT_Invalidate();
+        NO_DISCARD Common::BoolResultStr RT_Invalidate();
 
     private:
         std::shared_ptr<Image2D>              m_DepthAttachment;

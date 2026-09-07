@@ -51,8 +51,19 @@ namespace Desert::Runtime
                     auto                       texResult =
                          Graphic::Texture2D::Create( spec, "GIF frame", gif.Width, gif.Height,
                                                      Core::Formats::ImageFormat::RGBA8F, std::move( pixels ) );
+                    // A BARE `continue` STOOD HERE, AND IT WAS NOT A SKIP — IT WAS A DIFFERENT
+                    // ANIMATION. The two arrays below are the animation's timeline: dropping a frame
+                    // without its delay shortens the loop and shifts every later frame earlier, so the
+                    // GIF plays at the wrong speed and out of step with itself, silently. Recording the
+                    // refusal does not repair the timeline; it is what makes a wrong one attributable
+                    // instead of being read as a badly authored file.
                     if ( !texResult.IsSuccess() )
+                    {
+                        LOG_ERROR( "[AnimatedImage] frame {} of {} was not uploaded and is missing from "
+                                   "the animation: {}",
+                                   i, gif.FrameCount, texResult.GetError() );
                         continue;
+                    }
                     anim.Frames.push_back( texResult.ExtractValue() );
                     cum += static_cast<float>( gif.DelaysMs[i] );
                     anim.CumEndMs.push_back( cum );
