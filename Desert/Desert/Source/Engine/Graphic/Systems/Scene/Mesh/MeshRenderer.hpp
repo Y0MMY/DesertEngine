@@ -16,6 +16,7 @@
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/RenderGraphBuilder.hpp>
+#include <Engine/Graphic/ShadowCascades.hpp>
 
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Geometry/StaticMesh.hpp>
@@ -127,15 +128,18 @@ namespace Desert::Graphic::System
         // payload and not this renderer's private business.
         PBRSceneFrame CaptureFrameState( const Core::Camera* camera ) const;
 
-        // Cascaded shadow maps: number of directional-shadow cascades (frustum splits) + per-map
-        // resolution. The count is the ShadowUB block's own, so the cascades this renderer fits and the
-        // cascades a shader can read are one number and cannot drift apart.
-        static constexpr uint32_t kNumCascades   = MaterialPBRBase::kMaxCascades;
-        static constexpr uint32_t kShadowMapSize = 2048;
-        // How far from the camera shadows are computed at all — in WORLD UNITS, and a world unit is a
-        // centimetre. It was a bare 150.0f from the metre era, which capped every shadow at a metre and a
-        // half after the units switch.
-        static inline const float kShadowMaxDistance = Common::Units::Metres( 150.0f );
+        // Cascaded shadow maps: the CEILING on directional-shadow cascades — how many the arrays below
+        // hold and how many the ShadowUB block can carry. It is the block's own constant, so the cascades
+        // this renderer can fit and the cascades a shader can read are one number and cannot drift apart.
+        //
+        // HOW MANY ARE ACTUALLY ALLOCATED IS NOT THIS, and the distinction is the whole of the preview
+        // shadow budget: the count, the resolution and the distance come from the renderer's own
+        // ShadowQuality (SceneRenderer::GetShadowQuality), read once in Initialize. See ShadowCascades.hpp.
+        static constexpr uint32_t kMaxCascades = MaterialPBRBase::kMaxCascades;
+        static_assert( kMaxCascades == kMaxShadowCascades,
+                       "The ShadowUB block's cascade count and the fitter's array bound are the same "
+                       "number seen from two sides; a renderer that fitted more than the block can carry "
+                       "would write matrices no shader ever reads." );
 
         virtual Common::BoolResultStr Initialize() override;
         virtual void                  Shutdown() override;
@@ -236,11 +240,26 @@ namespace Desert::Graphic::System
         // Cascade depth map (for the editor's CSM debug viewer). Null if out of range / not yet created.
         std::shared_ptr<Image2D> GetCascadeShadowImage( uint32_t cascade ) const
         {
-            if ( cascade >= kNumCascades || !m_CascadeFB[cascade] )
+            if ( cascade >= m_Shadow.CascadeCount || !m_CascadeFB[cascade] )
                 return nullptr;
             return m_CascadeFB[cascade]->GetColorAttachmentImage();
         }
-        static constexpr uint32_t GetCascadeCount() { return kNumCascades; }
+
+        // HOW MANY CASCADES THIS RENDERER ACTUALLY HAS — not the ceiling. It was `static constexpr`, and
+        // that is precisely what made a per-renderer budget impossible: every consumer, including the
+        // deferred composite's own shadow gather, asked the CLASS instead of the object and would have
+        // read four for a renderer holding one.
+        [[nodiscard]] uint32_t GetCascadeCount() const
+        {
+            return m_Shadow.CascadeCount;
+        }
+
+        // The budget this renderer was created with. Fixed after Initialize — the framebuffers are
+        // allocated from it once.
+        [[nodiscard]] const ShadowQuality& GetShadowQuality() const
+        {
+            return m_Shadow;
+        }
 
         void SetShadows( bool enabled, float bias, int debugMode, float splitLambda )
         {
@@ -358,15 +377,15 @@ namespace Desert::Graphic::System
         // frame by UpdateCascades().
         std::shared_ptr<GraphicsPipeline> m_ShadowPipeline;
         std::shared_ptr<Shader>           m_ShadowShader;
-        std::unique_ptr<MaterialShadow>   m_ShadowMaterial[kNumCascades];
-        std::shared_ptr<Framebuffer>      m_CascadeFB[kNumCascades];
+        std::unique_ptr<MaterialShadow>   m_ShadowMaterial[kMaxCascades];
+        std::shared_ptr<Framebuffer>      m_CascadeFB[kMaxCascades];
 
         // Instanced shadow caster: one pipeline + per-cascade instanced material (each owns the cascade's
         // light matrix UBO + an InstanceTransforms SSBO). Batched casters of one mesh collapse to a single
         // instanced draw per cascade. Optional — null if the Shadow_Instanced shader is missing.
         std::shared_ptr<GraphicsPipeline>        m_ShadowInstancedPipeline;
         std::shared_ptr<Shader>                  m_ShadowInstancedShader;
-        std::unique_ptr<MaterialShadowInstanced> m_ShadowInstancedMaterial[kNumCascades];
+        std::unique_ptr<MaterialShadowInstanced> m_ShadowInstancedMaterial[kMaxCascades];
 
         // Skinned shadow caster: the (Skinned x ShadowDepth) cell, which did not exist — the cascade pass
         // walked the static queue by name and a character cast nothing. One material per cascade, exactly
@@ -374,9 +393,15 @@ namespace Desert::Graphic::System
         // Optional — null if the Shadow_Skinned shader is missing, and then skinned shadows are simply off.
         std::shared_ptr<GraphicsPipeline>      m_ShadowSkinnedPipeline;
         std::shared_ptr<Shader>                m_ShadowSkinnedShader;
-        std::unique_ptr<MaterialShadowSkinned> m_ShadowSkinnedMaterial[kNumCascades];
+        std::unique_ptr<MaterialShadowSkinned> m_ShadowSkinnedMaterial[kMaxCascades];
 
-        glm::mat4                         m_CascadeVP[kNumCascades] = { glm::mat4( 1.0f ) };
+        // THE BUDGET, copied from the owning SceneRenderer in Initialize() and never written again. Held
+        // by value rather than read through m_SceneRenderer on every use, because the three numbers decide
+        // what was ALLOCATED: reading them live would let a later write leave the fitter and the
+        // framebuffers disagreeing, which is the one failure this cannot be allowed to have.
+        ShadowQuality m_Shadow;
+
+        glm::mat4 m_CascadeVP[kMaxCascades] = { glm::mat4( 1.0f ) };
         // World-space size of one shadow-map texel per cascade (2*radius/res) — drives a cascade-correct
         // normal-offset/bias in the PBR shader instead of the old fixed world-unit constants.
         glm::vec4                         m_CascadeWorldPerTexel    = glm::vec4( 1.0f );

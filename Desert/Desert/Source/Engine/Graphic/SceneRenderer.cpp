@@ -273,7 +273,8 @@ namespace Desert::Graphic
         return SlotPool().InUseCount();
     }
 
-    SceneRenderer::SceneRenderer() : m_SlotLease( SlotPool() )
+    SceneRenderer::SceneRenderer( const ShadowQuality& shadowQuality )
+         : m_SlotLease( SlotPool() ), m_ShadowQuality( shadowQuality )
     {
         if ( !m_SlotLease.IsValid() )
         {
@@ -643,7 +644,7 @@ namespace Desert::Graphic
             if ( meshRenderer )
             {
                 shadow.CascadeVP            = meshRenderer->GetCascadeViewProj();
-                shadow.Count                = System::MeshRenderer::GetCascadeCount();
+                shadow.Count                = meshRenderer->GetCascadeCount();
                 shadow.Bias                 = meshRenderer->GetShadowBias();
                 shadow.Enabled              = meshRenderer->AreShadowsEnabled();
                 shadow.CascadeWorldPerTexel = meshRenderer->GetCascadeWorldPerTexel();
@@ -1235,7 +1236,7 @@ namespace Desert::Graphic
 
     uint32_t SceneRenderer::GetShadowCascadeCount()
     {
-        return System::MeshRenderer::GetCascadeCount();
+        return UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->GetCascadeCount();
     }
 
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage()

@@ -21,6 +21,39 @@ namespace Desert::Graphic
 
     inline constexpr uint32_t kMaxShadowCascades = 4;
 
+    // WHAT A RENDERER SPENDS ON THE SUN'S SHADOW, chosen when the renderer is CREATED and fixed for its
+    // life — the cascade framebuffers are allocated once, in MeshRenderer::SetupShadowPass.
+    //
+    // It exists because the three numbers are one decision and were three constants. A viewport of a
+    // level wants 4 cascades at 2048 over 150 m; a 512-px asset preview showing one object on a floor
+    // wants none of that, and paying for it is not a nicety: four 2048 RGBA32F colour attachments plus
+    // their D24S8 depth is 335 MB PER RENDERER, and this editor allows six live renderers at once. That
+    // is why the preview scene had shadows switched off outright (a floor with no shadow under the ball),
+    // and switching them back on as they stood would have been 2 GB of attachments for six open windows.
+    //
+    // THE THREE MOVE TOGETHER OR THE RESULT IS A BLOB. Dropping to one cascade while keeping 150 m makes
+    // the single map cover the whole distance, so a 1 m object's shadow lands in about seven texels of
+    // 1024 — cheaper and useless. The quantity that decides whether a shadow is usable is one texel's
+    // world size, 2*Radius/ShadowMapSize, which is what Desert/Tests/Engine/ShadowCascades asserts about
+    // both presets below rather than asserting each number on its own.
+    struct ShadowQuality
+    {
+        uint32_t CascadeCount  = kMaxShadowCascades;
+        uint32_t ShadowMapSize = 2048;
+        // How far from the camera shadows are computed at all — see CascadeSetup::MaxDistance.
+        float MaxDistance = Common::Units::Metres( 150.0f );
+
+        bool operator==( const ShadowQuality& ) const = default;
+    };
+
+    // A viewport of a level: what every renderer in this engine used before the budget was nameable.
+    inline constexpr ShadowQuality kSceneShadowQuality{};
+
+    // An asset preview: ONE cascade at 1024 over 10 m. Ten metres is the whole preview world — the
+    // primitives are 1 m across (PrimitiveMeshFactory::kPrimitiveSize) and the floor a few metres — so
+    // the single cascade is spent entirely on the subject instead of on empty distance.
+    inline constexpr ShadowQuality kPreviewShadowQuality{ 1u, 1024u, Common::Units::Metres( 10.0f ) };
+
     struct CascadeFit
     {
         glm::mat4 ViewProj      = glm::mat4( 1.0f ); // light-space matrix for this cascade
@@ -44,6 +77,17 @@ namespace Desert::Graphic
         uint32_t CascadeCount  = kMaxShadowCascades;
         uint32_t ShadowMapSize = 2048;
     };
+
+    // Copies the budget into the fit's inputs. ONE assignment site for all three, because the failure
+    // this whole file was extracted for is a middle link dropping one of them: a renderer that allocated
+    // one cascade and then fitted four would write three matrices no map exists for, and the shader would
+    // sample a cascade that was never rendered — a correct-looking frame with the subject unshadowed.
+    inline void ApplyShadowQuality( CascadeSetup& setup, const ShadowQuality& quality )
+    {
+        setup.CascadeCount  = quality.CascadeCount;
+        setup.ShadowMapSize = quality.ShadowMapSize;
+        setup.MaxDistance   = quality.MaxDistance;
+    }
 
     // Fills @p out with CascadeCount fitted cascades. Returns how many were written (0 when the setup is
     // degenerate: no light direction, or a far plane behind the near one).

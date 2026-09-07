@@ -160,6 +160,11 @@ namespace Desert::Graphic::System
         if ( !targetFb )
             return Common::MakeError( "Target framebuffer is not available" );
 
+        // THE BUDGET, TAKEN ONCE AND HELD. Read before the first Setup* because SetupShadowPass allocates
+        // from it; from here on nothing may change it, and holding a copy is what makes that true rather
+        // than a rule somebody has to keep.
+        m_Shadow = m_SceneRenderer ? m_SceneRenderer->GetShadowQuality() : ShadowQuality{};
+
         if ( !SetupGeometryPass() )
             return Common::MakeError( "Failed to setup static geometry pass" );
 
@@ -212,7 +217,9 @@ namespace Desert::Graphic::System
         m_ShadowPipeline.reset();
         m_ShadowInstancedPipeline.reset();
         m_ShadowSkinnedPipeline.reset();
-        for ( uint32_t i = 0; i < kNumCascades; ++i )
+        // kMaxCascades, not the budget: a Shutdown after a re-Init with a different budget must still
+        // release every slot the arrays hold, and releasing an already-null one costs nothing.
+        for ( uint32_t i = 0; i < kMaxCascades; ++i )
         {
             m_ShadowMaterial[i].reset();
             m_ShadowInstancedMaterial[i].reset();
@@ -1466,15 +1473,31 @@ namespace Desert::Graphic::System
         // One R32F (in RGBA32F) light-space depth map + depth attachment PER CASCADE. Each cascade also
         // gets its own MaterialShadow so the 4 shadow passes don't alias a single shared light-matrix UBO
         // (all draws recorded into one command buffer would otherwise see the last cascade's matrix).
-        for ( uint32_t i = 0; i < kNumCascades; ++i )
+        for ( uint32_t i = 0; i < m_Shadow.CascadeCount; ++i )
         {
             FramebufferSpecification shadowSpec;
             shadowSpec.DebugName = "ShadowCascade" + std::to_string( i );
             shadowSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
             shadowSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
             m_CascadeFB[i] = Graphic::Framebuffer::Create( shadowSpec );
-            m_CascadeFB[i]->Resize( kShadowMapSize, kShadowMapSize );
+            m_CascadeFB[i]->Resize( m_Shadow.ShadowMapSize, m_Shadow.ShadowMapSize );
             m_ShadowMaterial[i] = std::make_unique<MaterialShadow>();
+        }
+
+        // WHAT THIS RENDERER JUST SPENT, said out loud and derived from the two formats pushed three
+        // lines above rather than from a number written down somewhere else. It is here because the
+        // preview shadow budget exists for exactly this quantity and "≈335 MB per open window" was a
+        // figure nobody could check: six live renderers are allowed, so the total is six times whatever
+        // this line prints and it is worth being able to read it in a log.
+        {
+            constexpr uint64_t kBytesPerTexel = 16u /* RGBA32F */ + 4u /* DEPTH24STENCIL8 */;
+            const uint64_t     bytes = static_cast<uint64_t>( m_Shadow.CascadeCount ) * m_Shadow.ShadowMapSize *
+                                   m_Shadow.ShadowMapSize * kBytesPerTexel;
+            LOG_INFO( "[Shadows] {} cascade(s) at {}x{} over {:.0f} m = {:.1f} MB of attachments for this "
+                      "renderer.",
+                      m_Shadow.CascadeCount, m_Shadow.ShadowMapSize, m_Shadow.ShadowMapSize,
+                      Common::Units::ToMetres( m_Shadow.MaxDistance ),
+                      static_cast<double>( bytes ) / ( 1024.0 * 1024.0 ) );
         }
 
         GraphicsPipelineSpecification spec;
@@ -1519,7 +1542,7 @@ namespace Desert::Graphic::System
             m_ShadowInstancedPipeline = GraphicsPipeline::Create( ispec );
             m_ShadowInstancedPipeline->Invalidate();
 
-            for ( uint32_t i = 0; i < kNumCascades; ++i )
+            for ( uint32_t i = 0; i < m_Shadow.CascadeCount; ++i )
                 m_ShadowInstancedMaterial[i] = std::make_unique<MaterialShadowInstanced>();
         }
 
@@ -1544,7 +1567,7 @@ namespace Desert::Graphic::System
             m_ShadowSkinnedPipeline             = GraphicsPipeline::Create( sspec );
             m_ShadowSkinnedPipeline->Invalidate();
 
-            for ( uint32_t i = 0; i < kNumCascades; ++i )
+            for ( uint32_t i = 0; i < m_Shadow.CascadeCount; ++i )
                 m_ShadowSkinnedMaterial[i] = std::make_unique<MaterialShadowSkinned>();
         }
         else
@@ -1565,7 +1588,12 @@ namespace Desert::Graphic::System
         frame.DirectionLights = &m_SceneRenderer->GetDirectionLights();
 
         frame.CascadeViewProj = m_CascadeVP;
-        for ( uint32_t c = 0; c < kNumCascades; ++c )
+        // THE COUNT TRAVELS WITH THE MAPS. Without it the applier bound four maps and told the shader to
+        // walk four cascades whatever this renderer had allocated, so a one-cascade renderer would have
+        // had three identity matrices tested and three unbound samplers read — the shader's own loop is
+        // driven by u_ShadowParams.w and would have found "the fragment is inside cascade 1" everywhere.
+        frame.CascadeCount = m_Shadow.CascadeCount;
+        for ( uint32_t c = 0; c < m_Shadow.CascadeCount; ++c )
             frame.CascadeMaps[c] = m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
         frame.CascadeTexelWorld = m_CascadeWorldPerTexel;
         frame.ShadowBias        = m_ShadowBias;
@@ -1614,23 +1642,29 @@ namespace Desert::Graphic::System
         setup.CameraNear       = camera->GetNear();
         setup.CameraFar        = camera->GetFar();
         setup.LightDirection   = glm::vec3( dirLights.DirectionLights[0].Direction );
-        setup.MaxDistance      = kShadowMaxDistance;
-        setup.SplitLambda      = m_SplitLambda;
-        setup.CascadeCount     = kNumCascades;
-        setup.ShadowMapSize    = kShadowMapSize;
+        ApplyShadowQuality( setup, m_Shadow );
+        setup.SplitLambda = m_SplitLambda;
 
         CascadeFit     fits[kMaxShadowCascades];
         const uint32_t n = ComputeShadowCascades( setup, fits );
+
+        // Cascade 1 (near-mid) doubles as the Reflective Shadow Map camera. NOT the widest cascade:
+        // one-bounce GI only matters within ~tens of metres of the camera, and the widest cascade
+        // squeezed the whole neighbourhood into a couple of RSM texels — the VPL gather then found
+        // almost no lit surface and the GI read as zero everywhere.
+        //
+        // DERIVED FROM THE COUNT rather than written as 1. A one-cascade budget has no cascade 1, and a
+        // literal here would have left m_RSMViewProj at identity for ever: the GI pass would have gathered
+        // against a light camera looking down the world axes from the origin, which is not an error
+        // anything reports — it is a frame with plausible-looking, wrong bounce light.
+        const uint32_t rsmCascade = ( n > 1u ) ? 1u : 0u;
+
         for ( uint32_t c = 0; c < n; ++c )
         {
             m_CascadeVP[c]            = fits[c].ViewProj;
             m_CascadeWorldPerTexel[c] = fits[c].WorldPerTexel;
 
-            // Cascade 1 (near-mid) doubles as the Reflective Shadow Map camera. NOT the widest cascade:
-            // one-bounce GI only matters within ~tens of metres of the camera, and the widest cascade
-            // squeezed the whole neighbourhood into a couple of RSM texels — the VPL gather then found
-            // almost no lit surface and the GI read as zero everywhere.
-            if ( c == 1 )
+            if ( c == rsmCascade )
             {
                 m_RSMViewProj = fits[c].ViewProj;
                 // Approximate light eye: back off from the fitted sphere's centre against the sun's travel
@@ -1648,7 +1682,7 @@ namespace Desert::Graphic::System
         // One depth-only pass per cascade, all in DepthPrePass (before Geometry, which depends on it).
         // Cascade matrices are computed in UpdateCascades() before the graph records (intra-phase order is
         // nondeterministic, so per-pass matrix computation can't be relied on for ordering).
-        for ( uint32_t c = 0; c < kNumCascades; ++c )
+        for ( uint32_t c = 0; c < m_Shadow.CascadeCount; ++c )
         {
             if ( !m_CascadeFB[c] )
                 continue;

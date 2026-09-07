@@ -286,6 +286,39 @@ TEST_F( MaterialPreviewRoute, TheCubemapDomainTakesTheCubemapRouteAndSurfaceTheS
             "the slot route the rest of this suite exists to protect.";
 }
 
+// The VOLUME domain is the third route, and the only one whose picture is not of an object.
+//
+// A cloud material describes a MEDIUM. Its layout is a painting on a sky map, its base and top are
+// kilometres on the CloudType assets it points at, and one cell of its weather lattice is about 3 km
+// across; none of that survives being wrapped onto a one-metre ball, which is the same class of scale
+// error as the "clouds hang too low" complaint. So it takes a dome, and the two assertions below are the
+// two halves of that: it must reach the dome entry point, and it must NOT reach the ball's.
+TEST_F( MaterialPreviewRoute, TheVolumeDomainTakesTheDomeRoute )
+{
+    const std::string code = Code( "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditorPanel.cpp" );
+    const std::string body = FunctionBody( code, "MaterialEditorPanel::OnPreUpdate" );
+    ASSERT_FALSE( body.empty() );
+
+    const std::size_t volumeGate = body.find( "ShaderDomain::Volume" );
+    ASSERT_NE( volumeGate, std::string::npos )
+         << "OnPreUpdate no longer branches on the Volume domain. Without it a cloud material falls through "
+            "to the mesh/slot route, where a Volume program cannot be drawn at all — an empty pane, which "
+            "reads as a broken preview rather than as a decision.";
+
+    const std::string afterGate = body.substr( volumeGate );
+    EXPECT_NE( afterGate.find( "SetVolumeMaterial" ), std::string::npos )
+         << "the Volume branch does not call PreviewViewport::SetVolumeMaterial, which IS that domain's "
+            "draw (a preview sky with ground, sun and a wide vertical lens).";
+
+    // And the pane's own refusal must survive underneath it. The dome is this material in a preview WORLD;
+    // the viewport is this material in a LEVEL, and the scene's layer carries budgets and a region size no
+    // material holds. A convincing picture with that sentence removed is a promise the pane cannot keep.
+    EXPECT_NE( code.find( "PreviewSceneNote" ), std::string::npos )
+         << "MaterialEditorPanel no longer carries PreviewSceneNote. The Volume domain's refusal was "
+            "REPLACED by a picture rather than kept under one, so nothing in the frame says the level's "
+            "cloud layer is not this material's preview world.";
+}
+
 // The Shape combo is a SURFACE control, not a preview control -- the other half of the same decision.
 //
 // Only the surface domain fills the pane with a primitive whose shape is a free choice (a grass card wants a

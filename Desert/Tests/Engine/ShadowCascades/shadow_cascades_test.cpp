@@ -16,6 +16,7 @@
 
 #include <cmath>
 
+using Desert::Graphic::ApplyShadowQuality;
 using Desert::Graphic::CascadeFit;
 using Desert::Graphic::CascadeSetup;
 using Desert::Graphic::ComputeShadowCascades;
@@ -166,6 +167,105 @@ TEST( ShadowCascades, CentreMovesInWholeTexelsAlongTheLightAxes )
                  << "cascade slid " << texels << " texels on axis " << axis << " at step " << step;
         }
     }
+}
+
+// ── The shadow BUDGET ─────────────────────────────────────────────────────────────────────────────
+//
+// A preview renderer allocates one cascade at 1024 instead of four at 2048, and the temptation is to
+// assert the three numbers. That would pin the decision without pinning what it is FOR: the numbers move
+// together (see ShadowQuality's own note), and one cascade at 1024 over the SCENE's 150 m is a legal set
+// of numbers that produces a blob. What matters is the world size of one texel against the thing being
+// shadowed, and that is what these assert.
+
+namespace
+{
+    // The preview camera as PreviewViewport drives it: a 35-degree lens looking at a 1 m primitive from
+    // about 1.8 m, which is what its own fit computes for a sphere.
+    CascadeSetup PreviewSetup()
+    {
+        CascadeSetup s;
+        s.CameraNear = Units::Cm( 1.0f );
+        s.CameraFar  = Units::Metres( 1000.0f );
+        s.CameraView =
+             glm::lookAt( glm::vec3( 0.0f, 0.6f, 1.8f ) * 100.0f, glm::vec3( 0.0f ), glm::vec3( 0, 1, 0 ) );
+        s.CameraProjection =
+             Desert::Core::MakePerspective( glm::radians( 35.0f ), 1.0f, s.CameraNear, s.CameraFar );
+        s.LightDirection = glm::normalize( glm::vec3( 2.0f, -6.0f, 5.0f ) );
+        return s;
+    }
+} // namespace
+
+// The two shipped budgets are not interchangeable and the difference is the whole point of the type.
+TEST( ShadowQualityBudget, ThePresetsDifferInAllThreeNumbers )
+{
+    using Desert::Graphic::kPreviewShadowQuality;
+    using Desert::Graphic::kSceneShadowQuality;
+
+    EXPECT_EQ( kSceneShadowQuality.CascadeCount, kMaxShadowCascades );
+    EXPECT_EQ( kSceneShadowQuality.ShadowMapSize, 2048u );
+    EXPECT_FLOAT_EQ( kSceneShadowQuality.MaxDistance, Units::Metres( 150.0f ) );
+
+    EXPECT_LT( kPreviewShadowQuality.CascadeCount, kSceneShadowQuality.CascadeCount );
+    EXPECT_LT( kPreviewShadowQuality.ShadowMapSize, kSceneShadowQuality.ShadowMapSize );
+    EXPECT_LT( kPreviewShadowQuality.MaxDistance, kSceneShadowQuality.MaxDistance );
+}
+
+// WHY THE BUDGET EXISTS, as a number. Attachment bytes are cascades x size^2 x (RGBA32F + D24S8); the
+// preview must be at least an order cheaper or it is not worth having a second budget at all.
+TEST( ShadowQualityBudget, ThePreviewCostsAnOrderOfMagnitudeLess )
+{
+    using Desert::Graphic::kPreviewShadowQuality;
+    using Desert::Graphic::kSceneShadowQuality;
+
+    const auto bytes = []( const Desert::Graphic::ShadowQuality& q )
+    {
+        constexpr uint64_t kBytesPerTexel = 16u + 4u; // RGBA32F colour + DEPTH24STENCIL8
+        return static_cast<uint64_t>( q.CascadeCount ) * q.ShadowMapSize * q.ShadowMapSize * kBytesPerTexel;
+    };
+
+    EXPECT_EQ( bytes( kSceneShadowQuality ), 335544320ull );  // 320 MiB
+    EXPECT_EQ( bytes( kPreviewShadowQuality ), 20971520ull ); // 20 MiB
+    EXPECT_LE( bytes( kPreviewShadowQuality ) * 10ull, bytes( kSceneShadowQuality ) );
+}
+
+// THE RELATION, and the reason the distance is part of the budget rather than left at the scene's. One
+// texel of the preview's single cascade must be small against the thing it shadows — the primitives are
+// 100 world units (1 m) across, so a texel worth more than a fiftieth of that is a blob with an outline.
+// Against the SCENE's 150 m the same one cascade at 1024 fails this by a wide margin, which is exactly
+// the mistake the three-numbers-together note warns about.
+TEST( ShadowQualityBudget, OnePreviewCascadeResolvesAPreviewSizedObject )
+{
+    constexpr float kPrimitiveSize = 100.0f; // world units, PrimitiveMeshFactory::kPrimitiveSize
+
+    CascadeSetup setup = PreviewSetup();
+    ApplyShadowQuality( setup, Desert::Graphic::kPreviewShadowQuality );
+
+    CascadeFit     fits[kMaxShadowCascades];
+    const uint32_t n = ComputeShadowCascades( setup, fits );
+    ASSERT_EQ( n, 1u ) << "the preview budget is one cascade; the fitter must not produce more";
+    EXPECT_LE( fits[0].WorldPerTexel, kPrimitiveSize / 50.0f )
+         << "one texel is " << fits[0].WorldPerTexel << " world units against a " << kPrimitiveSize
+         << "-unit subject";
+
+    // The same single cascade over the SCENE's distance — the tempting half-change — does not.
+    CascadeSetup tooFar = PreviewSetup();
+    ApplyShadowQuality( tooFar, Desert::Graphic::ShadowQuality{ 1u, 1024u, Units::Metres( 150.0f ) } );
+    CascadeFit farFits[kMaxShadowCascades];
+    ASSERT_EQ( ComputeShadowCascades( tooFar, farFits ), 1u );
+    EXPECT_GT( farFits[0].WorldPerTexel, kPrimitiveSize / 50.0f )
+         << "if this ever passes, the distance has stopped mattering and the budget can lose a field";
+}
+
+// ApplyShadowQuality is the one assignment site precisely so a link cannot drop one of the three.
+TEST( ShadowQualityBudget, ApplyCarriesAllThreeNumbers )
+{
+    CascadeSetup                         setup;
+    const Desert::Graphic::ShadowQuality q{ 2u, 512u, Units::Metres( 37.0f ) };
+    ApplyShadowQuality( setup, q );
+
+    EXPECT_EQ( setup.CascadeCount, q.CascadeCount );
+    EXPECT_EQ( setup.ShadowMapSize, q.ShadowMapSize );
+    EXPECT_FLOAT_EQ( setup.MaxDistance, q.MaxDistance );
 }
 
 TEST( ShadowCascades, DegenerateSetupsProduceNothing )

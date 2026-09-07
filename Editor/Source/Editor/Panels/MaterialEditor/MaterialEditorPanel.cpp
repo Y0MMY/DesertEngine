@@ -8,6 +8,7 @@
 #include <Editor/Widgets/ThumbnailService.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/CloudLayoutAsset.hpp>
 #include <Engine/Assets/CloudTypeAsset.hpp>
@@ -19,6 +20,7 @@
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/SkyPresets.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/CloudLayout/CloudLayoutService.hpp>
 #include <Engine/Runtime/Services/CloudType/CloudTypeService.hpp>
@@ -58,6 +60,8 @@ namespace Desert::Editor
                     return "Cube";
                 case PreviewViewport::Shape::Plane:
                     return "Plane";
+                case PreviewViewport::Shape::Cylinder:
+                    return "Cylinder";
             }
             return "Sphere";
         }
@@ -412,12 +416,35 @@ namespace Desert::Editor
             return {};
         }
 
+        // The VOLUME domain fills the pane too, and with a sky rather than a shape — so it is no longer a
+        // refusal. What it draws is the material's OWN preview world, which is a different thing from the
+        // scene's cloud layer; that sentence has not gone away, it has moved UNDER the picture (see
+        // PreviewSceneNote and its call site in OnUIRender). A pane that showed a convincing sky while
+        // silently dropping "the level's layer is not this one" would be worse than the refusal was.
+        if ( domain == ::Desert::Core::Formats::ShaderDomain::Volume )
+            return {};
+
         if ( domain != ::Desert::Core::Formats::ShaderDomain::Surface )
             return std::string( "No preview shape for a " ) + DomainName( domain ) + "-domain material.\n\n'" +
                    shaderName + "' " + WhatTheDomainDrawsInstead( domain ) +
                    "\n\nThe parameters beside it edit the material normally.";
 
         return {};
+    }
+
+    std::string MaterialEditorPanel::PreviewSceneNote() const
+    {
+        if ( !m_Preview || m_Preview->GetFill() != PreviewViewport::Fill::SkyDome )
+            return {};
+
+        // THE REFUSAL, KEPT, UNDER THE THING THAT REPLACED IT. The dome is this material in a preview
+        // WORLD; the viewport is this material in a LEVEL, and they are not the same picture — the
+        // scene's own layer carries tracing budgets, a region size and a planet radius that live on its
+        // component and not in any material. A dome that looked right would otherwise be read as a
+        // promise about the level, which it cannot make.
+        return "This is a preview sky built from this material alone. The level's cloud layer carries its "
+               "own tracing budgets and region size; open a scene with a volumetric cloud component to see "
+               "it there. The layer picks up an edit here the same frame.";
     }
 
     std::optional<::Desert::Core::Formats::ShaderDomain> MaterialEditorPanel::EffectiveDomain() const
@@ -589,11 +616,30 @@ namespace Desert::Editor
         if ( !drawn )
             return;
 
-        if ( const PushedIdentity wanted{ drawn->GetMetadata().Handle, m_Shape, EffectiveShaderName() };
+        if ( const PushedIdentity wanted{ drawn->GetMetadata().Handle, m_Shape, EffectiveShaderName(),
+                                          m_PreviewMesh };
              !( wanted == m_Pushed ) )
         {
-            if ( EffectiveDomain() == ::Desert::Core::Formats::ShaderDomain::Skybox )
+            const auto domain = EffectiveDomain();
+            if ( domain == ::Desert::Core::Formats::ShaderDomain::Skybox )
                 m_Preview->SetCubemapMaterial( [this] { return ResolveSubjectCubemap(); } );
+            else if ( domain == ::Desert::Core::Formats::ShaderDomain::Volume )
+                m_Preview->SetVolumeMaterial( drawn->GetMetadata().Handle );
+            else if ( static_cast<uint64_t>( m_PreviewMesh ) != 0 )
+            {
+                // THIS MATERIAL IN EVERY SLOT, and the count comes from the mesh rather than from a
+                // guess: a mesh with four slots handed one handle would draw three of them with the
+                // engine default and read as "the material only works on part of it". The window is about
+                // one material, so every slot gets it and the tab says so out loud.
+                std::vector<Assets::AssetHandle> slots{ drawn->GetMetadata().Handle };
+                if ( auto* meshService = Runtime::ResourceRegistry::GetMeshService() )
+                {
+                    if ( const auto* mesh = meshService->Get( m_PreviewMesh ) )
+                        slots.assign( std::max<std::size_t>( mesh->GetSubmeshes().size(), 1 ),
+                                      drawn->GetMetadata().Handle );
+                }
+                m_Preview->SetMesh( m_PreviewMesh, slots );
+            }
             else
                 m_Preview->SetMaterial( drawn->GetMetadata().Handle, m_Shape );
             m_Pushed = wanted;
@@ -647,7 +693,7 @@ namespace Desert::Editor
             if ( ImGui::BeginCombo( "Shape", ShapeName( m_Shape ) ) )
             {
                 for ( auto s : { PreviewViewport::Shape::Sphere, PreviewViewport::Shape::Cube,
-                                 PreviewViewport::Shape::Plane } )
+                                 PreviewViewport::Shape::Cylinder, PreviewViewport::Shape::Plane } )
                 {
                     const bool selected = ( s == m_Shape );
                     if ( ImGui::Selectable( ShapeName( s ), selected ) && !selected )
@@ -1284,6 +1330,161 @@ namespace Desert::Editor
         return changed;
     }
 
+    void MaterialEditorPanel::DrawPreviewSceneTab()
+    {
+        if ( !m_Preview )
+            return;
+
+        // THE WIDGET'S OWN COPY, edited in place. There is no push call and no Apply: PreviewViewport
+        // writes whatever it finds here onto its entities on the next frame it records, so a control
+        // added below is live the moment it is drawn and cannot be forgotten by a plumbing step.
+        PreviewViewport::SceneSetup& setup = m_Preview->Setup();
+        const bool                   dome  = ( m_Preview->GetFill() == PreviewViewport::Fill::SkyDome );
+
+        ImGui::TextDisabled( "Settings of the scene this material is shown in. They belong to this window "
+                             "and are not saved with the material." );
+        ImGui::Separator();
+
+        if ( ImGui::CollapsingHeader( "Environment", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            // The SHARED preset table, walked rather than listed here — adding a preset is one row in
+            // Graphic::kSkyPresets and it appears in this combo, in Details, and in the thumbnails.
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            if ( ImGui::BeginCombo( "##sky_preset", Graphic::SkyPresetName( setup.Sky ) ) )
+            {
+                for ( const auto& entry : Graphic::kSkyPresets )
+                {
+                    const bool selected = ( entry.Id == setup.Sky );
+                    if ( ImGui::Selectable( entry.Name, selected ) )
+                        setup.Sky = entry.Id;
+                    if ( selected )
+                        ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            ImGui::SliderFloat( "Sky Intensity", &setup.SkyIntensity, 0.0f, 4.0f );
+
+            // ROTATION IS NOT OFFERED, and its absence is a decision rather than an omission. For a
+            // preset sky the environment's rotation IS the sun's azimuth — the row below — so a second
+            // control would be two knobs on one number; and for an HDR environment the engine has no
+            // rotation at all, on the sky, the skybox or in any shader. See the report.
+        }
+
+        if ( ImGui::CollapsingHeader( "Light", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            ImGui::TextDisabled( "Hold L over the preview and drag to move the sun." );
+
+            // ONE SUN. These two angles are the key light AND the sun baked into the sky; there is no
+            // second pair, because a material lit from the left under a sun visibly on the right is a
+            // preview an artist would trust and should not.
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            ImGui::SliderFloat( "Sun Bearing", &setup.SunYawDegrees, -180.0f, 180.0f, "%.0f deg" );
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            ImGui::SliderFloat( "Sun Elevation", &setup.SunPitchDegrees, 1.0f, 89.0f, "%.0f deg" );
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            ImGui::SliderFloat( "Intensity", &setup.LightIntensity, 0.0f, 30.0f );
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            ImGui::ColorEdit3( "Light Colour", &setup.LightColor.x );
+        }
+
+        if ( ImGui::CollapsingHeader( dome ? "Ground" : "Floor", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            // THE GROUND IS NOT OPTIONAL UNDER A DOME. A cloud deck's shadow and the light it throws down
+            // are part of what the material looks like, so the rows are shown as the fixed facts they are
+            // rather than as controls that would be refused on click.
+            if ( dome )
+            {
+                ImGui::TextDisabled( "The ground is part of the picture here: the deck's own shadow, and "
+                                     "the light it throws down, are part of what this material looks "
+                                     "like." );
+            }
+            else
+            {
+                ImGui::Checkbox( "Show Floor", &setup.ShowFloor );
+                ImGui::BeginDisabled( !setup.ShowFloor );
+                ImGui::Checkbox( "Receive Shadow", &setup.FloorReceivesShadow );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "The cast shadow is the point of the floor, and the only part of it "
+                                       "that is not free: one 1024 cascade over 10 m, about 20 MB for this "
+                                       "window." );
+                ImGui::SetNextItemWidth( -FLT_MIN );
+                ImGui::SliderFloat( "Size (cm)", &setup.FloorSize, 100.0f, 2000.0f, "%.0f" );
+                ImGui::EndDisabled();
+            }
+
+            // Offered in BOTH, because the surface it colours exists in both — the dome's ground is the
+            // same entity. A field the widget applies and only one mode lets you reach is the dead-setting
+            // shape wearing a layout.
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            ImGui::ColorEdit3( dome ? "Ground Colour" : "Floor Colour", &setup.FloorColour.x );
+            // Not in the dome: an authoring grid drawn across a 20 km ground under a cloudscape is
+            // scenery from a different picture, and the row would be offering it as if it were useful.
+            if ( !dome )
+                ImGui::Checkbox( "Show Grid", &setup.ShowGrid );
+        }
+
+        // The dome's budget, and only where there is a dome. These are the two fields that decide what an
+        // open cloud-material window costs every frame, so they are shown rather than hidden in a constant.
+        if ( dome && ImGui::CollapsingHeader( "Cloud Tracing", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            ImGui::TextDisabled( "This preview's own budget. The scene's layer keeps its component's." );
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            ImGui::SliderInt( "Max Steps", &setup.CloudMaxSteps, 8, 256 );
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            ImGui::SliderFloat( "Stop Transmittance", &setup.CloudStopTransmittance, 0.001f, 0.2f, "%.3f" );
+        }
+
+        // The preview mesh, which is a SURFACE question: a dome has no shape and a cubemap ball's shape
+        // is not a choice. The Shape combo itself stays on the toolbar where it has always been; what is
+        // here is the one thing that combo cannot express.
+        if ( m_Preview->GetFill() == PreviewViewport::Fill::Object &&
+             ImGui::CollapsingHeader( "Preview Mesh", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            ImGui::TextDisabled( "Shape is on the toolbar. A mesh dropped here replaces it." );
+            const std::string label =
+                 m_PreviewMeshName.empty() ? std::string( "<drop a static mesh>" ) : m_PreviewMeshName;
+            ImGui::Button( ( label + "##preview_mesh" ).c_str(), ImVec2( -FLT_MIN, 0.0f ) );
+            if ( ImGui::BeginDragDropTarget() )
+            {
+                const char* types[] = { ::Desert::Editor::DragPayloads::MeshAsset,
+                                        ::Desert::Editor::DragPayloads::AssetFile };
+                for ( const char* t : types )
+                {
+                    if ( const ImGuiPayload* pl = ImGui::AcceptDragDropPayload( t ) )
+                    {
+                        const std::string path( static_cast<const char*>( pl->Data ) );
+                        if ( m_AssetManager )
+                        {
+                            if ( auto mesh = m_AssetManager->FindByPath<Assets::StaticMeshAsset>( path ) )
+                            {
+                                m_PreviewMesh     = mesh->GetMetadata().Handle;
+                                m_PreviewMeshName = mesh->GetMetadata().Filepath.filename().string();
+                            }
+                        }
+                        break;
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+            ImGui::BeginDisabled( static_cast<uint64_t>( m_PreviewMesh ) == 0 );
+            if ( ImGui::Button( "Back to the primitive" ) )
+            {
+                m_PreviewMesh = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+                m_PreviewMeshName.clear();
+            }
+            ImGui::EndDisabled();
+            if ( static_cast<uint64_t>( m_PreviewMesh ) != 0 )
+            {
+                // SAID, NOT DISCOVERED. A mesh with several material slots is shown with THIS material in
+                // every one of them: the window is about one material, and filling slot 0 while the rest
+                // kept the mesh's authored materials would make the pane a picture of somebody else's
+                // work with a corner of yours in it.
+                ImGui::TextDisabled( "This material fills every slot of that mesh." );
+            }
+        }
+    }
+
     void MaterialEditorPanel::PublishToRuntime( Assets::SurfaceMaterialAsset& asset, bool isInstance )
     {
         auto* materialService = Runtime::ResourceRegistry::GetMaterialService();
@@ -1570,7 +1771,23 @@ namespace Desert::Editor
 
         const float  kParamColumnW = 300.0f;
         const ImVec2 avail         = ImGui::GetContentRegionAvail();
-        const float  imageSide     = std::max( 64.0f, std::min( avail.x - kParamColumnW, avail.y ) );
+
+        // THE NOTE IS RESERVED FOR, NOT HOPED FOR. The pane is fitted to the SHORTER of the two axes, so
+        // a window that is taller than it is wide sizes it from the width and there is room underneath —
+        // but a wide, short window sizes it from the height, and the sentence was then laid out past the
+        // bottom edge and simply never appeared. A caveat that is only visible at some window shapes is
+        // the same as no caveat.
+        const std::string note      = PreviewSceneNote();
+        const float       noteLines = note.empty() ? 0.0f : 3.0f;
+        const float       noteHeight =
+             note.empty()
+                        ? 0.0f
+                        : ( ImGui::GetTextLineHeightWithSpacing() * noteLines + ImGui::GetStyle().ItemSpacing.y );
+        const float imageSide = std::max( 64.0f, std::min( avail.x - kParamColumnW, avail.y - noteHeight ) );
+
+        // The pane and the sentence under it are ONE column, so the note cannot end up beside the picture
+        // it is about when the window is narrow.
+        ImGui::BeginGroup();
 
         // The image is last frame's render; recording this frame's happens in OnPreUpdate. Rendering from
         // inside the ImGui pass destroys descriptor pools whose sets are bound to the command buffer being
@@ -1588,6 +1805,18 @@ namespace Desert::Editor
                                                     ? std::string( "Starting the preview..." )
                                                     : m_PreviewUnavailable );
         }
+
+        // WHATEVER FILLS THE PANE, THIS LINE STAYS UNDER IT. Empty for every domain that has nothing to
+        // qualify; the Volume domain's dome is the first thing in this window that shows a convincing
+        // picture of something that is NOT what the level will do, and the difference has to be readable
+        // without opening a scene to find out.
+        if ( !note.empty() )
+        {
+            ImGui::PushTextWrapPos( ImGui::GetCursorPosX() + imageSide );
+            ImGui::TextDisabled( "%s", note.c_str() );
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::EndGroup();
 
         ImGui::SameLine();
         ImGui::BeginGroup();
@@ -1642,10 +1871,32 @@ namespace Desert::Editor
                 ImGui::Separator();
             }
 
-            ImGui::TextDisabled( "Parameters" );
-            ImGui::Separator();
-            if ( DrawParameters( *drawn, parent ? &parent->Data() : nullptr, isInstance ) )
-                PublishToRuntime( *drawn, isInstance );
+            // TWO TABS, BECAUSE THERE ARE TWO SUBJECTS. Everything to the left of this line edits the
+            // MATERIAL and is saved with it; the second tab edits the SCENE the material is being shown
+            // in, which is a property of this window and of nothing else. Collapsing them into one column
+            // of fields is how an artist comes to believe the floor and the sun travel with the asset.
+            if ( ImGui::BeginTabBar( "##material_tabs", ImGuiTabBarFlags_None ) )
+            {
+                if ( ImGui::BeginTabItem( "Parameters" ) )
+                {
+                    if ( DrawParameters( *drawn, parent ? &parent->Data() : nullptr, isInstance ) )
+                        PublishToRuntime( *drawn, isInstance );
+                    ImGui::EndTabItem();
+                }
+
+                // Offered only while there IS a preview world to configure. A material whose domain has
+                // no pane (Terrain, Post Process) would otherwise get a tab full of controls over a scene
+                // nothing renders — the dead-setting shape, one level up.
+                if ( m_Preview && m_PreviewUnavailable.empty() )
+                {
+                    if ( ImGui::BeginTabItem( "Preview Scene" ) )
+                    {
+                        DrawPreviewSceneTab();
+                        ImGui::EndTabItem();
+                    }
+                }
+                ImGui::EndTabBar();
+            }
 
             ImGui::EndDisabled();
         }

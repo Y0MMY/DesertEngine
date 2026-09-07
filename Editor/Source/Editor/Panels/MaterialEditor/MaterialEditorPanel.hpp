@@ -259,6 +259,18 @@ namespace Desert::Editor
         // same thing to the eye in all three cases and something different in each.
         [[nodiscard]] std::string PreviewUnavailableReason( const std::string& shaderName ) const;
 
+        // The sentence that stays UNDER whatever fills the pane, or empty when there is nothing to
+        // qualify. It is the other half of PreviewUnavailableReason and not a replacement for it: a
+        // domain can now be drawn AND still need a caveat, which the Volume domain is the first to be.
+        // Being told "there is no preview" and being shown a preview that means something narrower than
+        // it looks are different states, and only one of them used to exist.
+        [[nodiscard]] std::string PreviewSceneNote() const;
+
+        // The second tab: the SCENE the material is shown in — sky, sun, floor, and the dome's own
+        // tracing budget. It edits PreviewViewport::Setup() in place, which is why it has no Apply and
+        // no push: the widget reads that struct every frame it records.
+        void DrawPreviewSceneTab();
+
         // The pane when there is no image: the same rectangle as before, with the reason written inside
         // it. Inside, not underneath — the message has to be where the picture would have been, or it is
         // one more line in a column of labels.
@@ -321,6 +333,15 @@ namespace Desert::Editor
 
         PreviewViewport::Shape m_Shape = PreviewViewport::Shape::Sphere;
 
+        // An ARBITRARY MESH to show the material on instead of a primitive, and its filename for the row
+        // that offers it. Null means "use the shape". PreviewViewport::SetMesh already framed a foreign
+        // mesh off its own vertices long before this window existed; all that was missing was a caller.
+        //
+        // Both are part of the pushed identity below, so choosing one announces itself exactly as a shape
+        // change does — there is no separate "the mesh changed" flag to forget.
+        Assets::AssetHandle m_PreviewMesh{ static_cast<uint64_t>( 0 ) };
+        std::string         m_PreviewMeshName;
+
         // WHAT WAS PUSHED, not whether something was. This used to be `bool m_Applied`, reset by hand at
         // every site that invalidates the push, and the site that changes the material's SHADER carries no
         // such reset.
@@ -343,10 +364,15 @@ namespace Desert::Editor
             Common::AssetHandle    Subject;
             PreviewViewport::Shape Shape = PreviewViewport::Shape::Sphere;
             std::string            ShaderName;
+            // The arbitrary preview mesh, or 0 for "the shape". A fourth term rather than a second
+            // condition beside the comparison, which is the whole reason this is an identity: the
+            // re-push is DERIVED, so the term added today needs no new reset site anywhere.
+            Common::AssetHandle Mesh{ static_cast<uint64_t>( 0 ) };
 
             bool operator==( const PushedIdentity& other ) const
             {
-                return Subject == other.Subject && Shape == other.Shape && ShaderName == other.ShaderName;
+                return Subject == other.Subject && Shape == other.Shape && ShaderName == other.ShaderName &&
+                       Mesh == other.Mesh;
             }
         };
         PushedIdentity m_Pushed;

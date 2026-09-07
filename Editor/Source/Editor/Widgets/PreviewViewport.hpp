@@ -4,6 +4,7 @@
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
+#include <Engine/ECS/SkyAtmosphereComponent.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
 
 #include <ImGui/imgui.h>
@@ -20,6 +21,7 @@ namespace Desert::Editor::UI
 namespace Desert::Editor::Render
 {
     class EditorCubemapPreviewPass;
+    class EditorGridPass;
 }
 
 namespace Desert::Graphic
@@ -63,7 +65,85 @@ namespace Desert::Editor
         {
             Sphere, // material preview default
             Cube,
-            Plane // right for cutout / foliage materials — a grass card garbles on a sphere
+            Plane,   // right for cutout / foliage materials — a grass card garbles on a sphere
+            Cylinder // a curved surface with a seam and two caps: what a tiling material reads wrong on
+        };
+
+        // WHAT FILLS THE PANE — the widget's real extension axis, named instead of inferred. It used to
+        // be deduced from which members happened to be set (a mesh handle, a cubemap pass), and that was
+        // fine while there were two kinds; the sky dome is a third whose CAMERA is different from both,
+        // and a camera chosen by "no mesh handle and no cubemap pass" is a rule nobody can read.
+        enum class Fill
+        {
+            Empty,
+            Object,  // a primitive or a measured mesh, orbited. Surface domain.
+            Cubemap, // an HDR environment wrapped on a ball, orbited. Skybox domain.
+            SkyDome  // a sky the material itself authors, looked AT from the ground. Volume domain.
+        };
+
+        // THE PREVIEW'S OWN WORLD, as distinct from the material on show — the distinction screen 16 of
+        // the mock is entirely about. These are settings of the SCENE the asset is shown in: which sky,
+        // where the sun is, whether there is a floor under the object. They are NOT part of the material
+        // and are deliberately not saved with it.
+        //
+        // Held here rather than in the panel because the widget is what owns the entities they drive AND
+        // what receives the mouse: the light is turned by dragging inside the image (hold L), so a copy
+        // living in the panel would have to be written back from Draw(). One value, two readers.
+        struct SceneSetup
+        {
+            // ── Environment ───────────────────────────────────────────────────────────────────────────
+            // The palette, from the SHARED table (Graphic::kSkyPresets) an artist also picks from in the
+            // Details panel. Not hand-authored numbers: that is what StudioNeutral was extracted for.
+            ECS::SkyPreset Sky = ECS::SkyPreset::StudioNeutral;
+            // Multiplies the preset's own SkyBrightness. A separate field rather than an edit of the
+            // palette, so switching preset does not silently discard it.
+            float SkyIntensity = 1.0f;
+
+            // ── The key light, which is ALSO the sun in the sky ────────────────────────────────────────
+            //
+            // ONE VECTOR, and the mock is emphatic about it: the light that lights the object and the sun
+            // baked into the sky are the same thing here (SkyboxECSSystem::ResolveAtmosphereSun reads the
+            // directional light's transform). Two independent controls would let an artist light a
+            // material from the left under a sun visibly on the right — and then trust it.
+            //
+            // Authored as the two angles a person can read and a drag can move; the travel vector the ECS
+            // wants is derived in LightTravel(). Yaw is a compass bearing about +Y, pitch the sun's
+            // ELEVATION above the horizon.
+            float     SunYawDegrees   = -22.0f;
+            float     SunPitchDegrees = 42.0f;
+            float     LightIntensity  = 3.5f;
+            glm::vec3 LightColor{ 1.0f, 0.97f, 0.92f };
+
+            // ── The floor ─────────────────────────────────────────────────────────────────────────────
+            //
+            // The cast shadow is the point of it, and the only part that is not free — see
+            // Graphic::ShadowQuality for what it costs and why it could not be had before.
+            bool  ShowFloor           = true;
+            bool  FloorCastsShadow    = false; // the floor itself is not a caster; the SUBJECT is
+            bool  FloorReceivesShadow = true;
+            float FloorSize           = 400.0f; // world units (cm), so 4 m
+            // AUTHORED, because the engine's default material is white and a white Lambertian floor under
+            // a noon sun clips — and a shadow on a clipped surface is not visible, which would have made
+            // "the floor is for the shadow" a claim the frame did not support. 0.30 sits near a mid grey
+            // once the sun and the sky ambient are added, which is where a shadow reads.
+            glm::vec3 FloorColour{ 0.30f, 0.30f, 0.31f };
+
+            bool ShowGrid = false;
+
+            // ── The sky dome's own budget (Fill::SkyDome only) ─────────────────────────────────────────
+            //
+            // A cloud march on every frame the window is open is the dome's whole cost, and MaxSteps /
+            // StopTransmittance are the two numbers that decide it. They are component fields
+            // (ECS::VolumetricCloudData), so this is a smaller default rather than a new mechanism.
+            int32_t CloudMaxSteps          = 96;
+            float   CloudStopTransmittance = 0.03f;
+
+            // Direction the light TRAVELS (sun -> scene), which is what TransformComponent::Translation on
+            // a directional light means. Derived, never stored: two copies of one direction is how a sky
+            // ends up lit from below.
+            [[nodiscard]] glm::vec3 LightTravel() const;
+
+            bool operator==( const SceneSetup& ) const = default;
         };
 
         // Show a mesh, auto-framed by its bounds. `materials` is applied slot-by-slot (pass the entity's
@@ -89,7 +169,39 @@ namespace Desert::Editor
         // panel, which knows why (no slot in the schema vs nothing bound vs a dangling handle).
         void SetCubemapMaterial( std::function<const Graphic::ImageCube*()> resolveCube );
 
+        // Show a VOLUME-domain material as the sky it authors: a preview world with ground, a sun and a
+        // wide enough vertical lens that horizon, mid-elevation and zenith are in one frame.
+        //
+        // The third entry through the extension point described above, and the one that most needs it —
+        // there is no shape here at all. A cloud material describes a MEDIUM: its layout is a painting on
+        // a sky map, its vertical profile is base and top in kilometres on the CloudType assets it points
+        // at, and one cell of its weather lattice is about 3 km wide. None of those has a meaning on a
+        // one-metre ball, and wrapping them onto one is the same class of scale error as the "clouds hang
+        // too low" complaint (a cell width disagreeing with a layer thickness).
+        //
+        // THE GROUND IS NOT SCENERY. A cloud deck's shadow, and the light it throws back down, are part of
+        // what the material looks like — the engine has already shipped a defect where that shadow reached
+        // one lit path and not the other two — so a dome with nothing under it would hide half of what is
+        // being edited.
+        //
+        // @p material is the handle the layer resolves its values from every frame (the document's working
+        // copy, so an edit shows without an Apply).
+        void SetVolumeMaterial( const Assets::AssetHandle& material );
+
         void Clear();
+
+        // What is filling the pane right now. The panel reads it to label its own controls (a Shape combo
+        // means nothing for a dome) and a test reads it to pin the routing.
+        [[nodiscard]] Fill GetFill() const
+        {
+            return m_Fill;
+        }
+
+        // The preview world's settings, for a panel to draw controls over. Mutable on purpose: the widget
+        // owns the entities and applies whatever it finds here on the next Update(), so there is one copy
+        // of each value and no push call to forget.
+        [[nodiscard]] SceneSetup&       Setup();
+        [[nodiscard]] const SceneSetup& Setup() const;
 
         // True once something has been set (and so there is anything to draw).
         [[nodiscard]] bool HasContent() const
@@ -128,6 +240,15 @@ namespace Desert::Editor
     private:
         void EnsureInit();
         void ApplyCamera( uint32_t width, uint32_t height );
+        // Write m_Setup onto the scene's entities. Called from Update(), every frame: the writes are a
+        // handful of component fields, and doing them unconditionally is what removes the "the panel
+        // edited the struct but forgot to push it" failure entirely.
+        //
+        // The ONE thing it does conditionally is ask for an environment re-bake, and only when the setup
+        // actually changed and no drag is in progress: the sky itself follows the sun on the same frame
+        // (the sky pass evaluates it), but the IBL cubes behind the ambient have to be re-baked, and that
+        // is not something to run sixty times a second while somebody is swinging the sun around.
+        void ApplySetup();
         // Bounds of the current mesh handle, if the MeshService already has it. False while it is still
         // loading — Update() keeps retrying so a mesh that arrives a few frames later still gets framed
         // instead of being previewed against a guessed radius.
@@ -137,14 +258,31 @@ namespace Desert::Editor
         // The cubemap domain's draw (see SetCubemapMaterial). Created on first use, source-cleared by
         // every other Set*/Clear so exactly one kind of content fills the pane at a time.
         std::unique_ptr<Render::EditorCubemapPreviewPass> m_CubemapPass;
+        // The authoring grid, installed on FIRST USE and never before. It is one blended fullscreen quad
+        // per frame and genuinely cheap to draw, but installing it builds a pipeline and a material — and
+        // the row that switches it on is off by default, so most preview windows would be paying for a
+        // pass they never show. SceneSettings::ShowGrid gates the draw once it exists.
+        std::unique_ptr<Render::EditorGridPass> m_GridPass;
         // Fully qualified: a Desert::Editor::Core namespace also exists, so an unqualified Core::Scene
         // would resolve there in TUs that see it.
         std::shared_ptr<::Desert::Core::Scene> m_Scene;
         // Our own camera, driven by the orbit state (not the scene's input-driven EditorCamera).
         std::shared_ptr<::Desert::Core::GameplayCamera> m_Camera;
         ECS::Entity                                     m_Target;
-        bool                                            m_Inited     = false;
-        bool                                            m_HasContent = false;
+        // The three entities the SceneSetup drives. Created once with the scene and then only written to
+        // — a floor that is switched off is an entity with no mesh in its slot, not an entity destroyed
+        // and rebuilt, because rebuilding it every toggle would churn the mesh service for a checkbox.
+        ECS::Entity m_Light;
+        ECS::Entity m_Floor;
+        ECS::Entity m_Sky;
+        // The volumetric layer, present only once a Volume-domain material has asked for it: it carries a
+        // modelling volume of 8 MiB and a sky-occlusion volume of 2 MiB per renderer, which no material
+        // preview should pay for by existing.
+        ECS::Entity m_CloudLayer;
+
+        Fill                m_Fill       = Fill::Empty;
+        bool                m_Inited     = false;
+        bool                m_HasContent = false;
         Assets::AssetHandle m_MeshHandle{ static_cast<uint64_t>( 0 ) }; // non-zero while previewing a mesh
         bool                m_Framed = false;                           // bounds resolved -> view is correct
 
@@ -171,6 +309,16 @@ namespace Desert::Editor
         // moments the cached image went stale — a dirty flag for a cache that no longer exists. Removed:
         // five deletions, no behaviour change, because there was no behaviour. The knowledge above is worth
         // keeping; a function that performs it is not.
+
+        // The preview world. Public through Setup(); see SceneSetup for why it lives here.
+        SceneSetup m_Setup;
+        // What was last written onto the entities, so ApplySetup can tell "nothing moved" from "the sun
+        // moved" without the panel having to say so. Not a dirty FLAG: a flag has to be raised by every
+        // writer, and the writers are a tab full of widgets plus two drag handlers.
+        SceneSetup m_AppliedSetup;
+        bool       m_AppliedSetupValid = false;
+        // True while a light drag is in flight — the one thing that defers the environment re-bake.
+        bool m_DraggingLight = false;
 
         uint32_t m_Width = 0, m_Height = 0;
     };
