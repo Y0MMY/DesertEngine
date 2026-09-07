@@ -50,6 +50,20 @@
 #include <GL/gl.h>
 #endif
 
+// WINDOWS' <GL/gl.h> IS FROZEN AT OPENGL 1.1 and Microsoft has never shipped a newer one; every
+// other platform's header carries the modern enums, which is why this compiles everywhere except
+// the one place nobody builds locally. `GL_CLAMP_TO_EDGE` arrived in OpenGL 1.2 (1998), so the
+// launcher's thumbnail upload was a Windows-only C2065 that cost a full CI cycle to see.
+//
+// The value, not a loader, is the right fix HERE and only here: this tool draws through ImGui's
+// fixed-function GL2 backend, so it needs exactly one 1.2-era constant and no 1.2-era *functions* —
+// and a constant is an ABI number, identical in every driver since. Pulling in glad or GLEW to
+// learn one integer would be a third-party dependency (§1.5) bought for nothing. If this file ever
+// needs a post-1.1 ENTRY POINT, that is the moment the trade flips and a loader becomes correct.
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
