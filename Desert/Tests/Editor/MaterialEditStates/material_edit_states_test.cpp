@@ -579,6 +579,294 @@ TEST( MaterialEditStates, TheComponentCountIsOneRuleAndItIsThePropertysIdentity 
     EXPECT_EQ( MaterialEdit::ComponentsOf( VT::Unknown ), 1 );
 }
 
+// ── 5. The reset, and the three things "default" names in this window (M7) ──────────────────────────────
+//
+// ONE SENTENCE, ASSERTED FROM BOTH SIDES: a reset is offered exactly when the row is showing something
+// other than what it inherits. What it inherits is the SHADER's declared default on a base material and
+// the PARENT chain's value on an instance — two different values, and Details' Д29 reset has only the
+// first of them, which is why its rule could not be copied here and had to be generalised.
+//
+// The mistake this section exists to catch is the one a straight copy of Д29 makes: reset by WRITING THE
+// DEFAULT IN rather than by removing the entry. On a base material the two are indistinguishable, which is
+// exactly how such a bug ships; on an INSTANCE the copy hands the row the schema default while the window
+// is displaying the parent's value, so the picture jumps to a third number nothing was showing.
+
+TEST( MaterialEditStates, TheResetIsOfferedExactlyWhenTheRowIsNotShowingWhatItInherits )
+{
+    const auto  schema   = SchemaOf( { Ranged( "Coverage", 0.0f, 1.0f, 0.45f ) } );
+    const auto& coverage = schema.Params[0];
+
+    // A base material that says nothing: the row IS the shader's default, so there is nothing to hand back.
+    MaterialData silent;
+    EXPECT_EQ( MaterialEdit::ResetOfferedFor( silent, nullptr, coverage, /*isInstance=*/false ),
+               MaterialEdit::RowReset::None );
+
+    // A base material that stores the default EXPLICITLY still gets no arrow, and that is the measured half
+    // of this rule rather than an oversight. This repository's own M_O4_Both_Clouds.demat carries 28 stored
+    // parameters of which 23 are byte-equal to the shader's default — written by the migration that moved
+    // the cloud look off the component, not by an artist. "The material stores an entry" would put 28
+    // arrows on a material with 5 real deviations, and an arrow on every row is an arrow on none.
+    MaterialData redundant;
+    redundant.SetParam( "Coverage", glm::vec4( 0.45f, 0.0f, 0.0f, 0.0f ) );
+    EXPECT_EQ( MaterialEdit::ResetOfferedFor( redundant, nullptr, coverage, /*isInstance=*/false ),
+               MaterialEdit::RowReset::None );
+
+    // And a value that differs does get one, named for what it would hand back.
+    MaterialData authored;
+    authored.SetParam( "Coverage", glm::vec4( 0.762f, 0.0f, 0.0f, 0.0f ) );
+    EXPECT_EQ( MaterialEdit::ResetOfferedFor( authored, nullptr, coverage, /*isInstance=*/false ),
+               MaterialEdit::RowReset::ToShaderDefault );
+}
+
+TEST( MaterialEditStates, AnInstanceResetsToItsPARENTAndNotToTheShadersDefault )
+{
+    const auto  schema   = SchemaOf( { Ranged( "Coverage", 0.0f, 1.0f, 0.45f ) } );
+    const auto& coverage = schema.Params[0];
+
+    // THREE DISTINCT NUMBERS ON PURPOSE — schema 0.45, parent 0.80, child 0.20. A reset that wrote the
+    // schema default in would land on 0.45, which is neither what the row shows nor what it inherits, and
+    // no test with parent == default could ever tell the two implementations apart.
+    MaterialData parent;
+    parent.SetParam( "Coverage", glm::vec4( 0.80f, 0.0f, 0.0f, 0.0f ) );
+
+    MaterialData child;
+    child.SetParam( "Coverage", glm::vec4( 0.20f, 0.0f, 0.0f, 0.0f ) );
+
+    EXPECT_EQ( MaterialEdit::ResetOfferedFor( child, &parent, coverage, /*isInstance=*/true ),
+               MaterialEdit::RowReset::ToParentValue );
+    EXPECT_FLOAT_EQ( MaterialEdit::EffectiveParamValue( child, &parent, coverage ).x, 0.20f );
+
+    // THE RESET IS THE ERASE, and this is the relation the whole feature rests on: after it, the row shows
+    // what it inherits, and therefore offers no further reset. Both halves, because either alone passes for
+    // a broken implementation — a reset that erases nothing satisfies the second, and one that writes 0.45
+    // in satisfies neither but would satisfy a test written against the schema default.
+    EXPECT_TRUE( child.RemoveParam( "Coverage" ) );
+    EXPECT_FLOAT_EQ( MaterialEdit::EffectiveParamValue( child, &parent, coverage ).x, 0.80f )
+         << "an instance falls back to its PARENT, not to the shader — 0.45 here means the reset wrote the "
+            "schema default in instead of removing the entry";
+    EXPECT_EQ( MaterialEdit::ResetOfferedFor( child, &parent, coverage, /*isInstance=*/true ),
+               MaterialEdit::RowReset::None );
+
+    // The same row, same bytes, read as a BASE material: it now inherits from the shader instead, so a
+    // parent value of 0.80 is not involved at all. The two modes are two answers to one question and the
+    // predicate must not average them.
+    MaterialData asBase;
+    asBase.SetParam( "Coverage", glm::vec4( 0.80f, 0.0f, 0.0f, 0.0f ) );
+    EXPECT_EQ( MaterialEdit::ResetOfferedFor( asBase, nullptr, coverage, /*isInstance=*/false ),
+               MaterialEdit::RowReset::ToShaderDefault );
+}
+
+TEST( MaterialEditStates, RemovingIsNotWritingTheDefaultIn )
+{
+    // The two are indistinguishable in the PICTURE and different in the FILE, which is why this is asserted
+    // on the data rather than left to the render. A material that stores its inherited value has PINNED it:
+    // editing the parent, or the shader, stops reaching it. That is the opposite of a reset.
+    MaterialData data;
+    data.SetParam( "Coverage", glm::vec4( 0.762f, 0.0f, 0.0f, 0.0f ) );
+    data.SetParam( "Seed", glm::vec4( 7.0f, 0.0f, 0.0f, 0.0f ) );
+    ASSERT_EQ( data.Params.size(), 2u );
+
+    EXPECT_TRUE( data.RemoveParam( "Coverage" ) );
+    EXPECT_EQ( data.Params.size(), 1u ) << "the entry is gone, not overwritten";
+    EXPECT_EQ( data.FindParam( "Coverage" ), nullptr );
+    EXPECT_EQ( data.Params[0].Name, "Seed" ) << "the surviving entries keep their order";
+
+    // A reset that changed nothing records nothing — the same discipline ResetFieldToDefault has in
+    // Details, and what lets MaterialEditorPanel::ResetParam skip the publish for a no-op.
+    EXPECT_FALSE( data.RemoveParam( "Coverage" ) );
+    EXPECT_FALSE( data.RemoveParam( "NeverWritten" ) );
+}
+
+TEST( MaterialEditStates, RowsThatCannotBeResetAreRefusedByKindAndNotByValue )
+{
+    // TEXTURE AND ASSET-REFERENCE ROWS GET NO ARROW, and the two reasons are different. A cloud type or
+    // layout slot already carries its own empty entry in its combo, so an arrow would be a second control
+    // for one action. A 2D texture slot cannot be UNBOUND at all: Graphic::DataDrivenMaterial::SetTexture
+    // refuses a null image and MaterialFactory::ApplyShaderAsset skips handle 0, so erasing the entry would
+    // clear the file and leave the ball still sampling the old texture — a control that changes the
+    // document and not the picture (DC §1.3).
+    const auto schema = SchemaOf( { Texture( "AlbedoMap" ), AssetRef( "CloudType1", "CloudTypeAsset" ) } );
+
+    MaterialData bound;
+    bound.SetTexture( "AlbedoMap", 1234u );
+    bound.SetTexture( "CloudType1", 5678u );
+
+    for ( const auto& p : schema.Params )
+    {
+        EXPECT_EQ( MaterialEdit::ResetOfferedFor( bound, nullptr, p, /*isInstance=*/false ),
+                   MaterialEdit::RowReset::None )
+             << p.Name << ": offered a reset it cannot carry out";
+        EXPECT_EQ( MaterialEdit::ResetOfferedFor( bound, nullptr, p, /*isInstance=*/true ),
+                   MaterialEdit::RowReset::None )
+             << p.Name << ": an instance takes these whole from its parent and draws them read-only";
+    }
+}
+
+TEST( MaterialEditStates, EveryOfferedResetHasSomethingToSayAboutItself )
+{
+    // The arrow is one glyph and it means one of two different things depending on the document. An artist
+    // pressing it has to know WHICH before pressing, so a kind with no sentence is a kind that ships a
+    // control nobody can predict — and adding a third kind without a sentence is what this catches.
+    for ( const auto kind : { MaterialEdit::RowReset::ToShaderDefault, MaterialEdit::RowReset::ToParentValue } )
+    {
+        const std::string tooltip = MaterialEdit::ResetTooltip( kind );
+        EXPECT_FALSE( tooltip.empty() );
+        EXPECT_NE( tooltip.find( kind == MaterialEdit::RowReset::ToParentValue ? "parent" : "shader" ),
+                   std::string::npos )
+             << "the sentence must name WHICH default it is about: " << tooltip;
+    }
+
+    // A row that offers nothing says nothing: the arrow is not drawn, so there is no hover to explain.
+    EXPECT_STREQ( MaterialEdit::ResetTooltip( MaterialEdit::RowReset::None ), "" );
+}
+
+TEST( MaterialEditStates, TheResetGoesThroughTheOneUnwriteAndLandsInTheWORKINGCopy )
+{
+    // SOURCE-LEVEL, for the reason the one-write assertion above gives: MaterialEditorPanel.cpp owns a
+    // PreviewViewport, which owns a SceneRenderer, which needs a Vulkan device — so no suite can construct
+    // the panel. What is checkable is that the drawing site does not grow a second execution path.
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() ) << "could not find the repository root from the test's working directory";
+
+    const std::string code =
+         CodeOnly( root + "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditorPanel.cpp" );
+    ASSERT_FALSE( code.empty() );
+
+    // ONE call site for the removal, and it is inside ResetParam. A row that erased the entry itself would
+    // skip the publish, and the value would revert in the file while the ball kept the old picture — the
+    // silent half-edit Д29 was about, in this window's own vocabulary.
+    EXPECT_EQ( CountOf( code, "RemoveParam(" ), 1u )
+         << "the erase belongs to ResetParam alone; a second caller is a second execution path";
+
+    const std::size_t at = code.find( "RemoveParam(" );
+    ASSERT_NE( at, std::string::npos );
+    EXPECT_EQ( EnclosingFunction( code, at ), "ResetParam" );
+
+    // AND IT REACHES THE DRAWN MATERIAL, never the subject. The whole point of the staged document is that
+    // an edit lands where only this window's preview can see it; a reset that went to the subject would put
+    // every mesh in every open scene back to the shader's defaults with no Apply and no way back.
+    const std::size_t body = code.find( "MaterialEditorPanel::ResetParam" );
+    ASSERT_NE( body, std::string::npos );
+    const std::string reset = code.substr( body, code.find( "\n    }", body ) - body );
+    EXPECT_NE( reset.find( "DrawnMaterial()" ), std::string::npos )
+         << "the reset must resolve its own target, so no caller can hand in the subject";
+    EXPECT_EQ( reset.find( "ResolveSubject()" ), std::string::npos )
+         << "a reset that reached the subject would move the level with no Apply and no Discard";
+    EXPECT_NE( reset.find( "PublishToRuntime(" ), std::string::npos )
+         << "without the publish the value reverts in the document and not on screen";
+}
+
+// ── 6. A drop the cloud slots cannot take is ANSWERED, not swallowed (M7) ───────────────────────────────
+//
+// The defect: FileExplorerPanel types its drag payload by FileType and every image is FileType::Texture, so
+// the browser emits TEXTURE_ASSET for a `.png` while these slots accepted only the generic AssetFile — and
+// a payload id that does not match fails SILENTLY in ImGui. Nothing bound, nothing logged, nothing drawn.
+// The same defect had already been found and fixed in CloudLayoutPanel's own image slots; the material's
+// slots kept it, which makes this the "one symptom fixed, its neighbour left standing" shape as well.
+//
+// Two halves are testable and both are held here: the SENTENCE (pure, below) and the fact that the panel
+// hands it the real extension constants rather than something that merely looks like them.
+
+namespace
+{
+    // What the panel passes, spelled once here so the expectations below and the source check agree.
+    constexpr const char* kTypeExt   = ".decloudtype";
+    constexpr const char* kLayoutExt = ".dclayout";
+
+    std::string RefusalFor( const char* path, bool isType )
+    {
+        return MaterialEdit::WhyThatCannotGoInThisSlot( path, isType, kTypeExt, kLayoutExt );
+    }
+} // namespace
+
+TEST( MaterialEditStates, APictureDroppedOnALayoutSlotIsAnsweredWithTheRouteThatWorks )
+{
+    // THE CASE THE FUNCTION EXISTS FOR. A refusal that only says "no" leaves the artist where they were —
+    // and where they were is "I cannot add a texture to a cloud material". So the sentence has to carry the
+    // step that does work, because for a picture there IS one.
+    const std::string refusal = RefusalFor( "Assets/Textures/sky_bands.png", /*isType=*/false );
+
+    EXPECT_NE( refusal.find( "sky_bands.png" ), std::string::npos )
+         << "name what arrived, or the artist cannot tell which of two drags was refused: " << refusal;
+    EXPECT_NE( refusal.find( kLayoutExt ), std::string::npos ) << "name what the slot takes: " << refusal;
+    EXPECT_NE( refusal.find( "Pattern image" ), std::string::npos )
+         << "name the step that gets the picture in — the whole point of answering at all: " << refusal;
+    EXPECT_NE( refusal.find( "New Cloud Asset" ), std::string::npos )
+         << "and where a layout comes from when there is not one yet: " << refusal;
+
+    // WHY it is refused rather than imported here, in the sentence: a layout is not an image. It carries
+    // four species channels AND an add/remove mask, which is exactly why CloudLayoutPanel imports the
+    // pattern and the mask as two separate pictures (O-4). An artist told only "no" would reasonably think
+    // the editor was broken.
+    EXPECT_NE( refusal.find( "mask" ), std::string::npos ) << refusal;
+}
+
+TEST( MaterialEditStates, EveryRefusedDropSaysWhatArrivedAndWhatTheSlotTakes )
+{
+    struct Case
+    {
+        const char* Path;
+        bool        IsType;
+        const char* Wanted;
+    };
+
+    // The four families that reach these slots: a picture (both slots), a sibling cloud format on the same
+    // generic payload, and anything else. None of them may produce an empty string — a refusal with nothing
+    // said is the one thing DC §1.4 forbids outright, and it is what this row did before.
+    const Case cases[] = {
+         { "Assets/Textures/sky.png", false, kLayoutExt },
+         { "Assets/Textures/sky.png", true, kTypeExt },
+         { "Assets/Clouds/Cirrus.decloudtype", false, kLayoutExt },
+         { "Assets/Clouds/Layouts/Bands.dclayout", true, kTypeExt },
+         { "Assets/Clouds/CloudNoise_Default.dcnv", false, kLayoutExt },
+         { "Assets/Scenes/Clouds_Demo.desce", true, kTypeExt },
+    };
+
+    for ( const auto& c : cases )
+    {
+        const std::string refusal = RefusalFor( c.Path, c.IsType );
+        EXPECT_FALSE( refusal.empty() ) << c.Path;
+        EXPECT_NE( refusal.find( std::filesystem::path( c.Path ).filename().string() ), std::string::npos )
+             << c.Path << " -> " << refusal;
+        EXPECT_NE( refusal.find( c.Wanted ), std::string::npos )
+             << "the slot must name what it DOES take, or the refusal is a dead end: " << refusal;
+    }
+
+    // And the near miss is named as the near miss it is: a `.decloudtype` on a layout slot is not "not
+    // something this slot can take", it is the OTHER slot's file, and saying so is the fix.
+    const std::string swapped = RefusalFor( "Assets/Clouds/Cirrus.decloudtype", /*isType=*/false );
+    EXPECT_NE( swapped.find( kTypeExt ), std::string::npos ) << swapped;
+    EXPECT_NE( swapped.find( "painted map of the sky" ), std::string::npos ) << swapped;
+}
+
+TEST( MaterialEditStates, TheSlotAcceptsThePayloadTheBrowserActuallyEmitsAndPassesTheRealExtensions )
+{
+    // SOURCE-LEVEL, for the reason every other panel claim here is: MaterialEditorPanel.cpp cannot be
+    // linked by a suite. What it holds is the two halves of the defect that no pure function can see.
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+    const std::string code =
+         CodeOnly( root + "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditorPanel.cpp" );
+    ASSERT_FALSE( code.empty() );
+
+    const std::size_t at = code.find( "DrawCloudAssetRef" );
+    ASSERT_NE( at, std::string::npos );
+    const std::string row = code.substr( code.find( "MaterialEditorPanel::DrawCloudAssetRef" ) );
+
+    // HALF ONE: the target must accept the payload the Content Browser really emits for an image. Accepting
+    // only AssetFile is what made the drop invisible, and it is invisible in exactly the way that leaves no
+    // evidence — so nothing but this line can catch a revert.
+    EXPECT_NE( row.find( "DragPayloads::TextureAsset" ), std::string::npos )
+         << "a .png travels as TEXTURE_ASSET; a slot that does not accept it cannot even refuse it";
+    EXPECT_NE( row.find( "DragPayloads::AssetFile" ), std::string::npos )
+         << "and .dclayout / .decloudtype travel as the generic AssetFile";
+
+    // HALF TWO: the sentence is parameterised on the extensions so this header stays free of the cloud
+    // includes — which means the panel could hand it anything. It must hand it the real constants.
+    EXPECT_NE( row.find( "Assets::kCloudTypeExtension" ), std::string::npos );
+    EXPECT_NE( row.find( "Assets::kCloudLayoutExtension" ), std::string::npos );
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
