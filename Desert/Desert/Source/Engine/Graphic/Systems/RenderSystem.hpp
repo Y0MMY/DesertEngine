@@ -25,7 +25,6 @@ namespace Desert::Graphic::System
         virtual ~RenderSystem() = default;
 
         virtual Common::BoolResultStr Initialize() = 0;
-        virtual void               Shutdown()   = 0;
 
         virtual const std::shared_ptr<Framebuffer>& GetSystemFramebuffer() const final
         {

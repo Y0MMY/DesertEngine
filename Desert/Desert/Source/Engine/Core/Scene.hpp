@@ -67,6 +67,19 @@ namespace Desert::Core
 
         [[nodiscard]] Common::BoolResultStr Init();
 
+        // Has Init() ever run on this scene? Asked by a caller that DEFERRED the first Init and now has
+        // to know whether the deferred one actually happened — a scene load can refuse the file and
+        // return with nothing initialised, and rendering a scene whose renderer has no systems is not a
+        // recoverable state. Answered by the scene rather than tracked by the caller, because the caller
+        // would be a second place holding the same fact (contract §2, one source of truth per value).
+        //
+        // Stays true across Clear() and across a second Init(): the question is "does this scene have a
+        // renderer that has been built", and Clear() empties the world without touching the renderer.
+        [[nodiscard]] bool IsInitialized() const
+        {
+            return m_Initialized;
+        }
+
         const std::shared_ptr<Graphic::Image2D>     GetFinalImage() const;
         const std::shared_ptr<Graphic::Framebuffer> GetTargetFramebuffer() const;
 
@@ -223,6 +236,9 @@ namespace Desert::Core
 
         std::vector<ECS::Entity>                 m_Entitys;
         std::unordered_map<Common::UUID, size_t> m_EntitysMap;
+
+        // Set by Init(), never cleared — see IsInitialized().
+        bool m_Initialized = false;
 
         Graphic::SceneRenderer*     m_SceneRenderer;
         std::weak_ptr<Core::Camera>   m_MainCamera;   // non-owning view (renderer reads this)

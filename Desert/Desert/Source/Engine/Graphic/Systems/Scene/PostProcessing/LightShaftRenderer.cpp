@@ -57,15 +57,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void LightShaftRenderer::Shutdown()
-    {
-        m_MaskPipeline.reset();
-        m_BlurPipeline.reset();
-        m_PingImage.reset();
-        m_PongImage.reset();
-        m_ShaftImage.reset();
-    }
-
     bool LightShaftRenderer::CreateImages( uint32_t width, uint32_t height )
     {
         // Half resolution: shafts are low-frequency by construction and the blur reads this image

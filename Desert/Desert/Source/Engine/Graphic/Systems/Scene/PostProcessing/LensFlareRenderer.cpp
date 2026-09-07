@@ -58,14 +58,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void LensFlareRenderer::Shutdown()
-    {
-        m_BrightPassPipeline.reset();
-        m_FeaturesPipeline.reset();
-        m_SourceImage.reset();
-        m_FlareImage.reset();
-    }
-
     bool LensFlareRenderer::CreateImages( uint32_t width, uint32_t height )
     {
         const uint32_t sw = std::max( 1u, width / kSourceDivisor );

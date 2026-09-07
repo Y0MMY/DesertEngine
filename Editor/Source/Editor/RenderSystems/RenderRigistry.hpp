@@ -1,6 +1,5 @@
 #pragma once
 
-#include "IRender.hpp"
 #include "Passes/EditorGridPass.hpp"
 #include "Passes/EditorColliderPass.hpp"
 #include "Passes/EditorUIPass.hpp"

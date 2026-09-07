@@ -52,15 +52,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void HeightFogRenderer::Shutdown()
-    {
-        m_FogPipeline.reset();
-        m_ApplyPipeline.reset();
-        m_ApplyMaterial.reset();
-        m_FogImage.reset();
-        m_ParamsBuffer.reset();
-    }
-
     bool HeightFogRenderer::CreatePipelines()
     {
         const auto shaderService = Runtime::ResourceRegistry::GetShaderService();

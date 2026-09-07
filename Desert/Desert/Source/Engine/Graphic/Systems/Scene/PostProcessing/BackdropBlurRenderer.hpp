@@ -52,12 +52,6 @@ namespace Desert::Graphic::System
             return BOOLSUCCESS;
         }
 
-        void Shutdown() override
-        {
-            m_DownsamplePipeline.reset();
-            m_Image.reset();
-        }
-
         void RegisterPasses( RenderGraphBuilder& ) override
         {
         }

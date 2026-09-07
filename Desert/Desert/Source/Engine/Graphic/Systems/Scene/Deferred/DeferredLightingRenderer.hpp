@@ -45,10 +45,6 @@ namespace Desert::Graphic::System
             return BOOLSUCCESS;
         }
 
-        virtual void Shutdown() override
-        {
-        }
-
         // Not a render-graph pass — driven from SceneRenderer's manual chain after the geometry graph.
         void RegisterPasses( RenderGraphBuilder& ) override
         {

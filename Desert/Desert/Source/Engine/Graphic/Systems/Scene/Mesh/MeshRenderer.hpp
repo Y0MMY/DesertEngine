@@ -142,7 +142,6 @@ namespace Desert::Graphic::System
                        "would write matrices no shader ever reads." );
 
         virtual Common::BoolResultStr Initialize() override;
-        virtual void                  Shutdown() override;
         virtual void                  RegisterPasses( RenderGraphBuilder& builder ) override;
 
         // Silhouette mask of the currently outlined meshes (white on the framebuffer clear color).

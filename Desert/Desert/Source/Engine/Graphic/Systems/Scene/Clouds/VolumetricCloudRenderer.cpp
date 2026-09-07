@@ -156,41 +156,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void VolumetricCloudRenderer::Shutdown()
-    {
-        m_MarchPipeline.reset();
-        m_ResolvePipeline.reset();
-        m_ShadowMapPipeline.reset();
-        m_SkyOcclusionPipeline.reset();
-        m_CompositePipeline.reset();
-        m_CompositeMaterial.reset();
-        m_TraceImage.reset();
-        m_TraceGuideImage.reset();
-        m_ShadowMapImage.reset();
-        m_ShadowMapValid = false;
-        m_SkyOcclusionVolume.reset();
-        m_SkyOcclusionFailed = false;
-        for ( uint32_t i = 0; i < 2u; ++i )
-        {
-            m_HistoryImage[i].reset();
-            m_HistoryGuideImage[i].reset();
-        }
-        m_ModellingVolume.reset();
-        m_ModellingValid = false;
-        for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
-            m_ProfileTypes[slot] = Assets::AssetHandle::Null();
-        m_ProfileSpeciesCount = 0;
-        m_ProfileGeneration   = 0;
-        m_ParamsBuffer.reset();
-        m_ResolveParamsBuffer.reset();
-        m_ShadowParamsBuffer.reset();
-        m_AuthoredBuffer.reset();
-        m_ShadowAuthoredBuffer.reset();
-        m_HeroClouds.clear();
-        m_AuthoredPayload = CloudAuthoredPayload{};
-        m_AuthoredAtlas   = nullptr;
-    }
-
     uint32_t VolumetricCloudRenderer::ResolveSpecies( CloudTypeShape ( &shapes )[kCloudSpeciesSlots],
                                                       Assets::AssetHandle ( &handles )[kCloudSpeciesSlots] ) const
     {

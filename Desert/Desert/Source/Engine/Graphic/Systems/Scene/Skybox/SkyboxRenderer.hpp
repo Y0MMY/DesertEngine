@@ -23,9 +23,6 @@ namespace Desert::Graphic::System
         using RenderSystem::RenderSystem;
 
         virtual Common::BoolResultStr Initialize() override;
-        void                          Shutdown() override
-        {
-        }
 
         void PrepareCamera( Core::Camera* camera );
         void PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material, float intensity = 1.0f );

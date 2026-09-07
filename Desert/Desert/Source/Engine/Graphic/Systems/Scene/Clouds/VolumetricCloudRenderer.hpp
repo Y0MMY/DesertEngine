@@ -90,7 +90,6 @@ namespace Desert::Graphic::System
         ~VolumetricCloudRenderer() override;
 
         Common::BoolResultStr Initialize() override;
-        void                  Shutdown() override;
         void                  RegisterPasses( RenderGraphBuilder& builder ) override;
 
         /**
