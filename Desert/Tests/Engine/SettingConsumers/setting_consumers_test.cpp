@@ -1171,6 +1171,14 @@ TEST( SettingConsumers, TheReaderDoesNotSeeCodeInsideALiteralOrAComment )
              << "a read written inside " << form.Name
              << " counts as a read, so prose and log text can certify a setting nobody consumes";
     }
+
+    // The one construct that hides the NEXT line rather than its own: a line comment ending in a
+    // backslash is spliced onto the following line before comments are looked for at all, so the read
+    // below it is commented out and must not count. It belongs with the negatives, not the positives —
+    // and it is the only place where seeing MORE than the compiler would be the failure.
+    EXPECT_FALSE( SpriteIsRead( SnippetAround( "// this comment continues \\" ) ) )
+         << "a line comment ending in a backslash did not swallow the line under it, so the reader sees "
+            "a read the compiler never compiles and the census certifies a dead setting";
 }
 
 // The two structural invariants, asserted directly rather than through a census.

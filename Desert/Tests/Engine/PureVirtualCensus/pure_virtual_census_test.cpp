@@ -43,7 +43,9 @@ namespace
 
     // Walks up from the working directory looking for a file only the repository has, as
     // DeviceLostCensus and AssetReferenceCensus do for the same reason: the runner's working directory
-    // is not fixed. (The suites share no header; copy-paste is the convention this directory follows.)
+    // is not fixed. THIS ONE is still copy-pasted on purpose: each census probes a DIFFERENT sentinel
+    // file, so a shared version would need the sentinel as a parameter and would say less than the
+    // three lines it replaced. The text READER is a different matter and is shared (Д33).
     std::string RepoRoot()
     {
         std::string prefix = "./";

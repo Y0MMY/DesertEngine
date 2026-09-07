@@ -153,9 +153,28 @@ namespace Desert::Tests::ConsumerText
         {
             if ( src[i] == '/' && i + 1 < src.size() && src[i + 1] == '/' )
             {
+                // A `//` comment ENDING IN A BACKSLASH swallows the next line too: the compiler splices
+                // the lines before it looks for comments at all. This is the mirror of the defect that
+                // caused the rebuild, and the reason to close it here rather than to note it — instead
+                // of hiding a read that exists, getting it wrong SHOWS a read the compiler never
+                // compiles, and the census then certifies a setting that is dead. There is no such
+                // comment in the tree today (measured: zero, over the 926 project sources), so this
+                // costs nothing now and cannot be introduced later without the reader following it.
                 std::size_t j = i;
-                while ( j < src.size() && src[j] != '\n' )
+                while ( j < src.size() )
+                {
+                    if ( src[j] != '\n' )
+                    {
+                        ++j;
+                        continue;
+                    }
+                    std::size_t back = j;
+                    while ( back > i && src[back - 1] == '\r' )
+                        --back;
+                    if ( back == i || src[back - 1] != '\\' )
+                        break;
                     ++j;
+                }
                 blank( i, j );
                 i = j;
             }
