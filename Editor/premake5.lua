@@ -35,6 +35,25 @@ project "Editor"
         externalincludedirs { path }
     end
 
+    -- THE VULKAN HEADERS, FROM THE ENGINE'S OWN DISCOVERY, ON EVERY PLATFORM. The Editor includes
+    -- Engine/Graphic/API/Vulkan/VulkanDevice.hpp, which opens with <vulkan/vulkan.h>, so it needs the
+    -- SDK's include directory exactly as much as the engine does — and EditorSpecific.IncludeDir has
+    -- never carried one. On macOS this went unnoticed for as long as the project has existed, because
+    -- Homebrew's prefix is added workspace-wide in PlatformMacOS.lua and the header is found by
+    -- accident. Windows has no such ambient path, so Editor.vcxproj failed at VulkanDevice.hpp(5)
+    -- with C1083 — the Editor was simply not buildable there.
+    --
+    -- Taken from DesertSpecific rather than copied into EditorSpecific so the SDK is discovered ONCE
+    -- (Desert/Dependencies.lua findVulkanSDK) and both consumers name the same directory; a second
+    -- copy is a second thing to keep in step. The keys are absent, not empty, when no SDK is found,
+    -- so pairs() simply yields nothing and the failure stays where it already is — in the engine.
+    for _, key in ipairs({ "Vulkan", "shaderc", "spirv_cross" }) do
+        local path = engineDeps.DesertSpecific.IncludeDir[key]
+        if path then
+            externalincludedirs { path }
+        end
+    end
+
     -- NOTE: no INCLUDE_HEADERS=#include<...> define here — nothing uses it, and
     -- the '#' turns the rest of the DEFINES line into a comment in gmake makefiles.
     defines { "YAML_CPP_STATIC_DEFINE",
