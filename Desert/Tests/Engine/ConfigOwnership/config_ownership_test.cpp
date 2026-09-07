@@ -1,0 +1,966 @@
+// WHICH CONFIGURATION FILE OWNS WHICH SETTING — the rule, and the census that keeps it true.
+//
+// This engine persists settings into three authored files, and until К1 nothing anywhere said which one
+// owns what. The cost of that silence is not theoretical; it has been paid four times, in four places, in
+// one week:
+//
+//   * К2 found ten viewport debug flags living in the LEVEL file, and `ShowColliders: true` had shipped
+//     through git in 55 of 73 scenes that stated it;
+//   * К3 (open) has five image-quality fields living in the level file, so a weak machine cannot turn the
+//     picture down without editing a file that goes to everybody;
+//   * У6, У8 and Д31 are the same shape one layer out — one container holding things with different
+//     owners and different lifetimes.
+//
+// Catching instances one at a time is what this suite exists to stop. The rule is below, it decides where
+// a NEW field goes without asking anyone, and the census under it is what goes red when a field lands in
+// the wrong file.
+//
+// ===================================================================================================
+// THE RULE
+// ===================================================================================================
+//
+//   ~/.desertengine/editor.json  — ONE PERSON'S COPY OF THE EDITOR.
+//       Holds what a user's own installation must remember between sessions and across every project,
+//       and whose value two people on the same project may legitimately hold differently at the same
+//       moment.
+//       Does NOT hold anything a second person opening the project must see, and nothing the shipped
+//       Runtime needs — the packaged game never opens this file.
+//
+//   <Name>.deproj                — WHAT THE PRODUCT IS, FOR EVERYBODY.
+//       Holds the few facts every process that opens this project must agree on before any level
+//       exists: its identity, where its content lives, which level boots, and the format's own version.
+//       Does NOT hold anything that varies from level to level, nothing that varies from machine to
+//       machine, and it grows a field only when the value genuinely cannot be derived — Constants.hpp
+//       already refused fourteen folder-name fields on exactly that ground.
+//
+//   <Name>.desce                 — WHAT THE WORLD IS.
+//       Holds the level's entities and the level-wide policy a designer authors and expects to travel
+//       with the level: the render path, shadows, the grade, the lens, wind, gravity, the splash.
+//       Does NOT hold what a VIEWER is doing on top of the world (К2 took ten such fields out) and does
+//       NOT hold what a MACHINE can afford (К3 owes five).
+//
+// THE DECISION PROCEDURE — three questions, IN THIS ORDER. The order IS the rule.
+//
+//   0. Is the field the file describing ITSELF — a format version, a unit generation, the name the file
+//      is filed under? Then it is FILE METADATA, it belongs to whichever file it describes, and
+//      questions 1-3 do not apply. Exactly four fields may claim this kind and they are named in the
+//      census below; a fifth is a conversation, not a row.
+//   1. Would two people working on this project AT THE SAME TIME legitimately want different values?
+//      Yes -> editor.json.
+//   2. Does the value differ from one level to the next?  Yes -> .desce.
+//   3. Otherwise -> .deproj.
+//
+// WHY QUESTION 1 COMES FIRST, which is the only part of this that is load-bearing. Questions 2 and 3 are
+// both TRUE of a quality knob — anti-aliasing does differ between levels if somebody authors it that way,
+// and it is a project-wide default if somebody sets it that way — so any order that asks them earlier
+// finds a home for it and stops. Question 1 is the only one whose "yes" is about a CONFLICT rather than
+// about a scope, and a conflict beats a scope: a value two people must be able to disagree about cannot
+// live in a file they share, whatever else is true of it. Asked in the wrong order, quality settles in the
+// level file — which is exactly where it is, and how it got there.
+//
+// HOW TO TELL A QUALITY KNOB FROM AN AUTHORED LOOK, because that is the boundary this went wrong on. Ask:
+// set to its cheapest value, has the level been MIS-AUTHORED, or merely RENDERED WORSE?
+//   * rendered worse -> machine quality. `MeshLOD` off is byte-identical geometry near the camera;
+//     `CloudQuality` High reproduces the calibrated constants to the digit; Anisotropy 1, Nearest
+//     filtering and AA None are the same picture, blurrier or harsher.
+//   * mis-authored -> level data that happens to cost something. Forward and Deferred are two shading
+//     models that disagree about cloud shadow on the ground; ACES and Reinhard are two grades; GI Off is
+//     a darker room, not a coarser one.
+// This is what settles the disagreement inside SceneSettings' own comments, where CloudQuality's note
+// counts NINE cost-versus-quality siblings and the struct header names only FIVE as misplaced. The other
+// four (RenderingPath, GlobalIllumination, EnableSSAO, EnableSSR) each change the authored look. The
+// closest call by far is EnableSSAO, and it is called Level here deliberately rather than quietly: it is
+// an on/off, not a fidelity ladder, and there is no cheaper SSAO to fall back to. If К3's machine-level
+// store ever grows a scalability LEVEL, SSAO is the first field to re-examine.
+//
+// A CONSEQUENCE THAT К3 HAS TO PLAN AROUND, recorded here because this is where it will be looked for:
+// answering "editor.json" for a field the SHIPPED GAME also needs is not a valid answer. `editor.json` is
+// an Editor-target concept (Desert::Editor::EditorPreferences); the Runtime never opens it. The five
+// misplaced quality fields are all read by SceneRenderer, which the packaged game runs — so moving them
+// into editor.json would take the quality dial away from the player entirely. Their real home is a
+// per-machine store BOTH hosts read, which does not exist and which is a fourth file. That is an owner's
+// decision, not a cleanup.
+//
+// ===================================================================================================
+// HOW THIS SUITE IS BUILT
+// ===================================================================================================
+//
+// Each file's field list is enumerated BY THE SAME MECHANISM THAT WRITES THAT FILE, never by a hand-typed
+// list — so a field added tomorrow fails here before anyone has to remember this document exists:
+//
+//   editor.json  <- rfl::fields<EditorPreferences>() and rfl::fields<DebugViewState>(), which is literally
+//                   what rfl::json::write emits in EditorPreferences::Save().
+//   .deproj      <- rfl::fields<ProjectFile>(), the same call Common::Project::WriteProjectFile makes.
+//   .desce       <- rfl::fields<SceneSerialized>() for the top level, and the reflection registry for the
+//                   Settings block, which is what SceneSerializer hands SerializeReflected.
+//
+// The three existing censuses in this repository ask three other questions and none of them can ask this
+// one; this suite is the fourth and it deliberately does not repeat them:
+//
+//   SettingConsumers   "does anything READ this?"       — owns that question for every REFLECTED type,
+//                                                          so the SceneSettings rows here carry no
+//                                                          consumer column. It covers nothing else, which
+//                                                          is why the rows for editor.json and .deproj DO
+//                                                          carry one: those two files had no readership
+//                                                          census at all, and К1 found two dead settings
+//                                                          in editor.json the first time anyone looked.
+//   SceneDebugFields   "should this be in a LEVEL?"     — the special case of this rule for one kind of
+//                                                          field (debug visualization), kept because it
+//                                                          also checks the migrator's key list.
+//   SceneVersionGate   "will this file LOAD?"
+//
+// The consumer half reuses SettingConsumers' reader (setting_consumers_reader.hpp) rather than growing a
+// second matcher. What is added locally is two receiver shapes that census did not need: a static
+// accessor chain (`ProjectContext::Current().Name`) and a template-argument declaration
+// (`std::optional<ProjectFile> s_Current;`).
+
+#include "../SettingConsumers/setting_consumers_reader.hpp"
+
+#include <Editor/Core/EditorPreferences.hpp>
+
+#include <Common/Project/ProjectFormat.hpp>
+
+#include <Engine/Core/SceneSettings.hpp>
+#include <Engine/Core/Serialize/SceneFormat.hpp>
+#include <Engine/Graphic/DebugViewState.hpp>
+#include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Engine/Reflection/ReflectionTypes.hpp>
+
+#include <rflcpp/rfl/Generic.hpp>
+#include <rflcpp/rfl/fields.hpp>
+#include <rflcpp/rfl/json.hpp>
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using Desert::Reflection::FieldInfo;
+using Desert::Reflection::ReflectionRegistry;
+
+namespace
+{
+    // The four kinds a persisted value can have. There is no fifth, and adding one is the conversation
+    // the rule above says to have rather than a row somebody slips in.
+    enum class Owner
+    {
+        Machine,  // one person's installation; two people may differ at the same moment
+        Project,  // the product, for everybody who opens it
+        Level,    // the world this file describes
+        FileMeta, // the file describing itself: format version, unit generation, its own name
+    };
+
+    const char* OwnerName( Owner owner )
+    {
+        switch ( owner )
+        {
+            case Owner::Machine:
+                return "Machine (~/.desertengine/editor.json)";
+            case Owner::Project:
+                return "Project (.deproj)";
+            case Owner::Level:
+                return "Level (.desce)";
+            case Owner::FileMeta:
+                return "FileMeta (belongs to whichever file it describes)";
+        }
+        return "?";
+    }
+
+    struct Row
+    {
+        const char* Field;
+        Owner       Kind;
+
+        // A repo-relative source file that must contain an ANCHORED READ of this field (see
+        // setting_consumers_reader.hpp). Left null for the SceneSettings rows on purpose: SettingConsumers
+        // owns readership for every reflected type and a second table of the same 51 answers would be the
+        // duplication §2.1 forbids.
+        const char* Where = nullptr;
+    };
+
+    struct FileCensus
+    {
+        const char* File;  // the file as a person names it
+        Owner       Holds; // the ONE kind this file may hold; FileMeta is additionally always allowed
+        // How a consumer file is allowed to get hold of one of these values. `Type` is the struct's own
+        // name; `Holder`/`Accessor` spell the static getter that hands it out (`ProjectContext::Current()`).
+        const char* Type;
+        const char* Holder;
+        const char* Accessor;
+        const Row*  Rows;
+        std::size_t Count;
+    };
+
+#define CENSUS_ROWS( rows ) rows, sizeof( rows ) / sizeof( ( rows )[0] )
+
+    // ------------------------------------------------------------------------------------------------
+    // ~/.desertengine/editor.json — Desert::Editor::EditorPreferences
+    //
+    // Every field is Machine, and that is not an accident of this table: the file is per-USER by
+    // construction (EditorPreferences::ConfigDirectory() is $HOME/.desertengine, not the project), so a
+    // field of any other kind here would be a value one person's home directory decides for everybody —
+    // which is unreachable for a teammate and invisible in review. If a row here ever needs a kind other
+    // than Machine, the field is in the wrong file, not the row.
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr const char* kEditorLayer    = "Editor/Source/EditorLayer.cpp";
+    constexpr const char* kPrefsImpl      = "Editor/Source/Editor/Core/EditorPreferences.cpp";
+    constexpr const char* kViewportPanel  = "Editor/Source/Editor/Panels/ViewportPanel/ViewportPanel.cpp";
+    constexpr const char* kPhotogrammetry = "Editor/Source/Editor/Panels/Photogrammetry/PhotogrammetryPanel.cpp";
+
+    constexpr Row kEditorPrefsRows[] = {
+         // Applied to the editor camera once a camera exists.
+         { "CameraSpeed", Owner::Machine, kEditorLayer },
+
+         // The four gizmo snap values and their modifier policy. Load()/Save() push them into GizmoState,
+         // which is where every gizmo actually reads them from.
+         { "TranslateSnap", Owner::Machine, kPrefsImpl },
+         { "RotateSnapDeg", Owner::Machine, kPrefsImpl },
+         { "ScaleSnap", Owner::Machine, kPrefsImpl },
+         { "PersistentSnap", Owner::Machine, kPrefsImpl },
+
+         { "AutosaveMinutes", Owner::Machine, kEditorLayer },
+         { "ShowPerfHud", Owner::Machine, kViewportPanel },
+
+         // Which generation of the default dock layout this user has been reset to. It looks like a
+         // version and is not FileMeta: it does not describe editor.json's format, it records a one-time
+         // action taken on THIS installation's imgui.ini.
+         { "DockLayoutVersion", Owner::Machine, kEditorLayer },
+
+         // The sibling that proves the rule already works when it is applied: MSAA is the same kind of
+         // cost-versus-quality choice as SceneSettings::AA and it is already here, per machine, while AA
+         // sits in the level file. SceneSettingsPanel draws the two combos side by side and labels them
+         // "(this machine)" and "(scene)". К3 is the task that makes them agree.
+         { "MSAASamples", Owner::Machine, kPrefsImpl },
+
+         // Selection outline: an editor-only viewport visualization (a runtime build has no selection).
+         { "OutlineColor", Owner::Machine, kEditorLayer },
+         { "OutlineWidth", Owner::Machine, kEditorLayer },
+         { "OutlineSmoothness", Owner::Machine, kEditorLayer },
+         { "EnableOutline", Owner::Machine, kEditorLayer },
+
+         // The whole view state, pushed into every scene's renderer each frame. Its ten leaves are
+         // censused separately below.
+         { "DebugView", Owner::Machine, kEditorLayer },
+
+         // External photogrammetry tooling: the command lines and paths of THIS machine's installation of
+         // somebody else's software. Nothing is more per-machine than a path to a binary.
+         { "PhotogrammetryCommand", Owner::Machine, kPhotogrammetry },
+         { "PhotogrammetryPhotosDir", Owner::Machine, kPhotogrammetry },
+         { "PhotogrammetryOutputMesh", Owner::Machine, kPhotogrammetry },
+         { "PhotogrammetryFaceModel", Owner::Machine, kPhotogrammetry },
+
+         // Details-panel personalisation, saved on the click.
+         { "FavouriteFields", Owner::Machine, kPrefsImpl },
+         { "CollapsedComponents", Owner::Machine, kPrefsImpl },
+    };
+
+    // ------------------------------------------------------------------------------------------------
+    // The nested DebugView block of editor.json — Desert::Graphic::DebugViewState.
+    //
+    // These are the ten fields К2 took out of the level file. They are censused for KIND only: their
+    // placement is additionally guarded by Desert/Tests/Engine/SceneDebugFields, which derives the set of
+    // names a .desce may never state from this same declaration, and duplicating its consumer answers here
+    // would be a second table of one set.
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr Row kDebugViewRows[] = {
+         { "ShowGrid", Owner::Machine },
+         { "ShowColliders", Owner::Machine },
+         { "ShowBoundingBoxes", Owner::Machine },
+         { "BoundingBoxColor", Owner::Machine },
+         { "BoundingBoxLineWidth", Owner::Machine },
+         { "WireframeMode", Owner::Machine },
+         { "ShowNormals", Owner::Machine },
+         { "LightingDebug", Owner::Machine },
+         { "ShadowDebug", Owner::Machine },
+         { "DeferredDebug", Owner::Machine },
+    };
+
+    // ------------------------------------------------------------------------------------------------
+    // <Name>.deproj — Common::Project::ProjectFile
+    //
+    // Four Project fields, one FileMeta, and one that is in the wrong file (EngineVersion).
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr const char* kProjectContext = "Desert/Desert/Source/Engine/Project/ProjectContext.cpp";
+    constexpr const char* kHubMain        = "Tools/ProjectHub/Source/Main.cpp";
+    constexpr const char* kHubProjects    = "Tools/ProjectHub/Source/Projects.cpp";
+
+    constexpr Row kProjectFileRows[] = {
+         // The descriptor's own format generation, stamped by WriteProjectFile and by nothing else.
+         { "FileVersion", Owner::FileMeta, kHubMain },
+
+         { "Name", Owner::Project, kEditorLayer },
+         // The load-bearing one: it remaps every content path into the project folder.
+         { "AssetsRoot", Owner::Project, kProjectContext },
+         { "DefaultScene", Owner::Project, kProjectContext },
+         { "Description", Owner::Project, kHubProjects },
+
+         // MISPLACED — see kKnownMisplaced. The build that last wrote this descriptor is a fact about a
+         // MACHINE, recorded into a file the whole team shares and git tracks.
+         { "EngineVersion", Owner::Machine, kHubMain },
+    };
+
+    // ------------------------------------------------------------------------------------------------
+    // <Name>.desce, top level — Desert::Core::SceneSerialized
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr Row kSceneFileRows[] = {
+         { "SceneName", Owner::FileMeta },    // the name this file is filed under; also decides where a save lands
+         { "Entities", Owner::Level },        // the world itself
+         { "Settings", Owner::Level },        // the block censused below
+         { "UnitVersion", Owner::FileMeta },  // world-unit generation
+         { "SceneVersion", Owner::FileMeta }, // schema generation
+    };
+
+    // ------------------------------------------------------------------------------------------------
+    // The Settings block of a .desce — Desert::Core::SceneSettings
+    //
+    // KIND ONLY. SettingConsumers owns "does anything read this" for every reflected type and answers it
+    // for all 51 of these fields; repeating those answers here would be a second statement of one set.
+    //
+    // Five rows say Machine, and all five are К3's. The four fields that LOOK like their siblings and are
+    // not — RenderingPath, GlobalIllumination, EnableSSAO, EnableSSR — are Level by the mis-authored /
+    // rendered-worse test at the top of this file.
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr Row kSceneSettingsRows[] = {
+         { "RenderingPath", Owner::Level },      // two shading models, not two fidelities
+         { "MeshLOD", Owner::Machine },          // К3
+         { "EnableSSAO", Owner::Level },         // the closest call; see the header
+         { "CloudQualityTier", Owner::Machine }, // К3
+         { "GlobalIllumination", Owner::Level },
+         { "GIIntensity", Owner::Level },
+         { "EnableSSR", Owner::Level },
+         { "SSRIntensity", Owner::Level },
+         { "SSRMaxDistance", Owner::Level },
+
+         { "EnableShadows", Owner::Level },
+         { "ShadowBias", Owner::Level },
+         { "CascadeSplitLambda", Owner::Level },
+
+         // The grade. "Which one a scene is graded through is a property of the scene, the way film stock
+         // was a property of the shoot" — SceneSettings.hpp's own words, and they are the rule's words.
+         { "Tonemapper", Owner::Level },
+         { "Exposure", Owner::Level },
+         { "Gamma", Owner::Level },
+         { "WhitePoint", Owner::Level },
+         { "AutoExposure", Owner::Level },
+         { "AutoExposureKey", Owner::Level },
+         { "AutoExposureSpeed", Owner::Level },
+         { "AutoExposureMin", Owner::Level },
+         { "AutoExposureMax", Owner::Level },
+
+         { "AA", Owner::Machine }, // К3 — and MSAASamples, its own sibling, is already in editor.json
+
+         { "EnableBloom", Owner::Level },
+         { "BloomThreshold", Owner::Level },
+         { "BloomIntensity", Owner::Level },
+         { "LensDispersion", Owner::Level },
+
+         // The lens. Every one of these is authored content: the pass hardcodes no colour, no ghost count
+         // and no spacing.
+         { "EnableLensFlare", Owner::Level },
+         { "LensFlareIntensity", Owner::Level },
+         { "LensFlareTint", Owner::Level },
+         { "LensFlareThreshold", Owner::Level },
+         { "LensFlareGhostCount", Owner::Level },
+         { "LensFlareGhostSpacing", Owner::Level },
+         { "LensFlareGhostSizeNear", Owner::Level },
+         { "LensFlareGhostSizeFar", Owner::Level },
+         { "LensFlareGhostTintInner", Owner::Level },
+         { "LensFlareGhostTintOuter", Owner::Level },
+         { "LensFlareHaloIntensity", Owner::Level },
+         { "LensFlareHaloRadius", Owner::Level },
+         { "LensFlareStreakIntensity", Owner::Level },
+         { "LensFlareStreakLength", Owner::Level },
+         { "LensFlareStreakAngle", Owner::Level },
+         { "LensFlareChromaShift", Owner::Level },
+
+         { "TextureFilterMode", Owner::Machine }, // К3
+         { "Anisotropy", Owner::Machine },        // К3
+
+         { "Gravity", Owner::Level },
+         { "WindDirection", Owner::Level },
+         { "WindStrength", Owner::Level },
+         { "WindTurbulence", Owner::Level },
+
+         // The shipping player's splash for this level.
+         { "SplashSprite", Owner::Level },
+         { "SplashDuration", Owner::Level },
+         { "SplashFade", Owner::Level },
+    };
+
+    constexpr FileCensus kFiles[] = {
+         { "~/.desertengine/editor.json", Owner::Machine, "EditorPreferences", "EditorPreferences", "Get",
+           CENSUS_ROWS( kEditorPrefsRows ) },
+         { "~/.desertengine/editor.json (DebugView)", Owner::Machine, "DebugViewState", nullptr, nullptr,
+           CENSUS_ROWS( kDebugViewRows ) },
+         { "<Name>.deproj", Owner::Project, "ProjectFile", "ProjectContext", "Current",
+           CENSUS_ROWS( kProjectFileRows ) },
+         { "<Name>.desce", Owner::Level, "SceneSerialized", nullptr, nullptr, CENSUS_ROWS( kSceneFileRows ) },
+         { "<Name>.desce (Settings)", Owner::Level, "SceneSettings", nullptr, nullptr,
+           CENSUS_ROWS( kSceneSettingsRows ) },
+    };
+
+    // ------------------------------------------------------------------------------------------------
+    // THE DEBT REGISTER. Every field currently in the wrong file, and THE TASK THAT OWNS MOVING IT.
+    //
+    // A task name is mandatory and is checked for. An exception list without one is a list nobody can read
+    // in a month, which is the state this whole subject was in before К1.
+    //
+    // Repairing one of these is a two-line edit here (delete the row, correct the Kind), and the corpus
+    // test below then requires that the FILES were converted too — which is what makes the migration
+    // provably run rather than merely written.
+    // ------------------------------------------------------------------------------------------------
+
+    struct Misplaced
+    {
+        const char* File;
+        const char* Field;
+        const char* Task; // must be non-empty; the suite checks
+        const char* Why;
+    };
+
+    constexpr Misplaced kKnownMisplaced[] = {
+         // ---- К3: image quality in the level file -------------------------------------------------
+         // All five are read by SceneRenderer, which the packaged game also runs, so their destination is
+         // NOT editor.json — see the consequence recorded in this file's header. К3 has to pick the store
+         // first; the move is the easy half.
+         { "<Name>.desce (Settings)", "AA", "К3",
+           "post-process anti-aliasing; its own sibling MSAASamples is already per-machine" },
+         { "<Name>.desce (Settings)", "MeshLOD", "К3",
+           "distance LOD; LOD0 is byte-identical geometry, so off vs on is fidelity, not authoring" },
+         { "<Name>.desce (Settings)", "TextureFilterMode", "К3", "sampler filter; the same picture, blurrier" },
+         { "<Name>.desce (Settings)", "Anisotropy", "К3", "sampler anisotropy; the same picture, blurrier" },
+         { "<Name>.desce (Settings)", "CloudQualityTier", "К3",
+           "cloud march budget; High reproduces the calibrated constants to the digit" },
+
+         // ---- К4 (proposed by К1, renumber if taken): a machine fact in a tracked team file ---------
+         // ProjectContext::Save() stamps Common::Version::Full() — which carries the commit hash and a
+         // `.dirty` suffix — on every write, and the only trigger is the Build Settings startup-scene
+         // combo, which calls SetDefaultScene with no equality guard. So re-picking the scene that is
+         // already selected rewrites a git-tracked file with a value that identifies one developer's
+         // working tree. The field has zero functional readers: the compatibility check its own header
+         // cites runs against Common::Version::CommitCount(), not against this string. К4 decides between
+         // deleting it and moving provenance somewhere untracked.
+         { "<Name>.deproj", "EngineVersion", "К4",
+           "the build that last wrote the descriptor is a fact about a machine, stamped into a file git "
+           "tracks and everyone shares" },
+    };
+
+    // ------------------------------------------------------------------------------------------------
+    // Reading the tree
+    // ------------------------------------------------------------------------------------------------
+
+    // Walks up from the working directory looking for a file only the repository has — the test runner's
+    // working directory is not fixed. Same shape as SceneDebugFields and SceneVersionGate.
+    std::string RepoRoot()
+    {
+        std::string prefix = "./";
+        for ( int up = 0; up < 6; ++up )
+        {
+            std::ifstream probe( prefix + "Desert/Desert/Source/Engine/Core/SceneSettings.hpp" );
+            if ( probe )
+                return prefix;
+            prefix += "../";
+        }
+        return {};
+    }
+
+    std::string ReadAll( const std::filesystem::path& path )
+    {
+        std::ifstream      in( path, std::ios::binary );
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        return buffer.str();
+    }
+
+    // The field names rfl::json::write will emit for T — i.e. the keys of the file, asked of the same
+    // library that writes them. A hand-typed list here would be a third statement of the format.
+    template <class T>
+    std::vector<std::string> SerializedKeysOf()
+    {
+        std::vector<std::string> names;
+        for ( const auto& meta : rfl::fields<T>() )
+            names.push_back( meta.name() );
+        return names;
+    }
+
+    std::vector<std::string> ReflectedKeysOf( const char* typeName )
+    {
+        std::vector<std::string> names;
+        const auto*              info = ReflectionRegistry::Get().Find( typeName );
+        if ( info == nullptr )
+            return names;
+        for ( const FieldInfo& field : info->Fields )
+            names.push_back( field.Name );
+        return names;
+    }
+
+    // The keys of one census's file, from that file's own writer.
+    std::vector<std::string> KeysOfFile( const FileCensus& file )
+    {
+        const std::string type = file.Type;
+        if ( type == "EditorPreferences" )
+            return SerializedKeysOf<Desert::Editor::EditorPreferences>();
+        if ( type == "DebugViewState" )
+            return SerializedKeysOf<Desert::Graphic::DebugViewState>();
+        if ( type == "ProjectFile" )
+            return SerializedKeysOf<Common::Project::ProjectFile>();
+        if ( type == "SceneSerialized" )
+            return SerializedKeysOf<Desert::Core::SceneSerialized>();
+        if ( type == "SceneSettings" )
+            return ReflectedKeysOf( "SceneSettings" );
+        return {};
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The consumer half — two receiver shapes on top of SettingConsumers' reader
+    // ------------------------------------------------------------------------------------------------
+
+    // `std::optional<ProjectFile> s_Current;` — the anchor is a template ARGUMENT, so the declaration
+    // shape DeriveReceivers recognises (`Type name`) does not fire and the binding is invisible to it.
+    // Without this, ProjectContext.cpp's `s_Current->AssetsRoot` reads as unanchored and the load-bearing
+    // consumer of the .deproj looks like it reads nothing.
+    std::vector<std::string> TemplateArgumentReceivers( const std::string& text, const std::string& anchor )
+    {
+        using namespace Desert::Tests::ConsumerText;
+
+        std::vector<std::string> out;
+        for ( std::size_t at : WordPositions( text, anchor ) )
+        {
+            std::size_t i = SkipSpace( text, at + anchor.size() );
+            if ( i >= text.size() || text[i] != '>' )
+                continue;
+            i = SkipSpace( text, i + 1 );
+            while ( i < text.size() && ( text[i] == '&' || text[i] == '*' ) )
+                i = SkipSpace( text, i + 1 );
+            const std::string name = IdentAt( text, i );
+            if ( !name.empty() )
+                out.push_back( name );
+        }
+        return out;
+    }
+
+    // The identifier immediately before the `::` that qualifies position `at`, or "" when `at` is
+    // unqualified. `Desert::Editor::EditorPreferences::Get` answers "EditorPreferences" for the `Get`.
+    std::string QualifierBefore( const std::string& text, std::size_t at )
+    {
+        using namespace Desert::Tests::ConsumerText;
+
+        std::size_t i = at;
+        while ( i > 0 && std::isspace( static_cast<unsigned char>( text[i - 1] ) ) != 0 )
+            --i;
+        if ( i < 2 || text[i - 1] != ':' || text[i - 2] != ':' )
+            return {};
+        i -= 2;
+        while ( i > 0 && std::isspace( static_cast<unsigned char>( text[i - 1] ) ) != 0 )
+            --i;
+        const std::size_t end = i;
+        while ( i > 0 && IsIdentChar( text[i - 1] ) )
+            --i;
+        return text.substr( i, end - i );
+    }
+
+    // `ProjectContext::Current().Name`, `EditorPreferences::Get().DebugView`, and — inside the type's own
+    // implementation file — the bare `Get().FavouriteFields`. A static accessor handing the value out with
+    // no local in between; AnchorReadsField stops at the `::`, so the chain is walked here.
+    //
+    // THE BARE FORM IS ONLY ACCEPTED IN A FILE THAT DEFINES MEMBERS OF THE TYPE, and that restriction is
+    // what keeps it from being vacuous: `Get` is the commonest accessor name in this engine, so crediting
+    // every unqualified `Get().Something` everywhere would let any singleton's field certify this one.
+    // Inside EditorPreferences.cpp an unqualified `Get()` is this type's by the language's own rules.
+    bool AccessorReadsField( const std::string& text, const std::string& holder, const std::string& accessor,
+                             const std::string& field )
+    {
+        using namespace Desert::Tests::ConsumerText;
+
+        // Does this file define members of the type at all? (`Holder::something` appearing anywhere.)
+        bool definesMembers = false;
+        for ( std::size_t at : WordPositions( text, holder ) )
+        {
+            const std::size_t i = SkipSpace( text, at + holder.size() );
+            definesMembers = definesMembers || ( i + 1 < text.size() && text[i] == ':' && text[i + 1] == ':' );
+        }
+
+        for ( std::size_t at : WordPositions( text, accessor ) )
+        {
+            const std::string qualifier = QualifierBefore( text, at );
+            const bool        reachable = qualifier == holder || ( qualifier.empty() && definesMembers );
+            if ( !reachable )
+                continue;
+
+            std::size_t i = SkipSpace( text, at + accessor.size() );
+            if ( i >= text.size() || text[i] != '(' )
+                continue;
+
+            int depth = 0;
+            while ( i < text.size() )
+            {
+                if ( text[i] == '(' )
+                    ++depth;
+                else if ( text[i] == ')' && --depth == 0 )
+                {
+                    ++i;
+                    break;
+                }
+                ++i;
+            }
+
+            if ( MemberReadAt( text, i, field ) )
+                return true;
+        }
+        return false;
+    }
+
+    bool FileReadsField( const std::string& text, const FileCensus& census, const std::string& field )
+    {
+        using namespace Desert::Tests::ConsumerText;
+
+        std::vector<std::string> receivers = DeriveReceivers( text, { census.Type } );
+        for ( const std::string& extra : TemplateArgumentReceivers( text, census.Type ) )
+            receivers.push_back( extra );
+
+        for ( const std::string& receiver : receivers )
+            if ( ReceiverReadsField( text, receiver, field ) )
+                return true;
+
+        if ( AnchorReadsField( text, census.Type, field ) )
+            return true;
+
+        if ( census.Holder != nullptr && census.Accessor != nullptr )
+            return AccessorReadsField( text, census.Holder, census.Accessor, field );
+
+        return false;
+    }
+
+    bool IsKnownMisplaced( const char* file, const std::string& field )
+    {
+        for ( const Misplaced& m : kKnownMisplaced )
+            if ( field == m.Field && std::string( file ) == m.File )
+                return true;
+        return false;
+    }
+} // namespace
+
+// ---------------------------------------------------------------------------------------------------
+// 0. THE SUITE CAN SEE WHAT IT CLAIMS TO CHECK
+// ---------------------------------------------------------------------------------------------------
+
+// Without this, every loop below runs over an empty set and reports green — the failure mode that looks
+// exactly like a census that found nothing wrong. SceneDebugFields learned the same lesson; so did
+// SceneVersionGate, which pins its corpus size for the same reason.
+TEST( ConfigOwnership, TheSourcesThisSuiteReadsAreWhereItThinksTheyAre )
+{
+    ASSERT_FALSE( RepoRoot().empty() ) << "repository root not found from the test's working directory";
+
+    for ( const FileCensus& file : kFiles )
+    {
+        SCOPED_TRACE( file.File );
+        EXPECT_FALSE( KeysOfFile( file ).empty() )
+             << file.Type
+             << " enumerated to no keys at all - the struct moved, was renamed, or is no "
+                "longer serialized the way this suite asks about it";
+    }
+
+    // The reflected block is the one that comes from a GENERATED table, so it is the one that can be
+    // silently absent when the header tool has not run.
+    EXPECT_NE( ReflectionRegistry::Get().Find( "SceneSettings" ), nullptr )
+         << "SceneSettings is not reflected - the generated table is stale or was not compiled in";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 1. THE CENSUS IS COMPLETE, IN BOTH DIRECTIONS
+// ---------------------------------------------------------------------------------------------------
+
+// A field added to any of the three files tomorrow lands here first, and the person adding it has to say
+// which kind it is. That decision is the entire point of this suite; everything else follows from it.
+TEST( ConfigOwnership, EveryKeyOfEveryConfigFileIsCensusedExactlyOnce )
+{
+    for ( const FileCensus& file : kFiles )
+    {
+        SCOPED_TRACE( file.File );
+
+        std::vector<std::string> fromWriter = KeysOfFile( file );
+        std::vector<std::string> fromTable;
+        for ( const Row* r = file.Rows; r != file.Rows + file.Count; ++r )
+            fromTable.push_back( r->Field );
+
+        // A duplicated row needs no assertion of its own: it makes this vector one longer than the
+        // writer's and the comparison below says so, naming the repeated field.
+        std::sort( fromWriter.begin(), fromWriter.end() );
+        std::sort( fromTable.begin(), fromTable.end() );
+
+        EXPECT_EQ( fromWriter, fromTable )
+             << "the census of " << file.File
+             << " and what actually gets written to it disagree. A key "
+                "the writer emits and this table does not name is a setting nobody has decided the owner "
+                "of; a row naming a key that is no longer written is a stale row.";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 2. THE RULE ITSELF
+// ---------------------------------------------------------------------------------------------------
+
+// One file, one kind. FileMeta is additionally allowed everywhere because it is not a setting at all — it
+// is the file describing itself, and it belongs to whichever file it describes by definition.
+TEST( ConfigOwnership, EveryFieldIsOfItsOwnFilesKind )
+{
+    for ( const FileCensus& file : kFiles )
+    {
+        SCOPED_TRACE( file.File );
+        for ( const Row* r = file.Rows; r != file.Rows + file.Count; ++r )
+        {
+            if ( r->Kind == Owner::FileMeta || r->Kind == file.Holds )
+                continue;
+
+            EXPECT_TRUE( IsKnownMisplaced( file.File, r->Field ) )
+                 << file.File << " holds " << r->Field << ", which is " << OwnerName( r->Kind ) << " and not "
+                 << OwnerName( file.Holds )
+                 << ". Either the row's kind is wrong, or the field is in the wrong file and needs a "
+                    "kKnownMisplaced entry naming the task that will move it.";
+        }
+    }
+}
+
+// FileMeta is the one kind that can be claimed to dodge the rule, so the set that may claim it is pinned
+// exactly rather than left to judgement. A version, a unit generation and the name a file is filed under
+// are the whole of it; a sixth field calling itself metadata is somebody widening a loophole.
+TEST( ConfigOwnership, OnlyFourFieldsAreFileMetadataAndTheseAreThey )
+{
+    std::vector<std::string> meta;
+    for ( const FileCensus& file : kFiles )
+        for ( const Row* r = file.Rows; r != file.Rows + file.Count; ++r )
+            if ( r->Kind == Owner::FileMeta )
+                meta.push_back( std::string( file.File ) + "::" + r->Field );
+
+    std::sort( meta.begin(), meta.end() );
+
+    const std::vector<std::string> expected = {
+         "<Name>.deproj::FileVersion",
+         "<Name>.desce::SceneName",
+         "<Name>.desce::SceneVersion",
+         "<Name>.desce::UnitVersion",
+    };
+
+    EXPECT_EQ( meta, expected ) << "the FileMeta kind is the rule's one exemption, and this is the list of "
+                                   "everything allowed to claim it. A new entry needs an argument, not a row.";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 3. THE DEBT REGISTER, PINNED IN BOTH DIRECTIONS
+// ---------------------------------------------------------------------------------------------------
+
+// Stated as an exact set rather than a count, for the reason SettingConsumers' dead-setting register gives:
+// a count lets repairing one violation and introducing another cancel out, which is precisely how a
+// register stops being read.
+TEST( ConfigOwnership, TheKnownMisplacedFieldsAreExactlyThese )
+{
+    std::vector<std::string> fromTables;
+    for ( const FileCensus& file : kFiles )
+        for ( const Row* r = file.Rows; r != file.Rows + file.Count; ++r )
+            if ( r->Kind != Owner::FileMeta && r->Kind != file.Holds )
+                fromTables.push_back( std::string( file.File ) + "::" + r->Field );
+
+    std::vector<std::string> registered;
+    for ( const Misplaced& m : kKnownMisplaced )
+        registered.push_back( std::string( m.File ) + "::" + m.Field );
+
+    std::sort( fromTables.begin(), fromTables.end() );
+    std::sort( registered.begin(), registered.end() );
+
+    EXPECT_EQ( fromTables, registered )
+         << "a field whose kind does not match its file is not in the debt register, or the register names "
+            "one that has since been moved. Both are edits somebody has to see.";
+
+    // Six today: five for К3, one for К4. This number going UP without a task name is what the next
+    // assertion refuses.
+    EXPECT_EQ( registered.size(), 6u );
+}
+
+// A debt entry with no owner is a note, and a note nobody owns is what this whole subject was made of
+// before К1. The task name is what turns the list into work.
+TEST( ConfigOwnership, EveryDebtEntryNamesTheTaskThatOwnsIt )
+{
+    for ( const Misplaced& m : kKnownMisplaced )
+    {
+        SCOPED_TRACE( std::string( m.File ) + "::" + m.Field );
+        ASSERT_NE( m.Task, nullptr );
+        EXPECT_GE( std::string( m.Task ).size(), 2u )
+             << "an exception without a task name is unreadable in a month - name the task that moves it";
+        ASSERT_NE( m.Why, nullptr );
+        EXPECT_GE( std::string( m.Why ).size(), 20u ) << "say what the field is and why it is misplaced";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 4. NO VALUE IS STATED BY TWO FILES
+// ---------------------------------------------------------------------------------------------------
+
+// The other half of one-source-of-truth (contract §2.1): the rule above stops a field landing in the wrong
+// file, and this stops it landing in two. A duplicated setting does not fail anything at first — it fails
+// the day the two copies disagree, which is a desync bug with no error message.
+TEST( ConfigOwnership, NoSettingIsStatedByTwoDifferentFiles )
+{
+    for ( std::size_t a = 0; a < std::size( kFiles ); ++a )
+    {
+        for ( std::size_t b = a + 1; b < std::size( kFiles ); ++b )
+        {
+            for ( const Row* x = kFiles[a].Rows; x != kFiles[a].Rows + kFiles[a].Count; ++x )
+            {
+                for ( const Row* y = kFiles[b].Rows; y != kFiles[b].Rows + kFiles[b].Count; ++y )
+                {
+                    if ( std::string( x->Field ) != y->Field )
+                        continue;
+
+                    // The two halves of editor.json are one file, and a name repeated between the outer
+                    // struct and its nested block would be a real collision - so this pair is NOT exempt.
+                    ADD_FAILURE() << x->Field << " is written by BOTH " << kFiles[a].File << " and "
+                                  << kFiles[b].File
+                                  << ". Two stores for one value is a desync waiting for the day they "
+                                     "disagree; delete one and give the survivor a reader.";
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 5. THE CONSUMER HALF, for the two files no other census covers
+// ---------------------------------------------------------------------------------------------------
+
+// SettingConsumers covers every REFLECTED type. editor.json and .deproj are not reflected — they go
+// through rfl directly — so until К1 nothing asked whether their fields reach anything, and the first
+// look found two settings in editor.json that no line of code outside their own declaration mentioned
+// (PhotogrammetryCaptureCommand and PhotogrammetryMode; both deleted by К1).
+//
+// The check is deliberately conservative in one known direction: a field whose only consumer sits in the
+// same file as the widget that edits it cannot be told apart from the widget's own `&prefs.Field` pointer.
+// That does not weaken what this catches, which is the failure that actually happened - a field NOTHING
+// anywhere mentions.
+TEST( ConfigOwnership, EveryFieldOfTheUnreflectedFilesNamesAConsumerThatReadsIt )
+{
+    using namespace Desert::Tests::ConsumerText;
+
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    for ( const FileCensus& file : kFiles )
+    {
+        for ( const Row* r = file.Rows; r != file.Rows + file.Count; ++r )
+        {
+            if ( r->Where == nullptr )
+                continue;
+
+            SCOPED_TRACE( std::string( file.File ) + "::" + r->Field );
+
+            const std::string text = StripCommentsAndLiterals( ReadAll( root + r->Where ) );
+            ASSERT_FALSE( text.empty() ) << "named consumer " << r->Where << " could not be read";
+
+            EXPECT_TRUE( FileReadsField( text, file, r->Field ) )
+                 << r->Where << " is named as the consumer of " << r->Field
+                 << " but contains no read of that field on a value of type " << file.Type
+                 << ". Either the read was removed and the setting is now dead, or it moved to another "
+                    "file and this row must follow it.";
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 6. THE CORPUS — the half that proves a migration was RUN and not merely written
+// ---------------------------------------------------------------------------------------------------
+
+// A .desce may state Level keys and its own metadata, and nothing else. Today it also states the five К3
+// owes, which is why they are exempted BY NAME here rather than by loosening the check: when К3 moves
+// them, deleting their register rows makes this assertion require that the files were converted too. That
+// is the same shape SceneDebugFields uses, and it is the only thing that ever makes a migration expire.
+TEST( ConfigOwnershipCorpus, NoSceneOnDiskStatesASettingOfAnotherFilesKind )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    std::vector<std::string> forbidden;
+    for ( const FileCensus& file : kFiles )
+    {
+        if ( std::string( file.File ) != "<Name>.desce (Settings)" )
+            continue;
+        for ( const Row* r = file.Rows; r != file.Rows + file.Count; ++r )
+            if ( r->Kind != Owner::FileMeta && r->Kind != file.Holds && !IsKnownMisplaced( file.File, r->Field ) )
+                forbidden.push_back( r->Field );
+    }
+
+    std::vector<std::filesystem::path> scenes;
+    std::error_code                    ec;
+    for ( const auto& entry :
+          std::filesystem::recursive_directory_iterator( root + "Editor/Resources/Assets/Scenes", ec ) )
+        if ( entry.is_regular_file() && entry.path().extension() == ".desce" )
+            scenes.push_back( entry.path() );
+
+    ASSERT_GE( scenes.size(), 40u ) << "the scene corpus was not found";
+
+    for ( const auto& path : scenes )
+    {
+        const auto parsed = rfl::json::read<rfl::Generic>( ReadAll( path ) );
+        ASSERT_TRUE( parsed.has_value() ) << path.string() << " is not readable JSON";
+        const auto root_object = parsed.value().to_object();
+        ASSERT_TRUE( root_object.has_value() ) << path.string() << " is not a JSON object";
+
+        const auto settings = root_object.value().get( "Settings" );
+        if ( !settings.has_value() )
+            continue;
+        const auto fields = settings.value().to_object();
+        if ( !fields.has_value() )
+            continue;
+
+        for ( const std::string& key : forbidden )
+            EXPECT_FALSE( fields.value().get( key ).has_value() )
+                 << path.string() << " states Settings." << key
+                 << ", which is not level data. Run Tools/SceneMigrator over it.";
+    }
+}
+
+// The `.deproj` this repository ships is tracked by git, and it currently states three keys - none of them
+// machine-specific. The moment anybody touches Build Settings -> Startup scene, ProjectContext::Save()
+// rewrites it in full and stamps EngineVersion with this machine's commit hash (and `.dirty`, if the tree
+// is). This is the tripwire for that event: it is green today and goes red on the commit that lets one
+// developer's build identity into a shared file. К4 owns the fix.
+TEST( ConfigOwnershipCorpus, TheTrackedProjectDescriptorStatesNoMachineSpecificKey )
+{
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    const std::string text = ReadAll( root + "Editor/Desert.deproj" );
+    ASSERT_FALSE( text.empty() ) << "Editor/Desert.deproj is missing or empty";
+
+    const auto parsed = rfl::json::read<rfl::Generic>( text );
+    ASSERT_TRUE( parsed.has_value() ) << "Editor/Desert.deproj is not readable JSON";
+    const auto object = parsed.value().to_object();
+    ASSERT_TRUE( object.has_value() );
+
+    for ( const FileCensus& file : kFiles )
+    {
+        if ( std::string( file.File ) != "<Name>.deproj" )
+            continue;
+        for ( const Row* r = file.Rows; r != file.Rows + file.Count; ++r )
+        {
+            if ( r->Kind != Owner::Machine )
+                continue;
+            EXPECT_FALSE( object.value().get( r->Field ).has_value() )
+                 << "Editor/Desert.deproj now states " << r->Field
+                 << ", a per-machine value, in a file git tracks and the whole team shares. See К4.";
+        }
+    }
+}
+
+int main( int argc, char** argv )
+{
+    ::testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
+}

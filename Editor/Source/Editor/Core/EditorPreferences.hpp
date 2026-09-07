@@ -14,6 +14,25 @@ namespace Desert::Editor
     // User-level editor settings, persisted to ~/.desertengine/editor.json (per-user, not per-project).
     // Loaded once at editor startup and applied to the live systems (GizmoState, editor camera); the
     // Preferences window (Edit -> Preferences...) edits + saves them.
+    //
+    // WHAT BELONGS IN THIS FILE, in one sentence (К1): ONE PERSON'S COPY OF THE EDITOR — what a user's own
+    // installation must remember between sessions and across every project, and whose value two people on
+    // the same project may legitimately hold differently at the same moment. What does NOT belong: anything
+    // a second person opening the project must see (that is the .deproj), anything that varies from level
+    // to level (that is the .desce), and anything the SHIPPED RUNTIME needs — the packaged game never opens
+    // this file, so a value put here is a value taken away from the player.
+    //
+    // The three-question procedure that decides where a NEW field goes, the argument for the order of the
+    // questions, and the census that goes red when a field lands in the wrong file are all in
+    // Desert/Tests/Engine/ConfigOwnership. That suite enumerates this struct through rfl::fields<> — the
+    // same call Save() writes it with — so a field added here without a decision fails it immediately.
+    //
+    // AND THIS IS THE ONLY PER-USER SETTINGS STORE. `~/.desertengine` holds four neighbours and not one of
+    // them is an alternative to this struct: `projects.json` and `engines.json` are cross-process
+    // REGISTRIES shared with the launcher, `Layouts/*.ini` (and the working-directory `imgui.ini`) are
+    // opaque ImGui dock state that ImGui itself writes and parses, and `asset_favorites.txt` is user state
+    // that should have been fields here — it is filed as debt, not as precedent. A new per-user setting
+    // goes in this struct; a new per-user FILE is a conversation with the owner.
     struct EditorPreferences
     {
         float CameraSpeed = 1.0f;
@@ -58,17 +77,20 @@ namespace Desert::Editor
         // scenes and sessions, which is strictly more than the old behaviour offered.
         Graphic::DebugViewState DebugView;
 
-        // Photogrammetry (Model-from-Photos panel): TOOL-AGNOSTIC external commands. Reconstruct: {input} = the
+        // Photogrammetry (Model-from-Photos panel): TOOL-AGNOSTIC external command. Reconstruct: {input} = the
         // photos folder, {output} = the produced mesh file, {outdir} = its directory (plug in Meshroom/COLMAP).
-        // Capture: {photos} = the photos folder to fill with frames from the camera (plug in ffmpeg/your tool).
-        std::string PhotogrammetryCommand = "meshroom_batch --input {input} --output {outdir}";
-        std::string PhotogrammetryCaptureCommand =
-             "ffmpeg -y -f avfoundation -framerate 2 -i 0 -t 20 -q:v 2 {photos}/frame_%03d.jpg";
+        //
+        // TWO FIELDS THAT USED TO SIT HERE WERE DELETED BY К1, not moved: `PhotogrammetryCaptureCommand` and
+        // `PhotogrammetryMode`. Both were serialized into every editor.json and neither was mentioned by a
+        // single line of code outside this declaration — the `{photos}` capture substitution the first one
+        // documented was never implemented (the panel writes frames itself), and the Object/Face preset
+        // switch the second one documented does not exist. They were §1.3 dead settings, invisible because
+        // this file had no readership census at all; Desert/Tests/Engine/ConfigOwnership is now that census.
+        // Old preference files still carrying the two keys load unchanged — reflect-cpp ignores keys the
+        // struct no longer has, so no migration is owed.
+        std::string PhotogrammetryCommand    = "meshroom_batch --input {input} --output {outdir}";
         std::string PhotogrammetryPhotosDir  = "";
         std::string PhotogrammetryOutputMesh = "Cooked/Photogrammetry/model.obj";
-        // 0 = Object (generic photogrammetry), 1 = Face (MetaHuman-style capture). Only swaps the tool
-        // presets + on-screen guidance; the engine still delegates the heavy lifting to the external CLI.
-        int PhotogrammetryMode = 0;
         // Path to the dlib 68-point model (shape_predictor_68_face_landmarks.dat) for real face tracking on
         // the camera overlay. Empty / dlib-not-built => a placeholder overlay is drawn instead.
         std::string PhotogrammetryFaceModel = "";
