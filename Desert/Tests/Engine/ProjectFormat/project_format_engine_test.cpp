@@ -101,7 +101,14 @@ TEST( EngineRegistration, TheEngineWritesDownWhereItIsSoTheLauncherCanFindIt )
     // The version is THIS build's, not a literal: a registry that reported someone else's version
     // would send the launcher's compatibility checks the wrong answer.
     EXPECT_EQ( install->VersionFull, Common::Version::Full() );
-    EXPECT_EQ( install->CommitCount, static_cast<int>( Common::Version::CommitCount() ) );
+    // BOTH SIDES ARE OPTIONAL, AND THE ASSERTION IS THAT THEY AGREE ABOUT ABSENCE TOO. И7 made the
+    // engine refuse to name a build it cannot trust (a shallow clone has no history to count), and the
+    // registry carries that through rather than flattening it to 0 — a zero would lose every comparison
+    // it was never entered into. Comparing the optionals directly says "known equals known, and unknown
+    // equals unknown", which is the whole point of the change.
+    EXPECT_EQ( install->CommitCount.has_value(), Common::Version::CommitCount().has_value() );
+    if ( Common::Version::CommitCount() )
+        EXPECT_EQ( *install->CommitCount, static_cast<int>( *Common::Version::CommitCount() ) );
 
     std::error_code ec;
     std::filesystem::remove_all( config, ec );
