@@ -425,8 +425,7 @@ TEST( PreferenceOwnership, AFinishedEditReachesTheFileOnceAndARedundantSaveNotAt
     const std::string marked = afterDrag + "\n";
     WriteWholeFile( PrefsPath(), marked );
     EXPECT_TRUE( EditorPreferences::Save() );
-    EXPECT_EQ( ReadWholeFile( PrefsPath() ), marked )
-         << "a save with nothing new in it rewrote editor.json";
+    EXPECT_EQ( ReadWholeFile( PrefsPath() ), marked ) << "a save with nothing new in it rewrote editor.json";
 }
 
 // The same statement asked of the FILE rather than of the struct, which is where К8's second symptom
@@ -461,7 +460,7 @@ TEST( PreferenceOwnership, AFailedWriteIsNotRememberedAsASuccessfulOne )
     EditorPreferences::Get().CameraSpeed = 2.5f;
     ASSERT_TRUE( EditorPreferences::Save() );
 
-    std::error_code ec;
+    std::error_code             ec;
     const std::filesystem::path blocker = PrefsPath() + ".tmp";
     std::filesystem::create_directory( blocker, ec );
     ASSERT_TRUE( std::filesystem::is_directory( blocker ) ) << "could not stage a blocked write";
@@ -544,7 +543,7 @@ namespace
     // The body of `Class::Method`, by brace matching from the first '{' after the name. Empty when the
     // name is not there at all, which the callers report as a distinct failure: a census naming a
     // function that no longer exists is worse than a missing guard, because it passes.
-    std::string BodyOf( const std::string& src, const std::string& qualifiedName )
+    std::string BodyOf( const std::string& src, const std::string& qualifiedName, std::size_t& bodyStart )
     {
         std::size_t at = 0;
         while ( ( at = src.find( qualifiedName, at ) ) != std::string::npos )
@@ -567,17 +566,40 @@ namespace
                 else if ( src[i] == '}' && --depth == 0 )
                     break;
             }
+            bodyStart = open;
             return src.substr( open, i - open );
         }
         return {};
     }
 
-    std::string PreferencesWindowBody()
+    // The window's source, with the line it starts on, so that a failure can say `EditorLayer.cpp:4592`
+    // instead of a byte offset into a substring nobody can navigate to. The reader preserves every
+    // newline and the file's length, which is what makes the arithmetic exact.
+    struct WindowSource
+    {
+        std::string Body;
+        std::size_t FirstLine = 0;
+
+        std::size_t LineOf( std::size_t at ) const
+        {
+            return FirstLine + static_cast<std::size_t>( std::count( Body.begin(), Body.begin() + at, '\n' ) );
+        }
+    };
+
+    WindowSource PreferencesWindow()
     {
         const std::string root = RepoRoot();
         EXPECT_FALSE( root.empty() ) << "could not find the repository root from the working directory";
-        const std::string src = Text::StripCommentsAndLiterals( ReadWholeFile( root + "Editor/Source/EditorLayer.cpp" ) );
-        return BodyOf( src, "EditorLayer::DrawPreferencesWindow" );
+
+        const std::string src =
+             Text::StripCommentsAndLiterals( ReadWholeFile( root + "Editor/Source/EditorLayer.cpp" ) );
+
+        std::size_t  at = 0;
+        WindowSource out;
+        out.Body = BodyOf( src, "EditorLayer::DrawPreferencesWindow", at );
+        if ( !out.Body.empty() )
+            out.FirstLine = 1 + static_cast<std::size_t>( std::count( src.begin(), src.begin() + at, '\n' ) );
+        return out;
     }
 
     // EVERY ImGui CALL THE WINDOW MAKES, split by whether it can edit a preference. The lists are the
@@ -588,22 +610,43 @@ namespace
     const std::vector<std::string>& ControlCalls()
     {
         static const std::vector<std::string> calls = {
-             "SliderFloat", "SliderFloat2", "SliderFloat3", "SliderInt",  "SliderAngle", "DragFloat",
-             "DragFloat2",  "DragFloat3",   "DragInt",      "Checkbox",   "ColorEdit3",  "ColorEdit4",
-             "InputText",   "InputInt",     "InputFloat",   "InputFloat3", "Combo",      "RadioButton" };
+             "SliderFloat", "SliderFloat2", "SliderFloat3", "SliderInt",   "SliderAngle", "DragFloat",
+             "DragFloat2",  "DragFloat3",   "DragInt",      "Checkbox",    "ColorEdit3",  "ColorEdit4",
+             "InputText",   "InputInt",     "InputFloat",   "InputFloat3", "Combo",       "RadioButton" };
         return calls;
     }
 
     const std::vector<std::string>& InertCalls()
     {
-        static const std::vector<std::string> calls = {
-             "Begin",   "End",        "SetNextWindowSize",          "SetNextItemWidth",
-             "Spacing", "Separator",  "SameLine",                   "NewLine",
-             "Dummy",   "Text",       "TextUnformatted",            "TextDisabled",
-             "PushID",  "PopID",      "Indent",                     "Unindent",
-             "BeginDisabled",         "EndDisabled",                "IsItemHovered",
-             "SetTooltip",            "IsItemDeactivatedAfterEdit", "PushItemWidth",
-             "PopItemWidth" };
+        static const std::vector<std::string> calls = { "Begin",
+                                                        "End",
+                                                        "SetNextWindowSize",
+                                                        "SetNextItemWidth",
+                                                        "Spacing",
+                                                        "Separator",
+                                                        "SameLine",
+                                                        "NewLine",
+                                                        "Dummy",
+                                                        "Text",
+                                                        "TextUnformatted",
+                                                        "TextDisabled",
+                                                        "PushID",
+                                                        "PopID",
+                                                        "Indent",
+                                                        "Unindent",
+                                                        "BeginDisabled",
+                                                        "EndDisabled",
+                                                        "IsItemHovered",
+                                                        "SetTooltip",
+                                                        "IsItemDeactivatedAfterEdit",
+                                                        "PushItemWidth",
+                                                        "PopItemWidth",
+                                                        "TextWrapped",
+                                                        "PushTextWrapPos",
+                                                        "PopTextWrapPos",
+                                                        "PushStyleColor",
+                                                        "PopStyleColor",
+                                                        "GetStyleColorVec4" };
         return calls;
     }
 
@@ -666,8 +709,9 @@ namespace
 // the commit rule nor visible to the binding rule, so it must stop the suite rather than pass through it.
 TEST( PreferenceOwnershipWindow, EveryCallInThePreferencesWindowIsClassified )
 {
-    const std::string body = PreferencesWindowBody();
-    ASSERT_FALSE( body.empty() ) << "EditorLayer::DrawPreferencesWindow was not found in EditorLayer.cpp";
+    const WindowSource window = PreferencesWindow();
+    ASSERT_FALSE( window.Body.empty() ) << "EditorLayer::DrawPreferencesWindow was not found in EditorLayer.cpp";
+    const std::string& body = window.Body;
 
     for ( const std::string& name : EveryImGuiCall( body ) )
         EXPECT_TRUE( Contains( ControlCalls(), name ) || Contains( InertCalls(), name ) )
@@ -681,8 +725,9 @@ TEST( PreferenceOwnershipWindow, EveryCallInThePreferencesWindowIsClassified )
 // THE HEADLINE. Every control commits, and it commits on the release rather than on the change.
 TEST( PreferenceOwnershipWindow, EveryControlCommitsWhenTheUserLetsGoOfIt )
 {
-    const std::string body = PreferencesWindowBody();
-    ASSERT_FALSE( body.empty() ) << "EditorLayer::DrawPreferencesWindow was not found in EditorLayer.cpp";
+    const WindowSource window = PreferencesWindow();
+    ASSERT_FALSE( window.Body.empty() ) << "EditorLayer::DrawPreferencesWindow was not found in EditorLayer.cpp";
+    const std::string& body = window.Body;
 
     const std::vector<std::size_t> controls = CallPositions( body, ControlCalls() );
     ASSERT_FALSE( controls.empty() ) << "the Preferences window draws no control at all";
@@ -698,11 +743,11 @@ TEST( PreferenceOwnershipWindow, EveryControlCommitsWhenTheUserLetsGoOfIt )
         for ( std::size_t commit : commits )
             committed = committed || ( commit > from && commit < to );
 
-        EXPECT_TRUE( committed ) << "the control at offset " << from
-                                 << " of DrawPreferencesWindow is not followed by an "
-                                    "ImGui::IsItemDeactivatedAfterEdit() commit before the next control: "
-                                    "an edit made with it is live but never written, which is exactly the "
-                                    "state К8 removed.";
+        EXPECT_TRUE( committed )
+             << "EditorLayer.cpp:" << window.LineOf( from ) << " — ImGui::" << Text::IdentAt( body, from )
+             << " in the Preferences window is not followed by an ImGui::IsItemDeactivatedAfterEdit() "
+                "commit before the next control. An edit made with it is live but never written, which is "
+                "exactly the state К8 removed.";
     }
 }
 
@@ -711,8 +756,9 @@ TEST( PreferenceOwnershipWindow, EveryControlCommitsWhenTheUserLetsGoOfIt )
 // guard is caught as readily as a save with no guard at all.
 TEST( PreferenceOwnershipWindow, NothingInThePreferencesWindowSavesOutsideACommit )
 {
-    const std::string body = PreferencesWindowBody();
-    ASSERT_FALSE( body.empty() ) << "EditorLayer::DrawPreferencesWindow was not found in EditorLayer.cpp";
+    const WindowSource window = PreferencesWindow();
+    ASSERT_FALSE( window.Body.empty() ) << "EditorLayer::DrawPreferencesWindow was not found in EditorLayer.cpp";
+    const std::string& body = window.Body;
 
     const std::vector<std::size_t> commits = Text::WordPositions( body, "IsItemDeactivatedAfterEdit" );
     const std::vector<std::size_t> saves   = Text::WordPositions( body, "Save" );
@@ -723,8 +769,8 @@ TEST( PreferenceOwnershipWindow, NothingInThePreferencesWindowSavesOutsideACommi
             "decision — the shape К8 exists to remove.";
 
     for ( std::size_t i = 0; i < saves.size(); ++i )
-        EXPECT_LT( commits[i], saves[i] ) << "a Save() at offset " << saves[i]
-                                          << " of DrawPreferencesWindow does not sit behind its own commit";
+        EXPECT_LT( commits[i], saves[i] ) << "EditorLayer.cpp:" << window.LineOf( saves[i] )
+                                          << " — this Save() does not sit behind a commit of its own.";
 }
 
 // And every control really edits a PREFERENCE, not a local copy of one. The field names are checked
@@ -733,15 +779,15 @@ TEST( PreferenceOwnershipWindow, NothingInThePreferencesWindowSavesOutsideACommi
 // persisting.
 TEST( PreferenceOwnershipWindow, EveryControlIsBoundToARealPreferenceField )
 {
-    const std::string body = PreferencesWindowBody();
-    ASSERT_FALSE( body.empty() ) << "EditorLayer::DrawPreferencesWindow was not found in EditorLayer.cpp";
+    const WindowSource window = PreferencesWindow();
+    ASSERT_FALSE( window.Body.empty() ) << "EditorLayer::DrawPreferencesWindow was not found in EditorLayer.cpp";
+    const std::string& body = window.Body;
 
     // The name the window binds the store to, derived rather than spelled: renaming the local is an
     // honest edit that changes nothing about whether the controls reach the store.
     const std::vector<std::size_t> gets = Text::WordPositions( body, "Get" );
     ASSERT_FALSE( gets.empty() ) << "the Preferences window never reaches EditorPreferences::Get()";
-    const std::string store =
-         Text::DeclaredNameBeforeAssignment( Text::StatementBefore( body, gets.front() ) );
+    const std::string store = Text::DeclaredNameBeforeAssignment( Text::StatementBefore( body, gets.front() ) );
     ASSERT_FALSE( store.empty() ) << "could not see what EditorPreferences::Get() is bound to";
 
     std::vector<std::string> fields;
@@ -762,11 +808,12 @@ TEST( PreferenceOwnershipWindow, EveryControlIsBoundToARealPreferenceField )
                 continue;
             ++bound;
             EXPECT_TRUE( Contains( fields, field ) )
-                 << "the Preferences window edits " << store << "." << field
-                 << ", which is not a field of EditorPreferences";
+                 << "EditorLayer.cpp:" << window.LineOf( at ) << " — the Preferences window edits " << store << "."
+                 << field << ", which is not a field of EditorPreferences";
         }
-        EXPECT_GT( bound, 0 ) << "the control at offset " << at
-                              << " of DrawPreferencesWindow edits nothing in the preference store";
+        EXPECT_GT( bound, 0 ) << "EditorLayer.cpp:" << window.LineOf( at )
+                              << " — ImGui::" << Text::IdentAt( body, at )
+                              << " edits nothing in the preference store";
     }
 }
 

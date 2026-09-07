@@ -293,8 +293,12 @@ namespace Desert::Editor
     {
         auto& v  = Get().CollapsedComponents;
         auto  it = std::find( v.begin(), v.end(), name );
+        // Already in the requested state. Since К8 this is no longer what keeps the file still — Save()
+        // compares the bytes and would skip the write anyway — but a section header reports a click on
+        // every frame it is hovered-and-pressed, so returning here also saves serializing the whole
+        // struct to find out that nothing moved.
         if ( collapsed == ( it != v.end() ) )
-            return; // already in the requested state — don't rewrite the file for nothing
+            return;
         if ( collapsed )
             v.push_back( name );
         else

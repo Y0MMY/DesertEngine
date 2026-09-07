@@ -2600,9 +2600,8 @@ namespace Desert::Editor
                 // the same reason it must be written back (a version that did not persist would rebuild
                 // the layout on every launch). Save() means "the user changed a setting" and would have
                 // logged this one as if they had.
-                const std::string layoutVersions =
-                     std::to_string( EditorPreferences::Get().DockLayoutVersion ) + " -> " +
-                     std::to_string( kDockLayoutVersion );
+                const std::string layoutVersions = std::to_string( EditorPreferences::Get().DockLayoutVersion ) +
+                                                   " -> " + std::to_string( kDockLayoutVersion );
 
                 EditorPreferences::Get().DockLayoutVersion = kDockLayoutVersion;
                 EditorPreferences::SaveMigrated( "docking layout version " + layoutVersions );
@@ -4627,7 +4626,11 @@ namespace Desert::Editor
                               prefs.AutosaveMinutes == 0 ? "Off" : "%d min" );
             if ( ImGui::IsItemDeactivatedAfterEdit() )
                 EditorPreferences::Save();
-            ImGui::TextDisabled( "Autosaves land in Scene/Autosave/, the main file is never touched." );
+            // Wrapped for the same reason as the footer below: at 380 px this line was clipped to
+            // "...the main file is nev" and the reassurance it exists to give was the part cut off.
+            ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+            ImGui::TextWrapped( "Autosaves land in Scene/Autosave/, the main file is never touched." );
+            ImGui::PopStyleColor();
 
             ImGui::Spacing();
             ImGui::TextDisabled( "Selection Outline" );
@@ -4635,7 +4638,16 @@ namespace Desert::Editor
             ImGui::Checkbox( "Enable Outline", &prefs.EnableOutline );
             if ( ImGui::IsItemDeactivatedAfterEdit() )
                 EditorPreferences::Save();
-            ImGui::ColorEdit3( "Color", glm::value_ptr( prefs.OutlineColor ) );
+            // NoInputs: a swatch that opens the picker, not three cramped R/G/B fields. Two reasons, and
+            // the first is a real collision rather than taste — with ThemeManager's
+            // style.ColorButtonPosition = ImGuiDir_Left, ImGui places a ColorEdit's LABEL after the last
+            // item it drew, which is the swatch and not the inputs, so the word "Color" is rendered on top
+            // of the R field. (That is ImGui's own arithmetic and it affects every labelled ColorEdit in
+            // this editor drawn under this theme; reported rather than fixed here, because the fix lives
+            // in ThemeManager and the left-hand swatch is a deliberate UE-parity choice.) The second is
+            // that three numeric fields do not fit a 380 px window, which is why this row was the one that
+            // showed it.
+            ImGui::ColorEdit3( "Color", glm::value_ptr( prefs.OutlineColor ), ImGuiColorEditFlags_NoInputs );
             if ( ImGui::IsItemDeactivatedAfterEdit() )
                 EditorPreferences::Save();
             ImGui::SliderFloat( "Width (px)", &prefs.OutlineWidth, 0.0f, 20.0f );
@@ -4646,8 +4658,14 @@ namespace Desert::Editor
                 EditorPreferences::Save();
 
             ImGui::Spacing();
-            ImGui::TextDisabled( "Every setting here is live the moment you change it, and is written to" );
-            ImGui::TextDisabled( "~/.desertengine/editor.json when you let go of the control." );
+            // WRAPPED, not two TextDisabled lines: this window opens 380 px wide and the user may make it
+            // narrower, and a fixed line is silently CLIPPED by the window edge rather than shortened —
+            // the first capture of this footer read "...and is written to" with the rest gone. A sentence
+            // explaining that there is no Save button is a poor sentence to lose the end of.
+            ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+            ImGui::TextWrapped( "There is no Save button: every setting here applies as you change it and "
+                                "is written to ~/.desertengine/editor.json when you let go of the control." );
+            ImGui::PopStyleColor();
         }
         ImGui::End();
     }
