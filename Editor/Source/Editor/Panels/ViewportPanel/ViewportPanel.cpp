@@ -603,7 +603,19 @@ namespace Desert::Editor
                 ImGui::TextUnformatted( "Show" );
                 ImGui::Separator();
                 bool viewChanged = false;
-                viewChanged |= ImGui::Checkbox( "Grid", &view.ShowGrid );
+                // The grid is FORCED off while 2D UI mode is on, so the live value is not the user's
+                // answer and the checkbox must not pretend otherwise: it is disabled and shows what will
+                // come back when 2D mode ends.
+                ImGui::BeginDisabled( m_UIMode );
+                bool grid = m_UIMode ? m_SavedShowGrid : view.ShowGrid;
+                if ( ImGui::Checkbox( "Grid", &grid ) )
+                {
+                    view.ShowGrid = grid;
+                    viewChanged   = true;
+                }
+                ImGui::EndDisabled();
+                if ( m_UIMode && ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+                    ImGui::SetTooltip( "2D UI mode hides the grid. Leave 2D to get it back." );
                 viewChanged |= ImGui::Checkbox( "Bounding Boxes", &view.ShowBoundingBoxes );
                 ImGui::BeginDisabled( !view.ShowBoundingBoxes );
                 viewChanged |= ImGui::ColorEdit3( "BB Color", &view.BoundingBoxColor.x );
@@ -612,7 +624,18 @@ namespace Desert::Editor
                 viewChanged |= ImGui::Checkbox( "Colliders", &view.ShowColliders );
                 viewChanged |= ImGui::Checkbox( "Wireframe", &view.WireframeMode );
                 if ( viewChanged )
+                {
+                    // THE USER'S ANSWER IS SAVED, NEVER THE SUPPRESSION. `Save()` writes the whole
+                    // preferences struct, so toggling any flag while 2D mode holds ShowGrid at false would
+                    // make that false PERMANENT — the user's grid would be off for good, in every scene,
+                    // because they once edited a canvas. The same trap existed before К2 and was worse: the
+                    // suppression lived in SceneSettings, so any Ctrl+S wrote it into the LEVEL.
+                    const bool live = view.ShowGrid;
+                    if ( m_UIMode )
+                        view.ShowGrid = m_SavedShowGrid;
                     EditorPreferences::Save();
+                    view.ShowGrid = live;
+                }
 
                 ImGui::Separator();
                 ImGui::TextDisabled( "Scene" );
@@ -674,7 +697,12 @@ namespace Desert::Editor
                     default:
                         break; // VM_Lit
                 }
+                // Same guard as the Show popup: never let 2D mode's forced-off grid reach editor.json.
+                const bool live = view.ShowGrid;
+                if ( m_UIMode )
+                    view.ShowGrid = m_SavedShowGrid;
                 EditorPreferences::Save();
+                view.ShowGrid = live;
             }
             ImGui::PopStyleVar();
             if ( ImGui::IsItemHovered() )
