@@ -3834,7 +3834,16 @@ namespace Desert::Editor
                         ImGui::TextDisabled( ICON_MDI_MAGNET " x%.2f", Gz::ScaleSnap() );
                         break;
                     default:
-                        ImGui::TextDisabled( ICON_MDI_MAGNET " %.2fm", Gz::TranslateSnap() );
+                        // CENTIMETRES, and metres only past a metre — the same rule DrawSnapControl
+                        // formats the toolbar button with, and it has to be the same rule because the two
+                        // labels sit on one screen reading one value. This said "%.2fm" over a value that
+                        // is in world units (1 unit = 1 cm), so a 5 m step read "500.00m" three inches
+                        // from a button reading "5 m". Third sighting of У5's metre-era label: the field's
+                        // default, the Preferences slider, and now the status bar.
+                        if ( Gz::TranslateSnap() >= 100.0f )
+                            ImGui::TextDisabled( ICON_MDI_MAGNET " %.0f m", Gz::TranslateSnap() / 100.0f );
+                        else
+                            ImGui::TextDisabled( ICON_MDI_MAGNET " %.0f cm", Gz::TranslateSnap() );
                         break;
                 }
             if ( ImGui::IsItemHovered() )
@@ -4430,22 +4439,18 @@ namespace Desert::Editor
             ImGui::Spacing();
             ImGui::TextDisabled( "Gizmo Snap" );
             ImGui::Separator();
-            bool snapChanged = false;
-            snapChanged |= ImGui::Checkbox( "Snap always on (Ctrl inverts)", &prefs.PersistentSnap );
+            ImGui::Checkbox( "Snap always on (Ctrl inverts)", &prefs.PersistentSnap );
             // CENTIMETRES, which is what the value has always been fed into: this control said "(m)" and
             // clamped to 0.01..100 while writing a field GizmoState reads as world units, and a world
             // unit is 1 cm. A slider whose unit disagrees with its consumer is how the shipped grid snap
             // ended up at half a centimetre (see EditorPreferences::TranslateSnap).
-            snapChanged |= ImGui::DragFloat( "Move (cm)", &prefs.TranslateSnap, 1.0f, 1.0f, 10000.0f, "%.0f" );
-            snapChanged |= ImGui::DragFloat( "Rotate (deg)", &prefs.RotateSnapDeg, 0.5f, 0.1f, 180.0f, "%.1f" );
-            snapChanged |= ImGui::DragFloat( "Scale", &prefs.ScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f" );
-            if ( snapChanged )
-            {
-                Core::GizmoState::SetTranslateSnap( prefs.TranslateSnap );
-                Core::GizmoState::SetRotateSnapDegrees( prefs.RotateSnapDeg );
-                Core::GizmoState::SetScaleSnap( prefs.ScaleSnap );
-                Core::GizmoState::SetPersistentSnap( prefs.PersistentSnap );
-            }
+            //
+            // Nothing is pushed anywhere afterwards: these four ARE the snap's storage and GizmoState
+            // reads them, so the gizmo follows on the same frame. The block that used to copy them into
+            // GizmoState is gone with the copy it fed (К6).
+            ImGui::DragFloat( "Move (cm)", &prefs.TranslateSnap, 1.0f, 1.0f, 10000.0f, "%.0f" );
+            ImGui::DragFloat( "Rotate (deg)", &prefs.RotateSnapDeg, 0.5f, 0.1f, 180.0f, "%.1f" );
+            ImGui::DragFloat( "Scale", &prefs.ScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f" );
 
             ImGui::Spacing();
             ImGui::TextDisabled( "Autosave" );

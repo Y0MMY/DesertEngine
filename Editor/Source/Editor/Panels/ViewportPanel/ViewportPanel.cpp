@@ -330,18 +330,35 @@ namespace Desert::Editor
             {
                 ImGui::TextUnformatted( "Snap steps" );
                 ImGui::Separator();
-                float t = Core::GizmoState::TranslateSnap();
-                float r = Core::GizmoState::RotateSnapDegrees();
-                float s = Core::GizmoState::ScaleSnap();
+
+                // THE OWNING FIELDS, EDITED IN PLACE. These three used to go through a local and a
+                // GizmoState setter, back when GizmoState kept its own copy of the value — which is
+                // why a step set here was live for the session and gone on the next launch. The
+                // snap's one storage is EditorPreferences, so a drag writes it directly and the
+                // gizmo follows on the same frame.
+                //
+                // A local would not work even now: DragFloat accumulates the drag IN the value it is
+                // handed, so one re-seeded from the owner every frame never moves. And the save waits
+                // for ImGui::IsItemDeactivatedAfterEdit() rather than riding the drag, because a
+                // DragFloat reports a change on every frame the mouse moves and that would rewrite
+                // editor.json (and log a line) sixty times a second.
+                auto& snapPrefs = EditorPreferences::Get();
+
                 ImGui::SetNextItemWidth( 130.0f );
-                if ( ImGui::DragFloat( "Move (cm)", &t, 1.0f, 1.0f, 10000.0f, "%.1f" ) )
-                    Core::GizmoState::SetTranslateSnap( t );
+                ImGui::DragFloat( "Move (cm)", &snapPrefs.TranslateSnap, 1.0f, 1.0f, 10000.0f, "%.1f" );
+                if ( ImGui::IsItemDeactivatedAfterEdit() )
+                    EditorPreferences::Save();
+
                 ImGui::SetNextItemWidth( 130.0f );
-                if ( ImGui::DragFloat( "Rotate (deg)", &r, 0.5f, 0.1f, 180.0f, "%.1f" ) )
-                    Core::GizmoState::SetRotateSnapDegrees( r );
+                ImGui::DragFloat( "Rotate (deg)", &snapPrefs.RotateSnapDeg, 0.5f, 0.1f, 180.0f, "%.1f" );
+                if ( ImGui::IsItemDeactivatedAfterEdit() )
+                    EditorPreferences::Save();
+
                 ImGui::SetNextItemWidth( 130.0f );
-                if ( ImGui::DragFloat( "Scale", &s, 0.01f, 0.01f, 10.0f, "%.2f" ) )
-                    Core::GizmoState::SetScaleSnap( s );
+                ImGui::DragFloat( "Scale", &snapPrefs.ScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f" );
+                if ( ImGui::IsItemDeactivatedAfterEdit() )
+                    EditorPreferences::Save();
+
                 ImGui::EndPopup();
             }
         }

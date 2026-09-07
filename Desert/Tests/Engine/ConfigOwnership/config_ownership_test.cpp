@@ -209,6 +209,7 @@ namespace
 
     constexpr const char* kEditorLayer    = "Editor/Source/EditorLayer.cpp";
     constexpr const char* kPrefsImpl      = "Editor/Source/Editor/Core/EditorPreferences.cpp";
+    constexpr const char* kGizmoState     = "Editor/Source/Editor/Core/GizmoState.cpp";
     constexpr const char* kViewportPanel  = "Editor/Source/Editor/Panels/ViewportPanel/ViewportPanel.cpp";
     constexpr const char* kPhotogrammetry = "Editor/Source/Editor/Panels/Photogrammetry/PhotogrammetryPanel.cpp";
 
@@ -216,12 +217,15 @@ namespace
          // Applied to the editor camera once a camera exists.
          { "CameraSpeed", Owner::Machine, kEditorLayer },
 
-         // The four gizmo snap values and their modifier policy. Load()/Save() push them into GizmoState,
-         // which is where every gizmo actually reads them from.
-         { "TranslateSnap", Owner::Machine, kPrefsImpl },
-         { "RotateSnapDeg", Owner::Machine, kPrefsImpl },
-         { "ScaleSnap", Owner::Machine, kPrefsImpl },
-         { "PersistentSnap", Owner::Machine, kPrefsImpl },
+         // The four gizmo snap values and their modifier policy. These rows named EditorPreferences.cpp
+         // until К6, because Save() pushed them into Core::GizmoState — which kept its OWN copy and was
+         // written directly by two toolbars, so the push reverted a live user choice on every unrelated
+         // save and no toolbar write ever reached the file. The second copy is gone; GizmoState.cpp now
+         // reads these four out of here and is the file this census follows them to.
+         { "TranslateSnap", Owner::Machine, kGizmoState },
+         { "RotateSnapDeg", Owner::Machine, kGizmoState },
+         { "ScaleSnap", Owner::Machine, kGizmoState },
+         { "PersistentSnap", Owner::Machine, kGizmoState },
 
          { "AutosaveMinutes", Owner::Machine, kEditorLayer },
          { "ShowPerfHud", Owner::Machine, kViewportPanel },
@@ -235,6 +239,16 @@ namespace
          // cost-versus-quality choice as SceneSettings::AA and it is already here, per machine, while AA
          // sits in the level file. SceneSettingsPanel draws the two combos side by side and labels them
          // "(this machine)" and "(scene)". К3 is the task that makes them agree.
+         //
+         // AND К3 HAS TO DECIDE THIS ROW TOO, not just the five in the level file — noted by К6 while
+         // moving the snap rows above, because the row itself stays green and hides it. The kind is right
+         // (a fidelity ladder, per machine) but the FILE is only right for the editor: the value reaches
+         // the renderer as Graphic::RenderConfig::MSAASamples, whose single writer is EditorPreferences,
+         // and the packaged Runtime never opens editor.json. So a shipped game runs MSAA nailed to 1 with
+         // no reader and no dial — which is exactly the consequence this file's header records for the
+         // five К3 owes, arrived at from the other direction. It is not added to the debt register here
+         // because the register's answer is "a per-machine store both hosts read", and that store is an
+         // owner's decision rather than a cleanup.
          { "MSAASamples", Owner::Machine, kPrefsImpl },
 
          // Selection outline: an editor-only viewport visualization (a runtime build has no selection).

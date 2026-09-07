@@ -12,8 +12,15 @@
 namespace Desert::Editor
 {
     // User-level editor settings, persisted to ~/.desertengine/editor.json (per-user, not per-project).
-    // Loaded once at editor startup and applied to the live systems (GizmoState, editor camera); the
-    // Preferences window (Edit -> Preferences...) edits + saves them.
+    // Loaded once at editor startup; the Preferences window (Edit -> Preferences...) edits + saves them,
+    // and several panels edit one field each and save on the spot.
+    //
+    // THIS STRUCT IS THE LIVE STATE, not a copy of it that something else has to be given. Everything
+    // that consumes a preference reads it from here every time it needs it — the gizmo snap through
+    // Core::GizmoState, the Details stars through the two helpers below, the Show flags straight off
+    // DebugView. Exactly ONE value is pushed anywhere, RenderConfig::MSAASamples, because the layer that
+    // reads it may not know the editor exists; see EditorPreferences.cpp for why that one is safe and
+    // the four snap values were not.
     //
     // WHAT BELONGS IN THIS FILE, in one sentence (К1): ONE PERSON'S COPY OF THE EDITOR — what a user's own
     // installation must remember between sessions and across every project, and whose value two people on
@@ -36,11 +43,15 @@ namespace Desert::Editor
     struct EditorPreferences
     {
         float CameraSpeed = 1.0f;
-        // World units, and 1 world unit is 1 CENTIMETRE project-wide. This was 0.5f with the comment
-        // "world units" from the metre era, and Load() pushes it straight into GizmoState — so the
-        // preferences file has been overwriting GizmoState's own (correct) 50 cm default with half a
-        // centimetre ever since the units migration, i.e. grid snap has effectively been off. Matches
-        // GizmoState::s_TranslateSnap deliberately: two defaults for one value is what caused this.
+        // THE GIZMO SNAP, AND THESE FOUR FIELDS ARE ITS ONLY STORAGE. Core::GizmoState reads and writes
+        // them; it keeps no copy, and neither does anything else. It used to keep one, with these values
+        // pushed into it by Save() — so an unrelated save reverted a step the user had just chosen, and
+        // a step chosen from a toolbar never reached this file at all. К6 deleted the second copy rather
+        // than adding a fourth Save() call; Desert/Tests/Editor/PreferenceOwnership holds the line.
+        //
+        // World units, and 1 world unit is 1 CENTIMETRE project-wide. TranslateSnap was 0.5f with the
+        // comment "world units" from the metre era, which is how the shipped grid snap ended up at half
+        // a centimetre; Load() migrates any stored value below 1 cm once.
         float TranslateSnap   = 50.0f; // cm — half a metre
         float RotateSnapDeg   = 15.0f; // degrees
         float ScaleSnap       = 0.1f;
@@ -117,11 +128,14 @@ namespace Desert::Editor
         // ~/.desertengine (created on demand); shared with the Project Hub's projects.json.
         static std::string ConfigDirectory();
 
-        // Reads editor.json into Get() (keeps defaults when the file is missing/corrupt) and pushes the
-        // values into GizmoState. The camera speed is applied by EditorLayer once a camera exists.
+        // Reads editor.json into Get() (keeps defaults when the file is missing/corrupt). The camera
+        // speed is applied by EditorLayer once a camera exists.
         static void Load();
 
-        // Writes Get() to editor.json and pushes the snap values into GizmoState.
+        // Writes Get() to editor.json. It CHANGES NOTHING ELSE: the only thing it touches besides the
+        // file is RenderConfig::MSAASamples, which is a one-way derived copy this file is the sole
+        // writer of. Anything else here would be a save that edits state the user did not touch in the
+        // action that triggered it, which is what К6 removed.
         // False when the preferences file could not be written (reason logged): the values are live in
         // this session but will not come back in the next one.
         static bool Save();
