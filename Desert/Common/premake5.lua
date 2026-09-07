@@ -9,6 +9,7 @@ project "Common"
         -- compiles the same file itself. Missing file here means an uninitialized submodule:
         -- `git submodule update --init ThirdParty/desert-shared`.
         "%{wks.location}/ThirdParty/desert-shared/Source/ProjectFormat.cpp",
+        "%{wks.location}/ThirdParty/desert-shared/Source/EngineRegistry.cpp",
     }
 
     includedirs {

@@ -34,6 +34,11 @@ export VK_LAYER_PATH="${VK_LAYER_PATH:-$BREW_PREFIX/share/vulkan/explicit_layer.
 # not search the Homebrew prefix by default.
 export DYLD_FALLBACK_LIBRARY_PATH="$BREW_PREFIX/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
 
+# Where this engine lives, so the Editor can record itself in ~/.desertengine/engines.json — the
+# file the launcher reads to find an engine at all. Exported BEFORE the `cd`, because after it the
+# working directory is Editor/ and the root would have to be re-derived from it.
+export DESERT_ROOT="$PWD"
+
 # The engine resolves Resources/... relative to the working directory.
 cd Editor
 

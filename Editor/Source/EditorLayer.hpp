@@ -291,7 +291,27 @@ namespace Desert::Editor
         // logged and the numbers in it.
         bool WriteViewportPng( const std::string& path );
 
+        // Writes `<project>/.thumbnail.png` — the picture the LAUNCHER puts on this project's tile.
+        //
+        // 512x288, centre-cropped to 16:9 from whatever the viewport happens to be. The aspect is
+        // not a preference: the launcher's grid is built out of 16:9 tiles, so a square or
+        // arbitrary-aspect file would either letterbox (which reads as a broken image) or crop
+        // differently on every project. Fixing it here means the launcher never has to guess.
+        //
+        // Called after a scene save and again on a clean exit, so the tile shows what the project
+        // last looked like rather than what it looked like the day it was created. Failure is
+        // returned, not swallowed — but the callers treat it as non-fatal: a project with no
+        // thumbnail is a state the launcher already draws, and losing a picture must never fail a
+        // save or hold up a shutdown.
+        [[nodiscard]] Common::BoolResultStr WriteProjectThumbnail();
+
     private:
+        // The resolved viewport as RGBA8, plus its size. One readback for every consumer: a capture
+        // that differed from a dump in flip, format or the device-idle wait that makes the readback
+        // legal would be a defect nobody could see in either picture alone.
+        [[nodiscard]] Common::BoolResultStr ReadViewportRGBA8( std::vector<uint8_t>& outPixels, uint32_t& outWidth,
+                                                               uint32_t& outHeight );
+
         enum class EditorState
         {
             Paused = 0,

@@ -992,6 +992,104 @@ namespace Desert::Editor
         return BOOLSUCCESS;
     }
 
+    // The one readback. Every picture the editor writes out of the viewport comes through here, so a
+    // capture cannot quietly differ from a dump in flip, format or the device-idle wait that makes the
+    // readback legal at all.
+    Common::BoolResultStr EditorLayer::ReadViewportRGBA8( std::vector<uint8_t>& outPixels, uint32_t& outWidth,
+                                                          uint32_t& outHeight )
+    {
+        if ( !m_MainScene )
+            return Common::MakeError<bool>( "no scene to capture" );
+
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+
+        auto img = m_MainScene->GetFinalImage();
+        if ( !img )
+            return Common::MakeError<bool>( "scene has no final image" );
+
+        outPixels = img->ReadPixelsRGBA8();
+        outWidth  = img->GetWidth();
+        outHeight = img->GetHeight();
+        if ( outPixels.size() != static_cast<size_t>( outWidth ) * outHeight * 4 )
+            return Common::MakeFormattedError<bool>( "readback is {} bytes, expected {}x{}x4 = {}",
+                                                     outPixels.size(), outWidth, outHeight,
+                                                     static_cast<size_t>( outWidth ) * outHeight * 4 );
+        return BOOLSUCCESS;
+    }
+
+    Common::BoolResultStr EditorLayer::WriteProjectThumbnail()
+    {
+        // The picture belongs to a project, so with no project there is nowhere for it to go. Not an
+        // error: the editor can be running a scene that was opened without one.
+        const std::string projectDirectory = Desert::Project::ProjectContext::Directory();
+        if ( projectDirectory.empty() )
+            return BOOLSUCCESS;
+
+        std::vector<uint8_t> px;
+        uint32_t             w = 0;
+        uint32_t             h = 0;
+        if ( const auto read = ReadViewportRGBA8( px, w, h ); !read.IsSuccess() )
+            return read;
+        if ( w == 0 || h == 0 )
+            return Common::MakeError<bool>( "the viewport has no size" );
+
+        // 16:9 window out of the middle of whatever the viewport is, then a box downsample to the
+        // fixed output size. Cropping rather than squashing, because a squashed frame is a picture
+        // of the wrong world; centre rather than top, because the interesting part of a viewport is
+        // where the camera is pointed.
+        constexpr uint32_t kOutW = 512;
+        constexpr uint32_t kOutH = 288; // 16:9 — the aspect the launcher's grid is built out of
+
+        uint32_t cropW = w;
+        uint32_t cropH = ( w * kOutH ) / kOutW;
+        if ( cropH > h )
+        {
+            cropH = h;
+            cropW = ( h * kOutW ) / kOutH;
+        }
+        const uint32_t cropX = ( w - cropW ) / 2;
+        const uint32_t cropY = ( h - cropH ) / 2;
+
+        std::vector<uint8_t> out( static_cast<size_t>( kOutW ) * kOutH * 4 );
+        for ( uint32_t y = 0; y < kOutH; ++y )
+        {
+            // Source rows this output row averages over. Integer bounds on both ends so no source
+            // pixel is counted twice and none is skipped.
+            const uint32_t sy0 = cropY + ( y * cropH ) / kOutH;
+            const uint32_t sy1 = std::max( sy0 + 1u, cropY + ( ( y + 1 ) * cropH ) / kOutH );
+            for ( uint32_t x = 0; x < kOutW; ++x )
+            {
+                const uint32_t sx0 = cropX + ( x * cropW ) / kOutW;
+                const uint32_t sx1 = std::max( sx0 + 1u, cropX + ( ( x + 1 ) * cropW ) / kOutW );
+
+                uint32_t accum[4] = { 0, 0, 0, 0 };
+                uint32_t samples  = 0;
+                for ( uint32_t sy = sy0; sy < sy1 && sy < h; ++sy )
+                    for ( uint32_t sx = sx0; sx < sx1 && sx < w; ++sx )
+                    {
+                        const size_t at = ( static_cast<size_t>( sy ) * w + sx ) * 4;
+                        for ( int c = 0; c < 4; ++c )
+                            accum[c] += px[at + static_cast<size_t>( c )];
+                        ++samples;
+                    }
+                const size_t dst = ( static_cast<size_t>( y ) * kOutW + x ) * 4;
+                for ( int c = 0; c < 4; ++c )
+                    out[dst + static_cast<size_t>( c )] =
+                         static_cast<uint8_t>( samples ? accum[c] / samples : 0u );
+            }
+        }
+
+        // The name is a CONVENTION shared with the launcher, which looks for exactly this file
+        // beside the .deproj. Leading dot so it does not show up as project content.
+        const std::string file = ( std::filesystem::path( projectDirectory ) / ".thumbnail.png" ).string();
+        stbi_flip_vertically_on_write( 0 );
+        if ( stbi_write_png( file.c_str(), static_cast<int>( kOutW ), static_cast<int>( kOutH ), 4, out.data(),
+                             static_cast<int>( kOutW ) * 4 ) == 0 )
+            return Common::MakeFormattedError<bool>( "could not write {}", file );
+        LOG_INFO( "[Project] thumbnail -> {} ({}x{})", file, kOutW, kOutH );
+        return BOOLSUCCESS;
+    }
+
     // Read the resolved viewport back off the GPU and write it as a PNG. The one place that does this: the
     // still capture, every frame of a `--shot-sequence`, and the F9 dump all go through here, so a capture
     // cannot quietly differ from a dump in flip, format or the device-idle wait that makes the readback
@@ -1018,22 +1116,12 @@ namespace Desert::Editor
             }
         }
 
-        Graphic::Renderer::GetInstance().WaitDeviceIdle();
-
-        auto img = m_MainScene->GetFinalImage();
-        if ( !img )
+        std::vector<uint8_t> px;
+        uint32_t             w = 0;
+        uint32_t             h = 0;
+        if ( const auto read = ReadViewportRGBA8( px, w, h ); !read.IsSuccess() )
         {
-            LOG_ERROR( "[Shot] scene has no final image ('{}')", path );
-            return false;
-        }
-
-        const std::vector<uint8_t> px = img->ReadPixelsRGBA8();
-        const uint32_t             w  = img->GetWidth();
-        const uint32_t             h  = img->GetHeight();
-        if ( px.size() != static_cast<size_t>( w ) * h * 4 )
-        {
-            LOG_ERROR( "[Shot] readback is {} bytes, expected {}x{}x4 = {}", px.size(), w, h,
-                       static_cast<size_t>( w ) * h * 4 );
+            LOG_ERROR( "[Shot] {} ('{}')", read.GetError(), path );
             return false;
         }
 
@@ -4166,6 +4254,16 @@ namespace Desert::Editor
             LOG_INFO( "[Scene] {}", verdict.Message );
         }
 
+        // Refresh the launcher's tile picture for this project. Only on a save that actually
+        // happened — a refused save must not leave the launcher showing a world that was never
+        // written. The failure is a toast and nothing more: the scene IS saved, and a launcher tile
+        // without a picture is a state the launcher already draws.
+        if ( verdict.MarkSceneSaved )
+            if ( const auto thumbnail = WriteProjectThumbnail(); !thumbnail.IsSuccess() )
+                Editor::ToastManager::Push( "The scene was saved, but the project thumbnail was not: " +
+                                                 thumbnail.GetError(),
+                                            Editor::ToastLevel::Warning );
+
         Editor::ToastManager::Push( verdict.Message,
                                     verdict.IsError ? Editor::ToastLevel::Error : Editor::ToastLevel::Success );
         return verdict.MayDiscardScene;
@@ -5092,6 +5190,21 @@ namespace Desert::Editor
 
         // Clean shutdown: drop the session lock so the next start doesn't think we crashed.
         CrashRecovery::DisarmSession();
+
+        // The launcher's tile picture, refreshed on the way out — HERE, while the device and the
+        // scene's final image still exist. Everything below this point is teardown; a few lines
+        // further down there is a WaitDeviceIdle and the release of exactly the GPU objects this
+        // readback needs.
+        //
+        // Not on a headless capture run: those open scratch projects in worktrees, and the picture
+        // would be of a scene nobody chose, written into a project nobody will open. Same rule, and
+        // the same reason, as staying out of the recent-projects registry.
+        //
+        // A failure is logged and nothing else. Refusing to shut down because a picture could not
+        // be written would be the tail wagging the dog.
+        if ( !Editor::ShotOptions::Get().Active() )
+            if ( const auto thumbnail = WriteProjectThumbnail(); !thumbnail.IsSuccess() )
+                LOG_WARN( "[Project] the tile thumbnail was not written on exit: {}", thumbnail.GetError() );
 
         // The app loop exits right after the last PresentFinalImage, so the GPU is still chewing on that
         // frame's command buffer. Panels own GPU objects — offscreen SceneRenderers (Details preview, asset

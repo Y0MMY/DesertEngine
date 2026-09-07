@@ -1,0 +1,7 @@
+{
+    "DisplayName": "Lua Sandbox",
+    "Description": "The standard content folders plus a starter Lua controller to attach to an entity.",
+    "Category": "",
+    "SortKey": 10,
+    "DefaultScene": ""
+}
