@@ -92,6 +92,16 @@ namespace Desert::Graphic::System
         Common::BoolResultStr Initialize() override;
         void                  RegisterPasses( RenderGraphBuilder& builder ) override;
 
+        // Drops the temporal reconstruction's history — see IRenderSystem::OnSceneReplaced, kind 1. Every
+        // other cache in this system is content-keyed already (the modelling volume and the noise bakes
+        // compare their authored parameters, m_Present is pushed explicitly including the absent case), so
+        // the history is the whole of what a scene change invalidates here. It is otherwise dropped only on
+        // a resize; without this, the first executed cloud frame of the new scene reprojects the old one.
+        void OnSceneReplaced() override
+        {
+            m_HistoryValid = false;
+        }
+
         /**
          * @brief This frame's cloud layer, from ECS::VolumetricCloudECSSystem.
          *

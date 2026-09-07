@@ -533,13 +533,16 @@ namespace Desert::Graphic::System
         // Only record the material here. This can run from the skybox-load command (ExecuteAll) BEFORE
         // BeginScene/PrepareCamera, so the active camera may not exist yet — the camera-dependent bind
         // is deferred to Render(), which always runs with a valid camera.
-        if ( !material )
-        {
-            return;
-        }
-
-        m_MaterialSkybox  = material;
-        m_SkyboxIntensity = intensity;
+        //
+        // A NULL MATERIAL MEANS "THIS SCENE HAS NO HDR SKYBOX", and it is the producer's way of saying so.
+        // It used to return early and change nothing, which made the sentence unsayable: SkyboxECSSystem
+        // emitted a command only when a cubemap existed, so deleting the SkyboxComponent — or loading a
+        // level that has none onto a renderer that had one — left the previous cubemap drawing behind the
+        // new world AND feeding its IBL into every PBR surface. This is the same explicit-absence rule the
+        // sky, the fog and the cloud layer already follow, and it is what lets a render system outlive the
+        // scene it was built for (IRenderSystem::OnSceneReplaced).
+        m_MaterialSkybox  = material; // an empty weak_ptr when the scene has none
+        m_SkyboxIntensity = material ? intensity : 1.0f;
     }
 
     void SkyboxRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow,
@@ -642,9 +645,15 @@ namespace Desert::Graphic::System
         // cloud component, which is what every asset thumbnail and mesh preview is.
         const CloudEnvironmentBake clouds = m_SceneRenderer->BuildCloudEnvironmentBake();
 
+        // THE SKY'S OWN INPUTS, as the bake will read them. Formed from the same PackSky the parameter
+        // buffer is filled from, so the number cannot describe a sky the dispatch will not see.
+        const uint64_t skyFingerprint = SkyBakeFingerprint(
+             PackSky( m_SunDir, m_Sky ), static_cast<uint32_t>( m_Sky.EnvironmentResolution ) );
+
         if ( !ShouldRebakeSkyEnvironment( m_BakedSunDir, m_SunDir, m_Sky.RebakeSunAngleThreshold,
                                           m_Sky.AutoRebakeEnvironment, static_cast<bool>( m_ProceduralEnv ),
-                                          explicitRequest, m_BakedCloudFingerprint, clouds.Fingerprint ) )
+                                          explicitRequest, m_BakedCloudFingerprint, clouds.Fingerprint,
+                                          m_BakedSkyFingerprint, skyFingerprint ) )
         {
             m_SecondsSinceStale = 0.0f;
             return;
@@ -754,12 +763,14 @@ namespace Desert::Graphic::System
 
         m_BakedSunDir           = m_SunDir;
         m_BakedCloudFingerprint = clouds.Fingerprint;
+        m_BakedSkyFingerprint   = skyFingerprint;
 
         const double bakeMs =
              std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - bakeStarted ).count();
 
         LOG_INFO( "[SkyAtmosphere] Environment baked at {}x{} in {:.1f} ms — {}. The device is idle for all "
-                  "of it, which is why the trigger is the sun and the cloud settings and not the frame.",
+                  "of it, which is why the trigger is the sun, the clouds and the sky's own parameters and "
+                  "not the frame.",
                   size.Width, size.Height, bakeMs,
                   clouds.Marched ? ( cloudBinding.SkyOcclusion ? "clouds marched into the panorama, "
                                                                  "sky-occlusion volume read"

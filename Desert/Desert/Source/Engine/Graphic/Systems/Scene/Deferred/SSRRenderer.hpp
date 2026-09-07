@@ -93,6 +93,14 @@ namespace Desert::Graphic::System
         {
         }
 
+        // The accumulated reflection is a reprojection of the previous frame, and the previous frame is now
+        // a different world — see IRenderSystem::OnSceneReplaced, kind 1. Same argument as GIResolveRenderer
+        // next door, at a blend weight of 0.88.
+        void OnSceneReplaced() override
+        {
+            m_HistoryValid = false;
+        }
+
         // gbuffer = the camera G-buffer (albedo/normal/worldpos at 0/1/2); sceneColor = snapshot of the lit
         // opaque scene; viewProj/cameraPos = the camera; maxDistance and thickness are WORLD distances,
         // and a world unit is a centimetre - callers passing literature values convert through Common::Units.

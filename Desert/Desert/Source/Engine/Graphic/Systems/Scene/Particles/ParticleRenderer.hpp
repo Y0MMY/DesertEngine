@@ -36,6 +36,17 @@ namespace Desert::Graphic::System
         Common::BoolResultStr Initialize() override;
         void                  RegisterPasses( RenderGraphBuilder& builder ) override;
 
+        // Drops every cached emitter — see IRenderSystem::OnSceneReplaced, kind 2. m_Emitters is keyed by
+        // the raw entt entity value, and a fresh registry hands those out from zero again, so the next
+        // scene's first emitter IS the previous scene's first emitter as far as this cache can tell: same
+        // key, and GetOrCreate reuses the buffer outright whenever MaxParticles happens to match — live
+        // particles at the old scene's world positions, and the old spawn phase, included.
+        //
+        // Dropping them is done HERE rather than by re-keying on the UUID because the map also has to
+        // SHRINK, and this is the only path that has idled the device first: a persistent particle SSBO
+        // may still be being read by the last submitted frame, and this engine has no deferred-free queue.
+        void OnSceneReplaced() override;
+
         // CPU snapshot of the scene's emitters (params, world position, per-frame spawn budget, zeroed spawn
         // counters). Call once per frame in BeginScene.
         void PrepareFrame( const ::Desert::Core::Scene& scene );

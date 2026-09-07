@@ -124,6 +124,21 @@ namespace Desert::Graphic::System
         return e;
     }
 
+    void ParticleRenderer::OnSceneReplaced()
+    {
+        if ( m_Emitters.empty() )
+            return;
+
+        // m_FrameEmitters holds raw pointers INTO m_Emitters, so it goes first. Nothing will consume it
+        // before the next PrepareFrame refills it — SimulateInFrame and the draw pass both run later in a
+        // frame than this, and this runs between frames.
+        m_FrameEmitters.clear();
+
+        LOG_INFO( "[Particles] Released {} cached emitter(s) belonging to the previous scene.",
+                  m_Emitters.size() );
+        m_Emitters.clear();
+    }
+
     void ParticleRenderer::PrepareFrame( const ::Desert::Core::Scene& scene )
     {
         m_FrameEmitters.clear();

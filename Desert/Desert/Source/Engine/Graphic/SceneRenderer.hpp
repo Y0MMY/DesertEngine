@@ -98,6 +98,28 @@ namespace Desert::Graphic
             return m_ShadowQuality;
         }
 
+        // A SCENE HAS JUST BEEN (RE)INITIALISED ON THIS RENDERER. Called from Scene::Init(), which runs on
+        // the first load AND on every load after it — opening a second level, "New Scene", or reopening the
+        // one already up. A repeat call is legal and always was; what changed with Г11 is what it costs.
+        //
+        // TWO LIFETIMES, and until Г11 they were one function under one name. The rule that separates them,
+        // in the shape Desert/Tests/Engine/ConfigOwnership uses for configuration files — there the actor is
+        // "two people at the same time", here it is "two scenes one after the other":
+        //
+        //   1. Would two scenes loaded one after the other legitimately need a DIFFERENT one of these?
+        //      Yes -> it belongs to the SCENE and RebindScene() releases it on every call.
+        //   2. Does it come from the window size or the device's capabilities instead?
+        //      Yes -> it belongs to the RENDERER; Resize() owns the one thing that changes it.
+        //   3. Otherwise -> the RENDERER, built once by EnsureRendererResources().
+        //
+        // Every pipeline, framebuffer and render system in this class answers question 1 with NO: a render
+        // system is constructed from a SceneRenderer* and a Framebuffer and never sees the Scene at all
+        // (Systems/RenderSystem.hpp), and the framebuffers are sized from the WINDOW. Exactly one row of
+        // m_RenderSystems answers YES — the "External:" passes the editor registers against a particular
+        // scene's RenderRegistry — and that row is what a rebind drops.
+        //
+        // Measured before the split, on Clouds_Protocol: 628-847 ms per load, every load, all of it spent
+        // rebuilding ~35 pipelines and every framebuffer against a device and a window that had not moved.
         void Init();
 
         [[nodiscard]] Common::BoolResultStr BeginScene( const Desert::Core::Scene& scene );
@@ -339,8 +361,43 @@ namespace Desert::Graphic
         Engine::RendererSlotLease m_SlotLease;
 
         // Constructor-set, const in everything but name: MeshRenderer copies it in Initialize and the
-        // framebuffers exist from that moment. Re-running Init() reallocates them from the same value.
+        // cascade framebuffers exist from that moment until this renderer dies.
         ShadowQuality m_ShadowQuality;
+
+        // Has EnsureRendererResources() run? Set once, never cleared — see its comment for why there is no
+        // path that invalidates it.
+        bool m_RendererResourcesBuilt = false;
+
+        // THE RENDERER'S HALF OF Init(), and it runs exactly ONCE per SceneRenderer. Builds the scene
+        // target and the deferred buffers, constructs every engine render system, initialises them (which
+        // is where the ~35 graphics pipelines are compiled) and wires the post chain together.
+        //
+        // Once, and not "once per device generation": device loss is NOT recoverable in this engine by a
+        // measured decision (Graphic/DeviceLost.hpp), so there is no second generation to rebuild for, and
+        // inventing a re-entry here would be inventing a path nothing can reach. The other thing that could
+        // invalidate these resources — the window size — is Resize()'s, and it resizes them in place.
+        //
+        // Returns false when it has already run, so the caller can tell a first build from a rebind
+        // without keeping a second copy of the flag.
+        bool EnsureRendererResources();
+
+        // THE SCENE'S HALF, and it runs on EVERY Init() including the first. Releases what belonged to the
+        // scene that was here before and rebuilds the graph over what is left.
+        //
+        // What that is, exhaustively: the "External:" render systems. The editor registers its authoring
+        // passes (grid, colliders, gizmo overlays) against the scene it built its RenderRegistry for, by
+        // name; a different scene's registry re-registers its own, and the registry that owned these is
+        // destroyed by the same caller a few lines later. Leaving them would leave passes closing over a
+        // registry that no longer exists.
+        //
+        // What is deliberately NOT here: any reset of the engine systems' own state. They keep it across a
+        // scene load for the same reason they keep it across a frame — every per-frame input is RESTATED by
+        // its producer, absence included (SkyboxECSSystem emits an explicit "no sky" command rather than
+        // emitting nothing), and everything expensive enough to be cached across frames is keyed on a
+        // fingerprint of the content it was built from rather than on "have I built one". Those two
+        // properties are what makes a render system survivable, and they are asserted in
+        // Desert/Tests/Engine/RendererSceneLifetime rather than left as a claim.
+        void RebindScene();
 
         void ClearMainFramebuffer();
         void ExecuteRenderGraph();
