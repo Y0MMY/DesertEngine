@@ -12,6 +12,7 @@
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Core/MeshResolve.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <filesystem>
 #include <system_error>
@@ -179,10 +180,15 @@ namespace Desert::Editor
 
             if ( !path.empty() )
             {
-                std::error_code   ec;
+                // Through the shared rule, not a bare exists(): a picture whose asset has moved on is not
+                // the asset's picture, and drawing it here would contradict the two panels that refuse to
+                // (Editor/Widgets/ThumbnailFreshness.hpp).
                 const std::string png = ThumbnailCache::DiskPath( path );
-                if ( std::filesystem::exists( png, ec ) )
+                if ( ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( png, path ) ) ==
+                     ThumbnailFreshness::Verdict::Show )
+                {
                     thumb = s_Thumbnails.Get( png );
+                }
             }
         }
 
