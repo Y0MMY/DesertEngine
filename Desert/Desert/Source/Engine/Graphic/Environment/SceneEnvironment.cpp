@@ -13,6 +13,12 @@ namespace Desert::Graphic
 {
     Environment EnvironmentManager::Create( const std::shared_ptr<Assets::SkyboxAsset>& skyboxAsset )
     {
+        // The panorama, the three cubes and the transient compute pipelines the bake creates are all the
+        // ENVIRONMENT's, not the skybox asset's: the recipe that rebuilds them is the sky settings plus a
+        // 450 ms bake, not a file read, so eviction must never treat them as reloadable. One scope rather
+        // than five claims — see Engine/Graphic/ResourceLedger.hpp on ResourceAttributionScope.
+        const ResourceAttributionScope owned( ResourceOwner::Environment );
+
         if ( Common::Utils::FileSystem::GetFileExtension( skyboxAsset->GetMetadata().Filepath ) ==
              ".hdr" ) // TODO: move the logic to the SkyboxAsset and raw data
         {
@@ -86,6 +92,9 @@ namespace Desert::Graphic
                                                       Image2D* transmittanceLut, Image2D* multiScatterLut,
                                                       const CloudBakeBinding& clouds )
     {
+        // Same reason as Create() above: a procedural sky's bake products have no file behind them at all.
+        const ResourceAttributionScope owned( ResourceOwner::Environment );
+
         auto* imageService = Runtime::ResourceRegistry::GetImageService();
 
         // Bake the atmosphere AND the cloud layer standing in it into one equirect HDR panorama, then run

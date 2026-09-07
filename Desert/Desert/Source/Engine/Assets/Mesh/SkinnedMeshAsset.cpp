@@ -43,6 +43,10 @@ namespace Desert::Assets
         m_Vertices.clear();
         m_Indices.clear();
         m_Submeshes.clear();
+        // Cleared for the reason StaticMeshAsset::Load records in full: the loop below appends one handle
+        // per submesh, so a second Load without this doubles the vector and leaves the STALE handles in
+        // the indices every draw reads.
+        m_MaterialAssetHandles.clear();
 
         m_Vertices.reserve( data.SkinnedVertices.size() );
         m_Indices.reserve( data.Indices.size() );
@@ -85,6 +89,11 @@ namespace Desert::Assets
             submesh.Transform    = s.Transform;
             submesh.BoundingBox  = s.BoundingBox;
 
+            // NEVER FILLED HERE UNTIL NOW, while `GetMaterialHandle( i )` indexes it — so every call on a
+            // skinned mesh was an out-of-bounds read of an EMPTY vector. StaticMeshAsset::Load has always
+            // had this line; the skinned path simply never grew it, and the two classes implement the same
+            // pure virtual. Found while giving Unload a caller: Unload cleared a vector Load never wrote.
+            m_MaterialAssetHandles.emplace_back( s.MaterialHandle );
             m_Submeshes.emplace_back( std::move( submesh ) );
         }
 
@@ -114,11 +123,21 @@ namespace Desert::Assets
         m_Indices.clear();
         m_Submeshes.clear();
         m_MorphTargets.clear();
+        m_MaterialAssetHandles.clear();
 
         m_Vertices.shrink_to_fit();
         m_Indices.shrink_to_fit();
         m_Submeshes.shrink_to_fit();
         m_MorphTargets.shrink_to_fit();
+        m_MaterialAssetHandles.shrink_to_fit();
+
+        // THE RIG SIGNATURE AND ITS DEPENDENCY GO WITH THE PAYLOAD. `ResolveDependencies` matches a
+        // SkeletonAsset by `GetSignature() == m_SkeletonSignature`, and `GetSkeletonDependency().IsValid()`
+        // is what callers ask before using the rig — an unloaded mesh answering both as if it were loaded
+        // is the same contradiction between a readiness flag and a getter that the cloud type had. The
+        // resolve re-runs on the next EnsureLoaded, which is written to be re-runnable.
+        m_SkeletonSignature   = 0U;
+        m_SkeletonDependency  = AssetDependency<SkeletonAsset>{};
 
         // The flag is what EnsureLoaded asks before deciding to parse, so an emptied asset that still
         // reports "ready" is an asset nobody will ever reload — the same never-recovers shape as the

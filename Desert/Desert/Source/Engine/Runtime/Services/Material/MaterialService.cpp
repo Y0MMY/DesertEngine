@@ -35,7 +35,13 @@ namespace Desert::Runtime
         if ( cell )
             m_BuiltToAsset.erase( cell.get() );
         if ( material )
+        {
             m_BuiltToAsset[material.get()] = handle;
+            // The ledger row this material opened in its constructor now knows whose it is — see
+            // Engine/Graphic/ResourceLedger.hpp. A render system's own materials stay attributed to the
+            // renderer; these are the ones a `.demat` can rebuild, i.e. the ones eviction may consider.
+            material->ClaimOwnership( Graphic::ResourceOwner::AssetService, handle );
+        }
         cell                     = material;
         m_MaterialAssets[handle] = materialAsset; // keep the shell too
 
@@ -126,8 +132,9 @@ namespace Desert::Runtime
             auto material = Graphic::MaterialFactory::CreateMaterial( ait->second.get(), path, pass );
             if ( !material )
                 return nullptr; // MaterialFactory named the material and the cell it refused
-            auto* raw                  = material.get();
-            m_BuiltToAsset[raw]        = current;
+            auto* raw           = material.get();
+            m_BuiltToAsset[raw] = current;
+            raw->ClaimOwnership( Graphic::ResourceOwner::AssetService, current );
             m_Materials[current][slot] = std::move( material );
             return raw;
         }

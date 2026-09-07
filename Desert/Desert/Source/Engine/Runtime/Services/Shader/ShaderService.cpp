@@ -15,6 +15,8 @@ namespace Desert::Runtime
         const auto shader                            = Graphic::Shader::Create( shaderAsset );
         m_Shaders[shaderAsset->GetMetadata().Handle] = shader;
         m_NameToHandleMap[shader->GetName()]         = shaderAsset->GetMetadata().Handle;
+        // Whose the shader is, in the ledger — see Engine/Graphic/ResourceLedger.hpp.
+        shader->ClaimOwnership( Graphic::ResourceOwner::AssetService, shaderAsset->GetMetadata().Handle );
 
         // Registered either way, deliberately: a shader that fails to compile must keep its NAME, or the
         // material referencing it silently falls back to the standard one and the artist is told nothing.
@@ -31,6 +33,8 @@ namespace Desert::Runtime
         {
             auto passShader                      = Graphic::Shader::Create( shaderAsset, {}, passName );
             m_PassShaders[passShader->GetName()] = passShader;
+            passShader->ClaimOwnership( Graphic::ResourceOwner::AssetService,
+                                        shaderAsset->GetMetadata().Handle );
         }
 
         return BOOLSUCCESS;

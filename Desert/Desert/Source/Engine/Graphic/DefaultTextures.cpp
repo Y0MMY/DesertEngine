@@ -67,6 +67,10 @@ namespace Desert::Graphic
         };
         spec.Data = std::vector<unsigned char>( pixel.begin(), pixel.end() );
 
+        // The device's own 1x1 fallbacks: built from a constant, not from a file, so nothing may release
+        // them. See Engine/Graphic/ResourceLedger.hpp.
+        const ResourceAttributionScope owned( ResourceOwner::Device );
+
         auto image = Image2D::Create( spec, nullptr );
         if ( !image )
         {

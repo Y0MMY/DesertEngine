@@ -45,7 +45,26 @@ namespace Desert::Graphic
             static uint64_t next = 1; // 0 is "accounts for nothing" and is never handed out
             return next;
         }
+
+        /// The attribution a new row gets when nobody claims it. Thread-local: two threads building GPU
+        /// objects at once must not attribute each other's, and the preloader does run staged work.
+        ResourceOwner& AmbientOwner()
+        {
+            static thread_local ResourceOwner owner = ResourceOwner::Unclaimed;
+            return owner;
+        }
     } // namespace
+
+    ResourceAttributionScope::ResourceAttributionScope( const ResourceOwner owner ) noexcept
+         : m_Previous( AmbientOwner() )
+    {
+        AmbientOwner() = owner;
+    }
+
+    ResourceAttributionScope::~ResourceAttributionScope()
+    {
+        AmbientOwner() = m_Previous;
+    }
 
     // ────────────────────────────────────────────────────────────────────────────────────────────────
     // ResourceOwnership — the token
@@ -122,7 +141,11 @@ namespace Desert::Graphic
         const uint64_t id = NextRowId()++;
 
         LedgerRow row;
-        row.Kind       = kind;
+        row.Kind = kind;
+        // The ambient default, if a scope is open. Nothing else reads it: a later Claim() overwrites the
+        // owner outright, because naming the asset behind an object is more specific than naming the
+        // subsystem that happened to be building when it appeared.
+        row.Owner      = AmbientOwner();
         row.Bytes      = bytes;
         row.BytesKnown = bytes != 0;
         Rows().emplace( id, row );

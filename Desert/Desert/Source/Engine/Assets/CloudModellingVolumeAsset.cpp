@@ -75,7 +75,14 @@ namespace Desert::Assets
     {
         m_Volume.Voxels.clear();
         m_Volume.Voxels.shrink_to_fit();
-        m_Ready = false;
+
+        // THE RECIPE'S `Blobs` IS A HEAP MEMBER TOO — up to 64 lumps — and it was the one allocation this
+        // body left behind. The whole volume is reset rather than the two vectors picked off, so a member
+        // added to CloudModellingVolumeData tomorrow does not silently become the next survivor: the
+        // sculpting tool reads the recipe back out of the asset, and it re-reads it through Load like
+        // everything else.
+        m_Volume = CloudModellingVolumeData{};
+        m_Ready  = false;
         return BOOLSUCCESS;
     }
 

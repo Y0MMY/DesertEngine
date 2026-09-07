@@ -45,6 +45,14 @@ namespace Desert::Assets
         m_Vertices.clear();
         m_Indices.clear();
         m_Submeshes.clear();
+        // WAS MISSING, AND IT IS THE ONE ACCUMULATING MEMBER IN THIS FUNCTION. The loop below
+        // `emplace_back`s one handle per submesh; without this clear a SECOND Load — which is exactly what
+        // eviction plus EnsureLoaded produces, and what a hot reload would produce the day meshes get one
+        // — leaves m_Submeshes.size() == N while m_MaterialAssetHandles.size() == 2N, with the STALE
+        // handles occupying indices [0,N). GetMaterialHandle(i) would then return the material assignment
+        // from before the reload, so a reload whose whole purpose is to pick up an edited file would
+        // silently keep the old bindings, and the vector would grow by N on every cycle.
+        m_MaterialAssetHandles.clear();
 
         m_Vertices.reserve( data.StaticVertices.size() );
         m_Indices.reserve( data.Indices.size() );
@@ -115,11 +123,16 @@ namespace Desert::Assets
         m_Indices.clear();
         m_Submeshes.clear();
         m_MorphTargets.clear();
+        // The fifth vector, which this body cleared and Load did not. See the clear in Load for what the
+        // two omissions together did to a reload; either one alone was harmless, which is why neither was
+        // noticed.
+        m_MaterialAssetHandles.clear();
 
         m_Vertices.shrink_to_fit();
         m_Indices.shrink_to_fit();
         m_Submeshes.shrink_to_fit();
         m_MorphTargets.shrink_to_fit();
+        m_MaterialAssetHandles.shrink_to_fit();
 
         // Same reason as SkinnedMeshAsset::Unload: the flag is what EnsureLoaded asks before deciding to
         // parse, so an emptied asset that still reports "ready" is one nobody will ever reload.

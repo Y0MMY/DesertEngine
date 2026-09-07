@@ -243,6 +243,39 @@ namespace Desert::Graphic
         uint64_t m_Row = 0;
     };
 
+    /**
+     * @brief WHILE THIS OBJECT IS ALIVE, ANY ROW OPENED ON THIS THREAD BELONGS TO @p owner.
+     *
+     * The reason it exists is arithmetic. One `SceneRenderer` builds roughly a hundred and twenty device
+     * objects across twenty render systems — framebuffers, LUTs, pipelines, the materials the passes own —
+     * and every one of them is created by a different file. Claiming them one at a time means touching
+     * twenty files to answer one question, and the twenty-first system, written next month, is attributed
+     * by nobody and silently swells the "Unclaimed" figure that the whole ledger exists to make trustworthy.
+     * One scope at the top of `EnsureRendererResources` attributes all of them, and a new system inside it
+     * is attributed the day it is written.
+     *
+     * AN EXPLICIT `Claim()` ALWAYS WINS, because it happens later: a service that builds a texture inside
+     * somebody's scope names the asset behind it afterwards, and that is the more specific truth. The scope
+     * is a DEFAULT for rows nobody speaks for, not an override of the rows somebody does.
+     *
+     * Thread-local, and nested scopes restore the enclosing one — a bake inside a renderer's scope is still
+     * the bake's.
+     */
+    class ResourceAttributionScope final
+    {
+    public:
+        explicit ResourceAttributionScope( ResourceOwner owner ) noexcept;
+        ~ResourceAttributionScope();
+
+        ResourceAttributionScope( const ResourceAttributionScope& )            = delete;
+        ResourceAttributionScope& operator=( const ResourceAttributionScope& ) = delete;
+        ResourceAttributionScope( ResourceAttributionScope&& )                 = delete;
+        ResourceAttributionScope& operator=( ResourceAttributionScope&& )      = delete;
+
+    private:
+        ResourceOwner m_Previous;
+    };
+
     /// A whole-ledger answer, taken in ONE pass under ONE lock. A caller that asked for the total and then
     /// for the per-owner split in two calls would be handed two halves of two different instants, and the
     /// difference between them reads exactly like a leak.

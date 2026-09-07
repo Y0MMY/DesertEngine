@@ -1,13 +1,31 @@
 #include "TextureService.hpp"
 
 #include <Engine/Graphic/TextureFactory.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Runtime
 {
+    namespace
+    {
+        // SAY WHOSE THE IMAGE IS, AS SOON AS IT EXISTS. A `Texture2D` is a thin wrapper around an
+        // ImageHandle, so the row that costs device memory is the Image's, not the texture's — and until
+        // somebody names the asset behind it the ledger correctly reports it as unclaimed. This is the one
+        // place that knows both halves. See Engine/Graphic/ResourceLedger.hpp.
+        void ClaimTextureImage( const std::shared_ptr<Graphic::Texture2D>& texture,
+                                const Assets::AssetHandle&                 asset )
+        {
+            if ( !texture )
+                return;
+            if ( auto* image = ResourceRegistry::GetImageService()->Resolve( texture->GetImageHandle() ) )
+                image->ClaimOwnership( Graphic::ResourceOwner::AssetService, asset );
+        }
+    } // namespace
+
     void TextureService::Register( const std::shared_ptr<Assets::TextureAsset>& texture )
     {
         m_Textures[texture->GetHandle()]      = Graphic::TextureFactory::Create2D( texture );
         m_TextureAssets[texture->GetHandle()] = texture; // keep the shell too
+        ClaimTextureImage( m_Textures[texture->GetHandle()], texture->GetHandle() );
     }
 
     void TextureService::RegisterAsset( const std::shared_ptr<Assets::TextureAsset>& texture )
@@ -29,6 +47,7 @@ namespace Desert::Runtime
             auto  tex = Graphic::TextureFactory::Create2D( ait->second );
             auto* raw = tex.get();
             m_Textures[handle] = std::move( tex );
+            ClaimTextureImage( m_Textures[handle], handle );
             return raw;
         }
         return nullptr;

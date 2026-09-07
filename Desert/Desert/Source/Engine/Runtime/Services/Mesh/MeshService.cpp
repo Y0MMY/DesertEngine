@@ -4,6 +4,22 @@
 
 namespace Desert::Runtime
 {
+    namespace
+    {
+        // The two device buffers a mesh IS, named as the asset's. A procedural mesh is claimed differently
+        // in RegisterProcedural: it has no file, so nothing may ever release it. See ResourceLedger.hpp.
+        void ClaimMeshBuffers( const std::shared_ptr<Mesh>& mesh, const Graphic::ResourceOwner owner,
+                               const Assets::AssetHandle& asset )
+        {
+            if ( !mesh )
+                return;
+            if ( const auto& vertices = mesh->GetVertexBuffer() )
+                vertices->ClaimOwnership( owner, asset );
+            if ( const auto& indices = mesh->GetIndexBuffer() )
+                indices->ClaimOwnership( owner, asset );
+        }
+    } // namespace
+
     Common::BoolResultStr MeshService::Register( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
     {
         if ( !meshAsset->GetMetadata().IsValid() )
@@ -14,6 +30,7 @@ namespace Desert::Runtime
         const auto handle = meshAsset->GetMetadata().Handle;
         m_Meshes[handle] = Graphic::MeshFactory::Create( meshAsset );
         m_MeshAssets[handle] = meshAsset;
+        ClaimMeshBuffers( m_Meshes[handle], Graphic::ResourceOwner::AssetService, handle );
 
         return BOOLSUCCESS;
     }
@@ -73,6 +90,10 @@ namespace Desert::Runtime
                 LOG_ERROR( "[MeshService] procedural mesh {} has no GPU buffers: {}", (uint64_t)handle,
                            uploaded.GetError() );
         }
+        // `Procedural`, NOT `AssetService`, and the distinction is load-bearing rather than cosmetic: this
+        // mesh was built from no file, so there is no recipe to rebuild it from and releasing it is data
+        // loss. The ledger's owner category is what asset eviction reads to know it must not touch this.
+        ClaimMeshBuffers( mesh, Graphic::ResourceOwner::Procedural, handle );
         m_Meshes[handle] = mesh;
         return handle;
     }
@@ -95,7 +116,10 @@ namespace Desert::Runtime
             // Don't cache a FAILED build (e.g. a skinned mesh whose skeleton dependency wasn't resolved yet) —
             // otherwise the null is sticky and the mesh can never recover once the dependency is in place.
             if ( raw )
+            {
                 m_Meshes[handle] = std::move( mesh );
+                ClaimMeshBuffers( m_Meshes[handle], Graphic::ResourceOwner::AssetService, handle );
+            }
             return raw;
         }
         return nullptr;

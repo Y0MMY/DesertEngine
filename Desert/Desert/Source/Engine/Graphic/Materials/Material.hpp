@@ -111,12 +111,10 @@ namespace Desert::Graphic
          */
         bool BindSchemaDefaultTexture( const std::string& sampler );
 
-        /// Say who holds this material — see Engine/Graphic/ResourceLedger.hpp. `MaterialService` claims
-        /// the ones built from a `.demat`; a render system's own materials stay `SceneRenderer`.
-        void ClaimOwnership( const ResourceOwner owner, const Common::AssetHandle asset = Common::AssetHandle{} )
-        {
-            m_Accounting.Claim( owner, asset );
-        }
+        /// Say who holds this material AND the uniform/storage buffers its shader declares — see
+        /// Engine/Graphic/ResourceLedger.hpp. `MaterialService` claims the ones built from a `.demat`; a
+        /// render system's own materials stay `SceneRenderer`.
+        void ClaimOwnership( ResourceOwner owner, Common::AssetHandle asset = Common::AssetHandle{} );
 
     protected:
         // Uploads all dirty TProperty members to the matching FieldProperty/Texture slot.

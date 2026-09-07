@@ -38,6 +38,11 @@ namespace Desert::Assets
 
     Common::BoolResultStr SkyboxAsset::Unload()
     {
+        // WAS `return BOOLSUCCESS;` — and this type owns no data at all, so a no-op is ALMOST right. What
+        // it got wrong is the one line it had: leaving `m_ReadyForUse` true made the eviction unobservable
+        // AND meant the file-existence check above — the entire point of Load() for this type — would
+        // never be re-asked. One bool, and it is the whole of the asset.
+        m_ReadyForUse = false;
         return BOOLSUCCESS;
     }
 } // namespace Desert::Assets

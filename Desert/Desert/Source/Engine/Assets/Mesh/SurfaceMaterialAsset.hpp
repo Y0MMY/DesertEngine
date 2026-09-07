@@ -32,6 +32,12 @@ namespace Desert::Assets
             return m_ReadyForUse;
         }
 
+        // A working copy has no file behind it — see CreateWorkingCopy below and Unload's refusal.
+        bool IsReloadableFromFile() const override
+        {
+            return !m_IsWorkingCopy;
+        }
+
         // A DETACHED IN-MEMORY COPY of this material, for an editor that must hold an edit back from the
         // scene until somebody accepts it.
         //
@@ -99,5 +105,10 @@ namespace Desert::Assets
         // so this is the only thing that distinguishes "a material with default values" from "a
         // material whose values were lost this session", and Save() is what asks.
         bool m_RunningOnSubstitutedDefaults = false;
+
+        // TRUE only for the detached copy CreateWorkingCopy makes. It exists so eviction can ask rather
+        // than guess: nothing else distinguishes a working copy from a loaded material, and the two must
+        // never be treated alike (Unload says what happens if they are).
+        bool m_IsWorkingCopy = false;
     };
 } // namespace Desert::Assets

@@ -26,6 +26,39 @@ namespace Desert::Graphic
         CachePropertyNames();
     }
 
+    void Material::ClaimOwnership( const ResourceOwner owner, const Common::AssetHandle asset )
+    {
+        m_Accounting.Claim( owner, asset );
+
+        // AND EVERYTHING THE MATERIAL BROUGHT WITH IT. A `Material` row is one object; the device
+        // allocations it is responsible for are the uniform and storage buffers its shader declares, and
+        // each of those is frames x slots VkBuffers. Leaving them out is not a rounding error — they were
+        // 259 of the 338 rows the first census could not attribute to anybody, i.e. the single largest
+        // reason the ledger looked half-blind. They are claimed HERE and not at their own construction
+        // because that happens inside MaterialExecutor's constructor, which does not know whether the
+        // material being built is an asset's or a render pass's.
+        if ( !m_MaterialExecutor )
+            return;
+
+        for ( const auto& [name, index] : m_MaterialExecutor->GetUniformBufferProperties() )
+        {
+            if ( const auto property = m_MaterialExecutor->GetUniformBufferProperty( name ) )
+            {
+                if ( const auto& buffer = property->GetUniform() )
+                    buffer->ClaimOwnership( owner, asset );
+            }
+        }
+
+        for ( const auto& [name, index] : m_MaterialExecutor->GetStorageBufferProperties() )
+        {
+            if ( const auto property = m_MaterialExecutor->GetStorageBufferProperty( name ) )
+            {
+                if ( const auto& buffer = property->GetStorageBuffer() )
+                    buffer->ClaimOwnership( owner, asset );
+            }
+        }
+    }
+
     MaterialInstancePtr Material::CreateInstance( const std::string& name )
     {
         return std::make_shared<MaterialInstance>(

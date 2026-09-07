@@ -90,7 +90,14 @@ namespace Desert::Assets
     {
         m_Volume.Voxels.clear();
         m_Volume.Voxels.shrink_to_fit();
-        m_Ready = false;
+
+        // The 8 MiB was already released correctly; what stayed behind was the DESCRIPTION of it. `Params`
+        // kept a non-zero Resolution beside an empty Voxels, so `GetVolume()` handed back a struct that
+        // still claimed to describe a 128^3 volume — and a caller trusting Resolution without checking
+        // Voxels.size() reads a lie. Same rule the layout asset already followed: zero the scalars that
+        // describe the buffer you just freed.
+        m_Volume = CloudNoiseVolumeData{};
+        m_Ready  = false;
         return BOOLSUCCESS;
     }
 

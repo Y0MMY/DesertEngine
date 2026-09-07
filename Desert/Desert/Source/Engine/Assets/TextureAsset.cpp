@@ -85,6 +85,18 @@ namespace Desert::Assets
 
     Common::BoolResultStr TextureAsset::Unload()
     {
+        // WAS `return BOOLSUCCESS;` — a body that released nothing AND left IsReadyForUse() true, which is
+        // the worse half: EnsureLoaded short-circuits on that flag, so an "unloaded" texture would never
+        // have been re-read. The eviction that has now been written would have marked it gone and then
+        // handed out a shell that still claimed to be loaded, for ever.
+        //
+        // THE HANDLE IS DELIBERATELY NOT RESET. Load() replaced m_Metadata.Handle with the id inside the
+        // `.tex`, and that id is the key TextureService and every `.demat` resolve against. Unload is not
+        // the inverse of Load here and must not be: an evicted asset keeps its identity, or the reload
+        // that follows would be a different asset.
+        m_SourcePath.clear();
+        m_SourcePath.shrink_to_fit();
+        m_IsReadyForUse = false;
         return BOOLSUCCESS;
     }
 

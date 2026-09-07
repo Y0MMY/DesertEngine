@@ -139,6 +139,11 @@ namespace Desert::Runtime
             return {};
         }
 
+        // The atlas is ONE image built from SEVERAL assets, so it names none of them: it is the service's,
+        // and asset eviction must not reach it through any single body's handle. See ResourceLedger.hpp.
+        atlas->ClaimOwnership( Graphic::ResourceOwner::AssetService );
+        atlas->RecordDeviceBytes( bytes.size() );
+
         m_Atlas          = std::move( atlas );
         m_AtlasSlabs     = bodies;
         m_AtlasRevisions = std::move( revisions );
