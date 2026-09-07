@@ -81,9 +81,21 @@ namespace Desert::Graphic
         // (EngineContext::GetActiveRendererSlot, Docs/RENDERER_FRAME_STATE.md). The lowest free slot is
         // taken, so a slot handed back by a closed view is reused; past kMaxRendererSlots the renderer
         // records into slot 0 and warns, and holds no lease to give back.
-        SceneRenderer();
+        //
+        // @p shadowQuality is this renderer's directional-shadow BUDGET and is a CONSTRUCTOR argument
+        // rather than a setter on purpose: MeshRenderer allocates the cascade framebuffers from it inside
+        // Init(), so a value arriving afterwards would be read by nothing and look like a knob. A viewport
+        // of a level takes the default; an asset preview passes Graphic::kPreviewShadowQuality, which is
+        // the difference between 335 MB of shadow attachments per open window and 21 MB.
+        explicit SceneRenderer( const ShadowQuality& shadowQuality = kSceneShadowQuality );
         // Returns the leased slot, so closing a view hands it back instead of using it up.
         ~SceneRenderer();
+
+        // This renderer's shadow budget. Read by its own MeshRenderer in Initialize and fixed thereafter.
+        [[nodiscard]] const ShadowQuality& GetShadowQuality() const
+        {
+            return m_ShadowQuality;
+        }
 
         void Init();
 
@@ -291,6 +303,10 @@ namespace Desert::Graphic
         // Which view this renderer is; see the constructor. Held as a lease so the slot goes back when
         // this renderer is destroyed, whatever destroys it.
         Engine::RendererSlotLease m_SlotLease;
+
+        // Constructor-set, const in everything but name: MeshRenderer copies it in Initialize and the
+        // framebuffers exist from that moment. Re-running Init() reallocates them from the same value.
+        ShadowQuality m_ShadowQuality;
 
         void ClearMainFramebuffer();
         void ExecuteRenderGraph();

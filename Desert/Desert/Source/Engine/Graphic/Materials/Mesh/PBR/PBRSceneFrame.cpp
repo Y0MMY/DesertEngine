@@ -31,8 +31,12 @@ namespace Desert::Graphic
         // The map array is handed over as-is (`Image2D* const*`) rather than copied into a local: a copy
         // is where a fifth cascade would get lost, because a hand-written brace list does not grow with
         // kMaxCascades and does not fail to compile when it stops matching.
-        SceneShadowBind( material, CascadeViewProj, CascadeMaps, MaterialPBRBase::kMaxCascades, ShadowBias,
-                         ShadowsEnabled, ShadowDebugMode, ShowNormals, CascadeTexelWorld, LightingDebug );
+        //
+        // CascadeCount, not kMaxCascades. The ceiling was passed here for as long as every renderer had
+        // four cascades, which made the two indistinguishable; they are not, and the difference is a
+        // preview that binds one map and would otherwise ask the shader to walk four.
+        SceneShadowBind( material, CascadeViewProj, CascadeMaps, CascadeCount, ShadowBias, ShadowsEnabled,
+                         ShadowDebugMode, ShowNormals, CascadeTexelWorld, LightingDebug );
 
         SceneEnvironmentBind( material, IrradianceMap, PrefilteredMap, BrdfLut );
         CloudShadowBind( material, CloudShadow );

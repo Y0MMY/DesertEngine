@@ -54,6 +54,11 @@ namespace Desert::Graphic
 
         const glm::mat4* CascadeViewProj = nullptr; // MaterialPBRBase::kMaxCascades entries
         Image2D*         CascadeMaps[MaterialPBRBase::kMaxCascades] = {};
+        // How many of the two above are REAL. The producing renderer's own shadow budget
+        // (Graphic::ShadowQuality), not the ceiling: an asset preview allocates one cascade, and the
+        // shader's cascade loop is driven by this number. It defaults to the ceiling so a snapshot built
+        // by hand behaves as every snapshot did before the budget existed.
+        uint32_t         CascadeCount = MaterialPBRBase::kMaxCascades;
         glm::vec4        CascadeTexelWorld{ 0.0f };
         float            ShadowBias      = 0.0f;
         bool             ShadowsEnabled  = true;
