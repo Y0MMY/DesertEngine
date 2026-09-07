@@ -89,10 +89,6 @@ namespace Desert::Graphic::System
             return BOOLSUCCESS;
         }
 
-        virtual void Shutdown() override
-        {
-        }
-
         void RegisterPasses( RenderGraphBuilder& ) override
         {
         }

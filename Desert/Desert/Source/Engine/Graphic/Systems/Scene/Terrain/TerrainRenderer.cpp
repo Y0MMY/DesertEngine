@@ -284,18 +284,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void TerrainRenderer::Shutdown()
-    {
-        m_Pipeline.reset();
-        m_Materials.clear();
-        m_GrassPipeline.reset();
-        m_GrassMaterial.reset();
-        m_GrassClumpTex.reset();
-        m_GrassCullPipeline.reset();
-        m_GrassVisibleBuf.reset();
-        m_GrassIndirectBuf.reset();
-    }
-
     void TerrainRenderer::RegisterPasses( RenderGraphBuilder& builder )
     {
         auto targetFb = m_TargetFramebuffer.lock();

@@ -265,6 +265,65 @@ TEST( TeardownOrder, StdExitAppearsOnlyBeforeTheApplicationExists )
                                   "what is wrong";
 }
 
+// RELATION: whoever DESTROYS a SceneRenderer idles the device first.
+//
+// This used to be implied by `RenderSystem::Shutdown()` — a pure virtual every render system implemented
+// and nobody ever called, whose twenty bodies were lists of `.reset()` the destructors already perform.
+// Г8 removed it, and removing a mechanism that never ran must not remove the thing it LOOKED like it was
+// guaranteeing. The guarantee is real and it is not RAII: releasing a pipeline, a framebuffer or a
+// descriptor pool while the last submitted frame is still executing against it is undefined, and
+// `SceneRenderer::Init()` already waits for exactly that reason before it clears the system map. The
+// destructor cannot take the wait itself — at process teardown it can run after the device is gone, which
+// is the segfault this whole suite exists for — so it belongs to each site that drops one, and every one
+// of them does it today.
+//
+// A NAMED LIST, like DeviceLostCensus's: there are five of them, each is a deliberate decision, and a
+// sixth surface added without the wait is precisely how this comes back.
+TEST( TeardownOrder, EverySiteThatDestroysASceneRendererIdlesTheDeviceFirst )
+{
+    struct Site
+    {
+        const char* File;
+        const char* Signature;
+        const char* What;
+    };
+
+    const Site sites[] = {
+         { "Editor/Source/Editor/Widgets/PreviewViewport.cpp", "PreviewViewport::~PreviewViewport",
+           "the Details mesh preview" },
+         { "Editor/Source/Editor/Widgets/AssetThumbnailRenderer.cpp",
+           "AssetThumbnailRenderer::~AssetThumbnailRenderer",
+           "the Content Browser thumbnail renderer -- ThumbnailService drops its renderer through this" },
+         { "Editor/Source/EditorLayer.cpp", "EditorLayer::CloseSceneView", "closing an extra scene view" },
+         { "Editor/Source/EditorLayer.cpp", "EditorLayer::OnDetach", "quitting, for every extra scene view" },
+         { "Editor/Source/Editor/Panels/Photogrammetry/PhotogrammetryPanel.cpp",
+           "PhotogrammetryPanel::ReleasePreview", "the reconstruction preview" },
+    };
+
+    for ( const Site& site : sites )
+    {
+        const std::string source = ReadFile( RepoRoot() / site.File );
+        ASSERT_FALSE( source.empty() ) << site.File << " not found or empty";
+
+        const std::string body = FunctionBody( source, site.Signature );
+        ASSERT_FALSE( body.empty() ) << site.Signature << " is not in " << site.File
+                                     << " any more. A row naming a function that no longer exists passes "
+                                        "without checking anything -- fix the row or the code.";
+
+        const size_t idle  = body.find( "WaitDeviceIdle()" );
+        const size_t drops = body.find( "Renderer.reset()" );
+        ASSERT_NE( drops, std::string::npos )
+             << site.Signature << " no longer drops a SceneRenderer; this row pins nothing.";
+        EXPECT_NE( idle, std::string::npos )
+             << site.Signature << " destroys the SceneRenderer of " << site.What
+             << " without waiting for the device. The last submitted frame may still be executing against "
+                "its pipelines, framebuffers and descriptor pools.";
+        if ( idle != std::string::npos )
+            EXPECT_LT( idle, drops ) << site.Signature << " waits for the device AFTER releasing the "
+                                        "renderer, which is the same as not waiting at all.";
+    }
+}
+
 // Only gtest is linked, not gtest_main — every suite in this tree brings its own entry point.
 int main( int argc, char** argv )
 {

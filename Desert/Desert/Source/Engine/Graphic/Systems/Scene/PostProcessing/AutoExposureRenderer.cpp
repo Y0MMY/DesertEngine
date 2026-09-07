@@ -73,16 +73,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void AutoExposureRenderer::Shutdown()
-    {
-        m_ClearPipeline.reset();
-        m_HistogramPipeline.reset();
-        m_AveragePipeline.reset();
-        m_LumImage[0].reset();
-        m_LumImage[1].reset();
-        m_Histogram.reset();
-    }
-
     bool AutoExposureRenderer::CreateResources()
     {
         m_Histogram = ShaderResources::StorageBuffer::Create( "AEHistogram", kBins * sizeof( uint32_t ), 1 );

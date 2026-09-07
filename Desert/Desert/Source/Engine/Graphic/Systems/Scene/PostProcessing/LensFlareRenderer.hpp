@@ -63,7 +63,6 @@ namespace Desert::Graphic::System
         };
 
         virtual Common::BoolResultStr Initialize() override;
-        virtual void                  Shutdown() override;
 
         void RegisterPasses( RenderGraphBuilder& /*builder*/ ) override
         {

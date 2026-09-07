@@ -39,15 +39,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void ParticleRenderer::Shutdown()
-    {
-        m_Emitters.clear(); // owns the per-emitter materials
-        m_FrameEmitters.clear();
-        m_SimPipeline.reset();
-        m_AddPipeline.reset();
-        m_AlphaPipeline.reset();
-    }
-
     bool ParticleRenderer::CreatePipelines()
     {
         auto shaderService = Runtime::ResourceRegistry::GetShaderService();

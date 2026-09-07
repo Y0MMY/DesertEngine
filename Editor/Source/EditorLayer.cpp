@@ -531,10 +531,25 @@ namespace Desert::Editor
         // just invokes the engine helper (the locomotion knowledge lives in the engine, not here).
         Animation::ProceduralCharacterAnimations::RegisterClips( *m_AssetManager, *m_AnimationLibrary );
 
+        // NOT INITIALISED WHEN A SCENE LOAD IS ALREADY QUEUED, and that condition is why the line moved
+        // rather than why it is conditional. The constructor above has already called LoadScene() for
+        // `--scene` or for the project's default scene, so by the time OnAttach gets here the empty "New
+        // Scene" this would build a renderer for is a scene NOBODY WILL EVER SEE: OnUpdate returns early
+        // for the whole of the staged startup load and draws no scene frame, and the first thing it does
+        // when that finishes is LoadSceneInternal, whose own Init() throws this one away. Measured at
+        // ~1.4 s of every Debug start (Г8) — pipelines and framebuffers built, waited on and destroyed.
+        //
+        // It is NOT a "run Init once" flag: re-running Init() is legal and is how a scene load rebuilds
+        // the renderer. Only this first, pre-empted one is skipped, and the deferred-load site in
+        // OnUpdate is what guarantees the scene ends up initialised even if the load refuses the file.
+        //
         // Propagated rather than reported: OnAttach owns a channel and Application::PushLayer now reads
         // it, and an editor whose main scene never initialised has no viewport to show anything in.
-        if ( const auto inited = m_MainScene->Init(); !inited.IsSuccess() )
-            return Common::MakeFormattedError( "main scene failed to initialise: {}", inited.GetError() );
+        if ( !m_SceneLoadRequested )
+        {
+            if ( const auto inited = m_MainScene->Init(); !inited.IsSuccess() )
+                return Common::MakeFormattedError( "main scene failed to initialise: {}", inited.GetError() );
+        }
 
 #ifdef EBABLE_IMGUI
         // EVERY TOOL ENTERS THROUGH PanelRegistry::Add / Adopt, and that is the whole of the guarantee that
@@ -752,7 +767,13 @@ namespace Desert::Editor
         // as many times as it likes. See BuildPaletteCommands and Editor/Core/Control.
 #endif // EBABLE_IMGUI
 
-        m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
+        // Only when the scene above really was initialised. Every editor pass builds its pipeline
+        // against `scene->GetTargetFramebuffer()`, which does not exist until SceneRenderer::Init has
+        // run — and when a scene load is already queued that Init is deliberately skipped (see the
+        // comment beside it). The load recreates this registry after its own Init, which is what the
+        // three other call sites of this line are for.
+        if ( m_MainScene->IsInitialized() )
+            m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
 
         // Boot into an empty "New Scene" — the demo scene (procedural character/house + player_controller.lua)
         // referenced assets that were cleared out for the from-scratch rebuild. Re-enable to get it back.
@@ -843,6 +864,26 @@ namespace Desert::Editor
             auto path = m_SceneLoadRequested.value();
             m_SceneLoadRequested.reset();
             LoadSceneInternal( path );
+
+            // THE OTHER HALF OF THE SKIPPED Init() IN OnAttach. That skip is safe only because THIS load
+            // initialises the scene — and LoadSceneInternal has three early returns (the file is gone,
+            // unreadable, or written by an older build) that deliberately leave the editor exactly as it
+            // was. "Exactly as it was" used to mean an initialised empty scene; with the first Init()
+            // pre-empted it would mean a scene whose renderer has no systems, and the frame below would
+            // record against it. Asked of the SCENE rather than inferred from the load's return value,
+            // which is void, and rather than tracked in a flag here, which would be a second copy of a
+            // fact the scene already holds.
+            if ( !m_MainScene->IsInitialized() )
+            {
+                if ( const auto inited = m_MainScene->Init(); !inited.IsSuccess() )
+                    LOG_ERROR( "[EditorLayer] the scene load was refused and the fallback initialise "
+                               "failed too: {}",
+                               inited.GetError() );
+                // The registry follows the Init that built the framebuffers its passes bind to, exactly
+                // as it does on the successful path inside LoadSceneInternal.
+                m_RenderRegistry.reset();
+                m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
+            }
         }
 
         // New (empty) scene — deferred like a load so it never tears down resources mid-frame.

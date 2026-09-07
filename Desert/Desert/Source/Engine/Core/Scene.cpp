@@ -225,6 +225,7 @@ namespace Desert::Core
         if ( m_State != SceneState::Play && !m_CameraPinned )
             SetActiveCamera( m_EditorCamera );
 
+        m_Initialized = true;
         return BOOLSUCCESS;
     }
 

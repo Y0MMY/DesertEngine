@@ -52,18 +52,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void JumpFloodOutlineRenderer::Shutdown()
-    {
-        m_InitPipeline.reset();
-        m_StepPipeline.reset();
-        m_FinalPipeline.reset();
-        m_MaterialInit.reset();
-        m_StepMaterials.clear();
-        m_MaterialComposite.reset();
-        m_SeedFramebuffers[0].reset();
-        m_SeedFramebuffers[1].reset();
-    }
-
     bool JumpFloodOutlineRenderer::CreateFramebuffers( uint32_t width, uint32_t height )
     {
         const auto makeFramebuffer = [&]( const std::string& name )

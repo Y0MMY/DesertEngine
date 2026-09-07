@@ -216,35 +216,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void MeshRenderer::Shutdown()
-    {
-        m_StaticInstancedInstance.reset();
-        m_StaticInstancedMaterial.reset();
-        m_StaticPipeline.reset();
-        m_StaticWireframePipeline.reset();
-        m_SkinnedPipeline.reset();
-        m_SilhouettePipeline.reset();
-        m_SilhouetteMaterial.reset();
-        m_SilhouetteMaskFramebuffer.reset();
-        m_ShadowPipeline.reset();
-        m_ShadowInstancedPipeline.reset();
-        m_ShadowSkinnedPipeline.reset();
-        // kMaxCascades, not the budget: a Shutdown after a re-Init with a different budget must still
-        // release every slot the arrays hold, and releasing an already-null one costs nothing.
-        for ( uint32_t i = 0; i < kMaxCascades; ++i )
-        {
-            m_ShadowMaterial[i].reset();
-            m_ShadowInstancedMaterial[i].reset();
-            m_ShadowSkinnedMaterial[i].reset();
-            m_CascadeFB[i].reset();
-        }
-        // In step with the framebuffers above. The destructor releases it too, which is what keeps the
-        // live total honest — nothing in this engine calls RenderSystem::Shutdown (SceneRenderer::Init
-        // drops the systems by clearing the map, and Application shuts the renderer down without walking
-        // them), so a total that depended on this function being reached would read as a leak.
-        m_ShadowAttachments.Release();
-    }
-
     void MeshRenderer::ClearQueues()
     {
         m_StaticQueue.clear();

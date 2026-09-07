@@ -59,7 +59,6 @@ namespace Desert::Graphic::System
         ~HeightFogRenderer() override;
 
         Common::BoolResultStr Initialize() override;
-        void                  Shutdown() override;
         void                  RegisterPasses( RenderGraphBuilder& builder ) override;
 
         /**

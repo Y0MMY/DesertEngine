@@ -34,7 +34,6 @@ namespace Desert::Graphic::System
                                       // unique_ptr<MaterialParticleBillboard> sees the complete type
 
         Common::BoolResultStr Initialize() override;
-        void                  Shutdown() override;
         void                  RegisterPasses( RenderGraphBuilder& builder ) override;
 
         // CPU snapshot of the scene's emitters (params, world position, per-frame spawn budget, zeroed spawn

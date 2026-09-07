@@ -54,13 +54,6 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void BloomRenderer::Shutdown()
-    {
-        m_DownsamplePipeline.reset();
-        m_UpsamplePipeline.reset();
-        m_BloomImage.reset();
-    }
-
     bool BloomRenderer::CreateImage( uint32_t width, uint32_t height )
     {
         // Half-resolution chain (mip 0 = scene / 2), capped so the smallest mip stays usable.

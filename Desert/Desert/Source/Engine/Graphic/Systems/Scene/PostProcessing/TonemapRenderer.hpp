@@ -15,7 +15,6 @@ namespace Desert::Graphic::System
         using RenderSystem::RenderSystem;
 
         virtual Common::BoolResultStr Initialize() override;
-        virtual void               Shutdown() override {};
 
         // Tonemap runs as part of the explicit post-process chain (after the Jump Flood outline),
         // not through the render graph.
