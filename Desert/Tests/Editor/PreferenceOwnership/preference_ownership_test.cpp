@@ -282,6 +282,50 @@ TEST( PreferenceOwnership, ReChoosingTheStepAlreadySetDoesNotRewriteTheFile )
     EXPECT_TRUE( std::filesystem::exists( PrefsPath() ) );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// 4. THE ONE MIGRATION THIS FILE CARRIES
+// ---------------------------------------------------------------------------------------------------
+
+// Load() raises a metre-era TranslateSnap to centimetres once and writes it back, and until now nothing
+// tested it — which matters more than it looks, because it is the only code in the editor that can
+// change a preference the user did not touch in that session, and it is therefore the one legitimate
+// exception to this suite's headline. It earns the exception by being a MIGRATION: it fires on a value
+// this build cannot produce, it says so in the log, and it persists the new form so it never fires
+// again. Contract §4.4 asks a migration to be tested; this is that test.
+TEST( PreferenceOwnership, AMetreEraSnapIsRaisedToCentimetresOnceAndWrittenBack )
+{
+    FreshInstall();
+
+    // 0.5 "world units" from when a unit was a metre — half a metre, meant as 50 cm.
+    EditorPreferences::Get().TranslateSnap = 0.5f;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+    EXPECT_FLOAT_EQ( Gizmo::TranslateSnap(), 50.0f );
+
+    // Written back in the new form, so the SECOND launch reads 50 and the migration does not fire on it
+    // again — a migration that ran every launch would multiply by a hundred every time.
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+    EXPECT_FLOAT_EQ( Gizmo::TranslateSnap(), 50.0f );
+}
+
+// The other half, and the one that says the rule is not "anything small is metres": 1 cm is the
+// smallest step the editor offers, so the migration's window is strictly below it and a legitimate
+// centimetre value must pass through untouched.
+TEST( PreferenceOwnership, ACentimetreEraSnapIsLeftAlone )
+{
+    FreshInstall();
+
+    EditorPreferences::Get().TranslateSnap = 1.0f;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    EditorPreferences::Get() = EditorPreferences{};
+    EditorPreferences::Load();
+    EXPECT_FLOAT_EQ( Gizmo::TranslateSnap(), 1.0f );
+}
+
 int main( int argc, char** argv )
 {
     // ~/.desertengine/editor.json is a real file in a real home directory, and this suite writes it. Point
