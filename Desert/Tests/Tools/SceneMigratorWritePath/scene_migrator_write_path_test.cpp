@@ -16,8 +16,6 @@
 #include <MigratorMain.hpp>
 #include <SceneMigration.hpp>
 
-#include <Common/Core/Constants.hpp>
-
 #include <rflcpp/rfl/json.hpp>
 
 #include <gtest/gtest.h>
@@ -186,9 +184,11 @@ TEST( SceneMigratorWritePath, TwoScenesSharingASceneNameRefuseToShareOneCloudMat
 {
     const fs::path dir = MakeTempDir( "desert_migrator_material_collision" );
 
-    // The materials land under the assets root, so point that at the temp tree rather than at whatever
-    // directory the suite happens to run from.
-    Common::Constants::Path::SetProjectRoot( dir, "Assets" );
+    // No SetProjectRoot any more: the materials land under the root derived from each SCENE's path, so
+    // both of these resolve to `dir` and contend for one file exactly as two scenes in one project would.
+    // Pointing the global content root at the temp tree used to be how this suite made the write land
+    // somewhere it could see — i.e. the suite was working around the defect below rather than exercising
+    // it.
 
     // One authored look field is all it takes to produce a bespoke material rather than the shared
     // default — the collision is a property of the NAME, not of how much was authored.
@@ -229,7 +229,95 @@ TEST( SceneMigratorWritePath, TwoScenesSharingASceneNameRefuseToShareOneCloudMat
          << errors;
     EXPECT_EQ( ReadRaw( second ), secondBefore ) << "the refused scene was rewritten anyway";
 
-    Common::Constants::Path::ResetToSandbox();
+    fs::remove_all( dir );
+}
+
+// THE WORKING DIRECTORY IS NOT AN INPUT — the defect this suite's newest test exists for, and the
+// fourth instance in one day of "a path resolved from the wrong root" (scene material paths saved
+// absolute; a committed `.tex` naming one machine; a thumbnail key naming a checkout).
+//
+// The v11 -> v12 raise creates a `.demat` and writes its assets-root-relative name INTO the scene. The
+// write used to resolve that name against `Constants::Path::ASSETS_PATH`, which with no project open is
+// the RELATIVE `Resources/Assets/` — so it resolved against the current directory. Run from the
+// repository root over `Editor/Resources/Assets/Scenes/Autosave/X.desce`, the tool reported "wrote
+// Materials/M_X_Clouds.demat" and created a whole new `Resources/Assets/` tree at the repository root,
+// while the scene named the file relative to the tree it actually lives in. Two DIFFERING files, one
+// name, one relative path, two roots — and which one the engine loads decided by where somebody stood.
+//
+// So the test runs the tool from a FOREIGN working directory, which is the only arrangement that can
+// tell the two roots apart: a run made from the right directory passes either way and proves nothing.
+// The assertion is the RELATION rather than a spelling — the path the scene now carries, joined to the
+// root the scene's own location implies, is the file that exists — plus the negative the defect
+// produced: nothing was created under the working directory at all.
+TEST( SceneMigratorWritePath, ACloudMaterialLandsBesideItsSceneAndNotUnderTheWorkingDirectory )
+{
+    const fs::path dir        = MakeTempDir( "desert_migrator_foreign_cwd" );
+    const fs::path assets     = dir / "Project" / "Editor" / "Resources" / "Assets";
+    const fs::path scenes     = assets / "Scenes" / "Autosave"; // the one subdirectory the repository has
+    const fs::path foreignCwd = dir / "Elsewhere";              // where the tool is run FROM
+    fs::create_directories( scenes );
+    fs::create_directories( foreignCwd );
+
+    const fs::path scene = scenes / "hero_autosave.desce";
+    {
+        SceneSerialized fixture;
+        fixture.SceneName    = "ForeignCwd";
+        fixture.SceneVersion = Desert::Migration::kSceneVersionSSRUnits; // v11: only the cloud step is ahead
+        fixture.UnitVersion  = Desert::Migration::kUnitVersion;
+
+        Desert::Assets::EntityData clouds;
+        clouds.Tag = "Sky";
+        rfl::Generic::Object payload;
+        payload["Coverage"]                  = 0.61; // one authored value, so the material is bespoke
+        clouds.Components["VolumetricCloud"] = rfl::Generic( std::move( payload ) );
+        fixture.Entities.push_back( std::move( clouds ) );
+
+        std::ofstream out( scene, std::ios::binary );
+        out << rfl::json::write( fixture );
+    }
+
+    const fs::path restore = fs::current_path();
+    fs::current_path( foreignCwd );
+
+    std::string report;
+    std::string errors;
+    const int   code = RunTool( { scene.string() }, report, errors );
+
+    fs::current_path( restore );
+
+    EXPECT_EQ( code, 0 ) << report << errors;
+
+    // The relation: whatever the scene now says, read against the root its own path implies, must be the
+    // file on disk. Asserting a literal `Materials/M_ForeignCwd_Clouds.demat` here would be a second
+    // statement of the naming rule; this asserts that the scene and the disk agree, which is the thing
+    // that was false.
+    const auto migrated = rfl::json::read<SceneSerialized>( ReadRaw( scene ) );
+    ASSERT_TRUE( migrated ) << "the migrated scene no longer parses";
+    ASSERT_FALSE( migrated.value().Entities.empty() );
+
+    const auto payload = migrated.value().Entities.front().Components.get( "VolumetricCloud" );
+    ASSERT_TRUE( payload.has_value() );
+    const auto fields = payload.value().to_object();
+    ASSERT_TRUE( fields.has_value() );
+    const auto named = fields.value().get( "Material" );
+    ASSERT_TRUE( named.has_value() ) << "the raise did not name a material at all";
+    const auto stored = named.value().to_string();
+    ASSERT_TRUE( stored.has_value() );
+
+    const fs::path root     = Desert::Migration::SceneOutputRoot( scene );
+    const fs::path material = ( root / stored.value() ).lexically_normal();
+    EXPECT_TRUE( fs::exists( material ) )
+         << "the scene names " << stored.value() << ", which under its own root is " << material
+         << " — and there is no file there; report was:\n"
+         << report;
+    EXPECT_EQ( material.lexically_normal(), ( assets / stored.value() ).lexically_normal() )
+         << "the material did not land under the scene's own assets root";
+
+    // The defect's own signature: a second content tree conjured at whatever directory the tool ran in.
+    EXPECT_FALSE( fs::exists( foreignCwd / "Resources" ) )
+         << "the run created a content tree under its working directory; report was:\n"
+         << report;
+
     fs::remove_all( dir );
 }
 

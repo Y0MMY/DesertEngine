@@ -15,6 +15,7 @@
 
 #include <array>
 #include <filesystem>
+#include <optional>
 
 namespace Path = Common::Constants::Path;
 namespace fs   = std::filesystem;
@@ -169,6 +170,77 @@ TEST( PathCensus, CurrentProjectRootReportsWhatWasSet )
     Path::SetProjectRoot( "/opt/ci/checkout/Other", "Assets" );
     Path::SetProjectRoot( saved.ProjectDir, saved.AssetsRoot );
     ExpectAllRowsDerivedFrom( "/ann/work/Game", "Content" );
+}
+
+// THE INVERSE, over the WHOLE census. RootForContentPath answers "which root was this file's directory
+// derived from", and it exists because four defects in one day were a path resolved from the process's
+// working directory instead of from the file being worked on. The guarantee a caller rests on is a
+// ROUND TRIP: Derive() builds Dir(d) from a root, and a file placed inside Dir(d) must give that same
+// root back. Asserted for every row rather than for the one row the migration tool needed, because the
+// two directions read the same census and this is what keeps them from drifting apart.
+TEST( PathCensus, TheInverseRecoversTheRootEveryRowWasDerivedFrom )
+{
+    ProjectRootGuard guard;
+    Path::SetProjectRoot( "/ann/work/Game", "Content" );
+
+    const fs::path assets = fs::path( "/ann/work/Game" ) / "Content";
+    const fs::path cooked = fs::path( "/ann/work/Game" ) / Path::COOKED_DIR_NAME;
+
+    for ( std::size_t i = 0; i < Path::CONTENT_DIR_COUNT; ++i )
+    {
+        const auto  d    = static_cast<Path::ContentDir>( i );
+        const auto& spec = Path::CONTENT_DIRS[i];
+
+        const std::optional<fs::path> root = Path::RootForContentPath( d, Path::Dir( d ) / "file.ext" );
+
+        // The two rows that name a root ITSELF have no relative part to find, and a file somewhere
+        // inside a root says nothing about where that root begins — so they answer nothing rather than
+        // guess, and a change that made them guess would land here.
+        if ( spec.Rel.empty() )
+        {
+            EXPECT_FALSE( root.has_value() )
+                 << "census row " << i << " names a root itself, so it cannot locate that root from a "
+                 << "file inside it";
+            continue;
+        }
+
+        ASSERT_TRUE( root.has_value() ) << "census row " << i << " (rel '" << spec.Rel
+                                        << "') did not recognise a file inside its own directory";
+        EXPECT_EQ( root->lexically_normal(), spec.Root == Path::DirRoot::Assets ? assets : cooked )
+             << "census row " << i << " (rel '" << spec.Rel << "') recovered the wrong root";
+    }
+}
+
+// THE LAST OCCURRENCE WINS, and the case that made it matter: this repository's scenes live flat in
+// Scenes/ with ONE subdirectory, Autosave/, and the tool is pointed at both. A first-occurrence rule
+// would resolve a checkout that itself sits under a folder called Scenes against the wrong ancestor and
+// write the migrated material into a developer's home directory.
+//
+// No ProjectRootGuard here or below, and that is the point being made: the inverse reads the census row
+// and the path handed to it, never the open project — which is what lets a tool ask about a file that
+// belongs to a tree the process has not opened.
+TEST( PathCensus, TheInverseResolvesAgainstTheNearestFolderOfThatName )
+{
+    const fs::path nested = "/home/me/Scenes/proj/Editor/Resources/Assets/Scenes/Autosave/x.desce";
+    const auto     root   = Path::RootForContentPath( Path::ContentDir::Scene, nested );
+
+    ASSERT_TRUE( root.has_value() );
+    EXPECT_EQ( *root, fs::path( "/home/me/Scenes/proj/Editor/Resources/Assets" ) );
+}
+
+// The two answers that are not paths. A file under no such folder gets nothing back — the caller has to
+// decide what that means rather than be handed a plausible-looking root — and a caller-RELATIVE spelling
+// gets the empty path, which is the honest statement that its root is wherever the caller is standing.
+// The second is not the working-directory dependence this function exists to remove: the caller named
+// the file that way, so the answer reproduces the caller's own frame instead of inventing one.
+TEST( PathCensus, TheInverseRefusesAPathOutsideTheRowAndKeepsACallerRelativeFrame )
+{
+    EXPECT_FALSE( Path::RootForContentPath( Path::ContentDir::Scene, "/ann/work/Game/Content/Meshes/x.desce" )
+                       .has_value() );
+
+    const auto relative = Path::RootForContentPath( Path::ContentDir::Scene, "Scenes/x.desce" );
+    ASSERT_TRUE( relative.has_value() );
+    EXPECT_TRUE( relative->empty() );
 }
 
 int main( int argc, char** argv )
