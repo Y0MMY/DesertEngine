@@ -1059,6 +1059,15 @@ TEST( CloudPlacementSpectrum, EveryFieldTheBakeReadsMakesTheCachedVolumeStale )
     moved.RegionSizeKm               = 40.0f;
     notices( moved, "Region Size" );
 
+    // THE BAKE'S OWN GRID (O8). It is not a look and no artist reaches for it to change the sky, which is
+    // exactly why it needs this line: it is the field most likely to be left out of the comparison on the
+    // grounds that it "isn't a parameter of the cloud". Two volumes of different resolutions over one
+    // region are different bytes, so a view that changed its budget and kept the volume it had would be
+    // marching a grid its own setting had already moved away from.
+    moved                  = base;
+    moved.VolumeSideVoxels = 128u;
+    notices( moved, "the volume's own resolution" );
+
     moved               = base;
     moved.LayerBottomKm = 1.0f;
     notices( moved, "the layer's base altitude" );
@@ -1253,7 +1262,7 @@ TEST( CloudPlacementSpectrum, AddingAFieldToTheBakesParametersForcesAVisitToTheS
 {
     const CloudProceduralFieldParams params;
 
-    // NINETEEN FIELDS. If this line stops compiling, a field was added to or removed from
+    // TWENTY FIELDS. If this line stops compiling, a field was added to or removed from
     // CloudProceduralFieldParams. Do BOTH of these before you touch this list:
     //
     //   1. add a line for it to EveryFieldTheBakeReadsMakesTheCachedVolumeStale above, and
@@ -1262,10 +1271,10 @@ TEST( CloudPlacementSpectrum, AddingAFieldToTheBakesParametersForcesAVisitToTheS
     // or the artist will move it in the editor and nothing at all will happen — the dead setting §1.3 of
     // the contract forbids, arrived at from the far side where the knob is wired and the CACHE is what eats
     // it.
-    const auto& [regionSizeKm, layerBottomKm, layerThicknessKm, blendRadiusKm, profileDepthKm, coverage,
-                 coverageContrast, seed, placementDensity, placementScatter, placementSizeVariety, patchTileKm,
-                 patchStrength, windAxis, layoutPlacement, patternSource, maskSource, resolvableChordKm, species] =
-         params;
+    const auto& [regionSizeKm, volumeSideVoxels, layerBottomKm, layerThicknessKm, blendRadiusKm, profileDepthKm,
+                 coverage, coverageContrast, seed, placementDensity, placementScatter, placementSizeVariety,
+                 patchTileKm, patchStrength, windAxis, layoutPlacement, patternSource, maskSource,
+                 resolvableChordKm, species] = params;
 
     // Named so the decomposition is not optimised away as unused, and asserted on the three that the walk
     // above cannot reach through CloudProceduralParamsEqual at all — a defaulted set must be the shipped
@@ -1279,6 +1288,7 @@ TEST( CloudPlacementSpectrum, AddingAFieldToTheBakesParametersForcesAVisitToTheS
     EXPECT_EQ( layoutPlacement.QuarterTurns, 0u );
 
     (void)regionSizeKm;
+    (void)volumeSideVoxels;
     (void)layerBottomKm;
     (void)layerThicknessKm;
     (void)blendRadiusKm;
@@ -1295,7 +1305,7 @@ TEST( CloudPlacementSpectrum, AddingAFieldToTheBakesParametersForcesAVisitToTheS
     (void)resolvableChordKm;
     (void)species;
 
-    std::printf( "[CloudPlacementSpectrum] CloudProceduralFieldParams is %zu bytes over 19 fields\n",
+    std::printf( "[CloudPlacementSpectrum] CloudProceduralFieldParams is %zu bytes over 20 fields\n",
                  sizeof( CloudProceduralFieldParams ) );
 }
 

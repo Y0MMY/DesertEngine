@@ -959,9 +959,9 @@ namespace Desert::Editor
         // panel can forget to draw it.
         if ( IsSkyRebuilding() )
         {
-            constexpr float kPad    = 6.0f;
-            const char*     label   = "Rebuilding the sky...";
-            const ImVec2    ts      = ImGui::CalcTextSize( label );
+            constexpr float kPad  = 6.0f;
+            const char*     label = "Rebuilding the sky...";
+            const ImVec2    ts    = ImGui::CalcTextSize( label );
             const ImVec2    boxMin( origin.x + kPad, origin.y + kPad );
             const ImVec2    boxMax( boxMin.x + ts.x + kPad * 2.0f, boxMin.y + ts.y + kPad );
 

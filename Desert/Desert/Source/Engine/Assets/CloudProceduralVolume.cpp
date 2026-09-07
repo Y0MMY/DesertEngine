@@ -1449,7 +1449,7 @@ namespace Desert::Assets
 
         // THE UNIT OF PROGRESS IS ONE XZ SLICE OF ONE SPECIES, which is also the unit of cancellation. A
         // species that places nothing still counts, so the fraction is monotone whatever the layer holds.
-        const uint32_t slices    = std::max<uint32_t>( 1u, static_cast<uint32_t>( params.Species.size() ) * depth );
+        const uint32_t slices = std::max<uint32_t>( 1u, static_cast<uint32_t>( params.Species.size() ) * depth );
         uint32_t       sliceDone = 0u;
 
         const float voxelXKm = params.RegionSizeKm / static_cast<float>( width );
@@ -1568,8 +1568,7 @@ namespace Desert::Assets
                 // unmeasurable, where a call per voxel would be millions of indirect calls through a
                 // std::function and would dominate the work it is reporting on. At the shipped 256 that is
                 // one check every ~40 ms of Debug bake, which is the granularity a cancel is honoured at.
-                if ( onProgress &&
-                     !onProgress( static_cast<float>( sliceDone ) / static_cast<float>( slices ) ) )
+                if ( onProgress && !onProgress( static_cast<float>( sliceDone ) / static_cast<float>( slices ) ) )
                     return Common::MakeError<std::vector<unsigned char>>(
                          "the procedural modelling bake was cancelled before it finished" );
                 ++sliceDone;

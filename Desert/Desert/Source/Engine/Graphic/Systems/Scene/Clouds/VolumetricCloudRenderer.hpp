@@ -476,7 +476,6 @@ namespace Desert::Graphic::System
         // cancelled" is a sentence a slider drag produces and a single edit does not.
         uint32_t m_ModellingBakesCancelled = 0;
 
-
         // WHAT THE VOLUME ON THE DEVICE WAS BAKED FROM. Two things, and both have to be asked about: the
         // PARAMETERS, which change when the artist moves a slider or drops a different type into a slot,
         // and the REGION ORIGIN, which changes when the camera crosses a snap of the lump lattice. A cache

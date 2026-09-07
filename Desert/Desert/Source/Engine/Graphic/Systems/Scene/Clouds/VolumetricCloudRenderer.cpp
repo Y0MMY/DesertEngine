@@ -443,18 +443,33 @@ namespace Desert::Graphic::System
             const bool sameParams =
                  m_ModellingValid && Assets::CloudProceduralParamsEqual( m_ModellingParams, wanted );
 
-            // WHAT IS IN FLIGHT COUNTS AS "ON THE DEVICE" FOR THE PURPOSE OF STARTING ANOTHER, or an artist
-            // holding a slider still would re-start the same bake sixty times a second. The question the
-            // guard used to ask — "is anything in flight" — could not tell a bake of the WANTED parameters
-            // from a bake of parameters the artist has since left, and that is exactly the difference the
-            // 15.42 s was made of.
-            bool pendingIsWanted = m_ModellingBake.valid() && m_PendingOriginKm == wantedOrigin &&
-                                   m_PendingSpeciesCount == speciesCount && m_PendingGeneration == generation &&
-                                   Assets::CloudProceduralParamsEqual( m_PendingParams, wanted );
-            for ( uint32_t slot = 0; pendingIsWanted && slot < speciesCount; ++slot )
-                pendingIsWanted = m_PendingTypes[slot] == handles[slot];
+            // ── WHAT A BAKE IN FLIGHT IS FOR, AND THE ONE DISTINCTION THAT MATTERS ────────────────────
+            //
+            // A bake becomes stale for two completely different reasons, and only ONE of them makes it
+            // worthless:
+            //
+            //   * THE SHAPE CHANGED — the artist moved a parameter or dropped a different cloud type in.
+            //     The volume in flight is a picture of a sky that no longer exists. Nothing downstream will
+            //     ever want it, so finishing it is pure waste and it is CANCELLED.
+            //   * ONLY THE REGION MOVED — the camera crossed a snap of the lump lattice. The volume in
+            //     flight is a picture of the RIGHT sky, one snap step away, and the field is periodic, so
+            //     it is a perfectly usable answer that the next frame can march. It is LET FINISH.
+            //
+            // THE SECOND CASE IS NOT A CONCESSION, IT IS FORWARD PROGRESS. Cancelling on a moving camera
+            // would replace "always one snap behind" with "never finishes at all" whenever the camera keeps
+            // crossing snaps faster than a bake completes — a starvation the old always-finish code could
+            // not have. The gain the owner asked for lives entirely in the first case: his twenty edits in
+            // 1.02 s are twenty shape changes and no region movement whatsoever.
+            bool pendingShapeIsWanted = m_ModellingBake.valid() && m_PendingSpeciesCount == speciesCount &&
+                                        m_PendingGeneration == generation &&
+                                        Assets::CloudProceduralParamsEqual( m_PendingParams, wanted );
+            for ( uint32_t slot = 0; pendingShapeIsWanted && slot < speciesCount; ++slot )
+                pendingShapeIsWanted = m_PendingTypes[slot] == handles[slot];
 
-            if ( !pendingIsWanted && !( sameTypes && sameRegion && sameParams ) )
+            // A bake of the wanted SHAPE is left alone even when its region has since moved, which is also
+            // what stops an artist holding a slider still from restarting the same bake sixty times a
+            // second: the frame after it lands starts the cheap origin-only rebake if one is still wanted.
+            if ( !pendingShapeIsWanted && !( sameTypes && sameRegion && sameParams ) )
             {
                 if ( auto valid = Assets::ValidateCloudProceduralParams( wanted ); !valid )
                 {
@@ -466,13 +481,16 @@ namespace Desert::Graphic::System
                     return m_ModellingValid;
                 }
 
-                // THE STALE ONE IS TOLD TO STOP, AND ITS RESULT IS DROPPED RATHER THAN COLLECTED. Half of
-                // the delay the owner reported was a bake nobody would ever see running to completion while
-                // the wanted one could not start: 20 edits in 1.02 s produced two bakes of 4 800 ms and
-                // 11 453 ms, in series, because `std::async` has no way to be told the answer is no longer
-                // needed. Dropping the future is safe and does not block — a future from
-                // JobSystem::Async wraps a packaged_task, whose destructor never waits, where
-                // ~future of a std::async future BLOCKS on the very thread we are trying to stop.
+                // GETTING HERE WITH A BAKE IN FLIGHT MEANS ITS SHAPE IS NOT THE WANTED ONE — see the two
+                // cases above — so it is told to stop and its result is dropped rather than collected. A
+                // third of the delay the owner reported was exactly this: 20 edits in 1.02 s produced two
+                // bakes of 4 800 ms and 11 453 ms IN SERIES, because `std::async` has no way to be told the
+                // answer is no longer needed, and the second could not start until the first was done.
+                //
+                // Dropping the future is safe and does not block — a future from JobSystem::Async wraps a
+                // packaged_task, whose destructor never waits, where the destructor of a std::async future
+                // BLOCKS on the very thread we are trying to stop. That is why the old code could not have
+                // done this even if it had had a flag.
                 if ( m_ModellingBake.valid() )
                 {
                     m_ModellingBakeCancel->store( true, std::memory_order_relaxed );

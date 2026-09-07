@@ -35,8 +35,8 @@ using Desert::Assets::CloudProceduralFieldParams;
 using Desert::Assets::CloudProceduralRegionOriginKm;
 using Desert::Assets::CloudProceduralSnapKm;
 using Desert::Assets::CloudProceduralSpecies;
-using Desert::Assets::GenerateCloudProceduralBlobs;
 using Desert::Assets::CloudProceduralVoxelBytes;
+using Desert::Assets::GenerateCloudProceduralBlobs;
 using Desert::Assets::kCloudProceduralVolumeHeight;
 using Desert::Assets::kCloudProceduralVolumeSide;
 using Desert::Assets::kCloudProceduralVolumeSideMin;
@@ -248,7 +248,8 @@ TEST( CloudProceduralField, TheBakedVolumeAgreesWithAGatherOverEveryLumpInAnyOrd
 
     std::printf( "[CloudProceduralField] the volume is %.2f%% cloud by voxel; probing %zu voxels inside it "
                  "and %zu outside\n",
-                 100.0 * static_cast<double>( filled ) / static_cast<double>( CloudProceduralVoxelBytes( kCloudProceduralVolumeSide ) / 4u ),
+                 100.0 * static_cast<double>( filled ) /
+                      static_cast<double>( CloudProceduralVoxelBytes( kCloudProceduralVolumeSide ) / 4u ),
                  inside.size(), outside.size() );
 
     ASSERT_GE( inside.size(), 50u ) << "the bake produced almost no cloud, so there is nothing to compare";
@@ -777,6 +778,171 @@ TEST( CloudProceduralField, CoverageIsTheFractionOfSkyThatHasCloudInTheColumn )
     EXPECT_LT( worst, 0.10 ) << "the coverage slider is out by " << worst
                              << " of the sky at its worst setting, so what it says and what a person "
                                 "looking up would measure are different numbers";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 7. THE BAKE'S OWN BUDGET (O8) — the grid is a parameter, and the three things that must stay true
+// ---------------------------------------------------------------------------------------------------
+//
+// WHY THE GRID BECAME A PARAMETER. The resolution used to be a constant, so a 512-pixel material-preview
+// pane baked exactly the volume a whole level bakes, and an artist dragging Coverage waited 15.42 s from
+// their last edit to a sky that showed it. What is under test here is not "smaller is faster" — that is
+// arithmetic — but the properties a caller is entitled to rely on: the block that comes back is the size
+// the parameters asked for, the slider's whole travel is legal and nothing outside it is silently
+// clamped, and the SKY IS THE SAME SKY, only sampled more coarsely.
+
+TEST( CloudProceduralBudget, TheBlockIsExactlyTheSizeTheParametersAskedFor )
+{
+    // A LENGTH THAT DOES NOT MATCH THE EXTENTS THE CALLER THEN BUILDS AN IMAGE WITH is the kind of defect
+    // that reads as a corrupt sky rather than as a wrong number, so it is asserted for every side the
+    // component's own Range permits rather than for the default alone.
+    for ( const uint32_t side : { kCloudProceduralVolumeSideMin, 96u, 128u, kCloudProceduralVolumeSide } )
+    {
+        CloudProceduralFieldParams params = MakeParams();
+        params.VolumeSideVoxels           = side;
+
+        const glm::vec2 origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const auto      baked  = BakeCloudProceduralVolume( params, origin );
+
+        ASSERT_TRUE( baked ) << "side " << side << ": " << ( baked ? std::string{} : baked.GetError() );
+        EXPECT_EQ( baked.GetValue().size(), CloudProceduralVoxelBytes( side ) )
+             << "side " << side << " produced a block of a different length than its own extents describe";
+    }
+}
+
+TEST( CloudProceduralBudget, TheRangeTheComponentOffersIsExactlyTheRangeTheBakeAccepts )
+{
+    // THE DEAD-SETTING TEST, FROM BOTH ENDS. The component offers 64..256; a value inside that must bake,
+    // and a value outside it must be REFUSED BY NAME rather than silently clamped — a silent clamp is how
+    // a slider ends up with a half that does nothing (contract §1.3).
+    CloudProceduralFieldParams params = MakeParams();
+
+    params.VolumeSideVoxels = kCloudProceduralVolumeSideMin;
+    EXPECT_TRUE( ValidateCloudProceduralParams( params ) );
+
+    params.VolumeSideVoxels = kCloudProceduralVolumeSide;
+    EXPECT_TRUE( ValidateCloudProceduralParams( params ) );
+
+    params.VolumeSideVoxels = kCloudProceduralVolumeSideMin - 1u;
+    EXPECT_FALSE( ValidateCloudProceduralParams( params ) ) << "a grid below the floor was accepted";
+
+    params.VolumeSideVoxels = kCloudProceduralVolumeSide + 1u;
+    EXPECT_FALSE( ValidateCloudProceduralParams( params ) ) << "a grid above the ceiling was accepted";
+
+    params.VolumeSideVoxels = 0u;
+    EXPECT_FALSE( ValidateCloudProceduralParams( params ) ) << "a grid of no voxels was accepted";
+}
+
+// THE RELATION THE WHOLE FEATURE STANDS ON, and it is not "the pixels match". A coarser grid is a coarser
+// PICTURE and its bytes cannot equal the fine one's; what must survive is that it is a picture of the SAME
+// SKY — the same clusters in the same places covering the same fraction of the ground.
+//
+// MEASURED AS THE TOP-DOWN COLUMN COVERAGE, which is the quantity the Coverage slider addresses and the
+// one the sky's calibration is written against. A grid that had started placing clouds elsewhere, or
+// growing them to fit itself, would move it.
+TEST( CloudProceduralBudget, ACoarserGridIsTheSameSkySampledMoreCoarsely )
+{
+    struct Row
+    {
+        uint32_t Side;
+        double   Columns;
+    };
+    std::vector<Row> rows;
+
+    for ( const uint32_t side : { kCloudProceduralVolumeSide, 128u, kCloudProceduralVolumeSideMin } )
+    {
+        CloudProceduralFieldParams params = MakeParams();
+        params.VolumeSideVoxels           = side;
+
+        const glm::vec2 origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+        const auto      baked  = BakeCloudProceduralVolume( params, origin );
+        ASSERT_TRUE( baked ) << ( baked ? std::string{} : baked.GetError() );
+
+        size_t columns = 0;
+        for ( uint32_t z = 0; z < side; ++z )
+            for ( uint32_t x = 0; x < side; ++x )
+                for ( uint32_t y = 0; y < kCloudProceduralVolumeHeight; ++y )
+                {
+                    const size_t at =
+                         ( ( static_cast<size_t>( z ) * kCloudProceduralVolumeHeight + y ) * side + x ) * 4u;
+                    if ( baked.GetValue()[at] != 0u )
+                    {
+                        ++columns;
+                        break;
+                    }
+                }
+
+        rows.push_back( Row{ side, static_cast<double>( columns ) /
+                                        static_cast<double>( static_cast<size_t>( side ) * side ) } );
+    }
+
+    for ( const Row& row : rows )
+        std::printf( "[CloudProceduralBudget] side %3u -> %.4f of the sky covered\n", row.Side, row.Columns );
+
+    // A HUNDREDTH OF THE SKY. The reference is the shipped 256, and the tolerance is a tenth of the 0.10
+    // the Coverage slider itself is held to above — so a budget that moved the sky as much as a tenth of
+    // one notch of Coverage fails here.
+    ASSERT_EQ( rows.size(), 3u );
+    for ( size_t i = 1; i < rows.size(); ++i )
+        EXPECT_NEAR( rows[i].Columns, rows[0].Columns, 0.01 )
+             << "side " << rows[i].Side << " covers a different fraction of the sky than the shipped "
+             << rows[0].Side << " does, so it is not the same sky sampled more coarsely";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 8. THE PROGRESS HOOK (Г9) — a pure function with a callback in it is a claim somebody has to check
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CloudProceduralBudget, BakingWithAProgressHookProducesTheIdenticalBytes )
+{
+    const CloudProceduralFieldParams params = MakeParams();
+    const glm::vec2                  origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+
+    const auto plain = BakeCloudProceduralVolume( params, origin );
+    ASSERT_TRUE( plain ) << ( plain ? std::string{} : plain.GetError() );
+
+    float last     = -1.0f;
+    int   calls    = 0;
+    bool  monotone = true;
+
+    const auto hooked = BakeCloudProceduralVolume( params, origin,
+                                                   [&]( float fraction )
+                                                   {
+                                                       monotone = monotone && fraction >= last;
+                                                       last     = fraction;
+                                                       ++calls;
+                                                       return true;
+                                                   } );
+    ASSERT_TRUE( hooked ) << ( hooked ? std::string{} : hooked.GetError() );
+
+    EXPECT_EQ( plain.GetValue(), hooked.GetValue() )
+         << "the progress hook changed the bytes, so the bake is not the pure function it is documented as";
+
+    // THE HOOK MUST ACTUALLY BE CALLED, or the cancellation test below is exercising a branch that never
+    // runs — and a callback nobody invokes is the shape of a feature that reports itself as working.
+    EXPECT_GT( calls, 1 ) << "the progress hook was never called during a bake of a whole region";
+    EXPECT_TRUE( monotone ) << "the reported fraction went backwards";
+    EXPECT_FLOAT_EQ( last, 1.0f ) << "a finished bake did not report itself finished";
+}
+
+TEST( CloudProceduralBudget, ACancelledBakeStopsEarlyAndSaysSoRatherThanReturningAPartialVolume )
+{
+    const CloudProceduralFieldParams params = MakeParams();
+    const glm::vec2                  origin = CloudProceduralRegionOriginKm( params, 0.0f, 0.0f );
+
+    int        calls     = 0;
+    const auto cancelled = BakeCloudProceduralVolume( params, origin,
+                                                      [&]( float )
+                                                      {
+                                                          ++calls;
+                                                          return false; // stop at the first opportunity
+                                                      } );
+
+    // AN ERROR AND NOT AN EMPTY SUCCESS. Contract §1.4: a caller that cannot tell "nothing here" from
+    // "stopped before finishing" reads the first as the second, and this one would upload a volume of
+    // zeros as a sky.
+    EXPECT_FALSE( cancelled ) << "a cancelled bake returned a volume";
+    EXPECT_EQ( calls, 1 ) << "the bake carried on past a callback that said stop";
 }
 
 int main( int argc, char** argv )
