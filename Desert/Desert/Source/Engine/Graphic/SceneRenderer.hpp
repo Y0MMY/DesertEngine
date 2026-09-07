@@ -122,11 +122,16 @@ namespace Desert::Graphic
         // through the control channel. Before and after INTERLEAVED across five sessions on a machine shared
         // with other agents; the spread is quoted and the figure is the MINIMUM of N, never the mean:
         //
-        //                                          before                     after
-        //   this function                    141-232 ms  (min 141, N=21)   0.4-0.5 ms (min 0.4, N=19)
-        //   whole load, command to frame:
-        //     reloading the SAME scene       6817-9510 ms (min 6817, N=8)   90-99 ms   (min 90,  N=4)
-        //     loading a DIFFERENT scene      1551-1941 ms (min 1551, N=4)   475-599 ms (min 475, N=8)
+        //                                          before                      after
+        //   this function                    141-232 ms   (min 141, N=21)   0.4-0.5 ms (min 0.4, N=19)
+        //
+        //   whole load, command to the frame that shows it, BY SCENE — the split matters, because the
+        //   saving is concentrated in the scene that has a cloud layer:
+        //     Clouds_Protocol                6817-9510 ms (min 6817, N=8)   90-99 ms   reloaded onto
+        //                                                                              itself (N=4)
+        //                                                                   535-599 ms arriving after
+        //                                                                              another scene (N=4)
+        //     Sky_PhysicalShowcase           1551-1941 ms (min 1551, N=4)   474-494 ms (min 474, N=4)
         //
         // The second block is the one a person waits through, and it is much the larger — which is the
         // finding. The cost was never really the pipelines. Destroying the render systems destroyed

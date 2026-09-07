@@ -10,11 +10,11 @@
 // Measured before/after INTERLEAVED across five sessions on a machine shared with other agents, minimum of
 // N: the pre-split Init cost 141-232 ms per load (min 141, N = 21) and the rebind costs 0.4-0.5 ms (min
 // 0.4, N = 19). The number that matters to a person is bigger than that and is the reason this suite exists
-// at all: the whole load, from the command to the frame that shows it, went from 6817-9510 ms to 90-99 ms
-// when reloading the same scene and from 1551-1941 ms to 475-599 ms when loading a different one — because
-// destroying the render systems destroyed a 5.8-SECOND content-keyed cloud bake that had nothing to do with
-// the scene having changed. The saving is not "we skipped some pipelines"; it is "we stopped throwing away
-// a cache whose own staleness test was already correct".
+// at all: the whole load, from the command to the frame that shows it, went from 6817-9510 ms to 90-599 ms
+// on Clouds_Protocol and from 1551-1941 ms to 474-494 ms on Sky_PhysicalShowcase — because destroying the
+// render systems destroyed a 5.8-SECOND content-keyed cloud bake that had nothing to do with the scene
+// having changed. The saving is not "we skipped some pipelines"; it is "we stopped throwing away a cache
+// whose own staleness test was already correct", and it is concentrated in the scene that HAS clouds.
 //
 // WHY THAT MAKES A TEST NECESSARY. Before the split, a render system could hold anything at all and a
 // scene load would launder it, because the system was destroyed. Now it is not, and three of the four
