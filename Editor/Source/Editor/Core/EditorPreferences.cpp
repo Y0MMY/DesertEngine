@@ -71,6 +71,12 @@ namespace Desert::Editor
     // control in the Preferences window now commits when the user lets go of it, and three other panels
     // commit on a click. Letting go of a control you only hovered, re-picking the MSAA level you are
     // already on, or dragging a slider back where it started were each a file write and a log line.
+    //
+    // К9 DEMOTED IT FROM A BELIEF TO A FALLBACK, which is a strictly smaller job and the right one. Every
+    // save now re-reads the file first (AdoptUnknownKeysFromDisk below), so this holds what the file
+    // ACTUALLY said a moment ago whenever the file could be read at all; the remembered value is what is
+    // left when it could not. A belief about a file several processes write was always the weaker of the
+    // two, and reading a few hundred bytes before a write nobody makes per frame costs nothing.
     static std::string s_OnDisk;
 
     // Which top-level keys of editor.json differ between two of its serializations, by name.

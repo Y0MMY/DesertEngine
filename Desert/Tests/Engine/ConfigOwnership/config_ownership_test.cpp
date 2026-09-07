@@ -88,8 +88,11 @@
 // Each file's field list is enumerated BY THE SAME MECHANISM THAT WRITES THAT FILE, never by a hand-typed
 // list — so a field added tomorrow fails here before anyone has to remember this document exists:
 //
-//   editor.json  <- rfl::fields<EditorPreferences>() and rfl::fields<DebugViewState>(), which is literally
-//                   what rfl::json::write emits in EditorPreferences::Save().
+//   editor.json  <- rfl::fields<EditorPreferences>() and rfl::fields<DebugViewState>(), which is what
+//                   rfl::json::write emits in EditorPreferences::Save() — less the one member that is not
+//                   a key at all, EditorPreferences::UnknownKeys, whose contents ARE keys of the file but
+//                   belong to whichever build wrote them. SerializedKeysOf() below says how that is
+//                   decided and which test pins it against the bytes.
 //   .deproj      <- rfl::fields<ProjectFile>(), the same call Common::Project::WriteProjectFile makes.
 //   .desce       <- rfl::fields<SceneSerialized>() for the top level, and the reflection registry for the
 //                   Settings block, which is what SceneSerializer hands SerializeReflected.
