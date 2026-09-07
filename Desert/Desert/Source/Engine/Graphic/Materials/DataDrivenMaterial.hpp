@@ -78,17 +78,26 @@ namespace Desert::Graphic
             return SetParam( name, value );
         }
 
-        // Bind a texture by its sampler name (the Properties texture2D name). Unset samplers keep the
-        // backend's fallback texture, so a shader with an unassigned texture still renders.
+        // Bind a texture by its sampler name (the Properties texture2D name).
+        //
+        // A NULL IMAGE IS "NONE", NOT A REFUSAL, and that is the whole of М9's second half. This used to
+        // `return false` on null, which made an empty slot INEXPRESSIBLE: the editor could take the
+        // handle out of the `.demat` and the descriptor went on pointing at the last texture assigned, so
+        // the file said one thing and the surface drew another with nothing in between to notice. Null
+        // now means the shader's own `Properties … = "white"` default, which is what an empty slot looks
+        // like by the shader author's definition.
         //
         // TEXTURES ARE NOT ROW BYTES and cannot be: a sampler is a descriptor, and a descriptor set is
         // shared by every draw the material records. Two objects that want different textures therefore
         // need two materials, and it is the RENDERER that keys them apart (MeshRenderer::DrawGenericMeshes
         // keys its shared override materials by shader AND texture set for exactly this reason).
+        //
+        // @return false only when @p name is not a Texture2D of this shader at all.
         bool SetTexture( const std::string& name, const Image2D* image )
         {
             if ( !image )
-                return false;
+                return BindSchemaDefaultTexture( name );
+
             if ( auto* tex = Get<Texture2DProperty>( name ) )
             {
                 tex->SetImage( image );

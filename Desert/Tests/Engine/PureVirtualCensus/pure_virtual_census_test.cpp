@@ -1,7 +1,7 @@
 // THE CENSUS OF PURE VIRTUALS EVERY CLASS IMPLEMENTS AND NOBODY CALLS.
 //
 // WHY IT EXISTS. Two of them turned up on one day, in unrelated subsystems, with nobody looking for
-// either: `Texture2DProperty::Clone()` (filed as М9) and `RenderSystem::Shutdown()` — a pure virtual
+// either: `Texture2DProperty::Clone()` (closed by М9) and `RenderSystem::Shutdown()` — a pure virtual
 // declared beside `Initialize()`, overridden by twenty render systems, carefully commented in
 // MeshRenderer, and reached from no call site in the repository. Two in a day without searching is a
 // habit, not an accident: somebody writes the "correct" virtual Init/Shutdown pair, wires up the first
@@ -526,7 +526,7 @@ namespace
         const char* Verdict;
     };
 
-    // THE REGISTER. Thirty-three pure virtuals that every implementer overrides and no translation unit
+    // THE REGISTER. Thirty-two pure virtuals that every implementer overrides and no translation unit
     // that can see the base ever calls. Each row says WHO decides, because an entry with no owner is
     // unreadable in a month — the rule ConfigOwnership's debt register already runs on.
     //
@@ -534,6 +534,11 @@ namespace
     // duplicate of ImGuiLayer.hpp that declared a second `Desert::ImGui::ImGuiLayer` with the same
     // fully-qualified name and was included by nothing; and `Editor::Render::IRender::Init`/`::Render`,
     // an interface nothing derived from (see NoAbstractBaseIsLeftWithoutASingleImplementation).
+    //
+    // М9 closed the fifth: `MaterialProperty::Clone` is gone with all four of its implementations. The
+    // comment left in its place (Properties/MaterialProperty.hpp) records why re-adding it in the shape
+    // it had would be worse than not having it — every commented-out body was an ALIAS of the original's
+    // GPU object, not a copy of it.
     constexpr CensusRow k_Census[] = {
          // ---- ONE ROW THAT IS A DESIGN QUESTION, NOT A CLEANUP -------------------------------------
          // Thirteen asset types implement Unload() and NOTHING in this engine ever evicts an asset. The
@@ -541,11 +546,6 @@ namespace
          // will not have eviction, which is the owner's call and not a tidy-up.
          { "AssetBase", "Unload", "Desert/Desert/Source/Engine/Assets/AssetBase.hpp",
            "OWNER DECIDES: does this engine want asset eviction? 13 implementations, no caller." },
-
-         // ---- ALREADY FILED --------------------------------------------------------------------------
-         { "MaterialProperty", "Clone",
-           "Desert/Desert/Source/Engine/Graphic/Materials/Properties/MaterialProperty.hpp",
-           "M9 owns this one: four implementations, zero call sites." },
 
          // ---- THE VULKAN BACKEND'S BIND VOCABULARY AND DEAD ACCESSORS --------------------------------
          // `Use`/`RT_Use` is the OpenGL "bind this object" idiom; a Vulkan backend binds through
@@ -629,7 +629,7 @@ namespace
          // ---- MATERIAL PROPERTY METADATA -------------------------------------------------------------
          { "IProperty", "GetTypeTag", "Desert/Desert/Source/Engine/Graphic/Materials/Properties/TProperty.hpp",
            "UNASSIGNED: the property type/editor-metadata surface, implemented by both property "
-           "templates and asked by nothing. Same family as M9's Clone." },
+           "templates and asked by nothing. Same family as the `Clone` М9 removed." },
          { "IProperty", "GetEditorMeta", "Desert/Desert/Source/Engine/Graphic/Materials/Properties/TProperty.hpp",
            "UNASSIGNED: same surface." },
          { "IProperty", "SetEditorMeta", "Desert/Desert/Source/Engine/Graphic/Materials/Properties/TProperty.hpp",
@@ -785,10 +785,11 @@ TEST( PureVirtualCensus, NoAbstractBaseIsLeftWithoutASingleImplementation )
 
 TEST( PureVirtualCensus, TheNumberIsStatedSoAShrinkageIsVisible )
 {
-    // 33, and it was 35 when Г8 counted: `RenderSystem::Shutdown` and the orphan duplicate of
-    // ImGuiLayer.hpp went with that task. Up is a regression; down is welcome, and this line moves with
-    // it. The count is quoted because a per-row diff never says "there are four more of these now".
-    EXPECT_EQ( std::size( k_Census ), 33u )
+    // 32, and it was 35 when Г8 counted: `RenderSystem::Shutdown` and the orphan duplicate of
+    // ImGuiLayer.hpp went with that task, and `MaterialProperty::Clone` with М9. Up is a regression;
+    // down is welcome, and this line moves with it. The count is quoted because a per-row diff never
+    // says "there are four more of these now".
+    EXPECT_EQ( std::size( k_Census ), 32u )
          << "the number of pure virtuals implemented by everybody and called by nobody has changed";
 }
 

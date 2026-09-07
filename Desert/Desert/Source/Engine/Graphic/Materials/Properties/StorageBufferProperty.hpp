@@ -22,11 +22,6 @@ namespace Desert::Graphic
             }
         }
 
-        std::unique_ptr<MaterialProperty> Clone() const override
-        {
-            return nullptr; // std::make_unique<UniformBufferProperty>( m_Buffer );
-        }
-
         void SetRawData( const void* data, uint32_t size )
         {
             m_Buffer->SetData( data, size );

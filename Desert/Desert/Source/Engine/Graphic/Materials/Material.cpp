@@ -1,6 +1,9 @@
 #include "Material.hpp"
-#include <Engine/Graphic/Image.hpp>
 #include <Engine/Core/Formats/MaterialParamRow.hpp>
+#include <Engine/Graphic/DefaultTextures.hpp>
+#include <Engine/Graphic/Image.hpp>
+
+#include <Common/Core/Logger.hpp>
 
 namespace Desert::Graphic
 {
@@ -27,6 +30,47 @@ namespace Desert::Graphic
     void Material::RegisterProperty( IProperty* prop )
     {
         m_RegisteredProperties.push_back( prop );
+    }
+
+    bool Material::BindSchemaDefaultTexture( const std::string& sampler )
+    {
+        if ( !m_MaterialExecutor )
+            return false;
+
+        auto property = m_MaterialExecutor->GetTexture2DProperty( sampler );
+        if ( !property )
+            return false;
+
+        // The schema is asked, never guessed. A sampler the shader declares by hand without a matching
+        // `Properties` entry (StaticMeshPBR's environment maps, the cloud shadow map) has no authored
+        // default and gets White -- the colour the backend fallback already held, so nothing moves.
+        auto kind = Core::Formats::DefaultTextureKind::White;
+        if ( const auto& shader = m_MaterialExecutor->GetShader() )
+        {
+            for ( const auto& param : shader->GetProgramMeta().Params )
+            {
+                if ( param.IsTexture && !param.IsCubeTexture && param.Name == sampler )
+                {
+                    kind = param.DefaultTexture;
+                    break;
+                }
+            }
+        }
+
+        const Image2D* image = DefaultTextures::Get().Resolve( kind );
+        if ( !image )
+        {
+            // Resolve() has already said WHICH kind failed; this line says which material and slot are
+            // left holding the previous image, because that is the visible symptom (DC §1.4).
+            LOG_ERROR( "[Materials] '{}' could not be given the '{}' default for its '{}' slot, so that "
+                       "sampler keeps whatever was bound to it last",
+                       m_MaterialExecutor->GetDubugName(), Core::Formats::DefaultTextureKindName( kind ),
+                       sampler );
+            return false;
+        }
+
+        property->SetImage( image );
+        return true;
     }
 
     // ---------------------------------------------------------------------------

@@ -88,6 +88,28 @@ namespace Desert::Graphic
             return m_PropertyNames;
         }
 
+        /**
+         * @brief Point @p sampler at its SHADER SCHEMA's own default texture — the operation "this slot
+         *        is empty" consists of.
+         *
+         * THE MISSING HALF OF SetImage, AND WHY IT IS ON `Material`. A texture property can be pointed at
+         * an image and, until М9, at nothing else: passing null left `m_Texture` null, `Apply()` skipped
+         * the write, and the descriptor went on holding the LAST image assigned. So a material could be
+         * given a texture and never have it taken away — clearing the slot in the editor emptied the
+         * `.demat` while the surface kept drawing the old map, a file and a picture disagreeing with
+         * nothing in between to notice. This is the same operation for a PBR material and for a
+         * data-driven one, so it lives once, on the base both of them are.
+         *
+         * The default comes from the shader's `Properties … = "white"` (`ShaderParam::DefaultTexture`),
+         * whose FIRST reader this is. A sampler the schema does not mention gets White, which is the
+         * colour the backend's unbound-descriptor fallback already held — the picture does not move for
+         * anything nobody has authored a default for.
+         *
+         * @return false when @p sampler is not a Texture2D of this material's shader (and then nothing is
+         *         written), true when the default was bound.
+         */
+        bool BindSchemaDefaultTexture( const std::string& sampler );
+
     protected:
         // Uploads all dirty TProperty members to the matching FieldProperty/Texture slot.
         // Exposed as protected so non-instance Bind() overrides (JFA, etc.) can flush manually.

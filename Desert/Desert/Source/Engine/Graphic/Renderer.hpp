@@ -9,6 +9,7 @@
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Geometry/Mesh.hpp>
 #include <Engine/Graphic/Texture.hpp>
+#include <Engine/Graphic/DefaultTextures.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 #include <Engine/Graphic/Image.hpp>
 
