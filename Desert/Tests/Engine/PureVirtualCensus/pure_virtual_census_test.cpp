@@ -126,8 +126,8 @@ namespace
     // are excluded, `lightweightvk` explicitly because it is vendored INSIDE our Vulkan folder.
     std::vector<fs::path> ProjectSources( const std::string& root )
     {
-        const char* trees[] = { "Desert/Desert/Source", "Desert/Common/Source", "Editor/Source",
-                                "Runtime/Source", "Tools" };
+        const char* trees[] = { "Desert/Desert/Source", "Desert/Common/Source", "Editor/Source", "Runtime/Source",
+                                "Tools" };
         std::vector<fs::path> files;
         for ( const char* tree : trees )
         {
@@ -135,12 +135,12 @@ namespace
             std::error_code ec;
             if ( !fs::exists( base, ec ) )
                 continue;
-            for ( auto it = fs::recursive_directory_iterator( base, ec );
-                  it != fs::recursive_directory_iterator(); ++it )
+            for ( auto it = fs::recursive_directory_iterator( base, ec ); it != fs::recursive_directory_iterator();
+                  ++it )
             {
                 if ( ec )
                     break;
-                const fs::path& p = it->path();
+                const fs::path&   p = it->path();
                 const std::string s = p.string();
                 if ( s.find( "ThirdParty" ) != std::string::npos ||
                      s.find( "lightweightvk" ) != std::string::npos )
@@ -156,9 +156,9 @@ namespace
 
     struct Tree
     {
-        std::vector<fs::path>              Files;
-        std::map<std::string, std::string> Code;      // path -> comment/string-stripped text
-        std::map<std::string, std::string> Raw;       // path -> as read (the include lines live here)
+        std::vector<fs::path>                        Files;
+        std::map<std::string, std::string>           Code;    // path -> comment/string-stripped text
+        std::map<std::string, std::string>           Raw;     // path -> as read (the include lines live here)
         std::map<std::string, std::set<std::string>> Closure; // path -> every project header it sees
     };
 
@@ -177,8 +177,8 @@ namespace
         std::map<std::string, std::set<std::string>> direct;
         for ( const auto& f : tree.Files )
         {
-            const std::string self = fs::weakly_canonical( f ).string();
-            const std::string& raw = tree.Raw[f.string()];
+            const std::string  self = fs::weakly_canonical( f ).string();
+            const std::string& raw  = tree.Raw[f.string()];
             for ( std::size_t at = 0; at < raw.size(); )
             {
                 const std::size_t hash = raw.find( "#include", at );
@@ -201,8 +201,8 @@ namespace
                     ++open;
                 if ( open >= raw.size() || ( raw[open] != '"' && raw[open] != '<' ) )
                     continue;
-                const char close = raw[open] == '"' ? '"' : '>';
-                const std::size_t end = raw.find( close, open + 1 );
+                const char        close = raw[open] == '"' ? '"' : '>';
+                const std::size_t end   = raw.find( close, open + 1 );
                 if ( end == std::string::npos )
                     continue;
                 const std::string name = raw.substr( open + 1, end - open - 1 );
@@ -269,9 +269,71 @@ namespace
     struct ClassSpan
     {
         std::string Name;
-        std::size_t Open;
-        std::size_t Close;
+        std::string BaseClause; // the text between the name and the '{', empty when there is none
+        std::size_t Open  = 0;
+        std::size_t Close = 0;
     };
+
+    // The base names in `: public A, B, private virtual C::D` — unqualified, because that is how the
+    // derived class's own declaration spells the name this census keys on.
+    std::vector<std::string> BaseNames( const std::string& clause )
+    {
+        std::vector<std::string> names;
+        const std::size_t        colon = clause.find( ':' );
+        if ( colon == std::string::npos )
+            return names;
+        // Template arguments hide commas that are not base separators: `: public Base<A, B>`.
+        int         depth = 0;
+        std::string current;
+        for ( std::size_t i = colon + 1; i < clause.size(); ++i )
+        {
+            const char c = clause[i];
+            if ( c == '<' )
+                ++depth;
+            else if ( c == '>' )
+                --depth;
+            if ( c == ',' && depth == 0 )
+            {
+                names.push_back( current );
+                current.clear();
+                continue;
+            }
+            if ( depth == 0 )
+                current.push_back( c );
+        }
+        names.push_back( current );
+
+        std::vector<std::string> cleaned;
+        for ( std::string& one : names )
+        {
+            // Drop the access/virtual keywords and any template argument list, keep the last
+            // `::`-qualified component.
+            for ( const char* keyword : { "public", "private", "protected", "virtual" } )
+            {
+                std::size_t at = one.find( keyword );
+                while ( at != std::string::npos )
+                {
+                    one.erase( at, std::string( keyword ).size() );
+                    at = one.find( keyword );
+                }
+            }
+            const std::size_t qualifier = one.rfind( "::" );
+            if ( qualifier != std::string::npos )
+                one.erase( 0, qualifier + 2 );
+
+            std::string ident;
+            for ( char c : one )
+            {
+                if ( IsIdentChar( c ) )
+                    ident.push_back( c );
+                else if ( !ident.empty() )
+                    break;
+            }
+            if ( !ident.empty() )
+                cleaned.push_back( ident );
+        }
+        return cleaned;
+    }
 
     // `class X {`, `class X final {`, `struct X : public Y {` — the name and the extent of its body.
     std::vector<ClassSpan> ClassSpans( const std::string& code )
@@ -313,7 +375,7 @@ namespace
                 else if ( code[j] == '}' && --depth == 0 )
                     break;
             }
-            spans.push_back( { name, scan, j } );
+            spans.push_back( { name, code.substr( at, scan - at ), scan, j } );
             i = at;
         }
         return spans;
@@ -352,7 +414,7 @@ namespace
         std::vector<PureVirtual> found;
         for ( const auto& file : tree.Files )
         {
-            const std::string& code  = tree.Code.at( file.string() );
+            const std::string&           code  = tree.Code.at( file.string() );
             const std::vector<ClassSpan> spans = ClassSpans( code );
 
             for ( std::size_t at = 0; ( at = code.find( "virtual", at ) ) != std::string::npos; at += 7 )
@@ -374,8 +436,8 @@ namespace
                 // default argument spells the same two characters — `SetData( ..., uint32_t offset = 0 )
                 // override;` — and matching anywhere reported four Vulkan overrides as pure virtuals.
                 std::size_t tail = decl.size();
-                while ( tail > 0 && ( decl[tail - 1] == ' ' || decl[tail - 1] == '\n' ||
-                                      decl[tail - 1] == '\t' || decl[tail - 1] == '\r' ) )
+                while ( tail > 0 && ( decl[tail - 1] == ' ' || decl[tail - 1] == '\n' || decl[tail - 1] == '\t' ||
+                                      decl[tail - 1] == '\r' ) )
                     --tail;
                 if ( tail == 0 || decl[tail - 1] != '0' )
                     continue;
@@ -450,8 +512,7 @@ namespace
                     ++paren;
                 if ( paren >= code.size() || code[paren] != '(' )
                     continue;
-                calls[code.substr( nameAt, at - nameAt )].push_back(
-                     fs::weakly_canonical( file ).string() );
+                calls[code.substr( nameAt, at - nameAt )].push_back( fs::weakly_canonical( file ).string() );
             }
         }
         return calls;
@@ -469,9 +530,10 @@ namespace
     // that can see the base ever calls. Each row says WHO decides, because an entry with no owner is
     // unreadable in a month — the rule ConfigOwnership's debt register already runs on.
     //
-    // Г8 closed two rows rather than listing them: `RenderSystem::Shutdown` (the task) and the orphan
+    // Г8 closed four rows rather than listing them: `RenderSystem::Shutdown` (the task); the orphan
     // duplicate of ImGuiLayer.hpp that declared a second `Desert::ImGui::ImGuiLayer` with the same
-    // fully-qualified name and was included by nothing.
+    // fully-qualified name and was included by nothing; and `Editor::Render::IRender::Init`/`::Render`,
+    // an interface nothing derived from (see NoAbstractBaseIsLeftWithoutASingleImplementation).
     constexpr CensusRow k_Census[] = {
          // ---- ONE ROW THAT IS A DESIGN QUESTION, NOT A CLEANUP -------------------------------------
          // Thirteen asset types implement Unload() and NOTHING in this engine ever evicts an asset. The
@@ -481,7 +543,8 @@ namespace
            "OWNER DECIDES: does this engine want asset eviction? 13 implementations, no caller." },
 
          // ---- ALREADY FILED --------------------------------------------------------------------------
-         { "MaterialProperty", "Clone", "Desert/Desert/Source/Engine/Graphic/Materials/Properties/MaterialProperty.hpp",
+         { "MaterialProperty", "Clone",
+           "Desert/Desert/Source/Engine/Graphic/Materials/Properties/MaterialProperty.hpp",
            "M9 owns this one: four implementations, zero call sites." },
 
          // ---- THE VULKAN BACKEND'S BIND VOCABULARY AND DEAD ACCESSORS --------------------------------
@@ -523,7 +586,8 @@ namespace
            "FENCED (API/Vulkan): outputs are set, never read back." },
          { "Device", "IsFormatSupported", "Desert/Desert/Source/Engine/Core/Device.hpp",
            "FENCED (API/Vulkan): format support is asked through the capability struct instead." },
-         { "MaterialBackend", "ApplyPushConstants", "Desert/Desert/Source/Engine/Graphic/Materials/MaterialBackend.hpp",
+         { "MaterialBackend", "ApplyPushConstants",
+           "Desert/Desert/Source/Engine/Graphic/Materials/MaterialBackend.hpp",
            "FENCED (API/Vulkan): push constants are written by the pipeline, not the material backend." },
          { "UniformImage2D", "GetImageHash", "Desert/Desert/Source/Engine/ShaderResources/UniformImage2D.hpp",
            "FENCED (API/Vulkan): the descriptor caches key off Image::GetHash directly." },
@@ -535,12 +599,10 @@ namespace
          // like the API a custom title bar would need, and whether that is coming is the owner's call.
          { "Window", "GetTitle", "Desert/Desert/Source/Engine/Core/Window.hpp",
            "OWNER DECIDES: the custom-title-bar surface, implemented on both platforms, called nowhere." },
-         { "Window", "SetTitle", "Desert/Desert/Source/Engine/Core/Window.hpp",
-           "OWNER DECIDES: same surface." },
+         { "Window", "SetTitle", "Desert/Desert/Source/Engine/Core/Window.hpp", "OWNER DECIDES: same surface." },
          { "Window", "SetWindowSize", "Desert/Desert/Source/Engine/Core/Window.hpp",
            "OWNER DECIDES: same surface." },
-         { "Window", "Maximize", "Desert/Desert/Source/Engine/Core/Window.hpp",
-           "OWNER DECIDES: same surface." },
+         { "Window", "Maximize", "Desert/Desert/Source/Engine/Core/Window.hpp", "OWNER DECIDES: same surface." },
          { "Window", "IsWindowMaximized", "Desert/Desert/Source/Engine/Core/Window.hpp",
            "OWNER DECIDES: same surface." },
          { "Window", "IsWindowMinimized", "Desert/Desert/Source/Engine/Core/Window.hpp",
@@ -584,12 +646,11 @@ TEST( PureVirtualCensus, TheScanSeesTheTreeAtAll )
     // the form "nothing unexpected was found", so a scan that found NOTHING passes all of them while
     // checking nothing at all. These are the floors under that.
     const std::string root = RepoRoot();
-    ASSERT_FALSE( root.empty() ) << "could not locate the repository from "
-                                 << fs::current_path().string();
+    ASSERT_FALSE( root.empty() ) << "could not locate the repository from " << fs::current_path().string();
 
     const Tree tree = ReadTree( root );
-    ASSERT_GT( tree.Files.size(), 800u ) << "only " << tree.Files.size()
-                                         << " sources walked -- the walk, not the engine, is what is wrong";
+    ASSERT_GT( tree.Files.size(), 800u )
+         << "only " << tree.Files.size() << " sources walked -- the walk, not the engine, is what is wrong";
 
     const std::vector<PureVirtual> pure = PureVirtuals( root, tree );
     EXPECT_GT( pure.size(), 150u ) << "only " << pure.size()
@@ -609,8 +670,8 @@ TEST( PureVirtualCensus, EveryDeadPureVirtualIsInTheRegisterAndEveryRegisterRowI
     const std::string root = RepoRoot();
     ASSERT_FALSE( root.empty() );
 
-    const Tree tree = ReadTree( root );
-    const std::vector<PureVirtual> pure = PureVirtuals( root, tree );
+    const Tree                                            tree  = ReadTree( root );
+    const std::vector<PureVirtual>                        pure  = PureVirtuals( root, tree );
     const std::map<std::string, std::vector<std::string>> calls = DispatchedCalls( tree );
 
     std::map<std::string, PureVirtual> dead;
@@ -662,6 +723,56 @@ TEST( PureVirtualCensus, EveryDeadPureVirtualIsInTheRegisterAndEveryRegisterRowI
              << Key( row.Class, row.Method ) << " has a census row (" << row.Verdict
              << ") and is NOT dead any more -- it is called, or it is gone. Delete the row: a census "
                 "that pins nothing passes silently.";
+    }
+}
+
+TEST( PureVirtualCensus, NoAbstractBaseIsLeftWithoutASingleImplementation )
+{
+    // THE SHAPE THE INCLUDE-CLOSURE RULE ABOVE CANNOT SEE, and it was live in the tree.
+    // `Editor::Render::IRender` declared `Init()` and `Render()`, was included by exactly one header, and
+    // NOTHING derived from it — so the interface could never be instantiated and its two pure virtuals
+    // could never be called. The rule above missed it for a reason worth writing down: the header sits in
+    // the include closure of half the editor, and `->Init(` and `->Render(` are two of the commonest calls
+    // in that half, so every one of them was attributed to it. Method names collide; an inheritance edge
+    // does not.
+    //
+    // This test needs no register: an abstract base with no derived class is dead by construction, there
+    // are none left, and one appearing is always worth a conversation.
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    const Tree tree = ReadTree( root );
+
+    std::map<std::string, std::string> abstractBases; // class -> where it is declared
+    std::set<std::string>              hasDerived;
+    for ( const auto& file : tree.Files )
+    {
+        const std::string&           code  = tree.Code.at( file.string() );
+        const std::vector<ClassSpan> spans = ClassSpans( code );
+        for ( const auto& span : spans )
+        {
+            for ( const std::string& base : BaseNames( span.BaseClause ) )
+                hasDerived.insert( base );
+        }
+    }
+
+    const std::vector<PureVirtual> pure = PureVirtuals( root, tree );
+    for ( const auto& entry : pure )
+        abstractBases.emplace( entry.Class, entry.Header + ":" + std::to_string( entry.Line ) );
+
+    ASSERT_GT( abstractBases.size(), 30u )
+         << "only " << abstractBases.size() << " abstract bases found; the class scan has stopped working";
+    ASSERT_GT( hasDerived.size(), 30u ) << "only " << hasDerived.size()
+                                        << " base names parsed out of base-clauses; inheritance is not "
+                                           "being read and every base would look orphaned";
+
+    for ( const auto& base : abstractBases )
+    {
+        EXPECT_EQ( hasDerived.count( base.first ), 1u )
+             << base.first << " (" << base.second
+             << ") declares a pure virtual and NOTHING in the repository derives from it. It cannot be "
+                "instantiated, so nothing it declares can ever run. Delete the interface, or give it the "
+                "implementation it was written for.";
     }
 }
 

@@ -319,7 +319,8 @@ TEST( TeardownOrder, EverySiteThatDestroysASceneRendererIdlesTheDeviceFirst )
              << " without waiting for the device. The last submitted frame may still be executing against "
                 "its pipelines, framebuffers and descriptor pools.";
         if ( idle != std::string::npos )
-            EXPECT_LT( idle, drops ) << site.Signature << " waits for the device AFTER releasing the "
+            EXPECT_LT( idle, drops ) << site.Signature
+                                     << " waits for the device AFTER releasing the "
                                         "renderer, which is the same as not waiting at all.";
     }
 }
