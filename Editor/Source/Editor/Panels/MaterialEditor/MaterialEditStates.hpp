@@ -229,6 +229,24 @@ namespace Desert::Editor::MaterialEdit
         }
     }
 
+    /// WHAT A ROW FALLS BACK TO when this material says nothing about it — and the name of the thing this
+    /// window calls "the default", which is NOT one thing.
+    ///
+    /// A BASE material inherits from its SHADER: `Properties … = 0.45` in the `.shader` file, which is a
+    /// compile-time constant nobody can edit from this window. An INSTANCE inherits from its PARENT chain,
+    /// which is another `.demat` somebody can open and change tomorrow. Details' reset (Д29) has only the
+    /// first of those, because a component's default is `TypeInfo::GetDefaultInstance` and there is no
+    /// second source — so the Details rule could not be copied here, it had to be generalised.
+    ///
+    /// One function, because EffectiveParamValue and the reset below must not each decide what "inherited"
+    /// means: a reset that handed a row the schema default while the row was showing the parent's value
+    /// would move the picture to a third number that nothing on screen ever displayed.
+    [[nodiscard]] inline glm::vec4 InheritedParamValue( const Assets::MaterialData*                 parentData,
+                                                        const ::Desert::Core::Formats::ShaderParam& p )
+    {
+        return parentData ? parentData->GetParam( p.Name, p.Default ) : p.Default;
+    }
+
     /// The value a row SHOWS: this material's own override, else the parent's effective value (instance
     /// mode), else the schema default.
     ///
@@ -239,8 +257,89 @@ namespace Desert::Editor::MaterialEdit
                                                         const Assets::MaterialData*                 parentData,
                                                         const ::Desert::Core::Formats::ShaderParam& p )
     {
-        const glm::vec4 fallback = parentData ? parentData->GetParam( p.Name, p.Default ) : p.Default;
-        return data.GetParam( p.Name, fallback );
+        return data.GetParam( p.Name, InheritedParamValue( parentData, p ) );
+    }
+
+    /// ── THE RESET, AND THE THREE THINGS IT IS NOT ONE OF ───────────────────────────────────────────────
+    ///
+    /// The Material Editor had no reset at all until M7, and the reason it could not simply borrow Details'
+    /// (Д29) is that "default" names three different values here and only one of them is a type's
+    /// default-constructed instance:
+    ///
+    ///   1. THE SHADER'S DEFAULT — `ShaderParam::Default`, parsed from `Properties … = 0.45`. What a BASE
+    ///      material falls back to. Nothing in this window can change it; it changes when the `.shader`
+    ///      does.
+    ///   2. THE PARENT'S VALUE — what an INSTANCE falls back to, resolved through the chain by
+    ///      MaterialService. A moving target: editing the parent moves every child that is not pinned.
+    ///   3. "RESET OVERRIDES" — the toolbar button, instance-only, which is (2) applied to every row at
+    ///      once. It existed before this one and is still the only way to clear the rows that carry a
+    ///      value EQUAL to the parent's (see RowReset::None below for why those get no arrow).
+    ///
+    /// The row control is (1) or (2) depending on the document, never (3).
+    enum class RowReset
+    {
+        None,            ///< the row is already showing what it inherits; there is nothing to hand back
+        ToShaderDefault, ///< base material: back to the value the `.shader` declares
+        ToParentValue,   ///< instance: drop this row's override, back to the parent chain
+    };
+
+    /// WHAT A RESET ON THIS ROW WOULD MEAN, and the ONE predicate the arrow is drawn from.
+    ///
+    /// THE RULE, in one sentence and readable in both directions: **a reset is offered exactly when the row
+    /// is showing something other than what it inherits.** Details' Д29 rule ("the arrow appears only for a
+    /// value different from the default") is the same sentence with the only fallback it has.
+    ///
+    /// WHY NOT "the material stores an entry for this row", which is the other obvious rule and the one the
+    /// instance star already draws from. Because a `.demat` stores far more than it changes: measured on
+    /// this repository's own `M_O4_Both_Clouds.demat`, 23 of its 28 stored parameters are byte-equal to the
+    /// shader's default — they were written by the migration that moved the cloud look off the component,
+    /// not by an artist. That rule would put 28 arrows on a material with 5 real deviations, and an arrow
+    /// on every row is an arrow on none.
+    ///
+    /// WHAT THAT LEAVES UNCOVERED, said out loud rather than hidden: an INSTANCE may store an override that
+    /// happens to equal its parent's value today. That is not a no-op — it is a PIN, and it will stop
+    /// tracking the parent the moment somebody edits the parent. It gets the star (which asks "does this row
+    /// track the parent?") and no arrow (which asks "is this row showing something else?"), because those
+    /// are two different questions. "Reset Overrides" is what clears it, and its tooltip says so.
+    ///
+    /// TEXTURE AND ASSET-REFERENCE ROWS GET NO ARROW EITHER, for two different reasons, and neither is an
+    /// oversight: a cloud type / layout slot already carries its own empty entry in its combo ("Default
+    /// (cumulus congestus)", "None (procedural weather)"), so an arrow would be a second control for the
+    /// one action; and a 2D texture slot cannot be UNBOUND at all today — Graphic::DataDrivenMaterial::
+    /// SetTexture refuses a null image and MaterialFactory::ApplyShaderAsset skips handle 0, so erasing the
+    /// entry would clear the file and leave the ball still sampling the old texture. A control that changes
+    /// the document and not the picture is worse than no control (DC §1.3).
+    [[nodiscard]] inline RowReset ResetOfferedFor( const Assets::MaterialData&                 data,
+                                                   const Assets::MaterialData*                 parentData,
+                                                   const ::Desert::Core::Formats::ShaderParam& p, bool isInstance )
+    {
+        if ( p.IsTexture || p.IsAssetRef() )
+            return RowReset::None;
+
+        if ( EffectiveParamValue( data, parentData, p ) == InheritedParamValue( parentData, p ) )
+            return RowReset::None;
+
+        return isInstance ? RowReset::ToParentValue : RowReset::ToShaderDefault;
+    }
+
+    /// What the arrow says when hovered. Two sentences and not one, because the artist has to know WHICH of
+    /// the three the button is about before pressing it — the whole reason this enum exists.
+    [[nodiscard]] inline const char* ResetTooltip( RowReset kind )
+    {
+        switch ( kind )
+        {
+            case RowReset::ToParentValue:
+                return "Drop this override, back to the parent material's value.\nUse Reset Overrides in the "
+                       "toolbar to drop them all.";
+            case RowReset::ToShaderDefault:
+                return "Reset to the value the shader declares for this parameter.\nThe material stops "
+                       "carrying a value of its own here.";
+            case RowReset::None:
+            default:
+                // Not reachable from a drawn arrow — the arrow is only drawn when a reset is offered. Named
+                // rather than left to a fallthrough so that adding a kind fails to compile silently nowhere.
+                return "";
+        }
     }
 
     /// Why the channel cannot WRITE this property, or empty when it can.

@@ -2,7 +2,11 @@
 
 #include "MaterialShaderRebuild.hpp"
 
+#include "../Clouds/CloudDocumentOpen.hpp"
+
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Import/TextureDnD.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
@@ -443,9 +447,26 @@ namespace Desert::Editor
         // scene's own layer carries tracing budgets, a region size and a planet radius that live on its
         // component and not in any material. A dome that looked right would otherwise be read as a
         // promise about the level, which it cannot make.
+        // AND WHAT IT COSTS TO MOVE, because the sentence that stood here promised the opposite of what
+        // the artist sees. "The layer picks up an edit here the same frame" is true of the VALUE and false
+        // of the PICTURE, and the difference is seconds: about half of this material's parameters — the
+        // ones that decide WHERE the clouds are, rather than how they are lit — are inputs to a baked
+        // 256x32x256 field of a few thousand cloud bodies, and moving one starts that bake again. Measured
+        // on this machine in Debug, from the edit landing to the new volume being collected: 3.3 s, 4.7 s,
+        // 5.3 s, 5.9 s, 8.0 s, 10.9 s across two materials — the spread is the number of bodies, so raising
+        // Coverage costs more than lowering it. The lighting and erosion parameters re-bake nothing and
+        // move within the ten frames the temporal resolve needs.
+        //
+        // Said in the panel and not only in a report, because "I moved it and nothing happened" was the
+        // owner's report twice, and a promise the window cannot keep is worse than silence — this is the
+        // fifth such sentence in a week.
         return "This is a preview sky built from this material alone. The level's cloud layer carries its "
                "own tracing budgets and region size; open a scene with a volumetric cloud component to see "
-               "it there. The layer picks up an edit here the same frame.";
+               "it there - it reads the same values, and shows them on its own next frame.\n"
+               "Lighting and detail parameters move the picture within a few frames. The ones that place "
+               "the clouds - coverage, the weather and placement numbers, the layout, the cloud types - "
+               "rebuild the cloud volume first, which takes SEVERAL SECONDS in a Debug build; the sky keeps "
+               "showing the previous one until it is ready.";
     }
 
     std::optional<::Desert::Core::Formats::ShaderDomain> MaterialEditorPanel::EffectiveDomain() const
@@ -771,7 +792,14 @@ namespace Desert::Editor
             }
             if ( ImGui::IsItemHovered() )
                 // ASCII: an em dash here draws as '?' — measured, see WhatTheDomainDrawsInstead.
-                ImGui::SetTooltip( "Drop every override, back to the parent's values" );
+                //
+                // IT SAYS WHAT THE ROW ARROWS DO NOT, and that sentence is the whole reason both controls
+                // exist. A row arrow appears only where the value DIFFERS from the parent's; an override
+                // that happens to equal the parent's value today is still a pin that will stop tracking it
+                // tomorrow, and this button is the only thing that clears those.
+                ImGui::SetTooltip( "Drop every override, back to the parent's values.\nIncluding the ones "
+                                   "that match the parent already - those carry no row arrow, because "
+                                   "nothing on screen would change." );
         }
 
         // WHICH OF THE THREE STATES THIS WINDOW IS IN, said out loud. Two different "dirty"s, so two
@@ -988,6 +1016,40 @@ namespace Desert::Editor
                 ImGui::PopTextWrapPos();
                 ImGui::EndTooltip();
             }
+
+            // RESET TO WHAT THIS ROW INHERITS — the shader's declared default on a base material, the
+            // parent chain's value on an instance. Which of the two, and why the two are not one thing, is
+            // MaterialEdit::ResetOfferedFor; this site only draws what it is told.
+            //
+            // ALWAYS VISIBLE WHEN OFFERED, NEVER ON HOVER, and that is a decision rather than a shortcut.
+            // Details' row furniture was laid out from a hover flag, and pressing its reset arrow made the
+            // row report itself unhovered on the next frame, which moved the arrow one button-width out
+            // from under the press (555e8681). Nothing here is positioned from hover, so that trap cannot
+            // reach this control — and a condition that is true or false for the whole drag is also what
+            // keeps the arrow from flickering while a neighbouring slider is dragged past it.
+            if ( const MaterialEdit::RowReset reset =
+                      MaterialEdit::ResetOfferedFor( data, parentData, p, isInstance );
+                 reset != MaterialEdit::RowReset::None )
+            {
+                // Right-aligned in the LABEL cell, as in Details — the value column is the widget's, and a
+                // button sharing it would move every slider's right edge by a button width on the rows that
+                // happen to differ from their default.
+                const float buttonWidth = ImGui::GetFrameHeight();
+                ImGui::SameLine();
+                if ( const float avail = ImGui::GetContentRegionAvail().x; avail > buttonWidth )
+                    ImGui::SetCursorPosX( ImGui::GetCursorPosX() + avail - buttonWidth );
+
+                ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetSelectedColor() );
+                // The id carries the parameter name: every row draws the same glyph, and ImGui keys a
+                // button on its label, so one id would make all thirty-three rows the same button.
+                if ( ImGui::SmallButton( ( ICON_MDI_BACKUP_RESTORE + hiddenId + "_reset" ).c_str() ) )
+                    ResetParam( p );
+                ImGui::PopStyleColor( 2 );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "%s", MaterialEdit::ResetTooltip( reset ) );
+            }
+
             ImGui::TableNextColumn();
             ImGui::PushItemWidth( -FLT_MIN );
 
@@ -1097,7 +1159,9 @@ namespace Desert::Editor
                     continue;
                 }
 
-                std::string disp = "<drop texture>";
+                // A NAME FOR THE EMPTY STATE THAT IS NOT AN INSTRUCTION TO DRAG, because dragging is no
+                // longer the only way in — see the picker below.
+                std::string disp = "<none - pick or drop a texture>";
                 if ( const uint64_t h = data.GetTexture( p.Name ); h != 0 && m_AssetManager )
                 {
                     if ( auto tex = m_AssetManager->FindByHandle<Assets::TextureAsset>( Common::UUID( h ) ) )
@@ -1108,7 +1172,24 @@ namespace Desert::Editor
                     }
                 }
 
-                ImGui::Button( ( disp + hiddenId ).c_str(), ImVec2( -FLT_MIN, 0.0f ) );
+                // THE BUTTON DOES SOMETHING NOW. Its result used to be DISCARDED — the row drew a control
+                // that looks pressable, said "<drop texture>", and answered a click with nothing, while
+                // the CUBE slot forty lines above opened a picker on exactly the same gesture. An artist
+                // who clicks and waits has no way to tell that apart from a broken editor, and "I cannot
+                // add a texture in the material editor" is what it gets reported as. Same popup, same
+                // shape, same reason as the cube slot's (DC §1.3: a control that does nothing may not
+                // ship).
+                //
+                // NO "None" ENTRY, and its absence is a decision with a mechanism behind it rather than an
+                // omission: a texture cannot be UNBOUND today. Graphic::DataDrivenMaterial::SetTexture
+                // refuses a null image and MaterialFactory::ApplyShaderAsset skips handle 0, so clearing
+                // the slot would empty the `.demat` and leave the material still sampling the old texture
+                // — a control that changes the document and not the picture, which is the thing this fix
+                // is about. Restoring the sampler to the schema's own `DefaultTexture` is what unbinding
+                // needs, and that field currently has NO reader anywhere in the engine; it is filed rather
+                // than half-built here.
+                if ( ImGui::Button( ( disp + hiddenId ).c_str(), ImVec2( -FLT_MIN, 0.0f ) ) )
+                    ImGui::OpenPopup( ( "texture_selector" + hiddenId ).c_str() );
                 if ( ImGui::BeginDragDropTarget() )
                 {
                     if ( const ImGuiPayload* pl =
@@ -1128,6 +1209,39 @@ namespace Desert::Editor
                         }
                     }
                     ImGui::EndDragDropTarget();
+                }
+                if ( ImGui::BeginPopup( ( "texture_selector" + hiddenId ).c_str() ) )
+                {
+                    if ( m_AssetManager )
+                    {
+                        const auto textures = m_AssetManager->FindAllByType<Assets::TextureAsset>();
+                        const uint64_t bound = data.GetTexture( p.Name );
+                        for ( const auto& [handle, texture] : textures )
+                        {
+                            // The SOURCE path when there is one, exactly as the button label above resolves
+                            // it: a cooked asset's own filepath is a hash nobody recognises, and a list of
+                            // those is a list of nothing.
+                            const auto& source = texture->GetSourcePath();
+                            const auto  path =
+                                 !source.empty() ? source : texture->GetMetadata().Filepath.string();
+                            const std::string name = std::filesystem::path( path ).filename().string();
+                            if ( ImGui::Selectable( name.c_str(), static_cast<uint64_t>( handle ) == bound ) )
+                            {
+                                data.SetTexture( p.Name, static_cast<uint64_t>( handle ) );
+                                changed = true;
+                            }
+                            if ( static_cast<uint64_t>( handle ) == bound )
+                                ImGui::SetItemDefaultFocus();
+                        }
+                        if ( textures.empty() )
+                        {
+                            // SAID, not an empty popup that reads as a broken menu. The list is what the
+                            // project has imported, so "there is nothing here" is an instruction.
+                            ImGui::TextDisabled( "No textures imported yet - drop an image into\n"
+                                                 "Resources/Assets/Textures, or drag one onto this slot." );
+                        }
+                    }
+                    ImGui::EndPopup();
                 }
                 ImGui::PopItemWidth();
                 continue;
@@ -1279,10 +1393,54 @@ namespace Desert::Editor
             ImGui::EndCombo();
         }
 
+        // OPEN WHAT IS IN THE SLOT. A picture becomes part of the sky by being imported INTO a layout, and
+        // until this button the only way to reach that document from here was to go and find the file in
+        // the Content Browser — which is why "I cannot add a texture to a cloud material" was the report.
+        // The slot now names its own next step instead of being a dead end.
+        if ( handle != 0 && m_AssetManager )
+        {
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( ( "Edit" + hiddenId + "_open" ).c_str() ) )
+            {
+                if ( isType )
+                {
+                    if ( auto asset =
+                              m_AssetManager->FindByHandle<Assets::CloudTypeAsset>( Common::UUID( handle ) ) )
+                        QueueAssetOpenRequest( asset->GetMetadata().Handle, Assets::CloudTypeAsset::GetTypeID() );
+                }
+                else if ( auto asset =
+                               m_AssetManager->FindByHandle<Assets::CloudLayoutAsset>( Common::UUID( handle ) ) )
+                {
+                    QueueAssetOpenRequest( asset->GetMetadata().Handle, Assets::CloudLayoutAsset::GetTypeID() );
+                }
+            }
+            if ( ImGui::IsItemHovered() )
+            {
+                ImGui::SetTooltip( isType ? "Open this cloud type in its own document."
+                                          : "Open this layout in its own document - where a picture is "
+                                            "imported into it, painted on, and exported." );
+            }
+        }
+
         if ( ImGui::BeginDragDropTarget() )
         {
-            if ( const ImGuiPayload* pl =
-                      ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::AssetFile ) )
+            // BOTH PAYLOADS, and accepting only the generic one was a live defect here exactly as it was in
+            // CloudLayoutPanel's image slots. FileExplorerPanel::EmitAssetDragSource types the payload by
+            // FileType, and every image is FileType::Texture — so the browser emits TEXTURE_ASSET for a
+            // `.png` and falls back to AssetFile only for what it has no specific type for (which is what
+            // `.dclayout` and `.decloudtype` are). An id that does not match fails SILENTLY in ImGui:
+            // nothing logs, nothing draws, the drop simply does nothing. Accepting the texture payload is
+            // what lets the refusal below exist at all — a drop this target never sees cannot be answered.
+            const ImGuiPayload* pl = nullptr;
+            for ( const char* accepted :
+                  { ::Desert::Editor::DragPayloads::AssetFile, ::Desert::Editor::DragPayloads::TextureAsset } )
+            {
+                pl = ImGui::AcceptDragDropPayload( accepted );
+                if ( pl )
+                    break;
+            }
+
+            if ( pl )
             {
                 const std::string path( static_cast<const char*>( pl->Data ),
                                         pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
@@ -1290,7 +1448,19 @@ namespace Desert::Editor
                 // payload for every type it has no icon for — without it this slot would bind a dropped
                 // .dcnv to a file that can never parse as what the slot means.
                 const char* wantedExt = isType ? Assets::kCloudTypeExtension : Assets::kCloudLayoutExtension;
-                if ( m_AssetManager && !path.empty() && std::filesystem::path( path ).extension() == wantedExt )
+                if ( m_AssetManager && !path.empty() && std::filesystem::path( path ).extension() != wantedExt )
+                {
+                    // SAID, NOT SWALLOWED (DC §1.4). A drop that lands on the right slot and does nothing is
+                    // indistinguishable from a broken editor, and the artist's next move is to try it again
+                    // harder. The sentence names what arrived, what this slot takes, and the step that
+                    // actually gets a picture into the sky — because for a picture there IS one and it is
+                    // two clicks away, not a refusal to be argued with.
+                    m_DropRefusal.Param   = p.Name;
+                    m_DropRefusal.Message = WhyThatCannotGoInThisSlot( path, isType );
+                    LOG_WARN( "[MaterialEditor] '{}' was dropped on the '{}' slot and was not bound: {}", path,
+                              p.Name, m_DropRefusal.Message );
+                }
+                else if ( m_AssetManager && !path.empty() )
                 {
                     if ( isType )
                     {
@@ -1326,12 +1496,92 @@ namespace Desert::Editor
                             changed = true;
                         }
                     }
+
+                    // A FILE OF THE RIGHT KIND THAT WOULD NOT LOAD used to leave the slot untouched and say
+                    // nothing, which looks exactly like the payload mismatch above and has a completely
+                    // different cause. Both are now answered; only the answers differ.
+                    if ( !changed )
+                    {
+                        m_DropRefusal.Param = p.Name;
+                        m_DropRefusal.Message =
+                             "'" + std::filesystem::path( path ).filename().string() +
+                             "' is the right kind of file for this slot but would not load. The load error "
+                             "above says why; the slot was left as it was.";
+                        LOG_ERROR( "[MaterialEditor] '{}' was dropped on the '{}' slot and would not load, so "
+                                   "the slot keeps what it had.",
+                                   path, p.Name );
+                    }
                 }
             }
             ImGui::EndDragDropTarget();
         }
 
+        // WHY THE LAST DROP ON THIS ROW DID NOTHING, under the row it was aimed at. In the panel and not
+        // only in the log, because the log is a different window and the artist is looking here — and
+        // because "I dropped it and nothing happened" is precisely the report this exists to answer.
+        // Cleared by any successful bind on this row, so it cannot outlive the confusion it explains.
+        if ( changed && m_DropRefusal.Param == p.Name )
+            m_DropRefusal = {};
+
+        if ( m_DropRefusal.Param == p.Name && !m_DropRefusal.Message.empty() )
+        {
+            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.45f, 0.35f, 1.0f ) );
+            ImGui::PushTextWrapPos( 0.0f );
+            ImGui::TextUnformatted( m_DropRefusal.Message.c_str() );
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+        }
+
         return changed;
+    }
+
+    std::string MaterialEditorPanel::WhyThatCannotGoInThisSlot( const std::string& path, bool isType )
+    {
+        const std::string name      = std::filesystem::path( path ).filename().string();
+        const std::string extension = std::filesystem::path( path ).extension().string();
+
+        // A PICTURE IS THE CASE THIS FUNCTION EXISTS FOR, and the answer is a route rather than a "no".
+        // Unreal's cloud material takes two LAYOUT TEXTURES and so does ours (O-4) — but a layout is not a
+        // picture: it carries four species channels AND an add/remove mask, which one image cannot express,
+        // which is exactly why CloudLayoutPanel imports the pattern and the mask as two separate pictures.
+        // So the picture goes into a `.dclayout`, and the `.dclayout` comes here.
+        static constexpr const char* kImageExtensions[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".gif" };
+        for ( const char* image : kImageExtensions )
+        {
+            if ( extension != image )
+                continue;
+
+            if ( isType )
+            {
+                return "'" + name +
+                       "' is a picture, and this slot takes a cloud TYPE (.decloudtype) - the altitudes, "
+                       "silhouette and density of a kind of cloud, which no image carries. Make one with "
+                       "Content Browser > right-click > New Cloud Asset > Cloud Type.";
+            }
+            return "'" + name +
+                   "' is a picture, and this slot takes a cloud LAYOUT (.dclayout). A layout is not an "
+                   "image: it carries this layer's four species channels AND an add/remove mask, which one "
+                   "picture cannot express. Make one with Content Browser > right-click > New Cloud Asset > "
+                   "Cloud Layout, open it, and use 'Pattern image...' to bring this picture in - then drop "
+                   "the .dclayout here.";
+        }
+
+        // The other cloud formats are the near misses: they arrive on the same generic payload, they look
+        // like they belong, and naming which of the two slots wants which is the whole of the answer.
+        if ( extension == Assets::kCloudTypeExtension || extension == Assets::kCloudLayoutExtension ||
+             extension == Assets::kCloudNoiseVolumeExtension ||
+             extension == Assets::kCloudModellingVolumeExtension )
+        {
+            return "'" + name + "' is a " + extension + " and this slot takes a " +
+                   ( isType ? std::string( Assets::kCloudTypeExtension ) + " (a kind of cloud)"
+                            : std::string( Assets::kCloudLayoutExtension ) + " (a painted map of the sky)" ) +
+                   ".";
+        }
+
+        return "'" + name + "' is not something this slot can take. It takes a " +
+               ( isType ? std::string( Assets::kCloudTypeExtension )
+                        : std::string( Assets::kCloudLayoutExtension ) ) +
+               ".";
     }
 
     void MaterialEditorPanel::DrawPreviewSceneTab()
@@ -1622,6 +1872,27 @@ namespace Desert::Editor
             return false;
 
         drawn->Data().SetParam( p.Name, value );
+        PublishToRuntime( *drawn, drawn->Data().IsInstance() );
+        return true;
+    }
+
+    bool MaterialEditorPanel::ResetParam( const ::Desert::Core::Formats::ShaderParam& p )
+    {
+        // THE DRAWN material, resolved here for the reason WriteParam resolves it here: the working copy is
+        // the only thing this window may edit, and no caller gets to hand in the subject instead.
+        const auto drawn = DrawnMaterial();
+        if ( !drawn || !m_WorkingCopy )
+            return false;
+
+        if ( !drawn->Data().RemoveParam( p.Name ) )
+            return false;
+
+        // The publish is what makes the ball show the inherited value again, and it is the SAME publish an
+        // ordinary edit makes. For a base material MaterialFactory::ApplyShaderAsset seeds every schema
+        // default before overlaying what the asset stores, so a removed entry genuinely reverts on the GPU
+        // rather than leaving the last written value behind; for an instance the global stamp drops the
+        // cached MaterialInstances and they are rebuilt from the chain, which is where the parent's value
+        // comes back from.
         PublishToRuntime( *drawn, drawn->Data().IsInstance() );
         return true;
     }

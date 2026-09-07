@@ -98,6 +98,29 @@ namespace Desert::Assets
             Params.push_back( { std::string( name ), value } );
         }
 
+        // STOP SAYING ANYTHING ABOUT @p name. Returns whether an entry was actually removed.
+        //
+        // THE PAIR OF SetParam, and erasing is not the same as writing the default in. What this material
+        // is silent about is answered by whoever reads it — the shader's `Properties … = 0.45` for a base
+        // material, the parent chain for an instance (MaterialService::ResolveOverrides) — and that answer
+        // is resolved at READ time. Writing the default in would freeze today's answer into the file, so a
+        // later edit to the parent, or to the shader, would stop reaching this material. That is a pin, and
+        // it is the opposite of a reset.
+        //
+        // Order of the surviving entries is preserved: MaterialData::Params is compared by NAME
+        // (MaterialEdit::AuthoredValuesEqual), so order carries no meaning — but a reorder here would show
+        // up as a spurious diff in every `.demat` the editor rewrites.
+        bool RemoveParam( std::string_view name )
+        {
+            for ( auto it = Params.begin(); it != Params.end(); ++it )
+                if ( it->Name == name )
+                {
+                    Params.erase( it );
+                    return true;
+                }
+            return false;
+        }
+
         uint64_t GetTexture( std::string_view name ) const
         {
             for ( const auto& t : Textures )

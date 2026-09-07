@@ -179,6 +179,20 @@ namespace Desert::Editor
         bool DrawCloudAssetRef( Assets::MaterialData& data, const ::Desert::Core::Formats::ShaderParam& p,
                                 const std::string& hiddenId );
 
+        /// Why @p path cannot be bound to a cloud type slot (@p isType) or a cloud layout slot — one
+        /// sentence, naming what arrived, what the slot takes, and, for the case this exists for, the two
+        /// clicks that get a PICTURE into the sky.
+        ///
+        /// A drop of the wrong thing used to do nothing and say nothing, which is what "I cannot add a
+        /// texture to a cloud material" turned out to mean: the Content Browser types its drag payload by
+        /// FileType, so a `.png` travels as TEXTURE_ASSET while this slot accepted only the generic
+        /// AssetFile — and a payload id that does not match fails SILENTLY in ImGui. The slot now accepts
+        /// both and answers the ones it cannot take (DC §1.4).
+        ///
+        /// Static and pure: it is a function of a path and a slot kind, so a suite can hold it. Nothing
+        /// else in this window can be reached by one.
+        [[nodiscard]] static std::string WhyThatCannotGoInThisSlot( const std::string& path, bool isType );
+
         bool DrawParameters( Assets::SurfaceMaterialAsset& asset, const Assets::MaterialData* parentData,
                              bool isInstance );
 
@@ -248,6 +262,24 @@ namespace Desert::Editor
         // that came from the channel turns that into a refusal with a reason, and the widget cannot reach
         // it at all because it is disabled in exactly that state.
         bool WriteParam( const ::Desert::Core::Formats::ShaderParam& p, const glm::vec4& value );
+
+        // THE ONE UNWRITE, and the pair of WriteParam above — same working copy, same publish, same
+        // reasoning about why there is exactly one of it.
+        //
+        // IT IS AN EDIT AND IT BEHAVES LIKE EVERY OTHER EDIT, which is the lesson Д29 paid for in Details:
+        // a reset that changes memory and tells nobody evaporates with the session. Here "tell somebody"
+        // means landing in the WORKING copy, because this document's dirty marks are DERIVED from it
+        // (MaterialEdit::EvaluateDirty) — so the tab's dot, the close prompt, Apply and Discard all learn
+        // about a reset for free, and cannot be forgotten at this call site.
+        //
+        // There is deliberately NO CommandHistory entry, and that is not this control being special: this
+        // window records no undo for ANY of its edits (every slider goes through WriteParam, which pushes
+        // nothing), and Discard is its way back. A reset that was the one undoable action in a window of
+        // non-undoable ones would be a worse lie than none at all.
+        //
+        // Returns whether anything was removed — false when the row was already showing what it inherits,
+        // exactly like ResetFieldToDefault. Nothing is published for a reset that changed nothing.
+        bool ResetParam( const ::Desert::Core::Formats::ShaderParam& p );
 
         void EnsurePreview();  // create the viewport + scene + renderer (claims a slot)
         void ReleasePreview(); // destroy them (returns the slot)
@@ -341,6 +373,19 @@ namespace Desert::Editor
         // directly instead would be the silent restoration of exactly the behaviour this document exists
         // to prevent, and the artist would have no way to know which of the two modes they were in.
         std::string m_WorkingCopyRefusal;
+
+        // WHY THE LAST DROP DID NOTHING, and on which row it was aimed. One at a time, because one drop
+        // happens at a time; cleared by the next successful bind on that row. Empty is the normal state.
+        //
+        // It exists because a drop this window could not use USED TO BE INVISIBLE — no bind, no log, no
+        // message, and an artist who reads that as a broken editor rather than as a wrong file. Held here
+        // rather than in a toast because the answer belongs beside the slot it is about.
+        struct DropRefusal
+        {
+            std::string Param;   // the schema parameter name of the row the drop landed on
+            std::string Message; // one sentence, from WhyThatCannotGoInThisSlot
+        };
+        DropRefusal m_DropRefusal;
 
         // Null whenever the window is not drawing — this IS the zero-cost mechanism, not an optimisation on
         // top of one. unique_ptr rather than a value member for exactly that reason.
