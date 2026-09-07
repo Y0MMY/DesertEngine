@@ -1214,16 +1214,15 @@ namespace Desert::Editor
                 {
                     if ( m_AssetManager )
                     {
-                        const auto textures = m_AssetManager->FindAllByType<Assets::TextureAsset>();
-                        const uint64_t bound = data.GetTexture( p.Name );
+                        const auto     textures = m_AssetManager->FindAllByType<Assets::TextureAsset>();
+                        const uint64_t bound    = data.GetTexture( p.Name );
                         for ( const auto& [handle, texture] : textures )
                         {
                             // The SOURCE path when there is one, exactly as the button label above resolves
                             // it: a cooked asset's own filepath is a hash nobody recognises, and a list of
                             // those is a list of nothing.
                             const auto& source = texture->GetSourcePath();
-                            const auto  path =
-                                 !source.empty() ? source : texture->GetMetadata().Filepath.string();
+                            const auto  path = !source.empty() ? source : texture->GetMetadata().Filepath.string();
                             const std::string name = std::filesystem::path( path ).filename().string();
                             if ( ImGui::Selectable( name.c_str(), static_cast<uint64_t>( handle ) == bound ) )
                             {
@@ -1353,6 +1352,18 @@ namespace Desert::Editor
             }
         }
 
+        // ROOM FOR THE EDIT BUTTON, TAKEN BEFORE THE COMBO IS DRAWN. The caller pushes an item width of
+        // -FLT_MIN, so the combo fills the cell to its right edge and anything SameLine'd after it lands
+        // outside — drawn, clipped, and invisible, which is how the first version of this button shipped
+        // into a frame that showed nothing. The width is narrowed only when there IS a button.
+        const bool  canOpenDocument = ( handle != 0 && m_AssetManager != nullptr );
+        const float editButtonWidth = canOpenDocument ? ImGui::CalcTextSize( "Edit" ).x +
+                                                             ImGui::GetStyle().FramePadding.x * 2.0f +
+                                                             ImGui::GetStyle().ItemSpacing.x
+                                                      : 0.0f;
+        if ( canOpenDocument )
+            ImGui::SetNextItemWidth( std::max( ImGui::GetContentRegionAvail().x - editButtonWidth, 1.0f ) );
+
         if ( ImGui::BeginCombo( hiddenId.c_str(), preview.c_str() ) )
         {
             const char* emptyLabel = isType ? "Default (cumulus congestus)" : "None (procedural weather)";
@@ -1397,21 +1408,21 @@ namespace Desert::Editor
         // until this button the only way to reach that document from here was to go and find the file in
         // the Content Browser — which is why "I cannot add a texture to a cloud material" was the report.
         // The slot now names its own next step instead of being a dead end.
-        if ( handle != 0 && m_AssetManager )
+        if ( canOpenDocument )
         {
             ImGui::SameLine();
-            if ( ImGui::SmallButton( ( "Edit" + hiddenId + "_open" ).c_str() ) )
+            if ( ImGui::Button( ( "Edit" + hiddenId + "_open" ).c_str() ) )
             {
                 if ( isType )
                 {
                     if ( auto asset =
                               m_AssetManager->FindByHandle<Assets::CloudTypeAsset>( Common::UUID( handle ) ) )
-                        QueueAssetOpenRequest( asset->GetMetadata().Handle, Assets::CloudTypeAsset::GetTypeID() );
+                        QueueCloudSubjectOpen( asset->GetMetadata().Handle, Assets::CloudTypeAsset::GetTypeID() );
                 }
                 else if ( auto asset =
                                m_AssetManager->FindByHandle<Assets::CloudLayoutAsset>( Common::UUID( handle ) ) )
                 {
-                    QueueAssetOpenRequest( asset->GetMetadata().Handle, Assets::CloudLayoutAsset::GetTypeID() );
+                    QueueCloudSubjectOpen( asset->GetMetadata().Handle, Assets::CloudLayoutAsset::GetTypeID() );
                 }
             }
             if ( ImGui::IsItemHovered() )
@@ -1456,7 +1467,8 @@ namespace Desert::Editor
                     // actually gets a picture into the sky — because for a picture there IS one and it is
                     // two clicks away, not a refusal to be argued with.
                     m_DropRefusal.Param   = p.Name;
-                    m_DropRefusal.Message = WhyThatCannotGoInThisSlot( path, isType );
+                    m_DropRefusal.Message = MaterialEdit::WhyThatCannotGoInThisSlot(
+                         path, isType, Assets::kCloudTypeExtension, Assets::kCloudLayoutExtension );
                     LOG_WARN( "[MaterialEditor] '{}' was dropped on the '{}' slot and was not bound: {}", path,
                               p.Name, m_DropRefusal.Message );
                 }
@@ -1533,55 +1545,6 @@ namespace Desert::Editor
         }
 
         return changed;
-    }
-
-    std::string MaterialEditorPanel::WhyThatCannotGoInThisSlot( const std::string& path, bool isType )
-    {
-        const std::string name      = std::filesystem::path( path ).filename().string();
-        const std::string extension = std::filesystem::path( path ).extension().string();
-
-        // A PICTURE IS THE CASE THIS FUNCTION EXISTS FOR, and the answer is a route rather than a "no".
-        // Unreal's cloud material takes two LAYOUT TEXTURES and so does ours (O-4) — but a layout is not a
-        // picture: it carries four species channels AND an add/remove mask, which one image cannot express,
-        // which is exactly why CloudLayoutPanel imports the pattern and the mask as two separate pictures.
-        // So the picture goes into a `.dclayout`, and the `.dclayout` comes here.
-        static constexpr const char* kImageExtensions[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".gif" };
-        for ( const char* image : kImageExtensions )
-        {
-            if ( extension != image )
-                continue;
-
-            if ( isType )
-            {
-                return "'" + name +
-                       "' is a picture, and this slot takes a cloud TYPE (.decloudtype) - the altitudes, "
-                       "silhouette and density of a kind of cloud, which no image carries. Make one with "
-                       "Content Browser > right-click > New Cloud Asset > Cloud Type.";
-            }
-            return "'" + name +
-                   "' is a picture, and this slot takes a cloud LAYOUT (.dclayout). A layout is not an "
-                   "image: it carries this layer's four species channels AND an add/remove mask, which one "
-                   "picture cannot express. Make one with Content Browser > right-click > New Cloud Asset > "
-                   "Cloud Layout, open it, and use 'Pattern image...' to bring this picture in - then drop "
-                   "the .dclayout here.";
-        }
-
-        // The other cloud formats are the near misses: they arrive on the same generic payload, they look
-        // like they belong, and naming which of the two slots wants which is the whole of the answer.
-        if ( extension == Assets::kCloudTypeExtension || extension == Assets::kCloudLayoutExtension ||
-             extension == Assets::kCloudNoiseVolumeExtension ||
-             extension == Assets::kCloudModellingVolumeExtension )
-        {
-            return "'" + name + "' is a " + extension + " and this slot takes a " +
-                   ( isType ? std::string( Assets::kCloudTypeExtension ) + " (a kind of cloud)"
-                            : std::string( Assets::kCloudLayoutExtension ) + " (a painted map of the sky)" ) +
-                   ".";
-        }
-
-        return "'" + name + "' is not something this slot can take. It takes a " +
-               ( isType ? std::string( Assets::kCloudTypeExtension )
-                        : std::string( Assets::kCloudLayoutExtension ) ) +
-               ".";
     }
 
     void MaterialEditorPanel::DrawPreviewSceneTab()
@@ -2052,13 +2015,33 @@ namespace Desert::Editor
         // but a wide, short window sizes it from the height, and the sentence was then laid out past the
         // bottom edge and simply never appeared. A caveat that is only visible at some window shapes is
         // the same as no caveat.
-        const std::string note      = PreviewSceneNote();
-        const float       noteLines = note.empty() ? 0.0f : 3.0f;
-        const float       noteHeight =
-             note.empty()
-                        ? 0.0f
-                        : ( ImGui::GetTextLineHeightWithSpacing() * noteLines + ImGui::GetStyle().ItemSpacing.y );
-        const float imageSide = std::max( 64.0f, std::min( avail.x - kParamColumnW, avail.y - noteHeight ) );
+        // AND MEASURED, NOT COUNTED. The reservation used to be a literal three lines, which is the same
+        // defect one step further in: a note of four lines is laid out past the reserved area and its last
+        // line simply never appears. That is not hypothetical — it happened the moment this note grew to
+        // say what a cloud edit costs, and the sentence that went missing was the one the note was
+        // lengthened for. ImGui can measure the wrapped text, so nothing here has to agree with the string.
+        //
+        // TWO PASSES, because the two quantities define each other: the pane's side is what the note wraps
+        // at, and the note's height is what the pane's side is left over from. The first pass measures at
+        // the WIDEST the pane could be (the width-limited side), which is the SMALLEST the note can be;
+        // the second measures at the side that follows, which can only be narrower and so can only need
+        // more height. Two steps therefore land on a reservation that is never short — the direction that
+        // matters, since being short is what hides the text.
+        const std::string note         = PreviewSceneNote();
+        const float       widthLimited = avail.x - kParamColumnW;
+
+        const auto measureNote = [&note]( float wrapWidth ) -> float
+        {
+            if ( note.empty() )
+                return 0.0f;
+            const ImVec2 size = ImGui::CalcTextSize( note.c_str(), nullptr, false, std::max( wrapWidth, 1.0f ) );
+            return size.y + ImGui::GetStyle().ItemSpacing.y;
+        };
+
+        const float firstPassSide =
+             std::max( 64.0f, std::min( widthLimited, avail.y - measureNote( widthLimited ) ) );
+        const float noteHeight = measureNote( firstPassSide );
+        const float imageSide  = std::max( 64.0f, std::min( widthLimited, avail.y - noteHeight ) );
 
         // The pane and the sentence under it are ONE column, so the note cannot end up beside the picture
         // it is about when the window is narrow.

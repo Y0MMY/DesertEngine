@@ -1,11 +1,16 @@
 #pragma once
 
 #include <Editor/Core/EditableProperty.hpp>
+#include <Editor/Import/TextureSourceFormats.hpp>
 
 #include <Engine/Assets/MaterialData.hpp>
 #include <Engine/Core/Formats/ShaderProgramMeta.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Desert::Editor::MaterialEdit
@@ -376,6 +381,75 @@ namespace Desert::Editor::MaterialEdit
         // Everything else is a uniform-buffer field, and an INSTANCE's value params are precisely what it
         // is allowed to override — so instance mode adds no refusal here.
         return {};
+    }
+
+    /// WHY A DROPPED FILE CANNOT GO IN A CLOUD TYPE (@p isType) OR CLOUD LAYOUT SLOT — one sentence,
+    /// naming what arrived, what the slot takes, and, for the case this exists for, the clicks that DO get
+    /// a picture into the sky.
+    ///
+    /// THE DROP USED TO DO NOTHING AND SAY NOTHING, which is what "I cannot add a texture to a cloud
+    /// material" turned out to mean. FileExplorerPanel::EmitAssetDragSource types its payload by FileType
+    /// and every image is FileType::Texture, so the browser emits TEXTURE_ASSET for a `.png` and falls back
+    /// to AssetFile only for what it has no specific type for — which is exactly what `.dclayout` and
+    /// `.decloudtype` are. An id that does not match fails SILENTLY in ImGui: nothing logs, nothing draws.
+    /// CloudLayoutPanel's own image slots were fixed for this; the material's slots were not, which makes
+    /// it the "one symptom fixed, its neighbour left standing" shape as well (DC §1.4).
+    ///
+    /// THE EXTENSIONS ARE PARAMETERS, not includes. This header is the pure half of the Material Editor —
+    /// the half a suite can reach — and pulling `Engine/Assets/CloudLayout.hpp` in for two `const char*`
+    /// would drag its tables along with it. The same trick RequestCloudDocumentOfType uses, for the same
+    /// reason, and MaterialEditStates' suite pins that the panel passes the real constants.
+    [[nodiscard]] inline std::string WhyThatCannotGoInThisSlot( const std::string& path, bool isType,
+                                                                std::string_view typeExtension,
+                                                                std::string_view layoutExtension )
+    {
+        const std::filesystem::path file      = path;
+        const std::string           name      = file.filename().string();
+        const std::string           extension = file.extension().string();
+
+        const std::string wanted( isType ? typeExtension : layoutExtension );
+
+        // A PICTURE IS THE CASE THIS FUNCTION EXISTS FOR, and the answer is a route rather than a "no".
+        // Unreal's cloud material takes two LAYOUT TEXTURES and so does ours (O-4) — but a layout is not a
+        // picture: it carries four species channels AND an add/remove mask, which one image cannot express,
+        // which is exactly why CloudLayoutPanel imports the pattern and the mask as two separate pictures.
+        // So the picture goes into a `.dclayout`, and the `.dclayout` comes here.
+        //
+        // "IS THIS AN IMAGE" IS ASKED OF THE ONE LIST, not of a sixth copy of it. The first version of this
+        // function typed its own six extensions and TextureSourceFormatCensus failed the build for it by
+        // name — which is the census doing exactly its job: two hand-written copies of this list had
+        // already drifted once, and a JPEG outranked a TGA for a whole release because of it. Nothing here
+        // CHOOSES between formats, so only the membership question is asked.
+        {
+            std::string lowered = extension;
+            std::transform( lowered.begin(), lowered.end(), lowered.begin(),
+                            []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+
+            if ( TextureSourceFormatRank( lowered ) < kTextureSourceExtensionCount )
+            {
+                if ( isType )
+                {
+                    return "'" + name + "' is a picture, and this slot takes a cloud TYPE (" + wanted +
+                           ") - the altitudes, silhouette and density of a kind of cloud, which no image "
+                           "carries. Make one with Content Browser > right-click > New Cloud Asset > Cloud Type.";
+                }
+                return "'" + name + "' is a picture, and this slot takes a cloud LAYOUT (" + wanted +
+                       "). A layout is not an image: it carries this layer's four species channels AND an "
+                       "add/remove mask, which one picture cannot express. Make one with Content Browser > "
+                       "right-click > New Cloud Asset > Cloud Layout, open it, and use 'Pattern image...' "
+                       "to bring this picture in - then drop the .dclayout here.";
+            }
+        }
+
+        // The near misses: a sibling cloud format arrives on the same generic payload, looks like it
+        // belongs, and naming which of the two slots wants which is the whole of the answer.
+        if ( extension == typeExtension || extension == layoutExtension )
+        {
+            return "'" + name + "' is a " + extension + " and this slot takes a " + wanted +
+                   ( isType ? " (a kind of cloud)." : " (a painted map of the sky)." );
+        }
+
+        return "'" + name + "' is not something this slot can take. It takes a " + wanted + ".";
     }
 
     /// @p name in @p schema, or null with @p outRefusal saying why — never null and silent.

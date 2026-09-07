@@ -179,20 +179,6 @@ namespace Desert::Editor
         bool DrawCloudAssetRef( Assets::MaterialData& data, const ::Desert::Core::Formats::ShaderParam& p,
                                 const std::string& hiddenId );
 
-        /// Why @p path cannot be bound to a cloud type slot (@p isType) or a cloud layout slot — one
-        /// sentence, naming what arrived, what the slot takes, and, for the case this exists for, the two
-        /// clicks that get a PICTURE into the sky.
-        ///
-        /// A drop of the wrong thing used to do nothing and say nothing, which is what "I cannot add a
-        /// texture to a cloud material" turned out to mean: the Content Browser types its drag payload by
-        /// FileType, so a `.png` travels as TEXTURE_ASSET while this slot accepted only the generic
-        /// AssetFile — and a payload id that does not match fails SILENTLY in ImGui. The slot now accepts
-        /// both and answers the ones it cannot take (DC §1.4).
-        ///
-        /// Static and pure: it is a function of a path and a slot kind, so a suite can hold it. Nothing
-        /// else in this window can be reached by one.
-        [[nodiscard]] static std::string WhyThatCannotGoInThisSlot( const std::string& path, bool isType );
-
         bool DrawParameters( Assets::SurfaceMaterialAsset& asset, const Assets::MaterialData* parentData,
                              bool isInstance );
 

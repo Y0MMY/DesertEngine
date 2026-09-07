@@ -756,6 +756,117 @@ TEST( MaterialEditStates, TheResetGoesThroughTheOneUnwriteAndLandsInTheWORKINGCo
          << "without the publish the value reverts in the document and not on screen";
 }
 
+// ── 6. A drop the cloud slots cannot take is ANSWERED, not swallowed (M7) ───────────────────────────────
+//
+// The defect: FileExplorerPanel types its drag payload by FileType and every image is FileType::Texture, so
+// the browser emits TEXTURE_ASSET for a `.png` while these slots accepted only the generic AssetFile — and
+// a payload id that does not match fails SILENTLY in ImGui. Nothing bound, nothing logged, nothing drawn.
+// The same defect had already been found and fixed in CloudLayoutPanel's own image slots; the material's
+// slots kept it, which makes this the "one symptom fixed, its neighbour left standing" shape as well.
+//
+// Two halves are testable and both are held here: the SENTENCE (pure, below) and the fact that the panel
+// hands it the real extension constants rather than something that merely looks like them.
+
+namespace
+{
+    // What the panel passes, spelled once here so the expectations below and the source check agree.
+    constexpr const char* kTypeExt   = ".decloudtype";
+    constexpr const char* kLayoutExt = ".dclayout";
+
+    std::string RefusalFor( const char* path, bool isType )
+    {
+        return MaterialEdit::WhyThatCannotGoInThisSlot( path, isType, kTypeExt, kLayoutExt );
+    }
+} // namespace
+
+TEST( MaterialEditStates, APictureDroppedOnALayoutSlotIsAnsweredWithTheRouteThatWorks )
+{
+    // THE CASE THE FUNCTION EXISTS FOR. A refusal that only says "no" leaves the artist where they were —
+    // and where they were is "I cannot add a texture to a cloud material". So the sentence has to carry the
+    // step that does work, because for a picture there IS one.
+    const std::string refusal = RefusalFor( "Assets/Textures/sky_bands.png", /*isType=*/false );
+
+    EXPECT_NE( refusal.find( "sky_bands.png" ), std::string::npos )
+         << "name what arrived, or the artist cannot tell which of two drags was refused: " << refusal;
+    EXPECT_NE( refusal.find( kLayoutExt ), std::string::npos ) << "name what the slot takes: " << refusal;
+    EXPECT_NE( refusal.find( "Pattern image" ), std::string::npos )
+         << "name the step that gets the picture in — the whole point of answering at all: " << refusal;
+    EXPECT_NE( refusal.find( "New Cloud Asset" ), std::string::npos )
+         << "and where a layout comes from when there is not one yet: " << refusal;
+
+    // WHY it is refused rather than imported here, in the sentence: a layout is not an image. It carries
+    // four species channels AND an add/remove mask, which is exactly why CloudLayoutPanel imports the
+    // pattern and the mask as two separate pictures (O-4). An artist told only "no" would reasonably think
+    // the editor was broken.
+    EXPECT_NE( refusal.find( "mask" ), std::string::npos ) << refusal;
+}
+
+TEST( MaterialEditStates, EveryRefusedDropSaysWhatArrivedAndWhatTheSlotTakes )
+{
+    struct Case
+    {
+        const char* Path;
+        bool        IsType;
+        const char* Wanted;
+    };
+
+    // The four families that reach these slots: a picture (both slots), a sibling cloud format on the same
+    // generic payload, and anything else. None of them may produce an empty string — a refusal with nothing
+    // said is the one thing DC §1.4 forbids outright, and it is what this row did before.
+    const Case cases[] = {
+         { "Assets/Textures/sky.png", false, kLayoutExt },
+         { "Assets/Textures/sky.png", true, kTypeExt },
+         { "Assets/Clouds/Cirrus.decloudtype", false, kLayoutExt },
+         { "Assets/Clouds/Layouts/Bands.dclayout", true, kTypeExt },
+         { "Assets/Clouds/CloudNoise_Default.dcnv", false, kLayoutExt },
+         { "Assets/Scenes/Clouds_Demo.desce", true, kTypeExt },
+    };
+
+    for ( const auto& c : cases )
+    {
+        const std::string refusal = RefusalFor( c.Path, c.IsType );
+        EXPECT_FALSE( refusal.empty() ) << c.Path;
+        EXPECT_NE( refusal.find( std::filesystem::path( c.Path ).filename().string() ), std::string::npos )
+             << c.Path << " -> " << refusal;
+        EXPECT_NE( refusal.find( c.Wanted ), std::string::npos )
+             << "the slot must name what it DOES take, or the refusal is a dead end: " << refusal;
+    }
+
+    // And the near miss is named as the near miss it is: a `.decloudtype` on a layout slot is not "not
+    // something this slot can take", it is the OTHER slot's file, and saying so is the fix.
+    const std::string swapped = RefusalFor( "Assets/Clouds/Cirrus.decloudtype", /*isType=*/false );
+    EXPECT_NE( swapped.find( kTypeExt ), std::string::npos ) << swapped;
+    EXPECT_NE( swapped.find( "painted map of the sky" ), std::string::npos ) << swapped;
+}
+
+TEST( MaterialEditStates, TheSlotAcceptsThePayloadTheBrowserActuallyEmitsAndPassesTheRealExtensions )
+{
+    // SOURCE-LEVEL, for the reason every other panel claim here is: MaterialEditorPanel.cpp cannot be
+    // linked by a suite. What it holds is the two halves of the defect that no pure function can see.
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+    const std::string code =
+         CodeOnly( root + "Editor/Source/Editor/Panels/MaterialEditor/MaterialEditorPanel.cpp" );
+    ASSERT_FALSE( code.empty() );
+
+    const std::size_t at = code.find( "DrawCloudAssetRef" );
+    ASSERT_NE( at, std::string::npos );
+    const std::string row = code.substr( code.find( "MaterialEditorPanel::DrawCloudAssetRef" ) );
+
+    // HALF ONE: the target must accept the payload the Content Browser really emits for an image. Accepting
+    // only AssetFile is what made the drop invisible, and it is invisible in exactly the way that leaves no
+    // evidence — so nothing but this line can catch a revert.
+    EXPECT_NE( row.find( "DragPayloads::TextureAsset" ), std::string::npos )
+         << "a .png travels as TEXTURE_ASSET; a slot that does not accept it cannot even refuse it";
+    EXPECT_NE( row.find( "DragPayloads::AssetFile" ), std::string::npos )
+         << "and .dclayout / .decloudtype travel as the generic AssetFile";
+
+    // HALF TWO: the sentence is parameterised on the extensions so this header stays free of the cloud
+    // includes — which means the panel could hand it anything. It must hand it the real constants.
+    EXPECT_NE( row.find( "Assets::kCloudTypeExtension" ), std::string::npos );
+    EXPECT_NE( row.find( "Assets::kCloudLayoutExtension" ), std::string::npos );
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
