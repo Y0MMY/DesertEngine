@@ -48,6 +48,16 @@ cd Editor && ../build/Bin/Debug/Editor --project Desert.deproj \
   Resources/Assets/Scenes -name '*.desce'` is the reliable way to pick one.
 - **`--shot-frames` matters.** Volumetric clouds accumulate over ~10 frames, so a shot taken on
   frame 1 is a picture of the dither. 90 is a safe default.
+- **NEVER 3, AND THIS DOCUMENT USED TO TELL YOU TO USE 3.** Below the engine's frames-in-flight the
+  readback beats the first present, and `--shot` writes a **fully blank PNG** — mean 0, min 0, max 0.
+  A blank file is byte-identical to another blank file, so a before/after pixel diff over two of them
+  reports `IDENTICAL` and the check silently passes on nothing at all. One task got six IDENTICAL
+  results that way and only caught it by opening the images. Laddered on a non-cloud scene: **5, 8,
+  12, 20 and 30 are all byte-identical to the 90-frame shot; only 3 is empty.** So use 5 as the low
+  end when you want an early frame, never 3 — and whatever count you use, **look at one of the
+  images, or assert a non-zero mean, before believing a diff over them.** (The advice to shoot at 3
+  came from a real defect that 90 frames hid — see the "convergence window is also a masking window"
+  note. The defect was real; the number was wrong.)
 - It segfaults during teardown afterwards — a known shutdown bug. The PNG is already written.
 - Interactive: `./scripts/MacOS/RunEditor.sh Debug` (sets the ICD, layer path, `DYLD_FALLBACK_LIBRARY_PATH`
   and `cd`s to `Editor/`, which is what makes `Resources/...` resolve).

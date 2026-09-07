@@ -57,6 +57,16 @@ saves weeks, because nobody builds on sand.
 4. **Silent fallbacks.** A resource that did not load, a size that did not match, a shader that did
    not compile — log it with the reason and the actual numbers (`LOG_ERROR` with names and values).
    Never substitute a default quietly. Debugging blind is the most expensive thing in graphics.
+   **An EMPTY SUCCESSFUL answer is a silent wrong answer, not a refusal.** Zero results and "not
+   ready yet" must be distinguishable by the caller, or the caller will read the first as the second
+   and be wrong with no way to tell. Two unrelated instances landed on one day: the control channel
+   answered `commands` with an empty `Open` group for the first ~90 seconds while the preloader ran,
+   and a client cannot tell "this project has no assets" from "ask again later"; and a content
+   census built its on-disk set from the keys the source was still offering, so the one file a
+   removal is about was the one it could never contain — every deletion became a no-op and **the
+   feature reported itself as working**. No test caught the second; a run of the real editor did.
+   The shape to watch for: a container whose contents are derived from the same source as the
+   question being asked of it.
 5. **New third-party dependencies without written agreement.** OpenVDB at runtime in particular: no.
 6. **Editing files another task owns.** Each task owns a file list. Need someone else's file — ask;
    the answer is either to widen the ownership or to sequence the tasks. A conflict in a shared
