@@ -21,5 +21,12 @@ namespace Desert::Project
     // and can say it on stderr before there is a window to say it in — an engine that could not
     // register is an engine the launcher will not list, which is a thing the person starting it
     // needs to be told rather than a line in a log they are not reading.
-    [[nodiscard]] Common::BoolResultStr RegisterThisEngine( const std::string& engineRoot );
+    //
+    // `configDirectory` is passed in rather than read from ProjectContext, and that is not a style
+    // choice: reaching for the process-wide config directory would make this function reachable by
+    // no test that is not willing to write into the developer's real `~/.desertengine`. As a
+    // parameter it needs only Common, so the shared-format suite compiles it and points it at a
+    // temp directory.
+    [[nodiscard]] Common::BoolResultStr RegisterThisEngine( const std::string& configDirectory,
+                                                            const std::string& engineRoot );
 } // namespace Desert::Project

@@ -90,7 +90,8 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
     if ( !options.Shot.Active() )
     {
         const char* engineRoot = std::getenv( "DESERT_ROOT" );
-        if ( const auto registered = Desert::Project::RegisterThisEngine( engineRoot ? engineRoot : "" );
+        if ( const auto registered = Desert::Project::RegisterThisEngine(
+                  Desert::Editor::ProjectContext::ConfigDirectory(), engineRoot ? engineRoot : "" );
              !registered.IsSuccess() )
             // stderr, not a log line: the consequence is that the LAUNCHER will not list this
             // engine, and the person who needs to know that is the one reading this terminal.

@@ -15,10 +15,16 @@ project(test_name)
     files {
         test_files,
         "%{wks.location}/ThirdParty/desert-shared/Tests/project_format_test.cpp",
+        -- The engine's WRITER for engines.json. It takes its config directory as an argument
+        -- precisely so it can be compiled here and pointed at a temp folder — without that it would
+        -- be reachable by no suite that is not willing to write into the developer's real
+        -- ~/.desertengine, which is how a file-writing function ends up untested.
+        "%{wks.location}/Desert/Desert/Source/Engine/Project/EngineRegistration.cpp",
     }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",
+        "%{wks.location}/Desert/Desert/Source",
     }
 
     for name, path in pairs(deps.Common.IncludeDir) do
@@ -34,6 +40,14 @@ project(test_name)
     end
 
     links { "Common", "Optick" }
+
+    -- Compiling EngineRegistration.cpp pulls Common::Utils::FileSystem in, and on macOS that object
+    -- carries the Cocoa file panels with it. The suite opens no dialog; it just has to satisfy the
+    -- linker for symbols it will never call.
+    filter "system:macosx"
+        links { "Cocoa.framework", "Foundation.framework" }
+
+    filter {}
 
     filter "configurations:Debug"
         for name, path in pairs(deps.TestSpecific.Libraries.Debug) do

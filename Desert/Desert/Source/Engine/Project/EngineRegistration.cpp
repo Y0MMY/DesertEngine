@@ -1,7 +1,5 @@
 #include "EngineRegistration.hpp"
 
-#include "ProjectContext.hpp"
-
 #include <Common/Core/Version.hpp>
 #include <Common/Project/EngineRegistry.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -10,7 +8,7 @@
 
 namespace Desert::Project
 {
-    Common::BoolResultStr RegisterThisEngine( const std::string& engineRoot )
+    Common::BoolResultStr RegisterThisEngine( const std::string& configDirectory, const std::string& engineRoot )
     {
         if ( engineRoot.empty() )
             return Common::MakeError<bool>(
@@ -24,8 +22,7 @@ namespace Desert::Project
             return Common::MakeFormattedError<bool>(
                  "DESERT_ROOT={} could not be resolved to an absolute path: {}", engineRoot, ec.message() );
 
-        const std::filesystem::path file =
-             std::filesystem::path( ProjectContext::ConfigDirectory() ) / "engines.json";
+        const std::filesystem::path file = std::filesystem::path( configDirectory ) / "engines.json";
 
         // Read what is there first. A registry with two installs in it belongs to the USER, not to
         // this process: clobbering it with a single entry would delete the other engine from the
