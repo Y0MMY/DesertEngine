@@ -63,13 +63,24 @@ namespace
         return out;
     }
 
-    // A DECLARATION of one of these names, not a mention: `<type> far =` / `<type> far;` / `<type> far )`.
-    // Comments and string literals are left alone on purpose — prose says "the far side" legitimately, and
-    // rewriting words inside comments is its own defect in this repository.
+    // A DECLARATION of one of these names, not a mention. Comments and string literals are left alone on
+    // purpose — prose says "the far side" legitimately, and rewriting words inside comments is its own
+    // defect in this repository.
+    //
+    // THE TYPE IS NOT ENUMERATED, AND THAT IS THE WHOLE POINT OF THIS VERSION. The first one listed the
+    // types it knew — const/float/int/auto/vec3/glm::… — and MISSED `std::vector<Scored> near;` in the
+    // control channel, which Windows then rejected an hour downstream. That is the same mistake twice: my
+    // original hand grep also required `const <one lowercase word>` and could not see `const glm::vec3 far`.
+    // A guard that enumerates what it knows about only ever catches what somebody already thought of.
+    //
+    // So: ANY identifier-ish text, possibly template/namespace/pointer/reference decorated, immediately
+    // followed by the reserved name and then by something a declaration ends with. The first token is
+    // deliberately loose — `x = near;` is caught too, and a false positive here costs one rename while a
+    // miss costs a Windows CI job.
     const std::regex& DeclarationOfReservedName()
     {
         static const std::regex re(
-             R"((?:\bconst\b|\bfloat\b|\bdouble\b|\bint\b|\bauto\b|\bbool\b|\bsize_t\b|\buint[0-9]*_t\b|\bvec[234]\b|\bglm::[A-Za-z0-9_]+)[ \t*&]+(far|near)[ \t]*(=|;|\)|,))" );
+             R"([A-Za-z_][A-Za-z0-9_:<>,& \t]*[ \t*&>][ \t]*(far|near)[ \t]*(=|;|\)|,|\[))" );
         return re;
     }
 } // namespace
@@ -102,7 +113,13 @@ TEST( ReservedIdentifiers, NoSourceDeclaresAVariableWindowsWillEat )
             // wants to run is a guard that gets excluded from the sweep.
             if ( line.find( "far" ) == std::string::npos && line.find( "near" ) == std::string::npos )
                 continue;
-            if ( std::regex_search( line, DeclarationOfReservedName() ) )
+
+            // A TRAILING COMMENT IS PROSE AND MUST NOT BE SCANNED. `glm::vec4 GhostParams; // z = size
+            // near, w = size far` is a lens-flare comment, and the loosened pattern above matched it — a
+            // guard that reports prose teaches people to ignore it, and "rewriting words inside comments"
+            // is already a filed defect here. Cut at `//` and match only what the compiler will see.
+            const std::string code = line.substr( 0, line.find( "//" ) );
+            if ( std::regex_search( code, DeclarationOfReservedName() ) )
                 offenders.push_back( fs::relative( file, root ).generic_string() + ":" + std::to_string( number ) +
                                      "  " + trimmed );
         }

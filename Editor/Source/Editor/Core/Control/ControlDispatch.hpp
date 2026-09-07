@@ -84,7 +84,7 @@ namespace Desert::Editor::Control
             CommandAddress Address;
             int            Score = 0;
         };
-        std::vector<Scored> near;
+        std::vector<Scored> nearMisses;
 
         std::size_t index = 0;
         for ( const auto& entry : dictionary )
@@ -109,7 +109,7 @@ namespace Desert::Editor::Control
                     // the same label in another group usually means a different thing entirely.
                     if ( entry.Group == wanted.Group )
                         score += 1000;
-                    near.push_back( Scored{ CommandAddress{ entry.Group, entry.Label }, score } );
+                    nearMisses.push_back( Scored{ CommandAddress{ entry.Group, entry.Label }, score } );
                 }
             }
 
@@ -119,13 +119,13 @@ namespace Desert::Editor::Control
         if ( resolution.Found )
             return resolution;
 
-        std::stable_sort( near.begin(), near.end(),
+        std::stable_sort( nearMisses.begin(), nearMisses.end(),
                           []( const Scored& a, const Scored& b ) { return a.Score > b.Score; } );
-        if ( near.size() > kMaxSuggestions )
-            near.resize( kMaxSuggestions );
+        if ( nearMisses.size() > kMaxSuggestions )
+            nearMisses.resize( kMaxSuggestions );
 
-        resolution.Suggestions.reserve( near.size() );
-        for ( auto& scored : near )
+        resolution.Suggestions.reserve( nearMisses.size() );
+        for ( auto& scored : nearMisses )
             resolution.Suggestions.push_back( std::move( scored.Address ) );
 
         return resolution;
