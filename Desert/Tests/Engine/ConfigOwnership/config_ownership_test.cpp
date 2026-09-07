@@ -239,6 +239,16 @@ namespace
          // cost-versus-quality choice as SceneSettings::AA and it is already here, per machine, while AA
          // sits in the level file. SceneSettingsPanel draws the two combos side by side and labels them
          // "(this machine)" and "(scene)". К3 is the task that makes them agree.
+         //
+         // AND К3 HAS TO DECIDE THIS ROW TOO, not just the five in the level file — noted by К6 while
+         // moving the snap rows above, because the row itself stays green and hides it. The kind is right
+         // (a fidelity ladder, per machine) but the FILE is only right for the editor: the value reaches
+         // the renderer as Graphic::RenderConfig::MSAASamples, whose single writer is EditorPreferences,
+         // and the packaged Runtime never opens editor.json. So a shipped game runs MSAA nailed to 1 with
+         // no reader and no dial — which is exactly the consequence this file's header records for the
+         // five К3 owes, arrived at from the other direction. It is not added to the debt register here
+         // because the register's answer is "a per-machine store both hosts read", and that store is an
+         // owner's decision rather than a cleanup.
          { "MSAASamples", Owner::Machine, kPrefsImpl },
 
          // Selection outline: an editor-only viewport visualization (a runtime build has no selection).

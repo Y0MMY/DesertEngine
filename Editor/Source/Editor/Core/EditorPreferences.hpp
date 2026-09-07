@@ -12,8 +12,15 @@
 namespace Desert::Editor
 {
     // User-level editor settings, persisted to ~/.desertengine/editor.json (per-user, not per-project).
-    // Loaded once at editor startup and applied to the live systems (GizmoState, editor camera); the
-    // Preferences window (Edit -> Preferences...) edits + saves them.
+    // Loaded once at editor startup; the Preferences window (Edit -> Preferences...) edits + saves them,
+    // and several panels edit one field each and save on the spot.
+    //
+    // THIS STRUCT IS THE LIVE STATE, not a copy of it that something else has to be given. Everything
+    // that consumes a preference reads it from here every time it needs it — the gizmo snap through
+    // Core::GizmoState, the Details stars through the two helpers below, the Show flags straight off
+    // DebugView. Exactly ONE value is pushed anywhere, RenderConfig::MSAASamples, because the layer that
+    // reads it may not know the editor exists; see EditorPreferences.cpp for why that one is safe and
+    // the four snap values were not.
     //
     // WHAT BELONGS IN THIS FILE, in one sentence (К1): ONE PERSON'S COPY OF THE EDITOR — what a user's own
     // installation must remember between sessions and across every project, and whose value two people on

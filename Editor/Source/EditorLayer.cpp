@@ -3834,7 +3834,16 @@ namespace Desert::Editor
                         ImGui::TextDisabled( ICON_MDI_MAGNET " x%.2f", Gz::ScaleSnap() );
                         break;
                     default:
-                        ImGui::TextDisabled( ICON_MDI_MAGNET " %.2fm", Gz::TranslateSnap() );
+                        // CENTIMETRES, and metres only past a metre — the same rule DrawSnapControl
+                        // formats the toolbar button with, and it has to be the same rule because the two
+                        // labels sit on one screen reading one value. This said "%.2fm" over a value that
+                        // is in world units (1 unit = 1 cm), so a 5 m step read "500.00m" three inches
+                        // from a button reading "5 m". Third sighting of У5's metre-era label: the field's
+                        // default, the Preferences slider, and now the status bar.
+                        if ( Gz::TranslateSnap() >= 100.0f )
+                            ImGui::TextDisabled( ICON_MDI_MAGNET " %.0f m", Gz::TranslateSnap() / 100.0f );
+                        else
+                            ImGui::TextDisabled( ICON_MDI_MAGNET " %.0f cm", Gz::TranslateSnap() );
                         break;
                 }
             if ( ImGui::IsItemHovered() )
