@@ -44,8 +44,8 @@ namespace Hub
     // Which engine this launcher will start, and how it found it.
     struct EngineChoice
     {
-        std::string Root;            // "" = none found; every engine-dependent action then refuses
-        std::string VersionFull;     // "" when the root came from the environment rather than the registry
+        std::string Root;        // "" = none found; every engine-dependent action then refuses
+        std::string VersionFull; // "" when the root came from the environment rather than the registry
         // Absent when the engine could not name its own build (shallow clone, no git). The sidebar
         // says so rather than printing a number nobody can act on — 0 would read as "build 0".
         std::optional<int> CommitCount;

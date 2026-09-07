@@ -57,8 +57,8 @@ namespace Desert::Project
         }
 
         Common::Engine::RegisterInstall(
-             registry, Common::Engine::EngineInstall{ root.string(), Common::Version::Full(),
-                                                      CommitCountForRegistry() } );
+             registry,
+             Common::Engine::EngineInstall{ root.string(), Common::Version::Full(), CommitCountForRegistry() } );
 
         // Atomic, for the same reason projects.json is: two processes share this file, and an
         // interrupted in-place write leaves a torn one that neither can parse.
