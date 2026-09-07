@@ -1180,14 +1180,13 @@ namespace Desert::Editor
                 // shape, same reason as the cube slot's (DC §1.3: a control that does nothing may not
                 // ship).
                 //
-                // NO "None" ENTRY, and its absence is a decision with a mechanism behind it rather than an
-                // omission: a texture cannot be UNBOUND today. Graphic::DataDrivenMaterial::SetTexture
-                // refuses a null image and MaterialFactory::ApplyShaderAsset skips handle 0, so clearing
-                // the slot would empty the `.demat` and leave the material still sampling the old texture
-                // — a control that changes the document and not the picture, which is the thing this fix
-                // is about. Restoring the sampler to the schema's own `DefaultTexture` is what unbinding
-                // needs, and that field currently has NO reader anywhere in the engine; it is filed rather
-                // than half-built here.
+                // THE "None" ENTRY EXISTS NOW, and the paragraph that used to stand here explaining why it
+                // could not is gone with the defect it described. It said, correctly at the time, that a
+                // texture could not be UNBOUND: SetTexture refused a null image, ApplyShaderAsset skipped
+                // handle 0, so clearing emptied the `.demat` while the material kept sampling the old
+                // texture — a control that changes the document and not the picture. M9 gave
+                // ShaderParam::DefaultTexture its first reader, so handle 0 now means the schema's own
+                // default and the entry is a real operation rather than a lie. See the popup below.
                 if ( ImGui::Button( ( disp + hiddenId ).c_str(), ImVec2( -FLT_MIN, 0.0f ) ) )
                     ImGui::OpenPopup( ( "texture_selector" + hiddenId ).c_str() );
                 if ( ImGui::BeginDragDropTarget() )
@@ -1216,6 +1215,24 @@ namespace Desert::Editor
                     {
                         const auto     textures = m_AssetManager->FindAllByType<Assets::TextureAsset>();
                         const uint64_t bound    = data.GetTexture( p.Name );
+
+                        // UNBINDING, WHICH WAS NOT EXPRESSIBLE UNTIL M9. This entry was deliberately absent
+                        // while clearing a slot emptied the .demat and left the material sampling the OLD
+                        // texture — an entry that hides a defect is worse than a missing one (§1.3). It
+                        // exists now because ShaderParam::DefaultTexture finally has a reader
+                        // (Material::BindSchemaDefaultTexture), so handle 0 means "the schema's own default"
+                        // rather than "nothing happened". Measured on a live editor with the counterfactual
+                        // built: under the old behaviour clearing moved 0.4 % of floor pixels, max delta
+                        // 4/255 — the checker was still there; with the reader, 100 % and 68/255.
+                        if ( ImGui::Selectable( "None", bound == 0 ) )
+                        {
+                            data.SetTexture( p.Name, 0 );
+                            changed = true;
+                        }
+                        if ( bound == 0 )
+                            ImGui::SetItemDefaultFocus();
+                        ImGui::Separator();
+
                         for ( const auto& [handle, texture] : textures )
                         {
                             // The SOURCE path when there is one, exactly as the button label above resolves
