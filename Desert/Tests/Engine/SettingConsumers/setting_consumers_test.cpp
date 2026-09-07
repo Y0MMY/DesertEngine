@@ -1044,6 +1044,174 @@ TEST( SettingConsumers, TheKnownDeadSettingsAreExactlyThese )
     EXPECT_EQ( registered.size(), 0u );
 }
 
+// ----------------------------------------------------------------------------------------------------
+// THE RELATION THIS CENSUS RESTS ON, AND WHICH NOTHING ASSERTED UNTIL Д33
+// ----------------------------------------------------------------------------------------------------
+//
+// Every row above is an argument about a source file, and every one of them is made through
+// `StripCommentsAndLiterals`. That makes the reader a load-bearing part of the gate and not a utility:
+// if it loses a stretch of a file, the census says "nobody reads this setting" in exactly the confident
+// voice it uses when that is true. It did lose stretches. `c.Peek() == '"'` — ordinary C++, and present
+// in DShaderParser.cpp — opened a string literal for a reader that knew nothing of character literals,
+// and it closed at the next quote hundreds of lines away. Measured on the tree Д33 started from: the
+// reader saw 11 801 tokens of that file and there are 24 793. Raw strings were the same hole in the
+// other direction, their CONTENTS read as code.
+//
+// The relation is: A DECLARATION STANDING AFTER A CONSTRUCT IS STILL VISIBLE, whatever the construct is.
+// Tested as a table over the literal forms rather than as a test per bug, because "the reader survives
+// `'\"'`" is one instance of a class and the class is what has to hold — the same reason §4 of the
+// verification skill prefers a relation to a function.
+//
+// The negative direction is asserted beside it: a read written INSIDE one of these constructs is not a
+// read. Both halves are needed. A reader that deleted the whole file would pass the second alone, and a
+// reader that stripped nothing would pass the first.
+
+namespace
+{
+    using Desert::Tests::ConsumerText::DeriveReceivers;
+    using Desert::Tests::ConsumerText::ReceiverReadsField;
+    using Desert::Tests::ConsumerText::StripCommentsAndLiterals;
+
+    // A file that binds a receiver to UICanvasData and then reads `Sprite` on it, with `before` standing
+    // between the two. Whatever `before` is, the read after it must survive.
+    std::string SnippetAround( const std::string& before )
+    {
+        return "void Draw( const ECS::UICanvasData& canvas )\n"
+               "{\n"
+               "    " +
+               before +
+               "\n"
+               "    Submit( canvas.Sprite );\n"
+               "}\n";
+    }
+
+    bool SpriteIsRead( const std::string& source )
+    {
+        const std::string              text      = StripCommentsAndLiterals( source );
+        const std::vector<std::string> receivers = DeriveReceivers( text, { "UICanvasData" } );
+        for ( const std::string& recv : receivers )
+            if ( ReceiverReadsField( text, recv, "Sprite" ) )
+                return true;
+        return false;
+    }
+
+    struct LiteralForm
+    {
+        const char* Name;
+        const char* Text;
+    };
+
+    // Each entry is a construct that has to be stepped over. The quotes and apostrophes inside them are
+    // the point, so they are written with explicit escapes rather than raw strings — a raw string in the
+    // TEST would be stripped by the compiler before the reader ever saw the shape being tested.
+    constexpr LiteralForm kLiteralForms[] = {
+         { "nothing at all (the control)", "int untouched = 0;" },
+         { "a line comment", "// canvas.Sprite is named here in prose" },
+         { "a line comment holding an apostrophe", "// don't let this open a character literal" },
+         { "a block comment over several lines", "/* one\n     two \" three ' four\n     five */" },
+         { "an ordinary string", "Log( \"a message\" );" },
+         { "a string holding an escaped quote", "Log( \"say \\\" and stop\" );" },
+         { "a string holding comment openers", "Log( \"http://host /* not a comment\" );" },
+         { "a string holding an apostrophe", "Log( \"it's fine\" );" },
+         { "a string continued by a line splice", "Log( \"first \\\n     second\" );" },
+         { "a character literal", "if ( c == 'x' ) return;" },
+         { "A CHARACTER LITERAL HOLDING A QUOTE", "if ( c == '\"' ) return;" },
+         { "a character literal holding an escaped apostrophe", "if ( c == '\\'' ) return;" },
+         { "a character literal holding a backslash", "if ( c == '\\\\' ) return;" },
+         { "a character literal holding a newline escape", "if ( c == '\\n' ) return;" },
+         { "a wide character literal holding a quote", "if ( w == L'\"' ) return;" },
+         { "a utf-8 character literal holding a quote", "if ( w == u8'\"' ) return;" },
+         { "a wide string holding a quote", "LogW( L\"say \\\" and stop\" );" },
+         { "a digit separator, which is not a literal at all", "const int million = 1'000'000;" },
+         { "a hexadecimal digit separator", "const unsigned mask = 0x1F'FF'00u;" },
+         { "a raw string", "Log( R\"(plain)\" );" },
+         { "a raw string holding quotes", "Log( R\"(he said \"stop\")\" );" },
+         { "a raw string holding an apostrophe and a comment opener", "Log( R\"(it's // here)\" );" },
+         { "a raw string with a delimiter", "Log( R\"json({ \"k\": 1 })json\" );" },
+         { "a raw string whose body contains its own closing shape",
+           "Log( R\"tag(a )\" inside)tag\" );" },
+         { "a raw string spanning lines", "Log( R\"(one\n     two \" three)\" );" },
+    };
+} // namespace
+
+// The positive half: the read written AFTER each construct is found.
+TEST( SettingConsumers, TheReaderSeesCodeAfterEveryLiteralForm )
+{
+    for ( const LiteralForm& form : kLiteralForms )
+    {
+        SCOPED_TRACE( form.Name );
+        EXPECT_TRUE( SpriteIsRead( SnippetAround( form.Text ) ) )
+             << "a read standing after " << form.Name
+             << " is invisible to the reader. Everything past this construct is missing from every "
+                "census built on it, and each of them reports the settings it hides as having no "
+                "consumer - a wrong answer that looks exactly like a right one.";
+    }
+}
+
+// The negative half: the same read written INSIDE each construct is not a read. Only the forms that can
+// carry arbitrary text are listed - a character literal and a digit separator cannot hold one.
+TEST( SettingConsumers, TheReaderDoesNotSeeCodeInsideALiteralOrAComment )
+{
+    const std::string read = "Submit( canvas.Sprite );";
+    const LiteralForm hiding[]{
+         { "a line comment", "// " },
+         { "a block comment", "/* " },
+         { "an ordinary string", "Log( \"" },
+         { "a raw string", "Log( R\"(" },
+         { "a raw string with a delimiter", "Log( R\"json(" },
+    };
+    const char* closing[]{ "", " */", "\" );", ")\" );", ")json\" );" };
+
+    int index = 0;
+    for ( const LiteralForm& form : hiding )
+    {
+        SCOPED_TRACE( form.Name );
+        const std::string source = "void Draw( const ECS::UICanvasData& canvas )\n{\n    " + std::string( form.Text ) +
+                                   read + closing[index++] + "\n}\n";
+        EXPECT_FALSE( SpriteIsRead( source ) )
+             << "a read written inside " << form.Name
+             << " counts as a read, so prose and log text can certify a setting nobody consumes";
+    }
+}
+
+// The two structural invariants, asserted directly rather than through a census.
+//
+// The first is what stops the whole class: an ordinary string and a character literal END AT THEIR OWN
+// LINE, so a malformed one costs a line and not a file. That is the difference between the fix and a
+// third workaround - `'\"'` is fixed by knowing about character literals, but the NEXT unbalanced quote
+// (a `#error don't`, a stray apostrophe in a macro) would open the same hundreds-of-lines hole.
+//
+// The second is what let the two whole-tree censuses drop their private copies of this function: offsets
+// into the output still name lines of the input, so they can keep reporting a line number.
+TEST( SettingConsumers, NoLiteralConsumesMoreThanItIsAllowedTo )
+{
+    const std::string strayQuote = "int before = 1;\n"
+                                   "const char* broken = \"unterminated;\n"
+                                   "int after = 2;\n";
+    const std::string stripped   = StripCommentsAndLiterals( strayQuote );
+    EXPECT_NE( stripped.find( "int after" ), std::string::npos )
+         << "an unterminated string swallowed the following line; the reader can still lose a whole file "
+            "to one unbalanced quote";
+    EXPECT_NE( stripped.find( "int before" ), std::string::npos );
+
+    const std::string strayApostrophe = "int before = 1;\n"
+                                        "int x = a; /* don't */\n"
+                                        "int after = 2;\n";
+    EXPECT_NE( StripCommentsAndLiterals( strayApostrophe ).find( "int after" ), std::string::npos )
+         << "an apostrophe inside a comment opened a character literal";
+
+    for ( const LiteralForm& form : kLiteralForms )
+    {
+        SCOPED_TRACE( form.Name );
+        const std::string source = SnippetAround( form.Text );
+        const std::string out    = StripCommentsAndLiterals( source );
+
+        EXPECT_EQ( out.size(), source.size() ) << "the output is no longer byte-aligned with the input";
+        EXPECT_EQ( std::count( out.begin(), out.end(), '\n' ), std::count( source.begin(), source.end(), '\n' ) )
+             << "a line was lost, so an offset in the output no longer names a line of the file";
+    }
+}
+
 // A field name shared by four components makes a name-only row vacuous, and this is the case that proved
 // it. The row shape above is the general fix; this stays as the specific one, because it asserts
 // something the general shape deliberately does not: that the handle is not merely READ but RESOLVED TO

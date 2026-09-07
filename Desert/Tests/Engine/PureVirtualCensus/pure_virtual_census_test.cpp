@@ -24,6 +24,8 @@
 // these rows are a question for the owner (does the engine want asset eviction at all?) rather than a
 // cleanup. What the row must carry is WHO decides, so that a year from now the entry is readable.
 
+#include "../SettingConsumers/setting_consumers_reader.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -70,51 +72,20 @@ namespace
         return text;
     }
 
-    // Comments and string literals become spaces, newlines survive so line numbers do. Without this the
-    // census counts the calls named in prose — and this file is full of prose naming them.
+    // Comments and literals become spaces, newlines survive so line numbers do. Without this the census
+    // counts the calls named in prose — and this file is full of prose naming them.
+    //
+    // Д33: THIS WAS A PRIVATE COPY, AND THE COPY WAS BLIND. It knew about `"…"` and about comments and
+    // about nothing else, so `c.Peek() == '"'` — ordinary C++, present in DShaderParser.cpp — opened a
+    // string literal for it that closed at the next quote hundreds of lines away, and every call site in
+    // between was invisible to a census whose whole product is a list of things nothing calls. The
+    // shared reader next door had exactly the same hole and it has been fixed there; this file now uses
+    // it rather than carrying a third opinion about what a literal is. (Its own escape handling was
+    // wrong in a second way: it emitted one space for a two-byte escape, so the output was SHORTER than
+    // the input and the line numbers it promised drifted.)
     std::string StripCommentsAndStrings( const std::string& src )
     {
-        std::string out;
-        out.reserve( src.size() );
-        for ( std::size_t i = 0; i < src.size(); )
-        {
-            if ( src.compare( i, 2, "//" ) == 0 )
-            {
-                while ( i < src.size() && src[i] != '\n' )
-                {
-                    out.push_back( ' ' );
-                    ++i;
-                }
-            }
-            else if ( src.compare( i, 2, "/*" ) == 0 )
-            {
-                const std::size_t end = src.find( "*/", i + 2 );
-                const std::size_t to  = end == std::string::npos ? src.size() : end + 2;
-                for ( ; i < to; ++i )
-                    out.push_back( src[i] == '\n' ? '\n' : ' ' );
-            }
-            else if ( src[i] == '"' )
-            {
-                out.push_back( ' ' );
-                ++i;
-                while ( i < src.size() && src[i] != '"' )
-                {
-                    out.push_back( src[i] == '\n' ? '\n' : ' ' );
-                    i += src[i] == '\\' ? 2 : 1;
-                }
-                if ( i < src.size() )
-                {
-                    out.push_back( ' ' );
-                    ++i;
-                }
-            }
-            else
-            {
-                out.push_back( src[i] );
-                ++i;
-            }
-        }
-        return out;
+        return Desert::Tests::ConsumerText::StripCommentsAndLiterals( src );
     }
 
     bool IsIdentChar( char c )

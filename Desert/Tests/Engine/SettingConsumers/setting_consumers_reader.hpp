@@ -45,41 +45,184 @@ namespace Desert::Tests::ConsumerText
         return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_';
     }
 
-    // Comments are stripped before anything else. A file that only NAMES the type in a comment (and
-    // `Components.hpp` mentions half the engine in comments) must not thereby acquire receivers, and a
-    // read that lives in a commented-out line is not a read.
+    // ----------------------------------------------------------------------------------------------
+    // Blanking the things that are not code
+    // ----------------------------------------------------------------------------------------------
+    //
+    // Comments and literals are removed before anything else. A file that only NAMES the type in a
+    // comment (and `Components.hpp` mentions half the engine in comments) must not thereby acquire
+    // receivers, and a read that lives in a commented-out line is not a read.
+    //
+    // Д33 REBUILT THIS, because the old version knew about `"..."` and about comments and about nothing
+    // else, and that hole took a whole gate's sight away without anyone being able to see that it had.
+    // The failure had a very particular shape, and it is the reason the invariants below are worth their
+    // cost:
+    //
+    //   * A CHARACTER LITERAL HOLDING A QUOTE ATE THE REST OF THE FILE. `c.Peek() == '"'` is ordinary
+    //     C++ and it appears in DShaderParser.cpp. The old scanner saw the `"` inside it, opened a
+    //     "string literal", and closed it at the next quote HUNDREDS OF LINES LATER — deleting
+    //     everything in between. М9 found it because six rows of a new census went red for a defect in
+    //     the census; the two censuses already shipped could not have told anybody, because a deletion
+    //     that hides a read makes a gate answer "nobody reads this" in exactly the confident voice it
+    //     uses when that is true (§1.4 of the contract, applied to the checker itself).
+    //   * AND IT LIED IN BOTH DIRECTIONS. Every stray quote flips the scanner's parity, so past the
+    //     first one the CONTENTS of real string literals were emitted as if they were code — a log line
+    //     naming a field could then certify that the field is read.
+    //   * RAW STRINGS were never handled at all. `R"(...)"` survived by accident as long as it contained
+    //     no quote of its own, and our raw strings hold C++ and JSON, which do.
+    //
+    // Two invariants close the class rather than the instance, and `TheReaderSeesCodeAfterEveryLiteral
+    // Form` asserts both:
+    //
+    //   1. NOTHING RUNS AWAY. An ordinary string and a character literal are bounded by their own line
+    //      (a line splice aside), so an unterminated one costs that line and not the file. Only a block
+    //      comment and a raw string may span lines, and both have an explicit terminator to look for.
+    //   2. THE RESULT IS THE SAME LENGTH AS THE INPUT. Every removed byte becomes a space and every
+    //      newline survives, so an offset into the output still names the same line of the original.
+    //      That is what lets the whole-tree censuses (PureVirtualCensus, DeviceLostCensus) report a
+    //      line number, and it is why they no longer carry a private copy of this function.
+
+    // The characters that may precede a literal's opening quote, as ONE token: the encoding prefix. `R`
+    // is what makes a string raw. Anything else in front of a quote is not a prefix, and the run is left
+    // alone so that it stays visible as code.
+    inline std::size_t LiteralPrefixStart( const std::string& s, std::size_t quote, bool& raw )
+    {
+        raw               = false;
+        std::size_t start = quote;
+        while ( start > 0 && IsIdentChar( s[start - 1] ) )
+            --start;
+        if ( start == quote )
+            return quote;
+
+        const std::string run = s.substr( start, quote - start );
+        for ( const char* ok : { "L", "u", "U", "u8", "R", "LR", "uR", "UR", "u8R" } )
+        {
+            if ( run != ok )
+                continue;
+            raw = run.back() == 'R';
+            return start;
+        }
+        return quote;
+    }
+
+    // `1'000'000` and `0x1F'FF'00`: C++14's digit separator, not the start of a character literal. Told
+    // apart by what the run behind the quote BEGINS with — an encoding prefix (`L'x'`, `u8'x'`) begins
+    // with a letter, a numeric literal with a digit. The run is scanned back over EARLIER SEPARATORS as
+    // well, or the second quote of `0x1F'FF'00` sees a run of `FF` and calls itself a character literal.
+    inline bool IsDigitSeparator( const std::string& s, std::size_t quote )
+    {
+        std::size_t start = quote;
+        while ( start > 0 && ( IsIdentChar( s[start - 1] ) || s[start - 1] == '\'' ) )
+            --start;
+        return start < quote && std::isdigit( static_cast<unsigned char>( s[start] ) ) != 0;
+    }
+
     inline std::string StripCommentsAndLiterals( const std::string& src )
     {
-        std::string out;
-        out.reserve( src.size() );
-        for ( std::size_t i = 0; i < src.size(); )
+        std::string out( src.size(), ' ' );
+
+        const auto blank = [&out, &src]( std::size_t from, std::size_t to )
+        {
+            for ( std::size_t p = from; p < to && p < src.size(); ++p )
+                out[p] = src[p] == '\n' ? '\n' : ' ';
+        };
+
+        // The end of an ordinary string or character literal opened at `open`, or npos when the line
+        // ends first. A backslash escapes the next byte, including a newline (a line splice, which is
+        // the one way a non-raw literal legitimately continues).
+        const auto closingQuote = [&src]( std::size_t open, char quote ) -> std::size_t
+        {
+            for ( std::size_t j = open + 1; j < src.size(); )
+            {
+                if ( src[j] == '\\' && j + 1 < src.size() )
+                {
+                    j += 2;
+                    continue;
+                }
+                if ( src[j] == '\n' )
+                    return std::string::npos;
+                if ( src[j] == quote )
+                    return j + 1;
+                ++j;
+            }
+            return std::string::npos;
+        };
+
+        std::size_t i = 0;
+        while ( i < src.size() )
         {
             if ( src[i] == '/' && i + 1 < src.size() && src[i + 1] == '/' )
             {
-                while ( i < src.size() && src[i] != '\n' )
-                    ++i;
+                std::size_t j = i;
+                while ( j < src.size() && src[j] != '\n' )
+                    ++j;
+                blank( i, j );
+                i = j;
             }
             else if ( src[i] == '/' && i + 1 < src.size() && src[i + 1] == '*' )
             {
-                i += 2;
-                while ( i + 1 < src.size() && !( src[i] == '*' && src[i + 1] == '/' ) )
-                    ++i;
-                i = i + 2 < src.size() ? i + 2 : src.size();
-                out += ' ';
+                const std::size_t end = src.find( "*/", i + 2 );
+                const std::size_t j   = end == std::string::npos ? src.size() : end + 2;
+                blank( i, j );
+                i = j;
             }
             else if ( src[i] == '"' )
             {
-                // String literals are blanked rather than kept: a log message naming a field is not a
-                // read of it, and "http://" would otherwise start a line comment.
-                ++i;
-                while ( i < src.size() && src[i] != '"' )
-                    i += ( src[i] == '\\' && i + 1 < src.size() ) ? 2 : 1;
-                i = i < src.size() ? i + 1 : i;
-                out += "\"\"";
+                bool              raw   = false;
+                const std::size_t start = LiteralPrefixStart( src, i, raw );
+
+                std::size_t j = std::string::npos;
+                if ( raw )
+                {
+                    // `R"delim(` ... `)delim"`. The delimiter is the text up to the first `(`; a raw
+                    // string with no terminator is not valid C++ at all, and blanking to the end of the
+                    // file is what a compiler effectively does with it.
+                    const std::size_t paren = src.find( '(', i + 1 );
+                    if ( paren != std::string::npos && paren - i - 1 <= 16 )
+                    {
+                        const std::string close = ")" + src.substr( i + 1, paren - i - 1 ) + "\"";
+                        const std::size_t end   = src.find( close, paren );
+                        j = end == std::string::npos ? src.size() : end + close.size();
+                    }
+                }
+                else
+                {
+                    j = closingQuote( i, '"' );
+                }
+
+                if ( j == std::string::npos )
+                {
+                    // Not a literal after all — a lone quote. Copied through so that the damage of a
+                    // malformed file is one character, never the rest of the file.
+                    out[i] = src[i];
+                    ++i;
+                }
+                else
+                {
+                    blank( start, j );
+                    i = j;
+                }
+            }
+            else if ( src[i] == '\'' && !IsDigitSeparator( src, i ) )
+            {
+                bool              prefixIsRaw = false;
+                const std::size_t start       = LiteralPrefixStart( src, i, prefixIsRaw );
+                const std::size_t j           = closingQuote( i, '\'' );
+                if ( j == std::string::npos )
+                {
+                    out[i] = src[i];
+                    ++i;
+                }
+                else
+                {
+                    blank( start, j );
+                    i = j;
+                }
             }
             else
             {
-                out += src[i++];
+                out[i] = src[i];
+                ++i;
             }
         }
         return out;
