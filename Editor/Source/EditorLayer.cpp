@@ -24,6 +24,10 @@
 #include "Editor/Core/Control/ControlChannelOptions.hpp"
 #include "Editor/Core/Control/ControlDispatch.hpp" // resolving a request to a palette entry
 #include "Editor/Core/CrashRecovery.hpp"
+
+// The device-lost latch, read in OnDetach: a shutdown caused by a lost GPU must save the user's work
+// before it goes, and must not report itself as a clean exit.
+#include <Engine/Graphic/DeviceLost.hpp>
 #include "Editor/Core/LayoutManager.hpp"
 #include "Editor/Core/PanelRequests.hpp"
 #include "Editor/Core/SceneOpenRequest.hpp"
@@ -5633,7 +5637,68 @@ namespace Desert::Editor
         m_ControlGate.Disarm();
         m_ControlSocket.Close();
 
-        // Clean shutdown: drop the session lock so the next start doesn't think we crashed.
+        // THE DEVICE DIED, AND THIS IS THE LAST MOMENT THE USER'S WORK EXISTS ANYWHERE.
+        //
+        // Not left to the autosave timer, which has three separate reasons not to have run recently: it
+        // fires every AutosaveMinutes (default 5), it skips when the command revision has not moved, and
+        // it runs in Edit mode only. This one runs ONCE, unconditionally, at the moment of loss.
+        //
+        // It writes a SEPARATE file so that a good periodic autosave is never clobbered by it. The name
+        // still contains "_autosave", which is what CrashRecovery::LatestAutosave matches on, and it is
+        // the newest file there, so the recovery prompt offers this one.
+        //
+        // IN PLAY MODE THE AUTHORED SCENE IS WHAT GETS WRITTEN — m_PlaySnapshot, the same text Stop would
+        // have restored. The live scene at that instant holds runtime mutations nobody authored and nobody
+        // wants back; saving those under the user's scene name would be the wrong answer wearing the right
+        // filename.
+        if ( Graphic::DeviceLost::IsLost() && m_MainScene )
+        {
+            using SceneState = ::Desert::Core::Scene::SceneState;
+            Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
+            const std::string             text =
+                 m_MainScene->GetState() == SceneState::Edit ? serializer.SerializeToJson() : m_PlaySnapshot;
+            if ( text.empty() )
+            {
+                // An empty file under a recovery name is a silent wrong answer: the prompt would offer it
+                // and the user would open nothing. Say so instead.
+                LOG_ERROR( "[DeviceLost] nothing could be serialized to save — the scene is in {} and its "
+                           "authored snapshot is empty. Your periodic autosave, if any, is untouched.",
+                           m_MainScene->GetState() == SceneState::Edit ? "Edit" : "Play" );
+            }
+            else
+            {
+                std::string name = m_MainScene->GetSceneName();
+                for ( auto& ch : name )
+                    if ( ch == ' ' )
+                        ch = '_';
+                const auto      dir = Common::Constants::Path::SCENE_PATH / "Autosave";
+                std::error_code ec;
+                std::filesystem::create_directories( dir, ec );
+                const auto path = dir / ( name + "_devicelost_autosave" +
+                                          std::string( Common::Constants::Extensions::SCENE_EXTENSION ) );
+                const auto written =
+                     ec ? Common::MakeFormattedError( "could not create {}: {}", dir.string(), ec.message() )
+                        : Common::Utils::FileSystem::WriteContentToFileAtomic( path, text );
+                // BRACES ARE REQUIRED ON BOTH ARMS: the LOG_ macros are not single statements, so a
+                // braceless if/else here does not compile. The autosave block above is written the same
+                // way for the same reason.
+                if ( written )
+                {
+                    LOG_INFO( "[DeviceLost] your work was saved to {} before shutting down; the next start "
+                              "will offer it.",
+                              path.string() );
+                }
+                else
+                {
+                    LOG_ERROR( "[DeviceLost] the emergency save FAILED: {}. The periodic autosave in {} is "
+                               "the newest copy that exists.",
+                               written.GetError(), dir.string() );
+                }
+            }
+        }
+
+        // Clean shutdown: drop the session lock so the next start doesn't think we crashed. After a device
+        // loss CrashRecovery::DisarmSession refuses, on purpose — see its own comment.
         CrashRecovery::DisarmSession();
 
         // The launcher's tile picture, refreshed on the way out — HERE, while the device and the
