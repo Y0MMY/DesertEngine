@@ -31,7 +31,7 @@ namespace Desert::Editor
      * spends its days removing: two of them agree, the one nobody remembers falls behind, and what the
      * channel offers stops being what the window edits.
      *
-     * NO ImGui AND NO glm HERE ON PURPOSE. This type crosses IAssetEditorPanel, the control channel's JSON
+     * NO ImGui AND NO glm HERE ON PURPOSE. This type crosses ISubjectDocument, the control channel's JSON
      * writer and a test suite that links only Common; a header that dragged a UI toolkit behind it could
      * not be asserted anywhere the editor is not built.
      */

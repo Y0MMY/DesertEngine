@@ -4,13 +4,13 @@
 // CloudDocumentOpen.hpp is included by the four cloud panels, which spell Desert::Core::Formats as an
 // unqualified `Core::Formats`; a header that made Desert::Editor::Core visible ahead of those uses rebinds
 // every one of them. Here there is no such use, so the include is safe — see the note at the top of the
-// header, and the identical one in Editor/Core/AssetEditorRegistry.hpp.
-#include <Editor/Core/AssetOpenRequest.hpp>
+// header, and the identical one in Editor/Core/SubjectEditorRegistry.hpp.
+#include <Editor/Core/SubjectOpenRequest.hpp>
 
 namespace Desert::Editor
 {
-    void QueueAssetOpenRequest( const Assets::AssetHandle& subject, Assets::AssetTypeID type )
+    void QueueCloudSubjectOpen( const Assets::AssetHandle& subject, Assets::AssetTypeID type )
     {
-        Core::AssetOpenRequests::Request( subject, type );
+        Core::SubjectOpenRequests::Request( AssetSubject( subject, static_cast<uint32_t>( type ) ) );
     }
 } // namespace Desert::Editor

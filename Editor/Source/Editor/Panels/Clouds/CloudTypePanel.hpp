@@ -43,7 +43,7 @@ namespace Desert::Editor
      * became in Р3. It was a SINGLETON with an "Open a type..." combo, reached from the View menu; the
      * combo is gone with the singleton, because the subject is now the window's identity.
      */
-    class CloudTypePanel final : public IAssetEditorPanel
+    class CloudTypePanel final : public ISubjectDocument
     {
     public:
         CloudTypePanel( const Assets::AssetHandle& subject, Assets::AssetManager* assets );
@@ -57,6 +57,15 @@ namespace Desert::Editor
 
         // NEVER — see CloudNoiseVolumePanel::HoldsRendererSlot. This panel draws a curve with ImGui::PlotLines
         // and owns no Scene and no SceneRenderer, so it costs none of the six slots.
+
+        // The `CloudType` this window is about, gone from the manager — deleted in the browser, or the project
+        // closed under it. Asked of the metadata rather than of a typed lookup: the question is whether the
+        // asset is still THERE, and a typed lookup answers a different one (whether it is still that type).
+        // DEFINED IN THE .cpp: this header only forward-declares AssetManager, and pulling the whole of
+        // it in for one metadata lookup would put the asset system into every translation unit that draws
+        // a cloud panel.
+        [[nodiscard]] bool IsSubjectAlive() const override;
+
         [[nodiscard]] bool HoldsRendererSlot() const override
         {
             return false;

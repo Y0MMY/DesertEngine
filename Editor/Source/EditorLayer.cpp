@@ -77,8 +77,8 @@
 #include "Editor/Panels/UI/UIEditorPanel.hpp"
 #include "Editor/Panels/AssetReferences/AssetReferencesPanel.hpp"
 #include "Editor/Panels/LuaConsole/LuaConsolePanel.hpp"
-#include "Editor/Panels/Stubs/SequencerPanel.hpp"
-#include "Editor/Panels/Stubs/BuildSettingsPanel.hpp"
+#include "Editor/Panels/Sequencer/SequencerPanel.hpp"
+#include "Editor/Panels/Build/BuildSettingsPanel.hpp"
 #include "Editor/Panels/History/HistoryPanel.hpp"
 #include "Editor/Panels/Validation/SceneValidationPanel.hpp"
 #include "Editor/Panels/Clouds/CloudModellingVolumePanel.hpp"
@@ -88,8 +88,8 @@
 #include "Editor/Panels/Clouds/CloudTypePanel.hpp"
 #include "Editor/Panels/Animation/AnimLayersPanel.hpp"
 #include "Editor/Core/ToastManager.hpp"
-#include "Editor/Core/AssetEditorRegistry.hpp"
-#include "Editor/Core/AssetOpenRequest.hpp"
+#include "Editor/Core/SubjectEditorRegistry.hpp"
+#include "Editor/Core/SubjectOpenRequest.hpp"
 
 // 4. Misc
 #include <glm/gtx/matrix_decompose.hpp>
@@ -158,12 +158,12 @@ namespace Desert::Editor
             return ICON_MDI_ANIMATION;
         if ( name == "Node Graph" )
             return ICON_MDI_GRAPH;
-        if ( name == "Anim Graph" )
-            return ICON_MDI_STATE_MACHINE;
         if ( name == "Model from Photos" )
             return ICON_MDI_CUBE_SCAN;
-        if ( name == "Particle Editor" )
-            return ICON_MDI_CREATION;
+        // "Anim Graph" and "Particle Editor" were here. They are DOCUMENTS now, and a document's icon
+        // comes from its registration rather than from a table keyed on a panel name — this table can
+        // only ever match a tool's constant name, and a document is named after the thing it edits.
+        // See SubjectEditorRegistry::Registration::Icon.
         if ( name == "UI Editor" )
             return ICON_MDI_VIEW_DASHBOARD;
         if ( name == "Lua Console" )
@@ -191,8 +191,14 @@ namespace Desert::Editor
         for ( auto& panel : m_Panels )
         {
             // An EXPLICIT request always wins and applies to every panel, contextual or not: a button in
-            // Details ("Open in Sequencer", "Anim Graph", "Particle Editor") asked for this panel by name.
-            // It pins it, exactly like ticking it in the View menu — the user asked, so nothing auto-closes it.
+            // Details ("Sequencer", "Anim Layers") asked for this panel BY NAME. It pins it, exactly like
+            // ticking it in the View menu — the user asked, so nothing auto-closes it.
+            //
+            // BY NAME IS ALL A TOOL CAN BE ASKED FOR, and that is why the Anim Graph and the Particle
+            // Editor no longer come through here: "show the one Anim Graph window" was the most their
+            // Details buttons could say. Those two ask for a SUBJECT now
+            // (Core::SubjectOpenRequests::Request), which is a different wire because it carries what to
+            // edit — see Editor/Core/SubjectOpenRequest.hpp.
             switch ( Core::PanelRequests::Consume( panel->GetName() ) )
             {
                 case Core::PanelRequests::Action::Open:
@@ -257,33 +263,28 @@ namespace Desert::Editor
     static constexpr const char* kDocumentWellWindow =
          ICON_MDI_FILE_DOCUMENT_MULTIPLE_OUTLINE "  Documents###documentwell";
 
-    // A document's icon comes from WHAT IT EDITS, not from its name — a document is named after an asset the
-    // user chose, so a lookup table of names (PanelIcon, above) has nothing to match.
-    static const char* DocumentIcon( const Assets::AssetTypeID type )
-    {
-        switch ( type )
-        {
-            case Assets::AssetTypeID::Material:
-                return ICON_MDI_PALETTE_SWATCH;
-            case Assets::AssetTypeID::CloudType:
-                return ICON_MDI_WEATHER_CLOUDY;
-            case Assets::AssetTypeID::CloudNoiseVolume:
-                return ICON_MDI_GRID;
-            case Assets::AssetTypeID::CloudModellingVolume:
-                return ICON_MDI_CUBE_OUTLINE;
-            case Assets::AssetTypeID::CloudLayout:
-                return ICON_MDI_IMAGE_FILTER_HDR;
-            default:
-                return ICON_MDI_FILE_DOCUMENT_OUTLINE;
-        }
-    }
+    // WHAT A DOCUMENT NOBODY CLAIMS LOOKS LIKE. The registry has no opinion about an unregistered subject
+    // type and must not invent one (SubjectEditorRegistry::Icon takes the fallback as an argument for
+    // exactly that reason), so the editor's answer lives here, once, rather than at each of the four places
+    // that draw a document's glyph.
+    static constexpr const char* kUnknownDocumentIcon = ICON_MDI_FILE_DOCUMENT_OUTLINE;
 
-    // The window title a document is drawn with: its type's icon, its asset name, and the "###assetdoc<n>"
-    // identity AssetDocumentTitle already baked into GetName(). NOT PanelDisplayTitle, which would look the
-    // icon up by a name that is an asset's and give every document the same fallback.
-    static std::string DocumentDisplayTitle( const IAssetEditorPanel& document )
+    // THE ICON SWITCH USED TO BE HERE, keyed on Assets::AssetTypeID, and it is gone rather than extended.
+    //
+    // It was one of the two hand-written tables a new kind of document had to be entered in — the other
+    // being AssetTypeName for the text — neither of which is where the document is registered. That is
+    // three edits in three files for one new kind, and the two that are not the registration are the ones
+    // that get forgotten: the table's `default:` then quietly gave the new kind the generic page glyph and
+    // nothing anywhere said so. The icon is now part of the registration
+    // (SubjectEditorRegistry::Registration::Icon), so a kind that exists HAS one, by construction. It also
+    // had no answer at all for a component subject, whose facet is not an AssetTypeID.
+
+    // The window title a document is drawn with: its type's icon, its subject's name, and the "###doc<...>"
+    // identity DocumentTitle already baked into GetName(). NOT PanelDisplayTitle, which would look the icon
+    // up by a name that is an asset's and give every document the same fallback.
+    std::string EditorLayer::DocumentDisplayTitle( const ISubjectDocument& document ) const
     {
-        return std::string( DocumentIcon( document.SubjectType() ) ) + "  " +
+        return std::string( m_SubjectEditors.Icon( document.Subject(), kUnknownDocumentIcon ) ) + "  " +
                DocumentDisplayName( document.GetName() ) + "###" + document.GetName();
     }
 
@@ -533,7 +534,7 @@ namespace Desert::Editor
 
 #ifdef EBABLE_IMGUI
         // EVERY TOOL ENTERS THROUGH PanelRegistry::Add / Adopt, and that is the whole of the guarantee that
-        // the View menu lists tools only: the registry REFUSES an IAssetEditorPanel at compile time, so a
+        // the View menu lists tools only: the registry REFUSES an ISubjectDocument at compile time, so a
         // document cannot be here to be listed. See Editor/Core/PanelRegistry.hpp.
         m_Panels.Add<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager );
         m_Panels.Add<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager, m_AnimationLibrary.get() );
@@ -545,8 +546,8 @@ namespace Desert::Editor
             m_Panels.Adopt( std::move( primaryViewport ) );
         }
         {
-            auto fileExplorer = std::make_unique<Editor::FileExplorerPanel>( Common::Constants::Path::ASSETS_PATH,
-                                                                             m_AssetManager.get(), m_MainScene );
+            auto fileExplorer = std::make_unique<Editor::FileExplorerPanel>(
+                 Common::Constants::Path::ASSETS_PATH, &m_SubjectEditors, m_AssetManager.get(), m_MainScene );
             m_FileExplorerPanel = fileExplorer.get();
             m_Panels.Adopt( std::move( fileExplorer ) );
         }
@@ -566,9 +567,13 @@ namespace Desert::Editor
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
         m_Panels.Add<Editor::NodeGraphPanel>( m_AssetManager );
-        m_Panels.Add<Editor::AnimGraphPanel>( m_MainScene, m_AnimationLibrary.get() );
+        // THE ANIM GRAPH AND THE PARTICLE EDITOR ARE NOT CONSTRUCTED HERE ANY MORE, for the reason the
+        // four cloud panels above are not: they edit ONE thing, so they are documents. The difference is
+        // what that one thing is — a component on an entity rather than a file — which is what U7 made
+        // expressible (Editor/Core/EditorSubject.hpp). Dropping them from this list removes them from the
+        // View menu, the command palette and `--open-panel` at once, because all three are generic over
+        // m_Panels; they are reached from the component that holds them, in Details.
         m_Panels.Add<Editor::PhotogrammetryPanel>( m_MainScene, m_AssetManager.get() );
-        m_Panels.Add<Editor::ParticleEditorPanel>( m_MainScene );
         m_Panels.Add<Editor::UIEditorPanel>( m_MainScene );
         m_Panels.Add<Editor::AssetReferencesPanel>( m_MainScene, m_AssetManager );
         m_Panels.Add<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() );
@@ -576,35 +581,160 @@ namespace Desert::Editor
         m_Panels.Add<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() );
         m_Panels.Add<Editor::BuildSettingsPanel>();
 
-        // Which editor opens which kind of asset. Double-clicking a `.demat` in the browser opens ONE window
-        // bound to THAT material, and a second material is a second window; the four cloud formats follow
-        // exactly the same rule. Adding the next asset kind is another line here rather than another branch
-        // in FileExplorerPanel and another file-static inbox beside it — see
-        // Editor/Core/AssetEditorRegistry.hpp.
-        m_AssetEditors.Register(
-             Assets::AssetTypeID::Material, [this]( const Assets::AssetHandle& material )
-             { return std::make_unique<Editor::MaterialEditorPanel>( material, m_AssetManager ); } );
+        // ── WHICH EDITOR OPENS WHICH KIND OF SUBJECT ──────────────────────────────────────────────────
+        //
+        // Double-clicking a `.demat` in the browser opens ONE window bound to THAT material, and a second
+        // material is a second window; the four cloud formats follow the same rule, and so — since U7 — do
+        // the two kinds of subject that are not files at all. Adding the next kind is another block here
+        // rather than another branch in FileExplorerPanel and another file-static inbox beside it. See
+        // Editor/Core/SubjectEditorRegistry.hpp.
+        //
+        // THE NAME AND THE ICON ARE PART OF THE REGISTRATION. They used to be two hand-written tables in
+        // this file keyed on Assets::AssetTypeID, so a new kind meant three edits and only one of them was
+        // here; the two that were not are the ones that fell behind.
+        using Registration = SubjectEditorRegistry::Registration;
+
+        m_SubjectEditors.Register(
+             AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::Material ) ),
+             Registration{ "Material", ICON_MDI_PALETTE_SWATCH,
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
+                               return std::make_unique<Editor::MaterialEditorPanel>(
+                                    Assets::AssetHandle( subject.Owner ), m_AssetManager );
+                           },
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           } } );
 
         // THE FOUR CLOUD DOCUMENTS. Each takes the raw AssetManager pointer the panels already held, so the
         // move from singleton to document changed the panels' ownership of their subject and nothing about
         // how they reach their assets.
-        m_AssetEditors.Register(
-             Assets::AssetTypeID::CloudNoiseVolume, [this]( const Assets::AssetHandle& subject )
-             { return std::make_unique<Editor::CloudNoiseVolumePanel>( subject, m_AssetManager.get() ); } );
-        m_AssetEditors.Register(
-             Assets::AssetTypeID::CloudType, [this]( const Assets::AssetHandle& subject )
-             { return std::make_unique<Editor::CloudTypePanel>( subject, m_AssetManager.get() ); } );
-        m_AssetEditors.Register(
-             Assets::AssetTypeID::CloudModellingVolume, [this]( const Assets::AssetHandle& subject )
-             { return std::make_unique<Editor::CloudModellingVolumePanel>( subject, m_AssetManager.get() ); } );
+        m_SubjectEditors.Register(
+             AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudNoiseVolume ) ),
+             Registration{ "CloudNoiseVolume", ICON_MDI_GRID,
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
+                               return std::make_unique<Editor::CloudNoiseVolumePanel>(
+                                    Assets::AssetHandle( subject.Owner ), m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           } } );
+        m_SubjectEditors.Register(
+             AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudType ) ),
+             Registration{ "CloudType", ICON_MDI_WEATHER_CLOUDY,
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument> {
+                               return std::make_unique<Editor::CloudTypePanel>(
+                                    Assets::AssetHandle( subject.Owner ), m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           } } );
+        m_SubjectEditors.Register(
+             AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudModellingVolume ) ),
+             Registration{ "CloudModellingVolume", ICON_MDI_CUBE_OUTLINE,
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
+                               return std::make_unique<Editor::CloudModellingVolumePanel>(
+                                    Assets::AssetHandle( subject.Owner ), m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           } } );
         // The layout document also READS the active scene's cloud layer for its preview numbers — the scene
         // is an input, never a second subject, and SetScene keeps it following the focused viewport exactly
         // as the singleton did.
-        m_AssetEditors.Register( Assets::AssetTypeID::CloudLayout,
-                                 [this]( const Assets::AssetHandle& subject ) {
-                                     return std::make_unique<Editor::CloudLayoutPanel>( subject, m_MainScene,
-                                                                                        m_AssetManager.get() );
-                                 } );
+        m_SubjectEditors.Register(
+             AssetSubjectType( static_cast<uint32_t>( Assets::AssetTypeID::CloudLayout ) ),
+             Registration{ "CloudLayout", ICON_MDI_IMAGE_FILTER_HDR,
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
+                               return std::make_unique<Editor::CloudLayoutPanel>(
+                                    Assets::AssetHandle( subject.Owner ), m_MainScene, m_AssetManager.get() );
+                           },
+                           [this]( const SubjectId& subject )
+                           {
+                               return m_AssetManager && m_AssetManager->FindMetadataByHandle(
+                                                             Assets::AssetHandle( subject.Owner ) ) != nullptr;
+                           } } );
+
+        // ── THE TWO DOCUMENTS WHOSE SUBJECT IS NOT A FILE ─────────────────────────────────────────────
+        //
+        // This is what U7 bought. Both were singleton panels that drew "whatever entity is selected", and
+        // both are now opened FROM the component that holds their data, by a button in Details — which is
+        // the thing the owner asked for and the thing the old asset-keyed seam could not express.
+        //
+        // THE FACTORY TAKES THE SCENE THAT IS ACTIVE AT THE MOMENT OF THE OPEN, and that is deliberate:
+        // the subject is an entity UUID, and a UUID belongs to ONE registry. Captured by reference to the
+        // member so a document opened from the second scene view binds to the second scene — and then
+        // never follows the fanout again (AnimGraphPanel::SetScene is a documented no-op).
+        //
+        // The DISPLAY name is the entity's, resolved once here rather than by the document: the document
+        // must not need a scene to know what it is called, and a name is a label while the subject is the
+        // identity — renaming the entity does not open a second window.
+        m_SubjectEditors.Register(
+             Editor::AnimGraphPanel::SubjectType(),
+             Registration{ Editor::AnimGraphPanel::kComponentTypeName, ICON_MDI_STATE_MACHINE,
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
+                               return std::make_unique<Editor::AnimGraphPanel>(
+                                    subject, SubjectEntityName( subject, "Anim Graph" ), m_MainScene,
+                                    m_AnimationLibrary.get() );
+                           },
+                           [this]( const SubjectId& subject )
+                           { return EntityHasComponent<ECS::AnimationComponent>( subject.Owner ); } } );
+        m_SubjectEditors.Register(
+             Editor::ParticleEditorPanel::SubjectType(),
+             Registration{ Editor::ParticleEditorPanel::kComponentTypeName, ICON_MDI_CREATION,
+                           [this]( const SubjectId& subject ) -> std::unique_ptr<ISubjectDocument>
+                           {
+                               return std::make_unique<Editor::ParticleEditorPanel>(
+                                    subject, SubjectEntityName( subject, "Particles" ), m_MainScene );
+                           },
+                           [this]( const SubjectId& subject )
+                           { return EntityHasComponent<ECS::ParticleEmitterComponent>( subject.Owner ); } } );
+
+        // ── AND HOW A PATH BECOMES ONE OF THEM ────────────────────────────────────────────────────────
+        //
+        // The asset browser's double-click used to carry a chain of `else if` over the file types, one arm
+        // per kind of document, and this file carried a second copy of the same chain. Registered here
+        // instead, beside the editors they feed, so the browser asks once and a new format is a line in
+        // this block rather than an edit in two files somebody has to remember exist.
+        m_SubjectEditors.RegisterPathOpener(
+             [this]( const std::string& path )
+             {
+                 switch ( RequestMaterialDocument( m_AssetManager.get(), path ) )
+                 {
+                     case MaterialDocumentRequest::NotAMaterialPath:
+                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                     case MaterialDocumentRequest::Failed:
+                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
+                     case MaterialDocumentRequest::Requested:
+                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
+                 }
+                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+             } );
+        m_SubjectEditors.RegisterPathOpener(
+             [this]( const std::string& path )
+             {
+                 switch ( RequestCloudDocument( m_AssetManager.get(), path ) )
+                 {
+                     case CloudDocumentRequest::NotACloudPath:
+                         return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+                     case CloudDocumentRequest::Failed:
+                         return SubjectEditorRegistry::PathOpenOutcome::Failed;
+                     case CloudDocumentRequest::Requested:
+                         return SubjectEditorRegistry::PathOpenOutcome::Requested;
+                 }
+                 return SubjectEditorRegistry::PathOpenOutcome::NotMine;
+             } );
 
         // NOTHING OPENS A PANEL AT BOOT ANY MORE, and the absence is the point.
         //
@@ -732,12 +862,20 @@ namespace Desert::Editor
         // all — every subsequent frame for the rest of the session, holding one of the six renderer slots.
         CloseDismissedSceneViews();
 
-        // Asset documents follow the scene views exactly, and for the same reason: closing one destroys a
-        // Scene and a SceneRenderer, neither of which is legal from inside the ImGui pass that noticed the
-        // click. Closes run BEFORE opens so a slot handed back this frame is available to whatever the user
-        // is opening in it.
+        // A DOCUMENT WHOSE SUBJECT HAS GONE IS QUEUED FOR CLOSING BEFORE THE QUEUE IS SERVICED, so the
+        // window disappears on the same frame the entity or the asset did rather than one later. It runs
+        // after CloseDismissedSceneViews above deliberately: closing a scene view is one of the ways a
+        // subject dies, and a document over an entity in that scene must see the scene gone, not still
+        // going. See CloseDocumentsWhoseSubjectIsGone.
+        CloseDocumentsWhoseSubjectIsGone();
+
+        // Documents follow the scene views exactly, and for the same reason: closing one destroys a Scene
+        // and a SceneRenderer, neither of which is legal from inside the ImGui pass that noticed the click.
+        // Closes run BEFORE opens so a slot handed back this frame is available to whatever the user is
+        // opening in it. The hidden-document slot release rides in the same function, behind the same
+        // device-idle wait, for the same reason.
         ServiceDocumentCloses();
-        ServiceAssetOpenRequests();
+        ServiceSubjectOpenRequests();
 
         // Stop is deferred here (between frames) so it never destroys/recreates render resources while a
         // command buffer that references them is in flight — see m_PendingSceneStop.
@@ -1211,10 +1349,10 @@ namespace Desert::Editor
         quiescence.Set( Control::PendingWork::SceneView, m_AddSceneViewRequested );
         quiescence.Set( Control::PendingWork::SceneStop, m_PendingSceneStop );
         quiescence.Set( Control::PendingWork::DocumentCloses, !m_DocumentsToClose.empty() );
-        // The queue is a file-static inbox drained by ServiceAssetOpenRequests, so "is anything queued"
+        // The queue is a file-static inbox drained by ServiceSubjectOpenRequests, so "is anything queued"
         // is asked of the queue itself rather than of a copy this layer keeps — a copy would be a second
         // answer, and the two would disagree on exactly the frame an open was handled halfway.
-        quiescence.Set( Control::PendingWork::AssetOpens, Core::AssetOpenRequests::HasPending() );
+        quiescence.Set( Control::PendingWork::AssetOpens, Core::SubjectOpenRequests::HasPending() );
         quiescence.Set( Control::PendingWork::OpenRefusal, m_OpenRefusalPending );
         m_FrameQuiescence = quiescence;
     }
@@ -1333,7 +1471,7 @@ namespace Desert::Editor
 
             case Control::Op::Properties:
             {
-                IAssetEditorPanel* focused = m_Documents.Find( m_FocusedDocument );
+                ISubjectDocument* focused = m_Documents.Find( m_FocusedDocument );
                 if ( !focused )
                 {
                     return Control::Response::Failure(
@@ -1352,7 +1490,7 @@ namespace Desert::Editor
                 // searched for across every open window, and the first match would win — which is a
                 // different document from the one the person or the capture is looking at, on any frame
                 // where two materials declare the same parameter. They almost all do.
-                IAssetEditorPanel* focused = m_Documents.Find( m_FocusedDocument );
+                ISubjectDocument* focused = m_Documents.Find( m_FocusedDocument );
                 if ( !focused )
                 {
                     return Control::Response::Failure(
@@ -1428,16 +1566,16 @@ namespace Desert::Editor
         // MOST RECENTLY USED ORDER, which is the order the well lists and Ctrl+Tab walks. Reporting the
         // storage order instead would be a second sequence for the same documents, and a client reading
         // it would predict a different answer from Ctrl+Tab than the editor gives.
-        for ( const Assets::AssetHandle& subject : m_Documents.MostRecentOrder() )
+        for ( const SubjectId& subject : m_Documents.MostRecentOrder() )
         {
-            const IAssetEditorPanel* document = m_Documents.Find( subject );
+            const ISubjectDocument* document = m_Documents.Find( subject );
             if ( !document )
                 continue;
 
             Control::DocumentSnapshot entry;
             entry.Name               = DocumentDisplayName( document->GetName() );
-            entry.Type               = Assets::AssetTypeName( document->SubjectType() );
-            entry.Subject            = std::to_string( static_cast<uint64_t>( subject ) );
+            entry.Type               = m_SubjectEditors.TypeName( subject );
+            entry.Subject            = subject.ToString();
             entry.HoldsRendererSlot  = document->HoldsRendererSlot();
             entry.ClaimsRendererSlot = document->ClaimsRendererSlot();
             entry.Focused            = ( subject == m_FocusedDocument );
@@ -1445,17 +1583,17 @@ namespace Desert::Editor
             // The three states, asked of the document itself. Written out as words here rather than
             // exported as enums, because the wire is read by clients that have none of our headers.
             entry.EditModel =
-                 ( document->GetEditModel() == IAssetEditorPanel::EditModel::Staged ) ? "staged" : "write-through";
+                 ( document->GetEditModel() == ISubjectDocument::EditModel::Staged ) ? "staged" : "write-through";
             entry.HasUnappliedEdits = document->HasUnappliedEdits();
             switch ( document->GetDiskState() )
             {
-                case IAssetEditorPanel::DiskState::Clean:
+                case ISubjectDocument::DiskState::Clean:
                     entry.DiskState = "clean";
                     break;
-                case IAssetEditorPanel::DiskState::Dirty:
+                case ISubjectDocument::DiskState::Dirty:
                     entry.DiskState = "dirty";
                     break;
-                case IAssetEditorPanel::DiskState::Untracked:
+                case ISubjectDocument::DiskState::Untracked:
                     // NOT "clean". A document that took no snapshot has no evidence about its file, and a
                     // client that read the two as one would report an unsaved edit as saved.
                     entry.DiskState = "untracked";
@@ -1469,8 +1607,8 @@ namespace Desert::Editor
         {
             Control::ClosedDocumentSnapshot entry;
             entry.Name    = closed.DisplayName;
-            entry.Type    = Assets::AssetTypeName( closed.Type );
-            entry.Subject = std::to_string( static_cast<uint64_t>( closed.Subject ) );
+            entry.Type    = m_SubjectEditors.TypeName( closed.Subject );
+            entry.Subject = closed.Subject.ToString();
             snapshot.RecentlyClosed.push_back( std::move( entry ) );
         }
 
@@ -1792,13 +1930,13 @@ namespace Desert::Editor
                 census.push_back( { "Details preview", details->HoldsRendererSlot() } );
 
         // The documents are asked of their own owner rather than sifted out of the panel list with a
-        // dynamic_cast. That cast was the seam this whole task closes: it only existed because the two
+        // dynamic_cast. That cast was the seam an earlier task closed: it only existed because the two
         // kinds shared a container, and every place that had to write it was a place that could forget to.
         for ( const auto& document : m_Documents )
         {
             // The VISIBLE half of the name. The census tells a user what to close, and they close a window
-            // titled "MP_GreenTint", not one titled "MP_GreenTint###assetdoc3333333333333333333".
-            census.push_back( { std::string( Assets::AssetTypeName( document->SubjectType() ) ) + " document '" +
+            // titled "MP_GreenTint", not one titled "MP_GreenTint###docasset:2:3333333333333333333".
+            census.push_back( { m_SubjectEditors.TypeName( document->Subject() ) + " document '" +
                                      DocumentDisplayName( document->GetName() ) + "'",
                                 document->HoldsRendererSlot(), document->ClaimsRendererSlot(),
                                 document->Subject() } );
@@ -1807,25 +1945,39 @@ namespace Desert::Editor
         return census;
     }
 
-    void EditorLayer::ServiceAssetOpenRequests()
+    std::string EditorLayer::SubjectEntityName( const SubjectId& subject, const char* what ) const
     {
-        for ( const auto& request : Core::AssetOpenRequests::Drain() )
+        // WHAT THE WINDOW IS CALLED, not what it is. The subject is the identity; this is the label beside
+        // it, and it is resolved ONCE, here, at the moment the document is built — the document itself must
+        // not need a scene to know its own name, and an entity renamed afterwards does not become a second
+        // window (an asset document behaves the same way; see Control::DocumentSnapshot::Subject).
+        std::string name = "Entity";
+        if ( m_MainScene )
+        {
+            if ( const auto entOpt = m_MainScene->FindEntityByID( subject.Owner ) )
+                name = entOpt->get().GetComponent<ECS::TagComponent>().Tag;
+        }
+        return name + " \xc2\xb7 " + what;
+    }
+
+    void EditorLayer::ServiceSubjectOpenRequests()
+    {
+        for ( const SubjectId& subject : Core::SubjectOpenRequests::Drain() )
         {
             // OPEN-OR-FOCUS, keyed by the subject, asked of the one owner of open documents. It does NOT
             // set a visibility flag any more: a document that is open is open, and "focus" is the only
-            // thing a second request for the same asset can mean.
-            if ( IAssetEditorPanel* open = m_Documents.Find( request.Subject ) )
+            // thing a second request for the same subject can mean.
+            if ( ISubjectDocument* open = m_Documents.Find( subject ) )
             {
                 FocusDocument( open->Subject() );
                 continue;
             }
 
-            // Checked BEFORE the slot arithmetic below, so a type with no editor is reported as the missing
+            // Checked BEFORE the slot arithmetic below, so a kind with no editor is reported as the missing
             // editor it is rather than as a resource shortage it had nothing to do with.
-            if ( !m_AssetEditors.HasEditorFor( request.Type ) )
+            if ( !m_SubjectEditors.HasEditorFor( subject.Type() ) )
             {
-                LOG_WARN( "[Editor] Nothing edits asset type '{}' (handle {}) — no window opened.",
-                          Assets::AssetTypeName( request.Type ), static_cast<uint64_t>( request.Subject ) );
+                LOG_WARN( "[Editor] Nothing edits subject '{}' — no window opened.", subject.ToString() );
                 continue;
             }
 
@@ -1839,8 +1991,8 @@ namespace Desert::Editor
             // not drawn yet holds NO slot and has a claim coming, so the live-renderer count alone would
             // admit a document there is no slot for and discover it a frame later.
             //
-            // The counting rule itself lives in AssetEditorRegistry.hpp, not here: this file is compiled by
-            // no suite, and a rule written in it is a rule nothing can assert.
+            // The counting rule itself lives in SubjectEditorRegistry.hpp, not here: this file is compiled
+            // by no suite, and a rule written in it is a rule nothing can assert.
             const uint32_t live    = Graphic::SceneRenderer::GetLiveRendererCount();
             const uint32_t pending = PendingRendererSlotDemand( m_Documents.Documents() );
 
@@ -1857,68 +2009,86 @@ namespace Desert::Editor
                                                "it frees nothing";
                     census += "\n    " + consumer.Name + " — " + state;
                 }
-                LOG_ERROR( "[Editor] Refusing to open a '{}' document (handle {}): {} of {} renderer slots are "
-                           "in use and {} more are already committed. Close one of these first:{}",
-                           Assets::AssetTypeName( request.Type ), static_cast<uint64_t>( request.Subject ), live,
-                           EngineContext::kMaxRendererSlots, pending, census );
+                LOG_ERROR( "[Editor] Refusing to open a document for subject '{}': {} of {} renderer slots "
+                           "are in use and {} more are already committed. Close one of these first:{}",
+                           subject.ToString(), live, EngineContext::kMaxRendererSlots, pending, census );
 
                 // AND THE SAME THING WHERE THE USER IS. The census above has always been written; it went
                 // to a log the user was not reading, so a double-click on the seventh document did nothing
                 // at all as far as the screen was concerned. The dialog carries the identical rows and, for
                 // the ones that are documents, a button that acts on them.
                 //
-                // The asset is named by its FILE NAME where one is known: "handle 3333333333333333333" is
-                // the log's identifier, not the user's.
-                std::string assetName;
-                if ( m_AssetManager )
-                {
-                    // The UNTYPED metadata lookup, deliberately: the refusal happens before any editor for
-                    // this type is consulted, so all that is known about the subject is that it is an
-                    // asset — and a typed lookup would have to guess which class to ask for. Metadata
-                    // carries no cast, so there is nothing here that could answer with a stranger.
-                    if ( const auto* metadata = m_AssetManager->FindMetadataByHandle( request.Subject ) )
-                        assetName = metadata->Filepath.stem().string();
-                }
-                if ( assetName.empty() )
-                    assetName = "this asset";
-
-                m_OpenRefusal =
-                     OpenRefusal{ std::move( assetName ), std::string( Assets::AssetTypeName( request.Type ) ),
-                                  live, pending, std::move( rows ) };
+                // The subject is named by its FILE NAME or its ENTITY NAME where one is known: "handle
+                // 3333333333333333333" is the log's identifier, not the user's.
+                m_OpenRefusal = OpenRefusal{ RefusedSubjectName( subject ), m_SubjectEditors.TypeName( subject ),
+                                             live, pending, std::move( rows ) };
                 m_OpenRefusalPending = true;
                 continue;
             }
 
-            auto document = m_AssetEditors.Create( request.Subject, request.Type );
+            auto document = m_SubjectEditors.Create( subject );
             if ( !document )
                 continue; // the registry already said why
 
             const std::string name = document->GetName();
             // Asked BEFORE the move, and counted rather than assumed: a document that will never claim a
             // slot adds nothing to the committed total, and "pending + 1" would have reported every cloud
-            // document as a claim on a slot it does not take. See IAssetEditorPanel::ClaimsRendererSlot.
+            // document as a claim on a slot it does not take. See ISubjectDocument::ClaimsRendererSlot.
             const uint32_t committed = pending + ( document->ClaimsRendererSlot() ? 1u : 0u );
 
-            const Assets::AssetHandle subject = document->Subject();
+            // ASKED THE MOMENT IT IS BUILT, and not left to the sweep a frame later. A document whose
+            // subject was already gone would otherwise appear for one frame and vanish, which reads as a
+            // window that failed rather than as a thing that is not there. The factory has just resolved
+            // the subject, so this costs one more resolution and answers before anything is on screen.
+            if ( !document->IsSubjectAlive() )
+            {
+                LOG_WARN( "[Editor] Refusing to open a document for subject '{}': the {} it names does not "
+                          "exist (deleted, or in a scene that is no longer open).",
+                          subject.ToString(), m_SubjectEditors.TypeName( subject ) );
+                continue;
+            }
+
             m_Documents.Add( std::move( document ) );
             m_FocusPanel      = name; // brings the new window forward in the document well
             m_FocusedDocument = subject;
             LOG_INFO( "[Editor] Opened a '{}' document '{}' ({} open, {}/{} renderer slots in use, {} "
                       "committed).",
-                      Assets::AssetTypeName( request.Type ), name, m_Documents.Count(),
+                      m_SubjectEditors.TypeName( subject ), name, m_Documents.Count(),
                       Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots,
                       committed );
         }
     }
 
-    void EditorLayer::RequestDocumentClose( const Assets::AssetHandle& subject )
+    std::string EditorLayer::RefusedSubjectName( const SubjectId& subject ) const
+    {
+        if ( subject.Domain == SubjectDomain::Asset && m_AssetManager )
+        {
+            // The UNTYPED metadata lookup, deliberately: the refusal happens before any editor for this
+            // type is consulted, so all that is known about the subject is that it is an asset — and a
+            // typed lookup would have to guess which class to ask for. Metadata carries no cast, so there
+            // is nothing here that could answer with a stranger.
+            if ( const auto* metadata =
+                      m_AssetManager->FindMetadataByHandle( Assets::AssetHandle( subject.Owner ) ) )
+                return metadata->Filepath.stem().string();
+        }
+        if ( subject.Domain == SubjectDomain::EntityComponent && m_MainScene )
+        {
+            if ( const auto entOpt = m_MainScene->FindEntityByID( subject.Owner ) )
+                return entOpt->get().GetComponent<ECS::TagComponent>().Tag;
+        }
+        return "this subject";
+    }
+
+    void EditorLayer::RequestDocumentClose( const SubjectId& subject, std::string reason )
     {
         if ( !m_Documents.Find( subject ) )
             return; // already gone, or never open — a second x on one window in one frame is not an error
 
-        if ( std::find( m_DocumentsToClose.begin(), m_DocumentsToClose.end(), subject ) ==
-             m_DocumentsToClose.end() )
-            m_DocumentsToClose.push_back( subject );
+        const auto queued =
+             std::find_if( m_DocumentsToClose.begin(), m_DocumentsToClose.end(),
+                           [&subject]( const PendingDocumentClose& p ) { return p.Subject == subject; } );
+        if ( queued == m_DocumentsToClose.end() )
+            m_DocumentsToClose.push_back( PendingDocumentClose{ subject, std::move( reason ) } );
     }
 
     void EditorLayer::RequestCloseAllDocuments()
@@ -1926,18 +2096,105 @@ namespace Desert::Editor
         // Collected first and requested after, rather than requested while iterating: RequestDocumentClose
         // reads the well, and a range-for over a container something else is being asked about is the kind
         // of thing that survives review and then does not survive a refactor.
-        std::vector<Assets::AssetHandle> subjects;
+        std::vector<SubjectId> subjects;
         subjects.reserve( m_Documents.Count() );
         for ( const auto& document : m_Documents )
             subjects.push_back( document->Subject() );
 
-        for ( const Assets::AssetHandle& subject : subjects )
-            RequestDocumentClose( subject );
+        for ( const SubjectId& subject : subjects )
+            RequestDocumentClose( subject, "Close All Documents" );
+    }
+
+    void EditorLayer::CloseDocumentsWhoseSubjectIsGone()
+    {
+        // ── A DOCUMENT CLOSES WITH ITS SUBJECT ────────────────────────────────────────────────────────
+        //
+        // The owner's decision, and the counterpart to the one he refused: a document is NOT closed when
+        // it loses the focus, because a layout that rearranges itself reads as an editor that lost your
+        // panel. It IS closed when the thing it edits stops existing — delete the entity, remove the
+        // component, delete the asset, close the scene — because the alternative is a window editing
+        // nothing, and every one of its controls then writes into a resolution that returns null.
+        //
+        // WITH A NAMED REASON. Three different causes now queue a close, and a user whose window vanished
+        // is owed which one it was; ServiceDocumentCloses prints it.
+        //
+        // ASKED EVERY FRAME, and it has to be: there is no one deletion event that covers an asset leaving
+        // the manager, an entity destroyed in any open scene, and a scene closed out from under a document.
+        // A subscription to one of the four would be worse than none, because the other three would look
+        // handled. The cost is one resolution per open document per frame — the same resolution each
+        // document performs to draw itself, and there are rarely more than six.
+        std::vector<SubjectId> dead;
+        for ( const auto& document : m_Documents )
+            if ( !document->IsSubjectAlive() )
+                dead.push_back( document->Subject() );
+
+        for ( const SubjectId& subject : dead )
+        {
+            RequestDocumentClose( subject, "the " + m_SubjectEditors.TypeName( subject ) +
+                                                " it was editing no longer exists" );
+        }
+    }
+
+    void EditorLayer::ReleaseSlotsOfHiddenDocuments()
+    {
+        // ── THE SLOT GOES WHEN NOBODY IS LOOKING; THE WINDOW STAYS ────────────────────────────────────
+        //
+        // Four documents docked as tabs in one node show one tab. The other three were rendering previews
+        // nobody could see and holding three of the six renderer slots while they did it, so the fifth
+        // document the user opened was refused over resources being spent on hidden windows.
+        //
+        // DrawDocuments counts the frames each document has gone undrawn (ImGui::Begin answers false for a
+        // collapsed window and for an inactive tab); this acts on the count. Called from
+        // ServiceDocumentCloses so it runs behind the SAME device-idle wait a close uses — releasing a
+        // PreviewViewport destroys a Scene and a SceneRenderer, and the last submitted frame may still be
+        // executing against them.
+        for ( const auto& document : m_Documents )
+        {
+            const auto it = m_DocumentHiddenFrames.find( document->Subject() );
+            if ( it == m_DocumentHiddenFrames.end() || it->second < kFramesHiddenBeforeSlotRelease )
+                continue;
+            if ( !document->HoldsRendererSlot() )
+                continue;
+
+            document->ReleaseRendererSlot();
+
+            // VERIFIED, NOT ASSUMED. ReleaseRendererSlot's contract is that HoldsRendererSlot answers false
+            // afterwards; a document that inherited the empty default while genuinely holding a slot would
+            // otherwise keep it for ever and the census would go on blaming a window the user cannot fix.
+            if ( document->HoldsRendererSlot() )
+            {
+                LOG_ERROR( "[Editor] '{}' was asked to release its renderer slot after {} hidden frames and "
+                           "still holds one. ReleaseRendererSlot must make HoldsRendererSlot false — see "
+                           "ISubjectDocument.",
+                           DocumentDisplayName( document->GetName() ), it->second );
+                continue;
+            }
+
+            LOG_INFO( "[Editor] '{}' gave its renderer slot back after {} frames off screen ({}/{} in use). "
+                      "It is rebuilt on the first frame the window is drawn again.",
+                      DocumentDisplayName( document->GetName() ), it->second,
+                      Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots );
+        }
     }
 
     void EditorLayer::ServiceDocumentCloses()
     {
-        if ( m_DocumentsToClose.empty() )
+        // The hidden-document sweep shares this function's device-idle wait, so the wait is taken when
+        // either has work. Two waits in one frame would be two full pipeline drains for one frame's worth
+        // of teardown.
+        bool releasePending = false;
+        for ( const auto& document : m_Documents )
+        {
+            const auto it = m_DocumentHiddenFrames.find( document->Subject() );
+            if ( it != m_DocumentHiddenFrames.end() && it->second >= kFramesHiddenBeforeSlotRelease &&
+                 document->HoldsRendererSlot() )
+            {
+                releasePending = true;
+                break;
+            }
+        }
+
+        if ( m_DocumentsToClose.empty() && !releasePending )
             return;
 
         // ONE device-idle wait for the whole batch. Destroying a document destroys its PreviewViewport, and
@@ -1946,35 +2203,43 @@ namespace Desert::Editor
         // the one ~PreviewViewport and CloseSceneView both established, not a precaution invented here.
         Graphic::Renderer::GetInstance().WaitDeviceIdle();
 
-        for ( const Assets::AssetHandle& subject : m_DocumentsToClose )
+        ReleaseSlotsOfHiddenDocuments();
+
+        for ( const PendingDocumentClose& pending : m_DocumentsToClose )
         {
             // Released, then destroyed HERE. The well hands ownership back rather than dropping the object
             // itself, because it is this function that knows the device is idle — see DocumentWell.
-            std::unique_ptr<IAssetEditorPanel> closed = m_Documents.Release( subject );
+            std::unique_ptr<ISubjectDocument> closed = m_Documents.Release( pending.Subject );
             if ( !closed )
                 continue;
 
             const std::string name = closed->GetName();
             m_ContextualShown.erase( closed.get() );
-            if ( m_FocusedDocument == subject )
-                m_FocusedDocument = Common::UUID::Null();
+            m_DocumentHiddenFrames.erase( pending.Subject );
+            if ( m_FocusedDocument == pending.Subject )
+                m_FocusedDocument = SubjectId{};
 
             closed.reset();
 
-            // Printed rather than derived: a document that failed to return its slot produces no error at
-            // all, and this line beside the one in ServiceAssetOpenRequests is what makes the leak readable.
-            LOG_INFO( "[Editor] Closed asset document '{}' ({} open, {}/{} renderer slots in use after "
+            // The REASON is printed, and it is why this line takes one. "Closed document 'Hero'" leaves a
+            // user who did not close it with nothing to go on; "because the AnimationComponent it was
+            // editing no longer exists" is the whole answer.
+            //
+            // The slot count is printed rather than derived for a different reason: a document that failed
+            // to return its slot produces no error at all, and this line beside the one in
+            // ServiceSubjectOpenRequests is what makes the leak readable.
+            LOG_INFO( "[Editor] Closed document '{}' — {} ({} open, {}/{} renderer slots in use after "
                       "release).",
-                      name, m_Documents.Count(), Graphic::SceneRenderer::GetLiveRendererCount(),
-                      EngineContext::kMaxRendererSlots );
+                      DocumentDisplayName( name ), pending.Reason, m_Documents.Count(),
+                      Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots );
         }
 
         m_DocumentsToClose.clear();
     }
 
-    void EditorLayer::FocusDocument( const Assets::AssetHandle& subject )
+    void EditorLayer::FocusDocument( const SubjectId& subject )
     {
-        IAssetEditorPanel* document = m_Documents.Find( subject );
+        ISubjectDocument* document = m_Documents.Find( subject );
         if ( !document )
             return;
 
@@ -1989,7 +2254,7 @@ namespace Desert::Editor
         if ( !next )
             return;
 
-        IAssetEditorPanel* document = m_Documents.Find( *next );
+        ISubjectDocument* document = m_Documents.Find( *next );
         if ( !document )
             return;
 
@@ -2159,7 +2424,7 @@ namespace Desert::Editor
             // ordinary window ring, which is a reasonable thing for it to do and not ours to remove.
             if ( io.KeyCtrl && !io.WantTextInput && ::ImGui::IsKeyPressed( ImGuiKey_Tab, false ) )
             {
-                const Assets::AssetHandle before = m_FocusedDocument;
+                const SubjectId before = m_FocusedDocument;
                 CycleDocuments();
                 if ( m_FocusedDocument != before )
                     ::ImGui::GetCurrentContext()->NavWindowingTarget = nullptr;
@@ -2333,8 +2598,9 @@ namespace Desert::Editor
                 // bottom next to Assets/Logs, authoring palettes on the right beside Details.
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Sequencer" ).c_str(), bottom );
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Anim Layers" ).c_str(), bottom );
-                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Anim Graph" ).c_str(), center );
-                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Particle Editor" ).c_str(), right );
+                // No line for "Anim Graph" or "Particle Editor": they are documents, and a document does
+                // not have a fixed home in the layout — it docks into the document well beside the others
+                // (DrawDocuments sets the dock id), which is the whole point of the well existing.
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "UI Editor" ).c_str(), right );
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Modeling" ).c_str(), left );
 
@@ -2452,7 +2718,7 @@ namespace Desert::Editor
         // creates or destroys a window, so a mistyped search cannot cost the user one.
         for ( const auto& document : m_Documents )
         {
-            const Assets::AssetHandle subject = document->Subject();
+            const SubjectId subject = document->Subject();
             commands.push_back( { "Document", "Go to " + DocumentDisplayName( document->GetName() ),
                                   [this, subject] { FocusDocument( subject ); } } );
         }
@@ -2464,9 +2730,13 @@ namespace Desert::Editor
         // behind the device-idle wait.
         for ( const auto& document : m_Documents )
         {
-            const Assets::AssetHandle subject = document->Subject();
+            const SubjectId subject = document->Subject();
             commands.push_back( { "Document", "Close " + DocumentDisplayName( document->GetName() ),
-                                  [this, subject] { RequestDocumentClose( subject ); } } );
+                                  [this, subject]
+                                  {
+                                      RequestDocumentClose( subject, "closed from the command "
+                                                                     "palette" );
+                                  } } );
         }
 
         // Ctrl+Tab, as a command. The key is bound in OnImGuiRender and a key is not available to a
@@ -2479,14 +2749,13 @@ namespace Desert::Editor
         }
 
         // Reopening one that was closed. The list the empty well shows, reachable without a mouse — and
-        // it is the same Core::AssetOpenRequests the Selectable there uses, so a reopen is refused by the
+        // it is the same Core::SubjectOpenRequests the Selectable there uses, so a reopen is refused by the
         // six-slot cap exactly like any other open rather than becoming a second way in.
         for ( const ClosedDocument& closed : m_Documents.RecentlyClosed() )
         {
-            const Assets::AssetHandle subject = closed.Subject;
-            const Assets::AssetTypeID type    = closed.Type;
+            const SubjectId subject = closed.Subject;
             commands.push_back( { "Document", "Reopen " + closed.DisplayName,
-                                  [subject, type] { Core::AssetOpenRequests::Request( subject, type ); } } );
+                                  [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
         }
 
         // Entities — select any object in the open scene.
@@ -2500,8 +2769,49 @@ namespace Desert::Editor
                 std::string        name = entity.HasComponent<ECS::TagComponent>()
                                                ? entity.GetComponent<ECS::TagComponent>().Tag
                                                : std::string( "Entity" );
-                commands.push_back(
-                     { "Entity", std::move( name ), [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
+                commands.push_back( { "Entity", name, [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
+
+                // DELETING ONE IS ALSO SOMETHING A PERSON DOES, and until now the palette could only
+                // SELECT. The Outliner's context menu and the Delete key both reach
+                // Commands::DeleteEntity — the same undoable command this runs — so the capability
+                // was always there and only the dictionary entry was missing.
+                //
+                // FOUND BY NEEDING IT. Verifying "a document closes with its subject" through the control
+                // channel means killing a subject through the control channel, and there was no way to
+                // destroy an entity without a mouse: the channel runs these closures and nothing else. A
+                // gap in the palette is a gap in what an agent can do at all, which is the one claim the
+                // palette exists to make good on.
+                commands.push_back( { "Entity", "Delete " + name, [uuid] { Commands::DeleteEntity( uuid ); } } );
+
+                // ── AND WHAT CAN BE OPENED *FROM* THIS ENTITY ─────────────────────────────────────────
+                //
+                // The other half of U7, and the half that makes a component document reachable at all
+                // without a mouse. The Details panel's button is how a person opens one; this is the same
+                // request under a name, which is what puts it in THE DICTIONARY — the palette, and
+                // therefore the control channel, which runs these same closures.
+                //
+                // A DOCUMENT REACHABLE ONLY BY CLICKING A BUTTON IS MISSING FROM THAT DICTIONARY, and the
+                // dictionary is this editor's one claim that "anything a person can do, an agent can do".
+                // The asset documents already had their entry (the Open group below, over the registered
+                // assets); a subject that is not a file had none, because there was no file to enumerate.
+                // Enumerating the ENTITIES against the registered COMPONENT kinds is the same loop over
+                // the other domain.
+                //
+                // DERIVED FROM THE REGISTRY, never a hand-written list of the two kinds that exist today:
+                // a third component document appears here the moment its factory is registered, which is
+                // the census this task exists to stop anybody having to refill.
+                for ( const SubjectTypeKey& type : m_SubjectEditors.RegisteredTypes() )
+                {
+                    if ( type.Domain != SubjectDomain::EntityComponent )
+                        continue;
+
+                    const SubjectId subject{ type.Domain, type.Facet, uuid };
+                    if ( !m_SubjectEditors.Exists( subject ) )
+                        continue;
+
+                    commands.push_back( { "Open", name + " \xc2\xb7 " + m_SubjectEditors.TypeName( type ),
+                                          [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
+                }
             }
         }
 
@@ -2522,19 +2832,19 @@ namespace Desert::Editor
         // no name to be reached by.
         //
         // The list is the project's registered assets filtered by "does an editor open this kind", which
-        // is m_AssetEditors and not a hand-written type list — so a new document type appears here the
+        // is m_SubjectEditors and not a hand-written type list — so a new document type appears here the
         // moment its factory is registered.
         if ( m_AssetManager )
         {
             for ( const auto& [metadata, asset] : m_AssetManager->RegisteredAssets() )
             {
-                if ( !metadata.IsValid() || !m_AssetEditors.HasEditorFor( metadata.AssetType ) )
+                const SubjectId subject =
+                     AssetSubject( metadata.Handle, static_cast<uint32_t>( metadata.AssetType ) );
+                if ( !metadata.IsValid() || !m_SubjectEditors.HasEditorFor( subject.Type() ) )
                     continue;
 
-                const Assets::AssetHandle subject = metadata.Handle;
-                const Assets::AssetTypeID type    = metadata.AssetType;
                 commands.push_back( { "Open", metadata.Filepath.filename().generic_string(),
-                                      [subject, type] { Core::AssetOpenRequests::Request( subject, type ); } } );
+                                      [subject] { Core::SubjectOpenRequests::Request( subject ); } } );
             }
         }
 
@@ -2544,7 +2854,7 @@ namespace Desert::Editor
         //
         // Offered for the FOCUSED document only, because that is the one a person means by "the preview"
         // and because seven entries per open document would bury everything else in the list.
-        if ( IAssetEditorPanel* focused = m_Documents.Find( m_FocusedDocument ); focused && focused->HasPreview() )
+        if ( ISubjectDocument* focused = m_Documents.Find( m_FocusedDocument ); focused && focused->HasPreview() )
         {
             for ( const PreviewViewpoint& viewpoint : kPreviewViewpoints )
             {
@@ -2554,7 +2864,7 @@ namespace Desert::Editor
                                           // Re-resolved rather than captured: the focus can move, and the
                                           // document can be destroyed, between this list being built and
                                           // the entry being run.
-                                          if ( IAssetEditorPanel* target = m_Documents.Find( m_FocusedDocument );
+                                          if ( ISubjectDocument* target = m_Documents.Find( m_FocusedDocument );
                                                target && target->HasPreview() )
                                           {
                                               target->SetPreviewViewpoint( *aim );
@@ -2574,30 +2884,30 @@ namespace Desert::Editor
         // available THIS INSTANT, exactly as the toolbar disables the two buttons in the same state; an
         // entry that ran and did nothing would be a silent no-op reported as a success, and a client
         // would read it as "the scene now has my edit".
-        if ( IAssetEditorPanel* focused = m_Documents.Find( m_FocusedDocument ) )
+        if ( ISubjectDocument* focused = m_Documents.Find( m_FocusedDocument ) )
         {
-            const Assets::AssetHandle subject = m_FocusedDocument;
+            const SubjectId subject = m_FocusedDocument;
 
-            if ( focused->GetEditModel() == IAssetEditorPanel::EditModel::Staged && focused->HasUnappliedEdits() )
+            if ( focused->GetEditModel() == ISubjectDocument::EditModel::Staged && focused->HasUnappliedEdits() )
             {
                 // Re-resolved inside, not captured: the focus can move and the document can be destroyed
                 // between this list being built and the entry being run — the same rule the Preview
                 // viewpoints above follow, for the same reason.
                 commands.push_back( { "Document", "Apply this document's edits to the scene", [this, subject]
                                       {
-                                          if ( IAssetEditorPanel* target = m_Documents.Find( subject ) )
+                                          if ( ISubjectDocument* target = m_Documents.Find( subject ) )
                                               (void)target->ApplyEdits();
                                       } } );
                 commands.push_back( { "Document", "Discard this document's unapplied edits", [this, subject]
                                       {
-                                          if ( IAssetEditorPanel* target = m_Documents.Find( subject ) )
+                                          if ( ISubjectDocument* target = m_Documents.Find( subject ) )
                                               (void)target->DiscardEdits();
                                       } } );
             }
 
             commands.push_back( { "Document", "Save this document", [this, subject]
                                   {
-                                      if ( IAssetEditorPanel* target = m_Documents.Find( subject ) )
+                                      if ( ISubjectDocument* target = m_Documents.Find( subject ) )
                                           (void)target->SaveDocument();
                                   } } );
         }
@@ -2697,12 +3007,15 @@ namespace Desert::Editor
                 ImGui::TextDisabled( "RECENTLY CLOSED" );
                 for ( const ClosedDocument& closed : m_Documents.RecentlyClosed() )
                 {
-                    ImGui::PushID( static_cast<int>( static_cast<uint64_t>( closed.Subject ) & 0x7fffffff ) );
-                    const std::string row = std::string( DocumentIcon( closed.Type ) ) + "  " + closed.DisplayName;
+                    ImGui::PushID( static_cast<int>( std::hash<SubjectId>{}( closed.Subject ) & 0x7fffffff ) );
+                    const std::string row =
+                         std::string( m_SubjectEditors.Icon( closed.Subject, kUnknownDocumentIcon ) ) + "  " +
+                         closed.DisplayName;
                     if ( ImGui::Selectable( row.c_str() ) )
-                        Core::AssetOpenRequests::Request( closed.Subject, closed.Type );
+                        Core::SubjectOpenRequests::Request( closed.Subject );
                     if ( ImGui::IsItemHovered() )
-                        ImGui::SetTooltip( "Reopen this %s document", Assets::AssetTypeName( closed.Type ) );
+                        ImGui::SetTooltip( "Reopen this %s document",
+                                           m_SubjectEditors.TypeName( closed.Subject ).c_str() );
                     ImGui::PopID();
                 }
             }
@@ -2720,17 +3033,18 @@ namespace Desert::Editor
 
         // Most recently used first, the same order Ctrl+Tab walks — one order, read in two places, so the
         // list cannot teach a different sequence from the key.
-        std::vector<Assets::AssetHandle> closeRequests;
-        for ( const Assets::AssetHandle& subject : m_Documents.MostRecentOrder() )
+        std::vector<SubjectId> closeRequests;
+        for ( const SubjectId& subject : m_Documents.MostRecentOrder() )
         {
-            const IAssetEditorPanel* document = m_Documents.Find( subject );
+            const ISubjectDocument* document = m_Documents.Find( subject );
             if ( !document )
                 continue;
 
-            ImGui::PushID( static_cast<int>( static_cast<uint64_t>( subject ) & 0x7fffffff ) );
+            ImGui::PushID( static_cast<int>( std::hash<SubjectId>{}( subject ) & 0x7fffffff ) );
 
-            const std::string row = std::string( DocumentIcon( document->SubjectType() ) ) + "  " +
-                                    DocumentDisplayName( document->GetName() );
+            const std::string row =
+                 std::string( m_SubjectEditors.Icon( document->Subject(), kUnknownDocumentIcon ) ) + "  " +
+                 DocumentDisplayName( document->GetName() );
             if ( ImGui::Selectable( row.c_str(), subject == m_FocusedDocument,
                                     ImGuiSelectableFlags_AllowItemOverlap ) )
                 FocusDocument( subject );
@@ -2740,8 +3054,7 @@ namespace Desert::Editor
             const char*       slot = document->HoldsRendererSlot()    ? "1 slot"
                                      : document->ClaimsRendererSlot() ? "claiming"
                                                                       : "no slot";
-            const std::string right =
-                 std::string( Assets::AssetTypeName( document->SubjectType() ) ) + " \xc2\xb7 " + slot;
+            const std::string right  = m_SubjectEditors.TypeName( document->Subject() ) + " \xc2\xb7 " + slot;
             const float rightW = ImGui::CalcTextSize( right.c_str() ).x;
             ImGui::SameLine( ImGui::GetContentRegionMax().x - rightW - 28.0f );
             ImGui::TextDisabled( "%s", right.c_str() );
@@ -2757,20 +3070,20 @@ namespace Desert::Editor
 
         // Requested after the loop: RequestDocumentClose only queues, but collecting first keeps the rule
         // that nothing mutates a container while it is being walked.
-        for ( const Assets::AssetHandle& subject : closeRequests )
-            RequestDocumentClose( subject );
+        for ( const SubjectId& subject : closeRequests )
+            RequestDocumentClose( subject, "closed from the Documents index" );
     }
 
     void EditorLayer::DrawDocuments()
     {
         namespace ImGui = ::ImGui;
 
-        std::vector<Assets::AssetHandle> closeRequests;
-        Assets::AssetHandle              focused = Common::UUID::Null();
+        std::vector<SubjectId> closeRequests;
+        SubjectId              focused;
 
         for ( const auto& document : m_Documents )
         {
-            const Assets::AssetHandle subject = document->Subject();
+            const SubjectId subject = document->Subject();
 
             // A DOCKED DOCUMENT, not a floating one. Before this they opened as a cascade of floating
             // windows stepped 32 px down-right from each other, which is what an application does when it
@@ -2796,13 +3109,30 @@ namespace Desert::Editor
             // it is open, or it does not exist.
             bool open = true;
             ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, document->GetWindowPadding() );
-            ImGui::Begin( DocumentDisplayTitle( *document ).c_str(), &open );
+            // BEGIN'S RETURN VALUE IS "IS THIS DOCUMENT ON SCREEN", and it was being thrown away. It is
+            // false for a window that is collapsed and for one whose dock tab is not the active one — so
+            // four documents in one dock node were all drawing their contents every frame while one of
+            // them was visible, and the three that were not were also holding renderer slots for it. The
+            // content is skipped, which is ImGui's own idiom, and the frames off screen are counted so the
+            // slot can go back (ReleaseSlotsOfHiddenDocuments).
+            const bool visible = ImGui::Begin( DocumentDisplayTitle( *document ).c_str(), &open );
             ImGui::PopStyleVar();
-            if ( ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows ) )
-                focused = subject;
+            if ( visible )
             {
-                DESERT_PROFILE_SCOPE_DYNAMIC( document->GetName().c_str() );
-                document->OnUIRender();
+                if ( ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows ) )
+                    focused = subject;
+                {
+                    DESERT_PROFILE_SCOPE_DYNAMIC( document->GetName().c_str() );
+                    document->OnUIRender();
+                }
+                // RESET RATHER THAN DECREMENTED. The threshold is about a window the user has LEFT off
+                // screen; one visible frame means they have not, and counting down from thirty would make
+                // the release depend on how often they flicked back to it.
+                m_DocumentHiddenFrames.erase( subject );
+            }
+            else
+            {
+                ++m_DocumentHiddenFrames[subject];
             }
             ImGui::End();
 
@@ -2813,7 +3143,7 @@ namespace Desert::Editor
         // The focus is only MOVED by a document that actually has it. A frame in which the keyboard is on a
         // tool leaves the last focused document standing, so Ctrl+Tab resumes from where the user was
         // editing rather than from nothing.
-        if ( static_cast<uint64_t>( focused ) != 0 )
+        if ( !focused.IsNull() )
         {
             // CLICKING A DOCUMENT COMMITS THE RING, cycling to one does not. Both are "focus", so without
             // this distinction one of the two rules would be wrong: either a mouse click would leave
@@ -2826,8 +3156,8 @@ namespace Desert::Editor
             m_FocusedDocument = focused;
         }
 
-        for ( const Assets::AssetHandle& subject : closeRequests )
-            RequestDocumentClose( subject );
+        for ( const SubjectId& subject : closeRequests )
+            RequestDocumentClose( subject, "you closed the window" );
     }
 
     void EditorLayer::DrawOpenRefusedPopup()
@@ -2870,7 +3200,7 @@ namespace Desert::Editor
                              m_OpenRefusal->Pending > 0 ? " or already committed" : "" );
         ImGui::Separator();
 
-        std::vector<Assets::AssetHandle> closeRequests;
+        std::vector<SubjectId> closeRequests;
         for ( const RendererSlotConsumer& consumer : m_OpenRefusal->Census )
         {
             ImGui::TextUnformatted( consumer.Name.c_str() );
@@ -2881,7 +3211,7 @@ namespace Desert::Editor
             if ( consumer.Document && m_Documents.Find( *consumer.Document ) )
             {
                 ImGui::SameLine( ImGui::GetContentRegionMax().x - 64.0f );
-                ImGui::PushID( static_cast<int>( static_cast<uint64_t>( *consumer.Document ) & 0x7fffffff ) );
+                ImGui::PushID( static_cast<int>( std::hash<SubjectId>{}( *consumer.Document ) & 0x7fffffff ) );
                 if ( ImGui::SmallButton( "Close" ) )
                     closeRequests.push_back( *consumer.Document );
                 ImGui::PopID();
@@ -2909,8 +3239,8 @@ namespace Desert::Editor
 
         ImGui::EndPopup();
 
-        for ( const Assets::AssetHandle& subject : closeRequests )
-            RequestDocumentClose( subject );
+        for ( const SubjectId& subject : closeRequests )
+            RequestDocumentClose( subject, "closed to free a renderer slot" );
     }
 
     void EditorLayer::DrawRecoveryPopup()
@@ -4168,8 +4498,10 @@ namespace Desert::Editor
         static constexpr const char* kContentGroup[]   = { "Assets", "Asset References", "Shader Library" };
         static constexpr const char* kOutputGroup[]    = { "Logs", "Lua Console", "History" };
         static constexpr const char* kViewportGroup[]  = { "Scene###scene" };
-        static constexpr const char* kGraphGroup[]     = { "Node Graph", "Anim Graph", "Particle Editor",
-                                                           "UI Editor" };
+        // "Anim Graph" and "Particle Editor" are gone from this list because they are gone from the
+        // registry this menu loops over — a name left here would draw a group entry for a panel that does
+        // not exist. They are opened from the component that holds them, in Details.
+        static constexpr const char* kGraphGroup[]     = { "Node Graph", "UI Editor" };
         static constexpr const char* kSequencerGroup[] = { "Sequencer", "Anim Layers" };
         static constexpr const char* kToolGroup[]      = { "Modeling", "Model from Photos", "Build Settings" };
 
@@ -4683,19 +5015,19 @@ namespace Desert::Editor
             for ( const auto& document : m_Documents )
             {
                 const std::string measured = std::string( ICON_MDI_RADIOBOX_MARKED ) + "  " +
-                                             DocumentIcon( document->SubjectType() ) + "  " +
-                                             DocumentDisplayName( document->GetName() );
+                                             m_SubjectEditors.Icon( document->Subject(), kUnknownDocumentIcon ) +
+                                             std::string( "  " ) + DocumentDisplayName( document->GetName() );
                 widestRow = std::max( widestRow, ImGui::CalcTextSize( measured.c_str() ).x );
             }
 
-            std::vector<Assets::AssetHandle> closeRequests;
-            for ( const Assets::AssetHandle& subject : m_Documents.MostRecentOrder() )
+            std::vector<SubjectId> closeRequests;
+            for ( const SubjectId& subject : m_Documents.MostRecentOrder() )
             {
-                const IAssetEditorPanel* document = m_Documents.Find( subject );
+                const ISubjectDocument* document = m_Documents.Find( subject );
                 if ( !document )
                     continue;
 
-                ImGui::PushID( static_cast<int>( static_cast<uint64_t>( subject ) & 0x7fffffff ) );
+                ImGui::PushID( static_cast<int>( std::hash<SubjectId>{}( subject ) & 0x7fffffff ) );
 
                 // A RADIO, NOT A CHECKBOX, and the difference is the whole argument of this task written
                 // in one glyph. A tick says "shown / hidden" and invites the user to untick it — which is
@@ -4704,7 +5036,8 @@ namespace Desert::Editor
                 const bool        active = ( subject == m_FocusedDocument );
                 const std::string label =
                      std::string( active ? ICON_MDI_RADIOBOX_MARKED : ICON_MDI_RADIOBOX_BLANK ) + "  " +
-                     DocumentIcon( document->SubjectType() ) + "  " + DocumentDisplayName( document->GetName() );
+                     m_SubjectEditors.Icon( document->Subject(), kUnknownDocumentIcon ) + std::string( "  " ) +
+                     DocumentDisplayName( document->GetName() );
 
                 if ( ImGui::MenuItem( label.c_str() ) )
                     FocusDocument( subject );
@@ -4723,13 +5056,13 @@ namespace Desert::Editor
             if ( ImGui::MenuItem( ICON_MDI_CLOSE_BOX_OUTLINE "  Close All Documents" ) )
                 RequestCloseAllDocuments();
 
-            for ( const Assets::AssetHandle& subject : closeRequests )
-                RequestDocumentClose( subject );
+            for ( const SubjectId& subject : closeRequests )
+                RequestDocumentClose( subject, "closed from Window \xe2\x96\xb8 Documents" );
         }
 
         // NO "SAVE ALL" HERE, AND ITS ABSENCE IS DELIBERATE.
         //
-        // The mock draws one. It cannot be built honestly yet: IAssetEditorPanel declares no Save() and no
+        // The mock draws one. It cannot be built honestly yet: ISubjectDocument declares no Save() and no
         // IsDirty(), the editor's single dirty flag belongs to the SCENE (a CommandHistory revision), and a
         // material document writes straight into the in-memory asset as a slider moves. "Save All" would
         // therefore have to mean "rewrite every open document's file whether or not it changed", it could

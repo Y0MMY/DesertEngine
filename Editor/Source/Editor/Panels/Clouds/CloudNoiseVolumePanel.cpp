@@ -54,7 +54,7 @@ namespace Desert::Editor
         }
 
         // The document's VISIBLE title: the subject's file name. Computed before the base class is
-        // constructed — IAssetEditorPanel bakes the title in its own constructor and holds it for the
+        // constructed — ISubjectDocument bakes the title in its own constructor and holds it for the
         // window's life — so it is a free function rather than a member.
         //
         // Falls back to the type's name rather than to something empty: a document whose asset has gone
@@ -72,7 +72,9 @@ namespace Desert::Editor
 
     CloudNoiseVolumePanel::CloudNoiseVolumePanel( const Assets::AssetHandle& subject,
                                                   Assets::AssetManager*      assets )
-         : IAssetEditorPanel( SubjectTitle( subject, assets ), subject, Assets::AssetTypeID::CloudNoiseVolume ),
+         : ISubjectDocument(
+                SubjectTitle( subject, assets ),
+                AssetSubject( subject, static_cast<uint32_t>( Assets::AssetTypeID::CloudNoiseVolume ) ) ),
            m_Assets( assets )
     {
         LoadSubject( assets );
@@ -83,7 +85,8 @@ namespace Desert::Editor
         if ( !assets )
             return;
 
-        const auto asset = assets->FindByHandle<Assets::CloudNoiseVolumeAsset>( Subject() );
+        const auto asset =
+             assets->FindByHandle<Assets::CloudNoiseVolumeAsset>( Assets::AssetHandle( Subject().Owner ) );
         if ( !asset || !asset->IsReadyForUse() )
         {
             // NAMED rather than left as an empty panel. The opener (CloudDocumentOpen.hpp) refuses to queue
@@ -640,5 +643,14 @@ namespace Desert::Editor
             m_Status        = "Saved a copy to " + target.string() + " - it has opened in its own window.";
             m_StatusIsError = false;
         }
+    }
+
+    bool CloudNoiseVolumePanel::IsSubjectAlive() const
+    {
+        // ASKED OF THE METADATA rather than of a typed lookup: the question is whether the asset is still
+        // THERE, and a typed lookup answers a different one (whether it is still that type) — a subject
+        // that failed to reload as its own class would read as deleted and the window would close on a
+        // load error instead of reporting it.
+        return m_Assets && m_Assets->FindMetadataByHandle( Assets::AssetHandle( Subject().Owner ) ) != nullptr;
     }
 } // namespace Desert::Editor

@@ -10,6 +10,7 @@
 #include <Common/Core/ResultStr.hpp>
 
 #include <Editor/Core/EditableProperty.hpp>
+#include <Editor/Core/EditorSubject.hpp>
 #include <Editor/Core/PreviewViewpoints.hpp>
 
 #include <Engine/Assets/Common.hpp>
@@ -104,7 +105,7 @@ namespace Desert::Editor
         bool              m_Pinned = false; // opened by hand: never auto-closed (see IsContextual)
     };
 
-    // The window title an asset document must carry: "<display name>###assetdoc<subject handle>".
+    // The window title a document must carry: "<display name>###doc<subject>".
     //
     // THE ###id IS NOT DECORATION. Every panel is drawn with ImGui::Begin( PanelDisplayTitle( GetName() ) ),
     // and ImGui derives a window's identity from the text after the LAST "###" — so two windows whose titles
@@ -117,22 +118,28 @@ namespace Desert::Editor
     // The subject and not a fresh id, deliberately: an id source would let one material open twice, and the
     // two windows would then edit one asset through two parameter tables.
     //
+    // THE WHOLE SUBJECT AND NOT ITS OWNER. This used to append the subject handle alone, which was
+    // unambiguous only while every document was an asset. It no longer is: an entity's UUID and an asset's
+    // handle are both 64-bit ids drawn from the same space, and two documents over one entity — its anim
+    // graph and its particle emitter — share an owner and differ only in the facet. Appending
+    // SubjectId::ToString() puts the domain and the facet in the id too, so those are three distinct
+    // windows rather than one window three things fight over.
+    //
     // The display half is stripped of any "###" of its own, and that is not defensive programming: what
     // EditorLayer hands to Begin() is PanelDisplayTitle(GetName()), which appends "###" + the whole name
     // again, and ImGui takes the id from the LAST "###" in the string. A display name carrying one (an asset
     // file may be named anything) would therefore end up deciding the window id — and two such assets would
     // merge into one window, which is the exact failure this function exists to prevent.
-    [[nodiscard]] inline std::string AssetDocumentTitle( const std::string&         displayName,
-                                                         const Assets::AssetHandle& subject )
+    [[nodiscard]] inline std::string DocumentTitle( const std::string& displayName, const SubjectId& subject )
     {
         std::string label = displayName;
         if ( const auto pos = label.find( "###" ); pos != std::string::npos )
             label.erase( pos );
 
-        return label + "###assetdoc" + std::to_string( static_cast<uint64_t>( subject ) );
+        return label + "###doc" + subject.ToString();
     }
 
-    // A panel that edits ONE asset: a document, not a tool.
+    // A panel that edits ONE SUBJECT: a document, not a tool.
     //
     // The difference that matters to the editor: a tool panel is created once at startup and toggled, so its
     // name is a constant and hiding it is the whole of "closing" it. A document is created when the user
@@ -149,29 +156,43 @@ namespace Desert::Editor
     //
     // GetVisibility() is inherited here and MEANS NOTHING for a document. Nothing reads it, nothing writes
     // it, and nothing should: a document is open, or it does not exist.
-    class IAssetEditorPanel : public IPanel
+    //
+    // NOT "IAssetEditorPanel" ANY MORE, and the rename is the task rather than tidying. The subject was an
+    // Assets::AssetHandle, so a document could only ever be a file — which made the Details-panel button
+    // the owner asked for ("edit the thing this component holds") inexpressible, since the request it
+    // would send has nowhere to put a component. Editor/Core/EditorSubject.hpp has the whole argument for
+    // what replaced it.
+    class ISubjectDocument : public IPanel
     {
     public:
-        IAssetEditorPanel( const std::string& displayName, const Assets::AssetHandle& subject,
-                           Assets::AssetTypeID type )
-             : IPanel( AssetDocumentTitle( displayName, subject ), /*showPanel=*/true ), m_Subject( subject ),
-               m_SubjectType( type )
+        ISubjectDocument( const std::string& displayName, const SubjectId& subject )
+             : IPanel( DocumentTitle( displayName, subject ), /*showPanel=*/true ), m_Subject( subject )
         {
         }
 
         // WHAT THIS DOCUMENT EDITS, fixed for its whole life. Immutable because it is the window's identity:
         // the title, and therefore the ImGui window id, is derived from it, and a title that changed under a
         // live window would either merge it into another document's window or orphan its saved dock entry.
-        // Editing a different asset means opening a different document.
-        [[nodiscard]] const Assets::AssetHandle& Subject() const noexcept
+        // Editing a different subject means opening a different document.
+        [[nodiscard]] const SubjectId& Subject() const noexcept
         {
             return m_Subject;
         }
 
-        [[nodiscard]] Assets::AssetTypeID SubjectType() const noexcept
-        {
-            return m_SubjectType;
-        }
+        // ── IS THE SUBJECT STILL THERE? ────────────────────────────────────────────────────────────────
+        //
+        // The owner's decision: a document CLOSES WITH ITS SUBJECT. Delete the entity, or delete the asset,
+        // and the window goes with a named reason rather than staying open over nothing.
+        //
+        // PURE VIRTUAL, and that is the point of it. A default returning true would be a document asserting
+        // its subject exists on no evidence — which is the shape this editor has paid for before
+        // (GetDiskState's own note below: "UNTRACKED IS NOT CLEAN"). Every document already resolves its
+        // subject to draw anything at all; this asks it to say what that resolution found.
+        //
+        // ASKED, NOT WATCHED. There is no deletion event to subscribe to that covers both an asset removed
+        // from the manager and an entity destroyed in any of the open scenes, and a subscription that
+        // covered one of the two would be worse than none: the uncovered half would look handled.
+        [[nodiscard]] virtual bool IsSubjectAlive() const = 0;
 
         // Is this document holding one of the six renderer slots RIGHT NOW?
         //
@@ -196,6 +217,29 @@ namespace Desert::Editor
         [[nodiscard]] virtual bool ClaimsRendererSlot() const
         {
             return true;
+        }
+
+        // ── GIVE THE SLOT BACK WHILE NOBODY IS LOOKING ─────────────────────────────────────────────────
+        //
+        // There are six renderer slots and a document holds one for as long as it is OPEN, which is not
+        // the same as for as long as it is SEEN. Four documents docked as tabs in one node show one tab;
+        // the other three were rendering a preview nobody could see and holding three of the six slots
+        // while they did it, so the fifth document the user opened was refused over resources that were
+        // being spent on hidden windows.
+        //
+        // THE ALTERNATIVE WAS TO CLOSE THE DOCUMENT ON FOCUS LOSS, AND THE OWNER REFUSED IT: a layout that
+        // rearranges itself reads as an editor that lost your panel. So the window stays and the RESOURCE
+        // goes. Called by EditorLayer from ServiceDocumentCloses — behind the same device-idle wait a close
+        // uses, and for the same reason: the last submitted frame may still be executing against the
+        // renderer this releases.
+        //
+        // AFTERWARDS HoldsRendererSlot() MUST ANSWER FALSE. That is the contract, it is what the editor
+        // logs an error about if it is broken, and it is what a suite can assert over a document with no
+        // renderer anywhere near (DocumentOwnership). The default body is empty because a document that
+        // never claims a slot has nothing to give back — for one that does, an empty override would fail
+        // that check out loud rather than quietly keep the slot.
+        virtual void ReleaseRendererSlot()
+        {
         }
 
         // Does this document show a 3D PREVIEW that can be put at a named viewpoint?
@@ -342,7 +386,6 @@ namespace Desert::Editor
         }
 
     private:
-        const Assets::AssetHandle m_Subject;
-        const Assets::AssetTypeID m_SubjectType;
+        const SubjectId m_Subject;
     };
 } // namespace Desert::Editor

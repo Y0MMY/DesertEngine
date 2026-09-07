@@ -2,7 +2,6 @@
 #include <Editor/Panels/PanelContext.hpp>
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
-#include <Editor/Core/Selection/SelectionManager.hpp>
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -19,8 +18,6 @@ namespace Desert::Editor
 
     namespace
     {
-        bool s_OpenRequested = false;
-
         using Data  = ECS::ParticleEmitterData;
         using Blend = ECS::ParticleBlendMode;
 
@@ -171,54 +168,43 @@ namespace Desert::Editor
         }
     } // namespace
 
-    ParticleEditorPanel::ParticleEditorPanel( const std::shared_ptr<::Desert::Core::Scene>& scene )
-         : IPanel( "Particle Editor", /*showPanel=*/false ), m_Scene( scene )
+    ParticleEditorPanel::ParticleEditorPanel( const SubjectId& subject, const std::string& displayName,
+                                              const std::shared_ptr<::Desert::Core::Scene>& scene )
+         : ISubjectDocument( displayName, subject ), m_Scene( scene )
     {
     }
 
-    void ParticleEditorPanel::RequestOpen()
+    ECS::ParticleEmitterComponent* ParticleEditorPanel::ResolveComponent() const
     {
-        s_OpenRequested = true;
-    }
+        const auto scene = m_Scene.lock();
+        if ( !scene )
+            return nullptr; // the scene this document was opened over has been closed
 
-    void ParticleEditorPanel::OnPreUpdate()
-    {
-        if ( s_OpenRequested )
-        {
-            GetVisibility() = true;
-            s_OpenRequested = false;
-        }
+        const auto entOpt = scene->FindEntityByID( Subject().Owner );
+        if ( !entOpt )
+            return nullptr; // the entity was deleted
+
+        auto& entity = entOpt->get();
+        if ( !entity.HasComponent<ECS::ParticleEmitterComponent>() )
+            return nullptr; // the component was removed from under the window
+
+        return &entity.GetComponent<ECS::ParticleEmitterComponent>();
     }
 
     void ParticleEditorPanel::OnUIRender()
     {
-        if ( !m_Scene )
+        // THE FOUR EMPTY STATES ARE GONE. They existed because the window was about "whatever is selected",
+        // so every way that could be nothing needed its own sentence. This window is about one emitter for
+        // its whole life; a null here means the subject has just died, and the editor closes the document
+        // for it on the same frame (EditorLayer::CloseDocumentsWhoseSubjectIsGone).
+        ECS::ParticleEmitterComponent* emitter = ResolveComponent();
+        if ( !emitter )
         {
-            ImGui::TextDisabled( "No active scene." );
-            return;
-        }
-        const auto& sel = Core::SelectionManager::GetSelected();
-        if ( !sel )
-        {
-            ImGui::TextDisabled( "Select an entity with a Particle Emitter." );
-            return;
-        }
-        const auto entOpt = m_Scene->FindEntityByID( *sel );
-        if ( !entOpt )
-        {
-            ImGui::TextDisabled( "Selection not found in the scene." );
-            return;
-        }
-        auto& entity = entOpt->get();
-        if ( !entity.HasComponent<ECS::ParticleEmitterComponent>() )
-        {
-            ImGui::TextDisabled( "Selected entity has no Particle Emitter component." );
-            if ( ImGui::Button( ICON_MDI_PLUS " Add Particle Emitter" ) )
-                entity.AddComponent<ECS::ParticleEmitterComponent>();
+            ImGui::TextDisabled( "This entity, its Particle Emitter or its scene is gone — closing." );
             return;
         }
 
-        Data& d = entity.GetComponent<ECS::ParticleEmitterComponent>().Data;
+        Data& d = emitter->Data;
 
         // Presets.
         ImGui::TextColored( ImVec4( 0.70f, 0.78f, 0.90f, 1.0f ), ICON_MDI_STAR " Presets" );
@@ -282,11 +268,6 @@ namespace Desert::Editor
         // Stats.
         const int maxAlive = std::min( d.MaxParticles, static_cast<int>( d.SpawnRate * d.Lifetime + 0.5f ) );
         ImGui::TextDisabled( "~%d particles alive (rate x lifetime, capped at Max).", std::max( 0, maxAlive ) );
-    }
-
-    bool ParticleEditorPanel::IsRelevant() const
-    {
-        return SelectionHas<ECS::ParticleEmitterComponent>( m_Scene );
     }
 
 } // namespace Desert::Editor

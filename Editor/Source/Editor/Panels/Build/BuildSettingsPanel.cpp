@@ -25,9 +25,9 @@ namespace Desert::Editor
         if ( !::Desert::Project::ProjectContext::HasProject() )
             return;
 
-        namespace fs              = std::filesystem;
-        const fs::path projectDir = ::Desert::Project::ProjectContext::Directory();
-        const fs::path assetsRoot = Common::Constants::Path::ASSETS_PATH;
+        namespace fs               = std::filesystem;
+        const fs::path  projectDir = ::Desert::Project::ProjectContext::Directory();
+        const fs::path  assetsRoot = Common::Constants::Path::ASSETS_PATH;
         std::error_code ec;
         for ( const auto& entry : fs::recursive_directory_iterator( assetsRoot, ec ) )
         {
@@ -39,13 +39,13 @@ namespace Desert::Editor
 
     void BuildSettingsPanel::OnUIRender()
     {
-        ImGui::TextUnformatted(
-             ( "Project: " + ::Desert::Project::ProjectContext::Current().Name ).c_str() );
+        ImGui::TextUnformatted( ( "Project: " + ::Desert::Project::ProjectContext::Current().Name ).c_str() );
         ImGui::Separator();
 
         ImGui::Spacing();
         ImGui::TextUnformatted( "Target platform" );
-        const char* platforms[] = { ICON_MDI_APPLE "  macOS (Apple Silicon)", ICON_MDI_MICROSOFT_WINDOWS "  Windows x64",
+        const char* platforms[] = { ICON_MDI_APPLE "  macOS (Apple Silicon)",
+                                    ICON_MDI_MICROSOFT_WINDOWS "  Windows x64",
                                     ICON_MDI_LINUX "  Linux x64 (planned)" };
         for ( int i = 0; i < 3; ++i )
         {
@@ -64,8 +64,7 @@ namespace Desert::Editor
 
         ImGui::Spacing();
 #ifdef DESERT_PLATFORM_MACOS
-        ImGui::Checkbox( ".app bundle (MoltenVK inside — no Homebrew on the player's machine)",
-                         &m_AppBundle );
+        ImGui::Checkbox( ".app bundle (MoltenVK inside — no Homebrew on the player's machine)", &m_AppBundle );
 #endif
 
         ImGui::Spacing();

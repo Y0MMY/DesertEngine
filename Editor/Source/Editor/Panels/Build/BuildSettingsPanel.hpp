@@ -38,7 +38,7 @@ namespace Desert::Editor
         std::atomic<bool> m_Building{ false };
         std::atomic<bool> m_HasResult{ false };
         bool              m_LastSuccess = false;
-        std::string       m_LastMessage;    // guarded by the m_Building/m_HasResult handshake
+        std::string       m_LastMessage; // guarded by the m_Building/m_HasResult handshake
         std::string       m_LastPackageDir;
 
         // Startup-scene picker: the .desce scenes found under the project (relative to the project

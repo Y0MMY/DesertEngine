@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Editor/Core/AssetOpenRequest.hpp>
+#include <Editor/Core/SubjectOpenRequest.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
@@ -24,7 +24,7 @@ namespace Desert::Editor
     // create-and-load if this is the first ask, register the shell), and two copies of it would be the
     // two-implementations-of-one-quantity shape this engine keeps paying for.
     //
-    // The request carries a HANDLE and not the path, because the handle is the document's identity: it is
+    // The request carries a SUBJECT and not the path, because the subject is the document's identity: it is
     // what open-or-focus is keyed on and what the window's ImGui id is built from. So the resolution has to
     // happen on this side of the wire.
     //
@@ -86,7 +86,8 @@ namespace Desert::Editor
                 materialService->RegisterAsset( asset );
         }
 
-        Core::AssetOpenRequests::Request( asset->GetMetadata().Handle, Assets::AssetTypeID::Material );
+        Core::SubjectOpenRequests::Request(
+             AssetSubject( asset->GetMetadata().Handle, static_cast<uint32_t>( Assets::AssetTypeID::Material ) ) );
         return MaterialDocumentRequest::Requested;
     }
 } // namespace Desert::Editor

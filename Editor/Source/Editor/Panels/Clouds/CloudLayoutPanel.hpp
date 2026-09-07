@@ -124,7 +124,7 @@ namespace Desert::Editor
      * scene, and the layer is an input to the preview in the same way a light is an input to a material
      * thumbnail.
      */
-    class CloudLayoutPanel final : public IAssetEditorPanel
+    class CloudLayoutPanel final : public ISubjectDocument
     {
     public:
         CloudLayoutPanel( const Assets::AssetHandle& subject, std::shared_ptr<::Desert::Core::Scene> scene,
@@ -134,6 +134,15 @@ namespace Desert::Editor
         // a CPU-evaluated top-down map uploaded as a Graphic::Image2D, not a rendered frame: there is no
         // Scene of its own and no SceneRenderer, so this document costs none of the six slots. It holds a
         // shared_ptr to the ACTIVE scene, which it reads and never renders.
+
+        // The `CloudLayout` this window is about, gone from the manager — deleted in the browser, or the project
+        // closed under it. Asked of the metadata rather than of a typed lookup: the question is whether the
+        // asset is still THERE, and a typed lookup answers a different one (whether it is still that type).
+        // DEFINED IN THE .cpp: this header only forward-declares AssetManager, and pulling the whole of
+        // it in for one metadata lookup would put the asset system into every translation unit that draws
+        // a cloud panel.
+        [[nodiscard]] bool IsSubjectAlive() const override;
+
         [[nodiscard]] bool HoldsRendererSlot() const override
         {
             return false;

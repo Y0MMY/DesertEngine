@@ -167,6 +167,7 @@ namespace Desert::Editor
     };
 
     FileExplorerPanel::FileExplorerPanel( const std::filesystem::path&         rootPath,
+                                          const SubjectEditorRegistry*         subjectEditors,
                                           Assets::AssetManager*                assetManager,
                                           std::weak_ptr<::Desert::Core::Scene> viewportScene )
          // IN DECLARATION ORDER. Members are constructed in the order they are DECLARED whatever this list
@@ -177,7 +178,7 @@ namespace Desert::Editor
            m_IsDragging( false ), m_IsInListView( false ), m_ShowHiddenFiles( false ), m_GridSize( 120.0f ),
            m_Refresh( false ), m_UpdateNavigationPath( true ), m_CurrentDir( nullptr ),
            m_BaseProjectDir( nullptr ), m_PreviousDirectory( nullptr ), m_AssetManager( assetManager ),
-           m_ViewportScene( std::move( viewportScene ) )
+           m_SubjectEditors( subjectEditors ), m_ViewportScene( std::move( viewportScene ) )
     {
         m_UIHelper = std::make_unique<UI::UIHelper>();
         m_UIHelper->Init();
@@ -2244,51 +2245,43 @@ namespace Desert::Editor
         }
 
         if ( doubleClicked && folder )
+        {
             ChangeDirectory( entry );
-        else if ( doubleClicked && entry->Type == FileType::ShaderGraph )
-            NodeGraphPanel::RequestOpen( entry->AssetPath ); // opens the Node Graph panel with this graph
-        else if ( doubleClicked && entry->Type == FileType::Scene )
-            Core::SceneOpenRequest::Request( entry->AssetPath ); // same guarded load as a drop / the menu
-        else if ( doubleClicked && entry->Type == FileType::Material )
-        {
-            // One Material Editor window bound to THIS .demat — UE's flow. Opening the same material twice
-            // focuses the window that is already on it; see EditorLayer::ServiceAssetOpenRequests.
-            //
-            // NotAMaterialPath is impossible here by the branch condition and is reported rather than
-            // ignored: the browser has just called this file a material, so the two disagreeing means the
-            // file-type table and the extension the opener checks have drifted apart — and the symptom
-            // would be a double-click that does nothing at all.
-            if ( RequestMaterialDocument( m_AssetManager, entry->AssetPath ) ==
-                 MaterialDocumentRequest::NotAMaterialPath )
-            {
-                LOG_ERROR( "[Assets] '{}' is listed as a material but does not look like one to the Material "
-                           "Editor — nothing opened.",
-                           entry->AssetPath );
-            }
         }
-        else if ( doubleClicked && IsCloudAssetPath( entry->AssetPath ) )
+        // ── THE TWO FILE KINDS THAT ARE NOT DOCUMENTS ─────────────────────────────────────────────────
+        //
+        // A SCENE is not a document: it is what every other window is about, and opening one replaces the
+        // world rather than adding a window to it — so it goes through its own guarded load, the same one
+        // a drop and the File menu use.
+        //
+        // A SHADER GRAPH is not a document YET. The Node Graph is still a singleton tool that swaps its
+        // document in place, so a second `.dgraph` overwrites the first with no prompt; making it a
+        // document needs a `.dgraph` asset type, which turns the AssetHandleStability census red until it
+        // is catalogued. Named here rather than left as an unexplained branch: this IS the remaining
+        // hand-written arm, and it is one, not five.
+        else if ( doubleClicked && entry->Type == FileType::Scene )
         {
-            // ONE EDITOR WINDOW PER CLOUD ASSET, bound to THIS file — the same flow as a `.demat` one branch
-            // up, and the reason all four cloud formats share a single branch: the document that opens is
-            // decided by the EXTENSION inside RequestCloudDocument, so a fifth format is a line there rather
-            // than a fifth branch here.
-            //
-            // BRANCHED ON THE EXTENSION AND NOT ON entry->Type, unlike every branch above it. The `FileType`
-            // enum has no cloud members, and adding four would mean editing FileExplorerPanel.hpp and the
-            // three sibling tables (`s_FileTypes`, `s_TypeColors`, `s_FileTypesToIcon`) that are keyed on
-            // it. That is worth doing for the icons; it is not what makes the double-click work, and the
-            // file's own idiom for asking an extension directly is already used twice in this class.
-            //
-            // NotACloudPath is impossible here by the branch condition and is reported rather than ignored:
-            // IsCloudAssetPath has just called this file a cloud asset, so the two disagreeing means the
-            // extension test and the opener have drifted apart — and the symptom would be a double-click
-            // that does nothing at all.
-            if ( RequestCloudDocument( m_AssetManager, entry->AssetPath ) == CloudDocumentRequest::NotACloudPath )
-            {
-                LOG_ERROR( "[Assets] '{}' looks like a cloud asset but no cloud editor would take it — "
-                           "nothing opened.",
-                           entry->AssetPath );
-            }
+            Core::SceneOpenRequest::Request( entry->AssetPath );
+        }
+        else if ( doubleClicked && entry->Type == FileType::ShaderGraph )
+        {
+            NodeGraphPanel::RequestOpen( entry->AssetPath );
+        }
+        // ── EVERYTHING ELSE: ASK THE REGISTRY ─────────────────────────────────────────────────────────
+        //
+        // One question, whatever the format. This used to be a chain of `else if` — one arm for `.demat`,
+        // one for the four cloud extensions — each of which had to know which opener to call and what its
+        // three outcomes meant, and EditorLayer carried a second copy of the same chain for its own
+        // path-to-document resolution. A new kind of document was an edit here, an edit there, and a
+        // registration; the two that were not the registration are the ones that got forgotten.
+        //
+        // NotMine is SILENT and that is correct: a `.png` is not a document, and most double-clicks in
+        // this browser land on files nothing opens. Failed has already been logged BY THE OPENER, with the
+        // path and the reason — reporting it again here would print two messages, the second of them
+        // guessing.
+        else if ( doubleClicked && m_SubjectEditors )
+        {
+            (void)m_SubjectEditors->OpenPath( entry->AssetPath );
         }
 
         ImGui::PopID();

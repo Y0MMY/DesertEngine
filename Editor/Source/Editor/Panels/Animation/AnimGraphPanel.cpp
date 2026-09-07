@@ -2,7 +2,6 @@
 #include <Editor/Panels/PanelContext.hpp>
 
 #include <Editor/Core/ImGuiUtilities.hpp>
-#include <Editor/Core/Selection/SelectionManager.hpp>
 
 #include <Engine/Animation/AnimationLibrary.hpp>
 #include <Engine/Animation/Graph/AnimGraph.hpp>
@@ -61,9 +60,10 @@ namespace Desert::Editor
         const char* kOpNames[]   = { ">", "<", ">=", "<=", "==", "!=", "is true", "is false" };
     } // namespace
 
-    AnimGraphPanel::AnimGraphPanel( const std::shared_ptr<::Desert::Core::Scene>& scene,
+    AnimGraphPanel::AnimGraphPanel( const SubjectId& subject, const std::string& displayName,
+                                    const std::shared_ptr<::Desert::Core::Scene>& scene,
                                     const Animation::AnimationLibrary*            library )
-         : IPanel( "Anim Graph", /*showPanel=*/false ), m_Scene( scene ), m_Library( library )
+         : ISubjectDocument( displayName, subject ), m_Scene( scene ), m_Library( library )
     {
         ed::Config config;
         config.SettingsFile = nullptr; // node positions live in the graph (State.X/Y), not a stray json
@@ -76,53 +76,39 @@ namespace Desert::Editor
             ed::DestroyEditor( m_Context );
     }
 
-    namespace
-    {
-        bool s_OpenRequested = false;
-    }
+    // THE STATIC RequestOpen INBOX IS GONE, and its absence is half the point of U7. It was a file-static
+    // bool that meant "reveal the one Anim Graph window", which is all a singleton can be asked. A document
+    // is asked for BY SUBJECT — Core::SubjectOpenRequests::Request( AnimGraphPanel::SubjectFor( entity ) ) —
+    // and the Details button beside the Animation component sends exactly that.
 
-    void AnimGraphPanel::RequestOpen()
+    ECS::AnimationComponent* AnimGraphPanel::ResolveComponent() const
     {
-        s_OpenRequested = true;
-    }
+        const auto scene = m_Scene.lock();
+        if ( !scene )
+            return nullptr; // the scene this document was opened over has been closed
 
-    void AnimGraphPanel::OnPreUpdate()
-    {
-        if ( s_OpenRequested )
-        {
-            GetVisibility() = true; // reveal even if it was a hidden/closed tab
-            s_OpenRequested = false;
-        }
+        const auto entOpt = scene->FindEntityByID( Subject().Owner );
+        if ( !entOpt )
+            return nullptr; // the entity was deleted
+
+        auto& entity = entOpt->get();
+        if ( !entity.HasComponent<ECS::AnimationComponent>() )
+            return nullptr; // the component was removed from under the window
+
+        return &entity.GetComponent<ECS::AnimationComponent>();
     }
 
     void AnimGraphPanel::OnUIRender()
     {
-        // Resolve the selected entity's AnimationComponent.
-        ECS::AnimationComponent* anim = nullptr;
-        Common::UUID             entityId{ 0 };
-        if ( const auto sel = Core::SelectionManager::GetSelected(); sel && m_Scene )
-        {
-            if ( const auto entOpt = m_Scene->FindEntityByID( *sel ) )
-            {
-                const auto& e = entOpt->get();
-                if ( e.HasComponent<ECS::AnimationComponent>() )
-                {
-                    anim     = &e.GetComponent<ECS::AnimationComponent>();
-                    entityId = *sel;
-                }
-            }
-        }
-
+        // NO "SELECT AN ENTITY" EMPTY STATE any more: this window is about one entity for its whole life.
+        // A null here is a subject that has just died, and the editor closes the document for it on the
+        // same frame (EditorLayer::CloseDocumentsWhoseSubjectIsGone) — so the message says what happened
+        // rather than asking the user to fix it.
+        ECS::AnimationComponent* anim = ResolveComponent();
         if ( !anim )
         {
-            ImGui::TextDisabled( "Select an animated entity (with an Animation component)." );
+            ImGui::TextDisabled( "This entity, its Animation component or its scene is gone — closing." );
             return;
-        }
-
-        if ( entityId != m_LastEntity )
-        {
-            m_LastEntity     = entityId;
-            m_ApplyPositions = true; // re-frame the newly shown graph's node positions
         }
 
         if ( !anim->Graph )
@@ -518,11 +504,6 @@ namespace Desert::Editor
 
         if ( dirty )
             anim.GraphRevision++;
-    }
-
-    bool AnimGraphPanel::IsRelevant() const
-    {
-        return SelectionHas<ECS::AnimationComponent>( m_Scene );
     }
 
 } // namespace Desert::Editor

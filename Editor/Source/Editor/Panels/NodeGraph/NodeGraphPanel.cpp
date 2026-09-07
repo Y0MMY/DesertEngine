@@ -1,6 +1,6 @@
 #include "NodeGraphPanel.hpp"
 
-#include <Editor/Core/AssetOpenRequest.hpp>
+#include <Editor/Core/SubjectOpenRequest.hpp>
 #include <Editor/Panels/MaterialEditor/MaterialShaderRebuild.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
@@ -528,7 +528,8 @@ namespace Desert::Editor
         // Open-or-focus the document for this graph's scratch material. One window per material now, so a
         // recompile brings the SAME window forward rather than re-pointing a shared one.
         if ( const auto material = EnsurePreviewMaterial(); static_cast<uint64_t>( material ) != 0 )
-            Core::AssetOpenRequests::Request( material, Assets::AssetTypeID::Material );
+            Core::SubjectOpenRequests::Request(
+                 AssetSubject( material, static_cast<uint32_t>( Assets::AssetTypeID::Material ) ) );
     }
 
     void NodeGraphPanel::DrawToolbar()

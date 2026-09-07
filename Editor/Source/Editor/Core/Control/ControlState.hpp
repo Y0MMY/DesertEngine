@@ -34,7 +34,7 @@ namespace Desert::Editor::Control
     {
         std::string Name;    ///< the display half, as a person reads it on the tab
         std::string Type;    ///< the asset type's name
-        std::string Subject; ///< the asset handle, decimal — an id survives a rename
+        std::string Subject; ///< SubjectId::ToString() — "asset:2:333" / "component:17293:88"
         bool        HoldsRendererSlot  = false;
         bool        ClaimsRendererSlot = false;
         bool        Focused            = false;
@@ -47,7 +47,7 @@ namespace Desert::Editor::Control
         // These three fields are what turn the picture into evidence.
         //
         // Strings and not the enums themselves: this struct is the wire's vocabulary, and a client reading
-        // "staged" needs no header of ours to know what it got. See IAssetEditorPanel for the states.
+        // "staged" needs no header of ours to know what it got. See ISubjectDocument for the states.
         std::string EditModel         = "write-through"; ///< "write-through" | "staged"
         bool        HasUnappliedEdits = false;           ///< working differs from what the scenes are rendering
         std::string DiskState         = "untracked";     ///< "clean" | "dirty" | "untracked"

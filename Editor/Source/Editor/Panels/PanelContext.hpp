@@ -23,4 +23,19 @@ namespace Desert::Editor
         auto ref = scene->FindEntityByID( *sel );
         return ref && ref->get().HasComponent<T>();
     }
+
+    // THE ENTITY'S SERIALIZED IDENTITY — the id a component-subject document is keyed on
+    // (Editor/Core/EditorSubject.hpp), and the same one SelectionManager and Scene::FindEntityByID speak.
+    //
+    // GUARDED, and the guard is not paranoia. Scene::CreateNewEntity attaches a UUIDComponent, but nothing
+    // in the type system says an entity has one, and EntitySerializer already has to cope with one that
+    // does not. An UNGUARDED GetComponent here would be an entt assertion on a path whose whole purpose is
+    // to answer "which entity is this?" — the null UUID is the honest answer, and a subject built from it
+    // is refused by SubjectEditorRegistry::Create by name rather than opening a window over nothing.
+    [[nodiscard]] inline Common::UUID EntityId( const ECS::Entity& entity )
+    {
+        if ( !entity.HasComponent<ECS::UUIDComponent>() )
+            return Common::UUID::Null();
+        return entity.GetComponent<ECS::UUIDComponent>().UUID;
+    }
 } // namespace Desert::Editor
