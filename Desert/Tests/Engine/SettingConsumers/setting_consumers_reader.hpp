@@ -182,7 +182,7 @@ namespace Desert::Tests::ConsumerText
                     {
                         const std::string close = ")" + src.substr( i + 1, paren - i - 1 ) + "\"";
                         const std::size_t end   = src.find( close, paren );
-                        j = end == std::string::npos ? src.size() : end + close.size();
+                        j                       = end == std::string::npos ? src.size() : end + close.size();
                     }
                 }
                 else

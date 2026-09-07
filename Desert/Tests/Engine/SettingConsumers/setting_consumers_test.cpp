@@ -1128,8 +1128,7 @@ namespace
          { "a raw string holding quotes", "Log( R\"(he said \"stop\")\" );" },
          { "a raw string holding an apostrophe and a comment opener", "Log( R\"(it's // here)\" );" },
          { "a raw string with a delimiter", "Log( R\"json({ \"k\": 1 })json\" );" },
-         { "a raw string whose body contains its own closing shape",
-           "Log( R\"tag(a )\" inside)tag\" );" },
+         { "a raw string whose body contains its own closing shape", "Log( R\"tag(a )\" inside)tag\" );" },
          { "a raw string spanning lines", "Log( R\"(one\n     two \" three)\" );" },
     };
 } // namespace
@@ -1166,8 +1165,8 @@ TEST( SettingConsumers, TheReaderDoesNotSeeCodeInsideALiteralOrAComment )
     for ( const LiteralForm& form : hiding )
     {
         SCOPED_TRACE( form.Name );
-        const std::string source = "void Draw( const ECS::UICanvasData& canvas )\n{\n    " + std::string( form.Text ) +
-                                   read + closing[index++] + "\n}\n";
+        const std::string source = "void Draw( const ECS::UICanvasData& canvas )\n{\n    " +
+                                   std::string( form.Text ) + read + closing[index++] + "\n}\n";
         EXPECT_FALSE( SpriteIsRead( source ) )
              << "a read written inside " << form.Name
              << " counts as a read, so prose and log text can certify a setting nobody consumes";
