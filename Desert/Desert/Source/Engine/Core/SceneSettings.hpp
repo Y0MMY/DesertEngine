@@ -164,14 +164,32 @@ namespace Desert::Core
         // screen-space effects, shadows, the grade, the lens, wind, gravity, the splash. Things a level
         // designer authors and expects to travel with the level.
         //
+        // In one sentence (К1): a .desce holds WHAT THE WORLD IS — its entities and the level-wide policy a
+        // designer authors and expects to travel with the level. It does NOT hold what a VIEWER is doing on
+        // top of the world (К2 took ten such fields out, to Graphic::DebugViewState), and it does NOT hold
+        // what a MACHINE can afford. The three-question procedure that decides where a NEW field goes, and
+        // the census that goes red when one lands in the wrong file, are in
+        // Desert/Tests/Engine/ConfigOwnership — which enumerates this struct through the reflection registry,
+        // i.e. through the same table SceneSerializer writes the block with.
+        //
         // WHAT IS STILL HERE THAT ARGUABLY SHOULD NOT BE — named rather than moved, because moving it needs
         // a decision this struct cannot make. Five fields describe what a MACHINE can afford rather than
         // what the level is: AA, TextureFilterMode, Anisotropy, MeshLOD and CloudQualityTier. A weak
-        // machine cannot turn any of them down without editing a file that goes to the repository. The
-        // right home is a per-user scalability store the engine does not have, and picking one (scene vs
-        // project vs machine) is a separate decision — see CloudQuality's own comment, which has argued the
-        // same thing since that field was added. They stay here, together, until that store exists; the
-        // debug ten left because their home was never in doubt.
+        // machine cannot turn any of them down without editing a file that goes to the repository. They are
+        // registered as debt against К3 in the census above, and К3 has ONE decision to make before it can
+        // move anything: the destination is NOT editor.json. All five are read by SceneRenderer, which the
+        // packaged game runs, and editor.json is an Editor-target file the Runtime never opens — so putting
+        // them there would take the quality dial away from the player. The home they need is a per-machine
+        // store BOTH hosts read, which does not exist.
+        //
+        // AND THE FOUR THAT LOOK LIKE THEM AND ARE NOT. CloudQuality's comment below counts NINE
+        // cost-versus-quality siblings; only these five are misplaced. RenderingPath, GlobalIllumination,
+        // EnableSSAO and EnableSSR each change the authored LOOK rather than degrading it — the test К1
+        // wrote down is "set to its cheapest value, has the level been MIS-AUTHORED, or merely RENDERED
+        // WORSE?". Forward and Deferred disagree about cloud shadow on the ground; GI Off is a darker room,
+        // not a coarser one. EnableSSAO is the closest call and is deliberately called level data out loud:
+        // it is an on/off, not a fidelity ladder, and it is the first field to re-examine if the machine
+        // store К3 needs ever grows a scalability LEVEL.
 
         // Rendering path. Default is Deferred — see the enum's own comment for what that costs.
         PROPERTY( DisplayName( "Render Path" ), Category( "Rendering" ) )

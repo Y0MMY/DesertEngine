@@ -252,6 +252,80 @@ is deleted, not kept "in case we roll back". Rolling back is called `git revert`
 
 ---
 
+## 6. Where a setting goes: three files, and the one question that decides
+
+Written down by К1 after the same question surfaced four times in a week (К2, К3, У6, У8, Д31) in the
+shape *one container holding things with different owners and different lifetimes*. Nothing anywhere
+said which file owned what, and the cost is measured: `ShowColliders: true` travelled through git in 55
+of the 73 scenes that stated it, and five image-quality fields still sit in the LEVEL file, so a weak
+machine cannot turn the picture down without editing a file that goes to everybody.
+
+**One sentence per file — what is in it and, above all, what is not:**
+
+- **`~/.desertengine/editor.json` — ONE PERSON'S COPY OF THE EDITOR.** What a user's own installation
+  must remember between sessions and across every project, and whose value two people on the same
+  project may legitimately hold differently at the same moment. NOT anything a second person opening
+  the project must see, and nothing the SHIPPED GAME needs — the packaged Runtime never opens this
+  file, so a value put here is a value taken away from the player.
+- **`<Name>.deproj` — WHAT THE PRODUCT IS, FOR EVERYBODY.** The few facts every process that opens
+  this project must agree on before any level exists: identity, where content lives, which level
+  boots, the format's own version. NOT anything that varies from level to level, NOT anything that
+  varies from machine to machine, and no field whose value is derivable — `Common/Core/Constants.hpp`
+  already refused fourteen folder-name fields on exactly that ground.
+- **`<Name>.desce` — WHAT THE WORLD IS.** The level's entities and the level-wide policy a designer
+  authors and expects to travel with the level: render path, shadows, the grade, the lens, wind,
+  gravity, the splash. NOT what a VIEWER draws on top of the world (К2 took ten fields out), and NOT
+  what a MACHINE can afford (К3 owes five).
+
+**For a new field — three questions, IN THIS ORDER. The order is the rule.**
+
+0. Does the field describe the FILE ITSELF — format version, unit generation, the name it is filed
+   under? Then it is FILE METADATA, belongs to whichever file it describes, and 1–3 do not apply.
+   Exactly four fields may claim this; a fifth is a conversation, not a row.
+1. **Would two people working on this project AT THE SAME TIME legitimately want different values?**
+   Yes → `editor.json`.
+2. **Does the value differ from one level to the next?** Yes → `.desce`.
+3. Otherwise → `.deproj`.
+
+**Why question 1 comes first** is the only load-bearing part. Questions 2 and 3 are BOTH true of a
+quality knob — anti-aliasing does differ between levels if authored that way, and it is a project-wide
+default if set that way — so any order that asks them earlier finds it a home and stops. Question 1 is
+the only one whose "yes" is about a CONFLICT rather than a scope, and a conflict beats a scope: a value
+two people must be able to disagree about cannot live in a file they share, whatever else is true of it.
+
+**Quality knob or authored look?** Set it to its cheapest value: has the level been MIS-AUTHORED, or
+merely RENDERED WORSE? Rendered worse → machine quality (`MeshLOD` off is byte-identical geometry near
+the camera). Mis-authored → level data that happens to cost something (Forward and Deferred disagree
+about cloud shadow on the ground; GI Off is a darker room, not a coarser one).
+
+**It is enforced, not merely written.** `Desert/Tests/Engine/ConfigOwnership` enumerates each file's
+fields through the same mechanism that WRITES that file, so a field added tomorrow reddens it before
+anyone remembers this document. Known violations sit in an explicit debt register and every row must
+name the task that owns moving it — the suite checks that, because an exception with no task name is
+unreadable in a month.
+
+**A fourth config file is a conversation with the owner, not a decision.** K3 has no valid
+"put it in `editor.json`" answer: all five quality fields are read by `SceneRenderer`, which the
+packaged game also runs, and `editor.json` is an Editor-target concept the Runtime never opens.
+
+**`editor.json` is THE per-user settings store, and the neighbours in `~/.desertengine` are not
+alternatives to it** — this matters because "user state" already has five files and only one of them
+is a place to put a setting:
+
+| file | what it is | may a setting go here? |
+|---|---|---|
+| `editor.json` | the user's editor settings | **yes — this is the one** |
+| `projects.json` | recent-projects registry, written by the engine AND the launcher | no: a cross-process registry, not settings |
+| `engines.json` | engine-install registry, same two writers | no: same |
+| `Layouts/*.ini`, `./imgui.ini` | opaque ImGui dock state, written and parsed by ImGui itself | no: we do not author its contents |
+| `asset_favorites.txt` | Content Browser pinned folders — plain text, absolute paths, unchecked write | **no, and it should not exist**: user state that belongs in `editor.json`, filed as debt |
+
+Note `imgui.ini` is resolved **relative to the working directory**, not to `~/.desertengine` — it is
+why a cross-tree pixel A/B silently compares two different viewport resolutions (`desert-engine-verify`
+§7).
+
+---
+
 ## Related
 
 - `DEV_CONTRACT.md`, bundled beside this file — the authority, with the history behind each rule.

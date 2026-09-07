@@ -12,6 +12,20 @@ namespace Desert::Project
     // (Common::Constants::Path) into the project folder. The Project Hub (Tools/ProjectHub) creates
     // projects and launches the apps — which is why the STRUCT lives in Common/Project/ProjectFormat.hpp:
     // the hub links Common and no engine code, and both sides must share one definition of the format.
+    //
+    // WHAT BELONGS IN A .deproj, in one sentence (К1): WHAT THE PRODUCT IS, FOR EVERYBODY — the few facts
+    // every process that opens this project must agree on before any level exists (its identity, where its
+    // content lives, which level boots, the format's own version). What does NOT belong: anything that
+    // varies from level to level (that is the .desce), anything that varies from machine to machine (that
+    // is ~/.desertengine/editor.json), and any field whose value can be derived — Common/Core/Constants.hpp
+    // already refused fourteen folder-name fields on exactly that ground, and the refusal is the model.
+    //
+    // The struct's field list is the format and is defined once, in the desert-shared submodule; the
+    // three-question procedure that decides where a NEW field goes, and the census that goes red when one
+    // lands in the wrong file, are in Desert/Tests/Engine/ConfigOwnership. That suite also holds a tripwire
+    // on the .deproj this repository tracks: `EngineVersion` is a fact about a MACHINE (Save() stamps
+    // Common::Version::Full(), commit hash and `.dirty` included) written into a file the whole team shares,
+    // and it is registered there as debt with the task that owns moving it.
     using ProjectFile = Common::Project::ProjectFile;
 
     class ProjectContext final
