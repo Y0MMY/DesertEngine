@@ -37,7 +37,14 @@ namespace Desert::Graphic::API::Vulkan
     {
         if ( m_Surface == VK_NULL_HANDLE )
         {
-            glfwCreateWindowSurface( instance, window, nullptr, &m_Surface );
+            // Its VkResult went on the floor. A surface that failed to appear leaves m_Surface at
+            // VK_NULL_HANDLE, and every capability query, format probe and swapchain creation below is then
+            // asked about nothing — a run of validation errors none of which names the surface. This does
+            // not go through NoteIfDeviceLost: it is a GLFW/platform failure at startup, before there is a
+            // device to lose, and it really is an invariant.
+            const VkResult surfaced = glfwCreateWindowSurface( instance, window, nullptr, &m_Surface );
+            DESERT_VERIFY( surfaced == VK_SUCCESS, "glfwCreateWindowSurface failed: {}",
+                           VkResultToString( surfaced ) );
         }
     }
 
