@@ -69,7 +69,9 @@ namespace Desert::Graphic::API::Vulkan
 
         if ( m_VkRenderPass == VK_NULL_HANDLE )
         {
-            CreateSwapChainRenderPass();
+            const auto pass = CreateSwapChainRenderPass();
+            if ( !pass.IsSuccess() )
+                return Common::MakeFormattedError<bool>( "the swapchain render pass: {}", pass.GetError() );
         }
 
         auto oldSwapchain = m_SwapChain;
@@ -213,8 +215,14 @@ namespace Desert::Graphic::API::Vulkan
             m_SwapChainImages.ImagesView[i] = createdImageView.GetValue();
         }
 
-        CreateColorAndDepthImages( vkLogicalDevice );
-        CreateSwapChainFramebuffers();
+        const auto attachments = CreateColorAndDepthImages( vkLogicalDevice );
+        if ( !attachments.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "the swapchain colour/depth attachments: {}",
+                                                     attachments.GetError() );
+
+        const auto framebuffers = CreateSwapChainFramebuffers();
+        if ( !framebuffers.IsSuccess() )
+            return Common::MakeFormattedError<bool>( "the swapchain framebuffers: {}", framebuffers.GetError() );
 
         if ( !m_VulkanQueue )
         {

@@ -148,10 +148,16 @@ namespace Desert::Graphic::API::Vulkan
         void InitSurface( GLFWwindow* window, const VkInstance instance );
 
     private:
-        Common::ResultStr<VkResult> AcquireNextImage( VkSemaphore presentCompleteSemaphore, uint32_t* imageIndex );
-        Common::ResultStr<VkResult> CreateSwapChainRenderPass();
-        Common::ResultStr<VkResult> CreateSwapChainFramebuffers();
-        Common::ResultStr<VkResult>
+        // ALL FOUR ARE [[nodiscard]] NOW, AND THREE OF THEM WERE NOT. Their results were dropped at every
+        // call site in CreateSwapChain — a render pass, a set of framebuffers and the colour/depth pair
+        // that could all silently fail to exist on the swapchain rebuild path, which is the exact path a
+        // lost device walks. The project's NO_DISCARD discipline covers wrappers like these; these three
+        // were simply missed, and nothing but the attribute would have said so.
+        [[nodiscard]] Common::ResultStr<VkResult> AcquireNextImage( VkSemaphore presentCompleteSemaphore,
+                                                                    uint32_t*   imageIndex );
+        [[nodiscard]] Common::ResultStr<VkResult> CreateSwapChainRenderPass();
+        [[nodiscard]] Common::ResultStr<VkResult> CreateSwapChainFramebuffers();
+        [[nodiscard]] Common::ResultStr<VkResult>
         CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device );
 
     private:

@@ -60,7 +60,19 @@ namespace Desert::Graphic::API::Vulkan
 
         VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                                .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
-        VK_CHECK_RESULT_BOOL( vkBeginCommandBuffer( m_CurrentCommandBuffer, &beginInfo ) );
+        const VkResult           begun     = vkBeginCommandBuffer( m_CurrentCommandBuffer, &beginInfo );
+        if ( begun != VK_SUCCESS )
+        {
+            // THE HANDLE IS DROPPED, not merely reported. It was assigned above, so returning the error
+            // alone would leave a buffer that is NOT recording sitting in m_CurrentCommandBuffer — and
+            // every vkCmd* in this file, plus EndFrame's vkEndCommandBuffer, treats a non-null value there
+            // as "recording". Nulling it is what makes the invariant this class relies on true in the
+            // failure case as well as the success case.
+            m_CurrentCommandBuffer = nullptr;
+            (void)NoteIfDeviceLost( begun, "vkBeginCommandBuffer", __FILE__, __LINE__ );
+            return Common::MakeFormattedError<bool>( "vkBeginCommandBuffer failed: {}",
+                                                     VkResultToString( begun ) );
+        }
 
         // Resolve the previous results and reset this frame's queries. Must be here: vkCmdResetQueryPool
         // is illegal inside a render pass, and this is the one point in the frame where the command buffer
