@@ -436,6 +436,34 @@ namespace Desert::ECS
                            "behind material that has already hidden them." ) )
         float StopTransmittance = 0.005f;
 
+        PROPERTY( DisplayName( "Volume Resolution" ), Category( "Quality" ), Range( 64, 256 ), Advanced,
+                  Tooltip( "Voxels per horizontal side of the camera-centric modelling volume the layer is "
+                           "baked into. It is the cost of the BAKE, not of the frame: the bake is a loop "
+                           "over side x side columns, so 128 costs a quarter of 256 and 64 a sixteenth. "
+                           "Lower it when a view has to follow an edit quickly — an asset preview does — "
+                           "and leave it at 256 for a level, where the sky is baked once and looked at for "
+                           "hours." ) )
+        // 256, WHICH IS THE ONLY VALUE A LEVEL SHOULD USE, and the field exists for the other end. The
+        // resolution used to be a constant, and the consequence was that a 512-pixel material-preview pane
+        // baked exactly what a whole level bakes: measured on this machine in Debug, an artist dragging
+        // Coverage waited 15.42 s from their last edit to a sky that showed it. It is here rather than in
+        // Assets:: because it is a property of the VIEW — see Docs/RENDERER_FRAME_STATE.md — in precisely
+        // the way MaxSteps above it already is, and PreviewViewport::SceneSetup sets both from one place.
+        //
+        // RAISING IT ABOVE 256 IS NOT AN OPTION AND THAT IS A MEASUREMENT, not caution: 512 was built,
+        // measured at +1.7 m of silhouette on 94.3 for four times the memory and +14.3 % of march time, and
+        // refused (Assets/CloudProceduralVolume.hpp carries the table).
+        //
+        // THE THREE NUMBERS ARE WRITTEN OUT rather than taken from Assets::kCloudProceduralVolumeSide and
+        // Assets::kCloudProceduralVolumeSideMin, for the same reason CloudLayerLatticeKm below spells out
+        // 100 000: including Assets/CloudProceduralVolume.hpp here would drag Engine/Graphic into Engine/ECS
+        // through CloudTypeShape.hpp, and that layering rule is not negotiable. So this is a MIRROR, and it
+        // is guarded rather than trusted — Desert/Tests/Engine/ComponentReflection
+        // (`DefaultsAreTheOnesTheComponentArguesFor`) asserts that the default and BOTH ends of the Range
+        // above equal the Assets constants, so the day one of them moves the other is a red test naming it
+        // rather than a slider whose top half bakes nothing and whose bottom half changes the sky's scale.
+        int32_t VolumeResolution = 256;
+
         // ---- Animation ------------------------------------------------------------------------------
 
         PROPERTY( DisplayName( "Wind Direction" ), Category( "Animation" ),

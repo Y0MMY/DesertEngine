@@ -138,6 +138,26 @@ namespace Desert::Editor
             int32_t CloudMaxSteps          = 96;
             float   CloudStopTransmittance = 0.03f;
 
+            // THE DOME'S OTHER BUDGET, AND UNTIL O8 IT DID NOT EXIST. The two numbers above bound the MARCH
+            // — what a frame costs. About half of a cloud material's parameters are inputs to a BAKE of the
+            // modelling volume instead, and that one is not a frame: it is a loop over side x side columns
+            // on a worker, and a 512-pixel preview pane was running exactly the one a whole level runs.
+            // Measured on this machine, Debug: dragging Coverage twenty times in 1.02 s put 15.42 s between
+            // the artist's last edit and the sky that showed it, which is what the owner reported twice as
+            // "the cloud preview still doesn't update straight away".
+            //
+            // 128 AND NOT 64, AND THE NUMBER IS THE MEASUREMENT RATHER THAN THE ARGUMENT — see the report
+            // for O8/Г9 and the table at Assets::kCloudProceduralVolumeSideMin for the floor. 128 quarters
+            // the bake; 64 would quarter it again but sits exactly on the floor where the cell clamp starts
+            // enlarging the shipped 3 km lattice, so the picture would stop being a coarser view of the
+            // artist's sky and start being a different sky.
+            //
+            // A FIELD RATHER THAN A CONSTANT, on exactly the terms the two above are already on: it is
+            // ECS::VolumetricCloudData::VolumeResolution, it is written onto the layer by ApplySetup every
+            // frame, and the Preview Scene tab can move it. An artist who wants to see what the level will
+            // see puts it back to 256 and waits.
+            int32_t CloudVolumeResolution = 128;
+
             // Direction the light TRAVELS (sun -> scene), which is what TransformComponent::Translation on
             // a directional light means. Derived, never stored: two copies of one direction is how a sky
             // ends up lit from below.
@@ -208,6 +228,21 @@ namespace Desert::Editor
         {
             return m_HasContent;
         }
+
+        // Is this preview's sky being rebuilt right now?
+        //
+        // WHAT IT IS FOR. About half of a cloud material's parameters — Coverage, the seed, the placement
+        // four, the weather tile, the painted layout, the cloud types — are inputs to a BAKE of the
+        // modelling volume rather than to the march, so moving one of them costs seconds on a worker while
+        // this pane goes on showing the PREVIOUS volume. Draw() paints its own badge from this, which is
+        // why the widget needs no cooperation from the panel; the accessor is public because a panel may
+        // reasonably want to say the same thing in its own status line, and because a test can assert the
+        // route exists without an editor.
+        //
+        // The five that answer within the frame and cost nothing — Extinction Scale, Phase G, Detail
+        // Strength, Scattering Albedo, Density Scale — never make this true, which is the whole point of
+        // it: an artist who sees no badge has just moved a cheap knob and the picture is already right.
+        [[nodiscard]] bool IsSkyRebuilding() const;
 
         // Records this frame's offscreen render at the requested size. Call ONCE per frame from
         // OnPreUpdate(), and only while the preview is actually visible — a collapsed section or a

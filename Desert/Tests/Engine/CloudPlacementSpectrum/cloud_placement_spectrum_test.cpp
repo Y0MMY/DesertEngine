@@ -135,12 +135,12 @@ namespace
             return -1.0;
 
         size_t columns = 0;
-        for ( uint32_t z = 0; z < kCloudProceduralVolumeDepth; ++z )
-            for ( uint32_t x = 0; x < kCloudProceduralVolumeWidth; ++x )
+        for ( uint32_t z = 0; z < kCloudProceduralVolumeSide; ++z )
+            for ( uint32_t x = 0; x < kCloudProceduralVolumeSide; ++x )
                 for ( uint32_t y = 0; y < kCloudProceduralVolumeHeight; ++y )
                 {
                     const size_t at = ( ( static_cast<size_t>( z ) * kCloudProceduralVolumeHeight + y ) *
-                                             kCloudProceduralVolumeWidth +
+                                             kCloudProceduralVolumeSide +
                                         x ) *
                                       kCloudProceduralBytesPerVoxel;
                     if ( baked.GetValue()[at] != 0u )
@@ -151,7 +151,7 @@ namespace
                 }
 
         return static_cast<double>( columns ) /
-               static_cast<double>( kCloudProceduralVolumeWidth * kCloudProceduralVolumeDepth );
+               static_cast<double>( kCloudProceduralVolumeSide * kCloudProceduralVolumeSide );
     }
 
     /// The lumps of one region, rasterised into the top-down column integral described in the file note.
@@ -621,12 +621,12 @@ TEST( CloudPlacementSpectrum, TheCoverageSliderStillMeansTheSkyAtTheShippedPlace
         ASSERT_TRUE( baked ) << ( baked ? std::string{} : baked.GetError() );
 
         size_t columns = 0;
-        for ( uint32_t z = 0; z < kCloudProceduralVolumeDepth; ++z )
-            for ( uint32_t x = 0; x < kCloudProceduralVolumeWidth; ++x )
+        for ( uint32_t z = 0; z < kCloudProceduralVolumeSide; ++z )
+            for ( uint32_t x = 0; x < kCloudProceduralVolumeSide; ++x )
                 for ( uint32_t y = 0; y < kCloudProceduralVolumeHeight; ++y )
                 {
                     const size_t at = ( ( static_cast<size_t>( z ) * kCloudProceduralVolumeHeight + y ) *
-                                             kCloudProceduralVolumeWidth +
+                                             kCloudProceduralVolumeSide +
                                         x ) *
                                       kCloudProceduralBytesPerVoxel;
                     if ( baked.GetValue()[at] != 0u )
@@ -637,7 +637,7 @@ TEST( CloudPlacementSpectrum, TheCoverageSliderStillMeansTheSkyAtTheShippedPlace
                 }
 
         const double measured = static_cast<double>( columns ) /
-                                static_cast<double>( kCloudProceduralVolumeWidth * kCloudProceduralVolumeDepth );
+                                static_cast<double>( kCloudProceduralVolumeSide * kCloudProceduralVolumeSide );
 
         std::printf( "[CloudPlacementSpectrum] coverage %.2f -> %.3f of the sky (%+.3f)\n", wanted, measured,
                      measured - wanted );
@@ -1566,9 +1566,9 @@ TEST( CloudPlacementSpectrum, TheBakedVolumeAgreesWithTheProxyThatTheShippedSkyH
     const auto      baked  = BakeCloudProceduralVolume( params, origin );
     ASSERT_TRUE( baked ) << ( baked ? std::string{} : baked.GetError() );
 
-    const uint32_t width  = kCloudProceduralVolumeWidth;
+    const uint32_t width  = kCloudProceduralVolumeSide;
     const uint32_t height = kCloudProceduralVolumeHeight;
-    const uint32_t depth  = kCloudProceduralVolumeDepth;
+    const uint32_t depth  = kCloudProceduralVolumeSide;
 
     std::vector<float> map( static_cast<size_t>( width ) * depth, 0.0f );
     for ( uint32_t z = 0; z < depth; ++z )
@@ -1698,9 +1698,9 @@ TEST( CloudPlacementSpectrum, TheBodysWidthFollowsTheCellAndItsHeightFollowsTheB
         const auto      baked  = BakeCloudProceduralVolume( params, origin );
         ASSERT_TRUE( baked ) << ( baked ? std::string{} : baked.GetError() );
 
-        const uint32_t width  = kCloudProceduralVolumeWidth;
+        const uint32_t width  = kCloudProceduralVolumeSide;
         const uint32_t height = kCloudProceduralVolumeHeight;
-        const uint32_t depth  = kCloudProceduralVolumeDepth;
+        const uint32_t depth  = kCloudProceduralVolumeSide;
 
         LatticePeak::ChordCensus horizontal;
         LatticePeak::ChordCensus vertical;

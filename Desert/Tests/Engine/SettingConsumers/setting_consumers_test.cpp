@@ -285,9 +285,14 @@ namespace
          { "CastShadows", kCloudRenderer },
          { "ShadowStrength", kCloudRenderer },
 
-         // Quality.
+         // Quality. The two march budgets go through the packer; the BAKE budget does not and cannot -
+         // the modelling volume is built on the CPU, before any packing, and its resolution is read by
+         // VolumetricCloudRenderer::BuildProceduralParams into
+         // Assets::CloudProceduralFieldParams::VolumeSideVoxels. Same category, two different consumers,
+         // and that is the distinction the whole field exists to make.
          { "MaxSteps", kCloudPayload },
          { "StopTransmittance", kCloudPayload },
+         { "VolumeResolution", kCloudRenderer },
 
          // Animation - integrated against the timestep by the system that owns it, and handed to the
          // packer as an offset. WIND STAYS ON THE COMPONENT deliberately (the one named divergence from

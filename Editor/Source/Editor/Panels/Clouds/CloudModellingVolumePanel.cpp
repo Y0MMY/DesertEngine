@@ -12,6 +12,8 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/JobSystem.hpp>
+#include <Common/Core/Profiler.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <ImGui/imgui.h>
@@ -763,8 +765,20 @@ namespace Desert::Editor
                 return !m_BakeCancelled.load();
             };
 
-            m_Baking = std::async( std::launch::async, [recipe, onProgress]
-                                   { return Assets::GenerateCloudModellingVolume( recipe, onProgress ); } );
+            // ON THE ENGINE'S POOL, NOT ON A THREAD OF ITS OWN (Г9). `std::async` here was invisible to the
+            // profiler, unbounded in thread count — every open sculpting document could start one, and
+            // nothing counted them against the machine — and it is the same defect the cloud renderer's own
+            // bake had. `DESERT_PROFILE_SCOPE` puts this bake in Optick and in the editor's Profiler panel,
+            // which is where its cost belongs rather than in a log line somebody has to correlate by hand.
+            //
+            // THE DESTRUCTOR STILL WAITS, and must: `onProgress` captures `this`. What the pool changes is
+            // where the thread comes from, not who owns the panel.
+            m_Baking = Common::JobSystem::Get().Async(
+                 [recipe, onProgress]
+                 {
+                     DESERT_PROFILE_SCOPE( "Clouds: Sculpted volume bake" );
+                     return Assets::GenerateCloudModellingVolume( recipe, onProgress );
+                 } );
         }
 
         if ( m_BakeRunning )

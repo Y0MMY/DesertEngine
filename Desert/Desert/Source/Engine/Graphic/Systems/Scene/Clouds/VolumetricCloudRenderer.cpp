@@ -7,6 +7,7 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include <Common/Core/JobSystem.hpp>
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Profiler.hpp>
 
@@ -86,7 +87,17 @@ namespace Desert::Graphic::System
         }
     } // namespace
 
-    VolumetricCloudRenderer::~VolumetricCloudRenderer() = default;
+    VolumetricCloudRenderer::~VolumetricCloudRenderer()
+    {
+        // TELL THE BAKE TO STOP, AND DO NOT WAIT FOR IT. It was `= default` while the future came from
+        // std::async, and that was correct only by accident: ~future of an async future BLOCKS, so closing a
+        // material document mid-bake stalled the editor for the remainder of a bake nobody would see. On the
+        // JobSystem the future's destructor waits for nothing, so the closing is instant — and the flag is
+        // what keeps that from leaking a worker for seconds afterwards. Nothing the job touches belongs to
+        // this object: the parameters, the origin and the flag are all captured BY VALUE, which is what
+        // makes not waiting safe rather than merely fast.
+        m_ModellingBakeCancel->store( true, std::memory_order_relaxed );
+    }
 
     Common::BoolResultStr VolumetricCloudRenderer::Initialize()
     {
@@ -226,6 +237,15 @@ namespace Desert::Graphic::System
         Assets::CloudProceduralFieldParams params;
 
         params.RegionSizeKm = std::max( m_Data.RegionSize, 1.0f ) / kCloudWorldUnitsPerKm;
+
+        // THIS VIEW'S BAKE BUDGET, and it is clamped to the component's own Range for the reason the four
+        // placement numbers below state: a scene file is a text file and an out-of-range number in one must
+        // produce a sky rather than a refusal. It is a property of the VIEW rather than of the layer's look
+        // — a preview and a viewport of the same scene legitimately want different answers — which is why
+        // it travels through the component beside Max Steps rather than through the material.
+        params.VolumeSideVoxels = static_cast<uint32_t>(
+             std::clamp( m_Data.VolumeResolution, static_cast<int32_t>( Assets::kCloudProceduralVolumeSideMin ),
+                         static_cast<int32_t>( Assets::kCloudProceduralVolumeSide ) ) );
 
         // THE SHELL, TAKEN FROM THE SPECIES AND NOT FROM THE COMPONENT, because that is where the packer
         // takes it from too: the layer's geometry is the UNION of its types' altitude ranges (decision
@@ -410,7 +430,7 @@ namespace Desert::Graphic::System
                                     !Assets::CloudProceduralParamsEqual( m_FailedParams, wanted ) ) )
             m_ModellingFailed = false;
 
-        if ( !m_ModellingBake.valid() && !m_ModellingFailed )
+        if ( !m_ModellingFailed )
         {
             const bool sameSet =
                  m_ModellingValid && m_ProfileSpeciesCount == speciesCount && m_ProfileGeneration == generation;
@@ -423,7 +443,18 @@ namespace Desert::Graphic::System
             const bool sameParams =
                  m_ModellingValid && Assets::CloudProceduralParamsEqual( m_ModellingParams, wanted );
 
-            if ( !( sameTypes && sameRegion && sameParams ) )
+            // WHAT IS IN FLIGHT COUNTS AS "ON THE DEVICE" FOR THE PURPOSE OF STARTING ANOTHER, or an artist
+            // holding a slider still would re-start the same bake sixty times a second. The question the
+            // guard used to ask — "is anything in flight" — could not tell a bake of the WANTED parameters
+            // from a bake of parameters the artist has since left, and that is exactly the difference the
+            // 15.42 s was made of.
+            bool pendingIsWanted = m_ModellingBake.valid() && m_PendingOriginKm == wantedOrigin &&
+                                   m_PendingSpeciesCount == speciesCount && m_PendingGeneration == generation &&
+                                   Assets::CloudProceduralParamsEqual( m_PendingParams, wanted );
+            for ( uint32_t slot = 0; pendingIsWanted && slot < speciesCount; ++slot )
+                pendingIsWanted = m_PendingTypes[slot] == handles[slot];
+
+            if ( !pendingIsWanted && !( sameTypes && sameRegion && sameParams ) )
             {
                 if ( auto valid = Assets::ValidateCloudProceduralParams( wanted ); !valid )
                 {
@@ -435,16 +466,51 @@ namespace Desert::Graphic::System
                     return m_ModellingValid;
                 }
 
-                m_PendingParams   = wanted;
-                m_PendingOriginKm = wantedOrigin;
+                // THE STALE ONE IS TOLD TO STOP, AND ITS RESULT IS DROPPED RATHER THAN COLLECTED. Half of
+                // the delay the owner reported was a bake nobody would ever see running to completion while
+                // the wanted one could not start: 20 edits in 1.02 s produced two bakes of 4 800 ms and
+                // 11 453 ms, in series, because `std::async` has no way to be told the answer is no longer
+                // needed. Dropping the future is safe and does not block — a future from
+                // JobSystem::Async wraps a packaged_task, whose destructor never waits, where
+                // ~future of a std::async future BLOCKS on the very thread we are trying to stop.
+                if ( m_ModellingBake.valid() )
+                {
+                    m_ModellingBakeCancel->store( true, std::memory_order_relaxed );
+                    m_ModellingBake = {};
+                    ++m_ModellingBakesCancelled;
+                }
+
+                m_PendingParams       = wanted;
+                m_PendingOriginKm     = wantedOrigin;
+                m_PendingSpeciesCount = speciesCount;
+                m_PendingGeneration   = generation;
+                for ( uint32_t slot = 0; slot < kCloudSpeciesSlots; ++slot )
+                    m_PendingTypes[slot] = slot < speciesCount ? handles[slot] : Assets::AssetHandle::Null();
 
                 // ON A WORKER, and the frame does not wait for it. See the note on the declaration: the
                 // bake is measured at hundreds of milliseconds to seconds in a Debug build, and a region
                 // shift happens once per lattice cell of camera travel.
                 m_ModellingBakeStarted = std::chrono::steady_clock::now();
 
-                m_ModellingBake = std::async( std::launch::async, [params = wanted, origin = wantedOrigin]()
-                                              { return Assets::BakeCloudProceduralVolume( params, origin ); } );
+                // A FRESH FLAG PER BAKE, not a reset of the old one: the abandoned job still holds the old
+                // shared_ptr and is still reading it, so clearing that flag would un-cancel a bake we have
+                // already stopped caring about and burn a worker for nothing.
+                m_ModellingBakeCancel = std::make_shared<std::atomic<bool>>( false );
+
+                // ON THE ENGINE'S POOL AND NOT ON A THREAD OF OUR OWN. Three things follow and all three
+                // were live defects: the work is VISIBLE (DESERT_PROFILE_SCOPE below puts it in Optick and
+                // in the editor's own Profiler panel, where a whole day was spent inferring this cost from
+                // log timestamps because no such row existed); it is BOUNDED (two document windows used to
+                // be able to start unrelated bakes with nothing counting them against the machine); and it
+                // is CANCELLABLE, which is what the block above needs.
+                m_ModellingBake = Common::JobSystem::Get().Async(
+                     [params = wanted, origin = wantedOrigin, cancel = m_ModellingBakeCancel]()
+                     {
+                         DESERT_PROFILE_SCOPE( "Clouds: Modelling volume bake" );
+                         return Assets::BakeCloudProceduralVolume(
+                              params, origin,
+                              [&cancel]( float ) { return !cancel->load( std::memory_order_relaxed ); } );
+                     } );
             }
         }
 
@@ -491,11 +557,17 @@ namespace Desert::Graphic::System
             if ( m_ModellingVolume )
                 Renderer::GetInstance().WaitDeviceIdle();
 
+            // THE SIDE COMES FROM THE PARAMETERS THE FINISHED BAKE RAN WITH, never from the constant and
+            // never from `wanted`. The bake sizes its byte block from its own parameters, so an image built
+            // to any other extent would be read past the end of the block or short of it — and `wanted` may
+            // have moved to a different budget while this worker ran.
+            const uint32_t bakedSide = m_PendingParams.VolumeSideVoxels;
+
             const Core::Formats::Image3DSpecification spec{
                  .Tag        = "CloudModellingVolume",
-                 .Width      = Assets::kCloudProceduralVolumeWidth,
+                 .Width      = bakedSide,
                  .Height     = Assets::kCloudProceduralVolumeHeight,
-                 .Depth      = Assets::kCloudProceduralVolumeDepth,
+                 .Depth      = bakedSide,
                  .Format     = Core::Formats::ImageFormat::RGBA8F,
                  .Data       = baked.GetValue(),
                  .Properties = Core::Formats::Sample,
@@ -504,15 +576,15 @@ namespace Desert::Graphic::System
             m_ModellingVolume = Image3D::Create( spec );
             if ( !m_ModellingVolume )
             {
-                // A device allocation failure is about the SIZE, which is fixed, so blaming the pending
-                // parameters keeps the retry honest: moving a knob is a fresh attempt, not a loop.
+                // A device allocation failure is about the SIZE, so blaming the pending parameters keeps the
+                // retry honest: moving a knob — including the resolution knob — is a fresh attempt, not a
+                // loop.
                 m_ModellingFailed = true;
                 m_FailedParams    = m_PendingParams;
                 m_FailedOriginKm  = m_PendingOriginKm;
                 LOG_ERROR( "[Clouds] The {}x{}x{} RGBA8 procedural modelling volume could not be created on "
                            "the device; the clouds will not render for this view.",
-                           Assets::kCloudProceduralVolumeWidth, Assets::kCloudProceduralVolumeHeight,
-                           Assets::kCloudProceduralVolumeDepth );
+                           bakedSide, Assets::kCloudProceduralVolumeHeight, bakedSide );
                 m_ModellingValid = false;
                 return false;
             }
@@ -543,16 +615,15 @@ namespace Desert::Graphic::System
 
             LOG_INFO( "[Clouds] Modelling volume baked for {} cloud type(s) in {:.0f} ms — region {:.0f} km "
                       "at ({:.1f}, {:.1f}), envelope {:.2f} to {:.2f} km, {}x{}x{} RGBA8 ({:.2f} MiB), "
-                      "{} lumps, {:.0f} m per voxel.",
+                      "{} lumps, {:.0f} m per voxel, {} stale bake(s) cancelled.",
                       speciesCount, bakeMs, m_ModellingParams.RegionSizeKm, m_ModellingOriginKm.x,
                       m_ModellingOriginKm.y, m_ModellingParams.LayerBottomKm,
-                      m_ModellingParams.LayerBottomKm + m_ModellingParams.LayerThicknessKm,
-                      Assets::kCloudProceduralVolumeWidth, Assets::kCloudProceduralVolumeHeight,
-                      Assets::kCloudProceduralVolumeDepth,
-                      BytesToMiB( static_cast<size_t>( Assets::kCloudProceduralVoxelBytes ) ),
+                      m_ModellingParams.LayerBottomKm + m_ModellingParams.LayerThicknessKm, bakedSide,
+                      Assets::kCloudProceduralVolumeHeight, bakedSide,
+                      BytesToMiB( static_cast<size_t>( Assets::CloudProceduralVoxelBytes( bakedSide ) ) ),
                       Assets::CountCloudProceduralBlobs( m_ModellingParams, m_ModellingOriginKm ),
-                      m_ModellingParams.RegionSizeKm / static_cast<float>( Assets::kCloudProceduralVolumeWidth ) *
-                           1000.0f );
+                      m_ModellingParams.RegionSizeKm / static_cast<float>( bakedSide ) * 1000.0f,
+                      m_ModellingBakesCancelled );
         }
 
         return m_ModellingValid;

@@ -441,7 +441,7 @@ namespace Desert::Assets
     float CloudProceduralLumpFloorKm( const CloudProceduralFieldParams& params )
     {
         // TWO BOUNDS AND THE VOLUME'S IS THE LARGER ONE, which is the whole finding — see the header.
-        const float voxelKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
+        const float voxelKm = params.RegionSizeKm / static_cast<float>( params.VolumeSideVoxels );
         return std::max( 0.5f * params.ResolvableChordKm, voxelKm );
     }
 
@@ -467,7 +467,7 @@ namespace Desert::Assets
         // in the shipped library is the altocumulus' 0.30, giving 0.90 km against this 0.75 km. The floor
         // is live and it clamps — a species asked for 0.375 km bakes byte-for-byte identically to one asked
         // for 0.75 km — but no authored sky is standing on it.
-        const float voxelKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
+        const float voxelKm = params.RegionSizeKm / static_cast<float>( params.VolumeSideVoxels );
         const float floorKm = std::max( 4.0f * voxelKm, 2.0f * params.ResolvableChordKm );
 
         const float anisotropy = std::max( species.Anisotropy, 1e-3f );
@@ -567,6 +567,13 @@ namespace Desert::Assets
 
     bool CloudProceduralParamsEqual( const CloudProceduralFieldParams& a, const CloudProceduralFieldParams& b )
     {
+        // THE GRID IS PART OF THE ANSWER, not of the request. Two volumes of different resolutions over one
+        // region are different bytes, so a view that changes its budget must re-bake — without this line a
+        // preview would keep marching the grid it was baked at before the budget moved, and the setting
+        // would be dead in the §1.3 sense while looking wired.
+        if ( a.VolumeSideVoxels != b.VolumeSideVoxels )
+            return false;
+
         if ( a.RegionSizeKm != b.RegionSizeKm || a.LayerBottomKm != b.LayerBottomKm ||
              a.LayerThicknessKm != b.LayerThicknessKm || a.BlendRadiusKm != b.BlendRadiusKm ||
              a.ProfileDepthKm != b.ProfileDepthKm || a.Coverage != b.Coverage ||
@@ -703,13 +710,24 @@ namespace Desert::Assets
         // them, and the march searches at ResolvableChordKm — so a region small enough to make the voxel
         // finer than half that chord fills the volume with structure the ray finds only when its jitter
         // happens to land on it, which is the definition of speckle.
-        const float voxelKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
+        // THE SIDE ITSELF IS CHECKED FIRST, because it is a parameter now and a zero would divide by zero
+        // three lines down while a million would ask for a terabyte. The ceiling is the shipped default:
+        // the volume is what a view marches, and raising it above 256 was BUILT, MEASURED at +1.7 m of
+        // silhouette for four times the memory, and refused (see the header). What this range exists for is
+        // the other direction — an asset preview buying its frame rate back.
+        if ( params.VolumeSideVoxels < kCloudProceduralVolumeSideMin ||
+             params.VolumeSideVoxels > kCloudProceduralVolumeSide )
+            return Common::MakeFormattedError<bool>(
+                 "a volume side of {} voxels is outside the {}..{} this subsystem bakes", params.VolumeSideVoxels,
+                 kCloudProceduralVolumeSideMin, kCloudProceduralVolumeSide );
+
+        const float voxelKm = params.RegionSizeKm / static_cast<float>( params.VolumeSideVoxels );
         if ( 2.0f * voxelKm < params.ResolvableChordKm )
             return Common::MakeFormattedError<bool>(
                  "a region of {:.1f} km over {} voxels gives a voxel of {:.0f} m, whose finest expressible "
                  "feature is {:.0f} m — thinner than the {:.0f} m the march can be relied on to find. Either "
                  "the region grows or the march steps finer (CLOUD_DISTANCE_TO_MAX_STEPS_KM)",
-                 params.RegionSizeKm, kCloudProceduralVolumeWidth, voxelKm * 1000.0f, 2.0f * voxelKm * 1000.0f,
+                 params.RegionSizeKm, params.VolumeSideVoxels, voxelKm * 1000.0f, 2.0f * voxelKm * 1000.0f,
                  params.ResolvableChordKm * 1000.0f );
 
         for ( size_t slot = 0; slot < params.Species.size(); ++slot )
@@ -1411,15 +1429,28 @@ namespace Desert::Assets
     Common::ResultStr<std::vector<unsigned char>>
     BakeCloudProceduralVolume( const CloudProceduralFieldParams& params, const glm::vec2& regionOriginKm )
     {
+        return BakeCloudProceduralVolume( params, regionOriginKm, CloudProceduralBakeProgressFn{} );
+    }
+
+    Common::ResultStr<std::vector<unsigned char>>
+    BakeCloudProceduralVolume( const CloudProceduralFieldParams& params, const glm::vec2& regionOriginKm,
+                               const CloudProceduralBakeProgressFn& onProgress )
+    {
         if ( auto valid = ValidateCloudProceduralParams( params ); !valid )
             return Common::MakeFormattedError<std::vector<unsigned char>>( "parameters are not usable: {}",
                                                                            valid.GetError() );
 
-        const uint32_t width  = kCloudProceduralVolumeWidth;
+        const uint32_t width  = params.VolumeSideVoxels;
         const uint32_t height = kCloudProceduralVolumeHeight;
-        const uint32_t depth  = kCloudProceduralVolumeDepth;
+        const uint32_t depth  = params.VolumeSideVoxels;
 
-        std::vector<unsigned char> voxels( static_cast<size_t>( kCloudProceduralVoxelBytes ), 0u );
+        std::vector<unsigned char> voxels(
+             static_cast<size_t>( CloudProceduralVoxelBytes( params.VolumeSideVoxels ) ), 0u );
+
+        // THE UNIT OF PROGRESS IS ONE XZ SLICE OF ONE SPECIES, which is also the unit of cancellation. A
+        // species that places nothing still counts, so the fraction is monotone whatever the layer holds.
+        const uint32_t slices    = std::max<uint32_t>( 1u, static_cast<uint32_t>( params.Species.size() ) * depth );
+        uint32_t       sliceDone = 0u;
 
         const float voxelXKm = params.RegionSizeKm / static_cast<float>( width );
         const float voxelZKm = params.RegionSizeKm / static_cast<float>( depth );
@@ -1439,7 +1470,10 @@ namespace Desert::Assets
                  GenerateCloudProceduralBlobs( params, slot, regionOriginKm );
 
             if ( blobs.empty() )
+            {
+                sliceDone += depth;
                 continue;
+            }
 
             // EVERY LUMP AT EVERY WRAP THAT REACHES THE REGION. This is what makes the volume periodic and
             // therefore what makes REPEAT sampling seamless — see the header note. A lump in the middle of
@@ -1485,7 +1519,10 @@ namespace Desert::Assets
             }
 
             if ( placed.empty() )
+            {
+                sliceDone += depth;
                 continue;
+            }
 
             // A COARSE XZ BIN OVER THE REGION, so a voxel asks about the lumps that can reach it rather
             // than about all of them. Without it the bake is `voxels x lumps` — two million by a thousand —
@@ -1526,6 +1563,17 @@ namespace Desert::Assets
 
             for ( uint32_t z = 0; z < depth; ++z )
             {
+                // BETWEEN SLICES AND NOT INSIDE THEM, exactly as the sculpted bake does it and for the same
+                // arithmetic: at most `4 x side` calls over a bake of seconds is a check whose cost is
+                // unmeasurable, where a call per voxel would be millions of indirect calls through a
+                // std::function and would dominate the work it is reporting on. At the shipped 256 that is
+                // one check every ~40 ms of Debug bake, which is the granularity a cancel is honoured at.
+                if ( onProgress &&
+                     !onProgress( static_cast<float>( sliceDone ) / static_cast<float>( slices ) ) )
+                    return Common::MakeError<std::vector<unsigned char>>(
+                         "the procedural modelling bake was cancelled before it finished" );
+                ++sliceDone;
+
                 const float worldZ = regionOriginKm.y + ( static_cast<float>( z ) + 0.5f ) * voxelZKm;
                 const int   binZ   = std::clamp( static_cast<int>( ( worldZ - regionOriginKm.y ) * invBin ), 0,
                                                  static_cast<int>( bins ) - 1 );
@@ -1622,6 +1670,9 @@ namespace Desert::Assets
                 }
             }
         }
+
+        if ( onProgress )
+            onProgress( 1.0f );
 
         return Common::MakeSuccess( std::move( voxels ) );
     }

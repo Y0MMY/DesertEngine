@@ -438,6 +438,7 @@ namespace Desert::Editor
             auto& cloud                  = m_CloudLayer.GetComponent<ECS::VolumetricCloudComponent>();
             cloud.Data.MaxSteps          = m_Setup.CloudMaxSteps;
             cloud.Data.StopTransmittance = m_Setup.CloudStopTransmittance;
+            cloud.Data.VolumeResolution  = m_Setup.CloudVolumeResolution;
         }
 
         m_AppliedSetup      = m_Setup;
@@ -694,6 +695,7 @@ namespace Desert::Editor
         cloud.Data.Material          = material;
         cloud.Data.MaxSteps          = m_Setup.CloudMaxSteps;
         cloud.Data.StopTransmittance = m_Setup.CloudStopTransmittance;
+        cloud.Data.VolumeResolution  = m_Setup.CloudVolumeResolution;
 
         // The ground comes on with the dome and is not a preference. The deck's shadow and the light it
         // throws down are part of what a cloud material looks like; a dome over nothing would be showing
@@ -897,6 +899,14 @@ namespace Desert::Editor
             LOG_ERROR( "[PreviewViewport] EndScene failed: {}", ended.GetError() );
     }
 
+    bool PreviewViewport::IsSkyRebuilding() const
+    {
+        // FILL::SKYDOME IS PART OF THE QUESTION, not an optimisation of it. Only the volume domain creates
+        // the cloud layer, so a mesh or material preview can never be baking — and asking the renderer
+        // anyway would make this widget's answer depend on a system it has no cloud entity for.
+        return m_Fill == Fill::SkyDome && m_Renderer && m_Renderer->IsCloudVolumeBaking();
+    }
+
     bool PreviewViewport::Draw( UI::UIHelper& uiHelper, const ImVec2& size )
     {
         const ImVec2 drawSize( std::max( size.x, 16.0f ), std::max( size.y, 16.0f ) );
@@ -935,6 +945,32 @@ namespace Desert::Editor
                  IM_COL32( 130, 135, 145, 255 ), label );
         }
         dl->AddRect( origin, end, ImGui::GetColorU32( ImGuiCol_Border ), kRounding );
+
+        // ── "REBUILDING THE SKY", ON THE PICTURE THAT IS STALE ─────────────────────────────────────────
+        //
+        // WHY HERE AND NOT IN A STATUS LINE. The thing the artist is looking at while they wait IS this
+        // image, and the sentence they need is about this image: the sky in it is the one from before the
+        // edit. A badge somewhere else is a badge they are not looking at — the owner reported this defect
+        // twice as "the cloud preview still doesn't update straight away", which is what a stale picture
+        // with no label says to a person.
+        //
+        // IT IS ALSO THE ONE PLACE THAT NEEDS NO COOPERATION. This widget owns the renderer that knows the
+        // answer and owns the rectangle the answer is about, so nothing has to be pushed anywhere and no
+        // panel can forget to draw it.
+        if ( IsSkyRebuilding() )
+        {
+            constexpr float kPad    = 6.0f;
+            const char*     label   = "Rebuilding the sky...";
+            const ImVec2    ts      = ImGui::CalcTextSize( label );
+            const ImVec2    boxMin( origin.x + kPad, origin.y + kPad );
+            const ImVec2    boxMax( boxMin.x + ts.x + kPad * 2.0f, boxMin.y + ts.y + kPad );
+
+            // Painted over the image rather than blended into it, and DARK: the badge has to be legible
+            // over a bright sky, which is the only content this pane ever shows while it is up.
+            dl->AddRectFilled( boxMin, boxMax, IM_COL32( 18, 20, 24, 205 ), kRounding );
+            dl->AddText( ImVec2( boxMin.x + kPad, boxMin.y + kPad * 0.5f ), IM_COL32( 235, 200, 120, 255 ),
+                         label );
+        }
 
         if ( !m_HasContent )
             return false;

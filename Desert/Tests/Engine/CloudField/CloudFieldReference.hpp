@@ -304,9 +304,9 @@ namespace Desert::Tests::CloudFieldRef
             if ( voxels.empty() )
                 return vec4( 0.0f );
 
-            constexpr int width  = static_cast<int>( Desert::Assets::kCloudProceduralVolumeWidth );
+            constexpr int width  = static_cast<int>( Desert::Assets::kCloudProceduralVolumeSide );
             constexpr int height = static_cast<int>( Desert::Assets::kCloudProceduralVolumeHeight );
-            constexpr int depth  = static_cast<int>( Desert::Assets::kCloudProceduralVolumeDepth );
+            constexpr int depth  = static_cast<int>( Desert::Assets::kCloudProceduralVolumeSide );
 
             const float x = uvw.x * static_cast<float>( width ) - 0.5f;
             const float y = uvw.y * static_cast<float>( height ) - 0.5f;

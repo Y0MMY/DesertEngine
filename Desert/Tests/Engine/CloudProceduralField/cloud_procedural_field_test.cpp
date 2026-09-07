@@ -36,10 +36,10 @@ using Desert::Assets::CloudProceduralRegionOriginKm;
 using Desert::Assets::CloudProceduralSnapKm;
 using Desert::Assets::CloudProceduralSpecies;
 using Desert::Assets::GenerateCloudProceduralBlobs;
-using Desert::Assets::kCloudProceduralVolumeDepth;
+using Desert::Assets::CloudProceduralVoxelBytes;
 using Desert::Assets::kCloudProceduralVolumeHeight;
-using Desert::Assets::kCloudProceduralVolumeWidth;
-using Desert::Assets::kCloudProceduralVoxelBytes;
+using Desert::Assets::kCloudProceduralVolumeSide;
+using Desert::Assets::kCloudProceduralVolumeSideMin;
 using Desert::Assets::PrepareCloudModellingBlob;
 using Desert::Assets::SortCloudModellingBlobs;
 using Desert::Assets::ValidateCloudProceduralParams;
@@ -143,7 +143,7 @@ namespace
 
     size_t VoxelIndex( uint32_t x, uint32_t y, uint32_t z )
     {
-        return ( ( static_cast<size_t>( z ) * kCloudProceduralVolumeHeight + y ) * kCloudProceduralVolumeWidth +
+        return ( ( static_cast<size_t>( z ) * kCloudProceduralVolumeHeight + y ) * kCloudProceduralVolumeSide +
                  x ) *
                4u;
     }
@@ -204,7 +204,7 @@ TEST( CloudProceduralField, TheBakedVolumeAgreesWithAGatherOverEveryLumpInAnyOrd
 
     const auto baked = BakeCloudProceduralVolume( params, origin );
     ASSERT_TRUE( baked ) << ( baked ? std::string{} : baked.GetError() );
-    ASSERT_EQ( baked.GetValue().size(), kCloudProceduralVoxelBytes );
+    ASSERT_EQ( baked.GetValue().size(), CloudProceduralVoxelBytes( kCloudProceduralVolumeSide ) );
 
     std::vector<CloudModellingBlob> blobs = GenerateCloudProceduralBlobs( params, 0u, origin );
     ASSERT_FALSE( blobs.empty() );
@@ -233,9 +233,9 @@ TEST( CloudProceduralField, TheBakedVolumeAgreesWithAGatherOverEveryLumpInAnyOrd
     std::vector<glm::u32vec3> outside;
 
     size_t filled = 0;
-    for ( uint32_t z = 0; z < kCloudProceduralVolumeDepth; ++z )
+    for ( uint32_t z = 0; z < kCloudProceduralVolumeSide; ++z )
         for ( uint32_t y = 0; y < kCloudProceduralVolumeHeight; ++y )
-            for ( uint32_t x = 0; x < kCloudProceduralVolumeWidth; ++x )
+            for ( uint32_t x = 0; x < kCloudProceduralVolumeSide; ++x )
             {
                 const bool solid = baked.GetValue()[VoxelIndex( x, y, z )] != 0u;
                 if ( solid )
@@ -248,13 +248,13 @@ TEST( CloudProceduralField, TheBakedVolumeAgreesWithAGatherOverEveryLumpInAnyOrd
 
     std::printf( "[CloudProceduralField] the volume is %.2f%% cloud by voxel; probing %zu voxels inside it "
                  "and %zu outside\n",
-                 100.0 * static_cast<double>( filled ) / static_cast<double>( kCloudProceduralVoxelBytes / 4u ),
+                 100.0 * static_cast<double>( filled ) / static_cast<double>( CloudProceduralVoxelBytes( kCloudProceduralVolumeSide ) / 4u ),
                  inside.size(), outside.size() );
 
     ASSERT_GE( inside.size(), 50u ) << "the bake produced almost no cloud, so there is nothing to compare";
 
-    const float voxelXKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
-    const float voxelZKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeDepth );
+    const float voxelXKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeSide );
+    const float voxelZKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeSide );
     const float voxelYKm = params.LayerThicknessKm / static_cast<float>( kCloudProceduralVolumeHeight );
 
     int    checked   = 0;
@@ -292,7 +292,7 @@ TEST( CloudProceduralField, TheBakedVolumeAgreesWithAGatherOverEveryLumpInAnyOrd
     // NOT A VACUOUS PASS. A volume that was entirely empty would satisfy every EXPECT above, and the
     // ASSERT on `inside` above is what makes that impossible — this states the same thing about the
     // fraction, so a bake that collapsed to a handful of lumps is caught even though it is not empty.
-    EXPECT_GT( filled, ( kCloudProceduralVoxelBytes / 4u ) / 400u )
+    EXPECT_GT( filled, ( CloudProceduralVoxelBytes( kCloudProceduralVolumeSide ) / 4u ) / 400u )
          << "under a quarter of a per cent of the volume has cloud in it, so the sky this agreed about is "
             "not one anybody would look at";
 }
@@ -406,7 +406,7 @@ TEST( CloudProceduralField, NoGeneratedLumpIsNarrowerThanTheVolumeCanCarry )
 {
     const CloudProceduralFieldParams shipped = MakeParams();
 
-    const float voxelKm = shipped.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
+    const float voxelKm = shipped.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeSide );
     const float floorKm = Desert::Assets::CloudProceduralLumpFloorKm( shipped );
 
     std::printf( "[CloudProceduralField] voxel %.1f m; the volume expresses %.0f m, the march finds %.0f m; "
@@ -563,11 +563,11 @@ TEST( CloudProceduralField, TheVolumeIsPeriodicSoRepeatSamplingShowsNoSeam )
     double interiorSum = 0.0;
     int    count       = 0;
 
-    for ( uint32_t z = 0; z < kCloudProceduralVolumeDepth; ++z )
+    for ( uint32_t z = 0; z < kCloudProceduralVolumeSide; ++z )
     {
         for ( uint32_t y = 0; y < kCloudProceduralVolumeHeight; ++y )
         {
-            const int last  = voxels[VoxelIndex( kCloudProceduralVolumeWidth - 1u, y, z )];
+            const int last  = voxels[VoxelIndex( kCloudProceduralVolumeSide - 1u, y, z )];
             const int first = voxels[VoxelIndex( 0u, y, z )];
             const int one   = voxels[VoxelIndex( 1u, y, z )];
 
@@ -653,15 +653,15 @@ TEST( CloudProceduralField, AValidatedRegionAlwaysClearsTheMarchsSearchLattice )
 
     EXPECT_TRUE( ValidateCloudProceduralParams( params ) ) << ValidateCloudProceduralParams( params ).GetError();
 
-    const float voxelKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeWidth );
+    const float voxelKm = params.RegionSizeKm / static_cast<float>( kCloudProceduralVolumeSide );
     std::printf( "[CloudProceduralField] a %.0f km region over %u voxels is %.1f m per voxel, finest "
                  "feature %.0f m, against the %.0f m the march resolves\n",
-                 params.RegionSizeKm, kCloudProceduralVolumeWidth, voxelKm * 1000.0f, 2.0f * voxelKm * 1000.0f,
+                 params.RegionSizeKm, kCloudProceduralVolumeSide, voxelKm * 1000.0f, 2.0f * voxelKm * 1000.0f,
                  params.ResolvableChordKm * 1000.0f );
 
     // The exact bound, from below. A region of `chord/2 * Width` is the smallest legal one.
     params.RegionSizeKm =
-         0.5f * params.ResolvableChordKm * static_cast<float>( kCloudProceduralVolumeWidth ) * 0.99f;
+         0.5f * params.ResolvableChordKm * static_cast<float>( kCloudProceduralVolumeSide ) * 0.99f;
 
     const auto refused = ValidateCloudProceduralParams( params );
     EXPECT_FALSE( refused ) << "a region of " << params.RegionSizeKm
@@ -712,8 +712,8 @@ TEST( CloudProceduralField, TheCostOfRebakingTheRegionIsMeasured )
 
         std::printf( "[CloudProceduralField] %d species, %zu lumps, %u x %u x %u voxels: %.1f ms per rebake "
                      "(best of 3, DEBUG build)\n",
-                     speciesCount, lumps, kCloudProceduralVolumeWidth, kCloudProceduralVolumeHeight,
-                     kCloudProceduralVolumeDepth, best );
+                     speciesCount, lumps, kCloudProceduralVolumeSide, kCloudProceduralVolumeHeight,
+                     kCloudProceduralVolumeSide, best );
 
         EXPECT_LT( best, 60000.0 ) << "a rebake of " << best
                                    << " ms means the sky lags the camera by a minute; the region's size, the "
@@ -748,8 +748,8 @@ TEST( CloudProceduralField, CoverageIsTheFractionOfSkyThatHasCloudInTheColumn )
         ASSERT_TRUE( baked ) << ( baked ? std::string{} : baked.GetError() );
 
         size_t columns = 0;
-        for ( uint32_t z = 0; z < kCloudProceduralVolumeDepth; ++z )
-            for ( uint32_t x = 0; x < kCloudProceduralVolumeWidth; ++x )
+        for ( uint32_t z = 0; z < kCloudProceduralVolumeSide; ++z )
+            for ( uint32_t x = 0; x < kCloudProceduralVolumeSide; ++x )
             {
                 for ( uint32_t y = 0; y < kCloudProceduralVolumeHeight; ++y )
                 {
@@ -762,7 +762,7 @@ TEST( CloudProceduralField, CoverageIsTheFractionOfSkyThatHasCloudInTheColumn )
             }
 
         const double measured = static_cast<double>( columns ) /
-                                static_cast<double>( kCloudProceduralVolumeWidth * kCloudProceduralVolumeDepth );
+                                static_cast<double>( kCloudProceduralVolumeSide * kCloudProceduralVolumeSide );
 
         std::printf( "[CloudProceduralField] coverage %.2f -> %.3f of the sky has cloud in the column "
                      "(%+.3f)\n",

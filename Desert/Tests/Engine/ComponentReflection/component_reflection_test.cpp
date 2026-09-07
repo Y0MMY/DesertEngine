@@ -11,6 +11,7 @@
 
 // The cloud packer, for the near-fade relation below: the component's fields are only half of that
 // story, and the half that can be undefined behaviour is the one on the GPU side of PackCloudParams.
+#include <Engine/Assets/CloudProceduralVolume.hpp>
 #include <Engine/Assets/CloudTypeData.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudQuality.hpp>
@@ -423,7 +424,7 @@ TEST( HeightFogReflection, DistancesAreLengthsAndEveryFieldIsAnnotatedWellEnough
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 21 fields since O1: the LOOK is a MATERIAL. What stays is exactly what
+// VolumetricCloudData — 22 fields: 21 since O1: the LOOK is a MATERIAL. What stays is exactly what
 // UVolumetricCloudComponent keeps, name for name — tracing budgets, pass routing, world integration —
 // plus the Material handle that is the seam itself, the region budget, and the wind pair (the one named
 // divergence from the UE split: the collector integrates the offset and may not touch the registry).
@@ -453,12 +454,13 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "ShadowStrength",
          "MaxSteps",
          "StopTransmittance",
+         "VolumeResolution",
          "WindDirection",
          "WindSpeed",
     };
 
     const TypeInfo& cloud = Type( "VolumetricCloudData" );
-    EXPECT_EQ( cloud.Fields.size(), 21u );
+    EXPECT_EQ( cloud.Fields.size(), 22u );
     EXPECT_EQ( FieldNames( cloud ), expected );
 
     EXPECT_EQ( CountInCategory( cloud, "Cloud Layer" ), 5u );
@@ -478,7 +480,12 @@ TEST( VolumetricCloudReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
     // switch, the shadow-ray budget pair and the aerial-perspective art direction pair.
     EXPECT_EQ( CountInCategory( cloud, "Lighting" ), 6u );
     EXPECT_EQ( CountInCategory( cloud, "Shadows" ), 2u );
-    EXPECT_EQ( CountInCategory( cloud, "Quality" ), 2u );
+    // THREE Quality rows since O8: two budgets for the MARCH (what a frame costs) and one for the BAKE
+    // (what an EDIT costs). They are in one category because an artist looking for "make this cheaper"
+    // looks in one place, and they are three rows rather than two because the two costs are paid at
+    // different times by different views — a preview wants a small bake and a full march, a level the
+    // reverse.
+    EXPECT_EQ( CountInCategory( cloud, "Quality" ), 3u );
     EXPECT_EQ( CountInCategory( cloud, "Animation" ), 2u );
 
     // THE SEAM ITSELF: one material handle, hidden from the reflected pass because its row is the
@@ -609,6 +616,21 @@ TEST( VolumetricCloudReflection, DefaultsAreTheOnesTheComponentArguesFor )
     // on empty sky.
     EXPECT_EQ( DefaultOf<int32_t>( cloud, "MaxSteps" ), 256 );
     EXPECT_FLOAT_EQ( DefaultOf<float>( cloud, "StopTransmittance" ), 0.005f );
+
+    // THE BAKE BUDGET IS A MIRROR AND THIS IS ITS GUARD. `VolumeResolution` cannot be written as
+    // `Assets::kCloudProceduralVolumeSide` at its own declaration — Engine/ECS must not include
+    // Engine/Assets, which drags Engine/Graphic in through CloudTypeShape.hpp — so it is the literal 256
+    // with the Range 64..256 beside it, and all three numbers have to agree with the Assets constants or
+    // the top half of the slider bakes nothing while the bottom half changes the sky's scale.
+    //
+    // ASSERTED AS A RELATION AND NOT AS THREE PINNED VALUES: whoever moves either constant gets a red
+    // test naming the other side, which is the whole reason a mirror is allowed to exist here at all.
+    EXPECT_EQ( DefaultOf<int32_t>( cloud, "VolumeResolution" ),
+               static_cast<int32_t>( Desert::Assets::kCloudProceduralVolumeSide ) );
+    EXPECT_FLOAT_EQ( Find( cloud, "VolumeResolution" )->Meta.RangeMax,
+                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeSide ) );
+    EXPECT_FLOAT_EQ( Find( cloud, "VolumeResolution" )->Meta.RangeMin,
+                     static_cast<float>( Desert::Assets::kCloudProceduralVolumeSideMin ) );
 
     // Animation: 30 m/s along +X.
     EXPECT_EQ( DefaultOf<glm::vec3>( cloud, "WindDirection" ), glm::vec3( 1.0f, 0.0f, 0.0f ) );
