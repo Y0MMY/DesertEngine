@@ -161,11 +161,16 @@ namespace
     // EVERY POINT THROUGH WHICH THE ENGINE ISSUES GPU WORK. Adding one without a gate is the way this
     // defect comes back, so the list is here and not inferred.
     //
-    // vkCmd* recording is deliberately ABSENT and is not an omission: nothing records without
-    // VulkanRendererAPI::m_CurrentCommandBuffer, and BeginFrame — which is on this list — is the only
-    // function that ever sets it. Forty recording entry points are covered by one gate because of that,
-    // and the day someone gives m_CurrentCommandBuffer a second writer, this comment is the thing they
-    // have to argue with.
+    // The forty-odd vkCmd* entry points in VulkanRenderer.cpp are deliberately ABSENT, and that is an
+    // argument rather than an omission: none of them records without VulkanRendererAPI::m_CurrentCommandBuffer,
+    // and BeginFrame — which IS on this list — is the only function that ever sets it. One gate therefore
+    // covers all of them, and OnlyBeginFrameCanArmTheCommandBuffer below asserts the "only" rather than
+    // trusting this paragraph.
+    //
+    // THE ARGUMENT HAS EXACTLY ONE EXCEPTION AND IT WAS FOUND BY LOOKING RATHER THAN BY ASSUMING:
+    // VulkanImGui::End records the whole interface into `queue->GetDrawCommandBuffer()` directly, past
+    // that field entirely. It is on the list for that reason. Any future second route to a command buffer
+    // belongs here too — grep GetDrawCommandBuffer before believing there are none.
     constexpr GatedEntryPoint k_Gated[] = {
          { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanQueue.cpp", "VulkanQueue::PrepareFrame",
            "vkResetFences + the acquire" },
@@ -199,6 +204,11 @@ namespace
            "vkDeviceWaitIdle" },
          { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanDevice.cpp",
            "VulkanLogicalDevice::SavePipelineCache", "vkGetPipelineCacheData" },
+         // THE EXCEPTION TO THE PARAGRAPH ABOVE, and the reason it is a row rather than a footnote. This
+         // one records interface geometry into `queue->GetDrawCommandBuffer()` DIRECTLY, reaching past
+         // m_CurrentCommandBuffer, so the single gate in BeginFrame does not reach it.
+         { "Desert/Desert/Source/Engine/Graphic/API/Vulkan/imgui/VulkanImGuiLayer.cpp", "VulkanImGui::End",
+           "a swapchain render pass and the whole interface's draw data" },
     };
 
     struct DroppedResult

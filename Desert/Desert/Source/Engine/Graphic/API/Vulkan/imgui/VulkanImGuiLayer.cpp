@@ -170,6 +170,19 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanImGui::End()
     {
+        // THE ONE PLACE THAT RECORDS WITHOUT GOING THROUGH VulkanRendererAPI::m_CurrentCommandBuffer.
+        //
+        // Every vkCmd* in VulkanRenderer.cpp is covered by one gate, because BeginFrame is the only writer
+        // of that field and BeginFrame is gated. This function is the exception: it reaches past the
+        // renderer to `queue->GetDrawCommandBuffer()` directly, so no amount of guarding over there
+        // reaches it. Left ungated, a loss discovered during a layer's OnUpdate would still be followed by
+        // a full frame of interface recording. Nothing would crash — recording does not touch the device
+        // and the buffer is never submitted, because PresentFinalImage is gated too — but "no Vulkan call
+        // after the loss" would be false, and a claim that is nearly true is the kind this project pays
+        // for later.
+        if ( !Graphic::DeviceLost::AllowWork() )
+            return;
+
         ImGuiIO& io     = ::ImGui::GetIO();
         auto     window = EngineContext::GetInstance().GetWindow();
         io.DisplaySize = ImVec2( (float)window->GetWidth(), (float)window->GetHeight() );
