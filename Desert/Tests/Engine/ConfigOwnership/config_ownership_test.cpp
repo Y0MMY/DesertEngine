@@ -88,8 +88,11 @@
 // Each file's field list is enumerated BY THE SAME MECHANISM THAT WRITES THAT FILE, never by a hand-typed
 // list — so a field added tomorrow fails here before anyone has to remember this document exists:
 //
-//   editor.json  <- rfl::fields<EditorPreferences>() and rfl::fields<DebugViewState>(), which is literally
-//                   what rfl::json::write emits in EditorPreferences::Save().
+//   editor.json  <- rfl::fields<EditorPreferences>() and rfl::fields<DebugViewState>(), which is what
+//                   rfl::json::write emits in EditorPreferences::Save() — less the one member that is not
+//                   a key at all, EditorPreferences::UnknownKeys, whose contents ARE keys of the file but
+//                   belong to whichever build wrote them. SerializedKeysOf() below says how that is
+//                   decided and which test pins it against the bytes.
 //   .deproj      <- rfl::fields<ProjectFile>(), the same call Common::Project::WriteProjectFile makes.
 //   .desce       <- rfl::fields<SceneSerialized>() for the top level, and the reflection registry for the
 //                   Settings block, which is what SceneSerializer hands SerializeReflected.
@@ -127,8 +130,11 @@
 #include <Engine/Reflection/ReflectionTypes.hpp>
 
 #include <rflcpp/rfl/Generic.hpp>
+#include <rflcpp/rfl/Tuple.hpp>
 #include <rflcpp/rfl/fields.hpp>
+#include <rflcpp/rfl/internal/is_extra_fields.hpp>
 #include <rflcpp/rfl/json.hpp>
+#include <rflcpp/rfl/named_tuple_t.hpp>
 
 #include <gtest/gtest.h>
 
@@ -517,12 +523,36 @@ namespace
 
     // The field names rfl::json::write will emit for T — i.e. the keys of the file, asked of the same
     // library that writes them. A hand-typed list here would be a third statement of the format.
+    //
+    // ONE MEMBER KIND IS NOT A KEY, AND rfl::fields<> DOES NOT KNOW THAT. An rfl::ExtraFields member is
+    // SPREAD at the struct's own level by the writer instead of being nested under its member name
+    // (NamedTupleParser::add_field_to_object), so it contributes whatever keys it holds and never one
+    // called after itself. EditorPreferences::UnknownKeys is one — К9 added it so that a build saving
+    // editor.json stops deleting the keys it does not know — and counting it here would demand a census
+    // row for a key the file can never contain.
+    //
+    // The skip is decided by rfl::internal::is_extra_fields_v, the SAME trait the writer branches on,
+    // rather than by the member's name, so it cannot drift into an exemption for something else. That it
+    // still agrees with an actual rfl::json::write is asserted in Desert/Tests/Editor/PreferenceOwnership
+    // (`TheKeysWrittenAreExactlyTheStructsFieldsPlusThePreservedOnes`) — this suite reads a field list and
+    // that one reads the bytes, which is the pair that keeps a census honest.
+    template <class NamedTupleType, std::size_t I>
+    void AppendSerializedKeys( std::vector<std::string>& names )
+    {
+        if constexpr ( I < NamedTupleType::size() )
+        {
+            using FieldType = rfl::tuple_element_t<I, typename NamedTupleType::Fields>;
+            if constexpr ( !rfl::internal::is_extra_fields_v<typename FieldType::Type> )
+                names.push_back( std::string( FieldType::name() ) );
+            AppendSerializedKeys<NamedTupleType, I + 1>( names );
+        }
+    }
+
     template <class T>
     std::vector<std::string> SerializedKeysOf()
     {
         std::vector<std::string> names;
-        for ( const auto& meta : rfl::fields<T>() )
-            names.push_back( meta.name() );
+        AppendSerializedKeys<rfl::named_tuple_t<T>, 0>( names );
         return names;
     }
 
