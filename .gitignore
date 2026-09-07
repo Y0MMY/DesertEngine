@@ -49,6 +49,14 @@ Radiant/Shaders/SPIRV/Bin/
 Editor/imgui.ini
 imgui.ini
 
+# The project tile picture the Editor writes beside the .deproj on every project save
+# (EditorLayer::WriteProjectThumbnail -> `<project>/.thumbnail.png`, the name the launcher looks for).
+# For this repository that lands as Editor/.thumbnail.png, where it sat untracked and unignored: three
+# different people reported it as unexplained dirt in `git status` inside one day. It is a screenshot of
+# whatever the last person had in their viewport, rewritten on every save — derived, per-machine, and
+# not something a clone should receive. Unanchored so it covers any project directory, not just ours.
+.thumbnail.png
+
 # Fetched by scripts/MacOS/Setup.sh (not submodules)
 ThirdParty/optick/
 ThirdParty/volk/

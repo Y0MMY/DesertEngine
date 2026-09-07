@@ -12,8 +12,10 @@
 namespace Desert::Editor
 {
     // User-level editor settings, persisted to ~/.desertengine/editor.json (per-user, not per-project).
-    // Loaded once at editor startup; the Preferences window (Edit -> Preferences...) edits + saves them,
-    // and several panels edit one field each and save on the spot.
+    // Loaded once at editor startup. EVERY EDITOR OF THESE FIELDS PERSISTS ON THE SPOT — the Preferences
+    // window commits each control when the user lets go of it, and the panels that own one field each
+    // (the viewport's Show flags and snap steps, MSAA in Scene Settings, the stars in Details) commit on
+    // the click. There is no "apply" step anywhere and there deliberately is not one; see Save().
     //
     // THIS STRUCT IS THE LIVE STATE, not a copy of it that something else has to be given. Everything
     // that consumes a preference reads it from here every time it needs it — the gizmo snap through
@@ -130,14 +132,45 @@ namespace Desert::Editor
 
         // Reads editor.json into Get() (keeps defaults when the file is missing/corrupt). The camera
         // speed is applied by EditorLayer once a camera exists.
+        //
+        // IT WRITES THE FILE IN EXACTLY ONE CASE, and the case is named: when MigrateLoaded() below
+        // raises a stored value, the new form is written back so the migration fires once instead of
+        // every launch (contract §4.3). That write goes through SaveMigrated(), NOT through Save(), and
+        // the difference is the point — a load that calls "save" is a reader that can write, and its log
+        // line then claims a save the user never made. Nothing else in Load() touches the file.
         static void Load();
 
-        // Writes Get() to editor.json. It CHANGES NOTHING ELSE: the only thing it touches besides the
-        // file is RenderConfig::MSAASamples, which is a one-way derived copy this file is the sole
-        // writer of. Anything else here would be a save that edits state the user did not touch in the
-        // action that triggered it, which is what К6 removed.
-        // False when the preferences file could not be written (reason logged): the values are live in
-        // this session but will not come back in the next one.
+        // THE ONE MIGRATION THIS FILE CARRIES, AS A PURE FUNCTION. In: a preference set as it was read
+        // from disk. Out: the same set in this build's form, plus one line per field it raised (empty =
+        // there was nothing to do, which is what Load() tests before it writes anything). No file, no
+        // globals, no logging — contract §4.4 asks a migration to be pure and tested, and
+        // Desert/Tests/Editor/PreferenceOwnership calls this directly rather than through the file.
+        static std::vector<std::string> MigrateLoaded( EditorPreferences& p );
+
+        // THE USER JUST CHANGED SOMETHING. Called by every control that edits this struct, at the moment
+        // the edit finishes (ImGui::IsItemDeactivatedAfterEdit for a slider or a drag, the click for a
+        // checkbox or a menu item) — never on every frame of a drag, which would be sixty writes a second.
+        //
+        // It CHANGES NOTHING ELSE: the only thing it touches besides the file is RenderConfig::MSAASamples,
+        // which is a one-way derived copy this file is the sole writer of. Anything else here would be a
+        // save that edits state the user did not touch in the action that triggered it, which is what К6
+        // removed.
+        //
+        // A SAVE THAT WOULD CHANGE NOTHING DOES NOT HAPPEN. The bytes are compared against what this
+        // process believes is already on disk (and the file is confirmed still to be there, so the answer
+        // can never be true of a file that is gone), and an identical write is skipped — no file write,
+        // and no log line about one. That is what makes commit-on-edit affordable: letting go of a control you
+        // only hovered, re-picking the MSAA level you are already on, or dragging a slider back to where
+        // it started all cost nothing. True means "editor.json holds these values", which is as true of a
+        // skipped write as of a performed one; false means it could not be written (reason logged) and the
+        // values are live in this session only.
         static bool Save();
+
+        // THE EDITOR, NOT THE USER, RAISED A STORED VALUE TO THIS BUILD'S FORM — a migration write-back,
+        // and the only legitimate reason to write this file without a user action behind it. `what` is
+        // the sentence that reaches the log in place of the changed-field list Save() derives, because a
+        // migration is not a field the user moved and reporting it as one is how "[Prefs] Saved ..." came
+        // to mean nothing. Same deduplication and same return meaning as Save().
+        static bool SaveMigrated( const std::string& what );
     };
 } // namespace Desert::Editor
