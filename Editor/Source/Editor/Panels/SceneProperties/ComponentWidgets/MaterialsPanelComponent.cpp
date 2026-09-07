@@ -11,6 +11,7 @@
 #include <Editor/Panels/MaterialEditor/MaterialDocumentOpen.hpp>
 #include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
@@ -464,20 +465,19 @@ namespace Desert::Editor
             const bool        flat = asset->Data().GetFloat( "AlphaCutoff" ) > 0.0f;
             const std::string png  = ThumbnailService::Get().RequestMaterial( asset->GetMetadata().Handle,
                                                                               path, flat );
-            bool              haveFresh = std::filesystem::exists( png, ec );
-            if ( haveFresh )
+
+            // THE SAME RULE THE SERVICE APPLIES, out of the same header, and that is the point. This used
+            // to be a hand-written copy of the margin comparison while ThumbnailService::ShouldQueue asked
+            // only whether the file existed. When the two disagreed — a source newer than its picture —
+            // this panel refused to draw and the service refused to render, and the material showed a flat
+            // colour swatch for the rest of the project's life.
+            bool haveFresh = ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( png, path ) ) ==
+                             ThumbnailFreshness::Verdict::Show;
+            if ( !haveFresh )
             {
-                // Edited material -> the cached PNG (and its decoded texture) are a lie. Same 3s margin the
-                // asset browser uses: coarse filesystem timestamps otherwise report the source as newer
-                // right after the PNG was written.
-                const auto pngTime = std::filesystem::last_write_time( png, ec );
-                const auto srcTime = std::filesystem::last_write_time( path, ec );
-                if ( !ec && ( srcTime - pngTime ) > std::chrono::seconds( 3 ) )
-                {
-                    haveFresh = false;
-                    m_Thumbnails.Invalidate( png );
-                    ThumbnailService::Get().Invalidate( path ); // let it be captured again
-                }
+                // Drop the decoded copy of a picture we have just decided not to show; the RequestMaterial
+                // above has already queued the replacement, because it asked this same question.
+                m_Thumbnails.Invalidate( png );
             }
             if ( haveFresh )
             {

@@ -10,6 +10,7 @@
 #include "CollectionsPanel.hpp"
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <Editor/Import/MeshMaterial.hpp>
 #include <Editor/Import/ImportManager.hpp>
@@ -395,9 +396,13 @@ namespace Desert::Editor
         const ImVec2      img( cardW, imgH );
         const std::string pngPath = ThumbnailCache::DiskPath( item.MeshPath );
 
-        // Rendered preview already on disk + decoded? Show it.
-        std::error_code ec;
-        if ( m_UIHelper && m_Thumbs && std::filesystem::exists( pngPath, ec ) )
+        // Rendered preview already on disk, and still a picture OF this mesh? Show it. The freshness half
+        // is not decoration: asking only whether the file exists is what let a mesh edited after its
+        // capture keep showing the old shape, and — because ThumbnailService used to ask the same
+        // impoverished question — never get a new one (Editor/Widgets/ThumbnailFreshness.hpp).
+        if ( m_UIHelper && m_Thumbs &&
+             ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, item.MeshPath ) ) ==
+                  ThumbnailFreshness::Verdict::Show )
         {
             if ( auto image = m_Thumbs->Get( pngPath ) )
             {

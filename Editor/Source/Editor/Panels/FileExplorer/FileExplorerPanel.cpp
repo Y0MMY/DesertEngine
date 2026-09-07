@@ -20,6 +20,7 @@
 #include <Editor/Import/MeshMaterial.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Editor/Widgets/ThumbnailService.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
@@ -1543,21 +1544,15 @@ namespace Desert::Editor
         const std::string pngPath = ThumbnailCache::DiskPath( entry->AssetPath );
 
         // Stale if the material was edited after the cached thumbnail was written (regenerate then).
-        std::error_code ec;
-        bool            haveFresh = std::filesystem::exists( pngPath, ec );
-        if ( haveFresh )
-        {
-            const auto pngT = std::filesystem::last_write_time( pngPath, ec );
-            const auto srcT = std::filesystem::last_write_time( entry->AssetPath, ec );
-            // Require the source to be newer by a margin: coarse-resolution filesystems (FAT/exFAT = 2s,
-            // some network drives) can otherwise report src slightly newer right after we wrote the PNG,
-            // causing endless regeneration.
-            if ( !ec && ( srcT - pngT ) > std::chrono::seconds( 3 ) )
-            {
-                haveFresh = false;             // material meaningfully newer than thumbnail -> regenerate
-                m_Thumbnails->Invalidate( pngPath ); // drop the stale decoded image so the new PNG is reloaded
-            }
-        }
+        // Through Editor/Widgets/ThumbnailFreshness.hpp, which is the same rule ThumbnailService::ShouldQueue
+        // applies — this used to be a hand-written copy of it, and the two answers disagreed for exactly the
+        // assets that needed re-rendering: this panel would not draw them and the service would not queue
+        // them, so they showed a colour swatch permanently.
+        const bool haveFresh =
+             ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, entry->AssetPath ) ) ==
+             ThumbnailFreshness::Verdict::Show;
+        if ( !haveFresh )
+            m_Thumbnails->Invalidate( pngPath ); // drop the stale decoded image so the new PNG is reloaded
 
         // Rendered material-on-sphere preview ready + fresh -> show it. (Only Get() once the file exists so
         // the cache never stores a null for this path.)
@@ -1613,18 +1608,12 @@ namespace Desert::Editor
 
         const std::string pngPath = ThumbnailCache::DiskPath( entry->AssetPath );
 
-        std::error_code ec;
-        bool            haveFresh = std::filesystem::exists( pngPath, ec );
-        if ( haveFresh )
-        {
-            const auto pngT = std::filesystem::last_write_time( pngPath, ec );
-            const auto srcT = std::filesystem::last_write_time( entry->AssetPath, ec );
-            if ( !ec && ( srcT - pngT ) > std::chrono::seconds( 3 ) )
-            {
-                haveFresh = false;
-                m_Thumbnails->Invalidate( pngPath );
-            }
-        }
+        // Same shared rule as the material grid above (Editor/Widgets/ThumbnailFreshness.hpp).
+        const bool haveFresh =
+             ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( pngPath, entry->AssetPath ) ) ==
+             ThumbnailFreshness::Verdict::Show;
+        if ( !haveFresh )
+            m_Thumbnails->Invalidate( pngPath );
         if ( haveFresh )
         {
             if ( auto img = m_Thumbnails->Get( pngPath ) )
@@ -1640,7 +1629,12 @@ namespace Desert::Editor
         const std::filesystem::path cooked    = CookPaths::CookedMesh( entry->AssetPath, ".stmesh" );
         const std::string           cookedStr = cooked.generic_string();
 
-        if ( ec || !std::filesystem::exists( cooked ) )
+        // The `ec ||` that used to lead this condition carried the error code from the THUMBNAIL's modtime
+        // read above, so a thumbnail whose stamp could not be read blacklisted the MESH as "not cooked" —
+        // permanently, for the session. Two unrelated facts sharing one variable; the stat now lives inside
+        // ThumbnailFreshness::Observe and this asks only its own question.
+        std::error_code ec;
+        if ( !std::filesystem::exists( cooked, ec ) )
         {
             m_FailedThumbs.insert( entry->AssetPath ); // not cooked -> icon
             return false;

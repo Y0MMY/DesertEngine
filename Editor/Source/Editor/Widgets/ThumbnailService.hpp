@@ -2,6 +2,8 @@
 
 #include <Editor/Widgets/AssetThumbnailRenderer.hpp>
 
+#include <filesystem>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -23,10 +25,18 @@ namespace Desert::Editor
      * This service is the single owner. Panels REQUEST and read; EditorLayer ticks it once per frame.
      *
      * Requests are deduplicated across panels and across frames:
-     *   - a PNG already on disk is never re-rendered (that is the persistent cache);
-     *   - a request already queued or in flight is not queued twice;
+     *   - a PNG on disk that is still a picture OF its asset is never re-rendered (that is the persistent
+     *     cache). "Still a picture of it" is Editor/Widgets/ThumbnailFreshness.hpp, the SAME rule every
+     *     panel uses to decide whether to draw the file — not "the file exists", which is what this gate
+     *     used to ask. The two questions differ for exactly the assets that need re-rendering, and while
+     *     they differed those assets were neither drawn nor queued, permanently;
+     *   - a request already queued or in flight is not queued twice, and one that has become unnecessary
+     *     while it waited is dropped at dispatch rather than re-rendered;
      *   - an asset that failed to render is remembered and not retried, so a broken .demat cannot make
-     *     the queue spin on it every frame forever.
+     *     the queue spin on it every frame forever. That memory is per-PROCESS on purpose: the usual
+     *     reason a capture fails is a shader, a service registration or a device that was not ready yet,
+     *     and persisting "this asset is bad" would turn a transient failure into one only a cache wipe
+     *     could clear. The thing worth persisting is the picture, and that is what the PNG is.
      */
     class ThumbnailService
     {
@@ -100,13 +110,21 @@ namespace Desert::Editor
             Assets::AssetHandle Handle{ static_cast<uint64_t>( 0 ) };
             Assets::AssetHandle Material{ static_cast<uint64_t>( 0 ) }; // meshes only
             std::string         Identity; // ThumbnailKey::Identity of the asset, NOT a path spelling
-            std::string         Png;
-            bool                Flat = false;
+            // The asset's own file. Carried so the freshness question can be asked AGAIN at dispatch: a
+            // request can sit in this queue for seconds, and in that time the capture it asks for may
+            // already have been done (two panels showing one asset) or made unnecessary.
+            std::string Source;
+            std::string Png;
+            bool        Flat = false;
         };
 
         // Shared by both Request* entry points: decides whether the work is needed at all. Takes the
         // asset's IDENTITY (ThumbnailKey::Identity), never a raw path — the sets below are keyed on it.
-        bool ShouldQueue( const std::string& identity, const std::string& png );
+        bool ShouldQueue( const std::string& identity, const std::string& png, const std::string& source );
+
+        // The identity-free half of the question: is the PICTURE on disk missing or out of date? Split out
+        // because dispatch asks it a second time, when the dedup sets deliberately still hold the entry.
+        static bool NeedsCapture( const std::string& png, const std::string& source );
 
         // Created lazily — a session may never preview — and RELEASED again once the queue has been idle
         // for a while, because it owns a full SceneRenderer and therefore one of the six renderer slots
@@ -122,7 +140,18 @@ namespace Desert::Editor
         std::unordered_set<std::string>         m_Failed;  // gave up: do not retry every frame
         std::string                             m_InFlight;      // identity of the asset being captured
         std::string                             m_InFlightPng;   // its target PNG, checked on completion
-        int                                     m_InFlightTicks = 0;
-        int                                     m_IdleTicks     = 0; // consecutive frames with no work at all
+        // The target's modification time BEFORE the capture started, absent when there was no file. The
+        // completion test compares against it rather than asking whether the file exists — see Tick().
+        std::optional<std::filesystem::file_time_type> m_InFlightPngBefore;
+        int                                            m_InFlightTicks = 0;
+        int                                            m_IdleTicks     = 0; // consecutive frames with no work
+
+        // What this run of the queue did, reported once when it drains. A capture that succeeds used to
+        // say nothing at all, so "the editor is rendering previews" and "the editor has stopped bothering"
+        // looked identical in a log — and the second is what M8 was reported as.
+        int m_Captured = 0;
+        int m_Skipped  = 0; // queued, then found already fresh before it was dispatched
+
+        static std::optional<std::filesystem::file_time_type> PngStamp( const std::string& png );
     };
 } // namespace Desert::Editor

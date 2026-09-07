@@ -67,9 +67,29 @@ namespace Desert::Editor
         bool                m_PendingFlatPreview = false; // material on a camera-facing plane (foliage/cutout)
         int                 m_Phase = 0; // 0 = idle, else = remaining render frames (capture on the last)
 
-        // High-res PNG on disk (crisp / reusable) — the grid loads it into a SMALL GPU texture for display
-        // (ThumbnailCache::kThumbMaxDim), so storage quality is decoupled from the tiny on-screen size.
-        static constexpr uint32_t kSize         = 1024;      // output PNG size (~1 MP square; was 256)
+        // THE PNG IS THE DISPLAY SIZE, and this used to be four times larger than anything could show.
+        //
+        // The old rule was "hi-res on disk, decoupled from the tiny on-screen size" — 1024 px written,
+        // 2048 px rendered. But ThumbnailCache::Get is the ONLY reader of these files and it box-averages
+        // every one of them down to kThumbMaxDim before it uploads anything, so the extra pixels were not
+        // stored for later: they were decoded and thrown away on every load, in every session, forever.
+        // Measured on this tree (Debug, and the machine was shared):
+        //
+        //   capture, final frame     2823 ms = 892 device idle + 1289 readback (16 MB) + 114 downscale
+        //                            + 528 png encode
+        //   cache HIT, per thumbnail   38 ms = 31 png decode (1024x1024) + 7 box filter and upload
+        //   on disk                   961 KB per material, 106 materials in this project alone
+        //
+        // Two thirds of a capture and all of a cache hit were paid for resolution that never reached a
+        // pixel. Matching kSize to kThumbMaxDim removes the load-time box filter entirely (the decode
+        // lands at the size it is uploaded at) and quarters both the readback and the encode.
+        //
+        // NOT smaller than the display, which is the failure in the other direction: v3 exists because
+        // 128 px "looked like 240p" in the grid. kThumbMaxDim was raised 256 -> 512 in this same change
+        // (the largest grid card is 528 physical pixels on a 2x display — see ThumbnailCache.hpp for the
+        // arithmetic), so what reaches the screen gets SHARPER here, not softer. This is the first version
+        // in which the pixels stored are the pixels drawn.
+        static constexpr uint32_t kSize         = 512;       // output PNG size == ThumbnailCache::kThumbMaxDim
         static constexpr uint32_t kRenderSize   = kSize * 2; // offscreen render size (2x supersample -> kSize)
         static constexpr int      kRenderFrames = 5;         // warm-up render frames before the capture readback
     };

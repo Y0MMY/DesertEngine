@@ -1,6 +1,7 @@
 #include "ThumbnailService.hpp"
 
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailFreshness.hpp>
 #include <Editor/Widgets/ThumbnailKey.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
@@ -40,21 +41,31 @@ namespace Desert::Editor
         return s_Instance;
     }
 
-    bool ThumbnailService::ShouldQueue( const std::string& identity, const std::string& png )
+    bool ThumbnailService::ShouldQueue( const std::string& identity, const std::string& png,
+                                        const std::string& source )
     {
         if ( identity.empty() )
             return false;
         if ( m_Failed.count( identity ) || m_Queued.count( identity ) )
             return false;
 
-        // Already captured in a previous session: the on-disk PNG IS the cache, so nothing to do. Staleness
-        // (asset edited after the PNG was written) is the caller's call via Invalidate() — the asset browser
-        // already makes that comparison and knows its own tolerances.
-        std::error_code ec;
-        if ( std::filesystem::exists( png, ec ) )
-            return false;
+        return NeedsCapture( png, source );
+    }
 
-        return true;
+    bool ThumbnailService::NeedsCapture( const std::string& png, const std::string& source )
+    {
+        // THROUGH THE SHARED RULE, and this is the whole of M8's defect. This used to be
+        // `exists(png) -> nothing to do`, with a comment saying staleness was "the caller's call via
+        // Invalidate()". The callers do make that comparison — and they make a DIFFERENT one: a PNG whose
+        // asset is more than three seconds newer is unusable to every reader and already-cached to this
+        // gate. Nothing draws it and nothing replaces it, for the rest of the project's life.
+        //
+        // Measured on this tree before the change: `touch`ing one .demat whose 961 KB PNG was on disk left
+        // the Details slot showing a flat colour swatch, across a restart, with the PNG's modification time
+        // unchanged and no capture ever logged. Invalidate() cannot rescue it either — it clears the two
+        // process-local sets and the file it would have to look past is still there.
+        return ThumbnailFreshness::Judge( ThumbnailFreshness::Observe( png, source ) ) ==
+               ThumbnailFreshness::Verdict::Capture;
     }
 
     std::string ThumbnailService::RequestMaterial( const Assets::AssetHandle& material,
@@ -66,10 +77,10 @@ namespace Desert::Editor
         // that never drains and a thumbnail that never refreshes.
         const std::string identity = ThumbnailKey::Identity( assetPath );
         const std::string png      = ThumbnailCache::DiskPath( assetPath );
-        if ( ShouldQueue( identity, png ) )
+        if ( ShouldQueue( identity, png, assetPath ) )
         {
             m_Queue.push_back( { Kind::Material, material, Assets::AssetHandle( static_cast<uint64_t>( 0 ) ),
-                                 identity, png, flatPreview } );
+                                 identity, assetPath, png, flatPreview } );
             m_Queued.insert( identity );
         }
         return png;
@@ -80,9 +91,9 @@ namespace Desert::Editor
     {
         const std::string identity = ThumbnailKey::Identity( assetPath );
         const std::string png      = ThumbnailCache::DiskPath( assetPath );
-        if ( ShouldQueue( identity, png ) )
+        if ( ShouldQueue( identity, png, assetPath ) )
         {
-            m_Queue.push_back( { Kind::Mesh, mesh, material, identity, png, false } );
+            m_Queue.push_back( { Kind::Mesh, mesh, material, identity, assetPath, png, false } );
             m_Queued.insert( identity );
         }
         return png;
@@ -111,7 +122,10 @@ namespace Desert::Editor
         m_Queued.clear();
         m_InFlight.clear();
         m_InFlightPng.clear();
+        m_InFlightPngBefore.reset();
         m_InFlightTicks = 0;
+        m_Captured      = 0;
+        m_Skipped       = 0;
 
         // ~AssetThumbnailRenderer idles the device and releases the scene before the renderer, which is what
         // returns the slot. Identical to the idle path above — the DIFFERENCE is only that this one is not
@@ -134,6 +148,19 @@ namespace Desert::Editor
         // different facts and only the second one means the service is done.
         if ( m_Renderer && m_Queue.empty() && m_InFlight.empty() && !m_Renderer->HasPending() )
         {
+            // Say what the run did, ONCE, on the frame the queue empties — not per capture, which would be
+            // one line per asset in a folder, and not never, which is what it used to be. Both numbers are
+            // needed to read it: "8 captured, 0 already fresh" is a cold cache doing its job, "0 captured,
+            // 8 already fresh" is the cache doing its job, and "0 captured, 0 already fresh" beside a
+            // warning is the queue giving up.
+            if ( m_Captured || m_Skipped )
+            {
+                LOG_INFO( "[Thumbnails] queue drained: {} captured, {} already fresh on disk.", m_Captured,
+                          m_Skipped );
+                m_Captured = 0;
+                m_Skipped  = 0;
+            }
+
             if ( ++m_IdleTicks >= kIdleTicksBeforeRelease )
             {
                 // ~AssetThumbnailRenderer idles the device and releases the scene before the renderer, which
@@ -158,17 +185,30 @@ namespace Desert::Editor
         {
             if ( !m_Renderer->HasPending() )
             {
-                std::error_code ec;
-                if ( !std::filesystem::exists( m_InFlightPng, ec ) )
+                // THE FILE MUST HAVE MOVED, not merely be present. "Does the PNG exist?" was a sound test
+                // only while a capture was never dispatched against an existing file; now that a STALE
+                // thumbnail is re-captured (ShouldQueue), the old picture is sitting at that exact path
+                // before the renderer starts, and an existence check would certify a capture that wrote
+                // nothing at all — the failure would then be invisible AND the stale picture would be
+                // queued again on the next Request, every frame, forever.
+                const std::optional<std::filesystem::file_time_type> after = PngStamp( m_InFlightPng );
+                if ( !after || after == m_InFlightPngBefore )
                 {
                     // The renderer finished but produced nothing — the asset cannot be previewed. Remember
                     // it, or every frame from now on would re-queue the same doomed request.
-                    LOG_WARN( "[Thumbnails] no preview produced for '{}' — not retrying", m_InFlight );
+                    LOG_WARN( "[Thumbnails] no preview produced for '{}' — not retrying (the file at '{}' "
+                              "was {} by the capture)",
+                              m_InFlight, m_InFlightPng, after ? "left unchanged" : "not written" );
                     m_Failed.insert( m_InFlight );
+                }
+                else
+                {
+                    ++m_Captured;
                 }
                 m_Queued.erase( m_InFlight );
                 m_InFlight.clear();
                 m_InFlightPng.clear();
+                m_InFlightPngBefore.reset();
                 m_InFlightTicks = 0;
             }
             else if ( ++m_InFlightTicks > kInFlightGiveUpTicks )
@@ -179,12 +219,27 @@ namespace Desert::Editor
                 m_Queued.erase( m_InFlight );
                 m_InFlight.clear();
                 m_InFlightPng.clear();
+                m_InFlightPngBefore.reset();
                 m_InFlightTicks = 0;
             }
             return; // one capture at a time — the renderer has a single slot
         }
 
-        if ( m_Queue.empty() || m_Renderer->HasPending() )
+        if ( m_Renderer->HasPending() )
+            return;
+
+        // Drain anything the queue no longer owes. A request can sit here for seconds — the drain rate
+        // measured on this machine is one capture per ~2 s — and in that time the same asset may have been
+        // captured through another entry (two panels showing one material), or the panel that asked may
+        // have called Invalidate() and asked again, leaving a duplicate behind it. Dispatching those would
+        // re-render a picture that is already correct, at full cost, one after another.
+        while ( !m_Queue.empty() && !NeedsCapture( m_Queue.front().Png, m_Queue.front().Source ) )
+        {
+            m_Queued.erase( m_Queue.front().Identity );
+            m_Queue.erase( m_Queue.begin() );
+            ++m_Skipped;
+        }
+        if ( m_Queue.empty() )
             return;
 
         const Request req = m_Queue.front();
@@ -195,8 +250,18 @@ namespace Desert::Editor
         else
             m_Renderer->RequestMesh( req.Handle, req.Png, req.Material );
 
-        m_InFlight      = req.Identity;
-        m_InFlightPng   = req.Png;
-        m_InFlightTicks = 0;
+        m_InFlight          = req.Identity;
+        m_InFlightPng       = req.Png;
+        m_InFlightPngBefore = PngStamp( req.Png );
+        m_InFlightTicks     = 0;
+    }
+
+    std::optional<std::filesystem::file_time_type> ThumbnailService::PngStamp( const std::string& png )
+    {
+        std::error_code ec;
+        const auto      stamp = std::filesystem::last_write_time( png, ec );
+        if ( ec )
+            return std::nullopt;
+        return stamp;
     }
 } // namespace Desert::Editor
