@@ -1,9 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string_view>
+#include <vector>
 
 namespace Common::Constants
 {
@@ -219,6 +222,75 @@ namespace Common::Constants
         inline const ProjectRootState& CurrentProjectRoot() noexcept
         {
             return Detail::s_ProjectRoot;
+        }
+
+        // THE INVERSE OF Derive(), read through ONE census row: given a path to a file that lies inside
+        // Dir(d), the ROOT that row hangs off — i.e. what the derivation must have been handed for Dir(d)
+        // to contain this file.
+        //
+        // WHY IT EXISTS. Four defects in one day were the same sentence: a path resolved from the process's
+        // WORKING DIRECTORY rather than from the file being worked on. The migration tool wrote a scene's
+        // new material into a second `Resources/Assets/` tree at whatever directory it was launched from,
+        // leaving two differing files with one name under one relative path in two roots; before it, scene
+        // material paths went to disk absolute, a committed `.tex` carried one machine's home directory,
+        // and a thumbnail key named a checkout. The answer is the same every time and it is a RELATION, not
+        // a patch at each site: derive the root from the FILE, never from where the process is standing.
+        //
+        // Derive() answers that forwards, from a root that must already be known; this answers it backwards
+        // from a path that IS known. Both read the same census row, so a layout change reaches the two
+        // directions in one edit and they cannot come to disagree — the reason this lives here rather than
+        // in the one tool that needed it first, which would have spelled `Scenes/` a second time.
+        //
+        // LEXICAL, and deliberately so: it consults no disk, so a caller can ask about a file it is only
+        // about to create, and the answer cannot change with what happens to exist. The LAST occurrence of
+        // the row's components wins, so `<root>/Scenes/Autosave/x.desce` resolves against the project's own
+        // `Scenes/` and not against some `Scenes` further up a developer's home directory.
+        //
+        // An EMPTY path is a real answer and means "the root is the working directory" — it is what a
+        // caller-relative spelling like `Scenes/x.desce` honestly implies, and joining onto it reproduces
+        // that same caller-relative form rather than inventing an absolute one.
+        //
+        // std::nullopt in two cases, both of which are "no answer" rather than a guess: the path does not
+        // lie under the row's relative part at all, and the two rows that name a root ITSELF (Rel == ""),
+        // where a file somewhere inside a root says nothing about where that root begins.
+        inline std::optional<std::filesystem::path> RootForContentPath( ContentDir                   d,
+                                                                        const std::filesystem::path& contentPath )
+        {
+            const ContentDirSpec& spec = CONTENT_DIRS[static_cast<std::size_t>( d )];
+            if ( spec.Rel.empty() )
+                return std::nullopt;
+
+            // A trailing separator makes the last component an empty string ("Scenes/" -> {"Scenes",""}),
+            // and matching on it would match everywhere; "." carries no location at all.
+            const auto Components = []( const std::filesystem::path& p )
+            {
+                std::vector<std::filesystem::path> parts;
+                for ( const auto& part : p.lexically_normal() )
+                {
+                    if ( !part.empty() && part != "." )
+                        parts.push_back( part );
+                }
+                return parts;
+            };
+
+            const std::vector<std::filesystem::path> rel = Components( std::filesystem::path( spec.Rel ) );
+            const std::vector<std::filesystem::path> dir = Components( contentPath.parent_path() );
+            if ( rel.empty() || dir.size() < rel.size() )
+                return std::nullopt;
+
+            std::size_t rootLength = dir.size() + 1; // > dir.size() means "no occurrence found"
+            for ( std::size_t start = 0; start + rel.size() <= dir.size(); ++start )
+            {
+                if ( std::equal( rel.begin(), rel.end(), dir.begin() + static_cast<std::ptrdiff_t>( start ) ) )
+                    rootLength = start;
+            }
+            if ( rootLength > dir.size() )
+                return std::nullopt;
+
+            std::filesystem::path root;
+            for ( std::size_t i = 0; i < rootLength; ++i )
+                root /= dir[i];
+            return root;
         }
 
         // Points every content path at <projectDir>/<assetsRoot>/... and the cooked tree at

@@ -33,6 +33,7 @@
 #include "MigratorMain.hpp"
 #include "SceneMigration.hpp"
 
+#include <Common/Core/Constants.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <rflcpp/rfl/json.hpp>
@@ -90,6 +91,20 @@ namespace
 
 namespace Desert::Migration
 {
+    std::filesystem::path SceneOutputRoot( const std::filesystem::path& scenePath )
+    {
+        if ( const auto root = Common::Constants::Path::RootForContentPath(
+                  Common::Constants::Path::ContentDir::Scene, scenePath ) )
+            return *root;
+
+        // Not under a `Scenes/` folder, so the census has nothing to say: the scene's own directory is
+        // the root. `parent_path()` is empty for a bare `x.desce`, and an empty root would resolve the
+        // material against the working directory by a different route — the very thing being fixed — so
+        // it is spelled as the current directory explicitly.
+        const std::filesystem::path directory = scenePath.parent_path();
+        return directory.empty() ? std::filesystem::path( "." ) : directory;
+    }
+
     int RunSceneMigrator( const std::vector<std::string>& args, std::ostream& out, std::ostream& err )
     {
         bool                               check = false;
@@ -123,7 +138,11 @@ namespace Desert::Migration
         int changed = 0;
         int failed  = 0;
 
-        // Cloud material relative path -> the scene that produced it, for the collision check below.
+        // Cloud material FILE -> the scene that produced it, for the collision check below. Keyed on the
+        // resolved path and not on the relative name any more: the root is per-scene now, so two scenes
+        // sharing a SceneName under two different assets roots produce two different files and are not in
+        // conflict at all, while the case the guard exists for — one file, two scenes — is exactly a
+        // repeated key here.
         std::map<std::string, std::string> writtenMaterials;
 
         for ( const auto& path : scenes )
@@ -144,8 +163,15 @@ namespace Desert::Migration
                 continue;
             }
 
+            // ONE root for this scene, and it is the scene's own (see SceneOutputRoot). It is handed to
+            // the migration as well as used for the write below, so the root the v7 -> v8 step measures
+            // material paths against and the root the v11 -> v12 material is written under are the same
+            // root by construction — the two used to be one global read twice, which is how a path
+            // written into the scene could name a place the file was not.
+            const std::filesystem::path assetsRoot = SceneOutputRoot( path );
+
             const Desert::Migration::SceneMigrationReport report =
-                 Desert::Migration::MigrateScene( parsed.value() );
+                 Desert::Migration::MigrateScene( parsed.value(), assetsRoot );
             if ( !report.Changed() )
             {
                 out << "ok     " << path.string() << " — already at scene v" << Desert::Migration::kSceneVersion
@@ -369,6 +395,12 @@ namespace Desert::Migration
             bool materialsFailed = false;
             for ( const auto& mat : report.CloudMaterial.Materials )
             {
+                // Under the SAME root MigrateScene was measured against, one page above: the relative path
+                // inside the scene and the file on disk must agree about one root or the scene names a
+                // material that is not where it says. That root is the SCENE'S (SceneOutputRoot) and not
+                // the process's working directory — see the header for what the working directory cost.
+                const std::filesystem::path matPath = ( assetsRoot / mat.RelativePath ).lexically_normal();
+
                 // TWO SCENES MUST NOT LAND ON ONE MATERIAL FILE. The name is derived from the scene's
                 // SceneName, which is NOT unique by construction — a .desce copied from another and
                 // edited keeps the original's name, and this repository's own verification protocol
@@ -379,22 +411,18 @@ namespace Desert::Migration
                 // the only place in the run that can. Named and fatal, never resolved by guessing at a
                 // suffix — the fix is to give the scene its own SceneName, which is what the operator
                 // has to know.
-                const auto claimed = writtenMaterials.emplace( mat.RelativePath, path.string() );
+                const auto claimed = writtenMaterials.emplace( matPath.generic_string(), path.string() );
                 if ( !claimed.second && claimed.first->second != path.string() )
                 {
                     err << "FAIL   " << path.string() << " — its cloud material would be written to "
-                        << mat.RelativePath << ", which " << claimed.first->second
+                        << matPath.string() << ", which " << claimed.first->second
                         << " already claimed in this run: both scenes state the same SceneName. Give one "
                         << "of them its own name and re-run; neither scene is modified.\n";
                     materialsFailed = true;
                     break;
                 }
 
-                // Under the same assets root MigrateScene measured against (its default argument): the
-                // relative path inside the scene and the file on disk must agree about one root or the
-                // scene names a material that is not where it says.
-                const std::filesystem::path matPath = Common::Constants::Path::ASSETS_PATH / mat.RelativePath;
-                std::error_code             ec;
+                std::error_code ec;
                 std::filesystem::create_directories( matPath.parent_path(), ec );
                 if ( !Common::Utils::FileSystem::WriteContentToFileAtomic( matPath, mat.Json ) )
                 {
@@ -403,7 +431,10 @@ namespace Desert::Migration
                     materialsFailed = true;
                     break;
                 }
-                out << "        wrote " << mat.RelativePath << "\n";
+                // The FULL path, not the relative name it used to print. An operator reading "wrote
+                // Materials/M_X.demat" cannot tell which of two trees it landed in, which is precisely the
+                // question this defect turned on; the line now answers it.
+                out << "        wrote " << matPath.string() << "\n";
             }
             if ( materialsFailed )
             {
