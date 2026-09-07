@@ -38,56 +38,48 @@ namespace Desert::Editor
 
         if ( Utils::ImGuiUtilities::SectionHeader( "Anti-Aliasing" ) )
         {
-            // ONE mode selector for every AA technique. None/FXAA/SMAA are post passes on the
-            // scene setting (live); MSAA is hardware multisampling — a USER pref (editor.json ->
-            // RenderConfig), because pipelines bake their sample count at startup. Selecting MSAA
-            // turns the post AA off and vice versa: they are alternatives, not layers.
-            auto&      prefs        = EditorPreferences::Get();
-            const int  maxMsaa      = Graphic::RenderConfig::MaxMSAASamples.load();
-            const bool msaaSelected = prefs.MSAASamples > 1;
+            // TWO CONTROLS, TWO OWNERS, AND NEITHER WRITES THE OTHER'S VALUE.
+            //
+            // This used to be ONE combo with four entries — None / FXAA / SMAA / MSAA — over two pieces of
+            // state with different owners and different lifetimes: SceneSettings::AA travels with the
+            // level, EditorPreferences::MSAASamples is this machine's and is baked into the pipelines at
+            // startup. Picking MSAA wrote BOTH (`s.AA = None` and `prefs.MSAASamples = 4`), and picking
+            // FXAA while MSAA was on wrote both again. DEV_CONTRACT §4.2 forbids exactly that: one user
+            // action, one value, two places to store it and no way to tell which the file meant.
+            //
+            // So they are two controls, each labelled with who owns it. They are not alternatives either,
+            // whatever the old combo implied: MSAA resolves geometry edges inside the pipeline and the post
+            // AA filters the resolved image, so both can be on and the picture is simply softer. Saying so
+            // in one line is cheaper than a cross-write that lies about the ownership.
+            auto&     prefs   = EditorPreferences::Get();
+            const int maxMsaa = Graphic::RenderConfig::MaxMSAASamples.load();
 
-            const char* modes[] = { "None", "FXAA", "SMAA", "MSAA" };
-            int         current = msaaSelected ? 3 : static_cast<int>( s.AA );
-            if ( ImGui::Combo( "Mode", &current, modes, IM_ARRAYSIZE( modes ) ) )
-            {
-                if ( current == 3 )
-                {
-                    s.AA              = Core::AntiAliasingMode::None;
-                    prefs.MSAASamples = std::min( 4, maxMsaa ); // sensible default sample count
-                    EditorPreferences::Save();
-                }
-                else
-                {
-                    if ( msaaSelected )
-                    {
-                        prefs.MSAASamples = 1;
-                        EditorPreferences::Save();
-                    }
-                    s.AA = static_cast<Core::AntiAliasingMode>( current );
-                }
-            }
+            const char* modes[] = { "None", "FXAA", "SMAA" };
+            int         current = static_cast<int>( s.AA );
+            if ( ImGui::Combo( "Post AA (scene)", &current, modes, IM_ARRAYSIZE( modes ) ) )
+                s.AA = static_cast<Core::AntiAliasingMode>( current );
+            Utils::ImGuiUtilities::Tooltip(
+                 "A post-process pass on the finished image. Saved IN THE SCENE and travels with it; "
+                 "applies immediately. TAA/DLSS need motion vectors (deferred)." );
 
-            if ( prefs.MSAASamples > 1 )
+            const char* msaaLevels[] = { "Off", "2x", "4x", "8x" };
+            const int   msaaValues[] = { 1, 2, 4, 8 };
+            int         msaaIdx      = 0;
+            for ( int v = 0; v < IM_ARRAYSIZE( msaaValues ); ++v )
+                if ( msaaValues[v] == prefs.MSAASamples )
+                    msaaIdx = v;
+            if ( ImGui::Combo( "MSAA (this machine)", &msaaIdx, msaaLevels, IM_ARRAYSIZE( msaaLevels ) ) )
             {
-                // Sample count — MSAA only.
-                const char* levels[] = { "2x", "4x", "8x" };
-                const int   values[] = { 2, 4, 8 };
-                int         idx      = 1;
-                for ( int v = 0; v < IM_ARRAYSIZE( values ); ++v )
-                    if ( values[v] == prefs.MSAASamples )
-                        idx = v;
-                if ( ImGui::Combo( "Samples", &idx, levels, IM_ARRAYSIZE( levels ) ) )
-                {
-                    prefs.MSAASamples = std::min( values[idx], maxMsaa );
-                    EditorPreferences::Save();
-                }
-                if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "Device max: %dx", maxMsaa );
+                prefs.MSAASamples = std::min( msaaValues[msaaIdx], maxMsaa );
+                EditorPreferences::Save();
             }
-            else
-            {
-                ImGui::TextDisabled( "TAA/DLSS need motion vectors (deferred)." );
-            }
+            Utils::ImGuiUtilities::Tooltip(
+                 "Hardware multisampling. A USER setting (editor.json), NOT part of the scene: the "
+                 "pipelines bake their sample count at startup, so it costs a restart and belongs to the "
+                 "machine that pays for it." );
+            ImGui::TextDisabled( "Device max: %dx. Both may be on — MSAA resolves edges, post AA filters\n"
+                                 "the resolved image.",
+                                 maxMsaa );
 
             // MSAA bakes into the pipelines at startup — flag any pending change loudly.
             const int active = Graphic::RenderConfig::MSAASamplesActive.load();
@@ -232,17 +224,15 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Procedural Sky + skybox intensity moved to the Skybox component (Details)." );
         }
 
-        if ( Utils::ImGuiUtilities::SectionHeader( "Shadow Debug", false ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( "Shadow Maps", false ) )
         {
-            // Viewport "show flags" (Grid / Bounding Boxes / Colliders / Wireframe / Mesh LOD) moved to the
-            // viewport toolbar's "Show" dropdown, next to View Mode. "Show Normals" and "Light Debug" moved
-            // to the View Mode dropdown (Normals / Light Complexity). This section keeps shadow-map inspection.
-
-            // Off / raw shadow factor (grayscale) / cascade tint — verifies the CSM independently of lighting.
-            const char* modes[] = { "Off", "Shadow Factor", "Cascades" };
-            int         cur     = static_cast<int>( s.ShadowDebug );
-            if ( ImGui::Combo( "Shadow Debug", &cur, modes, IM_ARRAYSIZE( modes ) ) )
-                s.ShadowDebug = static_cast<Core::ShadowDebugMode>( cur );
+            // WHAT IS LEFT HERE IS AN INSPECTOR, NOT A SETTING, and that is the whole distinction К2 drew
+            // through this panel. The "Shadow Debug" combo that used to sit above these thumbnails wrote
+            // SceneSettings::ShadowDebug — a viewport visualization stored in the level file — and it
+            // duplicated the viewport's own View Mode dropdown, which offered Cascades but not Shadow
+            // Factor. Both modes live in that dropdown now (View Mode -> Shadow Cascades / Shadow Factor)
+            // and the flag lives in EditorPreferences. The images below read GPU state and write nothing,
+            // so they stay.
 
             // CSM cascade depth maps (R32F light-space depth, near→far cascades).
             if ( auto* sr = m_Scene->GetSceneRenderer() )
@@ -278,14 +268,11 @@ namespace Desert::Editor
                                  "reach on the ground (~15 km); Low also caps the sun-ray at 16 samples,\n"
                                  "which runs the sunward highlights bright." );
 
-            // Deferred G-buffer debug view (UE-style buffer visualization) — only meaningful in Deferred.
+            // The "Deferred Debug" combo that used to sit here is gone (К2): a G-buffer view is what the
+            // VIEWPORT is showing, not what the level is, and this combo was a second control over the
+            // same state as the viewport's View Mode dropdown — offering GI, which that one lacked, and
+            // lacking the three heat maps, which it had. GI was added there; this is the one control now.
             ImGui::BeginDisabled( s.RenderingPath != Core::RenderPath::Deferred );
-            // Contiguous 0..6, so the index maps straight onto the enum. The heat-map modes (7/8/9) are
-            // deliberately absent: those live in the viewport's View Mode dropdown.
-            const char* dbg[]  = { "Lit", "Albedo", "Normal", "Metallic", "Roughness", "AO", "GI" };
-            int         dbgCur = static_cast<int>( s.DeferredDebug );
-            if ( ImGui::Combo( "Deferred Debug", &dbgCur, dbg, IM_ARRAYSIZE( dbg ) ) )
-                s.DeferredDebug = static_cast<Core::DeferredDebugMode>( dbgCur );
             ImGui::Checkbox( "Enable SSAO", &s.EnableSSAO );
 
             const char* giModes[] = { "Off", "Screen Space", "RSM" };

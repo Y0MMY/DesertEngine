@@ -1546,13 +1546,21 @@ namespace Desert::Editor
                                                          Render::RenderRegistry* registry,
                                                          const Common::Timestep& ts )
     {
-        // Editor-only selection-outline appearance (from EditorPreferences, not scene data) is pushed per
-        // scene before it records this frame.
+        // Editor-only VIEW state (from EditorPreferences, not scene data) pushed per scene before it
+        // records this frame: the selection outline, and — since К2 — the debug/show flags that used to be
+        // serialized into the level. Both must land BEFORE BeginScene, which is where the renderer hands
+        // them on to its systems.
+        //
+        // Only scenes that reach this function are pushed to, and that is the point: the asset-thumbnail,
+        // inspector-preview and photogrammetry renderers own their own SceneRenderer, are never fed here,
+        // and therefore keep DebugViewState's all-off defaults. They used to have to remember to switch the
+        // grid off by hand on a scene they owned.
         if ( auto* sr = scene.GetSceneRenderer() )
         {
             const auto& prefs = EditorPreferences::Get();
             sr->SetOutlineSettings( prefs.OutlineColor, prefs.OutlineWidth, prefs.OutlineSmoothness,
                                     prefs.EnableOutline );
+            sr->SetDebugView( prefs.DebugView );
         }
 
         {

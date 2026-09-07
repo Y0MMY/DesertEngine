@@ -5,6 +5,10 @@
 
 #include <glm/glm.hpp>
 
+// The viewport's debug/show state. An ENGINE type, because the engine's renderer is what consumes it —
+// this header only says where the editor's persisted copy lives.
+#include <Engine/Graphic/DebugViewState.hpp>
+
 namespace Desert::Editor
 {
     // User-level editor settings, persisted to ~/.desertengine/editor.json (per-user, not per-project).
@@ -38,6 +42,21 @@ namespace Desert::Editor
         float     OutlineWidth      = 4.0f;
         float     OutlineSmoothness = 2.0f;
         bool      EnableOutline     = true;
+
+        // Viewport Show flags + View Mode — grid, colliders, bounding boxes, wireframe, buffer views.
+        // Edited by the viewport toolbar's "Show" popup and its View Mode dropdown, pushed to every scene's
+        // renderer each frame via SceneRenderer::SetDebugView, and persisted here because it is the USER's
+        // answer to "what am I looking at", not the level's. It used to live in the level file: 55 of 80
+        // scenes shipped `ShowColliders: true` through git, and 72 of 77 overrode whatever grid setting the
+        // person opening them had chosen. See Graphic/DebugViewState.hpp.
+        //
+        // EVERY FLAG DEFAULTS OFF, including the grid, and that is a deliberate departure from the old
+        // SceneSettings default of `ShowGrid = true`. Two reasons: the repository's own scenes are 72:5
+        // against the grid, so all-off is what "the editor looks the same after the migration" actually
+        // means here; and it makes one rule — an overlay appears because YOU turned it on — instead of one
+        // default per flag. Turning the grid on is one click in the Show popup and it then persists across
+        // scenes and sessions, which is strictly more than the old behaviour offered.
+        Graphic::DebugViewState DebugView;
 
         // Photogrammetry (Model-from-Photos panel): TOOL-AGNOSTIC external commands. Reconstruct: {input} = the
         // photos folder, {output} = the produced mesh file, {outdir} = its directory (plug in Meshroom/COLMAP).

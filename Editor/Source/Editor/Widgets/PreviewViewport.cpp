@@ -128,10 +128,11 @@ namespace Desert::Editor
             return;
         }
 
-        // Clean preview: no editor ground grid, no shadows or bloom to muddy a small image. FXAA keeps the
-        // silhouette smooth at inspector sizes (there is no supersampling here — this renders live).
+        // Clean preview: no shadows or bloom to muddy a small image. FXAA keeps the silhouette smooth at
+        // inspector sizes (there is no supersampling here — this renders live). The grid needs no line:
+        // debug overlays live on the RENDERER now and default to off, and only the main editor loop pushes
+        // the user's flags into one (Graphic::DebugViewState).
         auto& settings         = m_Scene->GetSettings();
-        settings.ShowGrid      = false;
         settings.EnableShadows = false;
         settings.EnableBloom   = false;
         settings.AA            = ::Desert::Core::AntiAliasingMode::FXAA;

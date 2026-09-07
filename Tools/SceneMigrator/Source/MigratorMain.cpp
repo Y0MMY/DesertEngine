@@ -331,6 +331,26 @@ namespace Desert::Migration
                     out << "; NOT carried, schema default stands: " << name;
                 out << ")";
             }
+            if ( report.DebugViewRaised )
+            {
+                out << " scene v" << Desert::Migration::kSceneVersionCloudMaterial << "->v"
+                    << Desert::Migration::kSceneVersionDebugView << " (";
+                if ( report.DebugView.KeysRemoved > 0 )
+                {
+                    // Named with their values, not counted: these were AUTHORED flags, and the operator has
+                    // to see that (say) the collider wireframes stopped because the file stopped deciding
+                    // them - not because something broke.
+                    out << report.DebugView.KeysRemoved << " viewport debug key(s) removed - the view owns "
+                        << "them now (editor Show flags / View Mode):";
+                    for ( const auto& name : report.DebugView.RemovedNames )
+                        out << " " << name;
+                }
+                else
+                {
+                    out << "stamp only - the scene stated no viewport debug flag";
+                }
+                out << ")";
+            }
             if ( report.UnitsRaised )
                 out << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
                     << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected

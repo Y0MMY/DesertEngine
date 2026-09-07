@@ -465,15 +465,17 @@ namespace Desert::Editor
                 ImGui::SameLine();
                 if ( ImGui::Checkbox( "2D", &m_UIMode ) )
                 {
-                    auto& s = m_Scene->GetSettings();
+                    // NOT saved to editor.json: this suppression belongs to the 2D mode it is part of, and
+                    // writing it would make "I was editing a canvas once" the user's permanent grid answer.
+                    auto& view = EditorPreferences::Get().DebugView;
                     if ( m_UIMode )
                     {
-                        m_SavedShowGrid = s.ShowGrid;
-                        s.ShowGrid      = false;
+                        m_SavedShowGrid = view.ShowGrid;
+                        view.ShowGrid   = false;
                     }
                     else
                     {
-                        s.ShowGrid = m_SavedShowGrid;
+                        view.ShowGrid = m_SavedShowGrid;
                     }
                 }
                 if ( ImGui::IsItemHovered() )
@@ -498,11 +500,22 @@ namespace Desert::Editor
         }
 
         // --- Right edge: View Mode (UE-style) + editor camera gear ---
-        // One dropdown driving the engine's existing debug visualizations behind a single control
-        // (instead of scattered Scene Settings checkboxes). Each mode maps to the underlying flags;
-        // the current selection is derived back from them so external edits stay in sync.
+        // One dropdown driving the engine's existing debug visualizations behind a single control.
+        // Each mode maps to the underlying flags; the current selection is derived back from them so
+        // external edits stay in sync.
+        //
+        // IT EDITS THE USER'S VIEW STATE, NOT THE SCENE (К2). These flags used to be SceneSettings fields,
+        // so choosing "Albedo" here dirtied the level and a Ctrl+S shipped it. They are
+        // EditorPreferences::DebugView now, pushed to the renderer each frame by EditorLayer.
+        //
+        // AND IT IS NOW THE ONLY PLACE THEY ARE EDITED. Scene Settings used to carry a "Shadow Debug"
+        // combo and a "Deferred Debug" combo of its own, offering Shadow Factor and GI, which this
+        // dropdown did not — two controls over one piece of state, disagreeing about its vocabulary.
+        // Those two entries were added here rather than dropped, so the panel could lose the combos
+        // without losing a visualization.
         {
-            auto& s = m_Scene->GetSettings();
+            auto& view = EditorPreferences::Get().DebugView;
+            auto& s    = m_Scene->GetSettings(); // Mesh LOD, the one Show-popup entry that IS scene data
             enum ViewMode
             {
                 VM_Lit,
@@ -512,10 +525,12 @@ namespace Desert::Editor
                 VM_Metallic,
                 VM_Roughness,
                 VM_AO,
+                VM_GI,
                 VM_LightComplexity,
                 VM_Overdraw,
                 VM_MaterialComplexity,
                 VM_ShadowCascades,
+                VM_ShadowFactor,
                 VM_Count
             };
             const char* kViewModes[] = { ICON_MDI_LIGHTBULB_ON "  Lit",
@@ -525,41 +540,56 @@ namespace Desert::Editor
                                          ICON_MDI_CIRCLE_HALF_FULL "  Metallic",
                                          ICON_MDI_BLUR "  Roughness",
                                          ICON_MDI_WEATHER_NIGHT "  Ambient Occlusion",
+                                         ICON_MDI_LIGHTBULB_OUTLINE "  Global Illumination",
                                          ICON_MDI_FIRE "  Light Complexity",
                                          ICON_MDI_LAYERS_TRIPLE "  Overdraw",
                                          ICON_MDI_TEXTURE "  Material Complexity",
-                                         ICON_MDI_LAYERS "  Shadow Cascades" };
+                                         ICON_MDI_LAYERS "  Shadow Cascades",
+                                         ICON_MDI_BRIGHTNESS_6 "  Shadow Factor" };
+            static_assert( IM_ARRAYSIZE( kViewModes ) == VM_Count,
+                           "every view mode needs a label - a short array silently truncates the combo" );
 
-            // Derive the active mode from the current settings (last-wins order matches the enum).
+            // Derive the active mode from the current view state (last-wins order matches the enum).
             int vm = VM_Lit;
-            if ( s.WireframeMode )
+            if ( view.WireframeMode )
                 vm = VM_Wireframe;
-            else if ( s.ShadowDebug == ::Desert::Core::ShadowDebugMode::Cascades )
+            else if ( view.ShadowDebug == Graphic::ShadowDebugMode::Cascades )
                 vm = VM_ShadowCascades;
-            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Albedo )
+            else if ( view.ShadowDebug == Graphic::ShadowDebugMode::ShadowFactor )
+                vm = VM_ShadowFactor;
+            else if ( view.DeferredDebug == Graphic::DeferredDebugMode::Albedo )
                 vm = VM_Albedo;
-            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Normal )
+            else if ( view.DeferredDebug == Graphic::DeferredDebugMode::Normal )
                 vm = VM_Normals;
-            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Metallic )
+            else if ( view.DeferredDebug == Graphic::DeferredDebugMode::Metallic )
                 vm = VM_Metallic;
-            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Roughness )
+            else if ( view.DeferredDebug == Graphic::DeferredDebugMode::Roughness )
                 vm = VM_Roughness;
-            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::AO )
+            else if ( view.DeferredDebug == Graphic::DeferredDebugMode::AO )
                 vm = VM_AO;
-            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::LightComplexity )
+            else if ( view.DeferredDebug == Graphic::DeferredDebugMode::GI )
+                vm = VM_GI;
+            else if ( view.DeferredDebug == Graphic::DeferredDebugMode::LightComplexity )
                 vm = VM_LightComplexity;
-            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Overdraw )
+            else if ( view.DeferredDebug == Graphic::DeferredDebugMode::Overdraw )
                 vm = VM_Overdraw;
-            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::MaterialComplexity )
+            else if ( view.DeferredDebug == Graphic::DeferredDebugMode::MaterialComplexity )
                 vm = VM_MaterialComplexity;
-            else if ( s.ShowNormals )
+            else if ( view.ShowNormals )
                 vm = VM_Normals;
 
             const float gearW = ImGui::GetFrameHeight();
             const float vmX   = ImGui::GetWindowContentRegionMax().x - gearW - 6.0f - 160.0f;
 
-            // Debug "Show" flags (grid, bounding boxes, colliders, wireframe, LOD) — moved out of Scene
-            // Settings so everything "what to show in the viewport" lives next to the View Mode dropdown.
+            // The "Show" flags. Every toggle here edits the USER's view state and is written to
+            // editor.json on the spot — these are single clicks scattered through a session, and losing
+            // them to a crash would be worse than the write (the same argument EditorPreferences makes for
+            // its favourite-field and collapsed-section lists).
+            //
+            // "Mesh LOD (auto)" is the odd one out and stays on the SCENE: it is a machine-quality knob,
+            // not a debug overlay, and it belongs to the group SceneSettings names as awaiting a decision
+            // about who owns quality. It is drawn here because this is where a user looks for it, under a
+            // separator that says which side of the fence it is on.
             ImGui::SameLine( vmX - gearW - 8.0f );
             if ( ImGui::Button( ICON_MDI_EYE_OUTLINE "##DebugShowFlags" ) )
                 ImGui::OpenPopup( "##DebugShowFlagsPopup" );
@@ -572,14 +602,20 @@ namespace Desert::Editor
                 ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 8.0f, 8.0f ) );
                 ImGui::TextUnformatted( "Show" );
                 ImGui::Separator();
-                ImGui::Checkbox( "Grid", &s.ShowGrid );
-                ImGui::Checkbox( "Bounding Boxes", &s.ShowBoundingBoxes );
-                ImGui::BeginDisabled( !s.ShowBoundingBoxes );
-                ImGui::ColorEdit3( "BB Color", &s.BoundingBoxColor.x );
-                ImGui::SliderFloat( "BB Width", &s.BoundingBoxLineWidth, 1.0f, 10.0f, "%.1f" );
+                bool viewChanged = false;
+                viewChanged |= ImGui::Checkbox( "Grid", &view.ShowGrid );
+                viewChanged |= ImGui::Checkbox( "Bounding Boxes", &view.ShowBoundingBoxes );
+                ImGui::BeginDisabled( !view.ShowBoundingBoxes );
+                viewChanged |= ImGui::ColorEdit3( "BB Color", &view.BoundingBoxColor.x );
+                viewChanged |= ImGui::SliderFloat( "BB Width", &view.BoundingBoxLineWidth, 1.0f, 10.0f, "%.1f" );
                 ImGui::EndDisabled();
-                ImGui::Checkbox( "Colliders", &s.ShowColliders );
-                ImGui::Checkbox( "Wireframe", &s.WireframeMode );
+                viewChanged |= ImGui::Checkbox( "Colliders", &view.ShowColliders );
+                viewChanged |= ImGui::Checkbox( "Wireframe", &view.WireframeMode );
+                if ( viewChanged )
+                    EditorPreferences::Save();
+
+                ImGui::Separator();
+                ImGui::TextDisabled( "Scene" );
                 ImGui::Checkbox( "Mesh LOD (auto)", &s.MeshLOD );
                 ImGui::PopStyleVar();
                 ImGui::EndPopup();
@@ -592,46 +628,53 @@ namespace Desert::Editor
             if ( ImGui::Combo( "##ViewMode", &vm, kViewModes, IM_ARRAYSIZE( kViewModes ) ) )
             {
                 // Reset every debug channel, then set the one this mode needs.
-                s.WireframeMode = false;
-                s.ShowNormals   = false;
-                s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Off;
-                s.ShadowDebug   = ::Desert::Core::ShadowDebugMode::Off;
+                view.WireframeMode = false;
+                view.ShowNormals   = false;
+                view.DeferredDebug = Graphic::DeferredDebugMode::Off;
+                view.ShadowDebug   = Graphic::ShadowDebugMode::Off;
                 switch ( vm )
                 {
                     case VM_Wireframe:
-                        s.WireframeMode = true;
+                        view.WireframeMode = true;
                         break;
                     case VM_Normals:
-                        s.ShowNormals   = true;
-                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Normal;
+                        view.ShowNormals   = true;
+                        view.DeferredDebug = Graphic::DeferredDebugMode::Normal;
                         break;
                     case VM_Albedo:
-                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Albedo;
+                        view.DeferredDebug = Graphic::DeferredDebugMode::Albedo;
                         break;
                     case VM_Metallic:
-                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Metallic;
+                        view.DeferredDebug = Graphic::DeferredDebugMode::Metallic;
                         break;
                     case VM_Roughness:
-                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Roughness;
+                        view.DeferredDebug = Graphic::DeferredDebugMode::Roughness;
                         break;
                     case VM_AO:
-                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::AO;
+                        view.DeferredDebug = Graphic::DeferredDebugMode::AO;
+                        break;
+                    case VM_GI:
+                        view.DeferredDebug = Graphic::DeferredDebugMode::GI;
                         break;
                     case VM_LightComplexity:
-                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::LightComplexity;
+                        view.DeferredDebug = Graphic::DeferredDebugMode::LightComplexity;
                         break;
                     case VM_Overdraw:
-                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Overdraw;
+                        view.DeferredDebug = Graphic::DeferredDebugMode::Overdraw;
                         break;
                     case VM_MaterialComplexity:
-                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::MaterialComplexity;
+                        view.DeferredDebug = Graphic::DeferredDebugMode::MaterialComplexity;
                         break;
                     case VM_ShadowCascades:
-                        s.ShadowDebug = ::Desert::Core::ShadowDebugMode::Cascades;
+                        view.ShadowDebug = Graphic::ShadowDebugMode::Cascades;
+                        break;
+                    case VM_ShadowFactor:
+                        view.ShadowDebug = Graphic::ShadowDebugMode::ShadowFactor;
                         break;
                     default:
                         break; // VM_Lit
                 }
+                EditorPreferences::Save();
             }
             ImGui::PopStyleVar();
             if ( ImGui::IsItemHovered() )
