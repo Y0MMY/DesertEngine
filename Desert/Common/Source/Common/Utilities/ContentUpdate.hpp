@@ -111,6 +111,21 @@ namespace Common::Utils
     ContentUpdatePlan PlanContentUpdate( const ContentManifest& recorded, const ContentManifest& onDisk,
                                          const ContentManifest& incoming, ContentAuthorship authorship );
 
+    // THE KEYS AN UPDATE HAS TO LOOK FOR ON DISK: everything the source is offering, PLUS everything
+    // the record says was handed over. Sorted and deduplicated.
+    //
+    // This is four lines and it exists as a named function because getting it wrong is invisible. A
+    // caller that censuses only what the DELIVERY contains cannot see the one file a removal is about
+    // — the source has stopped mentioning it, by definition — so onDisk comes back without it,
+    // PlanContentUpdate reads "the person already deleted it", the removal becomes ContentAction::None,
+    // and the update reports success having done nothing. That shipped here, in the collection
+    // installer, and no unit test could reach it because the census was built inline in a panel.
+    //
+    // So the rule is out where a test can hold it: an inventory must be built from the RECORD of what
+    // was given, never from the delivery that no longer mentions it.
+    std::vector<std::string> KeysToCensus( const std::vector<std::string>& offered,
+                                           const ContentManifest&          recorded );
+
     // A STARTING RECORD FOR AN INSTALL THAT PREDATES RECORDS — the migration, and without it this whole
     // mechanism would help nobody who already has content installed.
     //

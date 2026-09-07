@@ -197,19 +197,14 @@ namespace Desert::Editor
             // "already gone from disk", every deletion became a silent no-op, and the feature reported
             // itself as working. Nothing caught it but a run of the real editor.
             //
-            // The class is worth naming because it is not local to this file: an inventory built from
-            // the DELIVERY instead of from the RECORD cannot describe what the delivery left out. So
-            // the union is computed once, up front, and the census below is a loop over it — there is
-            // no second place left in which to forget half of it.
-            std::vector<std::string> keys;
-            keys.reserve( offered.size() + recorded.Count() );
+            // The union therefore does not live here any more: it is Common's KeysToCensus, where a
+            // test can hold the rule that no test could reach while it was inline in this panel.
+            std::vector<std::string> offeredKeys;
+            offeredKeys.reserve( offered.size() );
             for ( const auto& mat : offered )
-                keys.push_back( "meshes/" + SanitizeName( mat.Name ) +
-                                std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) );
-            for ( const auto& entry : recorded.Entries() )
-                keys.push_back( entry.Key );
-            std::sort( keys.begin(), keys.end() );
-            keys.erase( std::unique( keys.begin(), keys.end() ), keys.end() );
+                offeredKeys.push_back( "meshes/" + SanitizeName( mat.Name ) +
+                                       std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) );
+            const std::vector<std::string> keys = Common::Utils::KeysToCensus( offeredKeys, recorded );
 
             // ------------------------------------------------------------------ 2. what is on disk
             Common::Utils::ContentManifest               onDisk;

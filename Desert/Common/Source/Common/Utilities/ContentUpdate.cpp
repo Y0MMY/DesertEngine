@@ -157,6 +157,18 @@ namespace Common::Utils
         return plan;
     }
 
+    std::vector<std::string> KeysToCensus( const std::vector<std::string>& offered,
+                                           const ContentManifest&          recorded )
+    {
+        std::vector<std::string> keys = offered;
+        keys.reserve( offered.size() + recorded.Count() );
+        for ( const auto& entry : recorded.Entries() )
+            keys.push_back( entry.Key );
+        std::sort( keys.begin(), keys.end() );
+        keys.erase( std::unique( keys.begin(), keys.end() ), keys.end() );
+        return keys;
+    }
+
     ContentManifest AdoptUnrecordedInstall( const ContentManifest& onDisk, const ContentManifest& incoming )
     {
         ContentManifest adopted;

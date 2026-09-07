@@ -431,6 +431,71 @@ TEST( ContentUpdate, TheRecordFileNameCannotBeMistakenForAScannedAsset )
     EXPECT_EQ( name.find( '.', 1 ), std::string::npos ) << "and no extension is what keeps scanners off";
 }
 
+// THE DEFECT THAT SHIPPED, HELD BY A TEST AT LAST. The collection installer built its on-disk census
+// from the materials the source was OFFERING. The one file a removal is about is by definition the one
+// the source has stopped offering, so it was never censused, PlanContentUpdate read "the person
+// already deleted it", every removal became ContentAction::None, and the update reported success
+// having done nothing. It was invisible to every unit test because the census was built inline inside
+// a panel; this is the rule pulled out to where a test can hold it.
+TEST( ContentUpdate, TheCensusCoversWhatTheSourceHasSTOPPEDOffering )
+{
+    ContentManifest recorded;
+    recorded.Insert( Entry( "meshes/kept.demat", std::string( "a" ) ) );
+    recorded.Insert( Entry( "meshes/dropped.demat", std::string( "b" ) ) );
+
+    // The next release ships only one of them, and a file that is new.
+    const std::vector<std::string> offered = { "meshes/kept.demat", "meshes/added.demat" };
+
+    const auto keys = KeysToCensus( offered, recorded );
+
+    // THE ASSERTION: the key the delivery no longer mentions is in the census. Without it the removal
+    // below cannot even be seen, let alone withheld or applied.
+    ASSERT_EQ( keys.size(), 3u );
+    EXPECT_EQ( keys[0], "meshes/added.demat" );   // sorted, so a caller's order cannot leak through
+    EXPECT_EQ( keys[1], "meshes/dropped.demat" ); // <- the one that used to be missing
+    EXPECT_EQ( keys[2], "meshes/kept.demat" );
+
+    // And what it buys, end to end through the planner: censusing that key is what turns the drop into
+    // a real removal instead of a silent no-op.
+    ContentManifest onDisk; // as a caller would fill it, by looking for each censused key
+    for ( const auto& key : keys )
+        if ( const auto* was = recorded.Find( key ) )
+            onDisk.Insert( *was );
+
+    ContentManifest incoming;
+    incoming.Insert( Entry( "meshes/kept.demat", std::string( "a" ) ) );
+    incoming.Insert( Entry( "meshes/added.demat", std::string( "c" ) ) );
+
+    const auto  plan    = PlanContentUpdate( recorded, onDisk, incoming, ContentAuthorship::LocallyAuthored );
+    const auto* dropped = plan.Find( "meshes/dropped.demat" );
+    ASSERT_NE( dropped, nullptr );
+    EXPECT_EQ( dropped->State, ContentFileState::SourceDeleted );
+    EXPECT_EQ( dropped->Action, ContentAction::Remove );
+}
+
+TEST( ContentUpdate, TheCensusHandlesTheEmptyEndsOfBothInputs )
+{
+    ContentManifest recorded;
+    recorded.Insert( Entry( "a.demat", std::string( "a" ) ) );
+    recorded.Insert( Entry( "b.demat", std::string( "b" ) ) );
+
+    // A collection that has dropped EVERY material: the census is entirely the record, which is the
+    // case the installer's old "no materials, nothing to do" early return used to skip outright.
+    const auto all = KeysToCensus( {}, recorded );
+    ASSERT_EQ( all.size(), 2u );
+    EXPECT_EQ( all[0], "a.demat" );
+
+    // A first install: nothing recorded, so the census is entirely the offer.
+    const auto fresh = KeysToCensus( { "b.demat", "a.demat" }, ContentManifest{} );
+    ASSERT_EQ( fresh.size(), 2u );
+    EXPECT_EQ( fresh[0], "a.demat" ) << "sorted regardless of the caller's order";
+
+    // A key on both sides is one key, not two — the census is a set, and a duplicate would make the
+    // caller read the same file twice and insert it twice.
+    EXPECT_EQ( KeysToCensus( { "a.demat", "b.demat" }, recorded ).size(), 2u );
+    EXPECT_TRUE( KeysToCensus( {}, ContentManifest{} ).empty() );
+}
+
 TEST( ContentUpdate, AKeyThatLeavesTheInstallIsRefusedBeforeAnyByteMoves )
 {
     const fs::path dir     = MakeTempDir();
