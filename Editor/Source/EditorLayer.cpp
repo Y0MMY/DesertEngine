@@ -546,12 +546,20 @@ namespace Desert::Editor
         // `--scene` or for the project's default scene, so by the time OnAttach gets here the empty "New
         // Scene" this would build a renderer for is a scene NOBODY WILL EVER SEE: OnUpdate returns early
         // for the whole of the staged startup load and draws no scene frame, and the first thing it does
-        // when that finishes is LoadSceneInternal, whose own Init() throws this one away. Measured at
-        // ~1.4 s of every Debug start (Г8) — pipelines and framebuffers built, waited on and destroyed.
+        // when that finishes is LoadSceneInternal, whose own Init() ran second. Measured at ~1.4 s of every
+        // Debug start (Г8) — pipelines and framebuffers built, waited on and destroyed.
         //
-        // It is NOT a "run Init once" flag: re-running Init() is legal and is how a scene load rebuilds
-        // the renderer. Only this first, pre-empted one is skipped, and the deferred-load site in
-        // OnUpdate is what guarantees the scene ends up initialised even if the load refuses the file.
+        // WHAT THIS SAVES CHANGED WITH Г11, AND THE LINE IS STILL RIGHT. Init() no longer rebuilds the
+        // renderer on a second call, so the first one would no longer be THROWN AWAY — it would simply
+        // happen earlier. What it would still be is a renderer built against an empty scene, before the
+        // staged startup load has cooked and preloaded anything, on a frame nobody sees; deferring it to
+        // the load that a person is actually waiting for is what keeps the two costs from being paid one
+        // after the other in the same second.
+        //
+        // It is NOT a "run Init once" flag: re-running Init() is legal, and is what binds a newly loaded
+        // scene to the renderer (SceneRenderer::Init — the renderer half is once, the scene half is every
+        // time). Only this first, pre-empted one is skipped, and the deferred-load site in OnUpdate is what
+        // guarantees the scene ends up initialised even if the load refuses the file.
         //
         // Propagated rather than reported: OnAttach owns a channel and Application::PushLayer now reads
         // it, and an editor whose main scene never initialised has no viewport to show anything in.
