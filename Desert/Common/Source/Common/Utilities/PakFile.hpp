@@ -4,7 +4,9 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Common::Utils
@@ -16,14 +18,42 @@ namespace Common::Utils
     //   [ blob | blob | ... ]                                            raw file contents
     //   [ u32 pathLen | path utf8 | u64 offset | u64 size | u64 hash ]*  index (at indexOffset)
     //
-    // hash = FNV-1a 64 of the entry's content: drives `PakTool diff` (patch-pak generation) and
-    // post-download integrity checks. The reader still accepts v1 "DPK1" archives (no hash column;
-    // EntryHash reports 0 for them). Paths are mount-root-relative, generic (forward-slash)
+    // hash = FNV-1a 64 of the entry's content: drives `PakTool patch` (patch-pak generation) and the
+    // per-entry verification Read() performs. The reader still accepts v1 "DPK1" archives (no hash
+    // column; EntryHash reports 0 for them). Paths are mount-root-relative, generic (forward-slash)
     // strings — e.g. "Assets/Scenes/Main.desce". No compression/encryption yet (a future version
     // bumps the magic again).
 
-    // Content hash used by the pak index (FNV-1a 64) — public so tools/tests hash the same way.
+    // Content hash used by the pak index (FNV-1a 64) — public so tools/tests hash the same way, and
+    // now also the unit of account in a ContentManifest: what the index carries per entry is exactly
+    // what a manifest records per file, so a manifest of a tree and a manifest of the archive built
+    // from it are the same manifest.
+    //
+    // WHEN THIS HAS TO BECOME A CRYPTOGRAPHIC HASH, stated once so nobody has to re-derive it: when a
+    // content set can be distributed PER ENTRY — when a third party can substitute one file INSIDE an
+    // archive rather than replacing the archive — a 64-bit non-cryptographic hash is forgeable and the
+    // per-entry column stops being a check. Today the payload is one whole .dpak, verified end to end
+    // before it is unpacked, so that surface does not exist and a second hash would be a second thing
+    // to keep in step with no consumer. The trigger is DISTRIBUTION SHAPE, not speed: measured on this
+    // machine, hardware SHA-256 is 1.65x FASTER than this loop over the shipping tree (496 ms against
+    // 819 ms for 318 MB), and it is still not worth a v3 magic today. When the trigger fires it is a
+    // format bump, never a silent swap.
     uint64_t PakContentHash( const void* data, size_t size );
+
+    // THE ONE KEY THAT IS NOT CONTENT. A patch archive carries its list of DELETED keys here, one per
+    // line, and the reader parses it at open and then hides it: Contains, Read, EntrySize, EntryHash
+    // and KeysWithPrefix all behave as if it were not in the archive, so no walker, no extractor and
+    // no manifest can mistake the bookkeeping for a file.
+    //
+    // WHY INSIDE THE PATCH AND NOT A NEW FORMAT. An overlay mount can only add or override, so a
+    // patch built the old way could not remove a file at all — and removals are not a corner: over
+    // this repository's whole history they are 168 of 1927 content changes (8.7 %), touching 16 of
+    // the 256 commits that changed packaged content. Every sixteenth update therefore had to re-ship
+    // the entire 318 MB base to drop one file. Putting the list in a RESERVED ENTRY rather than a new
+    // header field costs no magic bump (so already-built archives stay readable and no migration
+    // exists), needs not one change in PakWriter's or PakReader's on-disk layout, and buys the
+    // masking rule exactly one home — VFS::Resolve.
+    inline constexpr std::string_view kDeletedEntriesKey = ".dpak-deleted";
 
     class PakWriter
     {
@@ -33,11 +63,24 @@ namespace Common::Utils
 
         bool IsOpen() const;
 
-        // Adds one file under the given mount-relative key ("Assets/x.desce"). Returns false on IO error.
+        // Adds one file under the given mount-relative key ("Assets/x.desce"). Returns false on IO error
+        // or when the key is the reserved deletion-list key (use SetDeletedKeys for that).
         bool AddFile( const std::string& key, const std::filesystem::path& sourceFile );
         bool AddData( const std::string& key, const void* data, size_t size );
 
-        // Writes the index + header. Returns entry count written (0 = failure/empty).
+        // Records the keys this patch DELETES from whatever is mounted beneath it. Returns false when a
+        // key cannot be spelled on one line (a line break is legal in a POSIX filename and would split
+        // one record into two that both parse), when it is empty, or when it is the reserved key.
+        //
+        // A key that this same archive also carries as CONTENT is refused at Finalize, not here: the two
+        // calls can arrive in either order, and "this archive both ships and deletes X" is a
+        // contradiction that must be caught whichever came second.
+        bool SetDeletedKeys( const std::vector<std::string>& keys );
+
+        // Writes the index + header. Returns the number of INDEX RECORDS written — content entries plus
+        // the deletion list if there is one — with 0 meaning failure or nothing to write. Counting the
+        // deletion list is what makes a patch that ONLY removes files (a legal and useful patch) come
+        // back non-zero instead of reading as an empty archive.
         size_t Finalize();
 
     private:
@@ -49,10 +92,15 @@ namespace Common::Utils
             uint64_t    Hash   = 0; // FNV-1a 64 of the content
         };
 
-        std::filesystem::path m_Path;
-        std::vector<Entry>    m_Entries;
-        uint64_t              m_Cursor = 0;
-        bool                  m_Ok     = false;
+        // Appends and indexes one blob under any key, reserved included — the single body AddData and
+        // the deletion list both go through.
+        bool WriteBlob( const std::string& key, const void* data, size_t size );
+
+        std::filesystem::path    m_Path;
+        std::vector<Entry>       m_Entries;
+        std::vector<std::string> m_Deleted;
+        uint64_t                 m_Cursor = 0;
+        bool                     m_Ok     = false;
     };
 
     class PakReader
@@ -75,10 +123,18 @@ namespace Common::Utils
         // actions, and the reader is the only place that knows which one happened.
         const std::string& OpenError() const;
 
+        // Every accessor below reports the reserved deletion-list key as ABSENT — it is bookkeeping, not
+        // content, and the only way to reach it is DeletedKeys().
         bool Contains( const std::string& key ) const;
         std::optional<uint64_t> EntrySize( const std::string& key ) const;
         // Content hash from the index (0 for v1 archives that predate hashing).
         std::optional<uint64_t> EntryHash( const std::string& key ) const;
+
+        // Keys this archive MASKS in everything mounted beneath it, parsed and validated at open (a
+        // corrupt or self-contradictory list is an open failure with a reason, not a silently empty
+        // list). Empty for a base archive and for every archive built before deletions existed.
+        const std::vector<std::string>& DeletedKeys() const;
+        bool                            IsDeleted( const std::string& key ) const;
 
         // Reads one entry (opens its own stream — safe to call from any thread).
         //
@@ -98,8 +154,13 @@ namespace Common::Utils
             uint64_t Hash   = 0; // 0 when the archive is v1 (pre-hash)
         };
 
+        // The reserved entry included, so the constructor can reach it; every public accessor filters it.
+        std::optional<std::string> ReadEntry( const std::string& key ) const;
+
         std::filesystem::path                 m_Path;
         std::unordered_map<std::string, Span> m_Index;
+        std::vector<std::string>              m_Deleted;
+        std::unordered_set<std::string>       m_DeletedLookup;
         std::string                           m_OpenError;
         bool                                  m_Ok        = false;
         bool                                  m_HasHashes = false; // false for a v1 archive

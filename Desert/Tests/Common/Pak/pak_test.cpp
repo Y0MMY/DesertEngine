@@ -11,8 +11,12 @@ namespace fs = std::filesystem;
 
 namespace
 {
+    // A clean directory AND a clean mount stack. The VFS stack is process-global, so a test that
+    // mounted and then failed an ASSERT before its Unmount would otherwise hand the next test a pak
+    // rooted in a directory that has just been deleted — a failure that names the wrong test.
     fs::path MakeTempDir()
     {
+        Common::Utils::VFS::Unmount();
         const fs::path dir = fs::temp_directory_path() / "desert_pak_test";
         fs::remove_all( dir );
         fs::create_directories( dir );
@@ -161,6 +165,224 @@ TEST( Pak, PatchMountOverridesBase )
 
     Common::Utils::VFS::Unmount();
     EXPECT_FALSE( Common::Utils::VFS::IsMounted() );
+}
+
+// ---------------------------------------------------------------- deletions in a patch
+//
+// THE RELATION UNDER TEST, HALF ONE: a file the source DELETED disappears from what the game sees.
+// Both halves matter and they fail in opposite directions — the other half ("a file a person edited is
+// not overwritten") lives in the ContentUpdate suite, because it is the other consumer of the same
+// mechanism.
+//
+// Before this, an overlay patch could only add or override, so the only way to drop a file from a
+// shipped game was to re-ship the whole base. The archives here are real .dpak files written by the
+// real writer and mounted by the real VFS.
+
+TEST( Pak, DeletedEntryDisappearsFromTheMountedContent )
+{
+    const fs::path dir = MakeTempDir();
+
+    const std::string keep   = "still here";
+    const std::string doomed = "the update removes this";
+    {
+        Common::Utils::PakWriter writer( dir / "Content.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.AddData( "Assets/keep.txt", keep.data(), keep.size() ) );
+        ASSERT_TRUE( writer.AddData( "Assets/gone.txt", doomed.data(), doomed.size() ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+    {
+        // A patch that ONLY deletes: no content entries at all. Finalize must still report a written
+        // archive, or a pure-removal update would read as an empty one and be discarded.
+        Common::Utils::PakWriter writer( dir / "Patch_001.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.SetDeletedKeys( { "Assets/gone.txt" } ) );
+        EXPECT_EQ( writer.Finalize(), 1u );
+    }
+
+    const auto base = Common::Utils::VFS::MountPak( dir / "Content.dpak" );
+    ASSERT_TRUE( base.IsSuccess() ) << base.GetError();
+    // Both files are there before the patch — otherwise the assertion after it proves nothing.
+    ASSERT_TRUE( Common::Utils::VFS::Exists( dir / "Assets/gone.txt" ) );
+
+    const auto patch = Common::Utils::VFS::MountPak( dir / "Patch_001.dpak" );
+    ASSERT_TRUE( patch.IsSuccess() ) << patch.GetError();
+
+    // THE ASSERTION. Every way of asking must agree — a file that Exists() but cannot be read, or that
+    // is gone from reads but still appears in a listing, is the defect this rule was added to prevent.
+    EXPECT_FALSE( Common::Utils::VFS::Exists( dir / "Assets/gone.txt" ) );
+    EXPECT_FALSE( Common::Utils::VFS::ReadFile( dir / "Assets/gone.txt" ).has_value() );
+    EXPECT_FALSE( Common::Utils::VFS::FileSize( dir / "Assets/gone.txt" ).has_value() );
+    EXPECT_FALSE( Common::Utils::FileSystem::Exists( dir / "Assets/gone.txt" ) );
+
+    const auto listed = Common::Utils::VFS::ListFiles( dir / "Assets" );
+    EXPECT_EQ( listed.size(), 1u );
+
+    // The neighbour is untouched: a deletion removes one key, not the mount.
+    EXPECT_EQ( Common::Utils::VFS::ReadFile( dir / "Assets/keep.txt" ).value_or( "" ), keep );
+
+    Common::Utils::VFS::Unmount();
+}
+
+TEST( Pak, DeletionListIsNotContent )
+{
+    const fs::path dir = MakeTempDir();
+
+    const std::string payload = "real file";
+    {
+        Common::Utils::PakWriter writer( dir / "p.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.AddData( "a.txt", payload.data(), payload.size() ) );
+        ASSERT_TRUE( writer.SetDeletedKeys( { "old.txt" } ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+
+    Common::Utils::PakReader reader( dir / "p.dpak" );
+    ASSERT_TRUE( reader.IsOpen() ) << reader.OpenError();
+
+    // The bookkeeping entry occupies an index record but must be invisible to every content accessor:
+    // an extractor, a walker or a manifest that picked it up would treat it as a shipped file.
+    const std::string reserved( Common::Utils::kDeletedEntriesKey );
+    EXPECT_EQ( reader.EntryCount(), 1u );
+    EXPECT_FALSE( reader.Contains( reserved ) );
+    EXPECT_FALSE( reader.Read( reserved ).has_value() );
+    EXPECT_FALSE( reader.EntrySize( reserved ).has_value() );
+    EXPECT_FALSE( reader.EntryHash( reserved ).has_value() );
+    const auto keys = reader.KeysWithPrefix( "" );
+    ASSERT_EQ( keys.size(), 1u );
+    EXPECT_EQ( keys[0], "a.txt" );
+
+    ASSERT_EQ( reader.DeletedKeys().size(), 1u );
+    EXPECT_EQ( reader.DeletedKeys()[0], "old.txt" );
+    EXPECT_TRUE( reader.IsDeleted( "old.txt" ) );
+
+    // The writer refuses to make the reserved key mean two things.
+    Common::Utils::PakWriter other( dir / "q.dpak" );
+    ASSERT_TRUE( other.IsOpen() );
+    EXPECT_FALSE( other.AddData( reserved, payload.data(), payload.size() ) );
+    EXPECT_FALSE( other.SetDeletedKeys( { reserved } ) );
+    EXPECT_FALSE( other.SetDeletedKeys( { "" } ) );
+    EXPECT_FALSE( other.SetDeletedKeys( { "two\nkeys" } ) ); // one record, not two that both parse
+}
+
+TEST( Pak, AnArchiveCannotBothShipAndDeleteAKey )
+{
+    const fs::path dir = MakeTempDir();
+
+    const std::string        payload = "x";
+    Common::Utils::PakWriter writer( dir / "contradiction.dpak" );
+    ASSERT_TRUE( writer.IsOpen() );
+    ASSERT_TRUE( writer.AddData( "a.txt", payload.data(), payload.size() ) );
+    ASSERT_TRUE( writer.SetDeletedKeys( { "a.txt" } ) ); // legal in isolation, caught at Finalize
+    EXPECT_EQ( writer.Finalize(), 0u );
+}
+
+TEST( Pak, APatchThatDeletesWhatIsNotThereIsRefused )
+{
+    const fs::path dir = MakeTempDir();
+
+    const std::string payload = "base content";
+    {
+        Common::Utils::PakWriter writer( dir / "Content.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.AddData( "Assets/a.txt", payload.data(), payload.size() ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+    {
+        Common::Utils::PakWriter writer( dir / "Patch_001.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.SetDeletedKeys( { "Assets/never_shipped.txt" } ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+
+    const auto base = Common::Utils::VFS::MountPak( dir / "Content.dpak" );
+    ASSERT_TRUE( base.IsSuccess() ) << base.GetError();
+
+    // A deletion with nothing to delete means this patch was built against a different base — so the
+    // file it was published to remove is some other file, or none. Refused, with the count and an
+    // example, because the alternative is a game that starts and looks updated and is not.
+    const auto patch = Common::Utils::VFS::MountPak( dir / "Patch_001.dpak" );
+    EXPECT_FALSE( patch.IsSuccess() );
+    EXPECT_NE( patch.GetError().find( "never_shipped.txt" ), std::string::npos ) << patch.GetError();
+    EXPECT_NE( patch.GetError().find( "different base" ), std::string::npos ) << patch.GetError();
+
+    // And it did not half-mount: the base is still the only thing on the stack.
+    EXPECT_EQ( Common::Utils::VFS::ReadFile( dir / "Assets/a.txt" ).value_or( "" ), payload );
+
+    Common::Utils::VFS::Unmount();
+}
+
+TEST( Pak, ALaterPatchCanBringADeletedFileBack )
+{
+    const fs::path dir = MakeTempDir();
+
+    const std::string first  = "v1";
+    const std::string second = "v3";
+    {
+        Common::Utils::PakWriter writer( dir / "Content.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.AddData( "Assets/a.txt", first.data(), first.size() ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+    {
+        Common::Utils::PakWriter writer( dir / "Patch_001.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.SetDeletedKeys( { "Assets/a.txt" } ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+    {
+        Common::Utils::PakWriter writer( dir / "Patch_002.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.AddData( "Assets/a.txt", second.data(), second.size() ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+
+    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Content.dpak" ).IsSuccess() );
+    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Patch_001.dpak" ).IsSuccess() );
+    // Dropped in 1.1 and restored in 1.2 is an ordinary release history, so it must mount and the
+    // newest mount must win. Refusing it — which the analysis proposed — would refuse a legal update.
+    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Patch_002.dpak" ).IsSuccess() );
+
+    EXPECT_TRUE( Common::Utils::VFS::Exists( dir / "Assets/a.txt" ) );
+    EXPECT_EQ( Common::Utils::VFS::ReadFile( dir / "Assets/a.txt" ).value_or( "" ), second );
+    EXPECT_EQ( Common::Utils::VFS::ListFiles( dir / "Assets" ).size(), 1u );
+
+    Common::Utils::VFS::Unmount();
+}
+
+TEST( Pak, ADamagedDeletionListIsAnOpenFailureWithAReason )
+{
+    const fs::path dir = MakeTempDir();
+
+    const std::string payload = "content";
+    {
+        Common::Utils::PakWriter writer( dir / "Patch_001.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.AddData( "Assets/a.txt", payload.data(), payload.size() ) );
+        ASSERT_TRUE( writer.SetDeletedKeys( { "Assets/b.txt" } ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+
+    // Flip one byte of the deletion list's blob. The header, the index and every span stay perfectly
+    // valid — only the content hash disagrees, which is exactly the shape a truncated or tampered
+    // download leaves behind.
+    const std::string before = Common::Utils::FileSystem::ReadFileContent( dir / "Patch_001.dpak" ).GetValue();
+    const size_t      at     = before.find( "Assets/b.txt" );
+    ASSERT_NE( at, std::string::npos );
+    std::string after = before;
+    after[at + 7]     = 'X'; // "Assets/b.txt" -> "Assets/X.txt" inside the LIST blob
+    {
+        std::ofstream out( dir / "Patch_001.dpak", std::ios::binary | std::ios::trunc );
+        out.write( after.data(), static_cast<std::streamsize>( after.size() ) );
+    }
+
+    Common::Utils::PakReader reader( dir / "Patch_001.dpak" );
+    EXPECT_FALSE( reader.IsOpen() );
+    EXPECT_NE( reader.OpenError().find( "deletion list" ), std::string::npos ) << reader.OpenError();
+
+    const auto mounted = Common::Utils::VFS::MountPak( dir / "Patch_001.dpak" );
+    EXPECT_FALSE( mounted.IsSuccess() );
+    Common::Utils::VFS::Unmount();
 }
 
 int main( int argc, char** argv )

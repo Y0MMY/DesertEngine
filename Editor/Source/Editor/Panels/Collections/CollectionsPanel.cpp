@@ -18,8 +18,17 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/PBRSurfaceParams.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+// The reflection rules for glm types and for the .demat schema. Needed HERE because this file now
+// reads a .demat back — it has to recover the material's existing identity so re-cooking one produces
+// the same bytes, and a cook that is not reproducible cannot be compared against a record.
+#include <Engine/Assets/Serialization/Material.hpp>
+#include <Engine/Core/Serialize/CustomReflect.hpp>
+#include <Engine/Core/Serialize/GLMReflect.hpp>
 
+#include <Common/Utilities/ContentManifest.hpp>
+#include <Common/Utilities/ContentUpdate.hpp>
 #include <Common/Utilities/FileSystem.hpp>
+#include <Common/Utilities/PakFile.hpp>
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Logger.hpp>
 
@@ -28,6 +37,7 @@
 #include <filesystem>
 #include <optional>
 #include <system_error>
+#include <utility>
 
 namespace Desert::Editor
 {
@@ -88,13 +98,41 @@ namespace Desert::Editor
             return out.empty() ? std::string( "material" ) : out;
         }
 
+        // The install record for one collection: what this materializer last handed the project.
+        //
+        // An UNREADABLE record is an ERROR, not an empty one. Reading a damaged record as empty would
+        // make every file look locally added and freeze the collection for ever, which is the failure
+        // the record exists to end — so it is reported and the collection is left alone until somebody
+        // deletes the record and lets it be rebuilt.
+        Common::ResultStr<Common::Utils::ContentManifest>
+        ReadInstallRecord( const std::filesystem::path& recordPath )
+        {
+            const auto raw = Common::Utils::FileSystem::ReadFileContent( recordPath );
+            if ( !raw )
+                return Common::MakeFormattedError<Common::Utils::ContentManifest>( "{}", raw.GetError() );
+            return Common::Utils::ContentManifest::Parse( raw.GetValue() );
+        }
+
         // Turn the manifest's detected materials into real .demat assets next to the meshes, so the existing
         // sidecar resolution (MeshMaterial::ResolveSidecar) binds them to every mesh — for both the offscreen
         // previews and dropping a card into the scene. We write into meshes/ (ResolveSidecar's "any .demat in
-        // the mesh folder" fallback picks it up). Only MISSING files are written so user edits in the Material
-        // panel are never clobbered. NOTE: a single shared material per collection is the atlas case (one
-        // diffuse, many cards); multi-material packs would need per-mesh resolution (future, via the Material
-        // index already carried here).
+        // the mesh folder" fallback picks it up). NOTE: a single shared material per collection is the atlas
+        // case (one diffuse, many cards); multi-material packs would need per-mesh resolution (future, via
+        // the Material index already carried here).
+        //
+        // THIS USED TO SKIP ON `exists()`, AND THAT WAS WRONG IN BOTH DIRECTIONS. The comment promised
+        // "only MISSING files are written so user edits are never clobbered", but comparing the
+        // EXISTENCE of a path cannot tell a user edit from a file we wrote ourselves last run — its own
+        // "possibly user-edited" admitted as much. So the promise was half-kept and half-broken: edits
+        // did survive, and so did every stale material. A corrected AlphaCutoff or a fixed texture
+        // mapping in an updated collection.json was ignored, silently and permanently, for anyone who
+        // had opened that collection once. The only cure was deleting the file by hand.
+        //
+        // The record is what makes the promise true rather than aspirational: with "what we last wrote"
+        // written down, "the person changed it" and "the source changed it" become two different
+        // questions with two different answers. The matrix and the all-or-nothing refusal live in
+        // Common/Utilities/ContentUpdate.hpp, shared with the game-patch path — this function supplies
+        // the three manifests and the bytes, and takes no policy decision of its own.
         void MaterializeMaterials( Assets::AssetManager& mgr, ImportManager& importer,
                                    const std::filesystem::path& collectionDir, const Manifest& manifest )
         {
@@ -104,6 +142,25 @@ namespace Desert::Editor
             std::error_code             ec;
             const std::filesystem::path meshDir = collectionDir / "meshes";
             std::filesystem::create_directories( meshDir, ec );
+
+            const std::filesystem::path recordPath =
+                 collectionDir / std::filesystem::path( Common::Utils::kInstallRecordFileName );
+            const bool hasRecord = std::filesystem::exists( recordPath, ec );
+
+            Common::Utils::ContentManifest recorded;
+            if ( hasRecord )
+            {
+                auto read = ReadInstallRecord( recordPath );
+                if ( !read )
+                {
+                    LOG_ERROR( "[Collections] {} could not be read ({}), so no material in this collection "
+                               "can be updated without risking someone's edits. Delete it to start the "
+                               "record over.",
+                               recordPath.generic_string(), read.GetError() );
+                    return;
+                }
+                recorded = read.ExtractValue();
+            }
 
             // Resolve a texture source path -> a registered TextureAsset handle (cooks the .tex if needed +
             // registers). Texture handles are deterministic (TextureImporter), so the handle is the same even
@@ -115,11 +172,16 @@ namespace Desert::Editor
                 return importer.ImportAndRegisterTexture( mgr, *path );
             };
 
+            Common::Utils::ContentManifest                            incoming;
+            Common::Utils::ContentManifest                            onDisk;
+            std::vector<std::pair<std::string, Assets::MaterialData>> cooked; // key -> what we would write
+            std::vector<std::string>                                  cookedBytes;
+
             for ( const auto& mat : *manifest.Materials )
             {
-                // ALWAYS (re)cook + register the manifest's textures, even if the .demat already exists —
+                // ALWAYS (re)cook + register the manifest's textures, whatever happens to the .demat —
                 // otherwise a deleted Cooked/ leaves the material's texture references dangling ("missing")
-                // because nothing re-cooks them. The .demat WRITE below is still skip-if-exists.
+                // because nothing re-cooks them.
                 const Assets::AssetHandle albedo    = resolveTex( mat.Albedo );
                 const Assets::AssetHandle normal    = resolveTex( mat.Normal );
                 const Assets::AssetHandle roughness = resolveTex( mat.Roughness );
@@ -127,22 +189,34 @@ namespace Desert::Editor
                 const Assets::AssetHandle ao        = resolveTex( mat.AO );
                 const Assets::AssetHandle opacity   = resolveTex( mat.Opacity );
 
-                const std::filesystem::path dematPath =
-                     meshDir / ( SanitizeName( mat.Name ) +
-                                 std::string( Common::Constants::Extensions::MATERIAL_EXTENSION ) );
-                if ( std::filesystem::exists( dematPath, ec ) )
-                    continue; // keep the existing (possibly user-edited) .demat; its handles already match
+                const std::string key = "meshes/" + SanitizeName( mat.Name ) +
+                                        std::string( Common::Constants::Extensions::MATERIAL_EXTENSION );
+                const std::filesystem::path dematPath = collectionDir / std::filesystem::path( key );
 
-                // loadAfterCreate=false: the file doesn't exist yet; reflected defaults are valid in memory.
-                auto asset = mgr.CreateAsset<Assets::SurfaceMaterialAsset>(
-                     Assets::AssetPriority::High, dematPath.generic_string(), false );
-                if ( !asset )
+                // THE COOK HAS TO BE DETERMINISTIC OR THE COMPARISON MEANS NOTHING. MaterialId is a random
+                // UUID, so re-cooking a material with a fresh one would produce different bytes every run
+                // and read as "the source changed it" for ever — and would renumber an identity that
+                // meshes and scenes already reference. The existing file's own id is therefore reused.
+                //
+                // exists() still appears, but it is no longer the DECISION — it only keeps the read
+                // quiet. The read primitive is soft on purpose and logs an error for a file that is not
+                // there, and on a first install every material in the collection is legitimately absent.
+                std::optional<Common::UUID> identity;
+                std::string                 diskBytes;
+                if ( std::filesystem::exists( dematPath, ec ) )
                 {
-                    LOG_WARN( "[Collections] Could not create material asset {}", dematPath.string() );
-                    continue;
+                    if ( const auto existing = Common::Utils::FileSystem::ReadFileContent( dematPath ); existing )
+                        diskBytes = existing.GetValue();
+                }
+                if ( !diskBytes.empty() )
+                {
+                    onDisk.Insert( { key, static_cast<uint64_t>( diskBytes.size() ),
+                                     Common::Utils::PakContentHash( diskBytes.data(), diskBytes.size() ) } );
+                    if ( const auto parsed = rfl::json::read<Assets::MaterialData>( diskBytes );
+                         parsed.has_value() )
+                        identity = parsed.value().MaterialId;
                 }
 
-                // Typed builder -> unified canon (single material protocol).
                 Assets::PBRSurfaceParams p;
                 p.AlbedoTexture    = albedo;
                 p.NormalTexture    = normal;
@@ -151,32 +225,102 @@ namespace Desert::Editor
                 p.AOTexture        = ao;
                 p.OpacityTexture   = opacity;
                 p.AlphaCutoff      = mat.AlphaCutoff.value_or( mat.Opacity ? 0.5f : 0.0f );
-                p.MaterialId       = asset->Data().MaterialId;
-                asset->Data()      = p.ToMaterialData();
+                p.MaterialId       = identity ? *identity : Common::UUID::Generate();
 
-                // Freshly created and populated above, so Save() cannot refuse here — but it is asked
-                // rather than assumed, because "cannot refuse" is a property of THIS call site and the
-                // asset does not know that.
-                const auto serialized = asset->Save();
-                if ( !serialized )
-                {
-                    LOG_ERROR( "[Collections] '{}' was NOT materialized: {}", mat.Name, serialized.GetError() );
-                    continue;
-                }
-                if ( const auto written =
-                          Common::Utils::FileSystem::WriteContentToFileAtomic( dematPath, serialized.GetValue() );
-                     !written )
-                {
-                    // Not registered on a failed write: registering would put a material into the
-                    // service under a handle whose .demat does not exist, so every mesh that adopts it
-                    // renders from values no future run can reload.
-                    LOG_ERROR( "[Collections] '{}' was NOT materialized — {} could not be written: {}", mat.Name,
-                               dematPath.generic_string(), written.GetError() );
-                    continue;
-                }
-                Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
-                LOG_INFO( "[Collections] Materialized '{}' -> {}", mat.Name, dematPath.generic_string() );
+                Assets::MaterialData data  = p.ToMaterialData();
+                std::string          bytes = rfl::json::write( data );
+                incoming.Insert( { key, static_cast<uint64_t>( bytes.size() ),
+                                   Common::Utils::PakContentHash( bytes.data(), bytes.size() ) } );
+                cooked.emplace_back( key, std::move( data ) );
+                cookedBytes.push_back( std::move( bytes ) );
             }
+
+            // EVERY COLLECTION THAT EXISTS TODAY PREDATES THE RECORD, and with no record every one of its
+            // materials reads as "the person added this" and is never touched again — the very freeze
+            // being fixed, preserved for exactly the projects that have the problem. So the first run
+            // adopts what it can prove is ours: the materials whose bytes already equal what the source
+            // is offering. Anything that differs stays untouched, because nothing on disk can tell an
+            // edit from an older release.
+            if ( !hasRecord )
+                recorded = Common::Utils::AdoptUnrecordedInstall( onDisk, incoming );
+
+            // onDisk is built from the keys this materializer owns, NOT by walking the collection: a
+            // directory walk would see every mesh and texture as a file the person added, and one of them
+            // could then be reported as a conflict for a material that has nothing to do with it.
+            const auto plan = Common::Utils::PlanContentUpdate(
+                 recorded, onDisk, incoming, Common::Utils::ContentAuthorship::LocallyAuthored );
+            if ( !plan.CanApply() )
+            {
+                // Refusal by default, with the files named. The dialog that should offer the choice
+                // belongs to the collection-update task, not here; until it exists, doing nothing and
+                // saying which files disagree is the answer that cannot destroy work.
+                std::string names;
+                for ( const auto& key : plan.Conflicts )
+                    names += ( names.empty() ? "" : ", " ) + key;
+                LOG_ERROR( "[Collections] {} was NOT updated: {} material(s) were changed both here and in "
+                           "the collection ({}). Nothing was written.",
+                           collectionDir.filename().string(), plan.Conflicts.size(), names );
+                return;
+            }
+
+            const auto applied =
+                 Common::Utils::ApplyContentUpdate( plan, recorded, incoming, collectionDir,
+                                                    [&]( const std::string& key ) -> std::optional<std::string>
+                                                    {
+                                                        for ( size_t i = 0; i < cooked.size(); ++i )
+                                                            if ( cooked[i].first == key )
+                                                                return cookedBytes[i];
+                                                        return std::nullopt;
+                                                    } );
+            if ( !applied )
+            {
+                LOG_ERROR( "[Collections] {} was NOT updated: {}", collectionDir.filename().string(),
+                           applied.GetError() );
+                return;
+            }
+
+            // Register only what was actually written, exactly as before: a material in the service under
+            // a handle whose .demat does not hold those values renders from numbers no future run can
+            // reload. loadAfterCreate=false is still right — the file on disk now holds precisely the
+            // MaterialData set below, because that is the value it was serialized from.
+            for ( const auto& step : plan.Steps )
+            {
+                if ( step.Action != Common::Utils::ContentAction::Write )
+                    continue;
+                const auto at = std::find_if( cooked.begin(), cooked.end(),
+                                              [&step]( const auto& c ) { return c.first == step.Key; } );
+                if ( at == cooked.end() )
+                    continue;
+                const std::filesystem::path dematPath = collectionDir / std::filesystem::path( step.Key );
+                auto asset = mgr.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High,
+                                                                            dematPath.generic_string(), false );
+                if ( !asset )
+                {
+                    LOG_WARN( "[Collections] Could not create material asset {}", dematPath.string() );
+                    continue;
+                }
+                asset->Data() = at->second;
+                Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
+                LOG_INFO( "[Collections] Materialized '{}' -> {}", step.Key, dematPath.generic_string() );
+            }
+
+            // The record LAST, and never before the files: writing it first would make a failed write look
+            // like a delivered one. Written when anything moved OR when there is no record yet — the
+            // second case is the adoption above, which has nothing to show in the counters and is the
+            // whole point of the first run.
+            if ( !hasRecord || applied.GetValue().Written || applied.GetValue().Removed )
+            {
+                if ( const auto written = Common::Utils::FileSystem::WriteContentToFileAtomic(
+                          recordPath, applied.GetValue().Recorded.Serialize() );
+                     !written )
+                    LOG_ERROR( "[Collections] {} materialized, but the install record could not be written "
+                               "({}) — the next update will treat these files as locally added and leave "
+                               "them alone.",
+                               collectionDir.filename().string(), written.GetError() );
+            }
+            if ( applied.GetValue().KeptLocalEdit )
+                LOG_INFO( "[Collections] {}: {} material(s) kept because they were edited here",
+                          collectionDir.filename().string(), applied.GetValue().KeptLocalEdit );
         }
     } // namespace
 

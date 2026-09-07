@@ -30,6 +30,15 @@ namespace Common::Utils
             in.read( reinterpret_cast<char*>( &value ), sizeof( T ) );
             return static_cast<bool>( in );
         }
+
+        // A key the deletion list can hold and hand back unchanged. The list is one key per line, so a
+        // line break inside a key would split one record into two that both parse — a corrupt list that
+        // reads as a valid one.
+        bool DeletableKey( std::string_view key )
+        {
+            return !key.empty() && key != kDeletedEntriesKey && key.find( '\n' ) == std::string_view::npos &&
+                   key.find( '\r' ) == std::string_view::npos;
+        }
     } // namespace
 
     uint64_t PakContentHash( const void* data, size_t size )
@@ -79,7 +88,10 @@ namespace Common::Utils
         return AddData( key, data.data(), data.size() );
     }
 
-    bool PakWriter::AddData( const std::string& key, const void* data, size_t size )
+    // The one place a blob is appended and indexed. AddData is this plus the reserved-key refusal, and
+    // Finalize calls it directly for the deletion list — so the list is hashed and indexed by exactly
+    // the same code as content, and cannot drift from it.
+    bool PakWriter::WriteBlob( const std::string& key, const void* data, size_t size )
     {
         if ( !m_Ok )
             return false;
@@ -97,10 +109,49 @@ namespace Common::Utils
         return true;
     }
 
+    bool PakWriter::AddData( const std::string& key, const void* data, size_t size )
+    {
+        if ( key == kDeletedEntriesKey )
+            return false; // reserved: SetDeletedKeys owns it
+        return WriteBlob( key, data, size );
+    }
+
+    bool PakWriter::SetDeletedKeys( const std::vector<std::string>& keys )
+    {
+        for ( const auto& key : keys )
+            if ( !DeletableKey( key ) )
+                return false;
+        m_Deleted = keys;
+        return true;
+    }
+
     size_t PakWriter::Finalize()
     {
         if ( !m_Ok )
             return 0;
+
+        if ( !m_Deleted.empty() )
+        {
+            // "Ships X" and "deletes X" in one archive is a contradiction with no right answer at
+            // resolution time, so it is refused HERE, where the producer can still be told, rather than
+            // guessed at by every reader for ever.
+            for ( const auto& key : m_Deleted )
+                for ( const auto& entry : m_Entries )
+                    if ( entry.Key == key )
+                        return 0;
+
+            std::string list;
+            for ( const auto& key : m_Deleted )
+            {
+                list += key;
+                list += '\n';
+            }
+            // Through the ordinary blob path, so the deletion list carries the same per-entry content
+            // hash as everything else — which is what turns a damaged list into a NAMED open failure
+            // instead of a shorter list nobody notices.
+            if ( !WriteBlob( std::string( kDeletedEntriesKey ), list.data(), list.size() ) )
+                return 0;
+        }
 
         std::ofstream out( m_Path, std::ios::binary | std::ios::in | std::ios::out );
         if ( !out )
@@ -259,7 +310,50 @@ namespace Common::Utils
             }
         }
         m_HasHashes = v2;
-        m_Ok        = true;
+
+        // THE DELETION LIST IS PARSED AT OPEN, NOT AT THE FIRST LOOKUP. A patch whose list is corrupt,
+        // unreadable or self-contradictory must fail to OPEN, with a reason — because the alternative
+        // is a patch that mounts, silently masks nothing, and leaves the game serving exactly the files
+        // the update was published to remove. That is the same shape as the archive that used to mount
+        // "successfully" while unreadable, and it is worse here: the update looks applied.
+        if ( m_Index.contains( std::string( kDeletedEntriesKey ) ) )
+        {
+            const auto list = ReadEntry( std::string( kDeletedEntriesKey ) );
+            if ( !list )
+            {
+                m_OpenError = fmt::format( "the deletion list ('{}') could not be read — its content hash does "
+                                           "not match the index, so the archive is damaged",
+                                           kDeletedEntriesKey );
+                return;
+            }
+            size_t start = 0;
+            while ( start < list->size() )
+            {
+                const size_t end = list->find( '\n', start );
+                std::string key = list->substr( start, ( end == std::string::npos ? list->size() : end ) - start );
+                start           = ( end == std::string::npos ) ? list->size() : end + 1;
+                if ( key.empty() )
+                    continue;
+                if ( key == kDeletedEntriesKey )
+                {
+                    m_OpenError = fmt::format( "the deletion list names '{}', its own reserved key — the "
+                                               "archive is corrupt",
+                                               kDeletedEntriesKey );
+                    return;
+                }
+                if ( m_Index.contains( key ) )
+                {
+                    m_OpenError = fmt::format( "'{}' is both shipped and deleted by this archive — there is no "
+                                               "right answer to that, so it is refused rather than guessed",
+                                               key );
+                    return;
+                }
+                if ( m_DeletedLookup.insert( key ).second )
+                    m_Deleted.push_back( std::move( key ) );
+            }
+        }
+
+        m_Ok = true;
     }
 
     bool PakReader::IsOpen() const
@@ -274,16 +368,20 @@ namespace Common::Utils
 
     size_t PakReader::EntryCount() const
     {
-        return m_Index.size();
+        // CONTENT entries. The deletion list occupies an index record but is not a file, and this count
+        // is what the mount log and every "N entries" message quote.
+        return m_Index.size() - ( m_Index.contains( std::string( kDeletedEntriesKey ) ) ? 1u : 0u );
     }
 
     bool PakReader::Contains( const std::string& key ) const
     {
-        return m_Index.contains( key );
+        return key != kDeletedEntriesKey && m_Index.contains( key );
     }
 
     std::optional<uint64_t> PakReader::EntrySize( const std::string& key ) const
     {
+        if ( key == kDeletedEntriesKey )
+            return std::nullopt;
         const auto it = m_Index.find( key );
         if ( it == m_Index.end() )
             return std::nullopt;
@@ -292,13 +390,32 @@ namespace Common::Utils
 
     std::optional<uint64_t> PakReader::EntryHash( const std::string& key ) const
     {
+        if ( key == kDeletedEntriesKey )
+            return std::nullopt;
         const auto it = m_Index.find( key );
         if ( it == m_Index.end() )
             return std::nullopt;
         return it->second.Hash;
     }
 
+    const std::vector<std::string>& PakReader::DeletedKeys() const
+    {
+        return m_Deleted;
+    }
+
+    bool PakReader::IsDeleted( const std::string& key ) const
+    {
+        return m_DeletedLookup.contains( key );
+    }
+
     std::optional<std::string> PakReader::Read( const std::string& key ) const
+    {
+        if ( key == kDeletedEntriesKey )
+            return std::nullopt; // reserved: DeletedKeys() is the way in
+        return ReadEntry( key );
+    }
+
+    std::optional<std::string> PakReader::ReadEntry( const std::string& key ) const
     {
         const auto it = m_Index.find( key );
         if ( it == m_Index.end() )
@@ -327,7 +444,7 @@ namespace Common::Utils
 
         // THE FORMAT HAS CARRIED A PER-ENTRY CONTENT HASH SINCE v2 AND NOTHING HAS EVER COMPARED IT.
         // Its own header comment promises it drives "post-download integrity checks"; the only reader
-        // of EntryHash was `PakTool diff`. That gap is not cosmetic: the constructor's checks are all
+        // of EntryHash was the patch generator. That gap is not cosmetic: the constructor's checks are all
         // structural, so a flipped bit anywhere in the DATA region leaves the header, the index and
         // every span perfectly valid. The archive mounts, this read succeeds, and the game runs on
         // corrupt content without one line anywhere — the exact silent-fallback shape §1.4 forbids.
@@ -365,7 +482,7 @@ namespace Common::Utils
     {
         std::vector<std::string> keys;
         for ( const auto& [key, span] : m_Index )
-            if ( prefix.empty() || key.rfind( prefix, 0 ) == 0 )
+            if ( key != kDeletedEntriesKey && ( prefix.empty() || key.rfind( prefix, 0 ) == 0 ) )
                 keys.push_back( key );
         return keys;
     }

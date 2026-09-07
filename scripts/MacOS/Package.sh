@@ -7,8 +7,12 @@
 # Content ships BOTH ways on purpose:
 #   - Content.dpak (built with the same PakTool the Runtime mounts) — the packaged-game path;
 #   - loose Resources/ — the editor's dev path and the VFS's loose-file override for debugging.
-# Updates later: build a new pak and `PakTool diff old new Patch_001.dpak` — the Runtime mounts
-# Patch*.dpak on top of the base automatically.
+# Updates later: keep Content.manifest (written beside the pak below, 0.076 % of its size), then for
+# the next release build the new pak and run
+#     PakTool patch <old Content.manifest> <new Content.dpak> Patch_001.dpak
+# — the Runtime mounts Patch*.dpak on top of the base automatically, and the patch carries the list of
+# files the release DELETED as well as the ones it changed. Keeping the manifest is what makes that
+# possible without keeping the old 318 MB archive.
 set -euo pipefail
 
 CONFIG="${1:-Release}"
@@ -31,6 +35,12 @@ done
 # One content pak with everything the editor/runtime reads (keys keep the "Resources/" prefix so
 # reads relative to the package root resolve through the VFS unchanged).
 "$BIN/PakTool" create "$OUT/Content.dpak" "$ROOT/Editor/Resources" --prefix Resources
+
+# The manifest of THIS release, beside it. Written at package time because it cannot be written later:
+# a manifest of a version can only be recorded while that version exists. It is what the next release's
+# `PakTool patch` compares against, and it is ~0.076 % of the archive, so keeping one per version for
+# ever costs nothing while keeping one 318 MB archive per version does not.
+"$BIN/PakTool" manifest "$OUT/Content.dpak" "$OUT/Content.manifest"
 
 # Loose copy for the editor + debugging override.
 cp -R "$ROOT/Editor/Resources" "$OUT/Resources"

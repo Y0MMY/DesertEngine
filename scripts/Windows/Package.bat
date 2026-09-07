@@ -8,8 +8,12 @@ REM
 REM Content ships BOTH ways on purpose (same rationale as scripts/MacOS/Package.sh):
 REM   - Content.dpak (built with the same PakTool the Runtime mounts) — the packaged-game path;
 REM   - loose Resources\ — the editor's dev path and the VFS's loose-file override for debugging.
-REM Updates later: build a new pak and `PakTool diff old new Patch_001.dpak` — the Runtime mounts
-REM Patch*.dpak on top of the base automatically.
+REM Updates later: keep Content.manifest (written beside the pak below, under a thousandth of its size), then
+REM for the next release build the new pak and run
+REM     PakTool patch <old Content.manifest> <new Content.dpak> Patch_001.dpak
+REM — the Runtime mounts Patch*.dpak on top of the base automatically, and the patch carries the list
+REM of files the release DELETED as well as the ones it changed. Keeping the manifest is what makes
+REM that possible without keeping the old 318 MB archive.
 
 cd /d "%~dp0..\.."
 set "ROOT=%CD%"
@@ -38,6 +42,11 @@ for %%D in ("%BIN%\*.dll") do copy /Y "%%D" "%OUT%\" >NUL 2>&1
 REM One content pak with everything the editor/runtime reads (keys keep the "Resources/" prefix so
 REM reads relative to the package root resolve through the VFS unchanged).
 "%BIN%\PakTool.exe" create "%OUT%\Content.dpak" "%ROOT%\Editor\Resources" --prefix Resources || exit /b 1
+
+REM The manifest of THIS release, beside it. Written at package time because it cannot be written
+REM later: a manifest of a version can only be recorded while that version exists. It is what the next
+REM release's `PakTool patch` compares against.
+"%BIN%\PakTool.exe" manifest "%OUT%\Content.dpak" "%OUT%\Content.manifest" || exit /b 1
 
 REM Loose copy for the editor + debugging override.
 robocopy "%ROOT%\Editor\Resources" "%OUT%\Resources" /E /NFL /NDL /NJH /NJS /NP >NUL
