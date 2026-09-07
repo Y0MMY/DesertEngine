@@ -3,6 +3,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
+#include <Engine/Graphic/MappedMemory.hpp>
 
 #include <VulkanAllocator/vk_mem_alloc.h>
 
@@ -65,29 +66,14 @@ namespace Desert::Graphic::API::Vulkan
 
         void ProcessDeletionQueue();
 
-        /// nullptr when the mapping failed, and it SAYS WHY when that happens. The result used to go
-        /// straight on the floor, so a failed map was indistinguishable from a successful one that
-        /// happened to hand back nothing — and most callers write into the pointer without asking.
+        /// A mapping you cannot write through without having asked whether it exists — see
+        /// Engine/Graphic/MappedMemory.hpp for the whole argument, and for the ten `memcpy`s into a
+        /// possibly-null pointer that this return type makes uncompilable rather than merely loud.
         ///
-        /// (Those callers are a separate defect and are named as one: eleven of them memcpy into this
-        /// return value unchecked, which is a null dereference rather than a refusal. This function can
-        /// only make the failure legible; fixing the call sites is not this change's business.)
-        uint8_t* MapMemory( VmaAllocation allocation )
-        {
-            uint8_t*       mappedMemory = nullptr;
-            const VkResult mapped =
-                 vmaMapMemory( VulkanAllocator::GetVMAAllocator(), allocation, (void**)&mappedMemory );
-            if ( mapped != VK_SUCCESS )
-            {
-                (void)NoteIfDeviceLost( mapped, "vmaMapMemory", __FILE__, __LINE__ );
-                LOG_ERROR( "[Allocator] vmaMapMemory failed: {}; the caller gets nullptr.",
-                           VkResultToString( mapped ) );
-                return nullptr;
-            }
-            return mappedMemory;
-        }
-
-        void UnmapMemory( VmaAllocation allocation );
+        /// The mapping unmaps itself, so there is no `UnmapMemory` to pair with this call any more: the
+        /// pairing was hand-written at thirteen sites and an early return past one of them leaked a
+        /// mapping with nothing to say so.
+        NO_DISCARD MappedMemory MapMemory( VmaAllocation allocation );
 
         void Init( const std::shared_ptr<VulkanLogicalDevice>& device, VkInstance instance );
 
@@ -102,6 +88,13 @@ namespace Desert::Graphic::API::Vulkan
         VulkanAllocator() = default;
 
     private:
+        // The unmap MappedMemory holds as its release hook. Private and static: nothing outside this
+        // class may unmap an allocation, because the only object that knows a mapping is still live is
+        // the MappedMemory that owns it, and a second unmap of the same allocation is undefined
+        // behaviour in VMA. It takes `void*` rather than `VmaAllocation` so that MappedMemory — which
+        // lives in Engine/Graphic and must not know Vulkan — can hold its address.
+        static void UnmapAllocation( void* allocation );
+
         friend class Common::Singleton<VulkanAllocator>;
 
         std::vector<BufferDeletionEntry>      m_BufferDeletionQueue;

@@ -52,9 +52,13 @@ namespace Desert::Graphic::API::Vulkan
         // caller passing a non-zero offset would have overwritten the head of the buffer with no error
         // anywhere. Every current caller passes 0 or omits it, so nothing changes today; what changes is
         // that the interface is now telling the truth.
-        void* dst = allocator->MapMemory( m_MemoryAllocation );
-        memcpy( (uint8_t*)dst + offset, data, size );
-        allocator->UnmapMemory( m_MemoryAllocation );
+        //
+        // A void override has no channel, so the report is the log. The offset is now BOUNDED as well as
+        // honoured: `dst + offset` past the end of the mapping corrupted whatever VMA had placed after it.
+        MappedMemory mapping = allocator->MapMemory( m_MemoryAllocation );
+        const auto   wrote   = mapping.Write( data, size, offset );
+        if ( !wrote.IsSuccess() )
+            LOG_ERROR( "[VulkanIndexBuffer] SetData wrote nothing: {}", wrote.GetError() );
     }
 
     void VulkanIndexBuffer::Use( BindUsage /*use*/ /*= BindUsage::Bind */ ) const
@@ -98,9 +102,11 @@ namespace Desert::Graphic::API::Vulkan
 
             if ( m_StorageBuffer.Data )
             {
-                void* data = allocator->MapMemory( m_MemoryAllocation );
-                memcpy( data, m_StorageBuffer.Data, m_Size );
-                allocator->UnmapMemory( m_MemoryAllocation );
+                MappedMemory mapping = allocator->MapMemory( m_MemoryAllocation );
+                const auto   wrote   = mapping.Write( m_StorageBuffer.Data, m_Size );
+                if ( !wrote.IsSuccess() )
+                    return Common::MakeFormattedError<bool>( "dynamic index buffer initial upload: {}",
+                                                             wrote.GetError() );
             }
 
             return Common::MakeSuccess( true );
@@ -110,10 +116,14 @@ namespace Desert::Graphic::API::Vulkan
         {
             auto vertexBufferCreateInfo =
                  CreateIndexBufferInfo( m_Size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE );
-            m_MemoryAllocation = allocator
-                                      ->RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
-                                                           VMA_MEMORY_USAGE_CPU_TO_GPU, m_VulkanBuffer )
-                                      .GetValue();
+            // ASKED, NOT ASSUMED — see the sibling line in VulkanVertexBuffer::RT_Invalidate. The tag
+            // said "VertexBuffer" here too, in the index buffer, so a VMA leak report named the wrong
+            // resource.
+            const auto allocated = allocator->RT_AllocateBuffer( "IndexBuffer", vertexBufferCreateInfo,
+                                                                 VMA_MEMORY_USAGE_CPU_TO_GPU, m_VulkanBuffer );
+            if ( !allocated.IsSuccess() )
+                return Common::MakeError<bool>( allocated.GetError() );
+            m_MemoryAllocation = allocated.GetValue();
         }
 
         else [[likely]]
@@ -134,10 +144,16 @@ namespace Desert::Graphic::API::Vulkan
             auto stagingBufferAllocationVAL = stagingBufferAllocation.GetValue();
 
             // copy data to staging buffer
-
-            auto destData = allocator->MapMemory( stagingBufferAllocationVAL );
-            memcpy( destData, m_StorageBuffer.Data, m_StorageBuffer.Size );
-            allocator->UnmapMemory( stagingBufferAllocationVAL );
+            {
+                MappedMemory staged = allocator->MapMemory( stagingBufferAllocationVAL );
+                const auto   wrote  = staged.Write( m_StorageBuffer.Data, m_StorageBuffer.Size );
+                if ( !wrote.IsSuccess() )
+                {
+                    staged.Unmap();
+                    allocator->RT_DestroyBuffer( stagingBuffer, stagingBufferAllocationVAL );
+                    return Common::MakeFormattedError<bool>( "index buffer staging upload: {}", wrote.GetError() );
+                }
+            }
 
             auto vertexBufferCreateInfo = CreateIndexBufferInfo(
                  m_Size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,

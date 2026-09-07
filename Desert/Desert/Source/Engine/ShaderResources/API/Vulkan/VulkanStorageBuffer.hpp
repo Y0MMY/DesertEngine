@@ -19,8 +19,7 @@ namespace Desert::ShaderResources::API::Vulkan
                              bool persistent = false );
         virtual ~VulkanStorageBuffer();
 
-        virtual uint8_t* MapMemory() override;
-        virtual void     UnmapMemory() override;
+        NO_DISCARD virtual Common::BoolResultStr EnsureMapped() override;
 
         virtual void           SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
         virtual uint32_t       GetBinding() const override
@@ -67,7 +66,8 @@ namespace Desert::ShaderResources::API::Vulkan
         std::vector<VmaAllocation>          m_MemoryAllocs;
         std::vector<VkBuffer>               m_Buffers;
         std::vector<VkDescriptorBufferInfo> m_DescriptorInfos;
-        std::vector<uint8_t*>               m_MappedMemories;
+        // See VulkanUniformBuffer: the mapping owns its own unmap, and cannot be written through unmapped.
+        std::vector<Desert::Graphic::MappedMemory> m_Mappings;
 
         uint32_t          m_Size    = 0;
         uint32_t          m_Binding = 0;
