@@ -214,14 +214,24 @@ namespace Desert::Editor
         // the edit finishes (ImGui::IsItemDeactivatedAfterEdit for a slider or a drag, the click for a
         // checkbox or a menu item) — never on every frame of a drag, which would be sixty writes a second.
         //
-        // It CHANGES NOTHING ELSE: the only thing it touches besides the file is RenderConfig::MSAASamples,
-        // which is a one-way derived copy this file is the sole writer of. Anything else here would be a
-        // save that edits state the user did not touch in the action that triggered it, which is what К6
+        // IT CHANGES NO SETTING. Two things besides the file are touched and neither is one:
+        // RenderConfig::MSAASamples, a one-way derived copy this file is the sole writer of; and
+        // UnknownKeys, which is re-read from disk immediately before the write. Anything else here would
+        // be a save that edits state the user did not touch in the action that triggered it — what К6
         // removed.
         //
-        // A SAVE THAT WOULD CHANGE NOTHING DOES NOT HAPPEN. The bytes are compared against what this
-        // process believes is already on disk (and the file is confirmed still to be there, so the answer
-        // can never be true of a file that is gone), and an identical write is skipped — no file write,
+        // WHY THE RE-READ IS PART OF SAVING AND NOT OF LOADING (К9). Several editors share one user's
+        // file. An editor that started before a key existed holds a carrier that has never heard of it,
+        // and would delete it on the next save — the defect again, one road further along. So the keys
+        // this build cannot name are taken from the file at the moment of writing rather than remembered
+        // from the moment of reading. KEYS ONLY: every field this struct declares is written from what the
+        // user has in front of them, so two editors still resolve a real disagreement last-writer-wins.
+        //
+        // A SAVE THAT WOULD CHANGE NOTHING DOES NOT HAPPEN. The bytes are compared against WHAT THE FILE
+        // SAYS — the re-read above supplies it, and this process's memo of its own last write is only the
+        // fallback for a file that cannot be read (К8 had the memo alone; К9 made the disk the authority
+        // it was always meant to stand in for). The file is confirmed still to be there, so the answer can
+        // never be true of a file that is gone. An identical write is skipped — no file write,
         // and no log line about one. That is what makes commit-on-edit affordable: letting go of a control you
         // only hovered, re-picking the MSAA level you are already on, or dragging a slider back to where
         // it started all cost nothing. True means "editor.json holds these values", which is as true of a

@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iterator>
+#include <optional>
 
 namespace Desert::Editor
 {
@@ -140,6 +141,107 @@ namespace Desert::Editor
         return list;
     }
 
+    // KEYS THIS PROJECT DELETED ON PURPOSE, WHICH IS A DIFFERENT THING FROM A KEY IT DOES NOT KNOW.
+    //
+    // Before К9 a removed field needed no entry here: the struct stopped naming it, so the next save
+    // rewrote the file without it and the key was gone. UnknownKeys ended that — every key survives now,
+    // including the ones somebody meant to destroy — so the deletion has to be stated somewhere, and this
+    // is that somewhere. The invariant it protects is contract §4's: a retirement finishes.
+    //
+    // Both entries are К1's. `PhotogrammetryCaptureCommand` documented a `{photos}` substitution that was
+    // never implemented and `PhotogrammetryMode` an Object/Face preset switch that does not exist; they
+    // were serialized into every editor.json and read by nothing.
+    //
+    // EXPIRY: a row leaves this list when no config in circulation can still carry the key. It costs one
+    // string compare per unknown key per read, and a read has neither in the ordinary case.
+    static bool IsRetiredKey( const std::string& key )
+    {
+        static const std::vector<std::string> retired = { "PhotogrammetryCaptureCommand", "PhotogrammetryMode" };
+        return std::find( retired.begin(), retired.end(), key ) != retired.end();
+    }
+
+    // Drops the retired keys from `p`, naming each in `raised` when one is given.
+    //
+    // BOTH PATHS THAT TAKE UNKNOWN KEYS OFF DISK CALL THIS, and they have to: MigrateLoaded() for the read
+    // at startup, AdoptUnknownKeysFromDisk() for the re-read at the moment of writing. One rule, one
+    // implementation — a second copy of "which keys are dead" is the two-stores shape К6 removed, and it
+    // would show up as a key that comes back whenever the OTHER path is the one that ran.
+    //
+    // Rebuilt rather than erased in place because rfl::Object is an ordered vector of pairs with no
+    // erase(). Rebuilding also preserves the order of what is kept, which matters because PersistCurrent
+    // compares the serialized TEXT.
+    static void DropRetiredKeys( EditorPreferences& p, std::vector<std::string>* raised )
+    {
+        if ( p.UnknownKeys.empty() )
+            return;
+
+        rfl::ExtraFields<rfl::Generic> kept;
+        for ( const auto& [key, value] : p.UnknownKeys )
+        {
+            if ( !IsRetiredKey( key ) )
+            {
+                kept.insert( key, value );
+                continue;
+            }
+            if ( raised != nullptr )
+                raised->push_back( "retired key '" + key + "' dropped (deleted by К1; it was read by nothing)" );
+        }
+        p.UnknownKeys = std::move( kept );
+    }
+
+    // WHAT editor.json HOLDS AT THIS INSTANT, and the unknown keys taken from it — refreshed into
+    // Get().UnknownKeys. Returns the file's canonical text, or nothing when there is no file or it could
+    // not be read or parsed.
+    //
+    // A LOAD-TIME SNAPSHOT IS NOT ENOUGH, AND THAT IS THE HALF OF К9 THE OBVIOUS FIX MISSES. Several
+    // editors are open against one `~/.desertengine/editor.json` here all day. Editor A starts at 10:00,
+    // when the file holds nothing A does not know, so A's carrier is empty. B's newer build writes
+    // `PackageAppBundle` at 10:30. A saves at 11:00 from a carrier captured an hour earlier — and deletes
+    // it. That is the same defect arriving by a different road, and a carrier filled only at Load() has
+    // no way to see it. The keys another build owns are therefore re-read at the moment of WRITING.
+    //
+    // IT ADOPTS KEYS AND NEVER VALUES. Only UnknownKeys is taken from the file; every field this struct
+    // declares stays exactly as the user left it, so a concurrent editor's disagreement about CameraSpeed
+    // is still resolved last-writer-wins the way it always was. Adopting a field would be the opposite of
+    // this file's rule — a save that changes a setting the user did not touch (К6).
+    //
+    // Cost: one read and one parse per save, of a file measured in hundreds of bytes. A save happens when
+    // a control is released or a menu item clicked, never per frame.
+    static std::optional<std::string> AdoptUnknownKeysFromDisk()
+    {
+        if ( !std::filesystem::exists( PrefsFile() ) )
+            return std::nullopt;
+
+        const auto raw = Common::Utils::FileSystem::ReadFileContent( PrefsFile() );
+        if ( !raw || raw.GetValue().empty() )
+        {
+            LOG_WARN( "[Prefs] {} exists but could not be read before saving; keys written by another "
+                      "build cannot be preserved this time and the file will be replaced wholesale.",
+                      PrefsFile() );
+            return std::nullopt;
+        }
+
+        auto parsed = rfl::json::read<EditorPreferences, rfl::DefaultIfMissing>( raw.GetValue() );
+        if ( !parsed.has_value() )
+        {
+            LOG_WARN( "[Prefs] {} is corrupt ({}); it is being replaced rather than merged, so any key "
+                      "another build put in it is lost with it.",
+                      PrefsFile(), parsed.error().what() );
+            return std::nullopt;
+        }
+
+        EditorPreferences fromDisk = parsed.value();
+
+        // The file's canonical text is taken BEFORE the retirement, on purpose: it is the memo the write
+        // is decided against, and a retired key still sitting on disk has to read as a difference or the
+        // save that removes it would be skipped as redundant.
+        const std::string canonical = rfl::json::write( fromDisk );
+
+        DropRetiredKeys( fromDisk, nullptr );
+        EditorPreferences::Get().UnknownKeys = std::move( fromDisk.UnknownKeys );
+        return canonical;
+    }
+
     // THE ONLY WRITER OF editor.json. Both public entry points funnel here; they differ in one thing, the
     // sentence that reaches the log, which is exactly the difference between "the user changed a setting"
     // and "this build raised a stored value".
@@ -155,6 +257,18 @@ namespace Desert::Editor
         // allowed to do besides writing the file, and PushToRenderConfig's header says why it cannot have
         // the same effect. Desert/Tests/Editor/PreferenceOwnership asserts the relation.
         PushToRenderConfig( EditorPreferences::Get() );
+
+        // Whatever another build has put in the file since this one read it. See the header above: this is
+        // what stops a long-running editor deleting a key that appeared after it started.
+        //
+        // The memo becomes what the file ACTUALLY says whenever the file can be read, which is strictly
+        // better than what this process last wrote and is what makes the skip below honest. When it cannot
+        // be read the memo is cleared instead, so the next write is unconditional — the safe direction, and
+        // the same one Load() takes for the same reason.
+        if ( const std::optional<std::string> onDisk = AdoptUnknownKeysFromDisk(); onDisk.has_value() )
+            s_OnDisk = *onDisk;
+        else if ( std::filesystem::exists( PrefsFile() ) )
+            s_OnDisk.clear();
 
         const std::string json = rfl::json::write( EditorPreferences::Get() );
         if ( json == s_OnDisk && std::filesystem::exists( PrefsFile() ) )
@@ -190,46 +304,11 @@ namespace Desert::Editor
         return true;
     }
 
-    // KEYS THIS PROJECT DELETED ON PURPOSE, WHICH IS A DIFFERENT THING FROM A KEY IT DOES NOT KNOW.
-    //
-    // Before К9 a removed field needed no entry here: the struct stopped naming it, so the next save
-    // rewrote the file without it and the key was gone. UnknownKeys ended that — every key survives now,
-    // including the ones somebody meant to destroy — so the deletion has to be stated somewhere, and this
-    // is that somewhere. The invariant it protects is contract §4's: a retirement finishes.
-    //
-    // Both entries are К1's. `PhotogrammetryCaptureCommand` documented a `{photos}` substitution that was
-    // never implemented and `PhotogrammetryMode` an Object/Face preset switch that does not exist; they
-    // were serialized into every editor.json and read by nothing.
-    //
-    // EXPIRY: a row leaves this list when no config in circulation can still carry the key. It costs one
-    // string compare per unknown key per launch, and a launch has neither in the ordinary case.
-    static bool IsRetiredKey( const std::string& key )
-    {
-        static const std::vector<std::string> retired = { "PhotogrammetryCaptureCommand", "PhotogrammetryMode" };
-        return std::find( retired.begin(), retired.end(), key ) != retired.end();
-    }
-
     std::vector<std::string> EditorPreferences::MigrateLoaded( EditorPreferences& p )
     {
         std::vector<std::string> raised;
 
-        // The retired keys, dropped by name. Rebuilt rather than erased in place because rfl::Object is
-        // an ordered vector of pairs with no erase() — and rebuilding preserves the order of what is
-        // kept, which matters because the memo in PersistCurrent compares the serialized TEXT.
-        if ( !p.UnknownKeys.empty() )
-        {
-            rfl::ExtraFields<rfl::Generic> kept;
-            for ( const auto& [key, value] : p.UnknownKeys )
-            {
-                if ( !IsRetiredKey( key ) )
-                {
-                    kept.insert( key, value );
-                    continue;
-                }
-                raised.push_back( "retired key '" + key + "' dropped (deleted by К1; it was read by nothing)" );
-            }
-            p.UnknownKeys = std::move( kept );
-        }
+        DropRetiredKeys( p, &raised );
 
         // METRE-ERA TranslateSnap -> centimetres.
         //

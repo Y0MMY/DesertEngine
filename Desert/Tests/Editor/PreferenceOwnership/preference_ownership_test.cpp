@@ -351,6 +351,15 @@ TEST( PreferenceOwnership, AStepChosenFromAToolbarSurvivesARestart )
 // running editor SHOULD produce a write — a "true" that meant "my memo says so" while nothing was on
 // disk would be §1.4's silent wrong answer. Overwriting the file with a marker asks the question the
 // test is actually about: does a redundant save touch the bytes?
+//
+// К9 MOVED THE MARKER ON FOR THE SAME KIND OF REASON, one step further along. It used to be a whole
+// foreign document — `{ "this file was not rewritten": true }` — which was fine while the store ignored
+// the disk entirely. It no longer does: a save now re-reads the file so that a key another build wrote
+// after this one started is preserved rather than deleted, and a save that finds a document full of keys
+// it has never seen SHOULD write, because merging them is the thing К9 built. So the marker is now
+// whitespace: byte-detectable, semantically nothing, and therefore a probe for a rewrite rather than for
+// the store's opinion of a stranger's file. (`AFinishedEditReachesTheFileOnceAndARedundantSaveNotAtAll`
+// below already used this probe, which is how it survived the change untouched.)
 TEST( PreferenceOwnership, ReChoosingTheStepAlreadySetDoesNotRewriteTheFile )
 {
     FreshInstall();
@@ -358,7 +367,7 @@ TEST( PreferenceOwnership, ReChoosingTheStepAlreadySetDoesNotRewriteTheFile )
     Gizmo::SetTranslateSnap( 25.0f );
     ASSERT_TRUE( std::filesystem::exists( PrefsPath() ) );
 
-    const std::string marker = "{ \"this file was not rewritten\": true }";
+    const std::string marker = ReadWholeFile( PrefsPath() ) + "\n";
     WriteWholeFile( PrefsPath(), marker );
 
     Gizmo::SetTranslateSnap( 25.0f );  // the same step, picked again
@@ -1063,7 +1072,70 @@ TEST( PreferenceOwnershipUnknownKeys, TheKeysWrittenAreExactlyTheStructsFieldsPl
 }
 
 // ---------------------------------------------------------------------------------------------------
-// 7a. THE OTHER HALF OF THE RULE: A DELETION STILL FINISHES
+// 7a. THE KEY THAT APPEARED AFTER THIS EDITOR STARTED
+// ---------------------------------------------------------------------------------------------------
+//
+// THE HALF A LOAD-TIME CARRIER CANNOT REACH, and the one that matches how this project is actually
+// worked: several editors open all day against one `~/.desertengine/editor.json`. Editor A starts when
+// the file holds nothing A does not know, so A's carrier is EMPTY and stays empty however faithfully it
+// is written back. B's newer build then writes a key of its own. A's next save — a Perf HUD toggle, a
+// slider release, anything — deletes it, and every assertion in §7 above still passes while it happens.
+//
+// So the keys another build owns are re-read at the moment of WRITING, not remembered from the moment of
+// reading. These are the tests for that, and they are red against a carrier that is only filled by
+// Load().
+
+TEST( PreferenceOwnershipUnknownKeys, ASaveKeepsAKeyThatAppearedAfterThisEditorLoadedTheFile )
+{
+    FreshInstall();
+
+    // 10:00 — this editor starts. The file holds nothing it does not know.
+    EditorPreferences::Get().CameraSpeed = 2.0f;
+    ASSERT_TRUE( EditorPreferences::Save() );
+    ASSERT_TRUE( EditorPreferences::Get().UnknownKeys.empty() );
+
+    // 10:30 — another build, with a field this one does not have, writes the file.
+    const std::string theirs = ReadWholeFile( PrefsPath() );
+    WriteWholeFile( PrefsPath(), theirs.substr( 0, theirs.rfind( '}' ) ) + ",\"ANewerBuildsSetting\":true}" );
+
+    // 11:00 — somebody toggles the Perf HUD in the editor that has been open since ten.
+    EditorPreferences::Get().ShowPerfHud = !EditorPreferences::Get().ShowPerfHud;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    EXPECT_EQ( ValueOf( ReadWholeFile( PrefsPath() ), "ANewerBuildsSetting" ), "true" )
+         << "a save deleted a key that appeared after this editor read the file — the carrier is filled "
+            "at load and never refreshed, so it has never heard of the key it is overwriting";
+}
+
+// THE BOUNDARY THAT KEEPS THE RE-READ FROM BECOMING A SECOND STORE. It adopts KEYS, never VALUES: a
+// field this struct declares is written from what the user has in front of them, so two editors still
+// resolve a real disagreement last-writer-wins exactly as before. Adopting a field would be a save that
+// changes a setting the user did not touch, which is the whole of what К6 removed.
+TEST( PreferenceOwnershipUnknownKeys, TheReReadTakesKeysItCannotNameAndNoValueItCan )
+{
+    FreshInstall();
+
+    EditorPreferences::Get().CameraSpeed = 2.0f;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    // Another editor writes BOTH a key this build has never seen and a different value for a field it
+    // owns. Only the first may come back.
+    EditorPreferences other;
+    other.CameraSpeed        = 99.0f;
+    const std::string theirs = rfl::json::write( other );
+    WriteWholeFile( PrefsPath(), theirs.substr( 0, theirs.rfind( '}' ) ) + ",\"ANewerBuildsSetting\":true}" );
+
+    EditorPreferences::Get().ShowPerfHud = !EditorPreferences::Get().ShowPerfHud;
+    ASSERT_TRUE( EditorPreferences::Save() );
+
+    EXPECT_FLOAT_EQ( EditorPreferences::Get().CameraSpeed, 2.0f )
+         << "the re-read pulled a SETTING off disk and changed a value the user did not touch";
+    EXPECT_EQ( ValueOf( ReadWholeFile( PrefsPath() ), "CameraSpeed" ), "2.0" );
+    EXPECT_EQ( ValueOf( ReadWholeFile( PrefsPath() ), "ANewerBuildsSetting" ), "true" );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// 7b. THE OTHER HALF OF THE RULE: A DELETION STILL FINISHES
 // ---------------------------------------------------------------------------------------------------
 //
 // Preserving unknown keys is one edit away from "this file never loses anything", which is contract §4's
