@@ -19,10 +19,10 @@ namespace Desert::Editor::Core
     //
     // BEFORE К10 THE SECOND WAS STORED IN THE FIRST. Entering 2D UI mode wrote `false` straight into the
     // preference struct and parked the user's real answer in a member of the panel, so any save of the
-    // preference file — and there are twenty-odd call sites — wrote "this user does not want a grid".
+    // preference file — and there were twenty-six call sites — wrote "this user does not want a grid".
     // К2 fenced the two save sites that existed then by restoring the true value around `Save()`; К8 took
-    // the count of unfenced sites to eleven. A fence per call site is a fence somebody forgets, and the
-    // answer is not a twelfth fence: it is that a mode must not have a field in the saved struct at all.
+    // the count of unfenced ones to twenty-four. A fence per call site is a fence somebody forgets, and the
+    // answer is not a twenty-fifth fence: it is that a mode must not have a field in the saved struct at all.
     //
     // So the suppression is applied HERE, to a COPY, on the view's way to the renderer, and the store is
     // never written. That is the same shape the corner orientation triad has always had in this viewport

@@ -839,12 +839,12 @@ TEST( PreferenceOwnershipWindow, EveryControlIsBoundToARealPreferenceField )
 // The two meanings have different owners and different lifetimes, and that is the whole argument: the
 // user's answer outlives the session, the mode dies with a toggle. К2 saw the collision and fenced it by
 // restoring the true value around the two `EditorPreferences::Save()` calls that existed in that file;
-// by the time К8 finished there were twenty-five call sites and twenty-three of them had no fence. Any
+// by the time К8 and П6 had finished there were twenty-six call sites and twenty-four had no fence. Any
 // of those, fired while 2D mode was on — the View menu's Perf HUD item, an MSAA pick, a star in Details,
 // a Build Settings path — wrote "ShowGrid: false" into ~/.desertengine/editor.json, permanently and for
 // every scene, because nothing on the next launch can tell a mode from a choice.
 //
-// THE FIX IS NOT A TWENTY-SIXTH FENCE. The mode no longer has a field in the saved struct at all: the
+// THE FIX IS NOT A TWENTY-FIFTH FENCE. The mode no longer has a field in the saved struct at all: the
 // suppression is applied to a COPY on the view's way to the renderer (Editor/Core/ViewportModes.hpp,
 // ViewportPanel::EffectiveDebugView), exactly as the corner orientation triad — the OTHER thing 2D mode
 // hides — has always worked. This is К6's move again: the second store is deleted rather than
@@ -1191,7 +1191,7 @@ TEST( PreferenceOwnershipSource, NoPanelKeepsItsOwnCopyOfADebugViewFlag )
 // SHAPE TWO: A FENCE AROUND A SAVE.
 //
 // `const bool live = view.ShowGrid; if (uiMode) view.ShowGrid = saved; Save(); view.ShowGrid = live;` —
-// К2's answer, and it worked, at exactly two of the twenty-five call sites that exist today. A fence is
+// К2's answer, and it worked, at exactly two of the twenty-six call sites that existed then. A fence is
 // per-call-site by construction, so the rule it enforces lives in whoever remembers it; this census is
 // that rule living in the build instead.
 //
@@ -1242,7 +1242,7 @@ TEST( PreferenceOwnershipSource, NoSaveOfThePreferencesIsFencedByARestoredField 
                  << file.Path << ":" << file.LineOf( at ) << " — this EditorPreferences save is FENCED: `"
                  << target
                  << "` is set before it and set again straight after, so what is written is not what the "
-                    "struct is carrying. A fence protects one call site out of twenty-five and the next one "
+                    "struct is carrying. A fence protects one call site out of twenty-six and the next one "
                     "arrives without it. Take the transient meaning out of the saved field instead — "
                     "Editor/Core/ViewportModes.hpp.";
         }
