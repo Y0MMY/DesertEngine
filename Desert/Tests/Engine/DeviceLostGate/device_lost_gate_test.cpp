@@ -20,6 +20,10 @@
 
 #include <gtest/gtest.h>
 
+// <atomic> is named explicitly rather than left to whatever <thread> happens to pull in. It compiles
+// either way on this toolchain, and the MSVC build is the one that would find out otherwise -- the same
+// class of Windows-only surprise this project has already paid for twice.
+#include <atomic>
 #include <string>
 #include <thread>
 #include <vector>
