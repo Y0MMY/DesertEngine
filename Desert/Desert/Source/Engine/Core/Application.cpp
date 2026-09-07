@@ -52,7 +52,25 @@ namespace Desert::Engine
         DESERT_VERIFY( swapChainResult.IsSuccess(), "Failed to setup SwapChain" );
 
         // 7. Initialize Global Renderer
-        Graphic::Renderer::CreateInstance().Init();
+        //
+        // ITS RESULT WAS DISCARDED. Renderer::Init returns BoolResultStr and can fail for two reasons that
+        // matter — no rendering API was selected, and the BRDF LUT could not be created — after either of
+        // which every frame below is drawn against half a renderer. Same instrument as the swapchain line
+        // above it, and for the same reason: there is no partially-working renderer to continue with.
+        const auto rendererReady = Graphic::Renderer::CreateInstance().Init();
+        DESERT_VERIFY( rendererReady.IsSuccess(), "Failed to initialize the renderer: {}",
+                       rendererReady.GetError() );
+
+        // A DEVICE CAN BE LOST BEFORE THE FIRST FRAME. Everything above uploads to the GPU — the BRDF LUT,
+        // the fallback textures, the swapchain's images — and on this machine another process's GPU reset
+        // is as likely during startup as at any other moment. Without this the engine would enter Run()
+        // with a latched device and half-built resources, and the loop's own check would only stop it one
+        // frame later, after a stream of refusals. Refusing HERE names the cause while it is still the
+        // only thing that has gone wrong.
+        DESERT_VERIFY( !Graphic::DeviceLost::IsLost(),
+                       "The GPU device was lost while the engine was starting up; see the [DeviceLost] "
+                       "block above. Nothing was drawn and nothing was open, so there is nothing to "
+                       "recover — start again." );
 
         m_Window->SetEventCallback( [this]( Common::Event& e ) { ProcessEvents( e ); } );
     }
@@ -176,6 +194,10 @@ namespace Desert::Engine
                 {
                     if ( EndRunOnDeviceLoss( "acquiring the next image" ) )
                         break;
+                    // A failure here that is NOT a device loss has no other cause today — the Vulkan
+                    // backend's acquire path reports only that — so this branch is currently unreachable
+                    // and is a log rather than an ending. Reporting it and carrying on is what this line
+                    // did before, with the difference that it now says so.
                     LOG_ERROR( "[Application] PrepareNextFrame failed: {}", prepared.GetError() );
                 }
             }
@@ -196,8 +218,10 @@ namespace Desert::Engine
                 // that and the next acquire blocks forever, so a reported error becomes a hang.
                 //
                 // Both of BeginFrame's failures are terminal anyway — the window is gone, or
-                // vkBeginCommandBuffer refused, which means the device is lost. Exit code 1 so a script
-                // that ran the editor headless is told.
+                // vkBeginCommandBuffer refused. The SECOND of those used to be described here as "which
+                // means the device is lost", and that reading is now a branch of its own rather than a
+                // guess: a lost device leaves by the line below with its own exit code, and everything
+                // still reaching exit 1 is a failure that really is ours.
                 if ( EndRunOnDeviceLoss( "beginning the frame" ) )
                     break;
 

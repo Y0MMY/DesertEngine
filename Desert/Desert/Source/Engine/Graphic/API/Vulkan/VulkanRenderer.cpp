@@ -759,11 +759,6 @@ namespace Desert::Graphic::API::Vulkan
     {
         return m_CompositeFramebuffer.lock();
     }
-    VkCommandBuffer VulkanRendererAPI::GetCurrentCmdBuffer() const
-    {
-        return m_CurrentCommandBuffer;
-    }
-
     void VulkanRendererAPI::SetViewportAndScissor( const uint32_t width, const uint32_t height )
     {
         if ( !m_CurrentCommandBuffer )

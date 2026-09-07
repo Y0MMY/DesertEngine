@@ -70,7 +70,12 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
 
-        VkCommandBuffer GetCurrentCmdBuffer() const;
+        // `VkCommandBuffer GetCurrentCmdBuffer() const;` USED TO SIT HERE WITH NO CALLERS AT ALL, and
+        // removing it is not tidiness. m_CurrentCommandBuffer being non-null is what every vkCmd* in the
+        // implementation reads as "recording", and BeginFrame — the one function the device-lost gate sits
+        // in front of — is its only writer. A public getter is a standing invitation to record from
+        // outside that invariant. Nothing wanted it; nothing gets it. (DeviceLostCensus asserts the
+        // single-writer half.)
 
     private:
         void SetViewportAndScissor( const uint32_t width, const uint32_t height );

@@ -38,7 +38,9 @@ namespace Desert::Graphic
      *    device — the specification requires them to work, and they return nothing to check. Refusing them
      *    too would mean leaking every GPU object and never destroying the device, which is the opposite of
      *    the orderly close this class exists to make possible. That is the one and only category of Vulkan
-     *    call the engine still issues after the latch, and `DeviceLostCensus` pins it.
+     *    call the engine still issues after the latch. `DeviceLostCensus` excludes it BY PREFIX RULE
+     *    (`vkDestroy*`, `vkFree*`, `vma*Destroy/Free`) rather than by a typed list, so the exemption cannot
+     *    quietly widen the way a hand-kept list of names would.
      *
      * WHY IT LIVES IN `Engine/Graphic` AND CARRIES NO VULKAN TYPE. Two of its readers may not see a Vulkan
      * header: `Engine::Application`, which ends the run, and the editor's crash recovery, which must not

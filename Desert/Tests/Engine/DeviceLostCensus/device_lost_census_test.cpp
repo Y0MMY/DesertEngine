@@ -427,6 +427,60 @@ TEST( DeviceLostCensus, TheDroppedResultCensusStillHoldsAndCanOnlyShrink )
             "welcome, and this line moves with it.";
 }
 
+TEST( DeviceLostCensus, OnlyBeginFrameCanArmTheCommandBuffer )
+{
+    // THE INVARIANT THE vkCmd* EXEMPTION RESTS ON, ASSERTED RATHER THAN ASSUMED.
+    //
+    // Roughly forty recording entry points in VulkanRenderer.cpp carry no device-lost guard of their own.
+    // That is correct only while `m_CurrentCommandBuffer` — the field every one of them checks for null
+    // before recording — is set to a real buffer in exactly ONE place: the gated BeginFrame. A second
+    // writer would reopen the whole defect silently, with nothing in a code review to point at. The field
+    // is private and has no getter, so this one file is the whole of its write surface.
+    //
+    // Clearing it to nullptr is deliberately not counted: disarming can only stop recording, never start
+    // it, and is therefore safe from anywhere.
+    const std::string root = RepoRoot();
+    ASSERT_FALSE( root.empty() );
+
+    const fs::path file   = fs::path( root ) / "Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanRenderer.cpp";
+    const std::string src = StripCommentsAndStrings( ReadAll( file ) );
+    const std::string begin = BodyOf( src, "VulkanRendererAPI::BeginFrame" );
+    ASSERT_FALSE( begin.empty() ) << "VulkanRendererAPI::BeginFrame is not in " << file.string();
+
+    const std::size_t beginAt  = src.find( begin );
+    const std::size_t beginEnd = beginAt + begin.size();
+
+    const std::string field = "m_CurrentCommandBuffer";
+    std::vector<int>  armedOutside;
+    int               armedInside = 0;
+    for ( std::size_t at = 0; ( at = src.find( field, at ) ) != std::string::npos; at += field.size() )
+    {
+        std::size_t eq = at + field.size();
+        while ( eq < src.size() && ( src[eq] == ' ' || src[eq] == '\n' ) )
+            ++eq;
+        if ( eq + 1 >= src.size() || src[eq] != '=' || src[eq + 1] == '=' )
+            continue; // a read, or a comparison -- neither arms anything
+
+        std::size_t rhs = eq + 1;
+        while ( rhs < src.size() && ( src[rhs] == ' ' || src[rhs] == '\n' ) )
+            ++rhs;
+        if ( src.compare( rhs, 7, "nullptr" ) == 0 )
+            continue; // disarming, allowed from anywhere
+
+        if ( at >= beginAt && at < beginEnd )
+            ++armedInside;
+        else
+            armedOutside.push_back( 1 + static_cast<int>( std::count( src.begin(), src.begin() + at, '\n' ) ) );
+    }
+
+    EXPECT_EQ( armedInside, 1 ) << "BeginFrame must arm the command buffer exactly once";
+    for ( int line : armedOutside )
+        ADD_FAILURE() << file.filename().string() << ":" << line
+                      << " assigns a command buffer to m_CurrentCommandBuffer OUTSIDE BeginFrame. Every "
+                         "vkCmd* in this file is guarded by that field being null on a lost device, and "
+                         "BeginFrame is the only function the device-lost gate sits in front of.";
+}
+
 int main( int argc, char** argv )
 {
     ::testing::InitGoogleTest( &argc, argv );
