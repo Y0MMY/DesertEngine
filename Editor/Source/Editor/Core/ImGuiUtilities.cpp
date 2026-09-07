@@ -94,7 +94,21 @@ namespace Desert::Editor::Utils
         const float       rowH   = height > 0.0f ? height : ImGui::GetFrameHeight();
         const ImVec2      rowMax( rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + rowH );
 
-        const bool hovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows ) &&
+        // `AllowWhenBlockedByActiveItem` IS THE WHOLE BUG, AND IT IS A CLICK THAT CANNOT LAND.
+        // Without it, IsWindowHovered goes FALSE the instant any widget becomes active — including a
+        // button inside this very row. The owner found it from the outside and described the mechanism
+        // exactly: "при клике пропадает pin to the top и как будто кликаем в пустоту".
+        //
+        // The chain: mouse-down on the reset arrow -> that SmallButton is now the active item ->
+        // IsWindowHovered false -> rowHovered false -> the pin is not drawn -> `rightEdge` is never
+        // stepped left past it -> the reset arrow is laid out one button-width FURTHER RIGHT than it was
+        // when it was pressed -> the cursor is no longer over it -> mouse-up lands on nothing and the
+        // reset never runs. The button was not broken; it MOVED OUT FROM UNDER THE PRESS.
+        //
+        // Two rows of buttons whose positions depend on a hover flag that a press destroys is a trap for
+        // every future control added here, which is why the flag is fixed rather than the arithmetic.
+        const bool hovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows |
+                                                     ImGuiHoveredFlags_AllowWhenBlockedByActiveItem ) &&
                              ImGui::IsMouseHoveringRect( rowMin, rowMax, /*clip*/ true );
 
         // Edge to edge, past the window padding: a band that stops short of the border reads as a box
