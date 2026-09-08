@@ -390,18 +390,28 @@ namespace
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kProjectContext = "Desert/Desert/Source/Engine/Project/ProjectContext.cpp";
-    constexpr const char* kHubMain        = "Tools/ProjectHub/Source/Main.cpp";
-    constexpr const char* kHubProjects    = "Tools/ProjectHub/Source/Projects.cpp";
+
+    // THE CONSUMER OF THREE OF THESE FIELDS LEFT THIS REPOSITORY (Л3). `FileVersion`, `Description` and
+    // `EngineVersion` are written and read by the LAUNCHER, which now lives in `desert-launcher` — so
+    // there is no file here to anchor a read in, and naming one would be a path that resolves to
+    // nothing. Their rows therefore carry `Where = nullptr`, which this table already means literally:
+    // "ownership is stated, readership is asserted elsewhere" (the SceneSettings rows use it for the
+    // same reason and say so at the field's declaration).
+    //
+    // This is NOT a hole. It is the desert-shared arrangement applied a second time: each side asserts
+    // its OWN end. The engine asserts that it does not write these fields; the launcher's own suite
+    // asserts that it reads them. A census that named a file across a repository boundary would be
+    // asserting something it cannot see, which is worse than asserting less.
 
     constexpr Row kProjectFileRows[] = {
          // The descriptor's own format generation, stamped by WriteProjectFile and by nothing else.
-         { "FileVersion", Owner::FileMeta, kHubMain },
+         { "FileVersion", Owner::FileMeta },
 
          { "Name", Owner::Project, kEditorLayer },
          // The load-bearing one: it remaps every content path into the project folder.
          { "AssetsRoot", Owner::Project, kProjectContext },
          { "DefaultScene", Owner::Project, kProjectContext },
-         { "Description", Owner::Project, kHubProjects },
+         { "Description", Owner::Project },
 
          // K4, CLOSED: this is a Project fact now, not a Machine one. It used to be stamped with
          // Common::Version::Full() — this machine's commit hash and `.dirty` flag — on every
@@ -411,7 +421,7 @@ namespace
          // opens the project, and it is exactly what a .deproj is for.
          // The consumer is the launcher's project screen, which DRAWS it; Projects.cpp is where it is
          // written, at creation, and the census names readers.
-         { "EngineVersion", Owner::Project, kHubMain },
+         { "EngineVersion", Owner::Project },
     };
 
     // ------------------------------------------------------------------------------------------------

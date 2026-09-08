@@ -39,7 +39,7 @@ fi
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-for exe in Editor Runtime ProjectHub PakTool DShaderTool; do
+for exe in Editor Runtime PakTool DShaderTool; do
     [ -x "$BIN/$exe" ] && cp "$BIN/$exe" "$OUT/"
 done
 

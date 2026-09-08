@@ -47,7 +47,7 @@ if not exist "%BIN%\Runtime.exe" (
 if exist "%OUT%" rmdir /S /Q "%OUT%"
 mkdir "%OUT%" || exit /b 1
 
-for %%E in (Editor Runtime ProjectHub PakTool DShaderTool) do (
+for %%E in (Editor Runtime PakTool DShaderTool) do (
     if exist "%BIN%\%%E.exe" copy /Y "%BIN%\%%E.exe" "%OUT%\" >NUL
 )
 

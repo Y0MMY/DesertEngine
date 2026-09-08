@@ -70,7 +70,7 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
     const bool unattended = Desert::Editor::IsUnattendedSession( options.Shot, !options.ControlSocket.empty() );
 
     // The editor is PROJECT-DRIVEN: `--project <path/to/.deproj>` is REQUIRED. Picking/creating projects
-    // is the Project Hub's job (Tools/ProjectHub, scripts/MacOS/RunProjectHub.sh) — the editor itself
+    // is the launcher's job (the desert-launcher repository) — the editor itself
     // never shows a chooser. Opening the project also remaps every engine content path into the project
     // folder, so it must happen BEFORE anything engine-side spins up.
     if ( !options.Project.empty() )
@@ -118,8 +118,9 @@ std::unique_ptr<Desert::Engine::Application> CreateApplication( int argc, char**
     if ( !Desert::Editor::ProjectContext::HasProject() )
     {
         std::fprintf( stderr,
-                      "No project given. Start the editor through the Project Hub\n"
-                      "(scripts/MacOS/RunProjectHub.sh) or pass: --project <path/to/.deproj>\n" );
+                      "No project given. Pass: --project <path/to/.deproj>\n"
+                      "(the launcher lives in the desert-launcher repository and starts the editor\n"
+                      " with exactly that flag — it is not part of this build.)\n" );
         std::exit( 1 );
     }
 
