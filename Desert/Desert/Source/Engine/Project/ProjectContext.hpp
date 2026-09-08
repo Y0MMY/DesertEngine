@@ -23,9 +23,10 @@ namespace Desert::Project
     // The struct's field list is the format and is defined once, in the desert-shared submodule; the
     // three-question procedure that decides where a NEW field goes, and the census that goes red when one
     // lands in the wrong file, are in Desert/Tests/Engine/ConfigOwnership. That suite also holds a tripwire
-    // on the .deproj this repository tracks: `EngineVersion` is a fact about a MACHINE (Save() stamps
-    // Common::Version::Full(), commit hash and `.dirty` included) written into a file the whole team shares,
-    // and it is registered there as debt with the task that owns moving it.
+    // on the .deproj this repository tracks: any field the census calls a MACHINE fact reddens it the
+    // moment the shared descriptor states one. `EngineVersion` used to be exactly that — Save() stamped
+    // Common::Version::Full(), commit hash and `.dirty` included — until К11 stopped the engine writing it;
+    // it is written once, by the launcher, at creation, and means the engine the project was created with.
     using ProjectFile = Common::Project::ProjectFile;
 
     class ProjectContext final

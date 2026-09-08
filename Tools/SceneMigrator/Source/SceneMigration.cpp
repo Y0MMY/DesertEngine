@@ -11,6 +11,10 @@
 #include <Engine/Assets/MaterialData.hpp>
 #include <Engine/Core/Serialize/CustomReflect.hpp>
 #include <Engine/Core/Serialize/GLMReflect.hpp>
+// The engine's own reflection table and serializer, linked into this tool (premake5.lua) so that
+// "canonical" means "the bytes the saver writes" rather than a field list maintained twice.
+#include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Engine/Reflection/ReflectionSerializer.hpp>
 
 #include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/Logger.hpp>
@@ -1395,6 +1399,141 @@ namespace Desert::Migration
         return report;
     }
 
+    RetiredKeysMigrationReport MigrateRetiredKeysV13ToV14( std::optional<rfl::Generic>&     settings,
+                                                           std::vector<Assets::EntityData>& entities )
+    {
+        RetiredKeysMigrationReport report;
+
+        // One block, one pass: rebuild it without the rows that name it. Rebuilt rather than erased in
+        // place because rfl::Object is an ordered vector of pairs with no erase(), and rebuilding also
+        // keeps the order of everything else — which matters now that a scene read and written back
+        // unchanged is expected to be byte-identical.
+        const auto strip = [&report]( rfl::Generic::Object fields, const char* block ) -> rfl::Generic::Object
+        {
+            rfl::Generic::Object kept;
+            for ( const auto& [key, value] : fields )
+            {
+                const RetiredKey* row = nullptr;
+                for ( const RetiredKey& candidate : kRetiredKeys )
+                    if ( key == candidate.Key && std::string( block ) == candidate.Block )
+                    {
+                        row = &candidate;
+                        break;
+                    }
+
+                if ( row == nullptr )
+                {
+                    kept[key] = value;
+                    continue;
+                }
+
+                ++report.KeysRemoved;
+                report.RemovedNames.push_back( std::string( block ) + "." + key + "=" + Describe( value ) + " (" +
+                                               row->Why + ")" );
+            }
+            return kept;
+        };
+
+        if ( settings.has_value() )
+        {
+            const auto fields = settings.value().to_object();
+            if ( !fields.has_value() )
+            {
+                LOG_WARN( "[SceneMigration] the Settings block is {0}, not an object - the retired keys "
+                          "could not be removed and stay in the file",
+                          Describe( settings.value() ) );
+            }
+            else
+            {
+                settings = rfl::Generic( strip( fields.value(), "Settings" ) );
+            }
+        }
+
+        // Component payloads. A row whose Block is not "Settings" names a field inside that component on
+        // every entity carrying one; with today's single row this loop finds nothing, and it exists so
+        // that the NEXT retirement does not have to invent a second mechanism.
+        for ( Assets::EntityData& entity : entities )
+        {
+            for ( const auto& [componentKey, payload] : entity.Components )
+            {
+                const bool anyRowNamesThisBlock =
+                     std::any_of( std::begin( kRetiredKeys ), std::end( kRetiredKeys ),
+                                  [&componentKey]( const RetiredKey& row ) { return componentKey == row.Block; } );
+                if ( !anyRowNamesThisBlock )
+                    continue;
+
+                const auto fields = payload.to_object();
+                if ( !fields.has_value() )
+                    continue;
+                entity.Components[componentKey] = rfl::Generic( strip( fields.value(), componentKey.c_str() ) );
+            }
+        }
+
+        return report;
+    }
+
+    SettingsCanonicalisationReport CanonicaliseSettingsV13ToV14( std::optional<rfl::Generic>& settings )
+    {
+        SettingsCanonicalisationReport report;
+
+        const auto* type = Reflection::ReflectionRegistry::Get().Find( "SceneSettings" );
+        if ( type == nullptr )
+        {
+            // The table is linked into this tool on purpose (see premake5.lua). If it is empty the tool
+            // cannot know what canonical means, and guessing would write a Settings block out of nothing.
+            LOG_ERROR( "[SceneMigration] the SceneSettings reflection table is not registered in this "
+                       "build of SceneMigrator - the Settings block is left exactly as it is, and the "
+                       "scene will not be byte-stable through a save" );
+            report.Refused = true;
+            return report;
+        }
+
+        rfl::Generic::Object stated;
+        if ( !settings.has_value() )
+        {
+            report.BlockCreated = true;
+        }
+        else if ( const auto fields = settings.value().to_object(); fields.has_value() )
+        {
+            stated = fields.value();
+        }
+        else
+        {
+            LOG_WARN( "[SceneMigration] the Settings block is {0}, not an object - it cannot be "
+                      "canonicalised and stays as it is",
+                      Describe( settings.value() ) );
+            report.Refused = true;
+            return report;
+        }
+
+        // THROUGH THE ENGINE'S OWN PAIR OF FUNCTIONS, in both directions. Reading into a default-
+        // constructed SceneSettings is exactly what the loader does (a key the file omits keeps the C++
+        // default), and writing it back out is exactly what the saver does - so the result is the saver's
+        // bytes by construction rather than by a list maintained here.
+        Core::SceneSettings values;
+        Reflection::DeserializeReflected( *type, &values, stated );
+        rfl::Generic::Object canonical = Reflection::SerializeReflected( *type, &values );
+
+        // An AssetHandle's on-disk FORM depends on whether the writer had a resolver, and this tool has
+        // none. Keep whatever the file said rather than restating a handle in the wrong form.
+        for ( const auto& field : type->Fields )
+            if ( field.Type == Reflection::FieldType::AssetHandle )
+                if ( const auto asStated = stated.get( field.Name ); asStated.has_value() )
+                    canonical[field.Name] = asStated.value();
+
+        for ( const auto& [key, value] : canonical )
+        {
+            const auto before = stated.get( key );
+            if ( !before.has_value() )
+                ++report.KeysAdded;
+            else if ( rfl::json::write( before.value() ) != rfl::json::write( value ) )
+                ++report.ValuesRestated;
+        }
+
+        settings = rfl::Generic( std::move( canonical ) );
+        return report;
+    }
+
     CloudMaterialMigrationReport MigrateCloudMaterialV11ToV12( std::vector<Assets::EntityData>& entities,
                                                                const std::string&               sceneName )
     {
@@ -1815,6 +1954,19 @@ namespace Desert::Migration
         {
             report.DebugViewRaised = true;
             report.DebugView       = MigrateDebugViewV12ToV13( scene.Settings );
+        }
+
+        // LAST, and it has to be: every step above may WRITE keys, and this one is the statement of which
+        // keys must not be in the finished file. Running it earlier would let a later step reintroduce a
+        // retired name and leave the tool reporting a removal that did not survive its own run.
+        if ( scene.SceneVersion.value_or( 0 ) < kSceneVersionRetiredKeys )
+        {
+            report.RetiredKeysRaised = true;
+            report.RetiredKeys       = MigrateRetiredKeysV13ToV14( scene.Settings, scene.Entities );
+            // AFTER the retirement, and it must be: canonicalising writes the block the reflection table
+            // describes, and a retired key is by definition not in that table - running it first would
+            // simply drop the key and leave the retirement step with nothing to report or explain.
+            report.SettingsCanonical = CanonicaliseSettingsV13ToV14( scene.Settings );
         }
 
         // Stamped whether or not anything moved: an empty scene at version 0 is still a scene at version 0,

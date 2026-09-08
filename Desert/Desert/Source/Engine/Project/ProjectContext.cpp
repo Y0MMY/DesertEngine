@@ -3,7 +3,6 @@
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Constants.hpp>
-#include <Common/Core/Version.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -97,11 +96,21 @@ namespace Desert::Project
     {
         if ( !s_Current || s_FilePath.empty() )
             return false;
-        // Stamped on the way out, at the one place the descriptor is written: EngineVersion means
-        // "the build that last wrote this file", so deriving it anywhere else would make it a claim
-        // about something other than this write. A project the launcher created and nobody has
-        // saved yet keeps the version the launcher put there.
-        s_Current->EngineVersion = Common::Version::Full();
+        // ENGINEVERSION IS NOT TOUCHED HERE, AND THAT IS THE WHOLE OF K4.
+        //
+        // It used to be stamped with Common::Version::Full() on every save — a string carrying THIS
+        // MACHINE's commit hash and its `.dirty` flag, written into a file git tracks and the whole team
+        // shares. So the field meant "whichever developer last happened to pick a startup scene", every
+        // one of them wrote a different value, and the churn travelled in commits. Its own header called
+        // it the input to a collection compatibility check; that check reads Common::Version::CommitCount()
+        // and has never read this. Nothing read it at all.
+        //
+        // The field now means what the launcher already writes into it: THE ENGINE THE PROJECT WAS
+        // CREATED WITH. That is a fact about the project rather than about a machine, it is stable, it
+        // belongs in a shared file by the §6 procedure, and the launcher's tile keeps the line it draws.
+        // Deleting the field instead would have thrown away a real answer to "which version was this made
+        // in" and cost more to reinstate later than leaving it correct costs now.
+        //
         // Atomic (write-then-rename), because the .deproj is the one file without which the project
         // does not open at all: the plain primitive truncates in place, so a write interrupted half
         // way used to leave zero bytes where the descriptor was.

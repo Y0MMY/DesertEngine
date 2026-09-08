@@ -18,7 +18,22 @@ project "SceneMigrator"
 
     files {
         "Source/**.cpp",
+        -- THE ENGINE'S OWN REFLECTION TABLE, not a copy of it. The v13 -> v14 step canonicalises the
+        -- Settings block, and "canonical" means "the bytes the engine's saver would write" — so it has
+        -- to enumerate the same 51 fields in the same order through the same serializer. A hand-written
+        -- field list here would be a second statement of the format, which is the fork this tool's own
+        -- header forbids.
+        --
+        -- It costs nothing but compile time: these three compile against Common alone, with no GPU, no
+        -- window and no Desert link (Desert/Tests/Engine/ConfigOwnership and SceneForeignKeys build on
+        -- exactly this recipe). Reflection.gen.cpp is emitted by DesertHeaderTool as a PREBUILD STEP OF
+        -- `Desert`, hence the dependency below.
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionSerializer.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Reflection/ReflectionRegistry.cpp",
+        "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp",
     }
+
+    dependson { "Desert" }
 
     includedirs {
         "%{wks.location}/Desert/Common/Source",

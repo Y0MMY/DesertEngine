@@ -377,6 +377,37 @@ namespace Desert::Migration
                 }
                 out << ")";
             }
+            if ( report.RetiredKeysRaised )
+            {
+                out << " scene v" << Desert::Migration::kSceneVersionDebugView << "->v"
+                    << Desert::Migration::kSceneVersionRetiredKeys << " (";
+                if ( report.RetiredKeys.KeysRemoved > 0 )
+                {
+                    // Named with their values AND the reason, because from v14 on this is the ONLY way a
+                    // key ever leaves a file: the saver preserves everything it does not declare, so a
+                    // removal is always a decision somebody made and the operator is entitled to see it.
+                    out << report.RetiredKeys.KeysRemoved << " retired key(s) removed:";
+                    for ( const auto& name : report.RetiredKeys.RemovedNames )
+                        out << " " << name;
+                }
+                else
+                {
+                    out << "stamp only - the scene stated no retired key";
+                }
+                if ( report.SettingsCanonical.Refused )
+                {
+                    out << "; Settings NOT canonicalised - see the error above";
+                }
+                else
+                {
+                    out << "; Settings canonical (";
+                    if ( report.SettingsCanonical.BlockCreated )
+                        out << "block created, ";
+                    out << report.SettingsCanonical.KeysAdded << " field(s) the file did not state, "
+                        << report.SettingsCanonical.ValuesRestated << " restated at float precision)";
+                }
+                out << ")";
+            }
             if ( report.UnitsRaised )
                 out << " units v0->v" << Desert::Migration::kUnitVersion << " (" << report.Units.Entities
                     << " entity(ies), " << report.Units.Values << " value(s) x100, " << report.Units.Rejected

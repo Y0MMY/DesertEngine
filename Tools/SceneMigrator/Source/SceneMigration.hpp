@@ -109,11 +109,21 @@ namespace Desert::Migration
     //                   ShadowDebug and DeferredDebug
     inline constexpr int kSceneVersionDebugView = 13;
 
+    //  14             - the keys this project RETIRED are gone from the files. Since K11 the engine's saver
+    //                   PRESERVES a key it does not declare (Engine/Core/Serialize/ForeignKeys.hpp), which
+    //                   is what stops one build deleting another's field - and it means a key we removed on
+    //                   purpose would otherwise be carried forever by every file that ever held it. So
+    //                   removal moved here, where it belongs: the step names each dead key, drops it, and
+    //                   this bump makes the run compulsory. `EnableSSGI` is the first row - the boolean was
+    //                   replaced by the GlobalIllumination mode on 2026-08-06 and had been riding along in
+    //                   the files for a month with nothing reading it.
+    inline constexpr int kSceneVersionRetiredKeys = 14;
+
     // The last step this tool knows and the generation the engine requires are ONE number, and this is
     // where that is checked. If a schema step is ever added here without raising Core::kSceneVersion, the
     // tool would stamp files at a version the loader refuses - every scene in the repository would stop
     // opening at once, and the file that caused it would look correct in isolation.
-    static_assert( kSceneVersionDebugView == kSceneVersion,
+    static_assert( kSceneVersionRetiredKeys == kSceneVersion,
                    "the last migration step and the engine's required scene version must be the same "
                    "generation - raise Core::kSceneVersion in Engine/Core/Serialize/SceneFormat.hpp" );
 
@@ -720,6 +730,104 @@ namespace Desert::Migration
     // SHELF LIFE: this raises v12 to v13 and nothing else. It is deleted once no v12 file remains.
     DebugViewMigrationReport MigrateDebugViewV12ToV13( std::optional<rfl::Generic>& settings );
 
+    // One key this project deleted on purpose, and where in a .desce it used to live.
+    //
+    // "Settings" means the scene-wide settings block; anything else is a COMPONENT KEY, and the row then
+    // names a field inside that component's payload on every entity that carries one. The distinction is
+    // in the data because each level of a .desce answers to a different registry, and a step that guessed
+    // the level would delete a live key that happened to share a name.
+    struct RetiredKey
+    {
+        const char* Block; // "Settings", or a ComponentRegistry key such as "DirectionLight"
+        const char* Key;
+        const char* Why; // the sentence the log prints, so the person running this knows what they lost
+    };
+
+    // THE LIST, AND IT IS THE ONLY ONE IN THE REPOSITORY.
+    //
+    // "Retired" is not "unknown", and since K11 the difference is load-bearing rather than a matter of
+    // taste: the engine's saver PRESERVES every key it does not declare, so a key we removed on purpose
+    // would ride along in the files for ever unless something deliberately took it out. That deliberate
+    // act is this table. It is in the TOOL and not in the engine because a runtime that carries a list of
+    // dead key names is keeping legacy alive (contract §4.6), and because a removal has to be written back
+    // to the FILES to be finished at all.
+    //
+    // A row is deleted once no file below the version that introduced it can exist - which, because the
+    // loader refuses anything that is not at kSceneVersion, is as soon as the corpus has been run through.
+    // The rows are kept for one generation so that a branch merged late still gets converted.
+    inline constexpr RetiredKey kRetiredKeys[] = {
+         { "Settings", "EnableSSGI",
+           "the screen-space GI toggle was replaced by the GlobalIllumination mode on 2026-08-06 "
+           "(commit 0b788b1b); nothing has read it since" },
+    };
+
+    // What MigrateRetiredKeysV13ToV14 removed from one file.
+    struct RetiredKeysMigrationReport
+    {
+        int KeysRemoved = 0;
+        // WHICH ones, with the value each held and the reason it is gone - "Settings.EnableSSGI=true
+        // (the screen-space GI toggle ...)". Named rather than counted for the same reason every other
+        // dropping step here names what it drops (§1.4): a person who authored the value has to be able
+        // to see that it is gone because it was retired, not because something broke.
+        std::vector<std::string> RemovedNames;
+    };
+
+    // Raises a scene from schema v13 to v14 by removing every key in kRetiredKeys from the block that
+    // owns it.
+    //
+    // WHY THIS STEP EXISTS AT ALL, when nothing read these keys. Until K11 the answer was "the next save
+    // deletes them anyway" - the saver enumerated its own registry, so an unknown key evaporated on
+    // contact. That is exactly the defect K11 removed, and removing it made this step necessary: a
+    // preserved key is preserved whether or not we still want it, so wanting rid of one is now a decision
+    // somebody has to write down. Here.
+    //
+    // PURE - no GPU, no filesystem, no global state.
+    //
+    // Idempotent: a scene stating none of the retired keys is left byte-identical and reports zero.
+    //
+    // SHELF LIFE: this raises v13 to v14. The step stays; kRetiredKeys is what empties, one row at a time,
+    // as each row's generation passes out of reach.
+    RetiredKeysMigrationReport MigrateRetiredKeysV13ToV14( std::optional<rfl::Generic>&     settings,
+                                                           std::vector<Assets::EntityData>& entities );
+
+    // What CanonicaliseSettingsV13ToV14 did to one file.
+    struct SettingsCanonicalisationReport
+    {
+        bool BlockCreated   = false; // the scene stated no Settings block at all
+        int  KeysAdded      = 0;     // fields this build knows that the file did not state
+        int  ValuesRestated = 0;     // fields whose TEXT changed without their value changing (see below)
+        bool Refused        = false; // the reflection table was not available; the block is untouched
+    };
+
+    // Rewrites the Settings block into exactly the bytes the ENGINE'S SAVER would write for the values
+    // the file states.
+    //
+    // WHY A CONVERSION IS NEEDED FOR SOMETHING THAT CHANGES NO VALUE. K11's relation is "a file read and
+    // written back with no change is byte-identical to the source", and until this ran it was false for
+    // every scene in the repository for two reasons that have nothing to do with foreign keys:
+    //
+    //   * a file states only the fields that existed when it was last saved — 26 of 51 in the oldest —
+    //     and the saver writes all of them, so the first save of any old scene ADDS keys;
+    //   * a float field hand-edited to `0.26` cannot survive a narrowing to `float` and back, and comes
+    //     out as `0.2599999904632568`. The VALUE is identical (it is the same float either way); the
+    //     TEXT is not, and byte-identity is a claim about text.
+    //
+    // Both are "the writer enumerates its registry and the file says something else", which is the same
+    // disagreement K11 is about — so both are settled the same way and in the same place: in the FILES,
+    // once, by a migration (§4.3, §4.5), rather than by every save of every build for ever.
+    //
+    // ASSET HANDLES ARE KEPT VERBATIM. A reflected AssetHandle is written as a PATH when the saver has an
+    // asset resolver and as a raw integer when it does not; this tool has no AssetManager and must not
+    // invent one, so any field of FieldType::AssetHandle keeps exactly the text the file already carried.
+    // Without that, canonicalising the fourteen scenes that state `"SplashSprite": ""` would replace the
+    // path form with a `0` and quietly change the format of a field.
+    //
+    // PURE apart from the process-wide reflection table it reads, which is const after static init. No
+    // GPU, no filesystem, no scene.
+    //
+    // Idempotent: a block that is already canonical is left byte-identical and reports zero.
+    SettingsCanonicalisationReport CanonicaliseSettingsV13ToV14( std::optional<rfl::Generic>& settings );
+
     // Everything that ran, so the caller can say which scene moved and how far.
     struct SceneMigrationReport
     {
@@ -757,13 +865,17 @@ namespace Desert::Migration
         // the schema was below kSceneVersionDebugView
         bool                     DebugViewRaised = false;
         DebugViewMigrationReport DebugView;
+        // the schema was below kSceneVersionRetiredKeys
+        bool                           RetiredKeysRaised = false;
+        RetiredKeysMigrationReport     RetiredKeys;
+        SettingsCanonicalisationReport SettingsCanonical;
 
         bool Changed() const
         {
             return SkyRaised || UnitsRaised || TonemapperRaised || CloudNoiseRaised || CloudSpeciesRaised ||
                    CloudTypeRaised || CloudSetRaised || TerrainMaterialRaised || MaterialPathRaised ||
                    GravityUnitsRaised || UIVisibilityRaised || SSRUnitsRaised || CloudMaterialRaised ||
-                   DebugViewRaised;
+                   DebugViewRaised || RetiredKeysRaised;
         }
     };
 

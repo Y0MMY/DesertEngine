@@ -13,6 +13,7 @@
 #include <Common/Core/Timestep.hpp>
 #include <Common/Core/UUID.hpp>
 #include <glm/glm.hpp>
+#include <rflcpp/rfl/Generic.hpp>
 #include <cstdint>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -182,6 +183,27 @@ namespace Desert::Core
             return m_Settings;
         }
 
+        // THE FILE THIS SCENE WAS LOADED FROM, AS IT WAS PARSED — kept for one purpose and read at one
+        // place: SceneSerializer merges what it is about to write onto this, so a key the file carries
+        // and this build does not declare survives the save (Serialize/ForeignKeys.hpp).
+        //
+        // THIS IS NOT A SECOND SOURCE OF TRUTH, and the reason is structural rather than a promise. The
+        // merge only ever takes a key that the WRITER DID NOT PRODUCE, and the writer produces every
+        // key this build knows about — so nothing that reaches the file from here is a value the engine
+        // has any state for. There is no path by which a value is read out of this and used; the one
+        // accessor hands the whole tree to the merge and nothing else calls it.
+        //
+        // Empty for a scene that was never loaded from a file (File → New), which makes the merge the
+        // identity and costs a new scene nothing.
+        [[nodiscard]] const rfl::Generic::Object& GetLoadedDocument() const
+        {
+            return m_LoadedDocument;
+        }
+        void SetLoadedDocument( rfl::Generic::Object document )
+        {
+            m_LoadedDocument = std::move( document );
+        }
+
         // The engine's ONE "save this scene" entry point — and therefore the one that has to answer
         // whether the save happened. It used to return void into a void (SceneSerializer::SaveToFile),
         // so the editor could only assume; see SceneSerializer::SaveToFile for what that cost.
@@ -286,5 +308,8 @@ namespace Desert::Core
 
         SceneSettings m_Settings;
         std::string   m_SceneName;
+        // See GetLoadedDocument() — the parsed .desce, held only so the saver can keep the keys this
+        // build cannot name.
+        rfl::Generic::Object m_LoadedDocument;
     };
 } // namespace Desert::Core

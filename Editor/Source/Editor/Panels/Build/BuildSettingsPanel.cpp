@@ -137,12 +137,13 @@ namespace Desert::Editor
         if ( ImGui::BeginCombo( "##startupScene",
                                 current.empty() ? ICON_MDI_MOVIE_OPEN "  <none>" : current.c_str() ) )
         {
-            // Only on an actual CHANGE. SetDefaultScene rewrites the whole .deproj — a file git tracks —
-            // and ProjectContext::Save() stamps EngineVersion with this machine's commit hash and a
-            // `.dirty` suffix while it is there. Re-picking the entry that is already selected used to do
-            // all of that for no change at all, which is the trigger ConfigOwnership's К4 note names and
-            // ConfigOwnershipCorpus's tripwire waits for. The guard is not the fix for EngineVersion —
-            // К4 owns that field — it is this panel refusing to be the thing that fires it.
+            // Only on an actual CHANGE. SetDefaultScene rewrites the whole .deproj, which git tracks, so
+            // re-picking the entry that is already selected used to produce a diff for no change at all.
+            //
+            // The guard was added while ProjectContext::Save() still stamped EngineVersion with this
+            // machine's commit hash, which made the pointless rewrite actively harmful; К11 removed the
+            // stamp, so what is left is ordinary hygiene — a panel does not dirty a shared file because
+            // somebody opened a combo box.
             if ( ImGui::Selectable( "<none>", current.empty() ) && !current.empty() )
                 ::Desert::Project::ProjectContext::SetDefaultScene( "" );
             for ( const auto& scene : m_Scenes )
