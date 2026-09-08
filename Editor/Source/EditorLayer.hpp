@@ -435,17 +435,19 @@ namespace Desert::Editor
         };
         std::vector<PendingDocumentClose> m_DocumentsToClose;
 
-        // Documents whose window has not been DRAWN for kFramesHiddenBeforeSlotRelease frames, counted per
-        // subject. A document behind another one's tab is open and invisible, and it was holding one of the
-        // six renderer slots for as long as the user left it there — see ISubjectDocument::ReleaseRendererSlot.
+        // How long a document must go UNDRAWN BY EVERY VIEW before it gives its renderer slot back. A
+        // document behind another one's tab is open and invisible, and it was holding one of the six
+        // renderer slots for as long as the user left it there — see ISubjectDocument::ReleaseRendererSlot.
         //
         // COUNTED RATHER THAN ACTED ON AT ONCE. Dragging a dock tab, collapsing a node and switching layouts
         // all hide a window for a frame or two, and tearing a Scene and a SceneRenderer down and building
         // them back for that would turn a flick of the mouse into a hitch. The threshold is the smallest
         // number of frames that is unambiguously "the user left it there" rather than "the layout moved".
+        //
+        // THE COUNT ITSELF LIVES ON m_OpenDocuments, not here, and the move is the point: with the Clouds
+        // window there are two views that can draw a document, so "nobody drew it" is a fact about all of
+        // them and cannot be maintained by either one. See OpenDocuments::NoteDrawn / EndFrame.
         static constexpr uint32_t kFramesHiddenBeforeSlotRelease = 30;
-
-        std::unordered_map<SubjectId, uint32_t> m_DocumentHiddenFrames;
         // Which document window has the keyboard focus, as of the last frame. Drives the radio in
         // Window ▸ Documents and is where Ctrl+Tab starts from.
         SubjectId m_FocusedDocument;

@@ -785,7 +785,10 @@ namespace Desert::Editor
     static ComponentEditorEntry MakeVolumetricCloudEntry()
     {
         ComponentEditorEntry e;
-        e.Name      = "Volumetric Cloud";
+        // The name is a REGISTRY KEY now, not just a caption: the Clouds window's first stage looks this
+        // entry up by it so that the layer's fields are drawn by the same code Details runs rather than by
+        // a second copy of them. Hence one constant with two readers.
+        e.Name      = kVolumetricCloudComponentEditor;
         e.CanRemove = true;
         e.Has       = []( ::Desert::ECS::Entity& en )
         { return en.HasComponent<::Desert::ECS::VolumetricCloudComponent>(); };

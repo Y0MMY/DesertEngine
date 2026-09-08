@@ -91,6 +91,7 @@
 #include "Editor/Panels/Clouds/CloudLayoutPanel.hpp"
 #include "Editor/Panels/Clouds/CloudNoiseVolumePanel.hpp"
 #include "Editor/Panels/Clouds/CloudTypePanel.hpp"
+#include "Editor/Panels/Clouds/CloudsPanel.hpp"
 #include "Editor/Panels/Animation/AnimLayersPanel.hpp"
 #include "Editor/Core/ToastManager.hpp"
 #include "Editor/Core/SubjectEditorRegistry.hpp"
@@ -618,6 +619,12 @@ namespace Desert::Editor
         m_Panels.Add<Editor::SequencerPanel>( m_MainScene, m_AnimationLibrary.get(), m_AssetManager.get() );
         m_Panels.Add<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() );
         m_Panels.Add<Editor::BuildSettingsPanel>();
+        // THE CLOUDS WINDOW IS A TOOL, and it must be: it is a setting the user keeps (View ▸ Clouds), it
+        // edits no subject of its own, and the compiler refuses a document here anyway (PanelRegistry).
+        // What it DOES is show the documents that edit the six stages of the sky — asked of
+        // m_OpenDocuments, which is the same container the document well reads, so both windows show the
+        // same object and neither knows the other exists. See Editor/Panels/Clouds/CloudsPanel.hpp.
+        m_Panels.Add<Editor::CloudsPanel>( m_MainScene, m_AssetManager, m_OpenDocuments );
 
         // ── WHICH EDITOR OPENS WHICH KIND OF SUBJECT ──────────────────────────────────────────────────
         //
@@ -2241,15 +2248,19 @@ namespace Desert::Editor
         // nobody could see and holding three of the six renderer slots while they did it, so the fifth
         // document the user opened was refused over resources being spent on hidden windows.
         //
-        // DrawDocuments counts the frames each document has gone undrawn (ImGui::Begin answers false for a
-        // collapsed window and for an inactive tab); this acts on the count. Called from
-        // ServiceDocumentCloses so it runs behind the SAME device-idle wait a close uses — releasing a
-        // PreviewViewport destroys a Scene and a SceneRenderer, and the last submitted frame may still be
-        // executing against them.
+        // EVERY VIEW REPORTS INTO ONE COUNT, and the count lives on the owner (OpenDocuments::NoteDrawn /
+        // EndFrame) rather than in this file. It used to be a map written only by the document well's draw
+        // loop, which was the whole truth while the well was the only thing that could draw a document —
+        // the Clouds window is a second one, and a material shown only in THAT window would otherwise have
+        // been counted hidden and had its preview renderer taken away under a pane somebody was using.
+        //
+        // Called from ServiceDocumentCloses so it runs behind the SAME device-idle wait a close uses —
+        // releasing a PreviewViewport destroys a Scene and a SceneRenderer, and the last submitted frame
+        // may still be executing against them.
         for ( const auto& document : m_OpenDocuments )
         {
-            const auto it = m_DocumentHiddenFrames.find( document->Subject() );
-            if ( it == m_DocumentHiddenFrames.end() || it->second < kFramesHiddenBeforeSlotRelease )
+            const uint32_t undrawn = m_OpenDocuments.FramesUndrawn( document->Subject() );
+            if ( undrawn < kFramesHiddenBeforeSlotRelease )
                 continue;
             if ( !document->HoldsRendererSlot() )
                 continue;
@@ -2264,13 +2275,13 @@ namespace Desert::Editor
                 LOG_ERROR( "[Editor] '{}' was asked to release its renderer slot after {} hidden frames and "
                            "still holds one. ReleaseRendererSlot must make HoldsRendererSlot false — see "
                            "ISubjectDocument.",
-                           DocumentDisplayName( document->GetName() ), it->second );
+                           DocumentDisplayName( document->GetName() ), undrawn );
                 continue;
             }
 
             LOG_INFO( "[Editor] '{}' gave its renderer slot back after {} frames off screen ({}/{} in use). "
                       "It is rebuilt on the first frame the window is drawn again.",
-                      DocumentDisplayName( document->GetName() ), it->second,
+                      DocumentDisplayName( document->GetName() ), undrawn,
                       Graphic::SceneRenderer::GetLiveRendererCount(), EngineContext::kMaxRendererSlots );
         }
     }
@@ -2283,8 +2294,7 @@ namespace Desert::Editor
         bool releasePending = false;
         for ( const auto& document : m_OpenDocuments )
         {
-            const auto it = m_DocumentHiddenFrames.find( document->Subject() );
-            if ( it != m_DocumentHiddenFrames.end() && it->second >= kFramesHiddenBeforeSlotRelease &&
+            if ( m_OpenDocuments.FramesUndrawn( document->Subject() ) >= kFramesHiddenBeforeSlotRelease &&
                  document->HoldsRendererSlot() )
             {
                 releasePending = true;
@@ -2318,7 +2328,7 @@ namespace Desert::Editor
 
             const std::string name = closed->GetName();
             m_ContextualShown.erase( closed.get() );
-            m_DocumentHiddenFrames.erase( pending.Subject );
+            m_OpenDocuments.ForgetDrawHistory( pending.Subject );
             if ( m_FocusedDocument == pending.Subject )
                 m_FocusedDocument = SubjectId{};
 
@@ -2778,6 +2788,11 @@ namespace Desert::Editor
         DrawDocumentWell();
         DrawDocuments();
 
+        // EVERY VIEW HAS NOW HAD ITS TURN — the tool panels above (the Clouds window is one of them) and
+        // the document well's own strip. Only here can "nobody drew this document" be answered, which is
+        // why the run of undrawn frames is closed at this point and not inside either draw loop.
+        m_OpenDocuments.EndFrame();
+
         DrawProfilerWindow();
 
         DrawStatusBar();
@@ -2830,6 +2845,19 @@ namespace Desert::Editor
                                       p->GetVisibility() = true;
                                       p->Pinned()        = true; // asked for explicitly: keep it open
                                   } } );
+        }
+
+        // THE SIX STAGES OF THE SKY, each as a command that opens the Clouds window ON that stage.
+        //
+        // Generated from the enum rather than typed, so a seventh stage is offered here the moment it
+        // exists and cannot be forgotten — CloudStageName has no `default:`, which is what makes that safe.
+        // They are the same CloudsPanel::OpenAt the Details panel's two buttons call, so a person with
+        // Ctrl+P and a client on the control channel reach the window exactly the way the button does.
+        for ( uint32_t i = 0; i < kCloudStageCount; ++i )
+        {
+            const auto stage = static_cast<CloudStage>( i );
+            commands.push_back( { "Clouds", std::to_string( i + 1 ) + " " + CloudStageName( stage ),
+                                  [stage] { CloudsPanel::OpenAt( stage ); } } );
         }
 
         // Documents — FOCUS an open one. A separate category because the verb is different and the
@@ -3337,14 +3365,12 @@ namespace Desert::Editor
                     DESERT_PROFILE_SCOPE_DYNAMIC( document->GetName().c_str() );
                     document->OnUIRender();
                 }
-                // RESET RATHER THAN DECREMENTED. The threshold is about a window the user has LEFT off
-                // screen; one visible frame means they have not, and counting down from thirty would make
-                // the release depend on how often they flicked back to it.
-                m_DocumentHiddenFrames.erase( subject );
-            }
-            else
-            {
-                ++m_DocumentHiddenFrames[subject];
+                // REPORTED, NOT DECIDED HERE. This view says only "I drew it"; whether NOBODY drew it is a
+                // question about all the views at once and is settled by OpenDocuments::EndFrame after
+                // every one of them has run — see the note there. Written as a report rather than as an
+                // erase because the Clouds window draws the same documents and the two answers must not
+                // race on the order the views happen to run in.
+                m_OpenDocuments.NoteDrawn( subject );
             }
             ImGui::End();
 

@@ -27,6 +27,14 @@ namespace Desert::Editor
         return static_cast<int>( m_Entries.size() );
     }
 
+    const ComponentEditorEntry* ComponentWidgetRegistry::Find( const std::string_view name ) const
+    {
+        for ( const ComponentEditorEntry& entry : m_Entries )
+            if ( entry.Name == name )
+                return &entry;
+        return nullptr;
+    }
+
     namespace
     {
         namespace ImGui = ::ImGui;

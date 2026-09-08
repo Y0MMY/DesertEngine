@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct ImGuiTextFilter;
@@ -82,6 +83,11 @@ namespace Desert::Editor
         std::function<void*( ECS::Entity& )> DataPtr;
     };
 
+    // The registered name of the cloud layer's component editor. Stated ONCE because it now has two
+    // readers — the registration in ComponentEditorRegistrations.cpp and the Clouds window's first stage —
+    // and a name that agreed only by inspection would fail as a blank pane rather than as an error.
+    inline constexpr const char* kVolumetricCloudComponentEditor = "Volumetric Cloud";
+
     // Editor-side registry of component editors. Components self-register at static-init via the macros
     // below, so adding one never touches ComponentEditor / the Details panel.
     class ComponentWidgetRegistry
@@ -95,6 +101,15 @@ namespace Desert::Editor
         {
             return m_Entries;
         }
+
+        // ONE COMPONENT'S EDITOR, BY NAME — for a panel other than Details that has to draw exactly one
+        // component. The Clouds window's first stage IS the cloud layer's component, and drawing it any
+        // other way would be a second copy of fields this registry already knows how to draw.
+        //
+        // NULL WHEN NOTHING IS REGISTERED UNDER THAT NAME, so the caller can say so rather than drawing an
+        // empty pane. The name is a registry key and the constants below are the only ones any caller
+        // outside the registration file should spell.
+        [[nodiscard]] const ComponentEditorEntry* Find( std::string_view name ) const;
 
     private:
         std::vector<ComponentEditorEntry> m_Entries;

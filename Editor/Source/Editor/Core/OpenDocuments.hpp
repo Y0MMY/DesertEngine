@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Desert::Editor
@@ -175,11 +177,79 @@ namespace Desert::Editor
             for ( auto& document : m_Documents )
                 released.emplace_back( std::move( document ) );
             m_Documents.clear();
+            m_FramesUndrawn.clear();
+            m_DrawnThisFrame.clear();
             return released;
+        }
+
+        // ── WAS ANYBODY LOOKING AT IT? ─────────────────────────────────────────────────────────────────
+        //
+        // A document gives its renderer slot back after a run of frames in which it was not DRAWN — four
+        // documents docked as tabs in one node show one tab, and the other three were rendering previews
+        // nobody could see while holding three of the six slots (ISubjectDocument::ReleaseRendererSlot).
+        //
+        // THE COUNT BELONGS HERE BECAUSE "NOBODY" IS ABOUT ALL THE VIEWS AT ONCE. It used to live in
+        // EditorLayer as a map written by the document well's draw loop, which was the whole truth while
+        // the well was the only thing that could draw a document. With the Clouds window it is not: a
+        // material shown ONLY inside that window would have been counted hidden by the well and had its
+        // preview renderer taken away underneath a pane the artist was looking at. One view's answer is
+        // not the question, so the question is asked of the owner and every view reports into it.
+        //
+        // Reset rather than decremented, for the reason the editor's own note gave: the threshold is about
+        // a window the user has LEFT, and one visible frame means they have not.
+
+        /// A view drew this document's CONTENTS this frame. Not "the window exists" — a collapsed window
+        /// and a dock tab that is not the active one both draw nothing, and those are exactly the cases
+        /// the slot release exists for.
+        ///
+        /// CONST, and the mutable set behind it is not a loophole. `const OpenDocuments&` already means
+        /// "you may not change WHICH documents exist" rather than deep const — Find() hands back a
+        /// non-const document through a const container for exactly that reason — and a VIEW is given the
+        /// const reference precisely so it cannot Open or Release. Reporting that it drew is neither.
+        void NoteDrawn( const SubjectId& subject ) const
+        {
+            if ( !subject.IsNull() )
+                m_DrawnThisFrame.insert( subject );
+        }
+
+        /// Close the frame's accounting: every open document that no view drew has its run of undrawn
+        /// frames extended; every one that was drawn goes back to zero. Called ONCE per frame, after every
+        /// view has had its turn — before that the answer would depend on the order the views run in.
+        void EndFrame()
+        {
+            for ( const auto& document : m_Documents )
+            {
+                const SubjectId& subject = document->Subject();
+                if ( m_DrawnThisFrame.count( subject ) != 0 )
+                    m_FramesUndrawn.erase( subject );
+                else
+                    ++m_FramesUndrawn[subject];
+            }
+            m_DrawnThisFrame.clear();
+        }
+
+        /// Consecutive frames in which NO view drew this document. Zero for one that is on screen, and
+        /// zero for one nothing knows about — which is the honest answer, because a document that has
+        /// never been accounted for has no run of hidden frames behind it.
+        [[nodiscard]] uint32_t FramesUndrawn( const SubjectId& subject ) const
+        {
+            const auto it = m_FramesUndrawn.find( subject );
+            return it == m_FramesUndrawn.end() ? 0u : it->second;
+        }
+
+        /// Forget one subject's accounting — used when its document is closed, so that reopening it does
+        /// not inherit the run of hidden frames the previous window ended on.
+        void ForgetDrawHistory( const SubjectId& subject )
+        {
+            m_FramesUndrawn.erase( subject );
+            m_DrawnThisFrame.erase( subject );
         }
 
     private:
         std::vector<std::unique_ptr<ISubjectDocument>> m_Documents;
+
+        mutable std::unordered_set<SubjectId>   m_DrawnThisFrame;
+        std::unordered_map<SubjectId, uint32_t> m_FramesUndrawn;
     };
 
     // ── THE RELATION TWO VIEWS HAVE TO SATISFY ─────────────────────────────────────────────────────────
